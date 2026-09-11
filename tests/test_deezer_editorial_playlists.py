@@ -69,7 +69,7 @@ def test_the_id_is_the_one_the_existing_loader_takes():
 def test_it_asks_the_genre_chart_it_was_given():
     c = _client({"data": []})
     c.get_editorial_playlists(116, limit=10)
-    c._api_get.assert_called_once_with('chart/116/playlists', {'limit': 10})
+    c._api_get.assert_called_once_with('chart/116/playlists', {'limit': 10}, use_token=False)
 
 
 def test_the_biggest_artwork_wins():
@@ -113,7 +113,8 @@ def test_the_limit_is_bounded():
 def test_search_uses_the_playlist_search_endpoint():
     c = _client({"data": [_ROW]})
     out = c.search_playlists('deep house', limit=5)
-    c._api_get.assert_called_once_with('search/playlist', {'q': 'deep house', 'limit': 5})
+    c._api_get.assert_called_once_with('search/playlist', {'q': 'deep house', 'limit': 5},
+                                       use_token=False)
     assert out[0]['title'] == 'Rock Essentials'
 
 
@@ -192,3 +193,70 @@ def test_no_deezer_client_is_an_empty_shelf(monkeypatch):
 def test_the_genres_endpoint_lists_the_chips(client):
     body = client.get('/api/discover/deezer/genres').get_json()
     assert body['genres'] == [{'id': 0, 'name': 'Top'}]
+
+
+# ---------------------------------------------------------------------------
+# the browse endpoints are public and must stay that way
+# ---------------------------------------------------------------------------
+
+def test_the_chart_call_sends_no_access_token():
+    """These endpoints need no auth, and a STALE token does not get ignored:
+
+        {"error": {"type": "OAuthException", "message": "Invalid OAuth access token."}}
+
+    so a user whose Deezer link had expired lost the browse rows entirely —
+    rows that never needed their account. Reported as the shelf going back to
+    "Could not reach Deezer just now" after having worked.
+    """
+    c = _client({"data": []})
+    c.get_editorial_playlists(152)
+    assert c._api_get.call_args.kwargs.get('use_token') is False
+
+
+def test_the_search_call_sends_no_access_token():
+    c = _client({"data": []})
+    c.search_playlists('deep house')
+    assert c._api_get.call_args.kwargs.get('use_token') is False
+
+
+def test_api_get_still_sends_the_token_by_default():
+    """Only the public browse calls opt out; the user-level endpoints must not."""
+    import inspect
+
+    from core.deezer_client import DeezerClient as _DC
+
+    signature = inspect.signature(_DC._api_get)
+    assert signature.parameters['use_token'].default is True
+
+
+def test_a_token_is_still_attached_when_asked_for():
+    """The opt-out must not have quietly disabled auth everywhere."""
+    import requests
+
+    from core.deezer_client import DeezerClient as _DC
+
+    sent = {}
+
+    class _Session:
+        def get(self, url, params=None, timeout=None):
+            sent.update(params or {})
+
+            class _R:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    return {"ok": True}
+
+            return _R()
+
+    c = _DC.__new__(_DC)
+    c.session = _Session()
+    c._access_token = 'live-token'
+    c._api_get('user/me/albums')
+    assert sent.get('access_token') == 'live-token'
+
+    sent.clear()
+    c._api_get('chart/0/playlists', use_token=False)
+    assert 'access_token' not in sent
+    assert requests is not None

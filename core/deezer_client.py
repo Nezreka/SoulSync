@@ -403,15 +403,23 @@ class DeezerClient:
         """Reload configuration — refresh OAuth token from config."""
         self._load_token()
 
-    def _api_get(self, endpoint: str, params: dict = None, timeout: int = 15) -> Optional[Dict[str, Any]]:
+    def _api_get(self, endpoint: str, params: dict = None, timeout: int = 15,
+                 use_token: bool = True) -> Optional[Dict[str, Any]]:
         """Generic GET request to Deezer API with error handling.
-        Includes OAuth access_token when available for user-level endpoints."""
+        Includes OAuth access_token when available for user-level endpoints.
+
+        use_token=False for the PUBLIC endpoints - charts, editorial, search.
+        They need no auth, and sending a stale token does not get ignored: the
+        api answers `{"error": {"type": "OAuthException"}}` and the call fails
+        outright. So a user with an expired Deezer link lost the browse rows
+        that never needed their account in the first place.
+        """
         try:
             url = f"{self.BASE_URL}/{endpoint.lstrip('/')}"
             if params is None:
                 params = {}
             # Include access token for authenticated requests
-            if self._access_token and 'access_token' not in params:
+            if use_token and self._access_token and 'access_token' not in params:
                 params['access_token'] = self._access_token
             response = self.session.get(url, params=params, timeout=timeout)
 
@@ -690,7 +698,7 @@ class DeezerClient:
             genre_id = 0
         limit = max(1, min(int(limit or 25), 100))
 
-        data = self._api_get(f'chart/{genre_id}/playlists', {'limit': limit})
+        data = self._api_get(f'chart/{genre_id}/playlists', {'limit': limit}, use_token=False)
         items = (data or {}).get('data') or []
         if not items:
             logger.debug("No Deezer editorial playlists for genre %s", genre_id)
@@ -714,7 +722,7 @@ class DeezerClient:
         if not query:
             return []
         limit = max(1, min(int(limit or 25), 100))
-        data = self._api_get('search/playlist', {'q': query, 'limit': limit})
+        data = self._api_get('search/playlist', {'q': query, 'limit': limit}, use_token=False)
         items = (data or {}).get('data') or []
         out = []
         for item in items:
