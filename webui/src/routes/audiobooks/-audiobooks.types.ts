@@ -267,6 +267,32 @@ export interface AudiobookDownload {
 
 /** One book on disk. */
 export interface AudiobookLibraryEntry {
+  catalog_asin?: string;
+  match_status?:
+    | 'unmatched'
+    | 'identifier'
+    | 'automatic'
+    | 'confirmed'
+    | 'suggested'
+    | 'ignored'
+    | 'changed'
+    | 'error';
+  match_score?: number;
+  match_revision?: number;
+  scan_signature?: string;
+  match_candidates?: AudiobookMatchCandidate[];
+  match_evidence?: string[];
+  origin?: 'soulsync' | 'disk' | 'unknown';
+  grouping?: string;
+  file_paths?: string[];
+  file_scope?: 'folder' | 'files';
+  download?: {
+    download_id: string;
+    source: string;
+    indexer: string;
+    release_title: string;
+    completed_at: number;
+  } | null;
   cover_url?: string;
   source?: string;
   asin: string;
@@ -337,6 +363,12 @@ export interface AudiobookLibraryScan {
   local?: number;
   error?: string;
   current?: string;
+  phase?: string;
+  matched?: number;
+  review?: number;
+  match_checked?: number;
+  match_pending?: number;
+  match_errors?: number;
 }
 
 export interface AudiobookLibrary {
@@ -344,4 +376,26 @@ export interface AudiobookLibrary {
   totalBytes: number;
   root: string;
   scan: AudiobookLibraryScan;
+}
+
+export interface AudiobookMatchCandidate {
+  book: {
+    asin: string;
+    title: string;
+    author_names?: string[];
+    narrator_names?: string[];
+    runtime_minutes?: number;
+    cover_url?: string;
+    language?: string;
+    format_type?: string;
+  };
+  score: number;
+  evidence: string[];
+  conflicts: string[];
+  automatic_eligible: boolean;
+}
+export interface AudiobookMatchResults {
+  candidates: AudiobookMatchCandidate[];
+  scan_signature: string;
+  match_revision: number;
 }

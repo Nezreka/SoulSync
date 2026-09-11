@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AudiobookLibraryEntry, AudiobookLibraryScan } from '../-audiobooks.types';
 
 import { deleteLibraryBook, fetchLibrary, scanLibrary } from '../-audiobooks.api';
+import { AudiobookLibraryMatch } from './audiobook-library-match';
 import styles from './audiobook-library.module.css';
 import { AudiobookOverlay } from './audiobook-overlay';
 
@@ -15,6 +16,30 @@ function size(bytes: number): string {
 
 function duration(minutes: number): string {
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
+}
+
+const ORIGINS: Record<string, string> = {
+  soulsync: 'SoulSync download',
+  disk: 'Found on disk',
+  unknown: 'Origin unknown',
+};
+const MATCHES: Record<string, string> = {
+  identifier: 'Identified by ASIN',
+  automatic: 'Auto-matched',
+  confirmed: 'Confirmed by you',
+  unmatched: 'Unmatched',
+  suggested: 'Review matches',
+  ignored: 'Kept unmatched',
+  changed: 'Files changed · review',
+  error: 'Match lookup failed',
+};
+function matchedAsin(book: AudiobookLibraryEntry): string {
+  return ['identifier', 'automatic', 'confirmed'].includes(book.match_status || '')
+    ? book.catalog_asin || ''
+    : '';
+}
+function needsReview(book: AudiobookLibraryEntry): boolean {
+  return !matchedAsin(book) && book.match_status !== 'ignored';
 }
 
 function Cover({ book }: { book: AudiobookLibraryEntry }) {
@@ -47,7 +72,9 @@ export function AudiobookLibraryModal({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState('');
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState('title');
-  const [localOnly, setLocalOnly] = useState(false);
+  const [matchFilter, setMatchFilter] = useState('all');
+  const [originFilter, setOriginFilter] = useState('all');
+  const [reviewBook, setReviewBook] = useState<AudiobookLibraryEntry | null>(null);
   const [confirm, setConfirm] = useState('');
   const [revision, setRevision] = useState(0);
   const [queuedAt, setQueuedAt] = useState(0);
@@ -92,14 +119,16 @@ export function AudiobookLibraryModal({ onClose }: { onClose: () => void }) {
     };
   }, [revision, queuedAt, scan.status]);
 
-  const localCount = books.filter((book) => book.asin.startsWith('local:')).length;
+  const reviewCount = books.filter(needsReview).length;
   const totalBytes = books.reduce((sum, book) => sum + book.size_bytes, 0);
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     return books
       .filter(
         (book) =>
-          (!localOnly || book.asin.startsWith('local:')) &&
+          (matchFilter === 'all' ||
+            (matchFilter === 'review' ? needsReview(book) : Boolean(matchedAsin(book)))) &&
+          (originFilter === 'all' || (book.origin || 'unknown') === originFilter) &&
           (!needle ||
             [book.title, book.author, book.narrator, book.series_title].some((s) =>
               s.toLowerCase().includes(needle),
@@ -113,7 +142,7 @@ export function AudiobookLibraryModal({ onClose }: { onClose: () => void }) {
             : (sort === 'author' ? a.author.localeCompare(b.author) : 0) ||
               a.title.localeCompare(b.title),
       );
-  }, [books, filter, sort, localOnly]);
+  }, [books, filter, sort, matchFilter, originFilter]);
 
   const startScan = async () => {
     scanBaseline.current = scan.started_at || 0;
@@ -152,7 +181,9 @@ export function AudiobookLibraryModal({ onClose }: { onClose: () => void }) {
   const scanText = queuedAt
     ? 'Starting scan…'
     : scan.status === 'running'
-      ? `Scanning folder · ${scan.checked || 0} books checked`
+      ? scan.phase === 'matching'
+        ? `Matching catalogue · ${scan.match_checked || 0} checked`
+        : `Scanning folder · ${scan.checked || 0} books checked`
       : scan.status === 'completed' && scan.finished_at
         ? `Last scanned ${new Date(scan.finished_at * 1000).toLocaleString()}`
         : scan.status === 'never'
@@ -182,84 +213,139 @@ export function AudiobookLibraryModal({ onClose }: { onClose: () => void }) {
           </button>
         </header>
 
-        <div className={styles.scanPanel}>
-          <div className={styles.scanInfo}>
-            <strong>
-              <span className={scanning ? styles.activeDot : styles.dot} />
-              {scanText}
-            </strong>
-            <span className={styles.root} title={root}>
-              {root || 'Set your audiobook folder in Settings → Library'}
-            </span>
-            {scan.status === 'completed' && (
-              <small>
-                {scan.adopted || 0} added · {scan.updated || 0} refreshed · {scan.removed || 0}{' '}
-                missing
-              </small>
+        {!reviewBook && (
+          <>
+            <div className={styles.scanPanel}>
+              <div className={styles.scanInfo}>
+                <strong>
+                  <span className={scanning ? styles.activeDot : styles.dot} />
+                  {scanText}
+                </strong>
+                <span className={styles.root} title={root}>
+                  {root || 'Set your audiobook folder in Settings → Library'}
+                </span>
+                {scan.status === 'completed' && (
+                  <small>
+                    {scan.adopted || 0} added · {scan.updated || 0} refreshed · {scan.removed || 0}{' '}
+                    missing
+                  </small>
+                )}
+              </div>
+              <div className={styles.scanActions}>
+                <button
+                  type="button"
+                  className={styles.primary}
+                  onClick={() => void startScan()}
+                  disabled={scanning || loading}
+                >
+                  {scanning ? 'Scanning…' : 'Scan folder'}
+                </button>
+                <Link
+                  to="/automations"
+                  search={{ action: 'audiobook_scan_library' }}
+                  onClick={onClose}
+                >
+                  Schedule & history ↗
+                </Link>
+              </div>
+            </div>
+            {scan.error && (
+              <p className={styles.notice} role="status">
+                {scan.error}
+              </p>
             )}
-          </div>
-          <div className={styles.scanActions}>
-            <button
-              type="button"
-              className={styles.primary}
-              onClick={() => void startScan()}
-              disabled={scanning || loading}
-            >
-              {scanning ? 'Scanning…' : 'Scan folder'}
-            </button>
-            <Link to="/automations" search={{ action: 'audiobook_scan_library' }} onClick={onClose}>
-              Schedule & history ↗
-            </Link>
-          </div>
-        </div>
-        {scan.error && (
-          <p className={styles.notice} role="status">
-            {scan.error}
-          </p>
-        )}
-        {message && (
-          <p className={styles.notice} role="status">
-            {message}
-          </p>
-        )}
-        {loadError && (
-          <p className={styles.notice} role="alert">
-            {loadError}{' '}
-            <button type="button" onClick={() => setRevision((v) => v + 1)}>
-              Retry
-            </button>
-          </p>
-        )}
+            {message && (
+              <p className={styles.notice} role="status">
+                {message}
+              </p>
+            )}
+            {loadError && (
+              <p className={styles.notice} role="alert">
+                {loadError}{' '}
+                <button type="button" onClick={() => setRevision((v) => v + 1)}>
+                  Retry
+                </button>
+              </p>
+            )}
 
-        <div className={styles.toolbar}>
-          <input
-            type="search"
-            aria-label="Search library"
-            placeholder="Search title, author, narrator or series…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-          <select aria-label="Sort library" value={sort} onChange={(e) => setSort(e.target.value)}>
-            <option value="title">Title A–Z</option>
-            <option value="author">Author A–Z</option>
-            <option value="recent">Recently added</option>
-            <option value="size">Largest first</option>
-          </select>
-        </div>
-        <div className={styles.filters}>
-          <button type="button" aria-pressed={!localOnly} onClick={() => setLocalOnly(false)}>
-            All books <span>{books.length}</span>
-          </button>
-          <button type="button" aria-pressed={localOnly} onClick={() => setLocalOnly(true)}>
-            Local only <span>{localCount}</span>
-          </button>
-          <span className={styles.filterHint}>
-            Local books are indexed without guessing an Audible edition.
-          </span>
-        </div>
-
+            <div className={styles.toolbar}>
+              <input
+                type="search"
+                aria-label="Search library"
+                placeholder="Search title, author, narrator or series…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+              <select
+                aria-label="Sort library"
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+              >
+                <option value="title">Title A–Z</option>
+                <option value="author">Author A–Z</option>
+                <option value="recent">Recently added</option>
+                <option value="size">Largest first</option>
+              </select>
+            </div>
+            <div className={styles.filters}>
+              <button
+                type="button"
+                aria-pressed={matchFilter === 'all'}
+                onClick={() => setMatchFilter('all')}
+              >
+                All books <span>{books.length}</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={matchFilter === 'review'}
+                onClick={() => setMatchFilter('review')}
+              >
+                Needs review <span>{reviewCount}</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={matchFilter === 'matched'}
+                onClick={() => setMatchFilter('matched')}
+              >
+                Matched
+              </button>
+              <select
+                aria-label="Filter by download origin"
+                value={originFilter}
+                onChange={(e) => setOriginFilter(e.target.value)}
+              >
+                <option value="all">All origins</option>
+                <option value="soulsync">SoulSync downloads</option>
+                <option value="disk">Found on disk</option>
+                <option value="unknown">Origin unknown</option>
+              </select>
+            </div>
+            {Boolean(scan.match_pending) && (
+              <p className={styles.notice}>
+                {scan.match_pending} books waiting for catalogue lookup. The automation processes a
+                limited batch each run.
+              </p>
+            )}
+            {Boolean(scan.match_errors) && (
+              <p className={styles.notice}>
+                {scan.match_errors} catalogue lookups failed. Your files are indexed; matching will
+                retry later.
+              </p>
+            )}
+          </>
+        )}
         <div className={styles.body} aria-busy={loading}>
-          {loading ? (
+          {reviewBook ? (
+            <AudiobookLibraryMatch
+              book={reviewBook}
+              onBack={() => setReviewBook(null)}
+              onSaved={() => {
+                setReviewBook(null);
+                setRevision((v) => v + 1);
+                setMessage('Catalogue match updated.');
+              }}
+            />
+          ) : loading ? (
             <p className={styles.empty}>Loading your shelves…</p>
           ) : books.length === 0 && !loadError ? (
             <div className={styles.empty}>
@@ -283,12 +369,12 @@ export function AudiobookLibraryModal({ onClose }: { onClose: () => void }) {
             <ul className={styles.grid}>
               {shown.map((book) => (
                 <li className={styles.card} key={book.asin}>
-                  {book.asin.startsWith('local:') ? (
+                  {!matchedAsin(book) ? (
                     <Cover book={book} />
                   ) : (
                     <Link
                       to="/audiobooks/$asin"
-                      params={{ asin: book.asin }}
+                      params={{ asin: matchedAsin(book) }}
                       onClick={onClose}
                       aria-label={`View ${book.title}`}
                     >
@@ -309,15 +395,47 @@ export function AudiobookLibraryModal({ onClose }: { onClose: () => void }) {
                     {book.runtime_minutes > 0 ? `${duration(book.runtime_minutes)} · ` : ''}
                     {size(book.size_bytes)}
                   </p>
+                  <div className={styles.badges}>
+                    <span data-origin={book.origin || 'unknown'}>
+                      {ORIGINS[book.origin || 'unknown']}
+                    </span>
+                    <button type="button" onClick={() => setReviewBook(book)}>
+                      {MATCHES[book.match_status || 'unmatched']}
+                    </button>
+                  </div>
                   <details className={styles.details}>
-                    <summary>
-                      File details{book.asin.startsWith('local:') ? ' · Local' : ''}
-                    </summary>
+                    <summary>File details</summary>
                     <p>
                       {book.file_count} {book.file_count === 1 ? 'audio file' : 'audio files'}
                     </p>
                     {book.narrator && <p>Narrated by {book.narrator}</p>}
                     <p className={styles.path}>{book.path}</p>
+                    {book.grouping && <p>{book.grouping}</p>}
+                    {book.file_paths && book.file_paths.length > 1 && (
+                      <details>
+                        <summary>Show {book.file_paths.length} audio files</summary>
+                        <ul className={styles.fileList}>
+                          {book.file_paths.map((path) => (
+                            <li key={path}>{path}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                    {book.download && (
+                      <div className={styles.downloadInfo}>
+                        <strong>Downloaded by SoulSync</strong>
+                        <p>{book.download.release_title}</p>
+                        <p>
+                          {book.download.indexer || book.download.source}
+                          {book.download.completed_at
+                            ? ` · ${new Date(book.download.completed_at * 1000).toLocaleDateString()}`
+                            : ''}
+                        </p>
+                      </div>
+                    )}
+                    <button type="button" onClick={() => setReviewBook(book)}>
+                      Change catalogue match
+                    </button>
                     {confirm === book.asin ? (
                       <div className={styles.confirm}>
                         <p>Delete this book from disk? Your recycle bin settings apply.</p>

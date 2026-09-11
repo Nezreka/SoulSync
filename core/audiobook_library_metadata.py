@@ -18,7 +18,7 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def read_metadata(path: Path, files: list[Path]) -> dict:
+def read_metadata(path: Path, files: list[Path], probes=None, include_sidecars=True) -> dict:
     """Prefer sidecars, then embedded album tags, then the name on disk.
 
     A local identity is assigned by the scanner when no explicit ASIN exists.
@@ -26,7 +26,8 @@ def read_metadata(path: Path, files: list[Path]) -> dict:
     """
     folder = path if path.is_dir() else path.parent
     facts = {"title": "", "author": "", "narrator": "", "asin": "",
-             "series_title": "", "series_sequence": "", "runtime_minutes": 0}
+             "series_title": "", "series_sequence": "", "runtime_minutes": 0,
+             "language": "", "format_type": ""}
 
     def put(key, value):
         text = _text(value)
@@ -36,7 +37,7 @@ def read_metadata(path: Path, files: list[Path]) -> dict:
     # A loose file must not inherit another book's directory sidecar.
     sidecars = [folder / n for n in ("metadata.opf", "book.nfo", "metadata.json")] \
         if path.is_dir() else [path.with_suffix(".opf"), path.with_suffix(".nfo")]
-    for sidecar in sidecars:
+    for sidecar in sidecars if include_sidecars else []:
         try:
             if sidecar.stat().st_size > 2 * 1024 * 1024:
                 continue
@@ -64,7 +65,7 @@ def read_metadata(path: Path, files: list[Path]) -> dict:
                     put("title", value)
                 elif tag == "creator":
                     put("narrator" if attrs.get("role") == "nrt" else "author", value)
-                elif tag in ("author", "narrator", "asin"):
+                elif tag in ("author", "narrator", "asin", "language"):
                     put(tag, value)
                 elif tag in ("identifier", "uniqueid") and \
                         (attrs.get("scheme", "").lower() == "asin" or attrs.get("type") == "asin"):
@@ -77,7 +78,7 @@ def read_metadata(path: Path, files: list[Path]) -> dict:
             continue
 
     duration = 0.0
-    for file in files:
+    for file in files if probes is None else []:
         try:
             import mutagen
             audio = mutagen.File(file)
@@ -92,6 +93,7 @@ def read_metadata(path: Path, files: list[Path]) -> dict:
                 "asin": ("TXXX:ASIN", "asin", "ASIN", "----:com.apple.iTunes:ASIN"),
                 "series_title": ("TXXX:SERIES", "series", "----:com.apple.iTunes:SERIES"),
                 "series_sequence": ("TXXX:SERIES-PART", "series-part"),
+                "language": ("TLAN", "language", "LANGUAGE"),
             }.items():
                 for name in names:
                     if name in tags:
@@ -100,7 +102,21 @@ def read_metadata(path: Path, files: list[Path]) -> dict:
             continue
         except Exception:  # malformed media is still visible by its filename
             continue
+    if probes is not None:
+        for probe in probes:
+            for key in ("title", "author", "narrator", "asin", "series_title", "series_sequence", "language", "format_type"):
+                if key == "title" and probe.get("title_source") == "filename":
+                    continue
+                put(key, probe.get(key))
+            duration += probe.get("duration_seconds", 0)
+    facts["duration_seconds"] = duration
     facts["runtime_minutes"] = round(duration / 60)
+    facts["title_source"] = "metadata" if facts["title"] else "filename"
+    text_title = str(facts["title"]).lower()
+    if "unabridged" in text_title:
+        facts["format_type"] = "unabridged"
+    elif "abridged" in text_title:
+        facts["format_type"] = "abridged"
     if not ASIN_RE.fullmatch(str(facts["asin"])):
         facts["asin"] = ""
     else:

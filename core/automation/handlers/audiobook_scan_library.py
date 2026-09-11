@@ -22,7 +22,7 @@ def auto_scan_audiobook_library(config: Dict[str, Any], deps: AutomationDeps) ->
         running = state["status"] == "running"
         failed = state["status"] == "error"
         total = max(1, state.get("found", 0))
-        phase = (f"Reading {state.get('current', 'audiobook folders')}" if running else
+        phase = (f"{'Matching' if state.get('phase') == 'matching' else 'Reading'} {state.get('current', 'audiobook folders')}" if running else
                  state.get("error") if failed else
                  f"Library updated: {state['adopted']} added, {state['updated']} refreshed, {state['removed']} missing")
         deps.update_progress(
@@ -31,7 +31,8 @@ def auto_scan_audiobook_library(config: Dict[str, Any], deps: AutomationDeps) ->
             phase=phase, log_line=phase, log_type="error" if failed else "info")
 
     try:
-        result = scan(root=root, progress=progress)
+        result = scan(root=root, progress=progress, match_catalog=bool(config.get("match_catalog", True)),
+                      match_limit=max(1,min(int(config.get("match_batch_size",25)),100)))
         return {**result, "_manages_own_progress": result.get("status") != "skipped"}
     except Exception as exc:
         deps.update_progress(automation_id, status="error", phase="Scan failed",

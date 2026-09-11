@@ -293,11 +293,11 @@ def test_hidden_folders_are_left_alone_generally(tmp_path, db):
 
 def test_a_real_book_beside_the_bin_is_still_found(tmp_path, db):
     make_book_folder(tmp_path, ".deleted", "20260909_120000_Deleted Book", asin="OLD")
-    make_book_folder(tmp_path, "Andy Weir", "Project Hail Mary", asin="KEEP")
+    make_book_folder(tmp_path, "Andy Weir", "Project Hail Mary", asin="B00000KEEP")
 
     scan(root=str(tmp_path), db=db)
 
-    assert [r["asin"] for r in db.get_library()] == ["KEEP"]
+    assert [r["asin"] for r in db.get_library()] == ["B00000KEEP"]
 
 
 def test_flat_library_indexes_each_file_and_never_the_root(tmp_path, db):
@@ -436,7 +436,7 @@ def test_automation_reports_running_and_finished_progress(tmp_path, db):
     make_book_folder(tmp_path, 'Book', sidecar=False)
     deps = MagicMock()
     with patch('core.audiobook_database.get_audiobook_db', return_value=db):
-        result = auto_scan_audiobook_library({'root': str(tmp_path), '_automation_id': 7}, deps)
+        result = auto_scan_audiobook_library({'root': str(tmp_path), '_automation_id': 7, 'match_catalog': False}, deps)
     assert result['adopted'] == 1 and result['_manages_own_progress']
     states = [call.kwargs['status'] for call in deps.update_progress.call_args_list]
     assert 'running' in states and states[-1] == 'finished'

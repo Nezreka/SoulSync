@@ -842,7 +842,12 @@ def create_audiobooks_blueprint() -> Blueprint:
 
         db = get_audiobook_db()
         rows = db.get_library()
+        history = db.library_download_history()
         for row in rows:
+            row["download"] = history.get(row.get("download_id"))
+            matched_cover = (row.get("catalog_book") or {}).get("cover_url")
+            if matched_cover and not row.get("cover_url"):
+                row["cover_url"] = matched_cover
             if not row.get("cover_url"):
                 row["cover_url"] = url_for("audiobooks_api.library_cover", asin=row["asin"])
         return jsonify({
@@ -850,6 +855,67 @@ def create_audiobooks_blueprint() -> Blueprint:
             "total_bytes": sum(int(r.get("size_bytes") or 0) for r in rows),
             "root": library_root(), "scan": scan_status(db),
         })
+
+    @bp.route("/library/<asin>/matches", methods=["GET"])
+    def library_matches(asin: str):
+        from core.audiobook_library_matching import candidates_for, score_candidate
+        from core.audiobook_library_metadata import ASIN_RE
+        row = get_audiobook_db().get_library_entry(asin)
+        if row is None:
+            return jsonify({"success": False, "error": "Book not found"}), 404
+        query = str(request.args.get("q") or "").strip()[:300]
+        try:
+            client = get_audiobook_client()
+            if ASIN_RE.fullmatch(query):
+                book = client.get_book(query.upper())
+                candidates = [score_candidate(row.get("metadata_json") or row, book)] if book else []
+            else:
+                candidates = candidates_for(row, client, query=query or None)
+            return jsonify({"success": True, "candidates": candidates,
+                            "scan_signature": row.get("scan_signature", ""),
+                            "match_revision": row.get("match_revision", 0)})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 503
+
+    @bp.route("/library/<asin>/match", methods=["PATCH"])
+    def library_match(asin: str):
+        from core.audiobook_library_matching import compact
+        from core.audiobook_library_metadata import ASIN_RE
+        db = get_audiobook_db()
+        row = db.get_library_entry(asin)
+        if row is None:
+            return jsonify({"success": False, "error": "Book not found"}), 404
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid match request"}), 400
+        action = data.get("action")
+        if action not in ("confirm", "ignore", "retry"):
+            return jsonify({"success": False, "error": "Choose confirm, ignore or retry"}), 400
+        if data.get("scan_signature") != row.get("scan_signature") or data.get("match_revision") != row.get("match_revision"):
+            return jsonify({"success": False, "error": "This book changed. Refresh its matches before saving."}), 409
+        selected = str(data.get("catalog_asin") or "").strip().upper()
+        book = {}
+        if action == "confirm":
+            if not ASIN_RE.fullmatch(selected):
+                return jsonify({"success": False, "error": "A valid Audible ASIN is required"}), 400
+            try:
+                result = get_audiobook_client().get_book(selected)
+            except Exception:
+                result = None
+            if result is None:
+                return jsonify({"success": False, "error": "Could not verify that catalogue edition. Try again later."}), 503
+            book = compact(result)
+            if book.get("asin") != selected or book.get("source") not in (None, "audible"):
+                return jsonify({"success": False, "error": "The catalogue returned a different edition"}), 400
+        ok = db.apply_library_match(asin, signature=data["scan_signature"], revision=data["match_revision"],
+            status="confirmed" if action == "confirm" else "ignored" if action == "ignore" else "unmatched",
+            catalog_asin=selected if action == "confirm" else "", book=book, manual=True,
+            evidence=["Edition confirmed by you" if action == "confirm" else "Kept unmatched by you" if action == "ignore" else "Automatic matching requested"])
+        if not ok:
+            return jsonify({"success": False, "error": "The book changed while saving. Refresh and try again."}), 409
+        if action == "retry":
+            db.update_library_entry(asin, match_checked_at=0)
+        return jsonify({"success": True, "book": db.get_library_entry(asin)})
 
     @bp.route("/library/<asin>/cover", methods=["GET"])
     def library_cover(asin: str):
@@ -891,9 +957,18 @@ def create_audiobooks_blueprint() -> Blueprint:
         path = Path(str(row.get("path") or "")).resolve()
         if path == root or not path.is_relative_to(root):
             return jsonify({"success": False, "error": "This book is outside the configured audiobook folder."}), 400
-        outcome = discard(str(path), reason="deleted from the library")
-        if not outcome.get("ok"):
-            return jsonify({"success": False, "error": outcome.get("error") or "Could not delete this book."}), 400
+        targets = [path]
+        if row.get("file_scope") == "files":
+            targets = [Path(p).resolve() for p in row.get("file_paths") or [str(path)]]
+            if any(p == root or not p.is_relative_to(root) or p.is_dir() for p in targets):
+                return jsonify({"success": False, "error": "The selected audio files are outside this library."}), 400
+        outcomes = []
+        for target in targets:
+            outcome = discard(str(target), reason="deleted from the library")
+            outcomes.append(outcome)
+            if not outcome.get("ok"):
+                return jsonify({"success": False, "error": (outcome.get("error") or "Could not delete this book.") + " Some files may already be in the recycle bin; scan to refresh."}), 400
+        outcome = {"ok": True, "permanent": any(o.get("permanent") for o in outcomes)}
         db.remove_from_library(asin)
         return jsonify({
             "success": True,

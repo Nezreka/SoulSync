@@ -38,6 +38,7 @@ import type {
   AudiobookLibraryEntry,
   AudiobookLibrary,
   AudiobookLibraryScan,
+  AudiobookMatchResults,
   AudiobookSearchResult,
   AudiobookPersonProfile,
   AudiobookRole,
@@ -823,4 +824,28 @@ export async function runAuthorScan(): Promise<Record<string, number> | null> {
     console.error('Failed to check followed authors:', err);
     return null;
   }
+}
+
+export async function fetchLibraryMatches(id: string, query = ''): Promise<AudiobookMatchResults> {
+  const data = await readJson<AudiobookMatchResults & { success?: boolean; error?: string }>(
+    audiobookClient.get(`audiobooks/library/${encodeURIComponent(id)}/matches`, {
+      searchParams: { q: query },
+    }),
+  );
+  if (!data.success) throw new Error(data.error || 'Could not search for matches.');
+  return data;
+}
+
+export async function saveLibraryMatch(
+  id: string,
+  snapshot: Pick<AudiobookMatchResults, 'scan_signature' | 'match_revision'>,
+  action: 'confirm' | 'ignore' | 'retry',
+  catalogAsin = '',
+): Promise<void> {
+  const data = await readJson<{ success?: boolean; error?: string }>(
+    audiobookClient.patch(`audiobooks/library/${encodeURIComponent(id)}/match`, {
+      json: { ...snapshot, action, catalog_asin: catalogAsin },
+    }),
+  );
+  if (!data.success) throw new Error(data.error || 'Could not save the match.');
 }

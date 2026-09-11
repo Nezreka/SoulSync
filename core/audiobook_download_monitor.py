@@ -376,7 +376,7 @@ def tick(db: Any = None) -> Dict[str, int]:
             continue
 
         imported_path = patch.pop("imported_path", "")
-        database.update_download(row["download_id"], **patch)
+        database.update_download(row["download_id"], imported_path=imported_path or None, **patch)
 
         # Same numbers onto the Downloads page card.
         update_progress(
@@ -397,6 +397,7 @@ def tick(db: Any = None) -> Dict[str, int]:
                 database.mark_wishlist_status(asin, STATUS_DONE)
                 database.add_to_library(
                     _book_for(row), imported_path or patch.get("save_path", ""),
+                    download_id=row["download_id"], origin="soulsync",
                 )
             logger.info("Audiobook imported: %s -> %s", row.get("title"), imported_path)
         elif patch.get("status") == "staged":

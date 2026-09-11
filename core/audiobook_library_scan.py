@@ -48,48 +48,14 @@ def is_book_folder(folder: Path) -> bool:
 
 
 def iter_book_folders(root: Path, max_depth: int = MAX_DEPTH):
-    """Compatibility iterator for book directories (never the library root)."""
-    if not Path(root).is_dir():
-        return
-    for path, _ in _inventory(Path(root), max_depth, lambda *_: None):
-        if path.is_dir():
-            yield path
-
-
-def _inventory(root: Path, max_depth: int, error):
-    stack = [(root, 0)]
-    while stack:
-        folder, depth = stack.pop()
-        if depth > max_depth:
-            error(folder, "Folder nesting exceeds the scan limit")
-            continue
-        try:
-            entries = sorted(folder.iterdir())
-            visible = [p for p in entries if not p.name.startswith('.') and not p.is_symlink()]
-            files = [p for p in visible if p.is_file() and p.suffix.lower() in _audio_extensions()]
-            children = [p for p in visible if p.is_dir()]
-            # CD1/CD2 are parts of a book, not independent titles.
-            discs = [p for p in children if _DISC.fullmatch(p.name)]
-            if folder != root and discs and len(discs) == len(children):
-                for disc in discs:
-                    files.extend(p for p in sorted(disc.iterdir())
-                                 if p.is_file() and not p.is_symlink()
-                                 and p.suffix.lower() in _audio_extensions())
-                children = []
-            if files and _stats(files)["size_bytes"] >= MIN_BOOK_BYTES:
-                if folder == root or (len(files) > 1 and all(p.suffix.lower() == ".m4b" for p in files)
-                                      and not (folder / "metadata.opf").exists()
-                                      and not (folder / "book.nfo").exists()):
-                    # A flat library is many files, never one deletable root directory.
-                    for file in files:
-                        if file.stat().st_size >= MIN_BOOK_BYTES:
-                            yield file, [file]
-                else:
-                    yield folder, files
-                    continue
-            stack.extend((p, depth + 1) for p in reversed(children))
-        except OSError as exc:
-            error(folder, str(exc))
+    from core.audiobook_library_inventory import discover
+    class MemoryCache:
+        def cached_library_file(self, *args): return None
+        def cache_library_file(self, *args): pass
+    if Path(root).is_dir():
+        for group in discover(Path(root), MemoryCache(), lambda *_: None, max_depth):
+            if group.scope == "folder":
+                yield group.path
 
 
 def _key(path: Path) -> str:
@@ -122,132 +88,166 @@ def scan_status(db=None) -> dict:
     return state
 
 
-def scan(root: Optional[str] = None, db: Any = None, progress=None) -> Dict[str, Any]:
-    """One shared, non-overlapping pass for the library automation.
+def _provenance(group, facts, previous, downloads):
+    if previous and previous.get("origin") == "soulsync":
+        return "soulsync", previous.get("download_id", "")
+    marker = ""
+    if group.scope == "folder":
+        try:
+            marker = (group.path / ".soulsync-release").read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    for download in downloads:
+        if download.get("status") != "completed":
+            continue
+        exact_path = download.get("imported_path") and _key(Path(download["imported_path"])) == _key(group.path)
+        marked = marker and marker in (download.get("release_title"), download.get("download_id"))
+        if exact_path or (marked and download.get("asin") == facts.get("asin")):
+            return "soulsync", download["download_id"]
+    if marker:
+        return "soulsync", ""
+    return (previous.get("origin", "unknown") if previous else "disk"), ""
 
-    Missing roots and incomplete walks never prune records. Local rows are
-    promoted to a catalogue identity only when an explicit ASIN is discovered.
-    """
-    if not _SCAN_LOCK.acquire(blocking=False):
-        return {"status": "skipped", "skipped": "An audiobook library scan is already running"}
+
+def scan(root: Optional[str] = None, db: Any = None, progress=None,
+         match_catalog: bool = False, match_limit: int = 25, client=None) -> Dict[str, Any]:
+    """Read files, reconcile inventory, then optionally match a bounded catalogue batch."""
     from core.audiobook_database import get_audiobook_db
     from core.audiobook_organizer import library_root
     from core.audiobook_library_metadata import read_metadata
-    from core.audiobook_post_processor import read_asin_from_folder
-
-    summary = {"status": "running", "checked": 0, "removed": 0, "adopted": 0,
-               "updated": 0, "local": 0, "errors": 0, "missing_root": False,
-               "started_at": time.time(), "error": ""}
+    from core.audiobook_library_inventory import discover
+    if not _SCAN_LOCK.acquire(blocking=False):
+        return {"status": "skipped", "skipped": "An audiobook library scan is already running"}
+    summary = {"status": "running", "phase": "scanning", "checked": 0, "removed": 0,
+               "adopted": 0, "updated": 0, "moved": 0, "local": 0, "errors": 0,
+               "missing_root": False, "started_at": time.time(), "error": ""}
     database = None
-
     def report():
         if database is not None:
             database.set_library_scan_state(summary)
         if progress:
             progress(dict(summary))
-
     def error(path, detail):
         summary["errors"] += 1
         summary["error"] = f"Could not fully scan {path}: {detail}"
         logger.warning(summary["error"])
-
     try:
-        library_path = Path(str(root or library_root())).resolve()
-        summary["root"] = str(library_path)
+        root_path = Path(str(root or library_root())).resolve()
+        summary["root"] = str(root_path)
         database = db if db is not None else get_audiobook_db()
         report()
-        if not library_path.is_dir():
+        if not root_path.is_dir():
             summary.update(missing_root=True, status="error", error="The audiobook folder is not reachable. Check its setting and mount.")
             return summary
         rows = database.get_library()
-        by_path = {_key(Path(row["path"])): row for row in rows if row.get("path")}
-        ids = {row["asin"] for row in rows}
-        seen = set()
-        adopted_ids = set()
-        # Inventory first. An unreadable branch must not look like deleted books.
-        candidates = list(_inventory(library_path, MAX_DEPTH, error))
-        summary["found"] = len(candidates)
-        for index, (path, files) in enumerate(candidates):
+        downloads = database.get_downloads()
+        by_path = {_key(Path(r["path"])): r for r in rows if r.get("path")}
+        ids = {r["asin"] for r in rows}
+        groups = discover(root_path, database, error)
+        summary["found"] = len(groups)
+        seen_ids, seen_files = set(), set()
+        for index, group in enumerate(groups):
             summary["checked"] += 1
-            summary["current"] = path.name
-            seen.add(_key(path))
+            summary["current"] = group.path.name
             try:
-                previous = by_path.get(_key(path))
-                stats = _stats(files)
-                signature = _signature(path, files)
-                if previous and previous.get("scan_signature") == signature:
-                    summary["local"] += int(previous["asin"].startswith("local:"))
-                    continue
-                facts = read_metadata(path, files)
-                asin = facts["asin"]
-                if not asin and path.is_dir():
-                    asin = read_asin_from_folder(path)
-                if previous and not previous["asin"].startswith("local:"):
-                    asin = previous["asin"]
-                # Keep multiple physical copies visible without overwriting an owned copy.
-                if asin in ids and (not previous or previous["asin"] != asin):
-                    old = next((r for r in rows if r["asin"] == asin), None)
-                    if old is None or Path(old["path"]).exists():
-                        asin = ""
-                asin = asin or _local_id(path)
-                summary["local"] += int(asin.startswith("local:"))
-                if previous and previous["asin"] == asin:
-                    fields = {**stats, "scan_signature": signature}
+                previous = by_path.get(_key(group.path))
+                if previous is None:
+                    possible = [r for r in rows if r.get("fingerprint") == group.fingerprint
+                                and r["asin"] not in seen_ids and not Path(r["path"]).exists()]
+                    if len(possible) == 1:
+                        previous = possible[0]
+                        summary["moved"] += 1
+                paths = [str(p) for p in group.files]
+                seen_files.update(_key(p) for p in group.files)
+                facts = (previous.get("metadata_json") if previous and previous.get("scan_signature") == group.signature
+                         else None)
+                if not facts:
+                    facts = read_metadata(group.path, group.files, probes=group.probes)
+                explicit_ids = {p.get("asin") for p in group.probes if p.get("asin")}
+                if facts.get("asin"):
+                    explicit_ids.add(facts["asin"])
+                facts["metadata_conflicts"] = ["Conflicting identifiers in the sidecar and audio files"] if len(explicit_ids)>1 else []
+                if facts["metadata_conflicts"]:
+                    facts["asin"] = ""
+                catalog_asin = facts.get("asin") or ""
+                key = previous["asin"] if previous else catalog_asin if catalog_asin and catalog_asin not in ids else _local_id(group.path)
+                origin, download_id = _provenance(group, facts, previous, downloads)
+                stats = _stats(group.files)
+                fields = {**stats, "path": str(group.path), "file_paths": paths,
+                          "file_scope": group.scope, "fingerprint": group.fingerprint,
+                          "scan_signature": group.signature, "metadata_json": facts,
+                          "grouping": group.grouping, "origin": origin, "download_id": download_id}
+                if previous:
+                    changed = previous.get("scan_signature") != group.signature
+                    # A previous manual decision is never silently replaced by a search.
+                    pinned = previous.get("match_status") in ("confirmed", "ignored", "changed")
+                    if changed and pinned and previous.get("match_status") != "ignored" and previous.get("fingerprint") and previous["fingerprint"] != group.fingerprint:
+                        fields.update(match_status="changed", match_evidence=["Files changed since confirmation; please review the saved match"])
+                    elif not pinned and (changed or previous.get("match_status") == "identifier"):
+                        preserve_import = (previous.get("origin") == "soulsync" or previous.get("match_status") == "identifier") and not facts["metadata_conflicts"] and not catalog_asin and (not previous.get("fingerprint") or previous["fingerprint"] == group.fingerprint)
+                        catalog_asin = catalog_asin or (previous.get("catalog_asin", "") if preserve_import else "")
+                        fields.update(catalog_asin=catalog_asin, match_status="identifier" if catalog_asin else "unmatched",
+                                      match_checked_at=0, match_candidates=[], catalog_book={})
                     if previous.get("source") == "scan":
-                        fields.update({k: facts[k] for k in ("title", "author", "narrator", "series_title", "series_sequence", "runtime_minutes")})
-                    if not database.update_library_entry(asin, **fields):
-                        raise RuntimeError("Could not update the library record")
-                    summary["updated"] += 1
+                        fields.update({k:facts[k] for k in ("title","author","narrator","series_title","series_sequence","runtime_minutes")})
+                    # No repeated DB writes or tag probes for an unchanged entry.
+                    if any(previous.get(k) != v for k,v in fields.items()):
+                        if not database.update_library_entry(key, **fields):
+                            raise RuntimeError("Could not update the library record")
+                        summary["updated"] += 1
                 else:
-                    book = {"asin": asin, "title": facts["title"],
-                            "author_names": [facts["author"]] if facts["author"] else [],
-                            "narrator_names": [facts["narrator"]] if facts["narrator"] else [],
-                            "series": [{"title": facts["series_title"], "sequence": facts["series_sequence"]}],
-                            "runtime_minutes": facts["runtime_minutes"]}
-                    if not database.add_to_library(book, str(path), source="scan", scan_signature=signature, **stats):
+                    book = {"asin":key, "title":facts["title"], "author_names":[facts["author"]] if facts["author"] else [],
+                            "narrator_names":[facts["narrator"]] if facts["narrator"] else [],
+                            "runtime_minutes":facts["runtime_minutes"],
+                            "series":[{"title":facts["series_title"],"sequence":facts["series_sequence"]}]}
+                    if not database.add_to_library(book,str(group.path),source="scan", catalog_asin=catalog_asin, **{k:v for k,v in fields.items() if k!='path'}):
                         raise RuntimeError("Could not save the library record")
-                    ids.add(asin)
-                    adopted_ids.add(asin)
-                    if previous:
-                        database.remove_from_library(previous["asin"])
                     summary["adopted"] += 1
+                seen_ids.add(key)
+                ids.add(key)
+                summary["local"] += int(not catalog_asin)
             except Exception as exc:
-                error(path, str(exc))
+                error(group.path, str(exc))
             finally:
                 if index % 10 == 0:
                     report()
-        # A mount disappearing during enumeration is also an incomplete scan.
-        if not library_path.is_dir():
-            error(library_path, "Folder became unavailable during the scan")
+        if not root_path.is_dir():
+            error(root_path,"Folder became unavailable during the scan")
         if not summary["errors"]:
             for row in rows:
-                if row["asin"] in adopted_ids:
+                if row["asin"] in seen_ids or not row.get("path"):
                     continue
-                path = Path(str(row.get("path") or ""))
-                if not row.get("path") or not path.resolve().is_relative_to(library_path):
-                    continue
-                if _key(path) in seen:
+                path = Path(row["path"])
+                if not path.resolve().is_relative_to(root_path):
                     continue
                 try:
-                    # Permission errors and existing audio outside the inventory are
-                    # preserved; only demonstrably missing/empty paths are forgotten.
-                    if path.exists() and (path.is_file() or is_book_folder(path)):
+                    old_files = row.get("file_paths") or []
+                    regrouped = old_files and all(_key(Path(p)) in seen_files for p in old_files)
+                    if not regrouped and path.exists() and (path.is_file() or is_book_folder(path)):
                         continue
                     if database.remove_from_library(row["asin"]):
                         summary["removed"] += 1
                 except Exception as exc:
-                    error(path, str(exc))
+                    error(path,str(exc))
+        if match_catalog:
+            from core.audiobook_library_matching import match_library
+            summary["phase"] = "matching"
+            report()
+            def matching_progress(counts,title):
+                summary.update(counts, current=title)
+                report()
+            summary.update(match_library(database,client=client,limit=match_limit,progress=matching_progress))
         summary["status"] = "error" if summary["errors"] else "completed"
         return summary
     except Exception as exc:
-        summary.update(status="error", error=str(exc))
+        summary.update(status="error",error=str(exc))
         summary["errors"] += 1
-        logger.exception("Audiobook library scan failed")
+        logger.exception("Audiobook scan failed")
         return summary
     finally:
         summary["finished_at"] = time.time()
-        summary["duration"] = round(time.time() - summary["started_at"], 2)
-        summary.pop("current", None)
+        summary["duration"] = round(time.time()-summary["started_at"],2)
+        summary.pop("current",None)
         try:
             report()
         finally:

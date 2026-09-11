@@ -1,13 +1,21 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { deleteLibraryBook, fetchLibrary, scanLibrary } from '../-audiobooks.api';
+import {
+  deleteLibraryBook,
+  fetchLibrary,
+  scanLibrary,
+  fetchLibraryMatches,
+  saveLibraryMatch,
+} from '../-audiobooks.api';
 import { AudiobookLibraryModal } from './audiobook-library-modal';
 
 vi.mock('../-audiobooks.api', () => ({
   fetchLibrary: vi.fn(),
   scanLibrary: vi.fn(),
   deleteLibraryBook: vi.fn(),
+  fetchLibraryMatches: vi.fn(),
+  saveLibraryMatch: vi.fn(),
 }));
 vi.mock('./audiobook-overlay', () => ({
   AudiobookOverlay: ({ children }: { children: React.ReactNode }) => (
@@ -78,7 +86,7 @@ describe('audiobook library', () => {
     vi.mocked(deleteLibraryBook).mockResolvedValue({ ok: true, recycled: true, error: '' });
     render(<AudiobookLibraryModal onClose={() => {}} />);
     await screen.findByRole('heading', { name: 'A Local Book' });
-    fireEvent.click(screen.getByText('File details · Local'));
+    fireEvent.click(screen.getByText('File details'));
     fireEvent.click(screen.getByRole('button', { name: 'Delete from disk' }));
     expect(deleteLibraryBook).not.toHaveBeenCalled();
     vi.mocked(fetchLibrary).mockResolvedValue({ ...response, books: [], totalBytes: 0 });
@@ -95,12 +103,62 @@ describe('audiobook library', () => {
     });
     render(<AudiobookLibraryModal onClose={() => {}} />);
     await screen.findByRole('heading', { name: 'A Local Book' });
-    fireEvent.click(screen.getByText('File details · Local'));
+    fireEvent.click(screen.getByText('File details'));
     fireEvent.click(screen.getByRole('button', { name: 'Delete from disk' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm delete' }));
     expect(await screen.findByRole('status')).toHaveTextContent('Permission denied');
     expect(
       within(screen.getByRole('list')).getByRole('heading', { name: 'A Local Book' }),
     ).toBeInTheDocument();
+  });
+  it('distinguishes proven downloads from disk discoveries and unknown history', async () => {
+    vi.mocked(fetchLibrary).mockResolvedValue({
+      ...response,
+      books: [
+        { ...book, origin: 'soulsync' },
+        { ...book, asin: 'local:two', title: 'Disk Book', origin: 'disk' },
+        { ...book, asin: 'local:three', title: 'Old Book', origin: 'unknown' },
+      ],
+    });
+    render(<AudiobookLibraryModal onClose={() => {}} />);
+    await screen.findByRole('heading', { name: 'Disk Book' });
+    fireEvent.change(screen.getByLabelText('Filter by download origin'), {
+      target: { value: 'soulsync' },
+    });
+    expect(screen.getByRole('heading', { name: 'A Local Book' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Disk Book' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Old Book' })).not.toBeInTheDocument();
+  });
+
+  it('searches editions and saves a confirmation with the reviewed snapshot', async () => {
+    const snapshot = {
+      scan_signature: 'files-v2',
+      match_revision: 3,
+      candidates: [
+        {
+          book: { asin: 'B000000001', title: 'Catalogue Book', author_names: ['An Author'] },
+          score: 98,
+          evidence: ['Narrator agrees'],
+          conflicts: [],
+          automatic_eligible: true,
+        },
+      ],
+    };
+    vi.mocked(fetchLibraryMatches).mockResolvedValue(snapshot);
+    vi.mocked(saveLibraryMatch).mockResolvedValue();
+    render(<AudiobookLibraryModal onClose={() => {}} />);
+    await screen.findByRole('heading', { name: 'A Local Book' });
+    fireEvent.click(screen.getByRole('button', { name: 'Unmatched' }));
+    fireEvent.change(screen.getByLabelText('Search catalogue or enter ASIN'), {
+      target: { value: 'B000000001' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Find editions' }));
+    await screen.findByRole('heading', { name: 'Catalogue Book' });
+    expect(fetchLibraryMatches).toHaveBeenCalledWith('local:one', 'B000000001');
+    fireEvent.click(screen.getByRole('button', { name: 'Use this edition' }));
+    await waitFor(() =>
+      expect(saveLibraryMatch).toHaveBeenCalledWith('local:one', snapshot, 'confirm', 'B000000001'),
+    );
+    await screen.findByRole('heading', { name: 'A Local Book' });
   });
 });

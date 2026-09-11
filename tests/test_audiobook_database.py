@@ -68,7 +68,7 @@ def test_the_schema_holds_only_audiobook_tables(db):
     }
     assert tables == {
         "audiobook_wishlist", "audiobook_downloads",
-        "audiobook_library", "audiobook_watchlist", "audiobook_library_scan_state",
+        "audiobook_library", "audiobook_watchlist", "audiobook_library_scan_state", "audiobook_library_file_cache",
         "audiobook_blocklist",
     }
 
