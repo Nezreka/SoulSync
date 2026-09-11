@@ -104,6 +104,7 @@ export function StatsPage() {
   const syncTimeoutRef = useRef<number | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastfmUsername, setLastfmUsername] = useState('');
+  const lastfmUsernameEdited = useRef(false);
   const [listeningDetailFilter, setListeningDetailFilter] =
     useState<StatsListeningEventsFilter | null>(null);
 
@@ -174,8 +175,8 @@ export function StatsPage() {
 
   useEffect(() => {
     const username = lastfmImportQuery.data?.username;
-    if (username && !lastfmUsername) setLastfmUsername(username);
-  }, [lastfmImportQuery.data?.username, lastfmUsername]);
+    if (!lastfmUsernameEdited.current) setLastfmUsername(username || '');
+  }, [lastfmImportQuery.data?.username]);
 
   useEffect(() => {
     const onProgress = () => {
@@ -285,7 +286,10 @@ export function StatsPage() {
               <LastfmImportControl
                 status={lastfmImportQuery.data}
                 username={lastfmUsername}
-                onUsernameChange={setLastfmUsername}
+                onUsernameChange={(value) => {
+                  lastfmUsernameEdited.current = true;
+                  setLastfmUsername(value);
+                }}
                 onRun={() => lastfmMutation.mutate()}
                 running={lastfmMutation.isPending}
               />
@@ -443,7 +447,7 @@ const PREVIOUS_PERIOD_LABEL: Partial<Record<StatsRange, string>> = {
   '12m': 'vs previous 12 months',
 };
 
-function LastfmImportControl({
+export function LastfmImportControl({
   onRun,
   onUsernameChange,
   running,
@@ -459,7 +463,7 @@ function LastfmImportControl({
   const active = !!status?.running;
   const pct = clampProgress(status?.progress);
   const canUseAuthenticatedUser = !!status?.authenticated_user_available;
-  const needsUsername = !username && !status?.username && !canUseAuthenticatedUser;
+  const needsUsername = !username.trim() && !canUseAuthenticatedUser;
   const disabled = running || active || !status?.api_key_configured || needsUsername;
   const subline = lastfmImportSubline(status);
 
@@ -485,15 +489,14 @@ function LastfmImportControl({
           }}
         />
       </div>
-      {needsUsername ? (
-        <input
-          className={styles.lastfmImportInput}
-          value={username}
-          onChange={(event) => onUsernameChange(event.target.value)}
-          placeholder="Last.fm username"
-          aria-label="Last.fm username"
-        />
-      ) : null}
+      <input
+        className={styles.lastfmImportInput}
+        value={username}
+        onChange={(event) => onUsernameChange(event.target.value)}
+        placeholder="Last.fm username"
+        aria-label="Last.fm username"
+        disabled={running || active}
+      />
       <button
         type="button"
         className={styles.lastfmImportRun}

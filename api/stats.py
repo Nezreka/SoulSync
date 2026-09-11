@@ -445,9 +445,9 @@ def lastfm_listening_import_status():
             'enabled': bool(config_manager.get('lastfm.listening_sync_enabled', False)),
             'api_key_configured': bool(config_manager.get('lastfm.api_key', '')),
             'authenticated_user_available': can_use_auth_user,
-            'username': username,
             'next_run_in_seconds': next_run,
             **status,
+            'username': username,
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

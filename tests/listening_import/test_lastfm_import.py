@@ -308,3 +308,47 @@ def test_lastfm_status_normalizes_false_complete_even_when_backfill_flag_was_set
     assert state["progress"] == 1
     assert state["last_success_at"] is None
 
+
+
+def test_corrected_username_does_not_reuse_old_accounts_cursor(tmp_path, monkeypatch):
+    import json
+    import core.listening_import.lastfm as module
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    db.set_metadata("lastfm_listening_import_state", json.dumps({
+        "username": "k", "status": "complete", "backfill_complete": True,
+        "last_imported_ts": 999999, "page": 3, "total_pages": 3,
+    }))
+    calls = []
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+        def get_user_recent_tracks(self, username, **kwargs):
+            calls.append((username, kwargs["page"], kwargs["from_ts"]))
+            return _recent_tracks_payload(page=1, total_pages=1, uts_values=[100])
+    monkeypatch.setattr(module, "LastFMClient", Client)
+    state = LastFMListeningImportWorker(db, _Config()).run_once(username="corrected")
+    assert state["status"] == "complete"
+    assert calls == [("corrected", 1, None)]
+    assert state["last_imported_ts"] == 100
+
+
+def test_failed_corrected_account_does_not_keep_old_pending_cursor(tmp_path, monkeypatch):
+    import json
+    import core.listening_import.lastfm as module
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    db.set_metadata("lastfm_listening_import_state", json.dumps({
+        "username": "k", "status": "error", "pending_last_imported_ts": 999999,
+        "last_imported_ts": 999999, "page": 2, "total_pages": 3,
+    }))
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+        def get_user_recent_tracks(self, username, **kwargs):
+            raise RuntimeError("Account unavailable")
+    monkeypatch.setattr(module, "LastFMClient", Client)
+    monkeypatch.setattr(module, "TRANSIENT_PAGE_RETRIES", 1)
+    state = LastFMListeningImportWorker(db, _Config()).run_once(username="corrected")
+    assert state["status"] == "error"
+    assert state["username"] == "corrected"
+    assert not state.get("last_imported_ts")
+    assert not state.get("pending_last_imported_ts")

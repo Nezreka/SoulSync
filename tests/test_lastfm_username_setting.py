@@ -76,3 +76,17 @@ def test_lastfm_is_a_section_the_server_persists():
     server = (_ROOT / "web_server.py").read_text(encoding="utf-8", errors="ignore")
     line = next(ln for ln in server.splitlines() if "for service in [" in ln)
     assert "'lastfm'" in line
+
+
+def test_status_returns_corrected_configuration_instead_of_failed_username(monkeypatch):
+    from flask import Flask
+    from types import SimpleNamespace
+    import api.stats as stats
+    monkeypatch.setattr(stats, "config_manager", SimpleNamespace(get=lambda key, default=None: {"lastfm.username": "corrected", "lastfm.api_key": "key"}.get(key, default)))
+    monkeypatch.setattr(stats, "_lastfm_import_worker", lambda: SimpleNamespace(status=lambda: {"username": "k", "status": "error"}))
+    monkeypatch.setattr(stats, "_automation_engine", lambda: None)
+    app = Flask(__name__)
+    app.register_blueprint(stats.bp)
+    response = app.test_client().get("/api/lastfm/listening-import/status")
+    assert response.status_code == 200
+    assert response.get_json()["username"] == "corrected"
