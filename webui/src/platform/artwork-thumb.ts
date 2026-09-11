@@ -8,11 +8,12 @@
  *
  * Callers do NOT need to know whether thumbnails are switched on. The server
  * ignores the parameter when the setting is off and serves the original, so a
- * call site can always ask and the single Settings toggle stays authoritative.
+ * call site can always ask. The compact dashboard rail is an exception: its
+ * artwork is always bounded to avoid decoding full-size masters in tiny cards.
  * That also means no config has to be plumbed into the browser.
  */
 
-export type ThumbVariant = 'grid' | 'card' | 'hero';
+export type ThumbVariant = 'grid' | 'card' | 'hero' | 'rail';
 
 /** Only our own cache endpoint understands `?v=`. */
 const CACHE_PREFIX = '/api/image-cache/';
@@ -48,6 +49,21 @@ export function thumb<T extends string | null | undefined>(
   variant: ThumbVariant,
   serviceWorkerControlled = serviceWorkerControlsPage(),
 ): T | string {
+  // Dashboard rails need bounded images even when originals are preferred
+  // elsewhere. Route remote artwork through the same cached resize path.
+  if (url && variant === 'rail') {
+    let target = url as string;
+    if (/^https?:\/\//i.test(target) || target.startsWith('//')) {
+      target = imageProxyUrl(target.startsWith('//') ? `https:${target}` : target);
+    }
+    const path = target.split('?')[0];
+    if (path.startsWith(CACHE_PREFIX) || path === IMAGE_PROXY_PREFIX) {
+      const parsed = new URL(target, 'http://localhost');
+      parsed.searchParams.set('v', 'rail');
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    return target;
+  }
   const safeUrl = browserSafeImageUrl(url, serviceWorkerControlled);
   if (!safeUrl) return safeUrl;
   if (!safeUrl.startsWith(CACHE_PREFIX)) return safeUrl;

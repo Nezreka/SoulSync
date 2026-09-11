@@ -46,6 +46,7 @@ DEFAULT_FETCH_TIMEOUT = 10.0
 # covers are square but artist photos and backdrops are not, so forcing a box
 # would letterbox or crop them.
 DEFAULT_VARIANT_MAX_WIDTH = {
+    "rail": 320,     # compact dashboard covers, including high-density screens
     "grid": 240,     # library/discover tiles
     "card": 480,     # shelf cards, search results
     "hero": 1200,    # detail-page headers
