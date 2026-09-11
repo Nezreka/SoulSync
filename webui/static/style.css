@@ -85591,3 +85591,60 @@ body.src-modal-open { overflow: hidden; }
     .dz-ed-controls { align-items: stretch; }
     .dz-ed-search { max-width: none; }
 }
+
+/* Library: shared cards with persistent Music / Video panels. */
+#settings-page .stg-media-card .stg-media-switcher {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    margin: 4px 0 20px;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 12px;
+    background: rgba(0,0,0,.2);
+}
+#settings-page .stg-media-switcher button {
+    min-width: 100px;
+    padding: 9px 22px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255,255,255,.6);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+}
+#settings-page .stg-media-switcher button:hover { color: #fff; background: rgba(255,255,255,.06); }
+#settings-page .stg-media-switcher button[aria-selected="true"] {
+    background: rgba(var(--accent-rgb),.18);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb),.25);
+}
+#settings-page .stg-media-switcher button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#settings-page .stg-media-panel[hidden] { display: none !important; }
+#settings-page .stg-media-context { display: flex; flex-direction: column; gap: 5px; margin-bottom: 20px; }
+#settings-page .stg-media-context strong { font-size: 16px; font-weight: 600; color: #eee; }
+#settings-page .stg-media-summary { font-size: 12px; line-height: 1.5; color: rgba(255,255,255,.5); }
+#settings-page .stg-media-summary.is-live { color: rgba(var(--accent-rgb),.8); }
+#settings-page .stg-media-panel > .settings-group { margin-top: 0; }
+@media (max-width: 600px) {
+    #settings-page .stg-media-card .stg-media-switcher { display: flex; }
+    #settings-page .stg-media-switcher button { flex: 1; }
+}
+#settings-page .stg-media-panel > .settings-group {
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 0 22px !important;
+}
+#settings-page .stg-media-panel > .settings-group::before { display: none; }
+#settings-page .stg-media-panel > .settings-group > h3 {
+    padding: 12px 0;
+    border-left: 0;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    font-size: 13px;
+}
+#settings-page .stg-media-panel > .settings-group:last-child { margin-bottom: 0 !important; }

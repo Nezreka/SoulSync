@@ -5240,17 +5240,17 @@
                                 <span class="stg-cardgroup-label">Files &amp; folders</span>
                                 <span class="stg-cardgroup-sub">Where things live on disk, and how they get named</span>
                             </div>
-                            <!-- Split from one "Paths &amp; Organization" card so the music side names
-                                 its sections the same way the video side does: Folders for where things
-                                 live, Organization for how they get named. One combined card on one side
-                                 and two split cards on the other made the two halves look like different
-                                 features rather than the same feature twice. -->
+                            <!-- Shared media tabs keep each set of controls mounted while switching. -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Music Folders</h3>
-                                <span class="settings-section-hint" data-stg-summary="library-paths" data-stg-fallback="Downloads, library &amp; extra folders">Downloads, library &amp; extra folders</span>
+                                <h3>Folders</h3>
+                                <span class="settings-section-hint">Downloads and library locations</span>
                             </div>
-                            <div class="settings-section-body collapsed" data-stg="library">
+<div class="settings-section-body collapsed stg-media-card" data-stg="library">
+<div class="stg-media-switcher" role="tablist" aria-label="Folders media type"><button type="button" id="folders-music-tab" role="tab" aria-selected="true" aria-controls="folders-music-panel" tabindex="0" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Music</button><button type="button" id="folders-video-tab" role="tab" aria-selected="false" aria-controls="folders-video-panel" tabindex="-1" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Video</button></div>
+<div id="folders-music-panel" role="tabpanel" aria-labelledby="folders-music-tab" class="stg-media-panel" tabindex="0">
+<div class="stg-media-context"><strong>Music folders</strong><span class="stg-media-summary" data-stg-summary="library-paths" data-stg-fallback="Downloads, library &amp; extra folders">Downloads, library &amp; extra folders</span></div>
+
 <div class="settings-group" data-stg="library">
                                 <h3>Folder Paths</h3>
                                 <div class="setting-help-text" style="margin-bottom: 4px;">
@@ -5406,13 +5406,47 @@
                                     <button class="test-button" onclick="addMusicPathRow()">+ Add Path</button>
                                 </div>
                             </div>
+
+</div>
+<div id="folders-video-panel" role="tabpanel" aria-labelledby="folders-video-tab" class="stg-media-panel" hidden tabindex="0">
+<div class="stg-media-context"><strong>Video folders</strong><span class="stg-media-summary" data-stg-summary="library-video-folders" data-stg-fallback="Movies, TV &amp; YouTube libraries">Movies, TV &amp; YouTube libraries</span></div>
+
+<div class="settings-group" data-stg="library">
+
+                                <div class="setting-help-text">
+                                    One shared download folder (where slskd / torrent drop files), then a separate library folder per type — finished files are sorted to the right one automatically. SEPARATE from your Music paths.
+                                </div>
+                                <div class="form-group">
+                                    <label>Download Folder (Input — shared with Music):</label>
+                                    <input type="text" id="video-download-path" placeholder="./downloads">
+                                    <div class="setting-help-text">Where downloads land — point this at the same folder as your slskd / torrent client. This is the SAME folder as the Music side; changing it here changes it there too.</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>🎬 Movies Library:</label>
+                                    <input type="text" id="video-movies-path" placeholder="/media/movies">
+                                </div>
+                                <div class="form-group">
+                                    <label>📺 TV Shows Library:</label>
+                                    <input type="text" id="video-tv-path" placeholder="/media/tv">
+                                </div>
+                                <div class="form-group">
+                                    <label>▶️ YouTube Library:</label>
+                                    <input type="text" id="video-youtube-path" placeholder="/media/youtube">
+                                </div>
                             </div>
+
+</div>
+</div>
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Music Organization</h3>
-                                <span class="settings-section-hint" data-stg-summary="library-music-org" data-stg-fallback="File naming templates &amp; reorganize">File naming templates &amp; reorganize</span>
+                                <h3>Organization</h3>
+                                <span class="settings-section-hint">Naming, layout and file handling</span>
                             </div>
-                            <div class="settings-section-body collapsed" data-stg="library">
+<div class="settings-section-body collapsed stg-media-card" data-stg="library">
+<div class="stg-media-switcher" role="tablist" aria-label="Organization media type"><button type="button" id="organization-music-tab" role="tab" aria-selected="true" aria-controls="organization-music-panel" tabindex="0" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Music</button><button type="button" id="organization-video-tab" role="tab" aria-selected="false" aria-controls="organization-video-panel" tabindex="-1" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Video</button></div>
+<div id="organization-music-panel" role="tabpanel" aria-labelledby="organization-music-tab" class="stg-media-panel" tabindex="0">
+<div class="stg-media-context"><strong>Music organization</strong><span class="stg-media-summary" data-stg-summary="library-music-org" data-stg-fallback="File naming templates &amp; reorganize">File naming templates &amp; reorganize</span></div>
+
 <div class="settings-group" data-stg="library">
                                 <h3>File Organization</h3>
 
@@ -5752,44 +5786,11 @@
                                     no needless renames. Turn off to match the metadata source exactly.
                                 </div>
                             </div>
-                            </div>
                             
-<div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
-                                <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Video Folders</h3>
-                                <span class="settings-section-hint" data-stg-summary="library-video-folders" data-stg-fallback="Movies, TV &amp; YouTube libraries">Movies, TV &amp; YouTube libraries</span>
-                            </div>
-                            <div class="settings-section-body collapsed" data-stg="library">
-<div class="settings-group" data-stg="library">
-                                
-                                <div class="setting-help-text">
-                                    One shared download folder (where slskd / torrent drop files), then a separate library folder per type — finished files are sorted to the right one automatically. SEPARATE from your Music paths.
-                                </div>
-                                <div class="form-group">
-                                    <label>Download Folder (Input — shared with Music):</label>
-                                    <input type="text" id="video-download-path" placeholder="./downloads">
-                                    <div class="setting-help-text">Where downloads land — point this at the same folder as your slskd / torrent client. This is the SAME folder as the Music side; changing it here changes it there too.</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>🎬 Movies Library:</label>
-                                    <input type="text" id="video-movies-path" placeholder="/media/movies">
-                                </div>
-                                <div class="form-group">
-                                    <label>📺 TV Shows Library:</label>
-                                    <input type="text" id="video-tv-path" placeholder="/media/tv">
-                                </div>
-                                <div class="form-group">
-                                    <label>▶️ YouTube Library:</label>
-                                    <input type="text" id="video-youtube-path" placeholder="/media/youtube">
-                                </div>
-                            </div>
-                            </div>
-<div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
-                                <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Video Organization</h3>
-                                <span class="settings-section-hint">Path templates, post-processing &amp; recycle</span>
-                            </div>
-                            <div class="settings-section-body collapsed" data-stg="library">
+</div>
+<div id="organization-video-panel" role="tabpanel" aria-labelledby="organization-video-tab" class="stg-media-panel" hidden tabindex="0">
+<div class="stg-media-context"><strong>Video organization</strong><span class="stg-media-summary">Path templates, post-processing &amp; recycle</span></div>
+
 <div class="settings-group" data-stg="library">
                                 
 
@@ -5933,7 +5934,12 @@
                                     <small class="settings-hint">Restores the Radarr/Sonarr standard layout.</small>
                                 </div>
                             </div>
-                            </div>
+
+</div>
+</div>
+
+
+
                             <div class="stg-cardgroup" data-stg="library">
                                 <span class="stg-cardgroup-label">Processing</span>
                                 <span class="stg-cardgroup-sub">What happens to a file after it arrives</span>

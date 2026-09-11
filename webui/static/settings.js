@@ -1028,6 +1028,29 @@ document.addEventListener('click', (e) => {
     });
 });
 
+// Media tabs keep both panels mounted, preserving unsaved values and listeners.
+function switchLibraryMediaTab(tab) {
+    const card = tab.closest('.stg-media-card');
+    if (!card) return;
+    card.querySelectorAll('[role="tab"]').forEach(button => {
+        const selected = button === tab;
+        button.setAttribute('aria-selected', String(selected));
+        button.tabIndex = selected ? 0 : -1;
+        const panel = document.getElementById(button.getAttribute('aria-controls'));
+        if (panel) panel.hidden = !selected;
+    });
+}
+function handleLibraryMediaTabKey(event) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = Array.from(event.currentTarget.closest('[role="tablist"]').querySelectorAll('[role="tab"]'));
+    const current = tabs.indexOf(event.currentTarget);
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+        : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    event.preventDefault();
+    switchLibraryMediaTab(tabs[index]);
+    tabs[index].focus();
+}
+
 // Settings redesign — tab switching + service accordions
 function switchSettingsTab(tab) {
     // Update tab bar
