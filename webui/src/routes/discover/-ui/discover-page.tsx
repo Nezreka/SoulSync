@@ -1462,6 +1462,10 @@ export function DiscoverPage() {
               'cache-genre-explorer',
               'lastfm-radio',
               'listenbrainz',
+              // the page renders sections through these ZONE lists, not from
+              // DISCOVER_LAYOUT - registering a section in the layout alone
+              // gets it an order and a policy but never puts it on screen.
+              'deezer-editorial',
               'build-a-playlist',
             ])}
           </DiscoveryZone>
