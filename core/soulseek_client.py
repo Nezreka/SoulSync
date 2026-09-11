@@ -1,5 +1,6 @@
 import requests
 import asyncio
+import threading
 import aiohttp
 import os
 from typing import List, Optional, Dict, Any
@@ -2447,3 +2448,36 @@ class SoulseekClient(DownloadSourcePlugin):
     def __del__(self):
         # No persistent session to clean up
         pass
+_SHARED_LOCK = threading.Lock()
+_SHARED_CACHE: Dict[str, Any] = {"key": None, "client": None}
+
+
+def get_shared_soulseek_client():
+    """One client per slskd configuration, shared by every caller.
+
+    Constructing one is not free: it logs at INFO and mkdirs the download path.
+    Callers on a timer - the audiobook download monitor ticks every few seconds
+    and touches several helpers per pass - turned that into a wall of identical
+    "configured with slskd at ..." lines in app.log and a filesystem hit for
+    each one.
+
+    Keyed on the url and api key rather than cached outright, so saving new
+    slskd settings takes effect without a restart. The cache lives here rather
+    than in a caller because the cost it avoids is this module's.
+    """
+    try:
+        cfg = config_manager.get("soulseek", {}) or {}
+        key = f"{cfg.get('slskd_url', '')}::{cfg.get('api_key', '')}"
+    except Exception:                                       # noqa: BLE001
+        key = "::"
+
+    with _SHARED_LOCK:
+        cached = _SHARED_CACHE["client"]
+        if cached is not None and _SHARED_CACHE["key"] == key:
+            return cached
+        client = SoulseekClient()
+        _SHARED_CACHE["key"] = key
+        _SHARED_CACHE["client"] = client
+        return client
+
+

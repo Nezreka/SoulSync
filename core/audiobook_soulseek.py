@@ -70,6 +70,18 @@ def is_enabled() -> bool:
         return False
 
 
+def _shared_client():
+    """The process-wide Soulseek client.
+
+    Deliberately NOT cached here, and deliberately reading no config here: the
+    audiobook side must never consult music's soulseek settings to decide
+    anything (tests/test_audiobooks_isolation.py holds that line). The cache and
+    the config read both live in core/soulseek_client.py, which owns them.
+    """
+    from core.soulseek_client import get_shared_soulseek_client
+    return get_shared_soulseek_client()
+
+
 def is_available() -> bool:
     """Whether Soulseek can actually answer: wanted by the chain AND configured.
 
@@ -80,8 +92,7 @@ def is_available() -> bool:
     if not is_enabled():
         return False
     try:
-        from core.soulseek_client import SoulseekClient
-        return bool(str(getattr(SoulseekClient(), "base_url", "") or ""))
+        return bool(str(getattr(_shared_client(), "base_url", "") or ""))
     except Exception as exc:                                # noqa: BLE001
         logger.debug("Could not check whether slskd is configured: %s", exc)
         return False
@@ -212,8 +223,7 @@ def search(
 
     if client is None:
         try:
-            from core.soulseek_client import SoulseekClient
-            client = SoulseekClient()
+            client = _shared_client()
         except Exception as exc:                            # noqa: BLE001
             logger.warning("Could not build a Soulseek client: %s", exc)
             return []
@@ -269,8 +279,7 @@ def grab(release: Any, save_path: Optional[str] = None, client: Any = None) -> D
 
     if client is None:
         try:
-            from core.soulseek_client import SoulseekClient
-            client = SoulseekClient()
+            client = _shared_client()
         except Exception as exc:                            # noqa: BLE001
             return {"ok": False, "error": f"Soulseek is not reachable: {exc}",
                     "refs": [], "username": username}
@@ -342,8 +351,7 @@ def landing_path(folder: str, client: Any = None) -> str:
         return ""
     try:
         if client is None:
-            from core.soulseek_client import SoulseekClient
-            client = SoulseekClient()
+            client = _shared_client()
         root = str(getattr(client, "download_path", "") or "")
     except Exception as exc:                                # noqa: BLE001
         logger.debug("Could not read the Soulseek download path: %s", exc)
@@ -432,8 +440,7 @@ def status_for(client_id: Any, client: Any = None) -> Optional[Dict[str, Any]]:
 
     if client is None:
         try:
-            from core.soulseek_client import SoulseekClient
-            client = SoulseekClient()
+            client = _shared_client()
         except Exception as exc:                            # noqa: BLE001
             logger.debug("Could not build a Soulseek client to poll: %s", exc)
             return None
@@ -461,8 +468,7 @@ def cancel(client_id: Any, client: Any = None) -> bool:
 
     if client is None:
         try:
-            from core.soulseek_client import SoulseekClient
-            client = SoulseekClient()
+            client = _shared_client()
         except Exception as exc:                            # noqa: BLE001
             logger.debug("Could not build a Soulseek client to cancel: %s", exc)
             return False
