@@ -47,6 +47,7 @@ afterEach(() => {
   delete window.SoulSyncWebShellBridge;
   delete window._labelDetailReturnTo;
   delete window.SoulSyncWebRouter;
+  delete (window as { navigateToPage?: unknown }).navigateToPage;
   vi.unstubAllGlobals();
 });
 
@@ -191,10 +192,11 @@ describe('LabelDetailPage', () => {
     window._labelDetailReturnTo = 'watchlist';
     stubCatalog({ total: 0, releases: [] });
 
-    // The shell installs SoulSyncWebRouter at app start; under the test router
+    // navigateToPage, not the SoulSyncWebRouter bridge: the bridge moves the
+    // url and leaves the sidebar on the page you came FROM. Under the test
     // it is absent, so the page's optional call would silently no-op.
     const navigateToPage = vi.fn();
-    window.SoulSyncWebRouter = { navigateToPage } as unknown as Window['SoulSyncWebRouter'];
+    window.navigateToPage = navigateToPage;
 
     renderLabel();
     await screen.findByText('Record Label');
@@ -205,10 +207,11 @@ describe('LabelDetailPage', () => {
   it('falls back to search when nothing recorded an origin', async () => {
     stubCatalog({ total: 0, releases: [] });
 
-    // The shell installs SoulSyncWebRouter at app start; under the test router
+    // navigateToPage, not the SoulSyncWebRouter bridge: the bridge moves the
+    // url and leaves the sidebar on the page you came FROM. Under the test
     // it is absent, so the page's optional call would silently no-op.
     const navigateToPage = vi.fn();
-    window.SoulSyncWebRouter = { navigateToPage } as unknown as Window['SoulSyncWebRouter'];
+    window.navigateToPage = navigateToPage;
 
     renderLabel();
     await screen.findByText('Record Label');

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ShellPageId } from '@/platform/shell/route-manifest';
 
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -123,7 +122,9 @@ export function LabelDetailPage({ labelId, labelName }: { labelId: string; label
             // history.back() is unreliable through the SPA router, which is why
             // navigateToLabelDetail records where you came from.
             const returnTo = window._labelDetailReturnTo || 'search';
-            void window.SoulSyncWebRouter?.navigateToPage(returnTo as ShellPageId);
+            // the sidebar-aware entry; the raw bridge would leave the sidebar
+            // marking Label Detail after going back
+            void window.navigateToPage?.(returnTo);
           }}
         >
           ← Back

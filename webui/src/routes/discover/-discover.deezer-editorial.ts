@@ -169,7 +169,12 @@ export async function openDeezerPlaylistInSync(
 
   // only navigate once it is actually there, so the tab is never opened onto a
   // playlist that failed to arrive
-  window.SoulSyncWebRouter?.navigateToPage('sync');
+  // navigateToPage, NOT the SoulSyncWebRouter bridge: the bridge moves the
+  // url and leaves the sidebar marking the page you came from, so the user
+  // lands on Sync with Discover still highlighted. globals.d.ts says so above
+  // the declaration; I used the bridge anyway by copying a call site that has
+  // the same bug.
+  void window.navigateToPage?.('sync');
   window.setTimeout(() => {
     document.querySelector<HTMLElement>('.sync-tab-button[data-tab="mirrored"]')?.click();
   }, 200);

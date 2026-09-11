@@ -67,7 +67,7 @@ describe('fetchDeezerEditorialGenres', () => {
 describe('openDeezerPlaylistInSync', () => {
   afterEach(() => {
     document.body.innerHTML = '';
-    delete (window as { SoulSyncWebRouter?: unknown }).SoulSyncWebRouter;
+    delete (window as { navigateToPage?: unknown }).navigateToPage;
   });
 
   const TRACKS = [{ id: 't1', name: 'A Song', artists: ['An Artist'], duration_ms: 1000 }];
@@ -95,7 +95,7 @@ describe('openDeezerPlaylistInSync', () => {
     const clicked = vi.fn();
     document.querySelector('.sync-tab-button')!.addEventListener('click', clicked);
     const navigate = vi.fn();
-    window.SoulSyncWebRouter = { navigateToPage: navigate } as never;
+    window.navigateToPage = navigate;
 
     const posted = stubLoad({
       id: '123', name: 'Rock Essentials', owner: 'Rod', image_url: 'https://cdn/x.jpg',
@@ -112,7 +112,7 @@ describe('openDeezerPlaylistInSync', () => {
 
   it('does not navigate when the playlist could not be loaded', async () => {
     const navigate = vi.fn();
-    window.SoulSyncWebRouter = { navigateToPage: navigate } as never;
+    window.navigateToPage = navigate;
     server.use(
       http.get('/api/deezer/playlist/:id', () =>
         HttpResponse.json({ error: 'Invalid Deezer playlist ID' }, { status: 400 }),
@@ -125,7 +125,7 @@ describe('openDeezerPlaylistInSync', () => {
 
   it('refuses an empty playlist rather than mirroring nothing', async () => {
     const navigate = vi.fn();
-    window.SoulSyncWebRouter = { navigateToPage: navigate } as never;
+    window.navigateToPage = navigate;
     stubLoad({ id: '123', name: 'Empty', tracks: [] });
 
     await expect(openDeezerPlaylistInSync(PLAYLIST)).resolves.toBe('That playlist came back empty');
@@ -134,7 +134,7 @@ describe('openDeezerPlaylistInSync', () => {
 
   it('reports a refused mirror instead of pretending it worked', async () => {
     const navigate = vi.fn();
-    window.SoulSyncWebRouter = { navigateToPage: navigate } as never;
+    window.navigateToPage = navigate;
     stubLoad({ id: '1', name: 'X', tracks: TRACKS }, { success: false, error: 'nope' });
 
     await expect(openDeezerPlaylistInSync(PLAYLIST)).resolves.toBe('nope');
@@ -149,13 +149,13 @@ describe('openDeezerPlaylistInSync', () => {
 
 describe('progress while a playlist loads', () => {
   afterEach(() => {
-    delete (window as { SoulSyncWebRouter?: unknown }).SoulSyncWebRouter;
+    delete (window as { navigateToPage?: unknown }).navigateToPage;
   });
 
   it('reports the track count as the job reports it', async () => {
     // the whole complaint: the card said "Adding to Sync" for ~2 minutes with
     // no idea what was happening or how long was left
-    window.SoulSyncWebRouter = { navigateToPage: vi.fn() } as never;
+    window.navigateToPage = vi.fn();
     let polls = 0;
     server.use(
       http.get('/api/deezer/playlist/:id', () =>
@@ -188,7 +188,7 @@ describe('progress while a playlist loads', () => {
   });
 
   it('opens with the count it already knows, before the first poll', async () => {
-    window.SoulSyncWebRouter = { navigateToPage: vi.fn() } as never;
+    window.navigateToPage = vi.fn();
     server.use(
       http.get('/api/deezer/playlist/:id', () => HttpResponse.error()),
     );
