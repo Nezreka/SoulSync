@@ -423,6 +423,7 @@ def aggregate(statuses: Sequence[Any], expected: int = 0) -> Dict[str, Any]:
         "state": state,
         "progress": round(min(progress, 100.0), 2),
         "transferred": transferred,
+        "speed": sum(max(0, float(getattr(s, "speed", 0) or 0)) for s in statuses if _state_of(s) not in ("done", "failed")),
         "size": total_size,
         "finished": finished,
         "failed": failed,

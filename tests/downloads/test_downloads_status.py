@@ -971,3 +971,21 @@ def test_manual_pick_rejected_fails_immediately_without_grace():
     out = st.build_batch_status_data('b1', batch, live, deps)
     assert out['tasks'][0]['status'] == 'failed'  # immediate, no 60s wait
     assert download_tasks['t1']['status'] == 'failed'
+
+
+def test_external_audiobook_progress_survives_music_timeout_and_serializes():
+    import time
+    from core.audiobook_download_state import register_download, update_progress, BATCH_ID
+    register_download('book', 'Rhythm of War', protocol='soulseek')
+    download_tasks['book']['status_change_time'] = time.time() - 3600
+    update_progress('book', percent=37.5, bytes_done=375000, bytes_total=1000000, speed=25000)
+    deps, submitted = _build_deps()
+    result = st.build_batch_status_data(BATCH_ID, download_batches[BATCH_ID], {}, deps)
+    assert result['tasks'][0]['progress'] == 37.5
+    assert result['tasks'][0]['status'] == 'downloading'
+    assert download_tasks['book']['error_message'] is None
+    assert submitted == []
+    unified = st.build_unified_downloads_response(20, deps)
+    row = next(item for item in unified['downloads'] if item['task_id'] == 'book')
+    assert row['progress'] == 37.5
+    assert row['status'] == 'downloading'

@@ -352,7 +352,7 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
 
             # If task has been running too long, check if file completed
             _dl_timeout = deps.config_manager.get('soulseek.download_timeout', 600) or 600
-            if task_age > _dl_timeout and task['status'] in ['downloading', 'queued', 'searching']:
+            if not batch.get("managed_externally") and task_age > _dl_timeout and task['status'] in ['downloading', 'queued', 'searching']:
                 stuck_state = task['status']
                 task_filename = task.get('filename') or (task.get('track_info') or {}).get('filename')
 
@@ -387,7 +387,7 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                 'track_index': task['track_index'],
                 'status': task['status'],
                 'track_info': task['track_info'],
-                'progress': 0,
+                'progress': task.get('progress', 0),
                 # V2 SYSTEM: Add persistent state information
                 'cancel_requested': task.get('cancel_requested', False),
                 'cancel_timestamp': task.get('cancel_timestamp'),
@@ -411,6 +411,12 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                 'retry_info': task.get('retry_info'),
                 'retry_trigger': task.get('retry_trigger'),
             }
+            # A book/release is monitored as a multi-file job by its own client
+            # monitor. Music's single-file timeout/recovery must not mutate it.
+            if batch.get('managed_externally'):
+                _attach_live_detail(task_status, task, None)
+                batch_tasks.append(task_status)
+                continue
             _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
             task_filename = task.get('filename') or _ti.get('filename')
             task_username = task.get('username') or _ti.get('username')

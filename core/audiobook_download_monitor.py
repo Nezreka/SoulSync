@@ -96,6 +96,10 @@ def process_download(
         except (TypeError, ValueError):
             pass
 
+    speed = getattr(status, "download_speed", None)
+    if speed is not None:
+        patch["speed"] = max(0, float(speed or 0))
+
     state = normalize_state(status)
     if state == "failed":
         patch["status"] = "failed"
@@ -179,11 +183,11 @@ class _SoulseekStatus:
     """
 
     def __init__(self, rolled: Dict[str, Any]) -> None:
-        self.state = rolled["state"]
-        self.progress = rolled["progress"]
+        self.state = "completed" if rolled["state"] == "done" else rolled["state"]
+        self.progress = rolled["progress"] / 100.0
         self.size = rolled["size"]
-        self.transferred = rolled["transferred"]
-        self.speed = 0
+        self.downloaded = rolled["transferred"]
+        self.download_speed = rolled.get("speed", 0)
         self.save_path = rolled.get("save_path", "")
         self.files = rolled["total"]
         self.files_done = rolled["finished"]
@@ -351,6 +355,7 @@ def tick(db: Any = None) -> Dict[str, int]:
 
     from core.audiobook_download_state import (
         forget,
+        register_download,
         is_cancelled,
         mark_status,
         update_progress,
@@ -358,6 +363,11 @@ def tick(db: Any = None) -> Dict[str, int]:
 
     for row in active:
         summary["checked"] += 1
+        # Runtime cards disappear on restart; the durable job and client refs
+        # remain. Reattach without replacing existing progress/cancellation.
+        register_download(row["download_id"], row.get("title") or "Audiobook",
+                          author=row.get("author") or "", protocol=row.get("source") or "",
+                          size_bytes=row.get("bytes_total") or 0, only_if_missing=True)
 
         # Cancelling a card used to remove it from the page while the torrent
         # carried on downloading. The client is told, then the row is closed.
@@ -376,6 +386,7 @@ def tick(db: Any = None) -> Dict[str, int]:
             continue
 
         imported_path = patch.pop("imported_path", "")
+        speed = patch.pop("speed", None)
         database.update_download(row["download_id"], imported_path=imported_path or None, **patch)
 
         # Same numbers onto the Downloads page card.
@@ -384,7 +395,11 @@ def tick(db: Any = None) -> Dict[str, int]:
             percent=patch.get("progress"),
             bytes_done=patch.get("bytes_done"),
             bytes_total=patch.get("bytes_total"),
+            speed=speed,
         )
+
+        if patch.get("status") == "downloading":
+            mark_status(row["download_id"], "downloading")
 
         asin = str(row.get("asin") or "")
         if patch.get("status") == "completed":

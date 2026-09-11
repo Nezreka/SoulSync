@@ -323,7 +323,7 @@ def test_the_monitor_reuses_the_music_path_resolver():
 # is_music_batch() already honours. No music file changes for this to work.
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def clean_runtime_state():
     from core.runtime_state import download_batches, download_tasks
 
@@ -763,7 +763,7 @@ def test_a_soulseek_row_is_polled_through_the_peer_client():
         status = _get_status("soulseek", "{}")
 
     assert status.state == "downloading"
-    assert status.progress == 42.0
+    assert status.progress == 0.42
     assert status.save_path == "/downloads/Book"
 
 
@@ -856,3 +856,46 @@ def test_a_single_file_torrent_points_at_the_file_not_the_root():
         check_complete=_capture_path(seen),
     )
     assert seen["path"] == "/downloads/Kings.m4b"
+
+@pytest.mark.parametrize('percent', [0.5, 1.0, 42.0, 100.0])
+def test_soulseek_progress_units_and_bytes_reach_monitor(percent):
+    from core.audiobook_download_monitor import _SoulseekStatus
+    status = _SoulseekStatus({'state':'downloading','progress':percent,'size':10000,
+        'transferred':int(percent*100),'speed':300,'total':20,'finished':3})
+    result = process_download(_row(source='soulseek'), get_status=lambda *_:status,
+        resolve_path=_identity_path, organize=_ok_organize())
+    assert result['progress'] == percent
+    assert result['bytes_done'] == int(percent*100)
+    assert result['speed'] == 300
+
+
+def test_soulseek_finished_files_enter_import_instead_of_downloading_forever():
+    from core.audiobook_download_monitor import _SoulseekStatus
+    status = _SoulseekStatus({'state':'done','progress':100,'size':1000,
+        'transferred':1000,'total':20,'finished':20,'save_path':'/downloads/Book'})
+    organize = MagicMock(return_value={'ok':True,'path':'/library/Book','files':[]})
+    result = process_download(_row(source='soulseek'), get_status=lambda *_:status,
+        resolve_path=_identity_path, organize=organize, check_complete=_whole_book)
+    assert result['status'] == 'completed'
+    organize.assert_called_once()
+
+
+def test_monitor_reattaches_after_restart_and_recovers_old_watchdog_failure(db, clean_runtime_state):
+    from core.audiobook_download_monitor import _SoulseekStatus
+    tasks, _ = clean_runtime_state
+    db.record_download('book-live', 'B1', 'Rhythm of War', 'soulseek', client_id='refs')
+    live = _SoulseekStatus({'state':'downloading','progress':25,'size':1000,
+        'transferred':250,'speed':75,'total':12,'finished':3})
+    with patch('core.audiobook_download_monitor._get_status', return_value=live):
+        tick(db=db)
+        assert tasks['book-live']['progress'] == 25
+        assert tasks['book-live']['bytes_transferred'] == 250
+        assert tasks['book-live']['speed'] == 75
+        tasks['book-live']['status'] = 'failed'
+        tasks['book-live']['error_message'] = 'Task stuck in downloading state for 10 minutes'
+        live.progress = .5
+        live.downloaded = 500
+        tick(db=db)
+    assert tasks['book-live']['status'] == 'downloading'
+    assert tasks['book-live']['progress'] == 50
+    assert tasks['book-live']['error_message'] is None
