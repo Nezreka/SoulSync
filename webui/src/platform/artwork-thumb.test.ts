@@ -59,9 +59,11 @@ describe('thumb', () => {
 });
 
 it('bounds dashboard artwork from cache, proxy, and remote sources', () => {
-  expect(thumb('/api/image-cache/abc?v=hero', 'rail')).toBe('/api/image-cache/abc?v=rail');
+  expect(thumb('/api/image-cache/abc?v=hero', 'rail')).toBe(
+    '/api/image-cache/abc?v=rail&thumb_rev=2',
+  );
   const remote = 'https://cdn.example.test/large.jpg';
-  expect(thumb(remote, 'rail')).toBe(`${imageProxyUrl(remote)}&v=rail`);
-  expect(thumb(imageProxyUrl(remote), 'rail')).toBe(`${imageProxyUrl(remote)}&v=rail`);
+  expect(thumb(remote, 'rail')).toBe(`${imageProxyUrl(remote)}&v=rail&thumb_rev=2`);
+  expect(thumb(imageProxyUrl(remote), 'rail')).toBe(`${imageProxyUrl(remote)}&v=rail&thumb_rev=2`);
   expect(thumb('/static/placeholder.png', 'rail')).toBe('/static/placeholder.png');
 });

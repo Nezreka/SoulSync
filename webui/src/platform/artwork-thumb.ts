@@ -60,6 +60,9 @@ export function thumb<T extends string | null | undefined>(
     if (path.startsWith(CACHE_PREFIX) || path === IMAGE_PROXY_PREFIX) {
       const parsed = new URL(target, 'http://localhost');
       parsed.searchParams.set('v', 'rail');
+      // Older servers cached originals under ?v=rail for 30 days. A new URL
+      // prevents those browser responses from surviving the resize rollout.
+      parsed.searchParams.set('thumb_rev', '2');
       return `${parsed.pathname}${parsed.search}${parsed.hash}`;
     }
     return target;
