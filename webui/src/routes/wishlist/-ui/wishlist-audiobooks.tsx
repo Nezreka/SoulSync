@@ -22,15 +22,17 @@ import styles from './wishlist-audiobooks.module.css';
 const FILTERS: { key: AudiobookWishlistStatus | 'all'; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'wanted', label: 'Looking' },
-  { key: 'grabbed', label: 'Downloading' },
+  { key: 'grabbed', label: 'In progress' },
   { key: 'done', label: 'Got it' },
+  { key: 'cancelled', label: 'Cancelled' },
   { key: 'failed', label: 'Not found yet' },
 ];
 
 const STATUS_LABELS: Record<AudiobookWishlistStatus, string> = {
   wanted: 'Looking',
   searching: 'Searching now',
-  grabbed: 'Sent to downloads',
+  grabbed: 'Queued',
+  cancelled: 'Cancelled',
   done: 'In your library',
   failed: 'Not found yet',
 };
@@ -78,6 +80,8 @@ export function WishlistAudiobooks() {
 
   useEffect(() => {
     void load();
+    const timer = window.setInterval(() => void load(), 20000);
+    return () => window.clearInterval(timer);
   }, [load]);
 
   const shown = useMemo(
@@ -224,7 +228,17 @@ export function WishlistAudiobooks() {
                             : ''
                     }`}
                   >
-                    {STATUS_LABELS[item.status] ?? item.status}
+                    {item.status === 'grabbed'
+                      ? {
+                          downloading: 'Downloading',
+                          queued: 'Queued',
+                          paused: 'Paused',
+                          unavailable: 'Waiting for client',
+                          staged: 'Checking files',
+                          importing: 'Importing',
+                          cancelled: 'Cancelled',
+                        }[item.download_status || ''] || 'Waiting for client'
+                      : (STATUS_LABELS[item.status] ?? item.status)}
                   </span>
                 </div>
               </Link>

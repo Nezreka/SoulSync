@@ -412,8 +412,13 @@ def aggregate(statuses: Sequence[Any], expected: int = 0) -> Dict[str, Any]:
         state = "failed"
     elif settled >= expected:
         state = "done"
-    else:
+    elif any(_state_of(s) == "running" and any(
+        token in str(getattr(s, "state", "")).lower()
+        for token in ("inprogress", "downloading", "transferring")
+    ) for s in statuses):
         state = "downloading"
+    else:
+        state = "queued"
 
     progress = (transferred / total_size * 100.0) if total_size else (
         finished / expected * 100.0 if expected else 0.0
@@ -457,6 +462,8 @@ def status_for(client_id: Any, client: Any = None) -> Optional[Dict[str, Any]]:
     mine = [status for status in (everything or [])
             if str(getattr(status, "id", "")) in wanted]
     rolled = aggregate(mine, expected=len(wanted))
+    if not mine:
+        rolled["state"] = "unavailable"
     rolled["save_path"] = landing_path(unpacked["folder"], client)
     return rolled
 

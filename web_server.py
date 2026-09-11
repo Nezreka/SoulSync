@@ -15770,6 +15770,18 @@ def cancel_task_v2():
             "error": "Missing playlist_id or track_index"
         }), 400
 
+    if playlist_id == 'audiobooks':
+        from core.audiobook_download_monitor import cancel_downloads as cancel_audiobooks
+        with tasks_lock:
+            task_id, _ = _find_task_by_playlist_track(playlist_id, track_index)
+        if not task_id:
+            return jsonify({"success": False, "error": "Audiobook task not found"}), 404
+        try:
+            cancel_audiobooks([task_id])
+            return jsonify({"success": True, "message": "Audiobook cancelled"})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
     try:
         # Everything in one atomic operation within the lock
         with tasks_lock:
@@ -15916,6 +15928,14 @@ def cancel_batch(batch_id):
     Cancels an entire batch - useful for cancelling during analysis phase
     or cancelling all downloads at once.
     """
+    if batch_id == 'audiobooks':
+        from core.audiobook_download_monitor import cancel_downloads as cancel_audiobooks
+        try:
+            count = cancel_audiobooks()
+            return jsonify({"success": True, "cancelled_tasks": count})
+        except Exception as exc:
+            return jsonify({"success": False, "error": str(exc)}), 500
+
     try:
         with tasks_lock:
             if batch_id not in download_batches:

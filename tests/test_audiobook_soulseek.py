@@ -336,7 +336,7 @@ def test_a_folder_nothing_is_known_about_yet_is_queued():
 def test_files_slskd_has_forgotten_still_count_against_the_total():
     # Otherwise two finished files out of thirty would report the book done.
     rolled = aggregate([_status("a", "Completed, Succeeded")], expected=30)
-    assert rolled["state"] == "downloading"
+    assert rolled["state"] == "queued"
 
 
 def test_a_status_poll_only_counts_this_books_transfers():
@@ -392,3 +392,8 @@ def test_a_cancel_that_stops_nothing_reports_false():
 
 def test_cancelling_a_row_with_no_refs_is_not_an_error():
     assert cancel("", client=MagicMock()) is False
+
+
+@pytest.mark.parametrize("state", ["Queued, Remotely", "Requested", "Initializing"])
+def test_non_transferring_files_do_not_claim_to_download(state):
+    assert aggregate([_status("a", state)])["state"] == "queued"

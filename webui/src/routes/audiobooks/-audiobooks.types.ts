@@ -151,7 +151,13 @@ export interface AudiobookPersonProfile {
 export type AudiobookNarratorMode = 'exact' | 'any';
 
 /** Where a wishlisted book has got to. */
-export type AudiobookWishlistStatus = 'wanted' | 'searching' | 'grabbed' | 'done' | 'failed';
+export type AudiobookWishlistStatus =
+  | 'wanted'
+  | 'searching'
+  | 'grabbed'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
 
 export interface AudiobookWishlistEntry {
   id: number;
@@ -167,6 +173,7 @@ export interface AudiobookWishlistEntry {
   release_date: string;
   language: string;
   status: AudiobookWishlistStatus;
+  download_status?: string;
   narrator_mode: AudiobookNarratorMode;
   /** Drives the retry backoff, so it doubles as "how hard have we looked". */
   attempt_count: number;
@@ -176,6 +183,7 @@ export interface AudiobookWishlistEntry {
 }
 
 export interface AudiobookWishlistCounts {
+  cancelled?: number;
   wanted: number;
   searching: number;
   grabbed: number;

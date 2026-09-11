@@ -140,13 +140,13 @@ def test_a_failed_organize_fails_the_download():
     assert "No audio files" in patch_out["error"]
 
 
-def test_a_poll_that_returns_nothing_changes_nothing():
+def test_a_missing_client_job_waits_without_claiming_to_download():
     # A client restarting or a momentary timeout must not mark a perfectly
     # healthy download as broken.
     assert process_download(
         _row(), get_status=lambda s, r: None,
         resolve_path=_identity_path, organize=_ok_organize(),
-    ) == {}
+    ) == {"status": "unavailable", "error": "Waiting for the download client to report this job"}
 
 
 def test_a_complete_download_with_no_visible_path_waits():
@@ -899,3 +899,71 @@ def test_monitor_reattaches_after_restart_and_recovers_old_watchdog_failure(db, 
     assert tasks['book-live']['status'] == 'downloading'
     assert tasks['book-live']['progress'] == 50
     assert tasks['book-live']['error_message'] is None
+
+
+@pytest.mark.parametrize("client_state", ["queued", "paused", "downloading", "unavailable"])
+def test_client_state_is_preserved(client_state):
+    result = process_download(_row(), get_status=lambda s, r: _status(client_state),
+                              resolve_path=_identity_path, organize=_ok_organize())
+    assert result["status"] == client_state
+
+
+def test_cancel_survives_cleanup_restart_and_late_poll(db, clean_runtime_state):
+    from core.audiobook_download_monitor import cancel_downloads
+    from core.audiobook_download_state import register_download
+    tasks, batches = clean_runtime_state
+    db.add_to_wishlist({"asin": "B1", "title": "Book"})
+    db.mark_wishlist_status("B1", "grabbed")
+    db.record_download("d1", "B1", "Book", "torrent", client_id="h1")
+    register_download("d1", "Book")
+    with patch("core.audiobook_download_monitor._cancel_at_client") as cancel:
+        assert cancel_downloads(db=db) == 1
+        cancel.assert_called_once()
+    tasks.clear()
+    batches.clear()
+    assert not db.update_download("d1", status="downloading", progress=50)
+    assert not db.update_download("d1", status="completed")
+    with patch("core.audiobook_download_monitor._get_status") as poll:
+        tick(db=db)
+        poll.assert_not_called()
+    assert not tasks and not batches
+    assert db.get_downloads(active_only=True) == []
+    assert db.get_wishlist()[0]["status"] == "cancelled"
+    assert db.get_wishlist()[0]["download_status"] == "cancelled"
+    assert db.get_wishlist_due() == []
+
+
+def test_cancel_one_book_preserves_other_jobs(db, clean_runtime_state):
+    from core.audiobook_download_monitor import cancel_downloads
+    for i in (1, 2):
+        db.record_download(f"d{i}", f"B{i}", f"Book {i}", "torrent", client_id=f"h{i}")
+    with patch("core.audiobook_download_monitor._cancel_at_client"):
+        assert cancel_downloads(["d1"], db=db) == 1
+    assert [r["download_id"] for r in db.get_downloads(active_only=True)] == ["d2"]
+
+
+@pytest.mark.parametrize("single", [False, True])
+def test_download_page_cancel_routes_persist_before_runtime_cleanup(db, clean_runtime_state, single):
+    # Execute the actual route body without starting web_server's background services.
+    import ast
+    import threading
+    from pathlib import Path
+    from flask import Flask, request, jsonify
+    from core.audiobook_download_state import register_download
+    tasks, _ = clean_runtime_state
+    db.record_download("d1", "B1", "Book", "torrent", client_id="h1")
+    register_download("d1", "Book")
+    name = "cancel_task_v2" if single else "cancel_batch"
+    tree = ast.parse((Path(__file__).parents[1] / "web_server.py").read_text(encoding="utf-8"))
+    node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
+    node.decorator_list = []
+    scope = {"request": request, "jsonify": jsonify, "tasks_lock": threading.Lock(),
+             "_find_task_by_playlist_track": lambda *args: ("d1", tasks["d1"])}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), "web_server.py", "exec"), scope)
+    with Flask(__name__).test_request_context(json={"playlist_id": "audiobooks", "track_index": 0}), \
+         patch("core.audiobook_database.get_audiobook_db", return_value=db), \
+         patch("core.audiobook_download_monitor._cancel_at_client"):
+        result = scope[name]() if single else scope[name]("audiobooks")
+    assert result.get_json()["success"] is True
+    assert db.get_downloads()[0]["status"] == "cancelled"
+    assert "d1" not in tasks

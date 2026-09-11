@@ -97,7 +97,7 @@ def register_download(
         batch["phase"] = "downloading"
 
         download_tasks[task_id] = {
-            "status": "downloading",
+            "status": "queued",
             "track_info": {
                 "title": title,
                 "name": title,
@@ -173,7 +173,7 @@ def mark_status(
         if task["status"] != status:
             task["status_change_time"] = time.time()
         task["status"] = status
-        if status == "downloading":
+        if status in ("downloading", "queued"):
             task["error_message"] = None
         if status == "completed":
             task["progress"] = 100.0

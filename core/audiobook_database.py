@@ -40,7 +40,9 @@ STATUS_GRABBED = "grabbed"      # handed to a download client, not yet imported
 STATUS_DONE = "done"            # imported into the library
 STATUS_FAILED = "failed"        # last attempt failed; retried on a later pass
 
-_STATUSES = (STATUS_WANTED, STATUS_SEARCHING, STATUS_GRABBED, STATUS_DONE, STATUS_FAILED)
+STATUS_CANCELLED = "cancelled"  # explicitly stopped; never automatically retried
+
+_STATUSES = (STATUS_WANTED, STATUS_SEARCHING, STATUS_GRABBED, STATUS_DONE, STATUS_FAILED, STATUS_CANCELLED)
 
 # Whether a wishlisted book must be downloaded in the narrator's reading it was
 # wished for. On Audible the narrator is baked into the ASIN, so picking a book
@@ -435,7 +437,9 @@ class AudiobookDatabase:
 
     def get_wishlist(self, profile_id: int = 1, status: Optional[str] = None) -> List[Dict[str, Any]]:
         conn = self._connect()
-        sql = "SELECT * FROM audiobook_wishlist WHERE profile_id = ?"
+        sql = """SELECT *, (SELECT d.status FROM audiobook_downloads d
+                 WHERE d.asin = audiobook_wishlist.asin ORDER BY d.created_at DESC, d.rowid DESC LIMIT 1) AS download_status
+                 FROM audiobook_wishlist WHERE profile_id = ?"""
         params: List[Any] = [int(profile_id)]
         if status:
             sql += " AND status = ?"
@@ -961,9 +965,24 @@ class AudiobookDatabase:
             # 'staged' is active on purpose: a book held back for missing
             # chapters must keep being re-checked, because the usual reason is a
             # torrent that has not finished yet.
-            sql += " WHERE status IN ('queued', 'downloading', 'importing', 'staged')"
+            sql += " WHERE status IN ('queued', 'downloading', 'importing', 'staged', 'paused', 'unavailable')"
         sql += " ORDER BY created_at DESC"
         return [dict(row) for row in conn.execute(sql)]
+
+    def cancel_active_downloads(self, task_ids=None):
+        """Persist cancellation before runtime cleanup can erase its signal."""
+        conn = self._connect()
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = self.get_downloads(active_only=True)
+            if task_ids is not None:
+                rows = [r for r in rows if r['download_id'] in task_ids]
+            for row in rows:
+                conn.execute("UPDATE audiobook_downloads SET status='cancelled', error='Cancelled by you', updated_at=? WHERE download_id=?",
+                             (_now(), row['download_id']))
+                conn.execute("UPDATE audiobook_wishlist SET status='cancelled', last_error='', status_changed_at=? WHERE asin=? AND status='grabbed' AND NOT EXISTS (SELECT 1 FROM audiobook_downloads d WHERE d.asin=audiobook_wishlist.asin AND d.status IN ('queued', 'downloading', 'importing', 'staged', 'paused', 'unavailable'))",
+                             (_now(), row['asin']))
+        return rows
 
     def update_download(
         self,
@@ -1001,7 +1020,7 @@ class AudiobookDatabase:
         conn = self._connect()
         try:
             cursor = conn.execute(
-                f"UPDATE audiobook_downloads SET {', '.join(fields)} WHERE download_id = ?",
+                f"UPDATE audiobook_downloads SET {', '.join(fields)} WHERE download_id = ?" + ("" if status == "cancelled" else " AND status != 'cancelled'"),
                 params,
             )
             conn.commit()
@@ -1197,6 +1216,7 @@ class AudiobookDatabase:
             "release_date": row["release_date"],
             "language": row["language"],
             "status": row["status"],
+            "download_status": (row["download_status"] if "download_status" in row.keys() else None),
             # Older rows predate the column; "exact" is the safe reading of a
             # book wished for before the choice existed.
             "narrator_mode": (
