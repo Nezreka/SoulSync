@@ -672,6 +672,11 @@ declare global {
       pageId: string,
       options?: Record<string, unknown>,
     ) => boolean | Promise<boolean> | void;
+    /** sync-services.js:2719 — reads #deezer-url-input and runs the whole
+     *  Deezer playlist flow: fetch, mirror, render, state. The Discover
+     *  editorial shelf drives this rather than fetching the playlist itself,
+     *  so browsing and pasting a link stay one pipeline. */
+    loadDeezerPlaylist?: () => Promise<void> | void;
     SoulSyncWebRouter?: {
       routeManifest: ShellRouteDefinition[];
       getCurrentPath: () => string;

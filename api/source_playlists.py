@@ -2352,6 +2352,70 @@ def get_deezer_arl_playlist_tracks(playlist_id):
         return jsonify({'error': str(e)}), 500
 
 
+@bp.route('/api/discover/deezer/editorial', methods=['GET'])
+def get_deezer_editorial_playlists():
+    """Deezer's own curated playlists, for a Discover shelf.
+
+    The browse half of a pipeline that already exists. Everything after picking
+    a card - loading the playlist, matching its tracks, syncing the result - is
+    /api/deezer/playlist/<id> and the /api/deezer/discovery/* family, unchanged.
+    The only thing missing was a way to FIND a playlist without pasting a url,
+    which is what ListenBrainz's created-for shelf does for its own source.
+
+    No auth. These endpoints are public, so the shelf works for everyone, not
+    only for users who have linked a Deezer account.
+
+    ?genre= a genre id from /api/discover/deezer/genres (0, the everything
+    chart, is the default and is deliberately small - the per-genre charts are
+    where the content is).
+    ?q= searches playlists by name instead, editorial and user mixed.
+    """
+    try:
+        client = _get_deezer_client()
+        if client is None:
+            return jsonify({"success": True, "playlists": [], "count": 0,
+                            "error": "Deezer client unavailable"})
+
+        query = (request.args.get('q') or '').strip()
+        try:
+            limit = int(request.args.get('limit') or 25)
+        except (TypeError, ValueError):
+            limit = 25
+
+        if query:
+            playlists = client.search_playlists(query, limit=limit)
+            scope = {'kind': 'search', 'query': query}
+        else:
+            genre_id = request.args.get('genre') or 0
+            playlists = client.get_editorial_playlists(genre_id, limit=limit)
+            scope = {'kind': 'genre', 'genre': str(genre_id)}
+
+        return jsonify({
+            "success": True,
+            "playlists": playlists,
+            "count": len(playlists),
+            "scope": scope,
+            "source": "deezer",
+        })
+    except Exception as e:
+        logger.error(f"Error getting Deezer editorial playlists: {e}")
+        # a browse row that fails is an empty row, not a broken page
+        return jsonify({"success": True, "playlists": [], "count": 0, "error": str(e)})
+
+
+@bp.route('/api/discover/deezer/genres', methods=['GET'])
+def get_deezer_editorial_genres():
+    """The genre chips the editorial shelf offers."""
+    try:
+        client = _get_deezer_client()
+        if client is None:
+            return jsonify({"success": True, "genres": []})
+        return jsonify({"success": True, "genres": client.get_editorial_genres()})
+    except Exception as e:
+        logger.error(f"Error getting Deezer editorial genres: {e}")
+        return jsonify({"success": True, "genres": []})
+
+
 @bp.route('/api/deezer/playlist/<playlist_id>', methods=['GET'])
 def get_deezer_playlist(playlist_id):
     """Fetch a Deezer playlist by ID or URL"""

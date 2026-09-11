@@ -43,6 +43,10 @@ describe('the section order', () => {
       'cache-genre-explorer',
       'lastfm-radio',
       'listenbrainz',
+      // NEW since the port, not drift: Deezer's editors publish curated
+      // playlists and the public api serves them free. It sits with the other
+      // source-backed playlist rows because that is what it is.
+      'deezer-editorial',
       'build-a-playlist',
     ]);
   });
@@ -149,6 +153,10 @@ describe('the empty policy is NOT uniform', () => {
       'cache-genre-releases',
       'cache-label-explorer',
       'cache-undiscovered',
+      // NEW since the port. Deezer's charts are always populated, so an empty
+      // row means the api was unreachable - and an explanation the user cannot
+      // act on is worse than no row at all.
+      'deezer-editorial',
       'listening-recs-section',
       'recommended-artists-section',
       'your-albums-section',

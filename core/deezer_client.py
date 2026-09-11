@@ -640,6 +640,118 @@ class DeezerClient:
 
         return albums[:limit]
 
+    # ── Editorial playlists ──────────────────────────────────────
+    #
+    # Deezer's own editors publish playlists per genre, and the public API
+    # serves them with no key and no auth. These are the "top stuff" rows: the
+    # same thing the Deezer app opens on.
+    #
+    # `chart/{genre}/playlists` is the curated selection. Genre 0 is the
+    # everything chart and is deliberately tiny (four entries), so a browse that
+    # only asked for 0 would look broken; the per-genre charts are where the
+    # content is (Rock 50, Dance 40, Rap 35 when this was written).
+    #
+    # Nothing here needs a token, so it works for every user whether or not they
+    # have linked a Deezer account.
+
+    # A genre's own chart, keyed by the ids `GET /genre` returns. Kept as a
+    # tuple rather than fetched so a browse does not spend a request working out
+    # what to ask for, and so the order on screen is a decision rather than
+    # whatever the api felt like returning.
+    EDITORIAL_GENRES = (
+        (0, 'Top'),
+        (132, 'Pop'),
+        (116, 'Rap / Hip Hop'),
+        (152, 'Rock'),
+        (113, 'Dance'),
+        (106, 'Electro'),
+        (165, 'R&B'),
+        (85, 'Alternative'),
+        (144, 'Reggae'),
+        (129, 'Jazz'),
+        (98, 'Classical'),
+        (173, 'Films / Games'),
+    )
+
+    def get_editorial_genres(self) -> List[Dict[str, Any]]:
+        """The genres a browse can ask for, as [{id, name}]."""
+        return [{'id': gid, 'name': name} for gid, name in self.EDITORIAL_GENRES]
+
+    def get_editorial_playlists(self, genre_id: int = 0, limit: int = 25) -> List[Dict[str, Any]]:
+        """Deezer's curated playlists for one genre.
+
+        Returns the normalised shape the discover shelf reads, or [] on any
+        failure - a browse row that cannot load is an empty row, never an error
+        the page has to handle.
+        """
+        try:
+            genre_id = int(genre_id)
+        except (TypeError, ValueError):
+            genre_id = 0
+        limit = max(1, min(int(limit or 25), 100))
+
+        data = self._api_get(f'chart/{genre_id}/playlists', {'limit': limit})
+        items = (data or {}).get('data') or []
+        if not items:
+            logger.debug("No Deezer editorial playlists for genre %s", genre_id)
+            return []
+
+        out = []
+        for item in items:
+            playlist = self._editorial_playlist_to_dict(item)
+            if playlist:
+                out.append(playlist)
+        logger.info("Deezer editorial: %s playlists for genre %s", len(out), genre_id)
+        return out
+
+    def search_playlists(self, query: str, limit: int = 25) -> List[Dict[str, Any]]:
+        """Search Deezer playlists by name. Editorial and user playlists mixed.
+
+        Same normalised shape as get_editorial_playlists, so a shelf can render
+        either without caring which it asked for.
+        """
+        query = (query or '').strip()
+        if not query:
+            return []
+        limit = max(1, min(int(limit or 25), 100))
+        data = self._api_get('search/playlist', {'q': query, 'limit': limit})
+        items = (data or {}).get('data') or []
+        out = []
+        for item in items:
+            playlist = self._editorial_playlist_to_dict(item)
+            if playlist:
+                out.append(playlist)
+        return out
+
+    @staticmethod
+    def _editorial_playlist_to_dict(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """One api playlist row -> the shape the shelf and the loader share.
+
+        `id` is what matters: it is the same id /api/deezer/playlist/<id> already
+        takes, so a card picked here goes through the pipeline that already
+        exists rather than a second one built for browsing.
+        """
+        if not isinstance(item, dict):
+            return None
+        playlist_id = str(item.get('id') or '').strip()
+        title = str(item.get('title') or '').strip()
+        if not playlist_id or not title:
+            return None
+        user = item.get('user') if isinstance(item.get('user'), dict) else {}
+        # picture_xl is 1000x1000; the shelf wants art that survives a retina
+        # tile, and the smaller keys are the same image scaled down
+        image = (item.get('picture_xl') or item.get('picture_big')
+                 or item.get('picture_medium') or item.get('picture') or '')
+        return {
+            'id': playlist_id,
+            'title': title,
+            'creator': str(user.get('name') or 'Deezer').strip() or 'Deezer',
+            'track_count': int(item.get('nb_tracks') or 0),
+            'image_url': image,
+            'link': str(item.get('link') or ''),
+            'source': 'deezer',
+        }
+
     def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed track info — returns Spotify-compatible dict (metadata source interface)"""
         cache = get_metadata_cache()

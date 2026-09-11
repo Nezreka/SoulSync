@@ -60,6 +60,7 @@ import { useDownloadBar } from '../-discover.use-download-bar';
 import { useHero } from '../-discover.use-hero';
 import { useLastfmRadio } from '../-discover.use-lastfm-radio';
 import { useListenBrainz } from '../-discover.use-listenbrainz';
+import { DeezerEditorialShelf } from './deezer-editorial-shelf';
 import { defaultLazySource, useMixModal } from '../-discover.use-mix-modal';
 import { useDiscoverMixes } from '../-discover.use-mixes';
 import { useDiscoverPage } from '../-discover.use-page';
@@ -937,6 +938,7 @@ export function DiscoverPage() {
     (id: DiscoverSectionId): boolean => {
       if (id === 'lastfm-radio') return lastfm.configured === true;
       if (id === 'listenbrainz') return true; // renders its own load/error states
+      if (id === 'deezer-editorial') return true; // fetches and empties itself
       if (id === 'build-a-playlist') return true; // a control, like adv-wave
       if (id === 'your-mixes-section') return mixes.mixes.length > 0;
       if (id === 'year-mixes-section') return mixes.decadeMixes.length > 0;
@@ -1154,6 +1156,8 @@ export function DiscoverPage() {
             playingKey={playingMixKey}
           />
         );
+      case 'deezer-editorial':
+        return <DeezerEditorialShelf onToast={(m) => toast(m, 'error')} />;
       case 'build-a-playlist':
         return (
           <BuildPlaylistSection

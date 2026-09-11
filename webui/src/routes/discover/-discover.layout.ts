@@ -36,6 +36,7 @@ export type DiscoverSectionId =
   | 'cache-deep-cuts'
   | 'lastfm-radio'
   | 'listenbrainz'
+  | 'deezer-editorial'
   | 'build-a-playlist';
 
 /** One entry: a full-width section, or a pair that renders two-up when both have content. */
@@ -77,6 +78,7 @@ export const DISCOVER_LAYOUT: DiscoverLayoutEntry[] = [
   single('cache-genre-explorer'), //                                  browse
   single('lastfm-radio'), //                                          stations & tools
   single('listenbrainz'),
+  single('deezer-editorial'), //                          deezer's own editors
   single('build-a-playlist'),
 ];
 
@@ -109,6 +111,9 @@ export const SECTION_EMPTY_POLICY: Partial<Record<DiscoverSectionId, EmptyPolicy
   'listening-recs-section': HIDE,
   'your-albums-section': HIDE,
   'your-artists-section': HIDE,
+  // Deezer's charts are always populated; an empty row means the api was
+  // unreachable, and an explanation nobody can act on is worse than no row.
+  'deezer-editorial': HIDE,
 
   // hideWhenEmpty absent → the controller default (false): stay and explain.
   'recent-releases': emptyState('No recent releases found'),
