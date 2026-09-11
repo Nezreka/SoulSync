@@ -2802,6 +2802,8 @@ async function loadSettingsData() {
         if (_slfmKey) _slfmKey.value = settings.concerts?.setlistfm_api_key || '';
         document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
         document.getElementById('lastfm-api-secret').value = settings.lastfm?.api_secret || '';
+        const _lfmUser = document.getElementById('lastfm-username');
+        if (_lfmUser) _lfmUser.value = settings.lastfm?.username || '';
         document.getElementById('lastfm-scrobble-enabled').checked = settings.lastfm?.scrobble_enabled === true;
         const lfmStatus = document.getElementById('lastfm-scrobble-status');
         if (lfmStatus) {
@@ -5935,6 +5937,10 @@ async function saveSettings(quiet = false) {
             setlistfm_api_key: _cfgStr('concerts-setlistfm-api-key', { trim: true })
         },
         lastfm: {
+            // _cfgStr rather than .value: this input is absent on the video
+            // side, and reading .value off a missing element is how a save
+            // wipes a stored setting.
+            username: _cfgStr('lastfm-username', { trim: true }),
             api_key: document.getElementById('lastfm-api-key').value,
             api_secret: document.getElementById('lastfm-api-secret').value,
             scrobble_enabled: document.getElementById('lastfm-scrobble-enabled').checked,
