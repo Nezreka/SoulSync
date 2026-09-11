@@ -10,7 +10,11 @@
  */
 
 import { apiClient, readJson } from '@/app/api-client';
-import { postMirrorPlaylist } from '@/routes/sync/-sync.api';
+import {
+  type DeezerLoadProgress,
+  fetchDeezerLinkPlaylist,
+  postMirrorPlaylist,
+} from '@/routes/sync/-sync.api';
 import { buildMirrorPayload } from '@/routes/sync/-sync.import';
 
 export interface DeezerEditorialPlaylist {
@@ -94,25 +98,36 @@ export async function fetchDeezerEditorialGenres(): Promise<DeezerEditorialGenre
  *
  * Returns an error string on failure, or null when it worked.
  */
+export interface DeezerHandoffStage {
+  /** 'loading' while tracks come in, 'mirroring' once they are all here. */
+  phase: 'loading' | 'mirroring';
+  done?: number;
+  total?: number;
+}
+
 export async function openDeezerPlaylistInSync(
   playlist: DeezerEditorialPlaylist,
+  onStage?: (stage: DeezerHandoffStage) => void,
 ): Promise<string | null> {
   let loaded: DeezerPlaylistResponse;
   try {
-    const response = await fetch(`/api/deezer/playlist/${encodeURIComponent(playlist.id)}`);
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
-      return body.error || `Could not load that playlist (${response.status})`;
-    }
-    loaded = (await response.json()) as DeezerPlaylistResponse;
-  } catch {
-    return 'Could not reach the server to load that playlist';
+    // the ASYNC loader, not the blocking one. a 200 track editorial playlist
+    // took 51 seconds on the reporter's machine and the card could say nothing
+    // but "adding to sync" for all of it. the job has always reported
+    // done/total; this is the first caller to read it.
+    onStage?.({ phase: 'loading', total: playlist.track_count || undefined });
+    loaded = (await fetchDeezerLinkPlaylist(playlist.id, (p: DeezerLoadProgress) =>
+      onStage?.({ phase: 'loading', done: p.done, total: p.total || playlist.track_count }),
+    )) as DeezerPlaylistResponse;
+  } catch (error) {
+    return (error as Error)?.message || 'Could not load that playlist';
   }
 
   const tracks = loaded.tracks ?? [];
   if (tracks.length === 0) return 'That playlist came back empty';
 
   try {
+    onStage?.({ phase: 'mirroring', done: tracks.length, total: tracks.length });
     const payload = buildMirrorPayload(
       'deezer',
       loaded.id ?? playlist.id,
@@ -130,13 +145,11 @@ export async function openDeezerPlaylistInSync(
     return 'Could not mirror that playlist';
   }
 
-  // only navigate once it is actually there, so the tab is never opened onto
-  // a playlist that failed to arrive
+  // only navigate once it is actually there, so the tab is never opened onto a
+  // playlist that failed to arrive
   window.SoulSyncWebRouter?.navigateToPage('sync');
   window.setTimeout(() => {
-    document
-      .querySelector<HTMLElement>('.sync-tab-button[data-tab="mirrored"]')
-      ?.click();
+    document.querySelector<HTMLElement>('.sync-tab-button[data-tab="mirrored"]')?.click();
   }, 200);
   return null;
 }

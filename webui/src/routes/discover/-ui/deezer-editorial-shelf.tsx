@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   type DeezerEditorialGenre,
+  type DeezerHandoffStage,
   type DeezerEditorialPlaylist,
   fetchDeezerEditorial,
   fetchDeezerEditorialGenres,
@@ -25,14 +26,35 @@ import { DiscoverSection } from './discover-section';
 /** Genre 0 is Deezer's everything chart, and the row the shelf opens on. */
 const DEFAULT_GENRE = 0;
 
+/** What the card says while it works. Silence is what made this feel broken. */
+function handoffLabel(stage?: DeezerHandoffStage | null): string {
+  if (!stage) return 'Starting…';
+  if (stage.phase === 'mirroring') return 'Adding to Sync…';
+  const { done, total } = stage;
+  if (done != null && total) return `Loading ${done} / ${total} tracks…`;
+  if (total) return `Loading ${total} tracks…`;
+  return 'Loading tracks…';
+}
+
+/** 0-100. The load owns the bar; mirroring is quick and finishes it. */
+function handoffPercent(stage?: DeezerHandoffStage | null): number {
+  if (!stage) return 0;
+  if (stage.phase === 'mirroring') return 100;
+  const { done, total } = stage;
+  if (done == null || !total) return 0;
+  return Math.min(100, Math.round((done / total) * 100));
+}
+
 function PlaylistCard({
   playlist,
   onOpen,
   busy,
+  stage,
 }: {
   playlist: DeezerEditorialPlaylist;
   onOpen: (p: DeezerEditorialPlaylist) => void;
   busy?: boolean;
+  stage?: DeezerHandoffStage | null;
 }) {
   const [failed, setFailed] = useState(false);
   const tracks = playlist.track_count;
@@ -60,8 +82,15 @@ function PlaylistCard({
       <div className="ya-card-info">
         <div className="ya-card-name">{playlist.title}</div>
         <div className="ya-card-sub">
-          {busy ? 'Adding to Sync…' : `${playlist.creator}${tracks ? ` · ${tracks} tracks` : ''}`}
+          {busy
+            ? handoffLabel(stage)
+            : `${playlist.creator}${tracks ? ` · ${tracks} tracks` : ''}`}
         </div>
+        {busy && (
+          <div className="dz-ed-progress" role="progressbar" aria-label="Adding to Sync">
+            <div className="dz-ed-progress-fill" style={{ width: `${handoffPercent(stage)}%` }} />
+          </div>
+        )}
       </div>
     </button>
   );
@@ -98,17 +127,18 @@ export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) 
   }, [genreId]);
 
   const [opening, setOpening] = useState<string | null>(null);
+  const [stage, setStage] = useState<DeezerHandoffStage | null>(null);
 
   const open = useCallback(
     async (playlist: DeezerEditorialPlaylist) => {
-      // a big editorial playlist takes a moment to load and mirror; without
-      // this the card looks like it ignored the click
       setOpening(playlist.id);
+      setStage({ phase: 'loading', total: playlist.track_count || undefined });
       try {
-        const error = await openDeezerPlaylistInSync(playlist);
+        const error = await openDeezerPlaylistInSync(playlist, setStage);
         if (error) onToast?.(error);
       } finally {
         setOpening(null);
+        setStage(null);
       }
     },
     [onToast],
@@ -156,6 +186,7 @@ export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) 
               playlist={p}
               onOpen={open}
               busy={opening === p.id}
+              stage={opening === p.id ? stage : null}
             />
           ))}
         </div>

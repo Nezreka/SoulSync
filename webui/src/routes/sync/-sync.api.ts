@@ -233,7 +233,17 @@ export async function fetchDeezerArlPlaylistTracks(
   return pollDeezerPlaylistLoad<AccountPlaylistTracks>(initial.job_id);
 }
 
-async function pollDeezerPlaylistLoad<T>(jobId: string): Promise<T> {
+/** What the load job reports while it runs: done, total and phase. */
+export interface DeezerLoadProgress {
+  done?: number;
+  total?: number;
+  phase?: string;
+}
+
+async function pollDeezerPlaylistLoad<T>(
+  jobId: string,
+  onProgress?: (progress: DeezerLoadProgress) => void,
+): Promise<T> {
   const deadline = Date.now() + 20 * 60 * 1000;
   while (Date.now() < deadline) {
     const statusResponse = await fetch(`/api/deezer/playlist-load/${jobId}`);
@@ -245,7 +255,11 @@ async function pollDeezerPlaylistLoad<T>(jobId: string): Promise<T> {
       status?: string;
       playlist?: T;
       error?: string;
+      progress?: DeezerLoadProgress;
     }>(statusResponse);
+    // the job has always reported done/total/phase and nothing read it, so a
+    // load that takes a minute looked identical to one that had died
+    if (onProgress && status.progress) onProgress(status.progress);
     if (status.status === 'complete' && status.playlist) return status.playlist;
     if (status.status === 'error') throw new Error(status.error || 'Deezer playlist load failed');
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -367,7 +381,10 @@ export async function parseITunesLinkUrl(
  * the backend's error message on !ok — the vanilla's 2746-2749 throw, which
  * lands in the tab's catch toast.
  */
-export async function fetchDeezerLinkPlaylist(id: string): Promise<Record<string, unknown>> {
+export async function fetchDeezerLinkPlaylist(
+  id: string,
+  onProgress?: (progress: DeezerLoadProgress) => void,
+): Promise<Record<string, unknown>> {
   const response = await fetch(`/api/deezer/playlist/${id}?async=1`);
   if (!response.ok) {
     const error = await readJson<{ error?: string }>(response);
@@ -384,7 +401,7 @@ export async function fetchDeezerLinkPlaylist(id: string): Promise<Record<string
     return (initial.playlist ?? initial) as Record<string, unknown>;
   }
   if (!initial.job_id) throw new Error('Deezer playlist load did not return a job id');
-  return pollDeezerPlaylistLoad<Record<string, unknown>>(initial.job_id);
+  return pollDeezerPlaylistLoad<Record<string, unknown>>(initial.job_id, onProgress);
 }
 
 /** GET /api/youtube/playlists (loadYouTubePlaylistsFromBackend, sync-spotify.js 695). */

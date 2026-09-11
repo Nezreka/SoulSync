@@ -140,8 +140,8 @@ const NEW_CLASSES: string[] = [
   // 3.3.0 zone regroup: the tools zone's grid modifier, styled in style.css
   'discovery-zone-section--map-tools',
   // NOTE: the Deezer editorial shelf adds no entry here on purpose. Its chips
-  // are styled in style.css, which makes them KNOWN rather than new, and the
-  // shelf itself reuses the page's own card classes.
+  // and its progress bar are styled in style.css, which makes them KNOWN
+  // rather than new, and the shelf reuses the page's own card classes.
 ];
 
 function componentFiles(): string[] {

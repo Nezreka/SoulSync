@@ -145,3 +145,68 @@ describe('openDeezerPlaylistInSync', () => {
     await expect(openDeezerPlaylistInSync(PLAYLIST)).resolves.toBeTruthy();
   });
 });
+
+describe('progress while a playlist loads', () => {
+  afterEach(() => {
+    delete (window as { SoulSyncWebRouter?: unknown }).SoulSyncWebRouter;
+  });
+
+  it('reports the track count as the job reports it', async () => {
+    // the whole complaint: the card said "Adding to Sync" for ~2 minutes with
+    // no idea what was happening or how long was left
+    window.SoulSyncWebRouter = { navigateToPage: vi.fn() } as never;
+    let polls = 0;
+    server.use(
+      http.get('/api/deezer/playlist/:id', () =>
+        HttpResponse.json({ pending: true, job_id: 'job-1' }),
+      ),
+      http.get('/api/deezer/playlist-load/job-1', () => {
+        polls += 1;
+        if (polls < 3) {
+          return HttpResponse.json({
+            status: 'running',
+            progress: { done: polls * 80, total: 200, phase: 'tracks' },
+          });
+        }
+        return HttpResponse.json({
+          status: 'complete',
+          playlist: { id: '1', name: 'Calm Piano', tracks: [{ id: 't', name: 'A' }] },
+        });
+      }),
+      http.post('/api/mirror-playlist', () => HttpResponse.json({ success: true })),
+    );
+
+    const stages: { phase: string; done?: number; total?: number }[] = [];
+    const error = await openDeezerPlaylistInSync(PLAYLIST, (s) => stages.push({ ...s }));
+
+    expect(error).toBeNull();
+    expect(stages.some((s) => s.phase === 'loading' && s.done === 80 && s.total === 200)).toBe(true);
+    expect(stages.some((s) => s.phase === 'loading' && s.done === 160)).toBe(true);
+    // and the final stage is the quick one, so the bar can finish
+    expect(stages.at(-1)?.phase).toBe('mirroring');
+  });
+
+  it('opens with the count it already knows, before the first poll', async () => {
+    window.SoulSyncWebRouter = { navigateToPage: vi.fn() } as never;
+    server.use(
+      http.get('/api/deezer/playlist/:id', () => HttpResponse.error()),
+    );
+    const stages: { phase: string; total?: number }[] = [];
+    await openDeezerPlaylistInSync({ ...PLAYLIST, track_count: 200 }, (s) => stages.push({ ...s }));
+    // the shelf already knows the playlist has 200 tracks; showing that at once
+    // beats an empty bar until the job's first frame lands
+    expect(stages[0]).toEqual({ phase: 'loading', total: 200 });
+  });
+
+  it('surfaces the loader error rather than a generic one', async () => {
+    server.use(
+      http.get('/api/deezer/playlist/:id', () =>
+        HttpResponse.json({ pending: true, job_id: 'job-2' }),
+      ),
+      http.get('/api/deezer/playlist-load/job-2', () =>
+        HttpResponse.json({ status: 'error', error: 'Deezer refused the request' }),
+      ),
+    );
+    await expect(openDeezerPlaylistInSync(PLAYLIST)).resolves.toBe('Deezer refused the request');
+  });
+});

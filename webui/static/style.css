@@ -85533,3 +85533,27 @@ body.src-modal-open { overflow: hidden; }
 
 /* a playlist cover is square art like any other card, so it inherits the
    shelf card styling above and needs nothing of its own */
+
+/* the editorial card while it is loading a playlist into Sync. a 200-track
+   playlist takes the better part of a minute to fetch, and the job has always
+   reported done/total - the card just never showed it. */
+.dz-ed-progress {
+    margin-top: 8px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+}
+
+.dz-ed-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent);
+    transition: width 0.35s ease;
+}
+
+/* it is working, so the art should not look idle */
+.discover-section .ya-card[aria-busy='true'] .ya-card-img img {
+    opacity: 0.55;
+    transition: opacity 0.25s ease;
+}
