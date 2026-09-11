@@ -1053,6 +1053,7 @@ function handleLibraryMediaTabKey(event) {
 
 // Settings redesign — tab switching + service accordions
 function switchSettingsTab(tab) {
+    if (tab === 'library') document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
     // Update tab bar
     document.querySelectorAll('.stg-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
     // Show/hide settings groups and section headers by data-stg attribute

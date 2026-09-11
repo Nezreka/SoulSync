@@ -377,10 +377,10 @@
     }
 
     function loadDownloads() {
-        fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
+        return fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
-                if (!d) return;
+                if (!d) return false;
                 var setP = function (id, v) { var el = document.getElementById(id); if (el && v != null) el.value = v; };
                 setP('video-download-path', d.download_path);
                 setP('video-movies-path', d.movies_path);
@@ -401,8 +401,9 @@
                 wireSeedIndexers();
                 renderVideoHybrid();
                 updateVideoSourceUI();
+                return true;
             })
-            .catch(function () { /* ignore */ });
+            .catch(function () { return false; });
     }
 
     function saveDownloads(silent) {
@@ -1343,10 +1344,10 @@
         renderOrgPreview();
     }
     function loadOrganization() {
-        fetch(ORG_URL, { headers: { 'Accept': 'application/json' } })
+        return fetch(ORG_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { if (d) { _videoOrg = d; fillOrg(); } })
-            .catch(function () { /* ignore */ });
+            .then(function (d) { if (!d) return false; _videoOrg = d; fillOrg(); return true; })
+            .catch(function () { return false; });
     }
     function collectOrg() {
         var val = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
@@ -1416,24 +1417,71 @@
         });
     }
 
+    // Both media sides share these Library panels. Load once per document,
+    // deduplicate requests, and never replace edits on a tab round-trip.
+    var _libraryLoaded = false;
+    var _libraryLoading = null;
+    function loadSharedLibrary() {
+        if (_libraryLoaded || _libraryLoading) return _libraryLoading;
+        var panels = ['folders-video-panel', 'organization-video-panel'].map(function (id) {
+            return document.getElementById(id);
+        }).filter(Boolean);
+        panels.forEach(function (panel) {
+            panel.setAttribute('aria-busy', 'true');
+            panel.querySelectorAll('input, select, textarea, button:not(.stg-library-retry)').forEach(function (input) {
+                if (!input.hasAttribute('data-library-disabled')) input.setAttribute('data-library-disabled', String(input.disabled));
+                input.disabled = true;
+            });
+            var status = panel.querySelector('.stg-library-load-status');
+            if (!status) {
+                status = document.createElement('p');
+                status.className = 'stg-library-load-status settings-hint';
+                status.setAttribute('role', 'status');
+                panel.prepend(status);
+            }
+            status.textContent = 'Loading saved video settings...';
+        });
+        wireDownloads();
+        wireOrganization();
+        _libraryLoading = Promise.all([loadDownloads(), loadOrganization()]).then(function (results) {
+            _libraryLoaded = results.every(Boolean);
+            panels.forEach(function (panel) {
+                panel.setAttribute('aria-busy', 'false');
+                var status = panel.querySelector('.stg-library-load-status');
+                if (_libraryLoaded) {
+                    panel.querySelectorAll('[data-library-disabled]').forEach(function (input) {
+                        input.disabled = input.getAttribute('data-library-disabled') === 'true';
+                        input.removeAttribute('data-library-disabled');
+                    });
+                    status.remove();
+                } else {
+                    status.textContent = 'Could not load saved video settings. ';
+                    var retry = document.createElement('button');
+                    retry.type = 'button'; retry.className = 'stg-library-retry'; retry.textContent = 'Retry';
+                    retry.addEventListener('click', loadSharedLibrary);
+                    status.append(retry);
+                }
+            });
+            if (typeof window.refreshLibrarySummaries === 'function') window.refreshLibrarySummaries();
+        }).finally(function () { _libraryLoading = null; });
+        return _libraryLoading;
+    }
+
     function onPageShown(e) {
         if (e && e.detail !== PAGE_ID) return;
         loadServer();
         loadConn();
         load();
         loadKeys();
-        loadDownloads();
+        loadSharedLibrary();
         loadImportLists();
         loadNotify();
-        wireDownloads();
         loadQuality();
         wireQuality();
         loadYtQuality();
         wireYtQuality();
         loadSlskd();
         wireSlskd();
-        loadOrganization();
-        wireOrganization();
     }
 
     function init() {
@@ -1516,6 +1564,7 @@
                 .catch(function () { toast('Some settings could not be saved', 'error'); });
         }, true);
         document.addEventListener('soulsync:video-page-shown', onPageShown);
+        document.addEventListener('soulsync:library-settings-shown', loadSharedLibrary);
     }
 
     if (document.readyState === 'loading') {
