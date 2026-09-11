@@ -1,5 +1,8 @@
+import type { Automation } from '@/routes/automations/-automations.types';
+
 import { apiClient, readJson } from '@/app/api-client';
 import { getShellProfileContext } from '@/platform/shell/bridge';
+import { runAutomation } from '@/routes/automations/-automations.api';
 
 /**
  * Every audiobook request, tagged with whose it is.
@@ -33,6 +36,8 @@ import type {
   AudiobookHome,
   AudiobookItem,
   AudiobookLibraryEntry,
+  AudiobookLibrary,
+  AudiobookLibraryScan,
   AudiobookSearchResult,
   AudiobookPersonProfile,
   AudiobookRole,
@@ -522,24 +527,38 @@ export async function fetchReleaseContents(
 // Library — what is actually on disk
 // ---------------------------------------------------------------------------
 
-export async function fetchLibrary(): Promise<{
-  books: AudiobookLibraryEntry[];
-  totalBytes: number;
-}> {
-  try {
-    const data = await readJson<{
-      success?: boolean;
-      books?: AudiobookLibraryEntry[];
-      total_bytes?: number;
-    }>(audiobookClient.get('audiobooks/library'));
-    return {
-      books: data?.success && Array.isArray(data.books) ? data.books : [],
-      totalBytes: data?.total_bytes || 0,
-    };
-  } catch (err) {
-    console.error('Failed to load the audiobook library:', err);
-    return { books: [], totalBytes: 0 };
+export async function fetchLibrary(): Promise<AudiobookLibrary> {
+  const data = await readJson<{
+    success?: boolean;
+    books?: AudiobookLibraryEntry[];
+    total_bytes?: number;
+    root?: string;
+    scan?: AudiobookLibraryScan;
+    error?: string;
+  }>(audiobookClient.get('audiobooks/library'));
+  if (!data.success || !Array.isArray(data.books)) {
+    throw new Error(data.error || 'Could not read your audiobook library.');
   }
+  return {
+    books: data.books,
+    totalBytes: data.total_bytes || 0,
+    root: data.root || '',
+    scan: data.scan || { status: 'never' },
+  };
+}
+
+/** Use the engine's Run Now so the scan has normal progress and run history. */
+export async function scanLibrary(): Promise<void> {
+  const automations = await readJson<Automation[] | { error?: string }>(
+    apiClient.get('automations'),
+  );
+  if (!Array.isArray(automations))
+    throw new Error(automations.error || 'Could not load automations.');
+  const candidates = automations.filter((a) => a.action_type === 'audiobook_scan_library');
+  const automation = candidates.find((a) => a.is_system) || candidates[0];
+  if (!automation)
+    throw new Error('Add Scan Audiobook Library on the Automations page, then try again.');
+  await runAutomation(automation.id);
 }
 
 /**
@@ -562,7 +581,11 @@ export async function deleteLibraryBook(
     };
   } catch (err) {
     console.error('Failed to delete the book:', err);
-    return { ok: false, recycled: false, error: 'Request failed' };
+    return {
+      ok: false,
+      recycled: false,
+      error: err instanceof Error ? err.message : 'Request failed',
+    };
   }
 }
 

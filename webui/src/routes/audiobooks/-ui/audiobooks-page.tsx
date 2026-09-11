@@ -204,7 +204,7 @@ export function AudiobooksBrowsePage() {
           type="button"
           className={styles.wishlistLink}
           onClick={() => setShowLibrary(true)}
-          title="Everything downloaded and filed"
+          title="Audiobooks in your library folder"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path

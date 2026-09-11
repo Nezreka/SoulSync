@@ -267,6 +267,8 @@ export interface AudiobookDownload {
 
 /** One book on disk. */
 export interface AudiobookLibraryEntry {
+  cover_url?: string;
+  source?: string;
   asin: string;
   title: string;
   author: string;
@@ -322,4 +324,24 @@ export interface AudiobookFollowedAuthor {
    *  once when the author is followed, because nobody sees the book before it
    *  is queued — there is no modal to ask. */
   narrator_mode?: string;
+}
+
+export interface AudiobookLibraryScan {
+  status: 'never' | 'running' | 'completed' | 'error' | 'interrupted';
+  started_at?: number;
+  finished_at?: number;
+  checked?: number;
+  adopted?: number;
+  updated?: number;
+  removed?: number;
+  local?: number;
+  error?: string;
+  current?: string;
+}
+
+export interface AudiobookLibrary {
+  books: AudiobookLibraryEntry[];
+  totalBytes: number;
+  root: string;
+  scan: AudiobookLibraryScan;
 }

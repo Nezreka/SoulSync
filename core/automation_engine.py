@@ -117,9 +117,6 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'audiobook_scan_watchlist',
         'initial_delay': 420,  # 7 minutes after startup
     },
-    # Keeps the "you own this" record honest. Daily and cheap: it reads the
-    # audiobook folder and touches nothing on disk, so the only cost of being
-    # wrong is an Owned badge that outlives the book.
     # Empties the audiobook recycle bin. The schedule is what matters: the
     # opportunistic pass only fires when something else is deleted, so on a
     # library nobody prunes the bin would never expire.
@@ -130,6 +127,8 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'audiobook_purge_recycle',
         'initial_delay': 780,  # 13 minutes after startup
     },
+    # Index existing audiobook folders and loose files, including external books.
+    # Reuse this system job so existing user schedules and history are preserved.
     {
         'name': 'Auto-Scan Audiobook Library',
         'trigger_type': 'schedule',

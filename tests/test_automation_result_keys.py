@@ -28,6 +28,7 @@ _HANDLERS = _ROOT / 'core/automation/handlers'
 # action_type → (handler module, the result keys the sentence reads).
 # Keep in step with ACTION_SENTENCES in -automations.format.ts.
 SENTENCE_SOURCES = {
+    'audiobook_scan_library': ('audiobook_scan_library.py', ('checked', 'adopted', 'updated', 'removed')),
     'scan_watchlist': ('scan_watchlist.py',
                        ('artists_scanned', 'new_tracks_found', 'tracks_added_to_wishlist')),
     'scan_watchlist_podcasts': ('scan_watchlist_podcasts.py',

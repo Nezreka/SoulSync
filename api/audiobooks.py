@@ -48,7 +48,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, jsonify, request, send_file, url_for
 
 from core.audiobook_client import (
     SEARCH_TYPES,
@@ -68,6 +68,26 @@ logger = get_logger("audiobooks.api")
 
 _MAX_LIMIT = 50   # Audible 400s above this; clamped rather than forwarded
 _DEFAULT_LIMIT = 25
+
+
+def _library_cover(row):
+    """Only serve known image names inside the configured, indexed book folder."""
+    from pathlib import Path
+    from core.audiobook_organizer import library_root
+    try:
+        root = Path(library_root()).resolve()
+        path = Path(row.get("path") or "").resolve()
+        if path == root or not path.is_relative_to(root):
+            return None
+        candidates = [path / name for name in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp", "folder.jpg")]
+        if path.is_file():
+            candidates = [path.with_suffix(ext) for ext in (".jpg", ".png", ".webp")]
+        for candidate in candidates:
+            if candidate.is_file() and candidate.resolve().is_relative_to(root):
+                return candidate.resolve()
+    except OSError:
+        pass
+    return None
 
 
 def _limit(default: int = _DEFAULT_LIMIT) -> int:
@@ -816,31 +836,64 @@ def create_audiobooks_blueprint() -> Blueprint:
 
     @bp.route("/library", methods=["GET"])
     def library():
-        """Everything imported, newest first."""
-        rows = get_audiobook_db().get_library()
+        """Indexed local books and the most recent folder scan."""
+        from core.audiobook_library_scan import scan_status
+        from core.audiobook_organizer import library_root
+
+        db = get_audiobook_db()
+        rows = db.get_library()
+        for row in rows:
+            if not row.get("cover_url"):
+                row["cover_url"] = url_for("audiobooks_api.library_cover", asin=row["asin"])
         return jsonify({
-            "success": True,
-            "books": rows,
+            "success": True, "books": rows,
             "total_bytes": sum(int(r.get("size_bytes") or 0) for r in rows),
+            "root": library_root(), "scan": scan_status(db),
         })
+
+    @bp.route("/library/<asin>/cover", methods=["GET"])
+    def library_cover(asin: str):
+        row = get_audiobook_db().get_library_entry(asin)
+        cover = _library_cover(row) if row else None
+        if cover is not None:
+            return send_file(cover, conditional=True, max_age=3600)
+        if row:
+            from io import BytesIO
+            from pathlib import Path
+            from core.audiobook_organizer import library_root
+            from core.audiobook_library_metadata import embedded_cover
+            root = Path(library_root()).resolve()
+            path = Path(row.get("path") or "").resolve()
+            if path != root and path.is_relative_to(root):
+                art = embedded_cover(path)
+                if art:
+                    return send_file(BytesIO(art[0]), mimetype=art[1], max_age=3600)
+        return jsonify({"success": False, "error": "No local cover"}), 404
 
     @bp.route("/library/<asin>", methods=["DELETE"])
     def library_delete(asin: str):
         """Remove one book from disk and from the record.
 
         The folder goes to the recycle bin rather than being unlinked, so a
-        mistake is recoverable for as long as the keep window allows. The row
-        is dropped either way: leaving it would put an Owned badge on a book
-        that is no longer there.
+        mistake is recoverable for as long as the keep window allows. Ownership
+        is removed only after the disk operation succeeds.
         """
         db = get_audiobook_db()
-        row = next((r for r in db.get_library() if r.get("asin") == asin), None)
+        row = db.get_library_entry(asin)
         if row is None:
             return jsonify({"success": False, "error": "Not in your library"}), 404
 
         from core.audiobook_recycle import discard
 
-        outcome = discard(str(row.get("path") or ""), reason="deleted from the library")
+        from pathlib import Path
+        from core.audiobook_organizer import library_root
+        root = Path(library_root()).resolve()
+        path = Path(str(row.get("path") or "")).resolve()
+        if path == root or not path.is_relative_to(root):
+            return jsonify({"success": False, "error": "This book is outside the configured audiobook folder."}), 400
+        outcome = discard(str(path), reason="deleted from the library")
+        if not outcome.get("ok"):
+            return jsonify({"success": False, "error": outcome.get("error") or "Could not delete this book."}), 400
         db.remove_from_library(asin)
         return jsonify({
             "success": True,

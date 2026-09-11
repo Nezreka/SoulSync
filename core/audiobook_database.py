@@ -9,7 +9,8 @@ solved this by living in database/video_library.db, and audiobooks follow the
 same rule: a new file, a new connection, nothing shared. A bug in here cannot
 corrupt, lock, or migrate anything the music side reads.
 
-ASIN is the identity throughout, the same key the catalog client uses.
+Catalogue entries use ASINs. Unidentified library files use local: keys,
+which are excluded from catalogue ownership checks.
 
 Schema changes ride _COLUMN_MIGRATIONS rather than being edited into the CREATE
 TABLE statements, because an existing install has already run the CREATE and
@@ -53,6 +54,9 @@ _NARRATOR_MODES = (NARRATOR_EXACT, NARRATOR_ANY)
 # added only to CREATE TABLE arrives for fresh installs and silently never
 # appears for anyone already running.
 _COLUMN_MIGRATIONS = (
+    ("audiobook_library", "cover_url", "TEXT DEFAULT ''"),
+    ("audiobook_library", "source", "TEXT DEFAULT 'download'"),
+    ("audiobook_library", "scan_signature", "TEXT DEFAULT ''"),
     ("audiobook_wishlist", "narrator_mode", f"TEXT DEFAULT '{NARRATOR_EXACT}'"),
     # When the row last CHANGED STATE, which is not when it was last attempted:
     # last_attempt_at only moves when count_attempt is passed, and a user action
@@ -301,6 +305,12 @@ class AudiobookDatabase:
                 "ON audiobook_blocklist (asin)"
             )
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audiobook_library_scan_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    payload TEXT NOT NULL
+                )
+            """)
             self._apply_column_migrations(cursor)
             conn.commit()
             self._initialized = True
@@ -972,7 +982,7 @@ class AudiobookDatabase:
             return False
 
     def add_to_library(self, book: Dict[str, Any], path: str, **extra: Any) -> bool:
-        """Record an imported book so the UI can say "you already have this"."""
+        """Record a downloaded or scanned book; local: keys identify unmatched files."""
         asin = str(book.get("asin") or "").strip()
         if not asin or not path:
             return False
@@ -984,8 +994,9 @@ class AudiobookDatabase:
             conn.execute("""
                 INSERT OR REPLACE INTO audiobook_library
                     (asin, title, author, narrator, series_title, series_sequence,
-                     path, file_count, size_bytes, audio_format, runtime_minutes, imported_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     path, file_count, size_bytes, audio_format, runtime_minutes, imported_at,
+                     cover_url, source, scan_signature)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 asin, str(book.get("title") or ""),
                 str(authors[0]) if authors else "",
@@ -994,6 +1005,8 @@ class AudiobookDatabase:
                 str(path), int(extra.get("file_count") or 0),
                 int(extra.get("size_bytes") or 0), str(extra.get("audio_format") or ""),
                 int(book.get("runtime_minutes") or 0), _now(),
+                str(book.get("cover_url") or ""), str(extra.get("source") or "download"),
+                str(extra.get("scan_signature") or ""),
             ))
             conn.commit()
             return True
@@ -1001,12 +1014,28 @@ class AudiobookDatabase:
             logger.warning("Could not record %s in the audiobook library: %s", asin, exc)
             return False
 
+    def get_library_scan_state(self) -> Dict[str, Any]:
+        row = self._connect().execute(
+            "SELECT payload FROM audiobook_library_scan_state WHERE id = 1").fetchone()
+        return json.loads(row[0]) if row else {"status": "never"}
+
+    def set_library_scan_state(self, state: Dict[str, Any]) -> None:
+        conn = self._connect()
+        conn.execute("INSERT OR REPLACE INTO audiobook_library_scan_state (id, payload) VALUES (1, ?)",
+                     (json.dumps(state),))
+        conn.commit()
+
     def is_owned(self, asin: str) -> bool:
         conn = self._connect()
         row = conn.execute(
             "SELECT 1 FROM audiobook_library WHERE asin = ?", (str(asin or "").strip(),),
         ).fetchone()
         return row is not None
+
+    def get_library_entry(self, asin: str) -> Optional[Dict[str, Any]]:
+        row = self._connect().execute(
+            "SELECT * FROM audiobook_library WHERE asin = ?", (asin,)).fetchone()
+        return dict(row) if row else None
 
     def get_library(self) -> List[Dict[str, Any]]:
         conn = self._connect()
@@ -1022,7 +1051,7 @@ class AudiobookDatabase:
         conn = self._connect()
         return {
             str(row[0]) for row in conn.execute("SELECT asin FROM audiobook_library")
-            if row[0]
+            if row[0] and not str(row[0]).startswith("local:")
         }
 
     def remove_from_library(self, asin: str) -> bool:
@@ -1049,7 +1078,9 @@ class AudiobookDatabase:
     def update_library_entry(self, asin: str, **fields: Any) -> bool:
         """Refresh what the scan measured on disk: path, file count, size."""
         asin = str(asin or "").strip()
-        allowed = {"path", "file_count", "size_bytes", "audio_format"}
+        allowed = {"path", "file_count", "size_bytes", "audio_format", "scan_signature",
+                   "title", "author", "narrator", "series_title", "series_sequence",
+                   "runtime_minutes", "cover_url"}
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not asin or not updates:
             return False

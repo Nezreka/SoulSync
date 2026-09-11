@@ -145,9 +145,8 @@ def entry_age_seconds(name: str, now: Optional[float] = None) -> Optional[float]
 def discard(path: str, reason: str = "") -> Dict[str, Any]:
     """Move one book folder to the bin. ``{ok, moved_to, permanent, error}``.
 
-    With the bin turned off, or when the folder cannot be moved into it, the
-    book is deleted outright — refusing to delete would leave the caller's
-    "removed" bookkeeping lying and fill the disk.
+    With the bin turned off, the selected book is deleted outright. A failed
+    recycle move leaves the book in place and reports an error to the caller.
     """
     source = Path(str(path or ""))
     result: Dict[str, Any] = {"ok": False, "moved_to": "", "permanent": False, "error": ""}
@@ -204,7 +203,7 @@ def discard(path: str, reason: str = "") -> Dict[str, Any]:
 
 def _delete_outright(source: Path, result: Dict[str, Any]) -> Dict[str, Any]:
     try:
-        shutil.rmtree(str(source))
+        shutil.rmtree(str(source)) if source.is_dir() else source.unlink()
         result.update(ok=True, permanent=True)
         logger.info("Deleted %s permanently", source.name)
     except OSError as exc:

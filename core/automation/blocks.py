@@ -237,6 +237,9 @@ ACTIONS: list[dict] = [
      "config_fields": [{"key": "category", "type": "select", "label": "Category", "options": [{"value": "all", "label": "All"}, {"value": "albums", "label": "Albums"}, {"value": "singles", "label": "Singles"}], "default": "all"}]},
     {"type": "scan_watchlist", "label": "Scan Watchlist", "icon": "eye", "description": "Check watched artists AND followed labels for new releases", "available": True},
     {"type": "scan_watchlist_podcasts", "label": "Scan Watchlist Podcasts", "icon": "mic", "description": "Check watchlisted podcasts for new episodes and prune expired", "available": True},
+    {"type": "audiobook_scan_library", "label": "Scan Audiobook Library", "icon": "headphones",
+     "description": "Scan the audiobook folder set in Settings, including books added outside SoulSync. Read tags and sidecars, index local books, and reconcile missing files without changing files on disk.",
+     "available": True},
     {"type": "scan_library", "label": "Scan Library", "icon": "refresh", "description": "Trigger media server library scan", "available": True},
     {"type": "refresh_mirrored", "label": "Refresh Mirrored Playlist", "icon": "copy", "description": "Re-fetch playlist from source and update mirror", "available": True,
      "config_fields": [
