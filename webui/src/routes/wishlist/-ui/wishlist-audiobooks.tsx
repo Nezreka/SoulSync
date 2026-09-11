@@ -195,64 +195,70 @@ export function WishlistAudiobooks() {
           </Link>
         </div>
       ) : (
-        <ul className={styles.rows}>
+        <ul className={styles.grid}>
           {shown.map((item) => (
-            <li className={styles.row} key={item.asin}>
+            <li className={styles.card} key={item.asin}>
               <Link
                 to="/audiobooks/$asin"
                 params={{ asin: item.asin }}
                 className={styles.coverLink}
+                aria-label={item.title}
               >
-                {item.cover_url ? (
-                  <img className={styles.cover} src={item.cover_url} alt="" loading="lazy" />
-                ) : (
-                  <span className={`${styles.cover} ${styles.coverBlank}`} aria-hidden="true" />
-                )}
+                <div className={styles.art}>
+                  {item.cover_url ? (
+                    <img className={styles.cover} src={item.cover_url} alt="" loading="lazy" />
+                  ) : (
+                    <span className={styles.coverBlank} aria-hidden="true">
+                      &#9835;
+                    </span>
+                  )}
+                  <span className={styles.scrim} aria-hidden="true" />
+                  <span
+                    className={`${styles.badge} ${
+                      item.status === 'done'
+                        ? styles.badgeDone
+                        : item.status === 'grabbed'
+                          ? styles.badgeActive
+                          : item.status === 'failed'
+                            ? styles.badgeFailed
+                            : ''
+                    }`}
+                  >
+                    {STATUS_LABELS[item.status] ?? item.status}
+                  </span>
+                </div>
               </Link>
 
-              <div className={styles.meta}>
+              <div className={styles.info}>
                 <Link to="/audiobooks/$asin" params={{ asin: item.asin }} className={styles.title}>
                   {item.title}
                 </Link>
-                <span className={styles.byline}>
-                  {item.authors.join(', ')}
-                  {item.narrators.length > 0 && ` · Narrated by ${item.narrators[0]}`}
-                </span>
+                <span className={styles.byline}>{item.authors.join(', ')}</span>
                 {item.series_title && (
                   <span className={styles.series}>
                     {item.series_sequence ? `Book ${item.series_sequence} of ` : ''}
                     {item.series_title}
                   </span>
                 )}
-                <span className={styles.trail}>
+                <span className={styles.trail} title={item.last_error || undefined}>
                   {item.attempt_count === 0
                     ? 'Not looked for yet'
-                    : `Looked ${item.attempt_count}× · last ${relativeTime(item.last_attempt_at)}`}
-                  {item.last_error ? ` · ${item.last_error}` : ''}
+                    : `Looked ${item.attempt_count}\u00d7 \u00b7 last ${relativeTime(item.last_attempt_at)}`}
+                  {item.last_error ? ` \u00b7 ${item.last_error}` : ''}
                 </span>
               </div>
 
-              <span
-                className={`${styles.status} ${
-                  item.status === 'done'
-                    ? styles.statusDone
-                    : item.status === 'grabbed'
-                      ? styles.statusActive
-                      : ''
-                }`}
-              >
-                {STATUS_LABELS[item.status] ?? item.status}
-              </span>
-
-              <div className={styles.rowActions}>
+              {/* the controls stay off the artwork and appear on hover, the way
+                  the video wishlist keeps its poster clean */}
+              <div className={styles.actions}>
                 {item.narrators.length > 0 && (
                   <button
                     type="button"
                     className={styles.action}
                     title={
                       item.narrator_mode === 'exact'
-                        ? `Only ${item.narrators[0]}'s reading will do — click to accept any narrator`
-                        : 'Any narrator will do — click to hold out for the one you picked'
+                        ? `Only ${item.narrators[0]}'s reading will do \u2014 click to accept any narrator`
+                        : 'Any narrator will do \u2014 click to hold out for the one you picked'
                     }
                     onClick={() =>
                       void changeNarratorMode(
@@ -261,7 +267,7 @@ export function WishlistAudiobooks() {
                       )
                     }
                   >
-                    {item.narrator_mode === 'exact' ? `${item.narrators[0]} only` : 'Any narrator'}
+                    {item.narrator_mode === 'exact' ? 'Narrator locked' : 'Any narrator'}
                   </button>
                 )}
                 <button
@@ -273,7 +279,7 @@ export function WishlistAudiobooks() {
                 </button>
                 <button
                   type="button"
-                  className={styles.action}
+                  className={`${styles.action} ${styles.actionDanger}`}
                   onClick={() => void remove(item.asin)}
                 >
                   Remove
