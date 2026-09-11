@@ -72,6 +72,28 @@ export async function fetchDeezerEditorial(genreId: number): Promise<DeezerEdito
   }
 }
 
+/**
+ * Search Deezer's playlists by name. Editorial and user playlists come back
+ * mixed, which is what Deezer's own search does.
+ *
+ * The server has supported ?q= since the shelf shipped; nothing called it, so
+ * the capability existed and no user could reach it.
+ */
+export async function searchDeezerPlaylists(
+  query: string,
+): Promise<DeezerEditorialPlaylist[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  try {
+    const data = await readJson<EditorialResponse>(
+      apiClient.get('discover/deezer/editorial', { searchParams: { q: trimmed } }),
+    );
+    return data.playlists ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /** The chips. Empty on failure, which hides the chip row rather than the shelf. */
 export async function fetchDeezerEditorialGenres(): Promise<DeezerEditorialGenre[]> {
   try {

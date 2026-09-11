@@ -20,6 +20,7 @@ import {
   fetchDeezerEditorial,
   fetchDeezerEditorialGenres,
   openDeezerPlaylistInSync,
+  searchDeezerPlaylists,
 } from '../-discover.deezer-editorial';
 import { DiscoverSection } from './discover-section';
 
@@ -99,6 +100,8 @@ function PlaylistCard({
 export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) => void }) {
   const [genres, setGenres] = useState<DeezerEditorialGenre[]>([]);
   const [genreId, setGenreId] = useState<number>(DEFAULT_GENRE);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
   const [playlists, setPlaylists] = useState<DeezerEditorialPlaylist[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -115,16 +118,27 @@ export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) 
   useEffect(() => {
     let live = true;
     setLoading(true);
-    void fetchDeezerEditorial(genreId).then((rows) => {
-      // a genre switched away from mid-flight must not overwrite the new one
-      if (!live) return;
-      setPlaylists(rows);
-      setLoading(false);
-    });
+    const trimmed = query.trim();
+    setSearching(trimmed.length > 0);
+    // debounced, so typing does not fire a request per keystroke at Deezer
+    const timer = window.setTimeout(
+      () => {
+        const request = trimmed ? searchDeezerPlaylists(trimmed) : fetchDeezerEditorial(genreId);
+        void request.then((rows) => {
+          // a genre or query switched away from mid-flight must not overwrite
+          // whatever replaced it
+          if (!live) return;
+          setPlaylists(rows);
+          setLoading(false);
+        });
+      },
+      trimmed ? 350 : 0,
+    );
     return () => {
       live = false;
+      window.clearTimeout(timer);
     };
-  }, [genreId]);
+  }, [genreId, query]);
 
   const [opening, setOpening] = useState<string | null>(null);
   const [stage, setStage] = useState<DeezerHandoffStage | null>(null);
@@ -152,31 +166,50 @@ export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) 
       count={playlists.length}
       loaded={!loading}
       actions={
-        genres.length > 0 ? (
+        <div className="dz-ed-controls">
+          <input
+            type="search"
+            className="dz-ed-search"
+            value={query}
+            placeholder="Search Deezer playlists…"
+            aria-label="Search Deezer playlists"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {genres.length > 0 ? (
           <div className="dz-ed-genres" role="tablist" aria-label="Deezer genres">
             {genres.map((g) => (
               <button
                 key={g.id}
                 type="button"
                 role="tab"
-                aria-selected={g.id === genreId}
-                className={`dz-ed-genre${g.id === genreId ? ' is-active' : ''}`}
-                onClick={() => setGenreId(g.id)}
+                aria-selected={!searching && g.id === genreId}
+                className={`dz-ed-genre${!searching && g.id === genreId ? ' is-active' : ''}`}
+                onClick={() => {
+                  // picking a genre leaves a search; they are two ways of
+                  // asking the same row a question, not two rows
+                  setQuery('');
+                  setGenreId(g.id);
+                }}
               >
                 {g.name}
               </button>
             ))}
-          </div>
-        ) : undefined
+            </div>
+          ) : null}
+        </div>
       }
     >
       {loading && playlists.length === 0 ? (
         <div className="discover-empty">
-          <p>Loading Deezer playlists…</p>
+          <p>{searching ? 'Searching Deezer…' : 'Loading Deezer playlists…'}</p>
         </div>
       ) : playlists.length === 0 ? (
         <div className="discover-empty">
-          <p>Could not reach Deezer just now.</p>
+          <p>
+            {searching
+              ? `No Deezer playlists match “${query.trim()}”.`
+              : 'Could not reach Deezer just now.'}
+          </p>
         </div>
       ) : (
         <div className="discover-grid">

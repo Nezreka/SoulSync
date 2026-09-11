@@ -85557,3 +85557,37 @@ body.src-modal-open { overflow: hidden; }
     opacity: 0.55;
     transition: opacity 0.25s ease;
 }
+
+/* the editorial shelf's header controls: a search box above the genre chips */
+.dz-ed-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-end;
+    max-width: 620px;
+}
+
+.dz-ed-search {
+    width: 100%;
+    max-width: 260px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.035);
+    color: #fff;
+    font-size: 12.5px;
+    outline: none;
+    transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.dz-ed-search::placeholder { color: rgba(255, 255, 255, 0.35); }
+
+.dz-ed-search:focus {
+    border-color: rgba(var(--accent-rgb), 0.5);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+@media (max-width: 768px) {
+    .dz-ed-controls { align-items: stretch; }
+    .dz-ed-search { max-width: none; }
+}

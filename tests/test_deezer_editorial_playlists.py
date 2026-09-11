@@ -124,13 +124,18 @@ def test_an_empty_search_asks_nothing():
     c._api_get.assert_not_called()
 
 
-def test_the_genre_list_is_offered_without_a_request():
-    """The chips must not cost an api call just to know what to ask for."""
+def test_the_genre_list_is_worth_its_one_request():
+    """This used to assert the opposite: that the chips cost no api call.
+
+    That saved one request and cost sixteen genres, because the hardcoded set
+    held twelve of Deezer's twenty-eight. The trade was wrong, so the assertion
+    changed with the decision rather than being deleted — the fallback below is
+    what still protects the offline case.
+    """
     c = DeezerClient.__new__(DeezerClient)
-    c._api_get = MagicMock(side_effect=AssertionError("asked the api for its own genre list"))
-    genres = c.get_editorial_genres()
-    assert {'id': 0, 'name': 'Top'} in genres
-    assert any(g['name'] == 'Rock' for g in genres)
+    c._api_get = MagicMock(return_value={"data": [{"id": 464, "name": "Metal"}]})
+    assert c.get_editorial_genres() == [{'id': 464, 'name': 'Metal'}]
+    c._api_get.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -260,3 +265,47 @@ def test_a_token_is_still_attached_when_asked_for():
     c._api_get('chart/0/playlists', use_token=False)
     assert 'access_token' not in sent
     assert requests is not None
+
+
+# ---------------------------------------------------------------------------
+# the genre list
+# ---------------------------------------------------------------------------
+
+def test_the_genres_come_from_deezer_not_a_constant():
+    """Twelve were hardcoded to save a request. Deezer publishes 28, so that
+    quietly hid Metal, Country, Blues, Folk, Soul & Funk and every regional
+    category from the shelf."""
+    c = _client({"data": [
+        {"id": 0, "name": "All"},
+        {"id": 464, "name": "Metal"},
+        {"id": 84, "name": "Country"},
+    ]})
+    genres = c.get_editorial_genres()
+    assert [g['name'] for g in genres] == ['All', 'Country', 'Metal']
+    c._api_get.assert_called_once_with('genre', use_token=False)
+
+
+def test_all_stays_at_the_front():
+    """It is the row the shelf opens on; alphabetical would bury it."""
+    c = _client({"data": [{"id": 464, "name": "Metal"}, {"id": 0, "name": "All"}]})
+    assert c.get_editorial_genres()[0]['name'] == 'All'
+
+
+def test_an_unreachable_genre_list_falls_back_to_the_builtin_set():
+    """The chips must still appear when Deezer is down."""
+    c = _client(None)
+    genres = c.get_editorial_genres()
+    assert len(genres) > 5
+    assert any(g['name'] == 'Top' for g in genres)
+
+
+def test_malformed_genre_rows_are_dropped():
+    c = _client({"data": [{"id": 1}, {"name": "No id"}, "junk", {"id": 2, "name": "Good"}]})
+    assert c.get_editorial_genres() == [{'id': 2, 'name': 'Good'}]
+
+
+def test_the_genre_list_does_not_send_a_token():
+    """Same public endpoint, same OAuthException trap as the charts."""
+    c = _client({"data": [{"id": 0, "name": "All"}]})
+    c.get_editorial_genres()
+    assert c._api_get.call_args.kwargs.get('use_token') is False

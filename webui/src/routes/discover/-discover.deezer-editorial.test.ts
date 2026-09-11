@@ -7,6 +7,7 @@ import {
   fetchDeezerEditorial,
   fetchDeezerEditorialGenres,
   openDeezerPlaylistInSync,
+  searchDeezerPlaylists,
 } from './-discover.deezer-editorial';
 
 const PLAYLIST = {
@@ -208,5 +209,37 @@ describe('progress while a playlist loads', () => {
       ),
     );
     await expect(openDeezerPlaylistInSync(PLAYLIST)).resolves.toBe('Deezer refused the request');
+  });
+});
+
+describe('searchDeezerPlaylists', () => {
+  it('asks the server with q, not a genre', async () => {
+    // the route has supported ?q= since the shelf shipped and nothing called
+    // it — the capability existed and no user could reach it
+    let asked: URLSearchParams | null = null;
+    server.use(
+      http.get('/api/discover/deezer/editorial', ({ request }) => {
+        asked = new URL(request.url).searchParams;
+        return HttpResponse.json({ success: true, playlists: [PLAYLIST] });
+      }),
+    );
+    const rows = await searchDeezerPlaylists('deep house');
+    expect(asked!.get('q')).toBe('deep house');
+    expect(asked!.get('genre')).toBeNull();
+    expect(rows).toHaveLength(1);
+  });
+
+  it('asks nothing for a blank query', async () => {
+    server.use(
+      http.get('/api/discover/deezer/editorial', () => {
+        throw new Error('searched for nothing');
+      }),
+    );
+    await expect(searchDeezerPlaylists('   ')).resolves.toEqual([]);
+  });
+
+  it('a failed search is an empty result, not a thrown page', async () => {
+    server.use(http.get('/api/discover/deezer/editorial', () => HttpResponse.error()));
+    await expect(searchDeezerPlaylists('x')).resolves.toEqual([]);
   });
 });

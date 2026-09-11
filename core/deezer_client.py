@@ -662,10 +662,10 @@ class DeezerClient:
     # Nothing here needs a token, so it works for every user whether or not they
     # have linked a Deezer account.
 
-    # A genre's own chart, keyed by the ids `GET /genre` returns. Kept as a
-    # tuple rather than fetched so a browse does not spend a request working out
-    # what to ask for, and so the order on screen is a decision rather than
-    # whatever the api felt like returning.
+    # The fallback genre set, used only when `GET /genre` cannot be reached.
+    # The live list is asked for instead (see get_editorial_genres): this used
+    # to BE the list, and shipping twelve of Deezer's twenty-eight quietly hid
+    # Metal, Country, Blues, Folk, Soul & Funk and every regional category.
     EDITORIAL_GENRES = (
         (0, 'Top'),
         (132, 'Pop'),
@@ -682,8 +682,33 @@ class DeezerClient:
     )
 
     def get_editorial_genres(self) -> List[Dict[str, Any]]:
-        """The genres a browse can ask for, as [{id, name}]."""
-        return [{'id': gid, 'name': name} for gid, name in self.EDITORIAL_GENRES]
+        """The genres a browse can ask for, as [{id, name}].
+
+        Asked for rather than hardcoded. The first version shipped twelve names
+        as a constant to save a request, which cost sixteen genres - Metal,
+        Country, Blues, Soul & Funk, Folk and every regional category among
+        them. One cached call is worth more than that.
+
+        EDITORIAL_GENRES stays as the fallback, so the chips still appear when
+        Deezer is unreachable, and 'All' is kept at the front because it is the
+        row the shelf opens on.
+        """
+        data = self._api_get('genre', use_token=False)
+        rows = (data or {}).get('data') or []
+        out = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            gid = row.get('id')
+            name = str(row.get('name') or '').strip()
+            if gid is None or not name:
+                continue
+            out.append({'id': int(gid), 'name': name})
+        if not out:
+            logger.debug("Deezer genre list unavailable; using the built-in set")
+            return [{'id': gid, 'name': name} for gid, name in self.EDITORIAL_GENRES]
+        out.sort(key=lambda g: (g['id'] != 0, g['name'].lower()))
+        return out
 
     def get_editorial_playlists(self, genre_id: int = 0, limit: int = 25) -> List[Dict[str, Any]]:
         """Deezer's curated playlists for one genre.
