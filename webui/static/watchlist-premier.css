@@ -1154,12 +1154,213 @@
   line-height: 1.6;
 }
 
+/* Inner inspector reset from style.css legacy mobile fixed positioning */
+.watchlist-inspector-drawer .watchlist-inspector {
+  position: static !important;
+  max-height: none !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  z-index: auto !important;
+  overflow: visible !important;
+}
+
+.watchlist-inspector-drawer .watchlist-inspector::before {
+  display: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   Watchlist Artist Full Detail Modal (Premier Mobile & Desktop)
+   -------------------------------------------------------------------------- */
+.watchlist-artist-detail-overlay {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  background: #0d1017 !important;
+  z-index: 10060 !important; /* Above hamburger button (9999) and float buttons */
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.watchlist-artist-detail-overlay.visible {
+  transform: translateX(0) !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-banner {
+  position: relative !important;
+  width: 100% !important;
+  max-height: 240px !important;
+  overflow: hidden !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-banner img {
+  width: 100% !important;
+  height: 240px !important;
+  object-fit: cover !important;
+  display: block !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-banner-fade {
+  position: absolute !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: 100px !important;
+  background: linear-gradient(to bottom, transparent, #0d1017) !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-content {
+  position: relative !important;
+  z-index: 2 !important;
+  padding: 24px 20px calc(48px + env(safe-area-inset-bottom, 24px)) !important;
+  max-width: 680px !important;
+  margin: 0 auto !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-back {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 9px 18px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: var(--wl-radius-full) !important;
+  color: #ffffff !important;
+  font-size: 13px !important;
+  font-weight: 650 !important;
+  cursor: pointer !important;
+  margin-bottom: 20px !important;
+  backdrop-filter: blur(16px) !important;
+  transition: all 0.2s ease !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-back:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+  transform: translateX(-2px) !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-hero {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  text-align: center !important;
+  gap: 16px !important;
+  margin-bottom: 28px !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-hero img {
+  width: 120px !important;
+  height: 120px !important;
+  border-radius: 50% !important;
+  border: 3px solid rgba(var(--accent-rgb, 147, 51, 234), 0.5) !important;
+  box-shadow: 0 0 30px rgba(var(--accent-rgb, 147, 51, 234), 0.35) !important;
+  object-fit: cover !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-hero-name {
+  font-size: 26px !important;
+  font-weight: 850 !important;
+  letter-spacing: -0.02em !important;
+  color: #ffffff !important;
+  margin: 0 !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-hero-stats {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 16px !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-hero-genres {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-genre-tag {
+  display: inline-flex !important;
+  padding: 4px 10px !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: var(--wl-radius-full) !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  color: var(--wl-text-secondary) !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-actions {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  margin: 24px 0 32px !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-discography-btn,
+.watchlist-artist-detail-overlay .watchlist-detail-settings-btn,
+.watchlist-artist-detail-overlay .watchlist-detail-remove-btn {
+  width: 100% !important;
+  min-height: 46px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 12px !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-discography-btn {
+  background: linear-gradient(135deg, rgba(var(--accent-rgb, 147, 51, 234), 0.9), rgba(var(--accent-rgb, 147, 51, 234), 0.7)) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb, 147, 51, 234), 0.35) !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-settings-btn {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-remove-btn {
+  background: rgba(239, 68, 68, 0.12) !important;
+  color: #fca5a5 !important;
+  border: 1px solid rgba(239, 68, 68, 0.3) !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-section {
+  background: var(--wl-surface) !important;
+  border: 1px solid var(--wl-line) !important;
+  border-radius: 16px !important;
+  padding: 16px !important;
+  margin-bottom: 16px !important;
+}
+
+.watchlist-artist-detail-overlay .watchlist-detail-section-title {
+  font-size: 12px !important;
+  font-weight: 750 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: var(--wl-text-muted) !important;
+  margin-bottom: 10px !important;
+}
+
 /* --------------------------------------------------------------------------
    Responsive Breakpoints
    -------------------------------------------------------------------------- */
 @media (max-width: 768px) {
   .watchlist-page-container {
-    padding: 12px 14px 48px;
+    padding: 12px 14px calc(48px + env(safe-area-inset-bottom, 24px)) !important;
   }
 
   .watchlist-page-container .watchlist-page-header {
@@ -1168,16 +1369,169 @@
     gap: 12px;
   }
 
+  .watchlist-page-container .watchlist-page-header-left {
+    width: 100%;
+    padding-left: 54px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .watchlist-page-container .watchlist-page-actions {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
+    -webkit-overflow-scrolling: touch !important;
+    gap: 8px !important;
+    padding-bottom: 6px !important;
+    width: 100% !important;
+  }
+
+  .watchlist-page-container .watchlist-page-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .watchlist-page-container .watchlist-page-actions .wl-chip {
+    padding: 7px 13px !important;
+    font-size: 12.5px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .watchlist-page-container .watchlist-attention-strip {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    padding-bottom: 6px !important;
+    scrollbar-width: none !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .watchlist-page-container .watchlist-attention-strip::-webkit-scrollbar {
+    display: none;
+  }
+
   .watchlist-page-container .watchlist-artists-grid--rows {
     grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .watchlist-page-container .watchlist-artist-card {
+    padding: 10px 12px !important;
+    grid-template-columns: 60px minmax(0, 1fr) auto !important;
+    gap: 12px !important;
+  }
+
+  .watchlist-page-container .watchlist-card-image,
+  .watchlist-page-container .watchlist-card-image img,
+  .watchlist-page-container .watchlist-card-image .watchlist-card-image-fallback {
+    width: 60px !important;
+    height: 60px !important;
+    border-radius: 10px !important;
+  }
+
+  .watchlist-page-container .watchlist-card-name {
+    font-size: 15px !important;
   }
 
   .watchlist-page-container .watchlist-toolbar {
     flex-direction: column;
     align-items: stretch;
+    gap: 8px;
+  }
+
+  .watchlist-page-container .watchlist-sort-select {
+    width: 100%;
+  }
+
+  /* Slide-Over Drawer on Mobile -> Bottom Sheet */
+  .watchlist-inspector-backdrop {
+    z-index: 10050 !important;
+    background: rgba(0, 0, 0, 0.75) !important;
+    backdrop-filter: blur(16px) !important;
   }
 
   .watchlist-inspector-drawer {
-    width: 100vw;
+    position: fixed !important;
+    top: auto !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 85vh !important;
+    background: #141722 !important;
+    border-radius: 24px 24px 0 0 !important;
+    border-left: none !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
+    box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.85) !important;
+    z-index: 10051 !important;
+    padding: 16px 18px calc(24px + env(safe-area-inset-bottom, 20px)) !important;
+    animation: wlSlideUpMobile 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 16px !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .watchlist-inspector-drawer::before {
+    content: '' !important;
+    display: block !important;
+    width: 44px !important;
+    height: 4px !important;
+    border-radius: 2px !important;
+    background: rgba(255, 255, 255, 0.25) !important;
+    margin: 0 auto 4px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .watchlist-inspector-header {
+    margin-bottom: 4px !important;
+  }
+
+  .watchlist-page-container .watchlist-inspector-actions {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .watchlist-page-container .watchlist-inspector-actions .wl-chip {
+    width: 100% !important;
+    justify-content: center !important;
+    padding: 9px 8px !important;
+    font-size: 13px !important;
   }
 }
+
+@keyframes wlSlideUpMobile {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+/* --------------------------------------------------------------------------
+   Suppress floating action buttons & mobile hamburger during modals/drawers
+   -------------------------------------------------------------------------- */
+body:has(.watchlist-artist-detail-overlay.visible) .hamburger-btn,
+body:has(.watchlist-artist-detail-overlay.visible) #gsearch-bar,
+body:has(.watchlist-artist-detail-overlay.visible) #gsearch-aura,
+body:has(.watchlist-artist-detail-overlay.visible) #notif-bell-btn,
+body:has(.watchlist-artist-detail-overlay.visible) #helper-float-btn,
+body:has(.watchlist-artist-detail-overlay.visible) .activity-float-btn,
+body:has(.watchlist-inspector-backdrop) #gsearch-bar,
+body:has(.watchlist-inspector-backdrop) #gsearch-aura,
+body:has(.watchlist-inspector-backdrop) #notif-bell-btn,
+body:has(.watchlist-inspector-backdrop) #helper-float-btn,
+body:has(.watchlist-inspector-backdrop) .activity-float-btn,
+body:has(#watchlist-artist-config-modal-overlay) #gsearch-bar,
+body:has(#watchlist-artist-config-modal-overlay) #gsearch-aura,
+body:has(#watchlist-artist-config-modal-overlay) #notif-bell-btn,
+body:has(#watchlist-artist-config-modal-overlay) #helper-float-btn,
+body:has(#watchlist-artist-config-modal-overlay) .activity-float-btn {
+  display: none !important;
+}
+
