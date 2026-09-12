@@ -38,19 +38,9 @@ logger = get_logger("video.recycle")
 
 TRASH_DIRNAME = "ss_recycle"
 
-_ROOT_SETTINGS = ("movies_path", "tv_path", "youtube_path")
-
-
 def _library_roots(db) -> list:
-    roots = []
-    for key in _ROOT_SETTINGS:
-        try:
-            v = str(db.get_setting(key) or "").strip()
-        except Exception:   # noqa: BLE001
-            v = ""
-        if v:
-            roots.append(v)
-    return roots
+    from core.video.library_roots import library_roots
+    return library_roots(db)
 
 
 def _root_for(path: str, roots) -> Optional[str]:

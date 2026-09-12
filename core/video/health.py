@@ -312,6 +312,14 @@ def collect(db) -> dict:
                 checks.append(_check(key + "_space", label, "warning",
                                      "%.1f GB free — the drive is nearly full" % free))
 
+    from core.video.library_roots import ADDITIONAL_KEYS, additional_paths
+    for key in ADDITIONAL_KEYS:
+        for index, path in enumerate(additional_paths(db, key)):
+            if not os.path.isdir(path):
+                label = "Additional movie library" if key.startswith("movies") else "Additional TV library"
+                checks.append(_check(f"{key}_{index}", label, "error",
+                                     f"{path} is unreachable — a drive or mount may be down"))
+
     # 2) recycle override folder (auto per-library folders create themselves)
     override = str(settings.get("recycle_path") or "").strip()
     if settings.get("recycle_deletes", True) and override and not os.path.isdir(override):

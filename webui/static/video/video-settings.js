@@ -376,6 +376,48 @@
         if (btn && !btn._vseedWired) { btn._vseedWired = true; btn.addEventListener('click', loadSeedIndexers); }
     }
 
+    function addVideoPathRow(host, value) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.value = value || '';
+        input.placeholder = host.dataset.videoExtraKind === 'movies' ? '/media/movies2' : '/media/tv2';
+        input.setAttribute('aria-label', host.dataset.videoExtraKind === 'movies' ? 'Additional movie library path' : 'Additional TV library path');
+        input.style.cssText = 'flex:1;min-width:0';
+        input.addEventListener('change', function () { saveDownloads(true); });
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'test-button';
+        remove.textContent = 'Remove';
+        remove.setAttribute('aria-label', 'Remove library path');
+        remove.addEventListener('click', function () { row.remove(); saveDownloads(true); });
+        if (host.closest('[aria-busy="true"]')) {
+            [input, remove].forEach(function (control) {
+                control.setAttribute('data-library-disabled', 'false');
+                control.disabled = true;
+            });
+        }
+        row.appendChild(input);
+        row.appendChild(remove);
+        host.appendChild(row);
+        return input;
+    }
+
+    function loadVideoPaths(kind, paths) {
+        var host = document.getElementById('video-' + kind + '-additional-paths');
+        if (!host) return;
+        host.replaceChildren();
+        (Array.isArray(paths) ? paths : []).forEach(function (path) { addVideoPathRow(host, path); });
+        host.dataset.loaded = 'true';
+    }
+
+    function collectVideoPaths(kind) {
+        var host = document.getElementById('video-' + kind + '-additional-paths');
+        if (!host || host.dataset.loaded !== 'true') return undefined;
+        return Array.from(host.querySelectorAll('input')).map(function (input) { return input.value.trim(); }).filter(Boolean);
+    }
+
     function loadDownloads() {
         return fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -385,6 +427,8 @@
                 setP('video-download-path', d.download_path);
                 setP('video-movies-path', d.movies_path);
                 setP('video-tv-path', d.tv_path);
+                loadVideoPaths('movies', d.movies_additional_paths);
+                loadVideoPaths('tv', d.tv_additional_paths);
                 setP('video-youtube-path', d.youtube_path);
                 _videoMode = d.download_mode || 'soulseek';
                 _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
@@ -414,6 +458,8 @@
                 download_path: val('video-download-path'),
                 movies_path: val('video-movies-path'),
                 tv_path: val('video-tv-path'),
+                movies_additional_paths: collectVideoPaths('movies'),
+                tv_additional_paths: collectVideoPaths('tv'),
                 youtube_path: val('video-youtube-path'),
                 // download_mode / hybrid_order are NOT sent from here any more.
                 // The shared download-chain widget owns them and writes them
@@ -778,6 +824,14 @@
     }
 
     function wireDownloads() {
+        document.querySelectorAll('[data-video-add-path]').forEach(function (button) {
+            if (button._vdWired) return;
+            button._vdWired = true;
+            button.addEventListener('click', function () {
+                var host = document.getElementById('video-' + button.dataset.videoAddPath + '-additional-paths');
+                if (host && host.dataset.loaded === 'true') addVideoPathRow(host, '').focus();
+            });
+        });
         var ms = document.getElementById('video-download-mode');
         if (ms && !ms._vdWired) {
             ms._vdWired = true;

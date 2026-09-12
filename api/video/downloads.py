@@ -379,6 +379,8 @@ def register_routes(bp):
         if not out["movies_path"]:        # migrate the legacy single transfer folder → Movies
             out["movies_path"] = db.get_setting("transfer_path") or ""
         out["download_path"] = config_manager.get(_SHARED_DOWNLOAD_KEY, "") or ""   # shared w/ music
+        from core.video.library_roots import ADDITIONAL_KEYS, additional_paths
+        out.update({key: additional_paths(db, key) for key in ADDITIONAL_KEYS})
         out.update(load_source(db))   # download_mode + hybrid_order
         return jsonify(out)
 
@@ -388,6 +390,14 @@ def register_routes(bp):
         from core.video.download_config import save as save_source
         db = get_video_db()
         body = request.get_json(silent=True) or {}
+        from core.video.library_roots import ADDITIONAL_KEYS, normalize_paths
+        import json
+        try:
+            extras = {key: normalize_paths(body[key]) for key in ADDITIONAL_KEYS if key in body}
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        for key, paths in extras.items():
+            db.set_setting(key, json.dumps(paths))
         for key in _PATH_KEYS:
             if key in body:
                 db.set_setting(key, (str(body.get(key) or "")).strip())

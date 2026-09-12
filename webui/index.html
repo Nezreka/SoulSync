@@ -5429,6 +5429,21 @@
                                     <label>📺 TV Shows Library:</label>
                                     <input type="text" id="video-tv-path" placeholder="/media/tv">
                                 </div>
+                                <div class="setting-help-text">
+                                    Movies and TV folders above are the destinations for new downloads. Add extra libraries below for existing collections on other drives. Include those libraries in your Plex/Jellyfin scan selection. In Docker, mount each folder at a different container path and enter that path here; use read-write access for renaming, upgrades, and recycling.
+                                </div>
+                                <div class="form-group">
+                                    <label>Additional Movie Libraries:</label>
+                                    <div id="video-movies-additional-paths" data-video-extra-kind="movies"></div>
+                                    <button type="button" class="test-button" data-video-add-path="movies">+ Add Path</button>
+                                    <div class="setting-help-text">Extra folders only — no need to repeat the primary folder. Example: /media/movies2</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Additional TV Libraries:</label>
+                                    <div id="video-tv-additional-paths" data-video-extra-kind="tv"></div>
+                                    <button type="button" class="test-button" data-video-add-path="tv">+ Add Path</button>
+                                    <div class="setting-help-text">Extra folders only — no need to repeat the primary folder. Example: /media/tv2</div>
+                                </div>
                                 <div class="form-group">
                                     <label>▶️ YouTube Library:</label>
                                     <input type="text" id="video-youtube-path" placeholder="/media/youtube">

@@ -70,11 +70,30 @@ services:
       # ─── Video libraries (OUTPUT) — one per content type ─────────────────
       # The video Downloads tab sorts finished files into these by type. Point each
       # at where Plex/Jellyfin reads from, then set the matching path on
-      # Settings → Downloads (the in-app placeholders match the in-container paths):
+      # Settings → Library → Folders → Videos (container paths):
       #   Movies → /media/movies   ·   TV → /media/tv   ·   YouTube → /media/youtube
       - ./Movies:/media/movies
       - ./TV:/media/tv
       - ./YouTube:/media/youtube
+      # Multiple movie / TV drives: give EVERY mount a UNIQUE container path.
+      # Mounts do not merge: do NOT bind several drives to /media/movies or /media/tv.
+      # Replace the host paths below with your real folders, then uncomment:
+      # - /mnt/drive2/Movies:/media/movies2:rw
+      # - /mnt/drive3/Movies:/media/movies3:rw
+      # - /mnt/drive4/Movies:/media/movies4:rw
+      # - /mnt/drive2/TV:/media/tv2:rw
+      # - /mnt/drive3/TV:/media/tv3:rw
+      # - /mnt/drive4/TV:/media/tv4:rw
+      # Recreate the container after adding mounts. In Settings → Library →
+      # Folders → Videos, add /media/movies2, /media/movies3, /media/movies4 under
+      # Additional Movie Libraries, and the /media/tv2 etc. paths under Additional
+      # TV Libraries. Enter CONTAINER paths (right side), not /mnt/drive2 paths.
+      # Keep /media/movies and /media/tv as primary destinations for new downloads.
+      # Extra paths let SoulSync locate existing files for playback, upgrades,
+      # renaming and recycling; :rw permits those file operations.
+      # Plex/Jellyfin must also have these folders mounted and included in the
+      # libraries selected for SoulSync's video scan. Adding paths here does not
+      # create media-server libraries or directly crawl unindexed video folders.
       # Use named volume for database persistence (separate from host database)
       # NOTE: Changed from /app/database to /app/data to avoid overwriting Python package
       # Holds BOTH databases (music_library.db + video_library.db) plus the video

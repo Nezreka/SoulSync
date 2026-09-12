@@ -929,7 +929,10 @@ const LIBRARY_SUMMARIES = {
     'library-video-folders': () => {
         const set = ['video-movies-path', 'video-tv-path', 'video-youtube-path']
             .filter(id => (document.getElementById(id)?.value || '').trim()).length;
-        return set ? `${set} of 3 libraries set` : 'no libraries set yet';
+        const extra = [...document.querySelectorAll('[data-video-extra-kind] input')]
+            .filter(input => input.value.trim()).length;
+        const primary = set ? `${set} of 3 libraries set` : 'no primary libraries set';
+        return extra ? `${primary} · ${extra} additional` : (set ? primary : 'no libraries set yet');
     },
     'library-post-processing': () => {
         const on = (id) => document.getElementById(id)?.checked;

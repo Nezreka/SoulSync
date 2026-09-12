@@ -144,3 +144,25 @@ def test_owned_library_dir_resolves_real_folder(db, tmp_path, monkeypatch):
     # Unowned target → None (template destination applies).
     dl2 = dict(dl, media_id="999")
     assert _owned_library_dir(db, dl2) is None
+
+
+def test_extra_drive_resolution_and_recycling_stay_on_that_drive(db, tmp_path):
+    from core.video.recycle import trash_dir_for
+    from core.video.library_roots import containing_root, library_roots
+    root = tmp_path / "movies2"
+    file = root / "Film" / "Film.mkv"
+    file.parent.mkdir(parents=True)
+    file.write_bytes(b"movie")
+    db.set_setting("movies_path", str(tmp_path / "primary"))
+    db.set_setting("movies_additional_paths", json.dumps([str(root)]))
+    resolved = resolve_video_file_path("/plex/movies/Film/Film.mkv", video_base_dirs(db), size_bytes=5)
+    assert resolved == str(file)
+    assert containing_root(resolved, library_roots(db, "movie")) == str(root)
+    assert trash_dir_for(resolved, {}, db) == str(root / "ss_recycle")
+    assert db.get_setting("movies_path") == str(tmp_path / "primary")
+
+
+def test_specific_folder_on_extra_drive_beats_primary_basename():
+    files = {"/primary/movie.mkv", "/extra/Film/movie.mkv"}
+    assert resolve_video_file_path("/server/Film/movie.mkv", ["/primary", "/extra"],
+                                   exists=lambda path: path in files) == "/extra/Film/movie.mkv"

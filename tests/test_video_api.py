@@ -663,7 +663,8 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "download_mode": "soulseek", "hybrid_order": ["soulseek"],
             # seeding lifecycle (arr-parity P5) rides the same config payload
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
-            "seed_mode": "soulsync", "seed_overrides": {}}
+            "seed_mode": "soulsync", "seed_overrides": {},
+            "movies_additional_paths": [], "tv_additional_paths": []}
         # Round-trips: libraries → video.db, the INPUT folder → the SHARED music key.
         client.post("/api/video/downloads/config",
                     json={"download_path": " /mnt/v/dl ", "movies_path": "/media/movies",
@@ -674,7 +675,8 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "tv_path": "/media/tv", "youtube_path": "/media/yt",
             "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
-            "seed_mode": "soulsync", "seed_overrides": {}}
+            "seed_mode": "soulsync", "seed_overrides": {},
+            "movies_additional_paths": [], "tv_additional_paths": []}
         # The input folder is the SHARED soulseek.download_path (so music sees it too);
         # it is NOT stored in video.db.
         assert fake.get("soulseek.download_path") == "/mnt/v/dl"
@@ -1924,3 +1926,16 @@ def test_a_broken_alias_lookup_never_blocks_a_grab(tmp_path, monkeypatch):
         assert _acceptable_titles("Password (2022)", "show", 203254) == ["Password (2022)"]
     finally:
         videoapi._video_db = None
+
+
+def test_additional_library_paths_roundtrip_validate_and_preserve(tmp_path):
+    client, api = _make_client(tmp_path)
+    url = "/api/video/downloads/config"
+    assert client.post(url, json={"movies_path": "/movies", "movies_additional_paths": [" /movies2 ", "/movies2", ""], "tv_additional_paths": ["/tv2"]}).status_code == 200
+    assert client.get(url).get_json()["movies_additional_paths"] == ["/movies2"]
+    client.post(url, json={"movies_path": "/new"})
+    assert client.get(url).get_json()["tv_additional_paths"] == ["/tv2"]
+    assert client.post(url, json={"movies_path": "/bad", "movies_additional_paths": "oops"}).status_code == 400
+    assert client.get(url).get_json()["movies_path"] == "/new"
+    client.post(url, json={"movies_additional_paths": []})
+    assert client.get(url).get_json()["movies_additional_paths"] == []

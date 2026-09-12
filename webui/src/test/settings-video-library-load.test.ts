@@ -16,6 +16,8 @@ function setup() {
                 download_path: '/downloads',
                 movies_path: '/movies',
                 tv_path: '/tv',
+                movies_additional_paths: ['/movies2'],
+                tv_additional_paths: ['/tv2'],
                 youtube_path: '/youtube',
               },
         ),
@@ -61,4 +63,29 @@ describe('shared video Library initialization', () => {
     );
     expect((doc.getElementById('video-movies-path') as HTMLInputElement).value).toBe('/movies');
   });
+});
+
+it('loads, edits, adds and removes additional video library paths', async () => {
+  const { doc, fetcher, show } = setup();
+  show();
+  await waitFor(() =>
+    expect(doc.querySelector('#video-movies-additional-paths input')).not.toBeNull(),
+  );
+  const movie = doc.querySelector('#video-movies-additional-paths input') as HTMLInputElement;
+  await waitFor(() => expect(movie.disabled).toBe(false));
+  expect(movie.value).toBe('/movies2');
+  const tv = doc.querySelector('#video-tv-additional-paths input') as HTMLInputElement;
+  expect(tv.value).toBe('/tv2');
+  (doc.querySelector('[data-video-add-path="movies"]') as HTMLButtonElement).click();
+  const inputs = doc.querySelectorAll('#video-movies-additional-paths input');
+  expect(inputs.length).toBe(2);
+  (inputs[1] as HTMLInputElement).value = '/movies3';
+  inputs[1].dispatchEvent(new Event('change'));
+  const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+  let body = JSON.parse(calls.at(-1)![1].body as string);
+  expect(body.movies_additional_paths).toEqual(['/movies2', '/movies3']);
+  expect(body.tv_additional_paths).toEqual(['/tv2']);
+  (doc.querySelector('#video-movies-additional-paths button') as HTMLButtonElement).click();
+  body = JSON.parse(calls.at(-1)![1].body as string);
+  expect(body.movies_additional_paths).toEqual(['/movies3']);
 });
