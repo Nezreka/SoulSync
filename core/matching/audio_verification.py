@@ -191,21 +191,16 @@ def _alias_aware_artist_sim(expected_artist: str, actual_artist: str,
 
 
 def _find_best_title_artist_match(recordings, expected_title, expected_artist,
-                                  aliases=None):
+                                  aliases=None, expected_duration_s=None):
     """Return (best_recording, title_sim, artist_sim) — title weighted higher.
 
-    Ties are broken in favour of a candidate whose VERSION matches the expected
-    one. `normalize` deliberately strips bracketed version tags, so "Celebrity"
-    and "Celebrity (karaoke)" both score title_sim 1.0 against an expected
-    "Celebrity" — an exact tie. With a strict `>` the winner was simply whichever
-    MusicBrainz happened to list first, and `evaluate`'s version gate then failed
-    on it and reported "Wrong download: 'Celebrity' is actually 'Celebrity
-    (karaoke)'" — for a file that is perfectly correct, with the matching
-    recording sitting in the same candidate list (#1132).
-
-    Reversing the candidate order flipped the verdict between FAIL and PASS,
-    which is what makes this a bug rather than a judgement call.
+    Ties are broken in favour of candidate duration agreement, version agreement,
+    and verbatim title similarity before bracket stripping. `normalize` deliberately
+    strips bracketed version tags, so "Celebrity" and "Celebrity (karaoke)" both
+    score title_sim 1.0 against an expected "Celebrity" — an exact tie.
     """
+    from core.matching.acoustid_candidates import duration_mismatches_strongly
+
     expected_version = _detect_title_version(expected_title or '')
     best_rec = None
     best_title_sim = 0.0
@@ -217,8 +212,30 @@ def _find_best_title_artist_match(recordings, expected_title, expected_artist,
         title_sim = similarity(expected_title, title)
         artist_sim = _alias_aware_artist_sim(expected_artist, artist, aliases)
         combined = (title_sim * 0.6) + (artist_sim * 0.4)
-        # Similarity dominates; version agreement only settles a draw.
-        key = (combined, 1 if _detect_title_version(title) == expected_version else 0)
+
+        raw_title_sim = SequenceMatcher(
+            None, (expected_title or '').lower().strip(), (title or '').lower().strip()
+        ).ratio()
+
+        rec_dur = rec.get('duration') or rec.get('length')
+        if rec_dur and rec_dur > 10000:
+            rec_dur_s = rec_dur / 1000.0
+        else:
+            rec_dur_s = rec_dur
+
+        dur_score = 0
+        if expected_duration_s and rec_dur_s:
+            if not duration_mismatches_strongly(expected_duration_s, rec_dur_s):
+                dur_score = 1
+            else:
+                dur_score = -1
+
+        key = (
+            combined,
+            dur_score,
+            1 if _detect_title_version(title) == expected_version else 0,
+            raw_title_sim,
+        )
         if best_key is None or key > best_key:
             best_key = key
             best_rec = rec
@@ -284,7 +301,8 @@ def _recording_identity(title: Optional[str]) -> str:
 def evaluate(expected_title: str, expected_artist: str,
              recordings: List[dict], *, fingerprint_score: float,
              aliases_provider: Optional[Any] = None,
-             accept_version: Optional[str] = None) -> Outcome:
+             accept_version: Optional[str] = None,
+             expected_duration_s: Optional[float] = None) -> Outcome:
     """Decide PASS / SKIP / FAIL for a fingerprinted file against expected
     title/artist. Pure: no I/O. Shared by import verification and library scan.
 
@@ -313,6 +331,7 @@ def evaluate(expected_title: str, expected_artist: str,
 
     best_rec, title_sim, artist_sim = _find_best_title_artist_match(
         recordings, expected_title, expected_artist, aliases_provider,
+        expected_duration_s=expected_duration_s,
     )
     if no_expected_artist:
         artist_sim = 1.0
