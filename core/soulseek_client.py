@@ -2256,6 +2256,19 @@ class SoulseekClient(DownloadSourcePlugin):
         from urllib.parse import quote
         return quote(str(part), safe="")
 
+    async def get_chat_connection_state(self) -> Dict[str, Any]:
+        """Chat requires a Soulseek login, not merely a reachable slskd API."""
+        state = await self._make_request('GET', 'server/state')
+        if not isinstance(state, dict) or not state:
+            return {"connected": False, "code": "slskd_unavailable",
+                    "error": "Cannot check slskd's Soulseek connection. Check that slskd is running and its API key is valid."}
+        connected = state.get('isConnected', state.get('IsConnected', False))
+        logged_in = state.get('isLoggedIn', state.get('IsLoggedIn', False))
+        if connected is True and logged_in is True:
+            return {"connected": True}
+        return {"connected": False, "code": "slskd_disconnected",
+                "error": "slskd is not connected and logged in to Soulseek. Reconnect in slskd, then try again. Your message has not been sent."}
+
     async def get_joined_rooms(self) -> List[str]:
         """Names of the rooms slskd is currently in ([] when none/unreachable)."""
         res = await self._make_request('GET', 'rooms/joined')

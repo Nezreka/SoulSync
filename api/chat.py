@@ -408,6 +408,33 @@ def _oembed_fetch(video_id):
 def create_blueprint() -> Blueprint:
     bp = Blueprint("chat_api", __name__)
 
+    def connection_state(client):
+        probe = getattr(client, "get_chat_connection_state", None)
+        if not callable(probe):
+            return {"connected": True}  # compatibility with injected chat adapters
+        try:
+            return _run_async(probe(), timeout=5)
+        except Exception:
+            return {"connected": False, "code": "slskd_unavailable",
+                    "error": "Cannot reach slskd. Check its connection before sending. Your draft is preserved."}
+
+    @bp.before_request
+    def require_soulseek_connection():
+        path = request.path
+        sends = request.method == "POST" and (path in (
+            "/api/chat/room/message", "/api/chat/room/protocol", "/api/chat/room/react",
+            "/api/chat/rooms/join") or path.startswith("/api/chat/conversations/"))
+        reads = request.method == "GET" and (path == "/api/chat/room" or path.startswith("/api/chat/conversations/"))
+        if not (sends or reads) or (sends and not _can_send()):
+            return None
+        client = _client()
+        if client is None:
+            return None  # route retains its existing not-configured response
+        state = connection_state(client)
+        if not state.get("connected"):
+            return jsonify({**state, "can_send": False}), 503
+        return None
+
     # ── Arcade bank (play money) ─────────────────────────────────────────
     # Per profile, local, refilled every local midnight. It is NOT authoritative
     # for anything between players and is not meant to be: a balance only your
@@ -991,10 +1018,12 @@ def create_blueprint() -> Blueprint:
     def chat_status():
         """Cheap page hydrate: is chat usable, which room, may I send."""
         client = _client()
+        connection = connection_state(client) if client is not None else {"connected": False}
         return jsonify({
+            **connection,
             "configured": client is not None,
             "room": _room_name(),
-            "can_send": _can_send(),
+            "can_send": _can_send() and connection.get("connected", False),
             "is_admin": bool(getattr(g, "is_admin", True)),   # shows the settings cog
             # our slskd account name — the page needs it for @mention highlights
             "username": _self_username(client) if client is not None else "",
