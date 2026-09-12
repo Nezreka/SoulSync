@@ -1056,9 +1056,18 @@ function handleLibraryMediaTabKey(event) {
 
 // Settings redesign — tab switching + service accordions
 function switchSettingsTab(tab) {
+    const search = document.getElementById('stg-search-input');
+    const results = document.getElementById('stg-search-results');
+    if (search) search.value = '';
+    if (results) results.hidden = true;
     if (tab === 'library') document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
     // Update tab bar
-    document.querySelectorAll('.stg-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    document.querySelectorAll('#settings-page .stg-tab').forEach(t => {
+        const active = t.dataset.tab === tab;
+        t.classList.toggle('active', active);
+        if (active) t.setAttribute('aria-current', 'page');
+        else t.removeAttribute('aria-current');
+    });
     // Show/hide settings groups and section headers by data-stg attribute
     document.querySelectorAll('#settings-page [data-stg]').forEach(g => {
         g.style.display = g.dataset.stg === tab ? '' : 'none';
@@ -1122,9 +1131,9 @@ function switchSettingsTab(tab) {
     const titles = {
         connections: { title: 'Connections', sub: 'Accounts, media servers, and API keys SoulSync connects to' },
         sources: { title: 'Sources', sub: 'Configure and prioritize acquisition sources and indexers' },
-        downloads: { title: 'Downloads', sub: 'Download modes, folder destinations, and chain priorities' },
+        downloads: { title: 'Downloads', sub: 'Download sources, queue behavior, and transfer preferences' },
         quality: { title: 'Quality', sub: 'Audio and video formats, release profiles, and ladders' },
-        library: { title: 'Library', sub: 'Organization rules, tagging, filters, and collection preferences' },
+        library: { title: 'Library', sub: 'Folders, file organization, tagging, and collection preferences' },
         appearance: { title: 'Appearance', sub: 'Visual themes, accents, GPU animations, and interface controls' },
         advanced: { title: 'Advanced', sub: 'Database tools, cache management, networking, and system diagnostics' },
         logs: { title: 'Logs', sub: 'Live streaming logs and real-time operational diagnostics' }
@@ -1136,23 +1145,56 @@ function switchSettingsTab(tab) {
 }
 
 function filterSettings(query) {
+    const results = document.getElementById('stg-search-results');
+    if (!results) return;
     const q = (query || '').trim().toLowerCase();
-    if (!q) {
-        const activeTab = document.querySelector('#settings-page .stg-tab.active')?.dataset.tab || 'connections';
-        switchSettingsTab(activeTab);
-        return;
-    }
-    document.querySelectorAll('#settings-page [data-stg]').forEach(el => {
-        const text = (el.textContent || '').toLowerCase();
-        if (text.includes(q)) {
-            el.style.display = '';
-            if (el.classList.contains('settings-section-body')) el.style.display = 'block';
-        } else {
-            el.style.display = 'none';
-        }
+    results.replaceChildren();
+    results.hidden = !q;
+    if (!q) return;
+    // Search only labels/help, never saved values or credentials. Navigation
+    // initializes the chosen category instead of exposing hidden, unloaded forms.
+    const matches = [];
+    document.querySelectorAll('#settings-page .settings-group[data-stg], #settings-page .settings-section-body[data-stg]').forEach(section => {
+        if (!(section.textContent || '').toLowerCase().includes(q)) return;
+        if (matches.some(item => item.contains(section))) return;
+        matches.push(section);
     });
-    document.querySelectorAll('#settings-page .settings-left-column, #settings-page .settings-right-column, #settings-page .settings-third-column').forEach(col => {
-        col.style.display = '';
+    if (!matches.length) {
+        const empty = document.createElement('p');
+        empty.setAttribute('role', 'status');
+        empty.textContent = 'No settings found. Try a service name, folder, or feature.';
+        results.append(empty);
+    }
+    matches.slice(0, 10).forEach(section => {
+        const category = section.dataset.stg;
+        const tab = document.querySelector('#settings-page .stg-tab[data-tab="' + category + '"]');
+        const heading = section.querySelector('h3') || section.previousElementSibling?.querySelector('h3');
+        const title = heading?.textContent.trim() || category;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = (tab?.textContent.trim() || category) + ' — ' + title;
+        button.addEventListener('click', () => {
+            switchSettingsTab(category);
+            if (section.classList.contains('settings-section-body')) {
+                section.classList.remove('collapsed');
+                section.style.display = '';
+                const header = section.previousElementSibling;
+                header?.classList.remove('collapsed');
+                header?.setAttribute('aria-expanded', 'true');
+            }
+            const matchingLabel = Array.from(section.querySelectorAll('label, h4')).find(label => label.textContent.toLowerCase().includes(q));
+            const mediaPanel = matchingLabel?.closest('[role="tabpanel"]');
+            if (mediaPanel) {
+                const mediaTab = document.querySelector('[aria-controls="' + mediaPanel.id + '"]');
+                if (mediaTab) switchLibraryMediaTab(mediaTab);
+            }
+            section.tabIndex = -1;
+            section.focus({ preventScroll: true });
+            section.scrollIntoView({ block: 'start', behavior: 'auto' });
+            section.classList.add('stg-search-target');
+            window.setTimeout(() => section.classList.remove('stg-search-target'), 2000);
+        });
+        results.append(button);
     });
 }
 window.filterSettings = filterSettings;

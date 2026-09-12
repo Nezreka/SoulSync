@@ -1,630 +1,164 @@
-/* ==========================================================================
-   SoulSync Settings Redesign — Premier App Aesthetic (Apple / Meta / Google)
-   Master-Detail Architecture, Grouped Inset Cards, and Refined Form Controls
-   ========================================================================== */
-
-/* ── 1. Page Shell & Master-Detail Two-Pane Layout ────────────────────────── */
+/* Settings: one category bar within the application's existing navigation. */
 #settings-page {
-    --stg-radius-card: 18px;
-    --stg-radius-control: 10px;
-    --stg-bg-card: rgba(22, 27, 38, 0.65);
-    --stg-bg-card-hover: rgba(28, 34, 48, 0.75);
-    --stg-border-card: 1px solid rgba(255, 255, 255, 0.08);
-    --stg-border-divider: 1px solid rgba(255, 255, 255, 0.05);
-    --stg-shadow-card: 0 8px 32px rgba(0, 0, 0, 0.35);
-    --stg-text-primary: #f8fafc;
-    --stg-text-secondary: rgba(255, 255, 255, 0.55);
-    --stg-text-muted: rgba(255, 255, 255, 0.38);
+    --stg-text-primary: #f3f4f7;
+    --stg-text-secondary: #a9b0bf;
+    --stg-surface: rgba(22, 27, 38, .72);
+    --stg-line: rgba(255, 255, 255, .09);
 }
-
-#settings-page .page-shell {
-    max-width: 100% !important;
-    padding: 0 !important;
-    background: transparent !important;
-}
-
-/* Hide the old top-header compact bar */
-#settings-page .settings-header-compact {
-    display: none !important;
-}
-
-/* Master-Detail Flex Container */
+#settings-page .settings-header-compact { display: none; }
+#settings-page .page-shell { max-width: 100%; padding: 0; }
 #settings-page .settings-content {
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: flex-start !important;
-    gap: 28px !important;
-    max-width: 1420px !important;
-    margin: 0 auto !important;
-    padding: 24px 28px 80px !important;
-    box-sizing: border-box !important;
-    width: 100% !important;
-}
-
-/* ── 2. Master Navigation Rail (Left Sidebar) ────────────────────────────── */
-#settings-page .stg-nav-rail {
-    width: 260px;
-    min-width: 260px;
-    position: sticky;
-    top: 20px;
-    z-index: 20;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    background: rgba(16, 20, 29, 0.82);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 20px;
-    padding: 16px 10px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-/* Settings Search / Quick Filter Input */
-.stg-nav-search-wrap {
-    position: relative;
-    padding: 0 4px 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    margin-bottom: 6px;
-}
-
-.stg-nav-search-wrap input {
+    display: block !important;
     width: 100%;
+    max-width: 1240px !important;
+    margin: 0 auto;
+    padding: 24px 32px 72px !important;
     box-sizing: border-box;
-    background: rgba(0, 0, 0, 0.35);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    padding: 8px 12px 8px 32px;
-    font-size: 0.84rem;
-    color: #f1f5f9;
-    outline: none;
-    transition: all 160ms ease;
-    font-family: inherit;
 }
-
-.stg-nav-search-wrap input:focus {
-    border-color: var(--accent-color, #1db954);
-    box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 29, 185, 84), 0.25);
-    background: rgba(0, 0, 0, 0.5);
+#settings-page .stg-category-nav { min-width: 0; margin-bottom: 28px; }
+#settings-page .stg-navigation-heading {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 24px; margin-bottom: 22px;
 }
-
-.stg-nav-search-wrap .stg-search-icon {
-    position: absolute;
-    left: 14px;
-    top: 50%;
-    transform: translateY(-50%) translateY(-5px);
-    width: 14px;
-    height: 14px;
-    fill: rgba(255, 255, 255, 0.4);
-    pointer-events: none;
+#settings-page .stg-eyebrow { font-size: 10px; letter-spacing: .12em; color: var(--stg-text-secondary); font-weight: 650; }
+#settings-page .stg-navigation-heading h2 { margin: 5px 0 0; font-size: 28px; letter-spacing: -.035em; line-height: 1.2; }
+#settings-page .stg-nav-search-wrap { position: relative; width: min(340px, 45%); }
+#settings-page .stg-nav-search-wrap input {
+    width: 100%; padding: 11px 14px 11px 38px !important; border-radius: 10px;
+    border: 1px solid var(--stg-line); background: rgba(0,0,0,.16); color: var(--stg-text-primary); box-sizing: border-box;
 }
-
-/* Section Header in Navigation Rail */
-.stg-nav-section-title {
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--stg-text-muted);
-    padding: 10px 12px 4px;
-    user-select: none;
-}
-
-/* Navigation Items (.stg-tab) in Rail */
+#settings-page .stg-search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; fill: var(--stg-text-secondary); pointer-events: none; }
 #settings-page .stg-tabbar {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 3px !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    width: 100% !important;
+    display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 4px !important;
+    width: 100%; overflow-x: auto; background: transparent !important;
+    border: 0; border-bottom: 1px solid var(--stg-line); border-radius: 0 !important;
+    padding: 0 !important; margin: 0 !important; box-shadow: none !important;
+    scrollbar-width: thin;
 }
-
 #settings-page .stg-tab {
-    display: flex !important;
-    align-items: center !important;
-    gap: 12px !important;
-    width: 100% !important;
-    padding: 9px 12px !important;
-    border-radius: 12px !important;
-    font-size: 0.88rem !important;
-    font-weight: 500 !important;
-    color: var(--stg-text-secondary) !important;
-    background: transparent !important;
-    border: none !important;
-    cursor: pointer !important;
-    text-align: left !important;
-    box-sizing: border-box !important;
-    transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1) !important;
-    position: relative !important;
+    display: inline-flex !important; align-items: center; justify-content: center;
+    gap: 7px; flex: 0 0 auto; width: auto !important;
+    padding: 13px 12px !important; border: 0 !important; border-bottom: 2px solid transparent !important;
+    border-radius: 0 !important; background: transparent !important; color: var(--stg-text-secondary) !important;
+    font-size: 13px !important; font-weight: 550; white-space: nowrap; cursor: pointer;
+    box-shadow: none !important; transition: color 120ms, border-color 120ms;
 }
-
-#settings-page .stg-tab:hover {
-    background: rgba(255, 255, 255, 0.05) !important;
-    color: var(--stg-text-primary) !important;
-    transform: translateX(2px);
-}
-
-#settings-page .stg-tab.active {
-    background: rgba(var(--accent-rgb, 29, 185, 84), 0.14) !important;
-    color: #ffffff !important;
-    font-weight: 600 !important;
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb, 29, 185, 84), 0.3) !important;
-}
-
-#settings-page .stg-tab.active::before {
-    content: "";
-    position: absolute;
-    left: 2px;
-    top: 8px;
-    bottom: 8px;
-    width: 3.5px;
-    border-radius: 3px;
-    background: var(--accent-color, #1db954);
-    box-shadow: 0 0 8px var(--accent-color, #1db954);
-}
-
-/* Squircle Category Badges (Apple System Settings style) */
-.stg-tab-badge {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-    transition: transform 180ms ease;
-}
-
-#settings-page .stg-tab:hover .stg-tab-badge {
-    transform: scale(1.08);
-}
-
-.stg-tab-badge svg {
-    width: 16px;
-    height: 16px;
-    fill: #ffffff;
-}
-
-/* Distinct gradients for each squircle badge */
-.badge-connections { background: linear-gradient(135deg, #0ea5e9, #2563eb); }
-.badge-downloads   { background: linear-gradient(135deg, #10b981, #059669); }
-.badge-sources     { background: linear-gradient(135deg, #8b5cf6, #6366f1); }
-.badge-quality     { background: linear-gradient(135deg, #f59e0b, #d97706); }
-.badge-library     { background: linear-gradient(135deg, #a855f7, #7c3aed); }
-.badge-appearance  { background: linear-gradient(135deg, #ec4899, #e11d48); }
-.badge-advanced    { background: linear-gradient(135deg, #64748b, #475569); }
-.badge-logs        { background: linear-gradient(135deg, #14b8a6, #0f766e); }
-
-.stg-tab-label {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* ── 3. Detail Workspace (Right Content Canvas) ──────────────────────────── */
-#settings-page .stg-detail-pane {
-    flex: 1;
-    min-width: 0;
-    max-width: 1040px;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-}
-
-/* Sticky Action Header Bar */
+#settings-page .stg-tab:hover { color: var(--stg-text-primary) !important; }
+#settings-page .stg-tab.active { color: var(--stg-text-primary) !important; border-bottom-color: var(--accent-color, #1db954) !important; }
+#settings-page .stg-tab-badge { display: inline-flex; width: 16px; height: 16px; background: none; box-shadow: none; }
+#settings-page .stg-tab-badge svg { width: 16px; height: 16px; fill: currentColor; opacity: .75; }
+#settings-page .stg-tab.active .stg-tab-badge { color: var(--accent-color, #1db954); }
+#settings-page .stg-detail-pane { width: 100%; min-width: 0; }
 #settings-page .settings-nav-row {
-    display: flex !important;
-    align-items: center !important;
-    justify-content: space-between !important;
-    background: rgba(16, 20, 29, 0.82) !important;
-    backdrop-filter: blur(20px) !important;
-    -webkit-backdrop-filter: blur(20px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-radius: 16px !important;
-    padding: 12px 20px !important;
-    margin-bottom: 20px !important;
-    position: sticky !important;
-    top: 20px !important;
-    z-index: 15 !important;
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35) !important;
+    display: flex !important; flex-direction: row !important; align-items: center; justify-content: space-between;
+    gap: 24px; margin-bottom: 24px; padding: 0 !important;
+    background: transparent !important; border: 0 !important; box-shadow: none !important;
+    position: static !important;
 }
-
-.stg-active-section-title {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.stg-active-title-text {
-    font-size: 1.15rem;
-    font-weight: 700;
-    letter-spacing: -0.015em;
-    color: var(--stg-text-primary);
-}
-
-.stg-active-sub-text {
-    font-size: 0.78rem;
-    color: var(--stg-text-secondary);
-}
-
-/* Save Settings Button — Premier Style */
+#settings-page .stg-active-section-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+#settings-page .stg-active-title-text { font-size: 20px; font-weight: 650; letter-spacing: -.02em; }
+#settings-page .stg-active-sub-text { color: var(--stg-text-secondary); font-size: 13px; line-height: 1.5; }
 #settings-page .save-button {
-    background: linear-gradient(135deg, var(--accent-color, #1db954), color-mix(in srgb, var(--accent-color, #1db954) 80%, black)) !important;
-    color: #ffffff !important;
-    font-weight: 600 !important;
-    font-size: 0.88rem !important;
-    padding: 9px 22px !important;
-    border-radius: 11px !important;
-    border: none !important;
-    cursor: pointer !important;
-    box-shadow: 0 4px 14px rgba(var(--accent-rgb, 29, 185, 84), 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
-    transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1) !important;
-    letter-spacing: -0.005em !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    gap: 8px !important;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    border: 1px solid rgba(var(--accent-rgb,29,185,84),.35); border-radius: 9px;
+    background: var(--accent-color,#1db954); color: #07190e; padding: 11px 18px;
+    font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; box-shadow: none;
 }
-
-#settings-page .save-button:hover {
-    transform: translateY(-1px) !important;
-    box-shadow: 0 6px 20px rgba(var(--accent-rgb, 29, 185, 84), 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
-}
-
-#settings-page .save-button:active {
-    transform: translateY(0) scale(0.98) !important;
-}
-
-#settings-page .save-button.is-saved {
-    background: linear-gradient(135deg, #10b981, #059669) !important;
-    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4) !important;
-}
-
-/* ── 4. Grouped Inset Cards (Apple / Meta style) ─────────────────────────── */
+#settings-page .save-button:disabled { opacity: .5; cursor: wait; }
 #settings-page .settings-columns {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 20px !important;
-    margin-bottom: 0 !important;
+    display: flex !important; flex-direction: column !important; gap: 18px !important;
+    width: 100%; max-width: none !important; margin: 0; padding: 0;
 }
-
 #settings-page .settings-left-column,
 #settings-page .settings-right-column,
-#settings-page .settings-third-column {
-    min-width: 0 !important;
-    width: 100% !important;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}
-
-/* Ensure inline display: none is strictly respected when tabs switch, overriding video-side.css */
-#settings-page .settings-left-column[style*="display: none"],
-#settings-page .settings-left-column[style*="display:none"],
-#settings-page .settings-right-column[style*="display: none"],
-#settings-page .settings-right-column[style*="display:none"],
-#settings-page .settings-third-column[style*="display: none"],
-#settings-page .settings-third-column[style*="display:none"],
-#settings-page .settings-group[style*="display: none"],
-#settings-page .settings-group[style*="display:none"],
-#settings-page .settings-group[data-svc-side][style*="display: none"],
-#settings-page .settings-group[data-svc-side][style*="display:none"],
+#settings-page .settings-third-column { min-width: 0; width: 100%; display: flex; flex-direction: column; gap: 18px; }
 #settings-page [data-stg][style*="display: none"],
-#settings-page [data-stg][style*="display:none"] {
-    display: none !important;
+#settings-page [data-stg][style*="display:none"],
+#settings-page .settings-left-column[style*="display: none"],
+#settings-page .settings-right-column[style*="display: none"],
+#settings-page .settings-third-column[style*="display: none"] { display: none !important; }
+#settings-page .settings-group,
+#settings-page .stg-media-card {
+    background: var(--stg-surface) !important; border: 1px solid var(--stg-line) !important;
+    border-radius: 14px !important; padding: 22px 24px !important; margin-bottom: 0 !important;
+    box-shadow: none !important; backdrop-filter: none !important;
 }
-
-#settings-page .settings-group {
-    background: var(--stg-bg-card) !important;
-    border: var(--stg-border-card) !important;
-    backdrop-filter: blur(20px) !important;
-    -webkit-backdrop-filter: blur(20px) !important;
-    border-radius: var(--stg-radius-card) !important;
-    box-shadow: var(--stg-shadow-card) !important;
-    padding: 20px 24px !important;
-    margin-bottom: 0 !important;
-    transition: border-color 200ms ease;
-    overflow: visible;
-}
-
-#settings-page .settings-group:hover {
-    border-color: rgba(255, 255, 255, 0.12) !important;
-}
-
-/* Card Header */
-#settings-page .settings-group > h3 {
-    font-size: 1.05rem !important;
-    font-weight: 600 !important;
-    letter-spacing: -0.01em !important;
-    color: var(--stg-text-primary) !important;
-    margin: 0 0 16px !important;
-    padding-bottom: 12px !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: space-between !important;
-}
-
-/* Section Header (Collapsible sections in Library / Advanced) */
+#settings-page .settings-group > h3 { font-size: 16px; font-weight: 650; margin: 0 0 18px; padding-bottom: 14px; border-bottom: 1px solid var(--stg-line); }
 #settings-page .settings-section-header {
-    background: rgba(255, 255, 255, 0.035) !important;
-    border: 1px solid rgba(255, 255, 255, 0.07) !important;
-    border-radius: 14px !important;
-    padding: 14px 18px !important;
-    margin-bottom: 10px !important;
-    transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1) !important;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15) !important;
+    border: 1px solid var(--stg-line); border-radius: 12px; padding: 16px 18px;
+    background: var(--stg-surface); margin-bottom: 0; box-shadow: none;
 }
-
-#settings-page .settings-section-header:hover {
-    background: rgba(255, 255, 255, 0.065) !important;
-    border-color: rgba(255, 255, 255, 0.12) !important;
-    transform: translateY(-1px);
-}
-
-#settings-page .settings-section-body {
-    background: rgba(14, 18, 26, 0.5) !important;
-    border: 1px solid rgba(255, 255, 255, 0.06) !important;
-    border-radius: 14px !important;
-    padding: 16px 20px !important;
-    margin-bottom: 16px !important;
-}
-
-/* ── 5. Form Group Rows (Apple Inset Row Grammar) ────────────────────────── */
-#settings-page .form-group {
-    display: flex !important;
-    justify-content: space-between !important;
-    align-items: center !important;
-    padding: 12px 4px !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
-    margin-bottom: 0 !important;
-    min-height: 48px;
-    box-sizing: border-box;
-    gap: 16px;
-}
-
-#settings-page .form-group:last-child {
-    border-bottom: none !important;
-}
-
-#settings-page .form-group > label {
-    font-size: 0.92rem !important;
-    font-weight: 500 !important;
-    color: var(--stg-text-primary) !important;
-    margin-bottom: 0 !important;
-    flex: 1 !important;
-    line-height: 1.4 !important;
-}
-
-/* Subtitles / Helper Text */
+#settings-page .settings-section-header:hover { border-color: rgba(var(--accent-rgb,29,185,84),.35); }
+#settings-page .settings-section-body { border-radius: 12px; padding: 18px 22px; }
+/* Keep complex fields stacked: labels, paths, help, repeatable rows and buttons
+   are not interchangeable cells in a single flex row. */
+#settings-page .form-group { min-width: 0; margin-bottom: 20px; }
+#settings-page .form-group:last-child { margin-bottom: 0; }
+#settings-page .form-group > label { font-size: 13px; font-weight: 600; line-height: 1.5; margin-bottom: 8px; }
 #settings-page .setting-help-text,
 #settings-page .form-group-help,
-#settings-page .settings-subtext {
-    font-size: 0.8rem !important;
-    color: var(--stg-text-secondary) !important;
-    line-height: 1.45 !important;
-    margin-top: 3px !important;
+#settings-page .settings-subtext { font-size: 12px; line-height: 1.6; color: var(--stg-text-secondary); margin-top: 7px; }
+#settings-page input[type="text"], #settings-page input[type="password"],
+#settings-page input[type="number"], #settings-page select, #settings-page textarea {
+    box-sizing: border-box; max-width: 100%; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.14); background-color: rgba(0,0,0,.18);
+    color: var(--stg-text-primary); padding: 10px 12px; font: inherit; font-size: 13px;
 }
-
-/* ── 6. Form Controls: Inputs, Selects, and Switches ────────────────────── */
-#settings-page input[type="text"],
-#settings-page input[type="password"],
-#settings-page input[type="number"],
-#settings-page select,
-#settings-page textarea {
-    background: rgba(10, 14, 22, 0.75) !important;
-    border: 1px solid rgba(255, 255, 255, 0.12) !important;
-    border-radius: var(--stg-radius-control) !important;
-    padding: 8px 14px !important;
-    color: #ffffff !important;
-    font-size: 0.88rem !important;
-    font-family: inherit !important;
-    outline: none !important;
-    box-sizing: border-box !important;
-    transition: all 160ms ease !important;
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35) !important;
+#settings-page input[type="checkbox"] { accent-color: var(--accent-color,#1db954); }
+#settings-page button:focus-visible, #settings-page input:focus-visible,
+#settings-page select:focus-visible, #settings-page textarea:focus-visible {
+    outline: 2px solid var(--accent-color,#1db954) !important; outline-offset: 3px;
 }
-
-#settings-page select {
-    appearance: none !important;
-    -webkit-appearance: none !important;
-    padding-right: 32px !important;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.6)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
-    background-repeat: no-repeat !important;
-    background-position: right 10px center !important;
-    cursor: pointer !important;
+#settings-page .svc-tile-row { display: grid !important; grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 10px; }
+#settings-page .svc-tile { border-radius: 12px; box-shadow: none; }
+#settings-page .stg-search-results { margin-bottom: 18px; padding: 8px; border: 1px solid var(--stg-line); border-radius: 12px; background: var(--stg-surface); }
+#settings-page .stg-search-results[hidden] { display: none; }
+#settings-page .stg-search-results button { display: block; width: 100%; text-align: left; padding: 12px; border: 0; border-radius: 7px; background: transparent; color: var(--stg-text-primary); cursor: pointer; font: inherit; font-size: 13px; }
+#settings-page .stg-search-results button:hover { background: rgba(255,255,255,.06); }
+#settings-page .stg-search-results p { padding: 8px 12px; margin: 0; color: var(--stg-text-secondary); font-size: 13px; }
+#settings-page .stg-search-target { outline: 2px solid rgba(var(--accent-rgb,29,185,84),.55); outline-offset: 5px; scroll-margin-top: 30px; }
+@media (max-width: 900px) {
+    #settings-page .settings-content { padding: 20px 18px 60px !important; }
+    #settings-page .stg-tab { padding: 12px 10px !important; }
+    #settings-page .stg-tab-badge { display: none; }
 }
-
-#settings-page input[type="text"]:focus,
-#settings-page input[type="password"]:focus,
-#settings-page input[type="number"]:focus,
-#settings-page select:focus,
-#settings-page textarea:focus {
-    border-color: var(--accent-color, #1db954) !important;
-    box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 29, 185, 84), 0.25), inset 0 1px 2px rgba(0, 0, 0, 0.3) !important;
-    background: rgba(14, 19, 29, 0.9) !important;
+@media (max-width: 560px) {
+    #settings-page .settings-content { padding: 16px 12px 48px !important; }
+    #settings-page .stg-navigation-heading { align-items: stretch; flex-direction: column; gap: 16px; margin-bottom: 12px; }
+    #settings-page .stg-nav-search-wrap { width: 100%; }
+    #settings-page .stg-navigation-heading h2 { font-size: 25px; }
+    #settings-page .settings-nav-row { align-items: flex-start; gap: 12px; }
+    #settings-page .save-button { padding: 10px 12px; font-size: 12px; }
+    #settings-page .save-button svg { display: none; }
+    #settings-page .stg-active-sub-text { font-size: 12px; }
+    #settings-page .settings-group, #settings-page .stg-media-card { padding: 16px !important; }
+    #settings-page .settings-section-hint { display: none; }
 }
+@media (prefers-reduced-motion: reduce) { #settings-page *, #settings-page *::before, #settings-page *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
-/* Apple-style Pill Switches */
-#settings-page input[type="checkbox"] {
-    appearance: none !important;
-    -webkit-appearance: none !important;
-    width: 44px !important;
-    height: 24px !important;
-    border-radius: 9999px !important;
-    background: rgba(255, 255, 255, 0.18) !important;
-    position: relative !important;
-    cursor: pointer !important;
-    transition: background-color 200ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 200ms ease !important;
-    outline: none !important;
-    margin: 0 !important;
-    flex-shrink: 0 !important;
-    border: none !important;
+#settings-page .stg-cardgroup { margin: 12px 0 0; gap: 10px; }
+#settings-page .stg-cardgroup:first-child { margin-top: 0; }
+#settings-page .stg-cardgroup-label { color: var(--stg-text-secondary); }
+#settings-page .header-actions { flex: 0 0 auto; }
+
+#settings-page .stg-media-card .form-group {
+    display: block !important; padding: 12px 0 !important;
 }
-
-#settings-page input[type="checkbox"]:checked {
-    background-color: var(--accent-color, #1db954) !important;
-    box-shadow: 0 0 12px rgba(var(--accent-rgb, 29, 185, 84), 0.4) !important;
+#settings-page .stg-media-card .form-group > label { display: block; }
+#settings-page .stg-media-card .form-group > input:not([type="checkbox"]):not([type="radio"]),
+#settings-page .stg-media-card .form-group > select,
+#settings-page .stg-media-card .form-group > textarea {
+    display: block; width: 100% !important; max-width: 100% !important;
 }
+#settings-page .settings-nav-row { flex-wrap: nowrap !important; }
+#settings-page .settings-nav-row .header-actions { width: auto !important; margin: 0 !important; }
 
-#settings-page input[type="checkbox"]::after {
-    content: "" !important;
-    position: absolute !important;
-    top: 2px !important;
-    left: 2px !important;
-    width: 20px !important;
-    height: 20px !important;
-    border-radius: 50% !important;
-    background: #ffffff !important;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35) !important;
-    transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
+/* Legacy media pages require 960px; forms should fit beside the app sidebar. */
+.main-container:has(#settings-page.active),
+.main-content:has(#settings-page.active) { min-width: 0 !important; }
 
-#settings-page input[type="checkbox"]:checked::after {
-    transform: translateX(20px) !important;
-}
-
-#settings-page input[type="checkbox"]:focus-visible {
-    outline: 2px solid var(--accent-color, #1db954) !important;
-    outline-offset: 2px !important;
-}
-
-/* Secondary Buttons */
-#settings-page .test-button,
-#settings-page .btn-secondary,
-#settings-page .stg-accordion-toggle {
-    background: rgba(255, 255, 255, 0.07) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    color: var(--stg-text-primary) !important;
-    border-radius: 9px !important;
-    padding: 6px 14px !important;
-    font-size: 0.82rem !important;
-    font-weight: 500 !important;
-    cursor: pointer !important;
-    transition: all 140ms ease !important;
-}
-
-#settings-page .test-button:hover,
-#settings-page .btn-secondary:hover,
-#settings-page .stg-accordion-toggle:hover {
-    background: rgba(255, 255, 255, 0.12) !important;
-    border-color: rgba(255, 255, 255, 0.18) !important;
-    transform: translateY(-1px);
-}
-
-/* ── 7. Connections & Sources Service Tiles Elevating ───────────────────── */
-#settings-page .svc-tile-row {
-    display: grid !important;
-    grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)) !important;
-    gap: 14px !important;
-}
-
-#settings-page .svc-tile {
-    background: rgba(22, 27, 38, 0.7) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-radius: 16px !important;
-    padding: 18px 12px 14px !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
-    transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
-
-#settings-page .svc-tile:hover {
-    transform: translateY(-3px) !important;
-    background: rgba(28, 34, 48, 0.85) !important;
-    border-color: rgba(255, 255, 255, 0.16) !important;
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45) !important;
-}
-
-#settings-page .svc-tile.is-active {
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb, 29, 185, 84), 0.4), 0 4px 16px rgba(0, 0, 0, 0.25) !important;
-}
-
-/* ── 8. Media Tabs (Library Folders & Organization) ─────────────────────── */
-#settings-page .stg-media-card {
-    background: var(--stg-bg-card) !important;
-    border: var(--stg-border-card) !important;
-    border-radius: var(--stg-radius-card) !important;
-    box-shadow: var(--stg-shadow-card) !important;
-    padding: 22px 24px !important;
-}
-
-#settings-page .stg-media-switcher {
-    background: rgba(0, 0, 0, 0.35) !important;
-    border-radius: 11px !important;
-    padding: 4px !important;
-    border: 1px solid rgba(255, 255, 255, 0.06) !important;
-}
-
-#settings-page .stg-media-switcher button {
-    border-radius: 8px !important;
-    font-size: 0.84rem !important;
-    font-weight: 500 !important;
-    padding: 7px 18px !important;
-    transition: all 140ms ease !important;
-}
-
-#settings-page .stg-media-switcher button[aria-selected="true"] {
-    background: var(--accent-color, #1db954) !important;
-    color: #ffffff !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
-}
-
-/* ── 9. Responsive Fluid Behavior (< 880px) ─────────────────────────────── */
-@media (max-width: 880px) {
-    #settings-page .settings-content {
-        flex-direction: column !important;
-        padding: 16px 14px 60px !important;
-        gap: 16px !important;
-    }
-
-    #settings-page .stg-nav-rail {
-        width: 100% !important;
-        min-width: 0 !important;
-        position: static !important;
-        padding: 10px !important;
-        border-radius: 14px !important;
-    }
-
-    .stg-nav-section-title {
-        display: none !important;
-    }
-
-    #settings-page .stg-tabbar {
-        flex-direction: row !important;
-        overflow-x: auto !important;
-        gap: 6px !important;
-        padding-bottom: 4px !important;
-        scrollbar-width: none !important;
-    }
-
-    #settings-page .stg-tabbar::-webkit-scrollbar {
-        display: none !important;
-    }
-
-    #settings-page .stg-tab {
-        width: auto !important;
-        padding: 8px 14px !important;
-        white-space: nowrap !important;
-    }
-
-    #settings-page .stg-tab.active::before {
-        display: none !important;
-    }
-
-    #settings-page .settings-nav-row {
-        position: static !important;
-        margin-bottom: 12px !important;
-        padding: 10px 14px !important;
-    }
-
-    #settings-page .settings-group,
-    #settings-page .stg-media-card {
-        padding: 16px 18px !important;
-    }
+/* Keep saving within reach while scrolling a long category. */
+#settings-page .settings-nav-row {
+    position: sticky !important; top: 0; z-index: 20;
+    background: rgb(15, 15, 15) !important; padding: 12px 0 !important;
 }
