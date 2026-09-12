@@ -469,7 +469,11 @@ def test_safety_valve_stuck_searching_marks_not_found():
     assert 'Search stuck' in download_tasks['t1']['error_message']
 
 
-def test_safety_valve_stuck_downloading_with_recovered_file_routes_to_post_processing():
+def test_safety_valve_stuck_downloading_with_recovered_file_routes_to_post_processing(monkeypatch):
+    # This unit test calls the formatter without its HTTP lock. Execute the
+    # recovery inline; threaded HTTP/cancellation coverage lives in #1245 tests.
+    from types import SimpleNamespace
+    monkeypatch.setattr(st, '_recovery_pool', SimpleNamespace(submit=lambda fn: fn()))
     deps, submitted = _build_deps(
         config=_FakeConfig({'soulseek.download_timeout': 1, 'soulseek.download_path': '/d', 'soulseek.transfer_path': '/t'}),
         find_completed=lambda *a, **kw: ('/found.flac', 'transfer'),
@@ -485,7 +489,11 @@ def test_safety_valve_stuck_downloading_with_recovered_file_routes_to_post_proce
     assert submitted == [('t1', 'b1')]
 
 
-def test_safety_valve_stuck_downloading_no_file_marks_failed():
+def test_safety_valve_stuck_downloading_no_file_marks_failed(monkeypatch):
+    # This unit test calls the formatter without its HTTP lock. Execute the
+    # recovery inline; threaded HTTP/cancellation coverage lives in #1245 tests.
+    from types import SimpleNamespace
+    monkeypatch.setattr(st, '_recovery_pool', SimpleNamespace(submit=lambda fn: fn()))
     deps, _ = _build_deps(config=_FakeConfig({'soulseek.download_timeout': 1}))
     download_tasks['t1'] = {
         'track_index': 0, 'status': 'downloading', 'track_info': {},

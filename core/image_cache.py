@@ -116,6 +116,7 @@ class ImageCache:
         self.fetcher = fetcher or requests.get
         self.db_path = self.cache_dir / "image_cache.sqlite3"
         self._db_lock = threading.RLock()
+        self._registrations: dict[str, float] = {}
         self._key_locks: dict[str, threading.RLock] = {}
         self._key_locks_lock = threading.Lock()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -135,6 +136,11 @@ class ImageCache:
         key = self.key_for_url(str(url), variant)
         now = time.time()
         with self._db_lock:
+            # Coalesce repeat page registrations, with bounded memory. Serving
+            # still touches LRU timestamps; registration refreshes once/minute.
+            registered = self._registrations.get(key)
+            if registered is not None and 0 <= now - registered < 60:
+                return f"/api/image-cache/{key}"
             with self._connect() as conn:
                 conn.execute(
                     """
@@ -148,6 +154,9 @@ class ImageCache:
                     """,
                     (key, str(url), now, now, now, variant),
                 )
+            if len(self._registrations) >= 4096:
+                self._registrations.pop(next(iter(self._registrations)))
+            self._registrations[key] = now
         return f"/api/image-cache/{key}"
 
     def get(self, key: str) -> CachedImage:
@@ -231,6 +240,7 @@ class ImageCache:
         that nothing will ever clean up."""
         removed = 0
         for key in keys:
+            self._registrations.pop(key, None)
             row = conn.execute("SELECT file_path FROM image_cache WHERE key = ?", (key,)).fetchone()
             path = (row["file_path"] if row else "") or ""
             if path:
