@@ -85627,12 +85627,12 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .stg-media-context strong { font-size: 16px; font-weight: 600; color: #eee; }
 #settings-page .stg-media-summary { font-size: 12px; line-height: 1.5; color: rgba(255,255,255,.5); }
 #settings-page .stg-media-summary.is-live { color: rgba(var(--accent-rgb),.8); }
-#settings-page .stg-media-panel > .settings-group { margin-top: 0; }
 @media (max-width: 600px) {
     #settings-page .stg-media-card .stg-media-switcher { display: flex; }
     #settings-page .stg-media-switcher button { flex: 1; }
 }
 #settings-page .stg-media-panel > .settings-group {
+    margin-top: 0;
     background: transparent !important;
     border: 0 !important;
     border-radius: 0 !important;

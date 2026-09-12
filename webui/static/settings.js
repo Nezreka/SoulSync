@@ -1117,7 +1117,46 @@ function switchSettingsTab(tab) {
     if (tab === 'connections') {
         try { applyServiceStatusGradients(); } catch (e) { }
     }
+
+    // Update active section title & subtitle in the detail header
+    const titles = {
+        connections: { title: 'Connections', sub: 'Accounts, media servers, and API keys SoulSync connects to' },
+        sources: { title: 'Sources', sub: 'Configure and prioritize acquisition sources and indexers' },
+        downloads: { title: 'Downloads', sub: 'Download modes, folder destinations, and chain priorities' },
+        quality: { title: 'Quality', sub: 'Audio and video formats, release profiles, and ladders' },
+        library: { title: 'Library', sub: 'Organization rules, tagging, filters, and collection preferences' },
+        appearance: { title: 'Appearance', sub: 'Visual themes, accents, GPU animations, and interface controls' },
+        advanced: { title: 'Advanced', sub: 'Database tools, cache management, networking, and system diagnostics' },
+        logs: { title: 'Logs', sub: 'Live streaming logs and real-time operational diagnostics' }
+    };
+    const titleEl = document.getElementById('stg-active-title');
+    const subEl = document.getElementById('stg-active-sub');
+    if (titleEl && titles[tab]) titleEl.textContent = titles[tab].title;
+    if (subEl && titles[tab]) subEl.textContent = titles[tab].sub;
 }
+
+function filterSettings(query) {
+    const q = (query || '').trim().toLowerCase();
+    if (!q) {
+        const activeTab = document.querySelector('#settings-page .stg-tab.active')?.dataset.tab || 'connections';
+        switchSettingsTab(activeTab);
+        return;
+    }
+    document.querySelectorAll('#settings-page [data-stg]').forEach(el => {
+        const text = (el.textContent || '').toLowerCase();
+        if (text.includes(q)) {
+            el.style.display = '';
+            if (el.classList.contains('settings-section-body')) el.style.display = 'block';
+        } else {
+            el.style.display = 'none';
+        }
+    });
+    document.querySelectorAll('#settings-page .settings-left-column, #settings-page .settings-right-column, #settings-page .settings-third-column').forEach(col => {
+        col.style.display = '';
+    });
+}
+window.filterSettings = filterSettings;
+
 
 // ── Settings → Connections: per-service status gradient + verify wiring ──
 // Gradient shows green when the user has filled in credentials, yellow when empty.
@@ -1252,6 +1291,16 @@ async function _stgRefreshAfterSave() {
             .filter(Boolean);
         if (expandedServices.length > 0) {
             _stgVerifyServices(expandedServices, { force: true });
+        }
+        const btn = document.getElementById('save-settings');
+        if (btn) {
+            const origHTML = btn.innerHTML;
+            btn.classList.add('is-saved');
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg><span>Saved</span>';
+            setTimeout(() => {
+                btn.classList.remove('is-saved');
+                btn.innerHTML = origHTML;
+            }, 2000);
         }
     } catch (e) {
         console.warn('[Settings Status] Post-save refresh failed:', e);
