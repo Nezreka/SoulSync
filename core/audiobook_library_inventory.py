@@ -90,7 +90,7 @@ def discover(root: Path, db, error, max_depth=32):
                 if DISC.fullmatch(file.parent.name):
                     title = re.sub(r'\s*[\[(]?(?:disc|cd)\s*\d+(?:\s*(?:of|/)\s*\d+)?[\])]?$', '', title, flags=re.I)
                 peers = [f for _, f in entries if folded(f.get('title')) == folded(facts['title'])]
-                def consistent(field):
+                def consistent(field, peers=peers, facts=facts, sidecar=sidecar):
                     values = {f.get(field) for f in peers if f.get(field)}
                     return facts.get(field) or (next(iter(values)) if len(values) == 1 else '') or sidecar.get(field) or ''
                 identity = ('book', folded(title), folded(consistent('author')),
@@ -118,7 +118,7 @@ def discover(root: Path, db, error, max_depth=32):
                 other != container and other.is_relative_to(container) for other in containers)
             path = container if owns_folder else files[0]
             fingerprint = hashlib.sha256('\n'.join(sorted(p['fingerprint'] for p in probes)).encode()).hexdigest()
-            signature_parts = [f'{p}:{facts["size"]}:{facts["mtime"]}' for p, facts in zip(files, probes)]
+            signature_parts = [f'{p}:{facts["size"]}:{facts["mtime"]}' for p, facts in zip(files, probes, strict=True)]
             for sidecar_path in ([container / name for name in ('metadata.opf', 'book.nfo', 'metadata.json')]
                                  + [files[0].with_suffix('.opf'), files[0].with_suffix('.nfo')]):
                 if sidecar_path.exists():
