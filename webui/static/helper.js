@@ -3467,27 +3467,20 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
-    // Convention: keep only the CURRENT release here, plus a single brief
-    // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.4.0': [
-        { date: 'September 2026 \u00b7 3.4.0' },
-        { title: 'Podcasts', desc: 'a whole new section. search itunes, or paste an rss url straight into the search bar and it works out that is what you did. custom, patreon and private feeds all work.', page: 'podcasts' },
-        { title: 'Bring your subscriptions with you', desc: 'OPML 2.0 import and export, with a live checklist preview before anything subscribes.', page: 'podcasts' },
-        { title: 'Podcasts download themselves', desc: 'the watchlist grabs new episodes with retention settings, so a daily show does not eat your disk. library path and organization templates are yours to set, and there is an mp4 option for media servers that only really do video.', page: 'podcasts' },
-        { title: 'Audiobooks', desc: 'audible catalogue, browse, detail, author and narrator pages. acquisition through prowlarr, the shared torrent and usenet clients, and soulseek.', page: 'audiobooks' },
-        { title: 'Narrator search', desc: 'search by narrator, which is the one question nothing else can answer. plus series in reading order, genre charts and sample audio.', page: 'audiobooks' },
-        { title: 'Audiobooks are a real side, not a demo', desc: 'quality profile, blocklist, library scan, recycle bin and author watchlist. a failed download blocks the release it came from, so the wishlist stops grabbing the same broken posting forever.', page: 'audiobooks' },
-        { title: 'Every download source on one tab', desc: 'the torrent client, the usenet client and prowlarr came over from Downloads, and yt-dlp came over from Advanced, three tabs from the youtube source it exists to serve. the download chain replaced the source dropdown.', page: 'settings' },
-        { title: 'Connections is tiles now', desc: '22 services were nested accordions in two API Configuration groups. each tile says whether it is configured without being opened.', page: 'settings' },
-        { title: 'Library and Quality are merged', desc: 'the Quality tab had two cards both called Quality, the music profile and the video ladder. they could never appear on screen together, so nobody had noticed.', page: 'settings' },
-        { title: 'Settings works by keyboard', desc: 'all 31 section toggles are reachable without a mouse, on one type scale, with one grammar per row.', page: 'settings' },
-        { title: 'YouTube says what is actually wrong', desc: 'the probe behind the Test button was hardcoded to return true, so the dot was green no matter what. it reports the real reason now, and names the browsers that cannot work.', page: 'settings' },
-        { title: 'Reverse proxy url base paths', desc: 'soulsync can live at /soulsync behind a proxy instead of needing its own hostname.' },
-        { title: 'Profiles cover podcasts and audiobooks', desc: 'both can be granted or denied per profile, and wishlists and followed authors belong to the person who made them. the download permission reads from the session, so a caller can no longer vote on its own permissions by omitting a header.' },
-        { title: 'Discovery opens again', desc: 'it crashed on open with a wrong-shaped response read during render. the test mocked a contract the server has never had, so it was green the whole time.', page: 'discover' },
-        { title: 'Reorganize survives a restart', desc: 'the bulk queue lived only in memory, so a worker recycle took every queued album with it while the job still logged complete. outstanding work is stored now.' },
-        { title: 'Stations and Because You Listen To', desc: 'shelves repeated the same album under near-identical headings, and a station gave you one click with nothing to inspect, download or sync.', page: 'discover' },
-        { title: 'Earlier versions', desc: '3.3.3 took chat beyond your install and made release parsing read the actual audio. 3.3.2 gave the video side search receipts and rebuilt the downloads page. 3.3.1 made daily mixes and stations real.' },
+    // Keep the current release and one brief Earlier versions summary.
+    '3.4.1': [
+        { date: 'September 2026 \u00b7 3.4.1' },
+        {"title": "Less waiting on downloads and imports", "desc": "lyrics requests have real network timeouts, manual imports run as background jobs, and file recovery no longer holds up download status updates.", "page": "downloads"},
+        {"title": "More responsive browsing", "desc": "repeated artwork registration is cached, metadata searches have bounded waits and worker capacity, and offline Plex connections are cached instead of retried on every poll."},
+        {"title": "Discover, Watchlist and Settings refreshed", "desc": "new layouts, clearer controls and responsive forms, with shared music and video folder and organization settings.", "page": "settings"},
+        {"title": "Deezer editorial playlists", "desc": "browse editorial playlists across all 28 genres, search playlists, and see what happens as a playlist is handed off to sync.", "page": "discover"},
+        {"title": "Existing audiobook libraries", "desc": "scan books already on disk, browse the rebuilt library, and review catalogue edition matches using metadata and download provenance.", "page": "audiobooks"},
+        {"title": "Audiobook download reliability", "desc": "live progress follows the download client, cancellation persists, Soulseek transfers are matched correctly, and wishlist rows move on from sent to downloads.", "page": "audiobooks"},
+        {"title": "Watchlist progress and cancellation", "desc": "source matching appears on the page and automation card, and a long artist can be cancelled while matching.", "page": "watchlist"},
+        {"title": "Connection and import fixes", "desc": "correct a Last.fm username, import SoundCloud downloads, preserve the selected Deezer track, and keep unsent chat drafts when Soulseek is disconnected."},
+        {"title": "Podcast protections", "desc": "podcast fetches are guarded and watchlist automation respects profile ownership.", "page": "podcasts"},
+        {"title": "Video libraries across drives", "desc": "configure additional video library paths and load shared Library settings from either media side.", "page": "settings"},
+        {"title": "Earlier versions", "desc": "3.4.0 introduced podcasts and audiobooks, reorganized settings, and added reverse proxy base paths. 3.3.3 expanded chat and improved release parsing."},
     ],
 };
 
@@ -3518,7 +3511,23 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.4.0: podcasts and audiobooks, and a settings page you can read",
+    "title": "3.4.1: less waiting, clearer pages and stronger audiobook libraries",
+    "description": "This update addresses slow processing and navigation, refreshes Discover, Watchlist and Settings, and improves existing audiobook libraries and download tracking.",
+    "features": [
+        "Less waiting on downloads and imports: lyrics requests have real network timeouts, manual imports run as background jobs, and file recovery no longer holds up download status updates.",
+        "More responsive browsing: repeated artwork registration is cached, metadata searches have bounded waits and worker capacity, and offline Plex connections are cached instead of retried on every poll.",
+        "Discover, Watchlist and Settings refreshed: new layouts, clearer controls and responsive forms, with shared music and video folder and organization settings.",
+        "Deezer editorial playlists: browse editorial playlists across all 28 genres, search playlists, and see what happens as a playlist is handed off to sync.",
+        "Existing audiobook libraries: scan books already on disk, browse the rebuilt library, and review catalogue edition matches using metadata and download provenance.",
+        "Audiobook download reliability: live progress follows the download client, cancellation persists, Soulseek transfers are matched correctly, and wishlist rows move on from sent to downloads.",
+        "Watchlist progress and cancellation: source matching appears on the page and automation card, and a long artist can be cancelled while matching.",
+        "Connection and import fixes: correct a Last.fm username, import SoundCloud downloads, preserve the selected Deezer track, and keep unsent chat drafts when Soulseek is disconnected.",
+        "Podcast protections: podcast fetches are guarded and watchlist automation respects profile ownership.",
+        "Video libraries across drives: configure additional video library paths and load shared Library settings from either media side."
+    ]
+},
+    {
+        title: "Earlier in 3.4.0: podcasts and audiobooks, and a settings page you can read",
         description: "two new sides to the app. podcasts with itunes search, rss and OPML, and audiobooks built on audible's catalogue with their own database and source chain. the settings page was rebuilt around tiles, and ten reported bugs are fixed.",
         features: [
             "podcasts, a whole new section: itunes search or paste an rss url straight into the search bar, with custom, patreon and private feeds supported. browse, show detail with the full episode tracklist, and a player",
