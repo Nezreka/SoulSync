@@ -96,7 +96,7 @@ def _recovery_identity(task):
 
 def _schedule_file_recovery(task_id, batch_id, task, deps):
     """Called under tasks_lock. Revalidate the attempt after slow I/O."""
-    if task_id in _recovery_pending or not _recovery_slots.acquire(blocking=False):
+    if task.get('cancel_requested') or task_id in _recovery_pending or not _recovery_slots.acquire(blocking=False):
         return
     identity = _recovery_identity(task)
     _recovery_pending[task_id] = task
@@ -113,6 +113,7 @@ def _schedule_file_recovery(task_id, batch_id, task, deps):
                 if found:
                     current['status'] = 'post_processing'
                     current['status_change_time'] = time.time()
+                    processing_identity = _recovery_identity(current)
                 else:
                     current['status'] = 'failed'
                     current['error_message'] = 'Task stuck in downloading state; completed file not found'
@@ -123,7 +124,7 @@ def _schedule_file_recovery(task_id, batch_id, task, deps):
                     # A rejected submission must not strand a download in
                     # Processing with no worker. Preserve any newer transition.
                     with tasks_lock:
-                        if download_tasks.get(task_id) is task and task.get('status') == 'post_processing':
+                        if download_tasks.get(task_id) is task and _recovery_identity(task) == processing_identity:
                             task['status'] = identity[0]
                             task['status_change_time'] = identity[1]
                     raise

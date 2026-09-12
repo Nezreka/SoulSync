@@ -50,7 +50,8 @@ def test_build_source_passes_timeout_tuple(monkeypatch):
 
     src = _build_source()
     assert src is not None
-    assert captured_kwargs["timeout"] == (PLEX_CONNECT_TIMEOUT, PLEX_SCAN_TIMEOUT)
+    assert captured_kwargs["timeout"] == (PLEX_CONNECT_TIMEOUT, PLEX_CONNECT_TIMEOUT)
+    assert src._server._timeout == (PLEX_CONNECT_TIMEOUT, PLEX_SCAN_TIMEOUT)
 
 
 def test_build_source_negative_cache_prevents_repeated_connect_attempts(monkeypatch):

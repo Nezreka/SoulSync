@@ -179,7 +179,7 @@ def test_scan_request_threads_mode_and_media_type(tmp_path, monkeypatch):
     import core.video.scanner as scanner_mod
     import core.video.sources as sources_mod
     monkeypatch.setattr(scanner_mod, "get_video_scanner", lambda db: _FakeScanner())
-    monkeypatch.setattr(sources_mod, "get_active_video_source", lambda: None)
+    monkeypatch.setattr(sources_mod, "get_active_video_source", lambda **kwargs: None)
 
     # default body → both libraries, full
     assert client.post("/api/video/scan/request", json={}).get_json()["media_type"] == "all"

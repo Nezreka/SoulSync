@@ -13,6 +13,8 @@ shape differs and is added in :func:`_jellyfin_sessions`).
 from __future__ import annotations
 
 import time
+import threading
+import hashlib
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -60,11 +62,13 @@ def _plex_config(db=None) -> Dict[str, str]:
 
 
 _server_cache: Dict[str, Any] = {"srv": None, "at": 0.0, "key": ""}
+_server_cache_lock = threading.RLock()
 
 
 def invalidate_plex_server_cache() -> None:
     """Force the next _plex_server call to reconnect."""
-    _server_cache.update(srv=None, at=0.0, key="")
+    with _server_cache_lock:
+        _server_cache.update(srv=None, at=0.0, key="")
 
 
 def _plex_server(db=None):
@@ -73,19 +77,27 @@ def _plex_server(db=None):
     cfg = _plex_config(db)
     if not cfg["base_url"] or not cfg["token"]:
         return None
-    key = cfg["base_url"] + "|" + cfg["token"][:6]
-    now = time.time()
-    if _server_cache["key"] == key and now - _server_cache["at"] < 60:
-        return _server_cache["srv"]
-    try:
-        from plexapi.server import PlexServer
-        srv = PlexServer(cfg["base_url"], cfg["token"], timeout=_PLEX_TIMEOUT)
-        _server_cache.update(srv=srv, at=now, key=key)
-        return srv
-    except Exception:   # noqa: BLE001 - unreachable server is an expected state
-        logger.debug("plex connect failed for activity", exc_info=True)
-        _server_cache.update(srv=None, at=now, key=key)
-        return None
+    key = hashlib.sha256(f"{cfg['base_url']}|{cfg['token']}".encode()).hexdigest()
+    with _server_cache_lock:
+        now = time.time()
+        if _server_cache["key"] == key and 0 <= now - _server_cache["at"] < 60:
+            return _server_cache["srv"]
+        try:
+            from plexapi.server import PlexServer
+            srv = PlexServer(cfg["base_url"], cfg["token"], timeout=_PLEX_TIMEOUT)
+            _server_cache.update(srv=srv, at=time.time(), key=key)
+            return srv
+        except Exception:   # noqa: BLE001 - unreachable server is an expected state
+            logger.debug("plex connect failed for activity", exc_info=True)
+            _server_cache.update(srv=None, at=time.time(), key=key)
+            return None
+
+
+def _mark_plex_unreachable(srv):
+    # A late failure from an old credential's client must not poison a newer one.
+    with _server_cache_lock:
+        if _server_cache['srv'] is srv:
+            _server_cache.update(srv=None, at=time.time())
 
 
 # ── normalization (pure — unit-tested with fakes) ────────────────────────────
@@ -424,7 +436,7 @@ def get_activity(db=None) -> Dict[str, Any]:
             platform = "plex"
         except Exception:   # noqa: BLE001 - configured but unreachable
             logger.debug("plex sessions() failed", exc_info=True)
-            _server_cache.update(srv=None, at=time.time(), key=_server_cache.get("key", ""))
+            _mark_plex_unreachable(srv)
 
     jf_sessions, jf_name = _jellyfin_activity(db)
     if jf_name is not None:                       # Jellyfin is configured
@@ -529,7 +541,7 @@ def get_history(db=None, limit: int = 40) -> Dict[str, Any]:
         items = srv.history(maxresults=limit)
     except Exception:   # noqa: BLE001
         logger.debug("plex history() failed", exc_info=True)
-        _server_cache.update(srv=None, at=time.time(), key=_server_cache.get("key", ""))
+        _mark_plex_unreachable(srv)
         return {"ok": False, "reason": "unreachable", "history": []}
     key = str(_g(srv, "machineIdentifier", "") or "plex")
     accounts, devices = _lookups(srv, key)
@@ -614,7 +626,7 @@ def get_stats(db=None, days: int = 30) -> Dict[str, Any]:
         items = srv.history(maxresults=1000, mindate=datetime.now() - timedelta(days=days))
     except Exception:   # noqa: BLE001
         logger.debug("plex history() for stats failed", exc_info=True)
-        _server_cache.update(srv=None, at=time.time(), key=_server_cache.get("key", ""))
+        _mark_plex_unreachable(srv)
         return {"ok": False, "reason": "unreachable"}
     accounts, devices = _lookups(srv, str(_g(srv, "machineIdentifier", "") or "plex"))
     data = compute_stats(items or [], accounts, devices, days)
