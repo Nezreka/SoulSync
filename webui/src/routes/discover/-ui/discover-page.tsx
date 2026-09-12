@@ -1338,6 +1338,109 @@ export function DiscoverPage() {
               </button>
             </div>
           )}
+          {/* Quick Filter Navigation Rail (Spotify / Deezer style) */}
+          <nav className="dsc-quick-filter-bar" aria-label="Discover Categories">
+            <button
+              type="button"
+              className="dsc-filter-pill active"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
+            >
+              <span>✨ For You</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
+            >
+              <span>🎵 Daily Mixes</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('recommended-stations-section')}
+            >
+              <span>📻 Artist Radio</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-new-missing')}
+            >
+              <span>🔥 New Releases</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('deezer-editorial')}
+            >
+              <span>🎧 Deezer Curated</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-tools')}
+            >
+              <span>🪐 Explore & Lab</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-library')}
+            >
+              <span>📦 Library Gaps</span>
+            </button>
+          </nav>
+
+          {/* Deezer Flow & Moods Bar */}
+          <div className="dsc-flow-bar" role="toolbar" aria-label="Music Moods">
+            <span className="dsc-flow-title">Flow Moods</span>
+            <button
+              type="button"
+              className="dsc-flow-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
+              title="Energizing high-tempo mixes"
+            >
+              <span className="dsc-flow-icon">⚡</span>
+              <span>Energizing</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-flow-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
+              title="Chill & ambient listening"
+            >
+              <span className="dsc-flow-icon">☕</span>
+              <span>Chill & Lo-Fi</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-flow-pill"
+              onClick={() => scrollToDiscoveryTarget('library-radio-section')}
+              title="Focus radio from your collection"
+            >
+              <span className="dsc-flow-icon">🎯</span>
+              <span>Focus</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-flow-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-library')}
+              title="Deep cuts and nocturnal sounds"
+            >
+              <span className="dsc-flow-icon">🌙</span>
+              <span>Deep Cuts</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-flow-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-tools')}
+              title="Surprise discovery shuffle"
+            >
+              <span className="dsc-flow-icon">🎲</span>
+              <span>Discovery Roulette</span>
+            </button>
+          </div>
+
           <div className="discover-command-grid">
             <div className="discover-command-hero">
               <DiscoverHero
