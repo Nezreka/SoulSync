@@ -1256,6 +1256,7 @@ class AudiobookClient:
         marketplace: str = _DEFAULT_MARKETPLACE,
         page: int = 1,
         sort: Optional[str] = None,
+        strict: bool = False,
     ) -> List[AudiobookItem]:
         """Search the Audible catalog.
 
@@ -1283,6 +1284,8 @@ class AudiobookClient:
         data = self._get_catalog(
             marketplace, "", params, _SEARCH_TTL, "Audible search",
         )
+        if data is None and strict:
+            raise RuntimeError("The audiobook catalogue is unavailable. Try again later.")
         items = self._products(data)
         logger.debug("search(%r, type=%s) -> %d results", query, param, len(items))
         return items

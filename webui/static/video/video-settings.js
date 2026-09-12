@@ -376,15 +376,59 @@
         if (btn && !btn._vseedWired) { btn._vseedWired = true; btn.addEventListener('click', loadSeedIndexers); }
     }
 
+    function addVideoPathRow(host, value) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.value = value || '';
+        input.placeholder = host.dataset.videoExtraKind === 'movies' ? '/media/movies2' : '/media/tv2';
+        input.setAttribute('aria-label', host.dataset.videoExtraKind === 'movies' ? 'Additional movie library path' : 'Additional TV library path');
+        input.style.cssText = 'flex:1;min-width:0';
+        input.addEventListener('change', function () { saveDownloads(true); });
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'test-button';
+        remove.textContent = 'Remove';
+        remove.setAttribute('aria-label', 'Remove library path');
+        remove.addEventListener('click', function () { row.remove(); saveDownloads(true); });
+        if (host.closest('[aria-busy="true"]')) {
+            [input, remove].forEach(function (control) {
+                control.setAttribute('data-library-disabled', 'false');
+                control.disabled = true;
+            });
+        }
+        row.appendChild(input);
+        row.appendChild(remove);
+        host.appendChild(row);
+        return input;
+    }
+
+    function loadVideoPaths(kind, paths) {
+        var host = document.getElementById('video-' + kind + '-additional-paths');
+        if (!host) return;
+        host.replaceChildren();
+        (Array.isArray(paths) ? paths : []).forEach(function (path) { addVideoPathRow(host, path); });
+        host.dataset.loaded = 'true';
+    }
+
+    function collectVideoPaths(kind) {
+        var host = document.getElementById('video-' + kind + '-additional-paths');
+        if (!host || host.dataset.loaded !== 'true') return undefined;
+        return Array.from(host.querySelectorAll('input')).map(function (input) { return input.value.trim(); }).filter(Boolean);
+    }
+
     function loadDownloads() {
-        fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
+        return fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
-                if (!d) return;
+                if (!d) return false;
                 var setP = function (id, v) { var el = document.getElementById(id); if (el && v != null) el.value = v; };
                 setP('video-download-path', d.download_path);
                 setP('video-movies-path', d.movies_path);
                 setP('video-tv-path', d.tv_path);
+                loadVideoPaths('movies', d.movies_additional_paths);
+                loadVideoPaths('tv', d.tv_additional_paths);
                 setP('video-youtube-path', d.youtube_path);
                 _videoMode = d.download_mode || 'soulseek';
                 _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
@@ -401,8 +445,9 @@
                 wireSeedIndexers();
                 renderVideoHybrid();
                 updateVideoSourceUI();
+                return true;
             })
-            .catch(function () { /* ignore */ });
+            .catch(function () { return false; });
     }
 
     function saveDownloads(silent) {
@@ -413,6 +458,8 @@
                 download_path: val('video-download-path'),
                 movies_path: val('video-movies-path'),
                 tv_path: val('video-tv-path'),
+                movies_additional_paths: collectVideoPaths('movies'),
+                tv_additional_paths: collectVideoPaths('tv'),
                 youtube_path: val('video-youtube-path'),
                 // download_mode / hybrid_order are NOT sent from here any more.
                 // The shared download-chain widget owns them and writes them
@@ -777,6 +824,14 @@
     }
 
     function wireDownloads() {
+        document.querySelectorAll('[data-video-add-path]').forEach(function (button) {
+            if (button._vdWired) return;
+            button._vdWired = true;
+            button.addEventListener('click', function () {
+                var host = document.getElementById('video-' + button.dataset.videoAddPath + '-additional-paths');
+                if (host && host.dataset.loaded === 'true') addVideoPathRow(host, '').focus();
+            });
+        });
         var ms = document.getElementById('video-download-mode');
         if (ms && !ms._vdWired) {
             ms._vdWired = true;
@@ -1343,10 +1398,10 @@
         renderOrgPreview();
     }
     function loadOrganization() {
-        fetch(ORG_URL, { headers: { 'Accept': 'application/json' } })
+        return fetch(ORG_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { if (d) { _videoOrg = d; fillOrg(); } })
-            .catch(function () { /* ignore */ });
+            .then(function (d) { if (!d) return false; _videoOrg = d; fillOrg(); return true; })
+            .catch(function () { return false; });
     }
     function collectOrg() {
         var val = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
@@ -1416,24 +1471,71 @@
         });
     }
 
+    // Both media sides share these Library panels. Load once per document,
+    // deduplicate requests, and never replace edits on a tab round-trip.
+    var _libraryLoaded = false;
+    var _libraryLoading = null;
+    function loadSharedLibrary() {
+        if (_libraryLoaded || _libraryLoading) return _libraryLoading;
+        var panels = ['folders-video-panel', 'organization-video-panel'].map(function (id) {
+            return document.getElementById(id);
+        }).filter(Boolean);
+        panels.forEach(function (panel) {
+            panel.setAttribute('aria-busy', 'true');
+            panel.querySelectorAll('input, select, textarea, button:not(.stg-library-retry)').forEach(function (input) {
+                if (!input.hasAttribute('data-library-disabled')) input.setAttribute('data-library-disabled', String(input.disabled));
+                input.disabled = true;
+            });
+            var status = panel.querySelector('.stg-library-load-status');
+            if (!status) {
+                status = document.createElement('p');
+                status.className = 'stg-library-load-status settings-hint';
+                status.setAttribute('role', 'status');
+                panel.prepend(status);
+            }
+            status.textContent = 'Loading saved video settings...';
+        });
+        wireDownloads();
+        wireOrganization();
+        _libraryLoading = Promise.all([loadDownloads(), loadOrganization()]).then(function (results) {
+            _libraryLoaded = results.every(Boolean);
+            panels.forEach(function (panel) {
+                panel.setAttribute('aria-busy', 'false');
+                var status = panel.querySelector('.stg-library-load-status');
+                if (_libraryLoaded) {
+                    panel.querySelectorAll('[data-library-disabled]').forEach(function (input) {
+                        input.disabled = input.getAttribute('data-library-disabled') === 'true';
+                        input.removeAttribute('data-library-disabled');
+                    });
+                    status.remove();
+                } else {
+                    status.textContent = 'Could not load saved video settings. ';
+                    var retry = document.createElement('button');
+                    retry.type = 'button'; retry.className = 'stg-library-retry'; retry.textContent = 'Retry';
+                    retry.addEventListener('click', loadSharedLibrary);
+                    status.append(retry);
+                }
+            });
+            if (typeof window.refreshLibrarySummaries === 'function') window.refreshLibrarySummaries();
+        }).finally(function () { _libraryLoading = null; });
+        return _libraryLoading;
+    }
+
     function onPageShown(e) {
         if (e && e.detail !== PAGE_ID) return;
         loadServer();
         loadConn();
         load();
         loadKeys();
-        loadDownloads();
+        loadSharedLibrary();
         loadImportLists();
         loadNotify();
-        wireDownloads();
         loadQuality();
         wireQuality();
         loadYtQuality();
         wireYtQuality();
         loadSlskd();
         wireSlskd();
-        loadOrganization();
-        wireOrganization();
     }
 
     function init() {
@@ -1516,6 +1618,7 @@
                 .catch(function () { toast('Some settings could not be saved', 'error'); });
         }, true);
         document.addEventListener('soulsync:video-page-shown', onPageShown);
+        document.addEventListener('soulsync:library-settings-shown', loadSharedLibrary);
     }
 
     if (document.readyState === 'loading') {

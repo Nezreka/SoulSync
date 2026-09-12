@@ -1,5 +1,6 @@
 import requests
 import asyncio
+import threading
 import aiohttp
 import os
 from typing import List, Optional, Dict, Any
@@ -2034,17 +2035,18 @@ class SoulseekClient(DownloadSourcePlugin):
             return False
 
         try:
-            # Primary check: server/state tells us if slskd is connected to the Soulseek network
-            state = await self._make_request('GET', 'server/state')
-            if state is not None:
-                is_connected = state.get('isConnected') or state.get('IsConnected', False)
-                is_logged_in = state.get('isLoggedIn') or state.get('IsLoggedIn', False)
-                if not (is_connected and is_logged_in):
-                    logger.debug(f"Soulseek not fully connected: isConnected={is_connected}, isLoggedIn={is_logged_in}")
-                return is_connected and is_logged_in
+            # Primary check: server or server/state tells us if slskd is connected to the Soulseek network
+            for endpoint in ('server', 'server/state'):
+                state = await self._make_request('GET', endpoint)
+                if isinstance(state, dict) and any(k in state for k in ('isConnected', 'IsConnected', 'isLoggedIn', 'IsLoggedIn')):
+                    is_connected = state.get('isConnected') or state.get('IsConnected', False)
+                    is_logged_in = state.get('isLoggedIn') or state.get('IsLoggedIn', False)
+                    if not (is_connected and is_logged_in):
+                        logger.debug(f"Soulseek not fully connected: isConnected={is_connected}, isLoggedIn={is_logged_in}")
+                    return is_connected and is_logged_in
 
-            # Fallback: if server/state endpoint unavailable (older slskd), check API reachability
-            logger.debug("server/state endpoint unavailable, falling back to session check")
+            # Fallback: if server endpoints unavailable (older slskd), check API reachability
+            logger.debug("server endpoints unavailable, falling back to session check")
             response = await self._make_request('GET', 'session')
             return response is not None
         except Exception as e:
@@ -2255,6 +2257,26 @@ class SoulseekClient(DownloadSourcePlugin):
         from urllib.parse import quote
         return quote(str(part), safe="")
 
+    async def get_chat_connection_state(self) -> Dict[str, Any]:
+        """Chat requires a Soulseek login, not merely a reachable slskd API.
+
+        slskd exposes server state at /api/v0/server in standard releases,
+        and /api/v0/server/state in some builds. Probe both so endpoint differences
+        do not falsely lock users out of chat.
+        """
+        for endpoint in ('server', 'server/state'):
+            state = await self._make_request('GET', endpoint)
+            if isinstance(state, dict) and any(k in state for k in ('isConnected', 'IsConnected', 'isLoggedIn', 'IsLoggedIn')):
+                connected = state.get('isConnected', state.get('IsConnected', False))
+                logged_in = state.get('isLoggedIn', state.get('IsLoggedIn', False))
+                if connected is True and logged_in is True:
+                    return {"connected": True}
+                return {"connected": False, "code": "slskd_disconnected",
+                        "error": "slskd is not connected and logged in to Soulseek. Reconnect in slskd, then try again. Your message has not been sent."}
+
+        return {"connected": False, "code": "slskd_unavailable",
+                "error": "Cannot check slskd's Soulseek connection. Check that slskd is running and its API key is valid."}
+
     async def get_joined_rooms(self) -> List[str]:
         """Names of the rooms slskd is currently in ([] when none/unreachable)."""
         res = await self._make_request('GET', 'rooms/joined')
@@ -2447,3 +2469,36 @@ class SoulseekClient(DownloadSourcePlugin):
     def __del__(self):
         # No persistent session to clean up
         pass
+_SHARED_LOCK = threading.Lock()
+_SHARED_CACHE: Dict[str, Any] = {"key": None, "client": None}
+
+
+def get_shared_soulseek_client():
+    """One client per slskd configuration, shared by every caller.
+
+    Constructing one is not free: it logs at INFO and mkdirs the download path.
+    Callers on a timer - the audiobook download monitor ticks every few seconds
+    and touches several helpers per pass - turned that into a wall of identical
+    "configured with slskd at ..." lines in app.log and a filesystem hit for
+    each one.
+
+    Keyed on the url and api key rather than cached outright, so saving new
+    slskd settings takes effect without a restart. The cache lives here rather
+    than in a caller because the cost it avoids is this module's.
+    """
+    try:
+        cfg = config_manager.get("soulseek", {}) or {}
+        key = f"{cfg.get('slskd_url', '')}::{cfg.get('api_key', '')}"
+    except Exception:                                       # noqa: BLE001
+        key = "::"
+
+    with _SHARED_LOCK:
+        cached = _SHARED_CACHE["client"]
+        if cached is not None and _SHARED_CACHE["key"] == key:
+            return cached
+        client = SoulseekClient()
+        _SHARED_CACHE["key"] = key
+        _SHARED_CACHE["client"] = client
+        return client
+
+

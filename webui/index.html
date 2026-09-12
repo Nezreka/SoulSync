@@ -101,6 +101,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-side.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-overlay-editor.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-collection-editor.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='settings-premier.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='discover-premier.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='watchlist-premier.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
         :root {
             --accent-rgb: {{ initial_accent_rgb }};
@@ -2573,24 +2576,83 @@
                     </div>
                 </div>
                 <div class="settings-content">
-                    <!-- Category Tab Bar -->
-                    <div class="settings-nav-row">
+                    <nav class="stg-category-nav" aria-label="Settings categories">
+                        <div class="stg-navigation-heading">
+                            <div><span class="stg-eyebrow">YOUR WORKSPACE</span><h2>Settings</h2></div>
+<div class="stg-nav-search-wrap">
+                            <svg class="stg-search-icon" viewBox="0 0 24 24"><path d="M21.71 20.29l-5.4-5.4a8 8 0 1 0-1.42 1.42l5.4 5.4a1 1 0 0 0 1.42-1.42zM4 10a6 6 0 1 1 6 6 6 6 0 0 1-6-6z"/></svg>
+                            <input type="text" id="stg-search-input" placeholder="Search settings..." aria-label="Search settings" autocomplete="off" aria-controls="stg-search-results" onkeydown="if(event.key==='Escape'){this.value='';filterSettings('')}" oninput="if(typeof filterSettings==='function')filterSettings(this.value)">
+                        </div>
+                        </div>
+                        <div id="stg-search-results" class="stg-search-results" hidden></div>
                         <div class="stg-tabbar">
-                            <button class="stg-tab active" data-tab="connections" onclick="switchSettingsTab('connections')">Connections</button>
-                            <button class="stg-tab" data-tab="downloads" onclick="switchSettingsTab('downloads')">Downloads</button>
-                            <button class="stg-tab" data-tab="sources" onclick="switchSettingsTab('sources')">Sources</button>
-                            <button class="stg-tab" data-tab="quality" onclick="switchSettingsTab('quality')">Quality</button>
-                            <button class="stg-tab" data-tab="library" onclick="switchSettingsTab('library')">Library</button>
-                            <button class="stg-tab" data-tab="appearance" onclick="switchSettingsTab('appearance')">Appearance</button>
-                            <button class="stg-tab" data-tab="advanced" onclick="switchSettingsTab('advanced')">Advanced</button>
-                            <button class="stg-tab" data-tab="logs" onclick="switchSettingsTab('logs')">Logs</button>
+<button type="button" class="stg-tab active" data-tab="connections" onclick="switchSettingsTab('connections')">
+                                <span class="stg-tab-badge badge-connections">
+                                    <svg viewBox="0 0 24 24"><path d="M18 10h-2V7a4 4 0 0 0-8 0v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2zm-8-3a2 2 0 0 1 4 0v3h-4V7zm8 13H6v-8h12v8z"/></svg>
+                                </span>
+                                <span class="stg-tab-label">Connections</span>
+                            </button>
+<button type="button" class="stg-tab" data-tab="sources" onclick="switchSettingsTab('sources')">
+                                <span class="stg-tab-badge badge-sources">
+                                    <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14.93V18a1 1 0 0 1-2 0v-1.07A7 7 0 0 1 5.07 11H4a1 1 0 0 1 0-2h1.07A7 7 0 0 1 11 5.07V4a1 1 0 0 1 2 0v1.07A7 7 0 0 1 18.93 11H20a1 1 0 0 1 0 2h-1.07A7 7 0 0 1 13 16.93zM12 7a5 5 0 1 0 5 5 5 5 0 0 0-5-5z"/></svg>
+                                </span>
+                                <span class="stg-tab-label">Sources</span>
+                            </button>
+<button type="button" class="stg-tab" data-tab="downloads" onclick="switchSettingsTab('downloads')">
+                                <span class="stg-tab-badge badge-downloads">
+                                    <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                                </span>
+                                <span class="stg-tab-label">Downloads</span>
+                            </button>
+<button type="button" class="stg-tab" data-tab="quality" onclick="switchSettingsTab('quality')">
+                                <span class="stg-tab-badge badge-quality">
+                                    <svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg>
+                                </span>
+                                <span class="stg-tab-label">Quality</span>
+                            </button>
+<button type="button" class="stg-tab" data-tab="library" onclick="switchSettingsTab('library')">
+                                <span class="stg-tab-badge badge-library">
+                                    <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+                                </span>
+                                <span class="stg-tab-label">Library</span>
+                            </button>
+<button type="button" class="stg-tab" data-tab="appearance" onclick="switchSettingsTab('appearance')">
+                                <span class="stg-tab-badge badge-appearance">
+                                    <svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.35 19.4a1 1 0 0 0 .71 1.6h4.52A8.96 8.96 0 0 0 12 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-5 9c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm3-4c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm4 0c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm3 4c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>
+                                </span>
+                                <span class="stg-tab-label">Appearance</span>
+                            </button>
+<button type="button" class="stg-tab" data-tab="advanced" onclick="switchSettingsTab('advanced')">
+                                <span class="stg-tab-badge badge-advanced">
+                                    <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54A.48.48 0 0 0 13.9 2h-3.8a.49.49 0 0 0-.49.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.73 8.47c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.48.48 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.8c.24 0 .44-.17.49-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                                </span>
+                                <span class="stg-tab-label">Advanced</span>
+                            </button>
+<button type="button" class="stg-tab" data-tab="logs" onclick="switchSettingsTab('logs')">
+                                <span class="stg-tab-badge badge-logs">
+                                    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                                </span>
+                                <span class="stg-tab-label">Logs</span>
+                            </button>
                         </div>
-                        <div class="header-actions">
-                            <button class="save-button" id="save-settings">Save Settings</button>
+                    </nav>
+
+                    <!-- Settings category content -->
+                    <div class="stg-detail-pane">
+                        <div class="settings-nav-row">
+                            <div class="stg-active-section-title">
+                                <span class="stg-active-title-text" id="stg-active-title">Connections</span>
+                                <span class="stg-active-sub-text" id="stg-active-sub">Accounts, media servers, and API keys SoulSync connects to</span>
+                            </div>
+                            <div class="header-actions">
+                                <button class="save-button" id="save-settings">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm2 16H5V5h11.17L19 7.83V19zm-7-7c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3zM6 6h9v4H6z"/></svg>
+                                    <span>Save Settings</span>
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                    <!-- Settings Panels -->
-                    <div class="settings-columns">
+                        <!-- Settings Panels -->
+                        <div class="settings-columns">
                         <!-- Left Column - API Configuration -->
                         <div class="settings-left-column">
                             <!-- API Configuration -->
@@ -2955,6 +3017,12 @@
                                             <label>API Secret:</label>
                                             <input type="password" id="lastfm-api-secret"
                                                 placeholder="Last.fm API Secret (required for scrobbling)">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="lastfm-username">Username:</label>
+                                            <input type="text" id="lastfm-username"
+                                                placeholder="Your Last.fm username">
+                                            <small>The Last.fm account whose listening history to import. You can correct this username here or on the Stats page.</small>
                                         </div>
                                         <div class="callback-info">
                                             <div class="callback-help">Get your API key and secret from <a
@@ -5234,17 +5302,17 @@
                                 <span class="stg-cardgroup-label">Files &amp; folders</span>
                                 <span class="stg-cardgroup-sub">Where things live on disk, and how they get named</span>
                             </div>
-                            <!-- Split from one "Paths &amp; Organization" card so the music side names
-                                 its sections the same way the video side does: Folders for where things
-                                 live, Organization for how they get named. One combined card on one side
-                                 and two split cards on the other made the two halves look like different
-                                 features rather than the same feature twice. -->
+                            <!-- Shared media tabs keep each set of controls mounted while switching. -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Music Folders</h3>
-                                <span class="settings-section-hint" data-stg-summary="library-paths" data-stg-fallback="Downloads, library &amp; extra folders">Downloads, library &amp; extra folders</span>
+                                <h3>Folders</h3>
+                                <span class="settings-section-hint">Downloads and library locations</span>
                             </div>
-                            <div class="settings-section-body collapsed" data-stg="library">
+<div class="settings-section-body collapsed stg-media-card" data-stg="library">
+<div class="stg-media-switcher" role="tablist" aria-label="Folders media type"><button type="button" id="folders-music-tab" role="tab" aria-selected="true" aria-controls="folders-music-panel" tabindex="0" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Music</button><button type="button" id="folders-video-tab" role="tab" aria-selected="false" aria-controls="folders-video-panel" tabindex="-1" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Video</button></div>
+<div id="folders-music-panel" role="tabpanel" aria-labelledby="folders-music-tab" class="stg-media-panel" tabindex="0">
+<div class="stg-media-context"><strong>Music folders</strong><span class="stg-media-summary" data-stg-summary="library-paths" data-stg-fallback="Downloads, library &amp; extra folders">Downloads, library &amp; extra folders</span></div>
+
 <div class="settings-group" data-stg="library">
                                 <h3>Folder Paths</h3>
                                 <div class="setting-help-text" style="margin-bottom: 4px;">
@@ -5400,13 +5468,62 @@
                                     <button class="test-button" onclick="addMusicPathRow()">+ Add Path</button>
                                 </div>
                             </div>
+
+</div>
+<div id="folders-video-panel" role="tabpanel" aria-labelledby="folders-video-tab" class="stg-media-panel" hidden tabindex="0">
+<div class="stg-media-context"><strong>Video folders</strong><span class="stg-media-summary" data-stg-summary="library-video-folders" data-stg-fallback="Movies, TV &amp; YouTube libraries">Movies, TV &amp; YouTube libraries</span></div>
+
+<div class="settings-group" data-stg="library">
+
+                                <div class="setting-help-text">
+                                    One shared download folder (where slskd / torrent drop files), then a separate library folder per type — finished files are sorted to the right one automatically. SEPARATE from your Music paths.
+                                </div>
+                                <div class="form-group">
+                                    <label>Download Folder (Input — shared with Music):</label>
+                                    <input type="text" id="video-download-path" placeholder="./downloads">
+                                    <div class="setting-help-text">Where downloads land — point this at the same folder as your slskd / torrent client. This is the SAME folder as the Music side; changing it here changes it there too.</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>🎬 Movies Library:</label>
+                                    <input type="text" id="video-movies-path" placeholder="/media/movies">
+                                </div>
+                                <div class="form-group">
+                                    <label>📺 TV Shows Library:</label>
+                                    <input type="text" id="video-tv-path" placeholder="/media/tv">
+                                </div>
+                                <div class="setting-help-text">
+                                    Movies and TV folders above are the destinations for new downloads. Add extra libraries below for existing collections on other drives. Include those libraries in your Plex/Jellyfin scan selection. In Docker, mount each folder at a different container path and enter that path here; use read-write access for renaming, upgrades, and recycling.
+                                </div>
+                                <div class="form-group">
+                                    <label>Additional Movie Libraries:</label>
+                                    <div id="video-movies-additional-paths" data-video-extra-kind="movies"></div>
+                                    <button type="button" class="test-button" data-video-add-path="movies">+ Add Path</button>
+                                    <div class="setting-help-text">Extra folders only — no need to repeat the primary folder. Example: /media/movies2</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Additional TV Libraries:</label>
+                                    <div id="video-tv-additional-paths" data-video-extra-kind="tv"></div>
+                                    <button type="button" class="test-button" data-video-add-path="tv">+ Add Path</button>
+                                    <div class="setting-help-text">Extra folders only — no need to repeat the primary folder. Example: /media/tv2</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>▶️ YouTube Library:</label>
+                                    <input type="text" id="video-youtube-path" placeholder="/media/youtube">
+                                </div>
                             </div>
+
+</div>
+</div>
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Music Organization</h3>
-                                <span class="settings-section-hint" data-stg-summary="library-music-org" data-stg-fallback="File naming templates &amp; reorganize">File naming templates &amp; reorganize</span>
+                                <h3>Organization</h3>
+                                <span class="settings-section-hint">Naming, layout and file handling</span>
                             </div>
-                            <div class="settings-section-body collapsed" data-stg="library">
+<div class="settings-section-body collapsed stg-media-card" data-stg="library">
+<div class="stg-media-switcher" role="tablist" aria-label="Organization media type"><button type="button" id="organization-music-tab" role="tab" aria-selected="true" aria-controls="organization-music-panel" tabindex="0" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Music</button><button type="button" id="organization-video-tab" role="tab" aria-selected="false" aria-controls="organization-video-panel" tabindex="-1" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Video</button></div>
+<div id="organization-music-panel" role="tabpanel" aria-labelledby="organization-music-tab" class="stg-media-panel" tabindex="0">
+<div class="stg-media-context"><strong>Music organization</strong><span class="stg-media-summary" data-stg-summary="library-music-org" data-stg-fallback="File naming templates &amp; reorganize">File naming templates &amp; reorganize</span></div>
+
 <div class="settings-group" data-stg="library">
                                 <h3>File Organization</h3>
 
@@ -5746,44 +5863,11 @@
                                     no needless renames. Turn off to match the metadata source exactly.
                                 </div>
                             </div>
-                            </div>
                             
-<div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
-                                <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Video Folders</h3>
-                                <span class="settings-section-hint" data-stg-summary="library-video-folders" data-stg-fallback="Movies, TV &amp; YouTube libraries">Movies, TV &amp; YouTube libraries</span>
-                            </div>
-                            <div class="settings-section-body collapsed" data-stg="library">
-<div class="settings-group" data-stg="library">
-                                
-                                <div class="setting-help-text">
-                                    One shared download folder (where slskd / torrent drop files), then a separate library folder per type — finished files are sorted to the right one automatically. SEPARATE from your Music paths.
-                                </div>
-                                <div class="form-group">
-                                    <label>Download Folder (Input — shared with Music):</label>
-                                    <input type="text" id="video-download-path" placeholder="./downloads">
-                                    <div class="setting-help-text">Where downloads land — point this at the same folder as your slskd / torrent client. This is the SAME folder as the Music side; changing it here changes it there too.</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>🎬 Movies Library:</label>
-                                    <input type="text" id="video-movies-path" placeholder="/media/movies">
-                                </div>
-                                <div class="form-group">
-                                    <label>📺 TV Shows Library:</label>
-                                    <input type="text" id="video-tv-path" placeholder="/media/tv">
-                                </div>
-                                <div class="form-group">
-                                    <label>▶️ YouTube Library:</label>
-                                    <input type="text" id="video-youtube-path" placeholder="/media/youtube">
-                                </div>
-                            </div>
-                            </div>
-<div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
-                                <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Video Organization</h3>
-                                <span class="settings-section-hint">Path templates, post-processing &amp; recycle</span>
-                            </div>
-                            <div class="settings-section-body collapsed" data-stg="library">
+</div>
+<div id="organization-video-panel" role="tabpanel" aria-labelledby="organization-video-tab" class="stg-media-panel" hidden tabindex="0">
+<div class="stg-media-context"><strong>Video organization</strong><span class="stg-media-summary">Path templates, post-processing &amp; recycle</span></div>
+
 <div class="settings-group" data-stg="library">
                                 
 
@@ -5927,7 +6011,12 @@
                                     <small class="settings-hint">Restores the Radarr/Sonarr standard layout.</small>
                                 </div>
                             </div>
-                            </div>
+
+</div>
+</div>
+
+
+
                             <div class="stg-cardgroup" data-stg="library">
                                 <span class="stg-cardgroup-label">Processing</span>
                                 <span class="stg-cardgroup-sub">What happens to a file after it arrives</span>
@@ -7171,6 +7260,7 @@
                     </div>
 
                 </div>
+                </div><!-- /.stg-detail-pane -->
                 </div>
             </div>
 

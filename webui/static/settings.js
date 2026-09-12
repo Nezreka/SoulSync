@@ -929,7 +929,10 @@ const LIBRARY_SUMMARIES = {
     'library-video-folders': () => {
         const set = ['video-movies-path', 'video-tv-path', 'video-youtube-path']
             .filter(id => (document.getElementById(id)?.value || '').trim()).length;
-        return set ? `${set} of 3 libraries set` : 'no libraries set yet';
+        const extra = [...document.querySelectorAll('[data-video-extra-kind] input')]
+            .filter(input => input.value.trim()).length;
+        const primary = set ? `${set} of 3 libraries set` : 'no primary libraries set';
+        return extra ? `${primary} · ${extra} additional` : (set ? primary : 'no libraries set yet');
     },
     'library-post-processing': () => {
         const on = (id) => document.getElementById(id)?.checked;
@@ -1028,10 +1031,43 @@ document.addEventListener('click', (e) => {
     });
 });
 
+// Media tabs keep both panels mounted, preserving unsaved values and listeners.
+function switchLibraryMediaTab(tab) {
+    const card = tab.closest('.stg-media-card');
+    if (!card) return;
+    card.querySelectorAll('[role="tab"]').forEach(button => {
+        const selected = button === tab;
+        button.setAttribute('aria-selected', String(selected));
+        button.tabIndex = selected ? 0 : -1;
+        const panel = document.getElementById(button.getAttribute('aria-controls'));
+        if (panel) panel.hidden = !selected;
+    });
+}
+function handleLibraryMediaTabKey(event) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = Array.from(event.currentTarget.closest('[role="tablist"]').querySelectorAll('[role="tab"]'));
+    const current = tabs.indexOf(event.currentTarget);
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+        : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    event.preventDefault();
+    switchLibraryMediaTab(tabs[index]);
+    tabs[index].focus();
+}
+
 // Settings redesign — tab switching + service accordions
 function switchSettingsTab(tab) {
+    const search = document.getElementById('stg-search-input');
+    const results = document.getElementById('stg-search-results');
+    if (search) search.value = '';
+    if (results) results.hidden = true;
+    if (tab === 'library') document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
     // Update tab bar
-    document.querySelectorAll('.stg-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    document.querySelectorAll('#settings-page .stg-tab').forEach(t => {
+        const active = t.dataset.tab === tab;
+        t.classList.toggle('active', active);
+        if (active) t.setAttribute('aria-current', 'page');
+        else t.removeAttribute('aria-current');
+    });
     // Show/hide settings groups and section headers by data-stg attribute
     document.querySelectorAll('#settings-page [data-stg]').forEach(g => {
         g.style.display = g.dataset.stg === tab ? '' : 'none';
@@ -1090,7 +1126,79 @@ function switchSettingsTab(tab) {
     if (tab === 'connections') {
         try { applyServiceStatusGradients(); } catch (e) { }
     }
+
+    // Update active section title & subtitle in the detail header
+    const titles = {
+        connections: { title: 'Connections', sub: 'Accounts, media servers, and API keys SoulSync connects to' },
+        sources: { title: 'Sources', sub: 'Configure and prioritize acquisition sources and indexers' },
+        downloads: { title: 'Downloads', sub: 'Download sources, queue behavior, and transfer preferences' },
+        quality: { title: 'Quality', sub: 'Audio and video formats, release profiles, and ladders' },
+        library: { title: 'Library', sub: 'Folders, file organization, tagging, and collection preferences' },
+        appearance: { title: 'Appearance', sub: 'Visual themes, accents, GPU animations, and interface controls' },
+        advanced: { title: 'Advanced', sub: 'Database tools, cache management, networking, and system diagnostics' },
+        logs: { title: 'Logs', sub: 'Live streaming logs and real-time operational diagnostics' }
+    };
+    const titleEl = document.getElementById('stg-active-title');
+    const subEl = document.getElementById('stg-active-sub');
+    if (titleEl && titles[tab]) titleEl.textContent = titles[tab].title;
+    if (subEl && titles[tab]) subEl.textContent = titles[tab].sub;
 }
+
+function filterSettings(query) {
+    const results = document.getElementById('stg-search-results');
+    if (!results) return;
+    const q = (query || '').trim().toLowerCase();
+    results.replaceChildren();
+    results.hidden = !q;
+    if (!q) return;
+    // Search only labels/help, never saved values or credentials. Navigation
+    // initializes the chosen category instead of exposing hidden, unloaded forms.
+    const matches = [];
+    document.querySelectorAll('#settings-page .settings-group[data-stg], #settings-page .settings-section-body[data-stg]').forEach(section => {
+        if (!(section.textContent || '').toLowerCase().includes(q)) return;
+        if (matches.some(item => item.contains(section))) return;
+        matches.push(section);
+    });
+    if (!matches.length) {
+        const empty = document.createElement('p');
+        empty.setAttribute('role', 'status');
+        empty.textContent = 'No settings found. Try a service name, folder, or feature.';
+        results.append(empty);
+    }
+    matches.slice(0, 10).forEach(section => {
+        const category = section.dataset.stg;
+        const tab = document.querySelector('#settings-page .stg-tab[data-tab="' + category + '"]');
+        const heading = section.querySelector('h3') || section.previousElementSibling?.querySelector('h3');
+        const title = heading?.textContent.trim() || category;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = (tab?.textContent.trim() || category) + ' — ' + title;
+        button.addEventListener('click', () => {
+            switchSettingsTab(category);
+            if (section.classList.contains('settings-section-body')) {
+                section.classList.remove('collapsed');
+                section.style.display = '';
+                const header = section.previousElementSibling;
+                header?.classList.remove('collapsed');
+                header?.setAttribute('aria-expanded', 'true');
+            }
+            const matchingLabel = Array.from(section.querySelectorAll('label, h4')).find(label => label.textContent.toLowerCase().includes(q));
+            const mediaPanel = matchingLabel?.closest('[role="tabpanel"]');
+            if (mediaPanel) {
+                const mediaTab = document.querySelector('[aria-controls="' + mediaPanel.id + '"]');
+                if (mediaTab) switchLibraryMediaTab(mediaTab);
+            }
+            section.tabIndex = -1;
+            section.focus({ preventScroll: true });
+            section.scrollIntoView({ block: 'start', behavior: 'auto' });
+            section.classList.add('stg-search-target');
+            window.setTimeout(() => section.classList.remove('stg-search-target'), 2000);
+        });
+        results.append(button);
+    });
+}
+window.filterSettings = filterSettings;
+
 
 // ── Settings → Connections: per-service status gradient + verify wiring ──
 // Gradient shows green when the user has filled in credentials, yellow when empty.
@@ -1225,6 +1333,16 @@ async function _stgRefreshAfterSave() {
             .filter(Boolean);
         if (expandedServices.length > 0) {
             _stgVerifyServices(expandedServices, { force: true });
+        }
+        const btn = document.getElementById('save-settings');
+        if (btn) {
+            const origHTML = btn.innerHTML;
+            btn.classList.add('is-saved');
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg><span>Saved</span>';
+            setTimeout(() => {
+                btn.classList.remove('is-saved');
+                btn.innerHTML = origHTML;
+            }, 2000);
         }
     } catch (e) {
         console.warn('[Settings Status] Post-save refresh failed:', e);
@@ -2802,6 +2920,8 @@ async function loadSettingsData() {
         if (_slfmKey) _slfmKey.value = settings.concerts?.setlistfm_api_key || '';
         document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
         document.getElementById('lastfm-api-secret').value = settings.lastfm?.api_secret || '';
+        const _lfmUser = document.getElementById('lastfm-username');
+        if (_lfmUser) _lfmUser.value = settings.lastfm?.username || '';
         document.getElementById('lastfm-scrobble-enabled').checked = settings.lastfm?.scrobble_enabled === true;
         const lfmStatus = document.getElementById('lastfm-scrobble-status');
         if (lfmStatus) {
@@ -5935,6 +6055,10 @@ async function saveSettings(quiet = false) {
             setlistfm_api_key: _cfgStr('concerts-setlistfm-api-key', { trim: true })
         },
         lastfm: {
+            // _cfgStr rather than .value: this input is absent on the video
+            // side, and reading .value off a missing element is how a save
+            // wipes a stored setting.
+            username: _cfgStr('lastfm-username', { trim: true }),
             api_key: document.getElementById('lastfm-api-key').value,
             api_secret: document.getElementById('lastfm-api-secret').value,
             scrobble_enabled: document.getElementById('lastfm-scrobble-enabled').checked,

@@ -73,6 +73,7 @@ def register_download(
     artwork_url: str = "",
     protocol: str = "",
     size_bytes: int = 0,
+    only_if_missing: bool = False,
 ) -> bool:
     """Put one grabbed audiobook on the Downloads page.
 
@@ -88,13 +89,15 @@ def register_download(
         return False
 
     with tasks_lock:
+        if only_if_missing and task_id in download_tasks:
+            return False
         batch = _ensure_batch()
         if task_id not in batch["queue"]:
             batch["queue"].append(task_id)
         batch["phase"] = "downloading"
 
         download_tasks[task_id] = {
-            "status": "downloading",
+            "status": "queued",
             "track_info": {
                 "title": title,
                 "name": title,
@@ -127,6 +130,7 @@ def update_progress(
     percent: Optional[float] = None,
     bytes_done: Optional[int] = None,
     bytes_total: Optional[int] = None,
+    speed: Optional[float] = None,
 ) -> None:
     """Push a poll result onto the card. Missing values are left alone."""
     task_id = str(task_id or "").strip()
@@ -136,6 +140,8 @@ def update_progress(
         task = download_tasks.get(task_id)
         if not task:
             return
+        if speed is not None:
+            task["speed"] = max(0.0, float(speed))
         if percent is not None:
             task["progress"] = max(0.0, min(100.0, float(percent)))
         if bytes_done is not None:
@@ -164,8 +170,11 @@ def mark_status(
         task = download_tasks.get(task_id)
         if not task:
             return
+        if task["status"] != status:
+            task["status_change_time"] = time.time()
         task["status"] = status
-        task["status_change_time"] = time.time()
+        if status in ("downloading", "queued"):
+            task["error_message"] = None
         if status == "completed":
             task["progress"] = 100.0
         if error:

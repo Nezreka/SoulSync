@@ -1,29 +1,14 @@
-"""Audiobook library scan — keeps the "you own this" record honest.
+"""Index the configured audiobook folder, including books acquired elsewhere.
 
-SoulSync records a book in ``audiobook_library`` at import, and that record is
-what puts an Owned badge on a search result and what stops the grab route
-downloading something twice. Records go stale the moment the user touches the
-folder themselves, which they do: books get deleted after listening, moved to
-a NAS, or restored from a backup taken before an import.
-
-This is the reconciliation. It does two things and no more:
-
-  * Forgets rows whose folder is gone, so an Owned badge never lies.
-  * Adopts folders on disk that the database does not know about, by reading
-    the asin back out of the sidecars the post-processor wrote.
-
-It never deletes, moves or rewrites a file. The disk is the truth here and the
-database is the copy, so the only thing that changes is the database.
-
-Adoption is deliberately limited to folders carrying a sidecar. Matching an
-arbitrary folder name back to a catalogue entry is a guess, and a wrong guess
-here is worse than no guess at all: it silently marks a book owned that the
-user does not have, and the wishlist then refuses to fetch it.
+The scan reads audio and sidecars; it never moves, tags, renames or deletes files.
+Unidentified books receive local keys, never guessed catalogue ownership.
 """
-
 from __future__ import annotations
 
+import hashlib
 import os
+import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -31,14 +16,10 @@ from typing import Any, Dict, List, Optional
 from utils.logging_config import get_logger
 
 logger = get_logger("audiobook_library_scan")
-
-# How deep to walk below the library root before giving up. The default
-# template is author/series/title, so three is the shape; four gives room for
-# an install that shelves by first letter on top of that.
-MAX_DEPTH = 4
-
-# A folder holding fewer bytes than this is not a book, it is leftovers.
+MAX_DEPTH = 32
 MIN_BOOK_BYTES = 1024 * 1024
+_SCAN_LOCK = threading.Lock()
+_DISC = re.compile(r"^(?:cd|disc|disk|part)\s*[-_ ]*\d+$", re.I)
 
 
 def _audio_extensions() -> frozenset:
@@ -46,224 +27,228 @@ def _audio_extensions() -> frozenset:
     return AUDIO_EXTENSIONS
 
 
+def _stats(files: list[Path]) -> dict:
+    return {"file_count": len(files), "size_bytes": sum(p.stat().st_size for p in files),
+            "audio_format": "/".join(sorted({p.suffix.lower().lstrip('.') for p in files}))}
+
+
 def folder_stats(folder: Path) -> Dict[str, Any]:
-    """Count and measure the audio directly inside a folder.
-
-    Not recursive on purpose. A book folder holds its own chapters, and
-    counting a subfolder's files into it would make a series folder look like
-    one enormous book.
-    """
-    extensions = _audio_extensions()
-    count = 0
-    size = 0
-    formats: List[str] = []
-
+    """Measure direct audio children; retained for organizer callers."""
     try:
-        entries = list(Path(folder).iterdir())
+        files = [p for p in Path(folder).iterdir()
+                 if not p.is_symlink() and p.is_file() and p.suffix.lower() in _audio_extensions()]
+        return _stats(files)
     except OSError:
         return {"file_count": 0, "size_bytes": 0, "audio_format": ""}
 
-    for entry in entries:
-        try:
-            if not entry.is_file():
-                continue
-            suffix = entry.suffix.lower()
-            if suffix not in extensions:
-                continue
-            count += 1
-            size += entry.stat().st_size
-            token = suffix.lstrip(".")
-            if token not in formats:
-                formats.append(token)
-        except OSError:
-            continue
-
-    return {
-        "file_count": count,
-        "size_bytes": size,
-        # Sorted so a mixed folder reports the same string every scan and does
-        # not churn the row on every pass.
-        "audio_format": "/".join(sorted(formats)),
-    }
-
 
 def is_book_folder(folder: Path) -> bool:
-    """True when this folder looks like it holds one book's audio."""
     stats = folder_stats(folder)
     return stats["file_count"] > 0 and stats["size_bytes"] >= MIN_BOOK_BYTES
 
 
 def iter_book_folders(root: Path, max_depth: int = MAX_DEPTH):
-    """Every folder under root that holds audio, without descending into it.
+    from core.audiobook_library_inventory import discover
+    class MemoryCache:
+        def cached_library_file(self, *args): return None
+        def cache_library_file(self, *args): pass
+    if Path(root).is_dir():
+        for group in discover(Path(root), MemoryCache(), lambda *_: None, max_depth):
+            if group.scope == "folder":
+                yield group.path
 
-    Stops at the first folder on a branch that holds audio: a book's own
-    chapters are the leaves, and anything below them belongs to that book.
-    """
-    root = Path(root)
-    if not root.is_dir():
-        return
 
-    stack = [(root, 0)]
-    while stack:
-        folder, depth = stack.pop()
-        if depth > max_depth:
-            continue
+def _key(path: Path) -> str:
+    return os.path.normcase(str(path.resolve()))
 
-        if depth > 0 and is_book_folder(folder):
-            yield folder
-            continue
 
+def _local_id(path: Path) -> str:
+    return "local:" + hashlib.sha256(_key(path).encode()).hexdigest()[:24]
+
+
+def _signature(path: Path, files: list[Path]) -> str:
+    sidecars = [path / name for name in ("metadata.opf", "book.nfo", "metadata.json")] \
+        if path.is_dir() else [path.with_suffix('.opf'), path.with_suffix('.nfo')]
+    parts = []
+    for file in files + sidecars:
         try:
-            children = [
-                child for child in folder.iterdir()
-                # Hidden folders are somebody's business, not the library's.
-                # The recycle bin is the one that matters: without this, a book
-                # deleted yesterday is found in .deleted, read from its own
-                # sidecar, and adopted straight back into the library — the
-                # delete would silently undo itself on the next daily scan.
-                if child.is_dir() and not child.name.startswith(".")
-            ]
-        except OSError as exc:
-            logger.debug("Could not list %s: %s", folder, exc)
+            stat = file.stat()
+        except FileNotFoundError:
             continue
+        parts.append(f"{file}:{stat.st_size}:{stat.st_mtime_ns}")
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
-        for child in children:
-            stack.append((child, depth + 1))
+
+def scan_status(db=None) -> dict:
+    from core.audiobook_database import get_audiobook_db
+    database = db if db is not None else get_audiobook_db()
+    state = database.get_library_scan_state()
+    if state.get("status") == "running" and not _SCAN_LOCK.locked():
+        state = {**state, "status": "interrupted", "error": "The previous scan was interrupted. Run it again."}
+    return state
 
 
-def _book_from_sidecar(folder: Path, asin: str) -> Dict[str, Any]:
-    """The minimum a library row needs, read off disk.
-
-    Only reached for a folder the database has never seen, so there is nothing
-    better to fall back on. The catalogue is not consulted: a scan that fires
-    one Audible request per unknown folder would hammer them on the first run
-    over an existing library, and every field it would fill is cosmetic.
-    """
-    from core.audiobook_post_processor import NFO_NAME, OPF_NAME
-
-    title = ""
-    author = ""
-    narrator = ""
-
-    for name, opening, closing in (
-        (OPF_NAME, "<dc:title>", "</dc:title>"),
-        (NFO_NAME, "<title>", "</title>"),
-    ):
+def _provenance(group, facts, previous, downloads):
+    if previous and previous.get("origin") == "soulsync":
+        return "soulsync", previous.get("download_id", "")
+    marker = ""
+    if group.scope == "folder":
         try:
-            text = (folder / name).read_text(encoding="utf-8", errors="ignore")
+            marker = (group.path / ".soulsync-release").read_text(encoding="utf-8").strip()
         except OSError:
+            pass
+    for download in downloads:
+        if download.get("status") != "completed":
             continue
-        if opening in text:
-            title = text.split(opening, 1)[1].split(closing, 1)[0].strip()
-        if not author and 'opf:role="aut"' in text:
-            author = text.split('opf:role="aut"', 1)[1].split(">", 1)[1] \
-                .split("<", 1)[0].strip()
-        if not narrator and 'opf:role="nrt"' in text:
-            narrator = text.split('opf:role="nrt"', 1)[1].split(">", 1)[1] \
-                .split("<", 1)[0].strip()
-        if title:
-            break
-
-    return {
-        "asin": asin,
-        # The folder name is the honest fallback: it is what the user sees.
-        "title": title or folder.name,
-        "author_names": [author] if author else [],
-        "narrator_names": [narrator] if narrator else [],
-        "series": [],
-    }
+        exact_path = download.get("imported_path") and _key(Path(download["imported_path"])) == _key(group.path)
+        marked = marker and marker in (download.get("release_title"), download.get("download_id"))
+        if exact_path or (marked and download.get("asin") == facts.get("asin")):
+            return "soulsync", download["download_id"]
+    if marker:
+        return "soulsync", ""
+    return (previous.get("origin", "unknown") if previous else "disk"), ""
 
 
-def scan(root: Optional[str] = None, db: Any = None) -> Dict[str, Any]:
-    """Reconcile the library table against the folder on disk.
-
-    Returns ``{checked, removed, adopted, updated, missing_root}``. Never
-    raises: this runs from the automation engine, and a scan that throws would
-    take the whole run down with it.
-    """
-    summary = {"checked": 0, "removed": 0, "adopted": 0, "updated": 0,
-               "missing_root": False, "started_at": time.time()}
-
+def scan(root: Optional[str] = None, db: Any = None, progress=None,
+         match_catalog: bool = False, match_limit: int = 25, client=None) -> Dict[str, Any]:
+    """Read files, reconcile inventory, then optionally match a bounded catalogue batch."""
     from core.audiobook_database import get_audiobook_db
     from core.audiobook_organizer import library_root
-
-    database = db if db is not None else get_audiobook_db()
-    library_path = Path(str(root or library_root()))
-
+    from core.audiobook_library_metadata import read_metadata
+    from core.audiobook_library_inventory import discover
+    if not _SCAN_LOCK.acquire(blocking=False):
+        return {"status": "skipped", "skipped": "An audiobook library scan is already running"}
+    summary = {"status": "running", "phase": "scanning", "checked": 0, "removed": 0,
+               "adopted": 0, "updated": 0, "moved": 0, "local": 0, "errors": 0,
+               "missing_root": False, "started_at": time.time(), "error": ""}
+    database = None
+    def report():
+        if database is not None:
+            database.set_library_scan_state(summary)
+        if progress:
+            progress(dict(summary))
+    def error(path, detail):
+        summary["errors"] += 1
+        summary["error"] = f"Could not fully scan {path}: {detail}"
+        logger.warning(summary["error"])
     try:
+        root_path = Path(str(root or library_root())).resolve()
+        summary["root"] = str(root_path)
+        database = db if db is not None else get_audiobook_db()
+        report()
+        if not root_path.is_dir():
+            summary.update(missing_root=True, status="error", error="The audiobook folder is not reachable. Check its setting and mount.")
+            return summary
         rows = database.get_library()
-    except Exception as exc:                                # noqa: BLE001
-        logger.warning("Could not read the audiobook library: %s", exc)
-        return summary
-
-    if not library_path.is_dir():
-        # A missing root is almost always an unmounted share or a container
-        # started without its volume. Forgetting the whole library over that
-        # would be catastrophic and unrecoverable, so nothing is touched.
-        summary["missing_root"] = True
-        logger.warning("Audiobook library root %s is not there; skipping the scan",
-                       library_path)
-        return summary
-
-    known_paths = set()
-
-    for row in rows:
-        summary["checked"] += 1
-        asin = str(row.get("asin") or "")
-        path = Path(str(row.get("path") or ""))
-
-        if not asin:
-            continue
-
-        if not path.is_dir() or not is_book_folder(path):
+        downloads = database.get_downloads()
+        by_path = {_key(Path(r["path"])): r for r in rows if r.get("path")}
+        ids = {r["asin"] for r in rows}
+        groups = discover(root_path, database, error)
+        summary["found"] = len(groups)
+        seen_ids, seen_files = set(), set()
+        for index, group in enumerate(groups):
+            summary["checked"] += 1
+            summary["current"] = group.path.name
             try:
-                if database.remove_from_library(asin):
-                    summary["removed"] += 1
-                    logger.info("Forgot %s: %s is gone", asin, path)
-            except Exception as exc:                        # noqa: BLE001
-                logger.warning("Could not forget %s: %s", asin, exc)
-            continue
-
-        known_paths.add(os.path.normcase(str(path.resolve())))
-
-        stats = folder_stats(path)
-        if (stats["file_count"] != int(row.get("file_count") or 0)
-                or stats["size_bytes"] != int(row.get("size_bytes") or 0)):
-            try:
-                if database.update_library_entry(asin, **stats):
-                    summary["updated"] += 1
-            except Exception as exc:                        # noqa: BLE001
-                logger.debug("Could not refresh %s: %s", asin, exc)
-
-    from core.audiobook_post_processor import read_asin_from_folder
-
-    for folder in iter_book_folders(library_path):
+                previous = by_path.get(_key(group.path))
+                if previous is None:
+                    possible = [r for r in rows if r.get("fingerprint") == group.fingerprint
+                                and r["asin"] not in seen_ids and not Path(r["path"]).exists()]
+                    if len(possible) == 1:
+                        previous = possible[0]
+                        summary["moved"] += 1
+                paths = [str(p) for p in group.files]
+                seen_files.update(_key(p) for p in group.files)
+                facts = (previous.get("metadata_json") if previous and previous.get("scan_signature") == group.signature
+                         else None)
+                if not facts:
+                    facts = read_metadata(group.path, group.files, probes=group.probes)
+                explicit_ids = {p.get("asin") for p in group.probes if p.get("asin")}
+                if facts.get("asin"):
+                    explicit_ids.add(facts["asin"])
+                facts["metadata_conflicts"] = ["Conflicting identifiers in the sidecar and audio files"] if len(explicit_ids)>1 else []
+                if facts["metadata_conflicts"]:
+                    facts["asin"] = ""
+                catalog_asin = facts.get("asin") or ""
+                key = previous["asin"] if previous else catalog_asin if catalog_asin and catalog_asin not in ids else _local_id(group.path)
+                origin, download_id = _provenance(group, facts, previous, downloads)
+                stats = _stats(group.files)
+                fields = {**stats, "path": str(group.path), "file_paths": paths,
+                          "file_scope": group.scope, "fingerprint": group.fingerprint,
+                          "scan_signature": group.signature, "metadata_json": facts,
+                          "grouping": group.grouping, "origin": origin, "download_id": download_id}
+                if previous:
+                    changed = previous.get("scan_signature") != group.signature
+                    # A previous manual decision is never silently replaced by a search.
+                    pinned = previous.get("match_status") in ("confirmed", "ignored", "changed")
+                    if changed and pinned and previous.get("match_status") != "ignored" and previous.get("fingerprint") and previous["fingerprint"] != group.fingerprint:
+                        fields.update(match_status="changed", match_evidence=["Files changed since confirmation; please review the saved match"])
+                    elif not pinned and (changed or previous.get("match_status") == "identifier"):
+                        preserve_import = (previous.get("origin") == "soulsync" or previous.get("match_status") == "identifier") and not facts["metadata_conflicts"] and not catalog_asin and (not previous.get("fingerprint") or previous["fingerprint"] == group.fingerprint)
+                        catalog_asin = catalog_asin or (previous.get("catalog_asin", "") if preserve_import else "")
+                        fields.update(catalog_asin=catalog_asin, match_status="identifier" if catalog_asin else "unmatched",
+                                      match_checked_at=0, match_candidates=[], catalog_book={})
+                    if previous.get("source") == "scan":
+                        fields.update({k:facts[k] for k in ("title","author","narrator","series_title","series_sequence","runtime_minutes")})
+                    # No repeated DB writes or tag probes for an unchanged entry.
+                    if any(previous.get(k) != v for k,v in fields.items()):
+                        if not database.update_library_entry(key, **fields):
+                            raise RuntimeError("Could not update the library record")
+                        summary["updated"] += 1
+                else:
+                    book = {"asin":key, "title":facts["title"], "author_names":[facts["author"]] if facts["author"] else [],
+                            "narrator_names":[facts["narrator"]] if facts["narrator"] else [],
+                            "runtime_minutes":facts["runtime_minutes"],
+                            "series":[{"title":facts["series_title"],"sequence":facts["series_sequence"]}]}
+                    if not database.add_to_library(book,str(group.path),source="scan", catalog_asin=catalog_asin, **{k:v for k,v in fields.items() if k!='path'}):
+                        raise RuntimeError("Could not save the library record")
+                    summary["adopted"] += 1
+                seen_ids.add(key)
+                ids.add(key)
+                summary["local"] += int(not catalog_asin)
+            except Exception as exc:
+                error(group.path, str(exc))
+            finally:
+                if index % 10 == 0:
+                    report()
+        if not root_path.is_dir():
+            error(root_path,"Folder became unavailable during the scan")
+        if not summary["errors"]:
+            for row in rows:
+                if row["asin"] in seen_ids or not row.get("path"):
+                    continue
+                path = Path(row["path"])
+                if not path.resolve().is_relative_to(root_path):
+                    continue
+                try:
+                    old_files = row.get("file_paths") or []
+                    regrouped = old_files and all(_key(Path(p)) in seen_files for p in old_files)
+                    if not regrouped and path.exists() and (path.is_file() or is_book_folder(path)):
+                        continue
+                    if database.remove_from_library(row["asin"]):
+                        summary["removed"] += 1
+                except Exception as exc:
+                    error(path,str(exc))
+        if match_catalog:
+            from core.audiobook_library_matching import match_library
+            summary["phase"] = "matching"
+            report()
+            def matching_progress(counts,title):
+                summary.update(counts, current=title)
+                report()
+            summary.update(match_library(database,client=client,limit=match_limit,progress=matching_progress))
+        summary["status"] = "error" if summary["errors"] else "completed"
+        return summary
+    except Exception as exc:
+        summary.update(status="error",error=str(exc))
+        summary["errors"] += 1
+        logger.exception("Audiobook scan failed")
+        return summary
+    finally:
+        summary["finished_at"] = time.time()
+        summary["duration"] = round(time.time()-summary["started_at"],2)
+        summary.pop("current",None)
         try:
-            resolved = os.path.normcase(str(folder.resolve()))
-        except OSError:
-            continue
-        if resolved in known_paths:
-            continue
-
-        asin = read_asin_from_folder(folder)
-        if not asin:
-            # No sidecar, so no reliable identity. Left alone rather than
-            # guessed at, because a wrong Owned badge blocks a download the
-            # user actually wants.
-            continue
-
-        try:
-            if database.is_owned(asin):
-                continue
-            if database.add_to_library(_book_from_sidecar(folder, asin),
-                                       str(folder), **folder_stats(folder)):
-                summary["adopted"] += 1
-                logger.info("Adopted %s from %s", asin, folder)
-        except Exception as exc:                            # noqa: BLE001
-            logger.warning("Could not adopt %s: %s", folder, exc)
-
-    summary["duration"] = round(time.time() - summary["started_at"], 2)
-    logger.info("Audiobook library scan: %d checked, %d removed, %d adopted, %d updated",
-                summary["checked"], summary["removed"], summary["adopted"],
-                summary["updated"])
-    return summary
+            report()
+        finally:
+            _SCAN_LOCK.release()

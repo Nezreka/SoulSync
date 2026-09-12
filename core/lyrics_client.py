@@ -1,9 +1,28 @@
 #!/usr/bin/env python3
 
 import os
+import requests
 from utils.logging_config import get_logger
 
 logger = get_logger("lyrics_client")
+
+# Transport timeout: (connect_timeout, read_timeout)
+# Connect: 3.05s (slightly more than standard 3s SYN retry).
+# Read: 10.0s (LRClib is fast; gives a 30x safety margin without holding threads).
+DEFAULT_LRCLIB_TIMEOUT = (3.05, 10.0)
+
+
+class TimeoutSession(requests.Session):
+    """requests.Session that injects default transport timeouts if not specified."""
+
+    def __init__(self, timeout=DEFAULT_LRCLIB_TIMEOUT):
+        super().__init__()
+        self.default_timeout = timeout
+
+    def request(self, method, url, **kwargs):
+        kwargs.setdefault("timeout", self.default_timeout)
+        return super().request(method, url, **kwargs)
+
 
 class LyricsClient:
     """
@@ -16,11 +35,12 @@ class LyricsClient:
         self._init_api()
 
     def _init_api(self):
-        """Initialize LRClib API with graceful fallback"""
+        """Initialize LRClib API with graceful fallback and transport timeouts."""
         try:
             from lrclib import LrcLibAPI
-            self.api = LrcLibAPI(user_agent="SoulSync/1.0 (WebUI)")
-            logger.debug("LRClib API client initialized")
+            session = TimeoutSession()
+            self.api = LrcLibAPI(user_agent="SoulSync/1.0 (WebUI)", session=session)
+            logger.debug("LRClib API client initialized with transport timeouts")
         except ImportError:
             logger.warning("LRClib API not available - lyrics functionality disabled")
             self.api = None

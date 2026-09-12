@@ -1,9 +1,10 @@
 """The artwork-cache HTTP surface: status, clear, prune, and ?v= thumbnails.
 
-Thumbnails are OPT-IN and off by default, so `?v=grid` must be inert until
+General-purpose thumbnails are OPT-IN and off by default, so `?v=grid` must be inert until
 someone turns them on in Settings -> Advanced. The cache itself keeps its
 existing default (on) — it has been on for every install since it shipped, and
 turning it off would silently slow down everyone already benefiting.
+Compact dashboard rail images are always resized independently of that toggle.
 """
 
 from __future__ import annotations
@@ -208,3 +209,18 @@ def test_image_cache_settings_actually_persist():
 
     config_manager.set('image_cache.thumbnails', False)   # leave it off again
 
+
+@pytest.mark.parametrize('proxy', [False, True])
+def test_dashboard_rail_is_resized_even_when_optional_thumbnails_are_off(client, cache, monkeypatch, proxy):
+    from urllib.parse import quote
+    from PIL import Image
+    _thumbnails(monkeypatch, False)
+    url = f'/api/image-proxy?url={quote(URL, safe="")}&v=rail' if proxy else f'/api/image-cache/{_key(cache)}?v=rail'
+    response = client.get(url)
+    assert response.status_code == 200
+    with Image.open(io.BytesIO(response.data)) as image:
+        assert image.width == VARIANT_MAX_WIDTH['rail']
+    assert len(response.data) < len(BIG)
+    again = client.get(url)
+    assert again.headers['X-SoulSync-Image-Cache'] == 'hit'
+    assert again.data == response.data

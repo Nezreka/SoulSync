@@ -98,7 +98,7 @@ def test_audiobooks_never_touch_the_music_batches():
 def test_a_grabbed_book_appears_as_a_card():
     assert _register() is True
     task = download_tasks["hash-1"]
-    assert task["status"] == "downloading"
+    assert task["status"] == "queued"
     assert task["batch_id"] == BATCH_ID
     assert task["track_info"]["title"] == "The Final Empire"
     # The cards read the music shape; author and series are the honest mapping.

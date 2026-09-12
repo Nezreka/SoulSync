@@ -121,6 +121,9 @@ class LastFMListeningImportWorker:
     def _run(self, username: str, full: bool) -> None:
         start_ts = time.time()
         previous = self._load_state()
+        if previous.get("username") and str(previous["username"]).casefold() != username.casefold():
+            previous = {}
+            self._state = {}
         previous_page = _int(previous.get("page"))
         previous_total_pages = _int(previous.get("total_pages"))
         previous_complete_is_suspect = _is_incomplete_backfill_state(previous)

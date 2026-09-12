@@ -134,158 +134,6 @@
   opacity: 0.72;
 }
 
-/* ── Rows ───────────────────────────────────────────────────────────────── */
-
-.rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px 12px 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-top-color: rgba(255, 255, 255, 0.13);
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.06) 0%,
-    rgba(255, 255, 255, 0.025) 100%
-  );
-  transition:
-    border-color 0.18s ease,
-    transform 0.18s ease,
-    box-shadow 0.18s ease;
-}
-
-.row:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: translateY(-2px);
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
-}
-
-.coverLink {
-  flex-shrink: 0;
-  display: block;
-}
-
-.cover {
-  width: 62px;
-  height: 62px;
-  border-radius: 12px;
-  object-fit: cover;
-  display: block;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45);
-}
-
-.coverBlank {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.28), rgba(255, 255, 255, 0.04));
-}
-
-.meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-.title {
-  font-size: 14.5px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  color: #ffffff;
-  text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.title:hover {
-  color: rgba(var(--accent-rgb), 1);
-}
-
-.byline {
-  font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.55);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.series {
-  font-size: 11.5px;
-  color: rgba(var(--accent-rgb), 0.85);
-}
-
-/* The waiting is the feature, so it says so out loud. */
-.trail {
-  margin-top: 3px;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.34);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.status {
-  flex-shrink: 0;
-  padding: 5px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  font-size: 11px;
-  font-weight: 620;
-  color: rgba(255, 255, 255, 0.7);
-  white-space: nowrap;
-}
-
-.statusActive {
-  border-color: rgba(var(--accent-rgb), 0.5);
-  background: rgba(var(--accent-rgb), 0.16);
-  color: #ffffff;
-}
-
-.statusDone {
-  border-color: rgba(80, 200, 130, 0.45);
-  background: rgba(80, 200, 130, 0.15);
-  color: #9ff0c2;
-}
-
-.rowActions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.action {
-  padding: 7px 13px;
-  border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.75);
-  font-size: 12px;
-  font-weight: 560;
-  font-family: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-  transition:
-    background 0.15s ease,
-    color 0.15s ease;
-}
-
-.action:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
-}
-
 /* ── States ─────────────────────────────────────────────────────────────── */
 
 .skeleton {
@@ -327,6 +175,7 @@
 .empty p {
   margin: 0 auto 18px;
   max-width: 460px;
+  letter-spacing: -0.01em;
   font-size: 13.5px;
   line-height: 1.6;
   color: rgba(255, 255, 255, 0.55);
@@ -350,12 +199,232 @@
   background: rgba(255, 255, 255, 0.17);
 }
 
-@media (max-width: 860px) {
-  .row {
-    flex-wrap: wrap;
-  }
+/* ==========================================================================
+   The wishlist as a wall of covers, not a list of rows.
+   ==========================================================================
+   This was a vertical list with a 62px thumbnail on the left, which reads as a
+   spreadsheet: the artwork was decoration and the text carried everything.
 
-  .rowActions {
-    width: 100%;
+   The video wishlist does the opposite and is the model here — a grid of
+   posters, art dominant, title and meta underneath, the card itself almost
+   invisible until you point at it (.vwsh-movie / .vwsh-movie-art in
+   video-side.css). Same geometry, same hover, one difference: an audiobook
+   cover is SQUARE where a film poster is 2:3.
+   ========================================================================== */
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* matches the video wishlist's movie grid */
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 26px 18px;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.coverLink {
+  display: block;
+  border-radius: 12px;
+}
+
+.coverLink:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.9);
+  outline-offset: 3px;
+}
+
+.art {
+  position: relative;
+  /* square: an audiobook cover is not a film poster */
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #16161d;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.card:hover .art {
+  border-color: rgba(var(--accent-rgb), 0.48);
+  transform: translateY(-3px);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(var(--accent-rgb), 0.12);
+}
+
+.cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.coverBlank {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  opacity: 0.4;
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.5), transparent 45%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.card:hover .scrim {
+  opacity: 1;
+}
+
+/* the state lives ON the art, so a wall of covers is still scannable */
+.badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
+}
+
+.badgeActive {
+  background: rgba(var(--accent-rgb), 0.9);
+  border-color: transparent;
+  color: #0b0b0b;
+}
+
+.badgeDone {
+  background: rgba(34, 197, 94, 0.88);
+  border-color: transparent;
+  color: #05210f;
+}
+
+.badgeFailed {
+  background: rgba(239, 68, 68, 0.85);
+  border-color: transparent;
+  color: #fff;
+}
+
+.info {
+  padding: 10px 2px 0;
+  min-width: 0;
+}
+
+.title {
+  display: block;
+  letter-spacing: -0.01em;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #fff;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title:hover {
+  color: var(--accent);
+}
+
+.byline,
+.series,
+.trail {
+  display: block;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.series {
+  color: rgba(255, 255, 255, 0.36);
+}
+
+.trail {
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 11px;
+}
+
+/* the actions do not sit on the artwork, and do not take a row of their own
+   until they are wanted — a wall of covers should read as covers */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.card:hover .actions,
+.card:focus-within .actions {
+  opacity: 1;
+}
+
+/* touch has no hover, so there is nothing to reveal */
+@media (hover: none) {
+  .actions {
+    opacity: 1;
+  }
+}
+
+.action {
+  font-family: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.action:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+}
+
+.actionDanger:hover {
+  background: rgba(239, 68, 68, 0.85);
+  border-color: transparent;
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 20px 14px;
   }
 }

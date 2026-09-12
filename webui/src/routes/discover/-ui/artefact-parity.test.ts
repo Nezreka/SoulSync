@@ -68,6 +68,9 @@ const KNOWN_IDS = new Set<string>([
  * component SOURCE and cannot tell a prop from an attribute.
  */
 const NEW_IDS = [
+  // Deezer's editors publish curated playlists and the public api serves them
+  // with no key. A shelf the vanilla never had, so its section anchor is new.
+  'deezer-editorial',
   'build-a-playlist',
   'lastfm-radio',
   'listenbrainz',
@@ -136,6 +139,9 @@ const DELETED_MARKUP_CLASSES = ['artweb-size-btn', 'watch-all-text'];
 const NEW_CLASSES: string[] = [
   // 3.3.0 zone regroup: the tools zone's grid modifier, styled in style.css
   'discovery-zone-section--map-tools',
+  // NOTE: the Deezer editorial shelf adds no entry here on purpose. Its chips
+  // and its progress bar are styled in style.css, which makes them KNOWN
+  // rather than new, and the shelf reuses the page's own card classes.
 ];
 
 function componentFiles(): string[] {

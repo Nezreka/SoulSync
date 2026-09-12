@@ -209,6 +209,22 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
                 # nothing has to be asked of the catalogue again later.
                 book=book,
             )
+        if not ref:
+            # "grabbed" hands the row to the download monitor. With no ref there
+            # is no download to follow, so claiming it strands the row on "sent
+            # to downloads" with nothing behind it - the state reset_stale_grabbed
+            # exists to clean up. Fail it and let the next pass try again.
+            database.mark_wishlist_status(
+                asin, STATUS_FAILED,
+                error="The client accepted the release but returned no handle",
+                count_attempt=True,
+            )
+            logger.warning(
+                "Audiobook grab for %s reported success with no ref; not marking it grabbed",
+                asin,
+            )
+            return outcome
+
         database.mark_wishlist_status(asin, STATUS_GRABBED, count_attempt=True)
         outcome["grabbed"] = True
         logger.info("Audiobook wishlist grabbed %s for %s", best.title, asin)
@@ -228,7 +244,8 @@ def run_pass(db: Any = None, limit: Optional[int] = None) -> Dict[str, Any]:
     from core.audiobook_database import get_audiobook_db
 
     database = db if db is not None else get_audiobook_db()
-    summary = {"checked": 0, "found": 0, "grabbed": 0, "errors": 0, "freed": 0}
+    summary = {"checked": 0, "found": 0, "grabbed": 0, "errors": 0,
+               "freed": 0, "unstuck": 0}
 
     # Self-healing, at the start of every pass rather than only at boot: a pass
     # that died mid-search leaves rows claimed as "searching", and the retry
@@ -238,6 +255,16 @@ def run_pass(db: Any = None, limit: Optional[int] = None) -> Dict[str, Any]:
         summary["freed"] = database.reset_stale_searching()
     except Exception as exc:                                # noqa: BLE001
         logger.debug("Could not free stale searching rows: %s", exc)
+
+    # A row handed to a download client is moved off "grabbed" by the download
+    # MONITOR, which only watches live downloads. If that download never
+    # registered, was cleared, or the monitor stopped running, the row sits on
+    # "sent to downloads" forever and no pass looks at it again. Same recovery
+    # as above, for the same reason.
+    try:
+        summary["unstuck"] = database.reset_stale_grabbed()
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not free stale grabbed rows: %s", exc)
 
     # Every profile, not just the first. There is no request behind a timed
     # pass, so the profile has to come from the rows — and sweeping only

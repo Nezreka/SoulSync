@@ -469,7 +469,11 @@ def test_safety_valve_stuck_searching_marks_not_found():
     assert 'Search stuck' in download_tasks['t1']['error_message']
 
 
-def test_safety_valve_stuck_downloading_with_recovered_file_routes_to_post_processing():
+def test_safety_valve_stuck_downloading_with_recovered_file_routes_to_post_processing(monkeypatch):
+    # This unit test calls the formatter without its HTTP lock. Execute the
+    # recovery inline; threaded HTTP/cancellation coverage lives in #1245 tests.
+    from types import SimpleNamespace
+    monkeypatch.setattr(st, '_recovery_pool', SimpleNamespace(submit=lambda fn: fn()))
     deps, submitted = _build_deps(
         config=_FakeConfig({'soulseek.download_timeout': 1, 'soulseek.download_path': '/d', 'soulseek.transfer_path': '/t'}),
         find_completed=lambda *a, **kw: ('/found.flac', 'transfer'),
@@ -485,7 +489,11 @@ def test_safety_valve_stuck_downloading_with_recovered_file_routes_to_post_proce
     assert submitted == [('t1', 'b1')]
 
 
-def test_safety_valve_stuck_downloading_no_file_marks_failed():
+def test_safety_valve_stuck_downloading_no_file_marks_failed(monkeypatch):
+    # This unit test calls the formatter without its HTTP lock. Execute the
+    # recovery inline; threaded HTTP/cancellation coverage lives in #1245 tests.
+    from types import SimpleNamespace
+    monkeypatch.setattr(st, '_recovery_pool', SimpleNamespace(submit=lambda fn: fn()))
     deps, _ = _build_deps(config=_FakeConfig({'soulseek.download_timeout': 1}))
     download_tasks['t1'] = {
         'track_index': 0, 'status': 'downloading', 'track_info': {},
@@ -971,3 +979,23 @@ def test_manual_pick_rejected_fails_immediately_without_grace():
     out = st.build_batch_status_data('b1', batch, live, deps)
     assert out['tasks'][0]['status'] == 'failed'  # immediate, no 60s wait
     assert download_tasks['t1']['status'] == 'failed'
+
+
+def test_external_audiobook_progress_survives_music_timeout_and_serializes():
+    import time
+    from core.audiobook_download_state import register_download, update_progress, mark_status, BATCH_ID
+    register_download('book', 'Rhythm of War', protocol='soulseek')
+    # The monitor sets status separately from transfer counters.
+    mark_status('book', 'downloading')
+    download_tasks['book']['status_change_time'] = time.time() - 3600
+    update_progress('book', percent=37.5, bytes_done=375000, bytes_total=1000000, speed=25000)
+    deps, submitted = _build_deps()
+    result = st.build_batch_status_data(BATCH_ID, download_batches[BATCH_ID], {}, deps)
+    assert result['tasks'][0]['progress'] == 37.5
+    assert result['tasks'][0]['status'] == 'downloading'
+    assert download_tasks['book']['error_message'] is None
+    assert submitted == []
+    unified = st.build_unified_downloads_response(20, deps)
+    row = next(item for item in unified['downloads'] if item['task_id'] == 'book')
+    assert row['progress'] == 37.5
+    assert row['status'] == 'downloading'

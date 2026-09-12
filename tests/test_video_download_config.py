@@ -271,7 +271,8 @@ def test_the_video_save_button_cannot_write_a_retired_form():
     """
     js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 
-    chain = js.split("Promise.all([", 1)[1].split("])", 1)[0]
+    save_handler = js.split("e.stopImmediatePropagation();", 1)[1]
+    chain = save_handler.split("Promise.all([", 1)[1].split("])", 1)[0]
     assert "saveSlskd" not in chain, (
         "the video save button posts the retired slskd form again"
     )

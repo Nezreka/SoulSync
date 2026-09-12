@@ -14,6 +14,10 @@ these adapters.
 from __future__ import annotations
 
 import re
+import time
+import threading
+import hashlib
+from typing import Any, Dict
 
 from utils.logging_config import get_logger
 
@@ -21,7 +25,21 @@ logger = get_logger("video_sources")
 
 # Library scans are bulk operations — a far longer per-request timeout than the
 # shared client's interactive one, so big libraries don't read-timeout mid-scan.
+# However, connection attempts (TCP SYN) must fail quickly (8s) to avoid stalling
+# Gunicorn workers on unreachable or offline servers.
+PLEX_CONNECT_TIMEOUT = 8
 PLEX_SCAN_TIMEOUT = 120
+
+_plex_srv_cache: Dict[str, Any] = {"srv": None, "at": 0.0, "key": ""}
+_plex_status_cache: Dict[str, Any] = {"srv": None, "at": 0.0, "key": ""}
+_plex_cache_lock = threading.RLock()
+
+
+def invalidate_video_source_cache() -> None:
+    """Force the next _build_source call to re-establish connections."""
+    with _plex_cache_lock:
+        _plex_srv_cache.update(srv=None, at=0.0, key="")
+        _plex_status_cache.update(srv=None, at=0.0, key="")
 
 
 def _to_int(val):
@@ -232,7 +250,7 @@ def video_jellyfin_test(cfg):
     return True, "Connected to %s" % name
 
 
-def _build_source(movies_lib=None, tv_lib=None):
+def _build_source(movies_lib=None, tv_lib=None, *, interactive=False):
     """Build a media source for the VIDEO server (see resolve_video_server),
     restricted to the named Movies/TV libraries when given. Uses VIDEO's OWN
     effective connection config (its creds, or inherited from music) — never the
@@ -245,13 +263,26 @@ def _build_source(movies_lib=None, tv_lib=None):
         base_url, token = cfg.get("base_url"), cfg.get("token")
         if not base_url or not token:
             return None
-        try:
-            from plexapi.server import PlexServer
-            srv = PlexServer(base_url, token, timeout=PLEX_SCAN_TIMEOUT)
-            return PlexVideoSource(srv, movies_lib=movies_lib, tv_lib=tv_lib)
-        except Exception:
-            logger.exception("video sources: Plex connect failed")
-            return None
+        key = hashlib.sha256(f"{base_url}|{token}".encode()).hexdigest()
+        cache = _plex_status_cache if interactive else _plex_srv_cache
+        with _plex_cache_lock:
+            now = time.time()
+            if cache["key"] == key and 0 <= now - cache["at"] < 60:
+                srv = cache["srv"]
+                return PlexVideoSource(srv, movies_lib=movies_lib, tv_lib=tv_lib) if srv is not None else None
+            try:
+                from plexapi.server import PlexServer
+                # The constructor itself makes an HTTP request. A short connect
+                # timeout alone cannot bound a server that accepts TCP then stalls.
+                srv = PlexServer(base_url, token, timeout=(PLEX_CONNECT_TIMEOUT, PLEX_CONNECT_TIMEOUT))
+                if not interactive:
+                    srv._timeout = (PLEX_CONNECT_TIMEOUT, PLEX_SCAN_TIMEOUT)
+                cache.update(srv=srv, at=time.time(), key=key)
+                return PlexVideoSource(srv, movies_lib=movies_lib, tv_lib=tv_lib)
+            except Exception as e:
+                logger.warning("video sources: Plex connect failed: %s", e)
+                cache.update(srv=None, at=time.time(), key=key)
+                return None
 
     if server == "jellyfin":
         return _video_jellyfin_source(video_jellyfin_config(db), movies_lib, tv_lib)
@@ -272,11 +303,11 @@ def _load_selection():
         return {}
 
 
-def get_active_video_source():
+def get_active_video_source(*, interactive=False):
     """Source for SCANNING — restricted to the user-mapped Movies/TV libraries.
     Falls back to all libraries when nothing is mapped yet."""
     sel = _load_selection() or {}
-    return _build_source(sel.get("movies") or None, sel.get("tv") or None)
+    return _build_source(sel.get("movies") or None, sel.get("tv") or None, interactive=interactive)
 
 
 def normalize_media_type(media_type) -> str:
@@ -306,6 +337,7 @@ def refresh_video_server_sections(media_type="all"):
         return src.refresh_sections(media_type)
     except Exception as e:   # noqa: BLE001 - surface any server error to the automation
         logger.exception("video sources: refresh failed")
+        invalidate_video_source_cache()
         return {"ok": False, "error": str(e)}
 
 
@@ -324,6 +356,7 @@ def set_video_poster(server_id, *, image_url=None, image_bytes=None, kind="movie
                               delete_key=delete_key)
     except Exception as e:   # noqa: BLE001 - surface any server error to the caller
         logger.exception("video sources: set_poster failed")
+        invalidate_video_source_cache()
         return {"ok": False, "error": str(e)}
 
 
@@ -332,13 +365,16 @@ def video_server_scan_in_progress(media_type="all"):
     for 'all'); False if idle; None if it can't be determined — no server, or an
     adapter that can't report scan state. Callers fall back to a fixed wait on None."""
     media_type = normalize_media_type(media_type)
-    src = get_active_video_source()
+    src = get_active_video_source(interactive=True)
     if src is None or not hasattr(src, "is_scanning"):
         return None
     try:
         return bool(src.is_scanning(media_type))
     except Exception:
         logger.debug("video sources: scan-status check failed", exc_info=True)
+        with _plex_cache_lock:
+            if _plex_status_cache['srv'] is getattr(src, '_server', None):
+                _plex_status_cache.update(srv=None, at=time.time())
         return None
 
 
@@ -356,6 +392,7 @@ def video_server_has_item(media_type, item) -> bool:
         return bool(src.has_item(media_type, item))
     except Exception:
         logger.debug("video sources: has_item probe failed", exc_info=True)
+        invalidate_video_source_cache()
         return False
 
 
@@ -914,6 +951,11 @@ class PlexVideoSource:
         """True if any SELECTED video section (scoped by media_type) is currently
         being scanned by Plex. Checks the per-section refreshing flag, then the
         server activity feed (real-time) — mirrors the music PlexClient check."""
+        # PlexAPI caches library sections on the connected server object.
+        # Reusing the connection must not reuse yesterday's refreshing flag.
+        reload_library = getattr(self._server.library, 'reload', None)
+        if callable(reload_library):
+            reload_library()
         sections = []
         for kind, name in (("movie", self._movies_lib), ("show", self._tv_lib)):
             if media_type != "all" and media_type != kind:

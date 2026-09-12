@@ -2807,7 +2807,10 @@ def image_proxy():
     try:
         from core.image_cache import get_image_cache
 
-        cached = get_image_cache().get_url(url)
+        cache = get_image_cache()
+        cached = cache.get_url(url)
+        if request.args.get('v') == 'rail':
+            cached = cache.get_variant_of(cached.key, 'rail')
         response = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
         max_age = int(config_manager.get("image_cache.ttl_seconds", 2592000))
         response.headers['Cache-Control'] = f'private, max-age={max_age}'
@@ -2874,7 +2877,9 @@ def serve_cached_image(cache_key):
         # nothing keeps getting the original.
         variant = (request.args.get('v') or '').strip()
         cache = get_image_cache()
-        if variant and thumbnails_enabled():
+        # Compact dashboard artwork is always bounded; other variants retain
+        # the existing opt-in setting for library/detail pages.
+        if variant == 'rail' or (variant and thumbnails_enabled()):
             cached = cache.get_variant_of(cache_key, variant)
         else:
             cached = cache.get(cache_key)

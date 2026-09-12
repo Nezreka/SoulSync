@@ -192,15 +192,15 @@ def test_an_adopted_book_keeps_its_title_and_author(tmp_path, db):
     assert row["narrator"] == "Ray Porter"
 
 
-def test_a_book_with_no_sidecar_is_left_alone(tmp_path, db):
-    # Guessing an identity from a folder name would mark a book owned that the
-    # user does not have, and the wishlist would then refuse to fetch it.
+def test_a_book_with_no_sidecar_is_indexed_without_guessing_ownership(tmp_path, db):
     make_book_folder(tmp_path, "Andy Weir", "Project Hail Mary", sidecar=False)
-
     summary = scan(root=str(tmp_path), db=db)
-
-    assert summary["adopted"] == 0
-    assert db.get_library() == []
+    assert summary["adopted"] == 1
+    row = db.get_library()[0]
+    assert row["title"] == "Project Hail Mary"
+    assert row["asin"].startswith("local:")
+    assert db.owned_asins() == set()
+    assert not db.is_owned(BOOK["asin"])
 
 
 def test_adoption_never_duplicates_a_book_already_recorded(tmp_path, db):
@@ -219,7 +219,8 @@ def test_a_book_moved_on_disk_is_adopted_at_its_new_home(tmp_path, db):
 
     summary = scan(root=str(tmp_path), db=db)
 
-    assert summary["removed"] == 1 and summary["adopted"] == 1
+    assert summary["adopted"] == 1
+    assert len(db.get_library()) == 1
     assert db.get_library()[0]["path"].endswith("Project Hail Mary")
     assert db.is_owned("B08G9PRS1K") is True
 
@@ -256,7 +257,7 @@ def test_a_row_that_will_not_delete_does_not_stop_the_scan(tmp_path):
 
     summary = scan(root=str(tmp_path), db=stubborn)
 
-    assert summary["checked"] == 2 and summary["removed"] == 1
+    assert summary["removed"] == 1 and summary["errors"] == 1
 
 
 def test_the_root_falls_back_to_the_configured_library(tmp_path, db):
@@ -292,8 +293,150 @@ def test_hidden_folders_are_left_alone_generally(tmp_path, db):
 
 def test_a_real_book_beside_the_bin_is_still_found(tmp_path, db):
     make_book_folder(tmp_path, ".deleted", "20260909_120000_Deleted Book", asin="OLD")
-    make_book_folder(tmp_path, "Andy Weir", "Project Hail Mary", asin="KEEP")
+    make_book_folder(tmp_path, "Andy Weir", "Project Hail Mary", asin="B00000KEEP")
 
     scan(root=str(tmp_path), db=db)
 
-    assert [r["asin"] for r in db.get_library()] == ["KEEP"]
+    assert [r["asin"] for r in db.get_library()] == ["B00000KEEP"]
+
+
+def test_flat_library_indexes_each_file_and_never_the_root(tmp_path, db):
+    for name in ('Book One.m4b', 'Book Two.mp3'):
+        (tmp_path / name).write_bytes(b'x' * (MIN_BOOK_BYTES + 1))
+    result = scan(root=str(tmp_path), db=db)
+    assert result['adopted'] == 2
+    assert {r['title'] for r in db.get_library()} == {'Book One', 'Book Two'}
+    assert all(Path(r['path']).is_file() for r in db.get_library())
+    assert scan(root=str(tmp_path), db=db)['adopted'] == 0
+    assert len(db.get_library()) == 2
+
+
+def test_separate_m4b_books_in_author_folder_are_not_merged(tmp_path, db):
+    author = tmp_path / 'Author'
+    author.mkdir()
+    for name in ('Book One.m4b', 'Book Two.m4b'):
+        (author / name).write_bytes(b'x' * (MIN_BOOK_BYTES + 1))
+    assert scan(root=str(tmp_path), db=db)['adopted'] == 2
+
+
+def test_cd_subfolders_form_one_book(tmp_path, db):
+    make_book_folder(tmp_path, 'Author', 'Book', 'CD1', sidecar=False)
+    make_book_folder(tmp_path, 'Author', 'Book', 'CD2', sidecar=False)
+    assert scan(root=str(tmp_path), db=db)['adopted'] == 1
+    row = db.get_library()[0]
+    assert row['title'] == 'Book' and row['file_count'] == 4
+
+
+def test_local_tags_supply_title_author_narrator_and_duration(tmp_path, db):
+    make_book_folder(tmp_path, 'Unknown folder', sidecar=False)
+    audio = MagicMock()
+    audio.info.length = 1800
+    audio.tags = {'album': ['Tagged Book'], 'artist': ['An Author'], 'composer': ['A Narrator']}
+    with patch('mutagen.File', return_value=audio):
+        scan(root=str(tmp_path), db=db)
+    row = db.get_library()[0]
+    assert row['title'] == 'Tagged Book'
+    assert row['author'] == 'An Author' and row['narrator'] == 'A Narrator'
+    assert row['runtime_minutes'] == 60
+
+
+def test_unchanged_audio_does_not_get_reprobed(tmp_path, db):
+    make_book_folder(tmp_path, 'Book', sidecar=False)
+    scan(root=str(tmp_path), db=db)
+    with patch('core.audiobook_library_metadata.read_metadata') as read:
+        result = scan(root=str(tmp_path), db=db)
+    read.assert_not_called()
+    assert result['adopted'] == 0 and result['updated'] == 0
+
+
+def test_local_book_promotes_only_when_explicit_asin_appears(tmp_path, db):
+    folder = make_book_folder(tmp_path, 'Book', sidecar=False)
+    scan(root=str(tmp_path), db=db)
+    assert db.owned_asins() == set()
+    (folder / OPF_NAME).write_text(build_opf(BOOK), encoding='utf-8')
+    scan(root=str(tmp_path), db=db)
+    assert len(db.get_library()) == 1
+    assert db.owned_asins() == {BOOK['asin']}
+
+
+def test_duplicate_asin_keeps_both_copies_without_overwriting(tmp_path, db):
+    make_book_folder(tmp_path, 'Copy One')
+    make_book_folder(tmp_path, 'Copy Two')
+    scan(root=str(tmp_path), db=db)
+    assert len(db.get_library()) == 2
+    assert db.owned_asins() == {BOOK['asin']}
+    assert len({r['path'] for r in db.get_library()}) == 2
+
+
+def test_unreadable_branch_preserves_missing_records(tmp_path, db):
+    blocked = tmp_path / 'Unavailable'
+    blocked.mkdir()
+    db.add_to_library(BOOK, str(blocked / 'Book'))
+    original = Path.iterdir
+    def listing(path):
+        if path == blocked:
+            raise PermissionError('unmounted')
+        return original(path)
+    with patch.object(Path, 'iterdir', listing):
+        result = scan(root=str(tmp_path), db=db)
+    assert result['errors'] == 1 and result['status'] == 'error'
+    assert db.is_owned(BOOK['asin'])
+
+
+def test_scan_does_not_follow_symlinks_outside_library(tmp_path, db):
+    root = tmp_path / 'library'
+    root.mkdir()
+    book = make_book_folder(tmp_path, 'outside')
+    (root / 'link').symlink_to(book, target_is_directory=True)
+    assert scan(root=str(root), db=db)['adopted'] == 0
+
+
+def test_completed_scan_state_survives_database_reopen(tmp_path, db):
+    make_book_folder(tmp_path, 'Book', sidecar=False)
+    result = scan(root=str(tmp_path), db=db)
+    saved = db.get_library_scan_state()
+    assert saved['status'] == 'completed'
+    assert saved['adopted'] == 1 and saved['finished_at'] == result['finished_at']
+
+
+def test_concurrent_scan_is_skipped(tmp_path, db):
+    from core.audiobook_library_scan import _SCAN_LOCK
+    with _SCAN_LOCK:
+        result = scan(root=str(tmp_path), db=db)
+    assert result['status'] == 'skipped'
+
+
+def test_first_use_automation_scans_existing_folder_without_database(tmp_path):
+    from core.automation.handlers.audiobook_scan_library import auto_scan_audiobook_library
+    with patch('core.audiobook_database.subsystem_in_use', return_value=False), \
+         patch('core.audiobook_library_scan.scan', return_value={'status': 'completed'}) as run:
+        result = auto_scan_audiobook_library({'root': str(tmp_path)}, MagicMock())
+    run.assert_called_once()
+    assert result['status'] == 'completed'
+
+
+def test_xml_metadata_decodes_escaped_titles(tmp_path, db):
+    folder = make_book_folder(tmp_path, 'Book', sidecar=False)
+    (folder / OPF_NAME).write_text(build_opf({**BOOK, 'title': 'War & Peace'}), encoding='utf-8')
+    scan(root=str(tmp_path), db=db)
+    assert db.get_library()[0]['title'] == 'War & Peace'
+
+
+def test_scan_refreshes_changed_tags(tmp_path, db):
+    folder = make_book_folder(tmp_path, 'Book', sidecar=False)
+    scan(root=str(tmp_path), db=db)
+    (folder / 'metadata.json').write_text('{"title":"Updated title","authors":["Writer"]}', encoding='utf-8')
+    result = scan(root=str(tmp_path), db=db)
+    assert result['updated'] == 1
+    assert db.get_library()[0]['title'] == 'Updated title'
+
+
+def test_automation_reports_running_and_finished_progress(tmp_path, db):
+    from core.automation.handlers.audiobook_scan_library import auto_scan_audiobook_library
+    make_book_folder(tmp_path, 'Book', sidecar=False)
+    deps = MagicMock()
+    with patch('core.audiobook_database.get_audiobook_db', return_value=db):
+        result = auto_scan_audiobook_library({'root': str(tmp_path), '_automation_id': 7, 'match_catalog': False}, deps)
+    assert result['adopted'] == 1 and result['_manages_own_progress']
+    states = [call.kwargs['status'] for call in deps.update_progress.call_args_list]
+    assert 'running' in states and states[-1] == 'finished'

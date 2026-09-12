@@ -8,7 +8,7 @@ attribute). bodies byte-identical; only the decorator changed and
 dev_mode_enabled / hydrabase_worker became getters.
 """
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from core.imports.album import build_album_import_match_payload
 from core.imports.routes import ImportRouteRuntime as _ImportRouteRuntime
@@ -208,10 +208,41 @@ def import_album_match():
     return jsonify(payload), status
 
 
+def _process_import(kind, data):
+    runtime = _build_import_route_runtime()
+    def operation():
+        if kind == 'album':
+            return _import_album_process(runtime, data)
+        return _import_singles_process(runtime, data.get('files', []))
+    if request.headers.get('Prefer') != 'respond-async':
+        payload, status = operation()
+    else:
+        from core.imports.jobs import import_jobs
+        key = request.headers.get('Idempotency-Key', '')
+        if not key or len(key) > 128:
+            return jsonify(success=False, error='A valid Idempotency-Key is required'), 400
+        app = current_app._get_current_object()
+        def background():
+            with app.app_context():
+                return operation()
+        payload, status = import_jobs.submit(get_current_profile_id(), key, kind, data, background)
+    return jsonify(payload), status
+
+
+@bp.route('/api/import/jobs/<job_id>', methods=['GET'])
+def import_job_status(job_id):
+    from core.imports.jobs import import_jobs
+    payload, status = import_jobs.get(get_current_profile_id(), job_id)
+    if payload.get('state') == 'complete' and (payload.get('status') or 200) >= 400:
+        # Preserve HTTPError/error_code semantics (notably disconnected media
+        # servers) used by the browser to stop the rest of an import batch.
+        return jsonify(payload['result']), payload['status']
+    return jsonify(payload), status
+
+
 @bp.route('/api/import/album/process', methods=['POST'])
 def import_album_process():
-    payload, status = _import_album_process(_build_import_route_runtime(), request.get_json() or {})
-    return jsonify(payload), status
+    return _process_import('album', request.get_json() or {})
 
 
 @bp.route('/api/import/search/tracks', methods=['GET'])
@@ -231,8 +262,7 @@ def _process_single_import_file(file_info):
 @bp.route('/api/import/singles/process', methods=['POST'])
 def import_singles_process():
     data = request.get_json() or {}
-    payload, status = _import_singles_process(_build_import_route_runtime(), data.get('files', []))
-    return jsonify(payload), status
+    return _process_import('singles', data)
 
 
 # Auto-Import Worker

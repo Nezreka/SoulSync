@@ -81,9 +81,10 @@ function RailCard({
         {src && (
           <img
             key={src}
-            src={thumb(src, 'grid')}
+            src={thumb(src, 'rail')}
             alt=""
             loading="lazy"
+            decoding="async"
             onError={() => setRung(rung + 1)}
           />
         )}

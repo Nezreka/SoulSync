@@ -573,16 +573,29 @@ def test_scan_watchlist_artists_honors_cancel_check(monkeypatch):
     monkeypatch.setattr(scanner, "_should_include_track", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(scanner, "is_track_missing_from_library", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(scanner, "add_track_to_wishlist", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(scanner, "update_artist_scan_timestamp", lambda *_args, **_kwargs: True)
+    # The user presses Cancel once Artist One has finished. Modelled as a FLAG
+    # rather than iter([False, True]): a real cancel_check reads
+    # watchlist_scan_state['cancel_requested'] and can be asked any number of
+    # times. A two-item iterator instead pins how OFTEN the scan is allowed to
+    # ask, which is not behaviour anyone relies on - and cancellation is now
+    # checked inside the album loop too, so that a long artist can be
+    # interrupted at all. What this test actually guards is unchanged: a cancel
+    # arriving after Artist One keeps Artist One's result.
+    cancel_requested = {'value': False}
+
+    def _finish_artist(*_args, **_kwargs):
+        cancel_requested['value'] = True
+        return True
+
+    monkeypatch.setattr(scanner, "update_artist_scan_timestamp", _finish_artist)
     monkeypatch.setattr(scanner, "update_similar_artists", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(scanner, "_backfill_similar_artists_fallback_ids", lambda *_args, **_kwargs: 0)
 
-    cancels = iter([False, True])
     scan_state = {}
     results = scanner.scan_watchlist_artists(
         [artist_a, artist_b],
         scan_state=scan_state,
-        cancel_check=lambda: next(cancels),
+        cancel_check=lambda: cancel_requested['value'],
     )
 
     assert len(results) == 1

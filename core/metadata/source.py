@@ -433,36 +433,87 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             ]
 
 
-def _process_deezer_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
+def _deezer_provenance_id(provenance) -> str:
+    """The deezer track id of the item the user actually picked, or "".
+
+    Only when the download CAME from deezer. A tidal download carries a tidal
+    id, and using it to ask deezer about a track would be worse than the text
+    search it replaces.
+    """
+    if not isinstance(provenance, dict):
+        return ""
+    if (provenance.get("source") or "").strip().lower() != "deezer":
+        return ""
+    return str(provenance.get("track_id") or "").strip()
+
+
+def _process_deezer_source(pp: dict, metadata: dict, cfg, runtime, track_title: str,
+                           artist_name: str, provenance=None) -> None:
     if cfg.get("deezer.embed_tags", True) is False:
-        return
-    if not track_title or not artist_name:
         return
 
     deezer_worker = getattr(runtime, "deezer_worker", None)
     dz_client = deezer_worker.client if deezer_worker else None
     if not dz_client:
         return
-    dz_result = _call_source_lookup("Deezer track", dz_client.search_track, artist_name, track_title)
-    if dz_result and _names_match(dz_result.get("title", ""), track_title) and _names_match(dz_result.get("artist", {}).get("name", ""), artist_name):
+
+    # If the download came from deezer we already know exactly which track this
+    # is - it is the one the user picked, and its id rode along on the search
+    # result. Asking deezer to find it again by artist and title is guesswork
+    # over a fact: search_track takes the first hit of a text query and both
+    # names then have to clear _names_match, which a remix suffix or a
+    # differently credited artist can fail. When that happened no deezer id was
+    # embedded at all, for a track downloaded from deezer.
+    #
+    # This is the same trade tidal and hifi already make, one step short: their
+    # download response carries the whole tag set so they skip the api entirely,
+    # while deezer's carries only ids, so the details call still happens. It
+    # just asks about a known id instead of a guessed one.
+    dz_track_id = _deezer_provenance_id(provenance)
+    dz_result = None
+
+    if not dz_track_id:
+        if not track_title or not artist_name:
+            return
+        dz_result = _call_source_lookup("Deezer track", dz_client.search_track, artist_name, track_title)
+        if not (dz_result
+                and _names_match(dz_result.get("title", ""), track_title)
+                and _names_match(dz_result.get("artist", {}).get("name", ""), artist_name)):
+            return
         dz_track_id = dz_result["id"]
-        pp["id_tags"]["DEEZER_TRACK_ID"] = str(dz_track_id)
+
+    pp["id_tags"]["DEEZER_TRACK_ID"] = str(dz_track_id)
+
+    dz_artist_id = None
+    if dz_result is not None:
         dz_artist_id = dz_result.get("artist", {}).get("id")
-        if dz_artist_id:
-            pp["id_tags"]["DEEZER_ARTIST_ID"] = str(dz_artist_id)
-        dz_details = _call_source_lookup("Deezer track details", dz_client.get_track_details, dz_track_id)
-        if dz_details:
-            bpm_val = dz_details.get("bpm")
-            if bpm_val and bpm_val > 0:
-                pp["deezer_bpm"] = bpm_val
-            dz_isrc = dz_details.get("isrc")
-            if dz_isrc:
-                pp["deezer_isrc"] = dz_isrc
-        if not pp["release_year"]:
+    elif isinstance(provenance, dict):
+        dz_artist_id = provenance.get("artist_id")
+    if dz_artist_id:
+        pp["id_tags"]["DEEZER_ARTIST_ID"] = str(dz_artist_id)
+
+    dz_details = _call_source_lookup("Deezer track details", dz_client.get_track_details, dz_track_id)
+    if dz_details:
+        bpm_val = dz_details.get("bpm")
+        if bpm_val and bpm_val > 0:
+            pp["deezer_bpm"] = bpm_val
+        dz_isrc = dz_details.get("isrc")
+        if dz_isrc:
+            pp["deezer_isrc"] = dz_isrc
+
+    if not pp["release_year"]:
+        # The search path reads the album off the search result, exactly as it
+        # always did. The details call is consulted ONLY on the provenance path,
+        # where there is no search result to read - deliberately not used as an
+        # extra fallback for the search path, so that path stays byte for byte
+        # what it was before provenance existed.
+        if dz_result is not None:
             dz_album = dz_result.get("album", {})
-            dz_release = (dz_album.get("release_date", "") if isinstance(dz_album, dict) else "") or ""
-            if len(dz_release) >= 4 and dz_release[:4].isdigit():
-                pp["release_year"] = dz_release[:4]
+        else:
+            dz_album = (dz_details or {}).get("album", {})
+        dz_release = (dz_album.get("release_date", "") if isinstance(dz_album, dict) else "") or ""
+        if len(dz_release) >= 4 and dz_release[:4].isdigit():
+            pp["release_year"] = dz_release[:4]
 
 
 def _process_jiosaavn_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
@@ -752,11 +803,11 @@ def _process_bandcamp_source(pp: dict, metadata: dict, cfg, runtime, track_title
             pp["bandcamp_label"] = bc_label
 
 
-def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
+def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, provenance=None) -> None:
     if source_name == "musicbrainz":
         _process_musicbrainz_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "deezer":
-        _process_deezer_source(pp, metadata, cfg, runtime, track_title, artist_name)
+        _process_deezer_source(pp, metadata, cfg, runtime, track_title, artist_name, provenance=provenance)
     elif source_name == "audiodb":
         _process_audiodb_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "jiosaavn":
@@ -1395,7 +1446,8 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         db = get_database()
 
         for source_name in source_order:
-            _process_source_enrichment(source_name, pp, metadata, cfg, runtime, track_title, artist_name)
+            _process_source_enrichment(source_name, pp, metadata, cfg, runtime, track_title, artist_name,
+                                       provenance=cached_meta)
 
         if not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"]:
             return

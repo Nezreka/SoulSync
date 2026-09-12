@@ -76,7 +76,7 @@ def process_download(
 
     status = get_status(source, ref)
     if status is None:
-        return {}
+        return {"status": "unavailable", "error": "Waiting for the download client to report this job"}
 
     patch: Dict[str, Any] = {}
     for key, attr in (("bytes_done", "downloaded"), ("bytes_total", "size")):
@@ -96,6 +96,10 @@ def process_download(
         except (TypeError, ValueError):
             pass
 
+    speed = getattr(status, "download_speed", None)
+    if speed is not None:
+        patch["speed"] = max(0, float(speed or 0))
+
     state = normalize_state(status)
     if state == "failed":
         patch["status"] = "failed"
@@ -103,7 +107,14 @@ def process_download(
         return patch
 
     if state != "completed":
-        patch["status"] = "downloading"
+        raw_state = str(getattr(status, "state", "")).lower()
+        if raw_state in ("queued", "waiting", "stalled", "missing"):
+            patch["status"] = "queued"
+        elif raw_state in ("paused", "unavailable"):
+            patch["status"] = raw_state
+        else:
+            patch["status"] = "downloading"
+        patch["error"] = "Waiting for the download client to report this job" if raw_state == "unavailable" else ""
         return patch
 
     # content_path FIRST. It is the client's absolute path to THIS torrent's
@@ -179,11 +190,11 @@ class _SoulseekStatus:
     """
 
     def __init__(self, rolled: Dict[str, Any]) -> None:
-        self.state = rolled["state"]
-        self.progress = rolled["progress"]
+        self.state = "completed" if rolled["state"] == "done" else rolled["state"]
+        self.progress = rolled["progress"] / 100.0
         self.size = rolled["size"]
-        self.transferred = rolled["transferred"]
-        self.speed = 0
+        self.downloaded = rolled["transferred"]
+        self.download_speed = rolled.get("speed", 0)
         self.save_path = rolled.get("save_path", "")
         self.files = rolled["total"]
         self.files_done = rolled["finished"]
@@ -351,6 +362,7 @@ def tick(db: Any = None) -> Dict[str, int]:
 
     from core.audiobook_download_state import (
         forget,
+        register_download,
         is_cancelled,
         mark_status,
         update_progress,
@@ -358,13 +370,16 @@ def tick(db: Any = None) -> Dict[str, int]:
 
     for row in active:
         summary["checked"] += 1
+        # Runtime cards disappear on restart; the durable job and client refs
+        # remain. Reattach without replacing existing progress/cancellation.
+        register_download(row["download_id"], row.get("title") or "Audiobook",
+                          author=row.get("author") or "", protocol=row.get("source") or "",
+                          size_bytes=row.get("bytes_total") or 0, only_if_missing=True)
 
         # Cancelling a card used to remove it from the page while the torrent
-        # carried on downloading. The client is told, then the row is closed.
+        # carried on downloading. Persist cancellation before runtime cleanup.
         if is_cancelled(row["download_id"]):
-            _cancel_at_client(row)
-            database.update_download(row["download_id"], status="cancelled",
-                                     error="Cancelled")
+            cancel_downloads([row["download_id"]], db=database)
             forget(row["download_id"])
             summary["cancelled"] += 1
             continue
@@ -376,7 +391,10 @@ def tick(db: Any = None) -> Dict[str, int]:
             continue
 
         imported_path = patch.pop("imported_path", "")
-        database.update_download(row["download_id"], **patch)
+        speed = patch.pop("speed", None)
+        if not database.update_download(row["download_id"], imported_path=imported_path or None, **patch):
+            forget(row["download_id"])
+            continue
 
         # Same numbers onto the Downloads page card.
         update_progress(
@@ -384,7 +402,12 @@ def tick(db: Any = None) -> Dict[str, int]:
             percent=patch.get("progress"),
             bytes_done=patch.get("bytes_done"),
             bytes_total=patch.get("bytes_total"),
+            speed=speed,
         )
+
+        if patch.get("status") in ("downloading", "queued", "paused", "unavailable"):
+            mark_status(row["download_id"], "downloading" if patch["status"] == "downloading" else "queued",
+                        error=patch.get("error") or ("Paused in download client" if patch["status"] == "paused" else ""))
 
         asin = str(row.get("asin") or "")
         if patch.get("status") == "completed":
@@ -397,6 +420,7 @@ def tick(db: Any = None) -> Dict[str, int]:
                 database.mark_wishlist_status(asin, STATUS_DONE)
                 database.add_to_library(
                     _book_for(row), imported_path or patch.get("save_path", ""),
+                    download_id=row["download_id"], origin="soulsync",
                 )
             logger.info("Audiobook imported: %s -> %s", row.get("title"), imported_path)
         elif patch.get("status") == "staged":
@@ -417,6 +441,17 @@ def tick(db: Any = None) -> Dict[str, int]:
                     asin, STATUS_FAILED, error=str(patch.get("error") or ""),
                 )
     return summary
+
+
+def cancel_downloads(task_ids=None, db=None):
+    from core.audiobook_database import get_audiobook_db
+    from core.audiobook_download_state import forget
+    database = db if db is not None else get_audiobook_db()
+    rows = database.cancel_active_downloads(task_ids)
+    for row in rows:
+        _cancel_at_client(row)
+        forget(row['download_id'])
+    return len(rows)
 
 
 def _cancel_at_client(row: Dict[str, Any]) -> None:

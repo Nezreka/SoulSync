@@ -50,7 +50,23 @@ def _mock_response(json_data=None, content=b"", status_code=200, headers=None):
     if json_data is not None:
         resp.json = Mock(return_value=json_data)
     resp.content = content
+    # fetch_feed reads through the ingest guard now, which streams so it can stop
+    # at a size cap. one chunk is enough to stand in for that here.
+    resp.iter_content = lambda chunk_size=None: iter([content] if content else [])
     return resp
+
+
+@pytest.fixture(autouse=True)
+def _allow_test_feed_urls():
+    """These tests are about parsing, not about the url guard.
+
+    check_url does a real dns lookup, so leaving it live would make every feed
+    test depend on the network and on example.com resolving. The guard has its
+    own tests in test_podcast_ingest_guard.py, which is where its behaviour is
+    actually pinned.
+    """
+    with patch("core.podcast_ingest_guard.check_url", return_value=(True, "")):
+        yield
 
 
 # ---------------------------------------------------------------------------

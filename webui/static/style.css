@@ -4344,16 +4344,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     line-height: 1;
 }
 
-/* Quality tab: the settings tiles stay exactly on the normal centered 920px
-   settings column. On wide screens only the profile panel protrudes into the
-   empty right margin, so the Quality tab lines up with the other tabs. */
+/* Quality tab: the profile panel sits INSIDE the settings column, as its right
+   hand column.
+
+   It used to hang outside instead - the layout was one side-panel wider than its
+   container, so the panel spilled into the empty margin beside a 920px settings
+   column. That was the right trade when the column was 920px and a 320px panel
+   would have left the tiles too narrow to read.
+
+   The column is --settings-max-width wide now, so the trade is gone: the tiles
+   keep about 1070px, which is wider than the whole column used to be. Hanging
+   outside had also started to LOOK wrong once the settings card grew a visible
+   border, because the panel was sitting past it with nothing behind it. */
 .qp-layout {
     --qp-side-width: 320px;
-    --qp-side-gap: 8px;
+    --qp-side-gap: 22px;
     display: flex;
     align-items: flex-start;
     gap: var(--qp-side-gap);
-    width: calc(100% + var(--qp-side-width) + var(--qp-side-gap));
+    width: 100%;
     overflow: visible;
 }
 
@@ -4862,7 +4871,12 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     min-width: 132px;
 }
 
-@media (max-width: 1800px) {
+/* Stacked only when the column really is too narrow to split. The old
+   breakpoint was 1800px because the panel hung outside and needed the viewport
+   to be wider than the column PLUS the panel plus margins. Now it lives inside
+   the column, so it can stay beside the tiles until the two together get tight,
+   which is a good deal narrower. */
+@media (max-width: 1100px) {
     .qp-layout {
         flex-direction: column-reverse;
         width: 100%;
@@ -85325,3 +85339,312 @@ body.src-modal-open { overflow: hidden; }
     margin: -2px 0 14px;
     max-width: 74ch;
 }
+
+/* ==========================================================================
+   DISCOVER — art-forward cards (the Deezer / Spotify idiom)
+   ==========================================================================
+   The shelves used a portrait tile with the title printed ON the artwork under
+   a black gradient. That reads as a poster: the art is a backdrop for text, and
+   every cover is cropped to 0.85 so nothing is ever shown as it was made.
+
+   Deezer and Spotify both do the opposite, and for the same reason — the art is
+   the product. A square cover at its own aspect, nothing written over it, and
+   the title sitting underneath in plain type. The card itself is invisible
+   until you point at it, so a shelf reads as a row of covers rather than a row
+   of boxes.
+
+   Scoped to .discover-section on purpose. `.ya-card` is shared with the
+   dashboard rails (see the dash-card--rail block), and those are a deliberately
+   different, smaller strip. Everything here stays on the Discover page.
+
+   No play button on the hover, even though both apps have one: these cards open
+   a modal, they do not start playback, and a play triangle would promise
+   something the click does not do.
+   ========================================================================== */
+
+.discover-section .ya-card,
+.discover-section .discover-grid .ya-card {
+    /* height comes from the art plus the caption now, not a fixed ratio */
+    aspect-ratio: auto;
+    height: auto;
+    width: 184px;
+
+    /* the box disappears; the artwork carries the card */
+    background: transparent;
+    border: 1px solid transparent;
+    box-shadow: none;
+    border-radius: 12px;
+    padding: 8px;
+
+    transition: background-color 0.22s ease, border-color 0.22s ease;
+}
+
+.discover-section .ya-card:hover,
+.discover-section .discover-grid .ya-card:hover {
+    /* a tint, not a jump. the lift fought the scroll on a horizontal shelf */
+    transform: none;
+    background: rgba(255, 255, 255, 0.055);
+    border-color: rgba(255, 255, 255, 0.05);
+    box-shadow: none;
+}
+
+/* the artwork: square, in flow, and the only rounded thing on the card */
+.discover-section .ya-card-img {
+    position: relative;
+    inset: auto;
+    aspect-ratio: 1;
+    width: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.03);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.discover-section .ya-card-img img {
+    transition: transform 0.45s cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+.discover-section .ya-card:hover .ya-card-img img {
+    transform: scale(1.045);
+}
+
+/* nothing is printed over the art any more, so the scrim has no job */
+.discover-section .ya-card-gradient {
+    display: none;
+}
+
+/* the caption drops below the cover */
+.discover-section .ya-card-info {
+    position: static;
+    padding: 12px 2px 2px;
+    z-index: auto;
+}
+
+.discover-section .ya-card-name {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    color: #fff;
+    /* the shadow existed to lift text off artwork; there is no artwork under it */
+    text-shadow: none;
+}
+
+.discover-section .ya-card-sub {
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.55);
+    text-shadow: none;
+    margin-top: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* badges sit on the art, so they move in by the card's new padding */
+.discover-section .ya-card-badges {
+    top: 16px;
+    left: 16px;
+}
+
+/* a grid cell should fill its column; only the shelf card is a fixed width */
+.discover-section .discover-grid .ya-card {
+    width: 100%;
+}
+
+/* the shelf gets room to breathe, the way both apps space a rail */
+.discover-section .discover-section-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.discover-section .discover-section-subtitle {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+@media (max-width: 768px) {
+    .discover-section .ya-card {
+        width: 146px;
+        padding: 6px;
+    }
+    .discover-section .ya-card-name { font-size: 13px; }
+    .discover-section .ya-card-sub { font-size: 11px; }
+    .discover-section .ya-card-badges { top: 12px; left: 12px; }
+}
+
+/* the shelf itself: a touch wider and airier, matching the card sizing above.
+   172px was sized for a portrait tile with the title printed inside it; a
+   square cover with the caption underneath wants a little more room. */
+.discover-section .discover-grid {
+    grid-auto-columns: 184px;
+    gap: 20px;
+}
+
+@media (max-width: 768px) {
+    .discover-section .discover-grid {
+        grid-auto-columns: 146px;
+        gap: 14px;
+    }
+}
+
+/* ── Deezer editorial: the genre chips in the section header ── */
+.dz-ed-genres {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.dz-ed-genre {
+    appearance: none;
+    -webkit-appearance: none;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.035);
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.dz-ed-genre:hover {
+    background: rgba(255, 255, 255, 0.075);
+    color: #fff;
+}
+
+.dz-ed-genre.is-active {
+    background: var(--accent);
+    border-color: transparent;
+    /* the accent is a bright colour; dark text is what stays readable on it */
+    color: #0b0b0b;
+}
+
+.dz-ed-genre:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
+
+/* a playlist cover is square art like any other card, so it inherits the
+   shelf card styling above and needs nothing of its own */
+
+/* the editorial card while it is loading a playlist into Sync. a 200-track
+   playlist takes the better part of a minute to fetch, and the job has always
+   reported done/total - the card just never showed it. */
+.dz-ed-progress {
+    margin-top: 8px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+}
+
+.dz-ed-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent);
+    transition: width 0.35s ease;
+}
+
+/* it is working, so the art should not look idle */
+.discover-section .ya-card[aria-busy='true'] .ya-card-img img {
+    opacity: 0.55;
+    transition: opacity 0.25s ease;
+}
+
+/* the editorial shelf's header controls: a search box above the genre chips */
+.dz-ed-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-end;
+    max-width: 620px;
+}
+
+.dz-ed-search {
+    width: 100%;
+    max-width: 260px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.035);
+    color: #fff;
+    font-size: 12.5px;
+    outline: none;
+    transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.dz-ed-search::placeholder { color: rgba(255, 255, 255, 0.35); }
+
+.dz-ed-search:focus {
+    border-color: rgba(var(--accent-rgb), 0.5);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+@media (max-width: 768px) {
+    .dz-ed-controls { align-items: stretch; }
+    .dz-ed-search { max-width: none; }
+}
+
+/* Library: shared cards with persistent Music / Video panels. */
+#settings-page .stg-media-card .stg-media-switcher {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    margin: 4px 0 20px;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 12px;
+    background: rgba(0,0,0,.2);
+}
+#settings-page .stg-media-switcher button {
+    min-width: 100px;
+    padding: 9px 22px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255,255,255,.6);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+}
+#settings-page .stg-media-switcher button:hover { color: #fff; background: rgba(255,255,255,.06); }
+#settings-page .stg-media-switcher button[aria-selected="true"] {
+    background: rgba(var(--accent-rgb),.18);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb),.25);
+}
+#settings-page .stg-media-switcher button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#settings-page .stg-media-panel[hidden] { display: none !important; }
+#settings-page .stg-media-context { display: flex; flex-direction: column; gap: 5px; margin-bottom: 20px; }
+#settings-page .stg-media-context strong { font-size: 16px; font-weight: 600; color: #eee; }
+#settings-page .stg-media-summary { font-size: 12px; line-height: 1.5; color: rgba(255,255,255,.5); }
+#settings-page .stg-media-summary.is-live { color: rgba(var(--accent-rgb),.8); }
+@media (max-width: 600px) {
+    #settings-page .stg-media-card .stg-media-switcher { display: flex; }
+    #settings-page .stg-media-switcher button { flex: 1; }
+}
+#settings-page .stg-media-panel > .settings-group {
+    margin-top: 0;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 0 22px !important;
+}
+#settings-page .stg-media-panel > .settings-group::before { display: none; }
+#settings-page .stg-media-panel > .settings-group > h3 {
+    padding: 12px 0;
+    border-left: 0;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    font-size: 13px;
+}
+#settings-page .stg-media-panel > .settings-group:last-child { margin-bottom: 0 !important; }

@@ -18,6 +18,7 @@
         rooms: [],               // joined rooms rail [{name, home}]
         canManage: false,        // admin: may join/leave rooms
         canSend: false,
+        connectionError: null,
         configured: null,        // null = unknown yet
         timer: null,
         lastStamp: null,         // newest message timestamp we've rendered
@@ -351,6 +352,8 @@
                 return r.json().catch(function () { return {}; }).then(function (body) {
                     return { ok: r.ok, status: r.status, body: body };
                 });
+            }).catch(function () {
+                return { ok: false, status: 0, body: { error: 'Could not reach SoulSync. Your message was not confirmed; check the conversation before trying again.' } };
             });
     }
 
@@ -3380,6 +3383,7 @@
         // last, because plain mode overrides the placeholder and hides the
         // rich controls this function just showed
         _syncModeBtn();
+        if (state.connectionError) input.placeholder = state.connectionError;
     }
 
     // ── composer toolbar (room only) ─────────────────────────────────────────
@@ -4753,12 +4757,16 @@
         if (state.view === 'room') {
             work = getJSON('/api/chat/room?room=' + encodeURIComponent(state.room || '')).then(function (res) {
                 if (!res.ok) {
+                    state.connectionError = res.body && res.body.error || 'Chat connection unavailable';
+                    state.canSend = false;
+                    renderComposer();
                     pollProblem(res.body && res.body.error
                         ? res.body.error
                         : 'Chat is unavailable right now.', state.renderedOk);
                     return;
                 }
                 pollRecovered();
+                state.connectionError = null;
                 state.canSend = !!res.body.can_send;
                 // auto-join OFF → the server no longer joins for us; show the
                 // join gate instead of the room (popwaffle9000's leave fix).
@@ -4780,11 +4788,15 @@
             work = getJSON('/api/chat/conversations/' + encodeURIComponent(state.pmUser))
                 .then(function (res) {
                     if (!res.ok) {
+                        state.connectionError = res.body && res.body.error || 'Chat connection unavailable';
+                        state.canSend = false;
+                        renderComposer();
                         pollProblem(res.body && res.body.error || 'Conversation unavailable.',
                             state.renderedOk);
                         return;
                     }
                     pollRecovered();
+                    state.connectionError = null;
                     state.canSend = !!res.body.can_send;
                     renderHead(); renderComposer();
                     renderMessages(res.body.messages);
@@ -5006,7 +5018,10 @@
                 if (typeof showToast === 'function') {
                     showToast(res.body && res.body.error || 'Message not sent', 'error');
                 }
-                input.value = text;     // give the words back
+                input.value = input.value ? text + '\n' + input.value : text; // preserve newer typing too
+                if (res.body && (res.body.code === 'slskd_disconnected' || res.body.code === 'slskd_unavailable')) {
+                    state.connectionError = res.body.error; state.canSend = false; renderComposer();
+                }
                 return;
             }
             // Optimistic echo: slskd takes a beat to include a just-sent message,
@@ -5917,6 +5932,7 @@
                 state.configured = !!(res.ok && res.body.configured);
                 state.homeRoom = (res.body && res.body.room) || 'SoulSync';
                 state.room = state.room || state.homeRoom;
+                state.connectionError = res.body && res.body.connected === false ? res.body.error || 'Soulseek is not connected' : null;
                 state.canSend = !!(res.body && res.body.can_send);
                 state.isAdmin = !!(res.body && res.body.is_admin);
                 state.selfName = String((res.body && res.body.username) || '');

@@ -138,7 +138,8 @@ export function useExplorerDiscovery(onRefresh: () => void): ExplorerDiscovery {
           'This playlist needs more tracks discovered before exploring. Redirecting to Sync...',
           'info',
         );
-        void window.SoulSyncWebRouter?.navigateToPage('sync');
+        // the sidebar-aware entry; the raw bridge leaves Explorer highlighted
+        void window.navigateToPage?.('sync');
         setTimeout(() => {
           document.querySelector<HTMLElement>('.sync-tab-button[data-tab="mirrored"]')?.click();
         }, 200);

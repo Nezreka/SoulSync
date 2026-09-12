@@ -691,7 +691,7 @@ def test_the_library_tab_speaks_one_card_language():
 
     assert titles == [
         # files & folders
-        "Music Folders", "Music Organization", "Video Folders", "Video Organization",
+        "Folders", "Organization",
         # processing
         "Post-Processing", "Import", "Filtering",
         # your library
@@ -862,10 +862,10 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
         bug generator, and this page has already been bitten by exactly that
         kind of drift twice (the download-mode select, the slskd form).
     """
-    slots = re.findall(r'<span class="settings-section-hint"[^>]*data-stg-summary="([^"]+)"[^>]*>', index)
+    slots = re.findall(r'<span[^>]*data-stg-summary="([^"]+)"[^>]*>', index)
     assert len(slots) >= 8, f"only {len(slots)} headers report live values"
 
-    for m in re.finditer(r'<span class="settings-section-hint"[^>]*data-stg-summary="[^"]+"[^>]*>', index):
+    for m in re.finditer(r'<span[^>]*data-stg-summary="[^"]+"[^>]*>', index):
         assert 'data-stg-fallback="' in m.group(0), (
             "no fallback - a header that cannot compute its summary would go blank"
         )
@@ -903,14 +903,8 @@ def test_a_failed_settings_load_does_not_summarise_an_empty_form(js):
 
 
 def test_the_two_sides_name_their_sections_the_same_way():
-    """Music used to have ONE card called "Paths & Organization" while video had
-    TWO, "Video Folders" and "Video Organization". That is not a naming quibble:
-    the combined name existed because the card was combined, so the same feature
-    looked like two different features depending on which half you were reading.
-
-    Folders is where things live. Organization is how they get named. Both sides
-    answer both questions under the same two words now, and this fails if one
-    side grows a section the other does not have.
+    """Folders and Organization are shared cards, each retaining both media
+    contexts so neither music nor video settings disappear in consolidation.
     """
     index = _read("webui/index.html")
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
@@ -922,12 +916,13 @@ def test_the_two_sides_name_their_sections_the_same_way():
             titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
 
     for noun in ("Folders", "Organization"):
-        music = f"Music {noun}"
-        video = f"Video {noun}"
-        assert music in titles, f"no {music} - the sides have drifted apart again"
-        assert video in titles, f"no {video} - the sides have drifted apart again"
+        assert titles.count(noun) == 1, f"expected one shared {noun} card"
+        card = re.split(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"',
+                        markup.split(f'<h3>{noun}</h3>', 1)[1], maxsplit=1)[0]
+        for media in ("Music", "Video"):
+            assert f'<strong>{media} {noun.lower()}</strong>' in card
 
-    # the combined name is what the split replaced; its return means the merge undid
+    # Folder locations and naming rules remain separate subjects.
     assert "Paths &amp; Organization" not in titles
 
 

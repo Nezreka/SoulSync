@@ -657,3 +657,59 @@ class TestBrowseAndGrab:
     def test_download_requires_files(self, browse_app):
         http, state = browse_app
         assert http.post("/api/chat/user/pal/download", json={}).status_code == 400
+
+
+@pytest.mark.parametrize("connection", [
+    {"isConnected": False, "isLoggedIn": False, "state": "Disconnecting"},
+    {"isConnected": True, "isLoggedIn": False},
+    None,
+])
+def test_chat_connection_requires_network_login(connection):
+    client = _RecordingClient({("GET", "server/state"): connection})
+    state = _run(client.get_chat_connection_state())
+    assert state["connected"] is False
+    assert "slskd" in state["error"]
+
+
+@pytest.mark.parametrize("endpoint", ["server", "server/state"])
+def test_chat_connection_accepts_logged_in_server(endpoint):
+    client = _RecordingClient({("GET", endpoint): {"isConnected": True, "isLoggedIn": True}})
+    assert _run(client.get_chat_connection_state()) == {"connected": True}
+
+
+@pytest.mark.parametrize("endpoint", ["server", "server/state"])
+def test_chat_connection_reports_disconnected_per_endpoint(endpoint):
+    client = _RecordingClient({("GET", endpoint): {"isConnected": False, "isLoggedIn": False}})
+    state = _run(client.get_chat_connection_state())
+    assert state["connected"] is False
+    assert state["code"] == "slskd_disconnected"
+
+
+@pytest.mark.parametrize("path,payload", [
+    ("/api/chat/room/message", {"message": "draft"}),
+    ("/api/chat/conversations/peer", {"message": "draft"}),
+    ("/api/chat/room/protocol", {"p": {"k": "hello"}}),
+    ("/api/chat/room/react", {"message": "draft"}),
+])
+def test_disconnected_chat_never_submits_messages_or_carriers(chat_app, path, payload):
+    http, state = chat_app
+    client = state["client"]
+    client.get_chat_connection_state = lambda: {"connected": False, "code": "slskd_disconnected", "error": "Reconnect in slskd"}
+    response = http.post(path, json=payload)
+    assert response.status_code == 503
+    assert response.get_json()["code"] == "slskd_disconnected"
+    assert not client.sent_room and not client.sent_pm and not client.joined
+    assert http.get("/api/chat/status").get_json()["can_send"] is False
+
+
+def test_chat_recovers_on_next_poll_after_slskd_reconnects(chat_app):
+    http, state = chat_app
+    client = state["client"]
+    client.get_chat_connection_state = lambda: {"connected": False, "error": "Reconnect in slskd"}
+    assert http.get("/api/chat/room").status_code == 503
+    assert not client.joined
+    client.get_chat_connection_state = lambda: {"connected": True}
+    response = http.get("/api/chat/room")
+    assert response.status_code == 200
+    assert response.get_json()["can_send"] is True
+    assert not client.sent_room and not client.sent_pm  # never auto-resend drafts

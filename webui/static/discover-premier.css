@@ -1,0 +1,1659 @@
+/* ==========================================================================
+   SoulSync Music Discover — Premier App Redesign (Deezer & Spotify Aesthetic)
+   Cinematic Hero Billboard, Deezer Flow Moods, Tactile Spotify Cards,
+   Ambient Lighting & Glassmorphic Surfaces
+   ========================================================================== */
+
+/* ── 1. Discover Canvas & Dynamic Ambient Environment ────────────────────── */
+.discover-container {
+    --dsc-bg-deep: #0a0d14;
+    --dsc-bg-card: rgba(22, 27, 38, 0.62);
+    --dsc-bg-card-hover: rgba(28, 34, 48, 0.85);
+    --dsc-border-glass: 1px solid rgba(255, 255, 255, 0.08);
+    --dsc-border-hover: 1px solid rgba(255, 255, 255, 0.16);
+    --dsc-text-primary: #ffffff;
+    --dsc-text-secondary: rgba(255, 255, 255, 0.7);
+    --dsc-text-muted: rgba(255, 255, 255, 0.45);
+    --dsc-accent-spotify: #1db954;
+    --dsc-accent-deezer: #a238ff;
+    --dsc-shadow-card: 0 12px 32px rgba(0, 0, 0, 0.45);
+    --dsc-shadow-glow: 0 16px 40px rgba(var(--accent-rgb, 29, 185, 84), 0.22);
+    
+    position: relative;
+    width: 100%;
+    max-width: 1480px;
+    margin: 0 auto;
+    padding: 16px 28px 96px;
+    box-sizing: border-box;
+    background: transparent;
+}
+
+/* Ambient dynamic background lighting */
+.discover-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 10%;
+    right: 10%;
+    height: 600px;
+    background: radial-gradient(ellipse at 50% 0%, rgba(var(--accent-rgb, 29, 185, 84), 0.18) 0%, rgba(162, 56, 255, 0.08) 45%, transparent 75%);
+    pointer-events: none;
+    z-index: 0;
+    filter: blur(60px);
+}
+
+/* ── 2. Top Quick-Filter Navigation Rail (Spotify / Deezer style) ─────────── */
+.dsc-quick-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0 20px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    position: sticky;
+    top: 0;
+    z-index: 25;
+    background: linear-gradient(180deg, rgba(10, 13, 20, 0.95) 0%, rgba(10, 13, 20, 0.8) 75%, transparent 100%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    margin-bottom: 8px;
+}
+
+.dsc-quick-filter-bar::-webkit-scrollbar {
+    display: none;
+}
+
+.dsc-filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    border-radius: 9999px;
+    font-size: 0.86rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--dsc-text-secondary);
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    text-decoration: none;
+}
+
+.dsc-filter-pill:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+}
+
+.dsc-filter-pill.active,
+.dsc-filter-pill:active {
+    color: #000000;
+    background: #ffffff;
+    border-color: #ffffff;
+    box-shadow: 0 4px 16px rgba(255, 255, 255, 0.25);
+    font-weight: 700;
+}
+
+/* Deezer Flow & Moods Bar */
+.dsc-flow-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0 16px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+}
+
+.dsc-flow-bar::-webkit-scrollbar {
+    display: none;
+}
+
+.dsc-flow-title {
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--dsc-text-muted);
+    margin-right: 4px;
+    white-space: nowrap;
+}
+
+.dsc-flow-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: 9999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #ffffff;
+    background: rgba(162, 56, 255, 0.12);
+    border: 1px solid rgba(162, 56, 255, 0.25);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 180ms ease;
+}
+
+.dsc-flow-pill:hover {
+    background: rgba(162, 56, 255, 0.28);
+    border-color: rgba(162, 56, 255, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(162, 56, 255, 0.35);
+}
+
+.dsc-flow-icon {
+    font-size: 14px;
+}
+
+/* ── 3. Cinematic Hero Billboard (Full-Width Immersion) ──────────────────── */
+.discover-command-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 20px !important;
+    margin-bottom: 36px !important;
+    padding: 0 !important;
+}
+
+.discover-command-hero {
+    width: 100% !important;
+    flex: 1 1 100% !important;
+}
+
+.discover-hero {
+    position: relative !important;
+    width: 100% !important;
+    min-height: 430px !important;
+    height: auto !important;
+    border-radius: 24px !important;
+    overflow: hidden !important;
+    margin-bottom: 0 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+    background: #0d111a !important;
+}
+
+/* Full-bleed background image with right-side placement and cinematic grading */
+.discover-hero-background {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    background-size: cover !important;
+    background-position: 85% 25% !important;
+    transform: scale(1.02);
+    transition: transform 6s cubic-bezier(0.16, 1, 0.3, 1), filter 1s ease;
+    filter: saturate(1.15) contrast(1.05);
+}
+
+.discover-hero:hover .discover-hero-background {
+    transform: scale(1.05);
+}
+
+/* Scrim vignette — deep obsidian left shield guaranteeing 100% text legibility */
+.discover-hero-overlay {
+    position: absolute !important;
+    inset: 0 !important;
+    background:
+        linear-gradient(90deg, #0a0d14 0%, rgba(10, 13, 20, 0.98) 42%, rgba(10, 13, 20, 0.7) 65%, rgba(10, 13, 20, 0.15) 88%, transparent 100%),
+        linear-gradient(0deg, #0a0d14 0%, rgba(10, 13, 20, 0.8) 25%, transparent 65%),
+        linear-gradient(180deg, rgba(10, 13, 20, 0.45) 0%, transparent 35%) !important;
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* Hide duplicate square image inside the hero */
+.discover-hero-image {
+    display: none !important;
+}
+
+/* Hero Content Area — Strictly Left-Aligned Flagship Layout */
+.discover-hero-content,
+.discover-command-hero .discover-hero-content {
+    position: relative !important;
+    z-index: 2 !important;
+    height: auto !important;
+    flex: 1 1 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: flex-start !important;
+    text-align: left !important;
+    padding: 28px 60px 14px !important;
+    max-width: min(1120px, 78%) !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+}
+
+.discover-hero-info,
+.discover-command-hero .discover-hero-info {
+    max-width: 100% !important;
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    text-align: left !important;
+    margin: 0 !important;
+}
+
+/* Glowing Featured Eyebrow Badge */
+.discover-hero-label {
+    display: inline-flex !important;
+    align-items: center !important;
+    align-self: flex-start !important;
+    text-align: left !important;
+    gap: 6px !important;
+    font-size: 0.72rem !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    color: #ffffff !important;
+    background: linear-gradient(135deg, var(--accent-color, #1db954), #059669) !important;
+    padding: 5px 12px !important;
+    border-radius: 9999px !important;
+    box-shadow: 0 2px 10px rgba(var(--accent-rgb, 29, 185, 84), 0.4) !important;
+    margin: 0 0 12px 0 !important;
+    text-shadow: none !important;
+}
+
+/* Massive Spotify/Deezer Title */
+.discover-hero-title,
+.discover-command-hero .discover-hero-title {
+    font-size: clamp(30px, 3.8vw, 54px) !important;
+    font-weight: 850 !important;
+    letter-spacing: -0.03em !important;
+    line-height: 1.08 !important;
+    color: #ffffff !important;
+    text-align: left !important;
+    align-self: flex-start !important;
+    max-width: 100% !important;
+    margin: 0 0 10px 0 !important;
+    text-shadow: 0 4px 24px rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Subtitle & Recommendation Reason */
+.discover-hero-subtitle,
+.discover-command-hero .discover-hero-subtitle {
+    font-size: 1.02rem !important;
+    line-height: 1.45 !important;
+    color: rgba(255, 255, 255, 0.85) !important;
+    max-width: 850px !important;
+    text-align: left !important;
+    align-self: flex-start !important;
+    margin: 0 0 14px 0 !important;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Meta Pills: Popularity, Owned Status, Genres */
+.discover-hero-meta,
+.discover-command-hero .discover-hero-meta {
+    width: 100% !important;
+    text-align: left !important;
+    margin: 0 0 20px 0 !important;
+}
+
+.discover-hero-meta-content {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    margin: 0 !important;
+    text-align: left !important;
+}
+
+.hero-meta-item {
+    background: rgba(255, 255, 255, 0.1) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 9999px !important;
+    padding: 5px 12px !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    color: #ffffff !important;
+}
+
+.hero-meta-item.hero-popularity {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    background: rgba(245, 158, 11, 0.2) !important;
+    border-color: rgba(245, 158, 11, 0.4) !important;
+    color: #fbbf24 !important;
+}
+
+.genre-tag {
+    background: rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 9999px !important;
+    padding: 3px 10px !important;
+    font-size: 0.76rem !important;
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Primary Action Buttons */
+.discover-hero-actions,
+.discover-command-hero .discover-hero-actions {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 14px !important;
+    flex-wrap: wrap !important;
+    width: 100% !important;
+    margin: 0 !important;
+}
+
+.discover-hero-actions .discover-hero-button,
+.discover-hero-actions .watchlist-toggle-btn {
+    width: auto !important;
+    max-width: fit-content !important;
+    flex: 0 0 auto !important;
+    margin: 0 !important;
+}
+
+/* Spotify-style Primary Pill / Play Button */
+.discover-hero-button.primary {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    background: var(--accent-color, #1db954) !important;
+    color: #05130a !important;
+    font-size: 0.92rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em !important;
+    padding: 11px 24px !important;
+    border-radius: 9999px !important;
+    border: none !important;
+    cursor: pointer !important;
+    box-shadow: 0 8px 24px rgba(var(--accent-rgb, 29, 185, 84), 0.45) !important;
+    transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.discover-hero-button.primary:hover {
+    transform: scale(1.04) translateY(-1px) !important;
+    box-shadow: 0 12px 32px rgba(var(--accent-rgb, 29, 185, 84), 0.6) !important;
+    background: #22c55e !important;
+    color: #000000 !important;
+}
+
+.discover-hero-button.primary:active {
+    transform: scale(0.98) !important;
+}
+
+/* Secondary Discography Pill */
+.discover-hero-button.secondary {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    background: rgba(255, 255, 255, 0.12) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    color: #ffffff !important;
+    font-size: 0.9rem !important;
+    font-weight: 600 !important;
+    padding: 11px 22px !important;
+    border-radius: 9999px !important;
+    border: 1px solid rgba(255, 255, 255, 0.18) !important;
+    cursor: pointer !important;
+    transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.discover-hero-button.secondary:hover {
+    background: rgba(255, 255, 255, 0.22) !important;
+    border-color: rgba(255, 255, 255, 0.3) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* Hero Controls: Pill Indicators & Actions */
+.discover-hero-controls {
+    position: relative !important;
+    z-index: 3 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 12px 56px 20px !important;
+    box-sizing: border-box !important;
+}
+
+.discover-hero-indicators {
+    display: flex !important;
+    align-items: center !important;
+    gap: 7px !important;
+    background: rgba(0, 0, 0, 0.45) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    padding: 6px 14px !important;
+    border-radius: 9999px !important;
+}
+
+.hero-indicator {
+    background: transparent !important;
+    border: none !important;
+    padding: 4px 2px !important;
+    cursor: pointer !important;
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+.hero-indicator-dot {
+    width: 6px !important;
+    height: 6px !important;
+    border-radius: 9999px !important;
+    background: rgba(255, 255, 255, 0.35) !important;
+    transition: all 240ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.hero-indicator.active .hero-indicator-dot {
+    width: 22px !important;
+    background: var(--accent-color, #1db954) !important;
+    box-shadow: 0 0 12px var(--accent-color, #1db954) !important;
+}
+
+.hero-indicator:hover .hero-indicator-dot {
+    background: rgba(255, 255, 255, 0.65) !important;
+}
+
+.discover-hero-bottom-actions {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+}
+
+.discover-hero-bottom-actions button {
+    background: rgba(0, 0, 0, 0.45) !important;
+    backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    color: rgba(255, 255, 255, 0.85) !important;
+    border-radius: 9999px !important;
+    padding: 7px 16px !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    transition: all 160ms ease !important;
+}
+
+.discover-hero-bottom-actions button:hover {
+    background: rgba(255, 255, 255, 0.18) !important;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.25) !important;
+}
+
+/* Prev/Next Hero Arrow Chevrons */
+.discover-hero-nav {
+    position: absolute !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 50% !important;
+    background: rgba(10, 13, 20, 0.65) !important;
+    backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    color: #ffffff !important;
+    font-size: 24px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    z-index: 5 !important;
+    opacity: 0 !important;
+    transition: all 180ms ease !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+}
+
+.discover-hero:hover .discover-hero-nav {
+    opacity: 1 !important;
+}
+
+.discover-hero-nav-prev { left: 16px !important; }
+.discover-hero-nav-next { right: 16px !important; }
+
+.discover-hero-nav:hover {
+    background: rgba(255, 255, 255, 0.25) !important;
+    transform: translateY(-50%) scale(1.08) !important;
+}
+
+/* ── 4. Re-imagined Quick Signals Bar (Replacing the clunky sidebar) ──────── */
+.discover-command-panel {
+    display: grid !important;
+    grid-template-columns: minmax(280px, 340px) 1fr !important;
+    gap: 16px !important;
+    background: rgba(16, 20, 29, 0.7) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: 20px !important;
+    padding: 16px 20px !important;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35) !important;
+}
+
+.discover-command-panel__head {
+    display: none !important;
+}
+
+.discover-next-move {
+    min-height: auto !important;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb, 29, 185, 84), 0.22), rgba(16, 20, 29, 0.85)) !important;
+    border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.3) !important;
+    border-radius: 14px !important;
+    padding: 14px 18px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    gap: 4px !important;
+}
+
+.discover-next-move:hover {
+    border-color: var(--accent-color, #1db954) !important;
+    box-shadow: 0 6px 24px rgba(var(--accent-rgb, 29, 185, 84), 0.25) !important;
+}
+
+.discover-action-grid {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 10px !important;
+}
+
+.discover-action-card {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.07) !important;
+    border-radius: 13px !important;
+    padding: 12px 14px !important;
+    transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.discover-action-card:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    border-color: rgba(255, 255, 255, 0.16) !important;
+    transform: translateY(-2px) !important;
+}
+
+.discover-command-tools {
+    display: none !important;
+}
+
+/* ── 5. Discovery Zones: Clean Section Containers ────────────────────────── */
+.discovery-zone {
+    margin-bottom: 44px !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: none !important;
+}
+
+.discovery-zone-head {
+    display: flex !important;
+    align-items: flex-end !important;
+    justify-content: space-between !important;
+    margin-bottom: 20px !important;
+    padding: 0 4px 10px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.discovery-zone-kicker {
+    font-size: 0.72rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    color: var(--accent-color, #1db954) !important;
+    margin-bottom: 4px !important;
+}
+
+.discovery-zone-head h2 {
+    font-size: 1.65rem !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.025em !important;
+    color: #ffffff !important;
+    margin: 0 !important;
+}
+
+.discovery-zone-head p {
+    font-size: 0.88rem !important;
+    color: var(--dsc-text-secondary) !important;
+    margin-top: 4px !important;
+}
+
+.discovery-zone-metric {
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 9999px !important;
+    padding: 4px 12px !important;
+    color: var(--dsc-text-secondary) !important;
+}
+
+/* ── 6. Spotify-Style Tactile Music Cards ────────────────────────────────── */
+/* Grids & Horizontal Rails */
+.discover-mixes-grid,
+.discover-carousel,
+.discover-grid {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 18px !important;
+    overflow-x: auto !important;
+    padding: 6px 2px 18px !important;
+    scroll-snap-type: x mandatory !important;
+    scrollbar-width: thin !important;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent !important;
+}
+
+.discover-mixes-grid::-webkit-scrollbar,
+.discover-carousel::-webkit-scrollbar,
+.discover-grid::-webkit-scrollbar {
+    height: 6px;
+}
+
+.discover-mixes-grid::-webkit-scrollbar-thumb,
+.discover-carousel::-webkit-scrollbar-thumb,
+.discover-grid::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+}
+
+/* Multi-row library grid exception for Your Albums */
+[id="your-albums-section"] .discover-grid {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)) !important;
+    gap: 18px !important;
+    overflow-x: visible !important;
+    scroll-snap-type: none !important;
+}
+
+[id="your-albums-section"] .discover-grid > .ya-card {
+    flex: none !important;
+    width: 100% !important;
+    max-width: none !important;
+}
+
+/* Mix Cards */
+.discover-mix-card {
+    flex: 0 0 190px !important;
+    width: 190px !important;
+    max-width: 190px !important;
+    scroll-snap-align: start !important;
+    background: rgba(22, 27, 38, 0.6) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    border-radius: 16px !important;
+    padding: 14px !important;
+    box-sizing: border-box !important;
+    transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+    position: relative !important;
+    cursor: pointer !important;
+}
+
+.discover-mix-card:hover {
+    background: rgba(30, 36, 50, 0.9) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    transform: translateY(-6px) !important;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Mix Cover Container */
+.mix-card-cover {
+    width: 100% !important;
+    aspect-ratio: 1 !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+    position: relative !important;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Floating Circular Spotify Play Button */
+.mix-card-play {
+    position: absolute !important;
+    bottom: 10px !important;
+    right: 10px !important;
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 50% !important;
+    background: var(--accent-color, #1db954) !important;
+    color: #000000 !important;
+    border: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 16px !important;
+    font-weight: bold !important;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5) !important;
+    cursor: pointer !important;
+    z-index: 5 !important;
+    opacity: 0 !important;
+    transform: translateY(8px) scale(0.9) !important;
+    transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.discover-mix-card:hover .mix-card-play {
+    opacity: 1 !important;
+    transform: translateY(0) scale(1) !important;
+}
+
+.mix-card-play:hover {
+    transform: translateY(-2px) scale(1.08) !important;
+    box-shadow: 0 10px 24px rgba(var(--accent-rgb, 29, 185, 84), 0.55) !important;
+    background: #22c55e !important;
+}
+
+.mix-card-play:active {
+    transform: translateY(0) scale(0.96) !important;
+}
+
+/* Mix Title & Meta */
+.mix-card-name {
+    font-size: 0.94rem !important;
+    font-weight: 700 !important;
+    color: #ffffff !important;
+    margin-top: 12px !important;
+    line-height: 1.3 !important;
+}
+
+.mix-card-meta {
+    font-size: 0.78rem !important;
+    color: var(--dsc-text-muted) !important;
+    margin-top: 4px !important;
+}
+
+/* ── Base Music Cards (.ya-card) ─────────────────────────────────────────── */
+.discover-grid > .ya-card,
+.discover-carousel > .ya-card,
+.ya-card.discover-album-card,
+.ya-card.recommended-artist-card {
+    flex: 0 0 180px !important;
+    width: 180px !important;
+    max-width: 180px !important;
+    scroll-snap-align: start !important;
+    border-radius: 16px !important;
+    overflow: hidden !important;
+    background: rgba(22, 27, 38, 0.6) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
+    transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+    box-sizing: border-box !important;
+}
+
+.discover-grid > .ya-card:hover,
+.discover-carousel > .ya-card:hover,
+.ya-card.discover-album-card:hover,
+.ya-card.recommended-artist-card:hover {
+    transform: translateY(-6px) !important;
+    background: rgba(30, 36, 50, 0.9) !important;
+    border-color: rgba(255, 255, 255, 0.16) !important;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55) !important;
+}
+
+/* Album Cards & Deezer Picks (Square Artwork & Tactile Spotify/Deezer Shape) */
+.ya-card.discover-album-card {
+    padding: 12px 12px 14px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+    cursor: pointer !important;
+}
+
+.ya-card.discover-album-card .ya-card-img {
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    aspect-ratio: 1 !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+    margin-bottom: 10px !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4) !important;
+}
+
+.ya-card.discover-album-card .ya-card-gradient {
+    display: none !important;
+}
+
+.ya-card.discover-album-card .ya-card-info {
+    position: static !important;
+    padding: 0 !important;
+    width: 100% !important;
+    text-align: left !important;
+}
+
+.ya-card.discover-album-card .ya-card-name {
+    font-size: 0.92rem !important;
+    font-weight: 700 !important;
+    color: #ffffff !important;
+    line-height: 1.3 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    margin-bottom: 4px !important;
+}
+
+.ya-card.discover-album-card .ya-card-sub {
+    font-size: 0.78rem !important;
+    color: rgba(255, 255, 255, 0.65) !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    line-height: 1.35 !important;
+}
+
+.ya-card-img img {
+    transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.ya-card:hover .ya-card-img img {
+    transform: scale(1.04) !important;
+}
+
+.ya-card-name {
+    font-size: 0.9rem !important;
+    font-weight: 700 !important;
+}
+
+.ya-card-sub {
+    font-size: 0.78rem !important;
+    color: rgba(255, 255, 255, 0.75) !important;
+}
+
+/* Recommended Artist Cards & Your Artists (Spotify Artist Avatar Aesthetic) */
+.ya-card.recommended-artist-card,
+[id="your-artists-carousel"] .ya-card {
+    padding: 14px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    cursor: pointer !important;
+}
+
+.ya-card.recommended-artist-card .recommended-card-image,
+.ya-card.recommended-artist-card .ya-card-img,
+[id="your-artists-carousel"] .ya-card .ya-card-img {
+    width: 100% !important;
+    aspect-ratio: 1 !important;
+    border-radius: 50% !important;
+    overflow: hidden !important;
+    margin: 0 auto 12px !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45) !important;
+    border: 2px solid rgba(255, 255, 255, 0.08) !important;
+    position: relative !important;
+}
+
+.ya-card.recommended-artist-card .recommended-card-image img,
+.ya-card.recommended-artist-card .ya-card-img img,
+[id="your-artists-carousel"] .ya-card .ya-card-img img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.ya-card.recommended-artist-card:hover .recommended-card-image img,
+.ya-card.recommended-artist-card:hover .ya-card-img img,
+[id="your-artists-carousel"] .ya-card:hover .ya-card-img img {
+    transform: scale(1.06) !important;
+}
+
+.recommended-card-image-fallback {
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 38px !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.ya-card.recommended-artist-card .ya-card-info,
+[id="your-artists-carousel"] .ya-card .ya-card-info {
+    text-align: center !important;
+    padding: 0 !important;
+    width: 100% !important;
+}
+
+.ya-card.recommended-artist-card .ya-card-name,
+[id="your-artists-carousel"] .ya-card .ya-card-name {
+    font-size: 0.92rem !important;
+    font-weight: 700 !important;
+    color: #ffffff !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    margin-bottom: 4px !important;
+}
+
+.ya-card.recommended-artist-card .ya-card-sub,
+[id="your-artists-carousel"] .ya-card .ya-card-sub {
+    font-size: 0.76rem !important;
+    color: var(--dsc-text-muted) !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    margin-bottom: 6px !important;
+}
+
+.ya-card.recommended-artist-card .ya-card-why {
+    display: flex !important;
+    justify-content: center !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    margin-bottom: 6px !important;
+}
+
+.ya-why-chip {
+    font-size: 0.68rem !important;
+    padding: 2px 7px !important;
+    border-radius: 9999px !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: rgba(255, 255, 255, 0.8) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    font-weight: 500 !important;
+}
+
+/* Eye Symbol Watchlist Button (Top-Right on Artist Cards — matches Your Artists) */
+.ya-watchlist-btn,
+.recommended-artist-card .recommended-card-watchlist-btn,
+.recommended-card-watchlist-btn {
+    position: absolute !important;
+    top: 8px !important;
+    right: 8px !important;
+    bottom: auto !important;
+    left: auto !important;
+    z-index: 4 !important;
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    max-width: 28px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 8px !important;
+    background: rgba(0, 0, 0, 0.55) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    color: rgba(255, 255, 255, 0.65) !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    opacity: 0 !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
+    transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1),
+                transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+                background 180ms ease,
+                border-color 180ms ease,
+                color 180ms ease !important;
+}
+
+.ya-card:hover .ya-watchlist-btn,
+.ya-card:hover .recommended-card-watchlist-btn,
+.recommended-artist-card:hover .recommended-card-watchlist-btn,
+.recommended-artist-card:focus-within .recommended-card-watchlist-btn,
+.ya-watchlist-btn.active,
+.ya-watchlist-btn.watching,
+.recommended-card-watchlist-btn.watching,
+.recommended-card-watchlist-btn.active {
+    opacity: 1 !important;
+}
+
+.ya-watchlist-btn:hover:not(:disabled),
+.recommended-card-watchlist-btn:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.8) !important;
+    border-color: rgba(255, 255, 255, 0.3) !important;
+    color: #ffffff !important;
+    transform: scale(1.1) !important;
+}
+
+.ya-watchlist-btn.active,
+.ya-watchlist-btn.watching,
+.recommended-card-watchlist-btn.watching,
+.recommended-card-watchlist-btn.active {
+    opacity: 1 !important;
+    color: var(--accent, #1db954) !important;
+    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.4) !important;
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.18) !important;
+    box-shadow: 0 0 12px rgba(var(--accent-rgb, 29, 185, 84), 0.3) !important;
+}
+
+.recommended-card-watchlist-btn .sr-only,
+.recommended-card-watchlist-btn span {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+@media (hover: none), (max-width: 768px) {
+    .ya-watchlist-btn,
+    .recommended-artist-card .recommended-card-watchlist-btn {
+        opacity: 0.92 !important;
+        transform: none !important;
+    }
+}
+
+/* ── 7. Stations Row & Live Avatars ──────────────────────────────────────── */
+.stations-row-wrap {
+    margin: 16px 0 28px !important;
+}
+
+.station-card {
+    border-radius: 18px !important;
+    background: rgba(22, 27, 38, 0.6) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    padding: 20px 16px !important;
+    transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.station-card:hover {
+    transform: translateY(-5px) !important;
+    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.35) !important;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5) !important;
+}
+
+.station-avatar {
+    border-radius: 50% !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+    border: 2px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.station-card:hover .station-avatar {
+    border-color: var(--accent-color, #1db954) !important;
+    transform: scale(1.04) !important;
+}
+
+.station-play-btn {
+    border-radius: 9999px !important;
+    font-weight: 700 !important;
+    background: var(--accent-color, #1db954) !important;
+    color: #000000 !important;
+}
+
+/* ── 8. Taste Dial (Adventurousness Wave) ─────────────────────────────────── */
+.adv-wave {
+    position: relative !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 14px !important;
+    background: linear-gradient(135deg, rgba(20, 26, 38, 0.75) 0%, rgba(12, 16, 24, 0.85) 100%) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.09) !important;
+    border-radius: 20px !important;
+    padding: 24px 28px 22px !important;
+    margin: 20px 0 36px !important;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4) !important;
+    overflow: hidden !important;
+}
+
+.adv-wave-head {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.adv-wave-label {
+    font-size: 0.82rem !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.12em !important;
+    color: rgba(255, 255, 255, 0.65) !important;
+    margin: 0 !important;
+}
+
+.adv-wave-state {
+    font-size: 0.84rem !important;
+    font-weight: 700 !important;
+    padding: 4px 14px !important;
+    border-radius: 9999px !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+    line-height: 1.3 !important;
+    margin: 0 !important;
+}
+
+.adv-wave-track {
+    position: relative !important;
+    height: 104px !important;
+    border-radius: 14px !important;
+    overflow: hidden !important;
+    background: rgba(10, 13, 20, 0.85) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.6) !important;
+    margin: 0 !important;
+}
+
+.adv-wave-ends {
+    display: flex !important;
+    justify-content: space-between !important;
+    font-size: 0.78rem !important;
+    font-weight: 500 !important;
+    color: rgba(255, 255, 255, 0.45) !important;
+    padding: 0 2px !important;
+    margin: 0 !important;
+}
+
+.adv-wave-help {
+    font-size: 0.82rem !important;
+    line-height: 1.5 !important;
+    color: rgba(255, 255, 255, 0.55) !important;
+    margin: 0 !important;
+}
+
+/* ── 9. Deezer Editorial Curated Shelf ────────────────────────────────────── */
+[id="deezer-editorial"] {
+    position: relative !important;
+    border-radius: 20px !important;
+    padding: 24px 28px !important;
+    background: linear-gradient(135deg, rgba(162, 56, 255, 0.07) 0%, rgba(18, 22, 32, 0.7) 100%) !important;
+    border: 1px solid rgba(162, 56, 255, 0.22) !important;
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.4) !important;
+    margin-bottom: 40px !important;
+}
+
+[id="deezer-editorial"] .discovery-zone-title {
+    background: linear-gradient(135deg, #ffffff 40%, #c084fc 100%) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+}
+
+.dz-ed-controls {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    margin-bottom: 16px !important;
+}
+
+.dz-ed-search {
+    width: 100% !important;
+    max-width: 380px !important;
+    background: rgba(255, 255, 255, 0.07) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 9999px !important;
+    padding: 10px 18px !important;
+    font-size: 0.86rem !important;
+    color: #ffffff !important;
+    outline: none !important;
+    transition: all 180ms ease !important;
+}
+
+.dz-ed-search:focus {
+    background: rgba(255, 255, 255, 0.12) !important;
+    border-color: rgba(162, 56, 255, 0.6) !important;
+    box-shadow: 0 0 16px rgba(162, 56, 255, 0.25) !important;
+}
+
+.dz-ed-genres {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
+    padding: 2px 0 6px !important;
+}
+
+.dz-ed-genres::-webkit-scrollbar {
+    display: none !important;
+}
+
+.dz-ed-genre {
+    display: inline-flex !important;
+    align-items: center !important;
+    padding: 6px 14px !important;
+    border-radius: 9999px !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    color: rgba(255, 255, 255, 0.7) !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    cursor: pointer !important;
+    white-space: nowrap !important;
+    transition: all 160ms ease !important;
+}
+
+.dz-ed-genre:hover {
+    color: #ffffff !important;
+    background: rgba(255, 255, 255, 0.12) !important;
+}
+
+.dz-ed-genre.active {
+    color: #ffffff !important;
+    background: linear-gradient(135deg, #a238ff, #7928ca) !important;
+    border-color: #a238ff !important;
+    box-shadow: 0 4px 14px rgba(162, 56, 255, 0.4) !important;
+}
+
+.dz-ed-progress {
+    width: 100% !important;
+    height: 4px !important;
+    border-radius: 9999px !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+    overflow: hidden !important;
+    margin-top: 6px !important;
+}
+
+.dz-ed-progress-fill {
+    height: 100% !important;
+    background: linear-gradient(90deg, #a238ff, #06b6d4) !important;
+    border-radius: 9999px !important;
+    transition: width 200ms ease !important;
+}
+
+/* Hero Help & Blacklist frosted glass buttons */
+.tool-help-button.discover-page-help-button,
+.discover-blacklist-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 38px !important;
+    height: 38px !important;
+    border-radius: 50% !important;
+    background: rgba(0, 0, 0, 0.45) !important;
+    backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.14) !important;
+    color: rgba(255, 255, 255, 0.8) !important;
+    cursor: pointer !important;
+    transition: all 180ms ease !important;
+}
+
+.tool-help-button.discover-page-help-button:hover,
+.discover-blacklist-btn:hover {
+    background: rgba(255, 255, 255, 0.2) !important;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.3) !important;
+    transform: scale(1.06) !important;
+}
+
+/* ── 10. Premier Artist Map & Artist Web Hubs (Explore & Build) ──────────── */
+.discover-hub-row--tools {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 22px !important;
+    align-items: stretch !important;
+    margin: 0 0 28px !important;
+    padding: 0 !important;
+}
+
+@media (max-width: 1100px) {
+    .discover-hub-row--tools {
+        grid-template-columns: 1fr !important;
+        gap: 20px !important;
+    }
+}
+
+.discover-hub-row--tools .artmap-hub {
+    position: relative !important;
+    border-radius: 22px !important;
+    overflow: hidden !important;
+    background: linear-gradient(145deg, rgba(17, 23, 37, 0.75) 0%, rgba(10, 14, 24, 0.88) 100%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.28s ease,
+                box-shadow 0.28s ease !important;
+    min-height: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.discover-hub-row--tools .artmap-hub:hover {
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    box-shadow: 0 22px 54px rgba(0, 0, 0, 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Background atmosphere with subtle glowing color clouds */
+.discover-hub-row--tools .artmap-hub-bg {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 0 !important;
+    background: radial-gradient(circle at 18% 18%, rgba(162, 56, 255, 0.14) 0%, transparent 55%),
+                radial-gradient(circle at 82% 82%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+                linear-gradient(145deg, #0f1422 0%, #090c14 100%) !important;
+    opacity: 0.95 !important;
+}
+
+/* Give the second card (Artist Web) an electric blue / indigo glow accent */
+.discover-hub-row--tools .artmap-hub:nth-child(2) .artmap-hub-bg {
+    background: radial-gradient(circle at 18% 18%, rgba(56, 189, 248, 0.14) 0%, transparent 55%),
+                radial-gradient(circle at 82% 82%, rgba(162, 56, 255, 0.1) 0%, transparent 50%),
+                linear-gradient(145deg, #0b1526 0%, #080c14 100%) !important;
+}
+
+.discover-hub-row--tools .artmap-hub-bg::after {
+    display: none !important;
+}
+
+.discover-hub-row--tools .artmap-hub-bg::before {
+    opacity: 0.18 !important;
+}
+
+/* Hub Content & Header */
+.discover-hub-row--tools .artmap-hub-content {
+    position: relative !important;
+    z-index: 2 !important;
+    padding: 24px 26px 28px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+}
+
+.discover-hub-row--tools .artmap-hub-header {
+    display: flex !important;
+    align-items: center !important;
+    gap: 15px !important;
+    margin-bottom: 20px !important;
+}
+
+.discover-hub-row--tools .artmap-hub-icon {
+    width: 32px !important;
+    height: 32px !important;
+    color: #c084fc !important;
+    filter: drop-shadow(0 2px 10px rgba(192, 132, 252, 0.4)) !important;
+    flex-shrink: 0 !important;
+}
+
+.discover-hub-row--tools .artmap-hub:nth-child(2) .artmap-hub-icon {
+    color: #38bdf8 !important;
+    filter: drop-shadow(0 2px 10px rgba(56, 189, 248, 0.4)) !important;
+}
+
+.discover-hub-row--tools .artmap-hub-title {
+    font-size: 1.3rem !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.02em !important;
+    color: #ffffff !important;
+    margin: 0 !important;
+    line-height: 1.2 !important;
+}
+
+.discover-hub-row--tools .artmap-hub-subtitle {
+    font-size: 0.86rem !important;
+    color: rgba(255, 255, 255, 0.6) !important;
+    margin: 4px 0 0 !important;
+    line-height: 1.35 !important;
+}
+
+/* Grid of 3 action cards */
+.discover-hub-row--tools .artmap-hub-cards {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+    align-items: stretch !important;
+    flex: 1 1 auto !important;
+}
+
+/* Each action card button — redesigned from cramped row to generous structured card */
+.discover-hub-row--tools .artmap-hub-card {
+    display: grid !important;
+    grid-template-areas:
+        "icon arrow"
+        "text text" !important;
+    grid-template-columns: 1fr auto !important;
+    grid-template-rows: auto 1fr !important;
+    row-gap: 14px !important;
+    column-gap: 10px !important;
+    align-items: start !important;
+    text-align: left !important;
+    padding: 18px 16px 18px !important;
+    border-radius: 16px !important;
+    background: rgba(255, 255, 255, 0.035) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+    cursor: pointer !important;
+    position: relative !important;
+    overflow: hidden !important;
+    min-height: 148px !important;
+    box-sizing: border-box !important;
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                background 0.22s ease,
+                border-color 0.22s ease,
+                box-shadow 0.22s ease !important;
+}
+
+.discover-hub-row--tools .artmap-hub-card::before {
+    content: '' !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background: radial-gradient(circle at 50% 0%, rgba(162, 56, 255, 0.16) 0%, transparent 72%) !important;
+    opacity: 0 !important;
+    transition: opacity 0.22s ease !important;
+    pointer-events: none !important;
+}
+
+.discover-hub-row--tools .artmap-hub:nth-child(2) .artmap-hub-card::before {
+    background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.16) 0%, transparent 72%) !important;
+}
+
+.discover-hub-row--tools .artmap-hub-card:hover {
+    transform: translateY(-3px) !important;
+    background: rgba(255, 255, 255, 0.075) !important;
+    border-color: rgba(162, 56, 255, 0.4) !important;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.38), 0 0 24px rgba(162, 56, 255, 0.16) !important;
+}
+
+.discover-hub-row--tools .artmap-hub:nth-child(2) .artmap-hub-card:hover {
+    border-color: rgba(56, 189, 248, 0.42) !important;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.38), 0 0 24px rgba(56, 189, 248, 0.16) !important;
+}
+
+.discover-hub-row--tools .artmap-hub-card:hover::before {
+    opacity: 1 !important;
+}
+
+.discover-hub-row--tools .artmap-hub-card:active {
+    transform: translateY(-1px) scale(0.99) !important;
+}
+
+/* Icon Squircle */
+.discover-hub-row--tools .artmap-hub-card-icon {
+    grid-area: icon !important;
+    justify-self: start !important;
+    width: 42px !important;
+    height: 42px !important;
+    border-radius: 12px !important;
+    background: rgba(162, 56, 255, 0.12) !important;
+    border: 1px solid rgba(162, 56, 255, 0.24) !important;
+    color: #d8b4fe !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+    transition: all 0.22s ease !important;
+}
+
+.discover-hub-row--tools .artmap-hub:nth-child(2) .artmap-hub-card-icon {
+    background: rgba(56, 189, 248, 0.12) !important;
+    border-color: rgba(56, 189, 248, 0.24) !important;
+    color: #7dd3fc !important;
+}
+
+.discover-hub-row--tools .artmap-hub-card-icon svg {
+    width: 22px !important;
+    height: 22px !important;
+}
+
+.discover-hub-row--tools .artmap-hub-card:hover .artmap-hub-card-icon {
+    background: rgba(162, 56, 255, 0.24) !important;
+    border-color: rgba(162, 56, 255, 0.48) !important;
+    color: #ffffff !important;
+    transform: scale(1.06) !important;
+    box-shadow: 0 4px 14px rgba(162, 56, 255, 0.35) !important;
+}
+
+.discover-hub-row--tools .artmap-hub:nth-child(2) .artmap-hub-card:hover .artmap-hub-card-icon {
+    background: rgba(56, 189, 248, 0.24) !important;
+    border-color: rgba(56, 189, 248, 0.48) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35) !important;
+}
+
+/* Arrow indicator on top-right */
+.discover-hub-row--tools .artmap-hub-card-arrow {
+    grid-area: arrow !important;
+    justify-self: end !important;
+    align-self: center !important;
+    width: 18px !important;
+    height: 18px !important;
+    color: rgba(255, 255, 255, 0.28) !important;
+    transition: all 0.22s ease !important;
+}
+
+.discover-hub-row--tools .artmap-hub-card:hover .artmap-hub-card-arrow {
+    color: #c084fc !important;
+    transform: translateX(3px) !important;
+}
+
+.discover-hub-row--tools .artmap-hub:nth-child(2) .artmap-hub-card:hover .artmap-hub-card-arrow {
+    color: #38bdf8 !important;
+}
+
+/* Text block spanning full width below icon */
+.discover-hub-row--tools .artmap-hub-card-text {
+    grid-area: text !important;
+    width: 100% !important;
+    min-width: 0 !important;
+}
+
+.discover-hub-row--tools .artmap-hub-card-text h3 {
+    font-size: 1.02rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em !important;
+    color: #ffffff !important;
+    margin: 0 0 6px !important;
+    line-height: 1.25 !important;
+    transition: color 0.2s ease !important;
+}
+
+.discover-hub-row--tools .artmap-hub-card-text p {
+    font-size: 0.81rem !important;
+    line-height: 1.44 !important;
+    color: rgba(255, 255, 255, 0.65) !important;
+    margin: 0 !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+    transition: color 0.2s ease !important;
+}
+
+.discover-hub-row--tools .artmap-hub-card:hover .artmap-hub-card-text p {
+    color: rgba(255, 255, 255, 0.85) !important;
+}
+
+/* ── 11. Responsive Mobile Adjustments (< 768px) ─────────────────────────── */
+@media (max-width: 768px) {
+    .discover-container {
+        padding: 12px 14px 72px !important;
+    }
+
+    .discover-hero {
+        height: 290px !important;
+        border-radius: 18px !important;
+    }
+
+    .discover-hero-content {
+        padding: 20px 20px 14px !important;
+    }
+
+    .discover-hero-title {
+        font-size: 26px !important;
+        margin-bottom: 6px !important;
+    }
+
+    .discover-hero-subtitle {
+        font-size: 0.85rem !important;
+        margin-bottom: 10px !important;
+    }
+
+    .discover-hero-button.primary {
+        padding: 10px 20px !important;
+        font-size: 0.84rem !important;
+    }
+
+    .discover-hero-button.secondary {
+        padding: 9px 16px !important;
+        font-size: 0.82rem !important;
+    }
+
+    .discover-hero-controls {
+        padding: 6px 20px 14px !important;
+    }
+
+    /* On mobile, collapse the command analytics panel to prioritize music discovery shelves */
+    .discover-command-panel {
+        display: none !important;
+    }
+
+    .discover-mix-card {
+        flex: 0 0 152px !important;
+        width: 152px !important;
+        padding: 10px !important;
+        border-radius: 14px !important;
+    }
+
+    /* On mobile touch devices, keep Play button accessible */
+    .mix-card-play {
+        opacity: 0.92 !important;
+        transform: none !important;
+        width: 38px !important;
+        height: 38px !important;
+        font-size: 13px !important;
+    }
+
+    .discover-grid > .ya-card,
+    .discover-carousel > .ya-card,
+    .ya-card.discover-album-card,
+    .ya-card.recommended-artist-card,
+    [id="your-artists-carousel"] .ya-card {
+        flex: 0 0 148px !important;
+        width: 148px !important;
+        max-width: 148px !important;
+        padding: 10px !important;
+        border-radius: 14px !important;
+    }
+
+    [id="deezer-editorial"] {
+        padding: 18px 16px !important;
+    }
+
+    .dz-ed-search {
+        max-width: 100% !important;
+    }
+
+    .discover-hub-row--tools {
+        grid-template-columns: 1fr !important;
+        gap: 16px !important;
+    }
+
+    .discover-hub-row--tools .artmap-hub-cards {
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
+    }
+
+    .discover-hub-row--tools .artmap-hub-card {
+        grid-template-areas: "icon text arrow" !important;
+        grid-template-columns: auto 1fr auto !important;
+        grid-template-rows: auto !important;
+        column-gap: 14px !important;
+        row-gap: 0 !important;
+        align-items: center !important;
+        min-height: auto !important;
+        padding: 14px 16px !important;
+    }
+}

@@ -60,6 +60,7 @@ import { useDownloadBar } from '../-discover.use-download-bar';
 import { useHero } from '../-discover.use-hero';
 import { useLastfmRadio } from '../-discover.use-lastfm-radio';
 import { useListenBrainz } from '../-discover.use-listenbrainz';
+import { DeezerEditorialShelf } from './deezer-editorial-shelf';
 import { defaultLazySource, useMixModal } from '../-discover.use-mix-modal';
 import { useDiscoverMixes } from '../-discover.use-mixes';
 import { useDiscoverPage } from '../-discover.use-page';
@@ -937,6 +938,7 @@ export function DiscoverPage() {
     (id: DiscoverSectionId): boolean => {
       if (id === 'lastfm-radio') return lastfm.configured === true;
       if (id === 'listenbrainz') return true; // renders its own load/error states
+      if (id === 'deezer-editorial') return true; // fetches and empties itself
       if (id === 'build-a-playlist') return true; // a control, like adv-wave
       if (id === 'your-mixes-section') return mixes.mixes.length > 0;
       if (id === 'year-mixes-section') return mixes.decadeMixes.length > 0;
@@ -1154,6 +1156,8 @@ export function DiscoverPage() {
             playingKey={playingMixKey}
           />
         );
+      case 'deezer-editorial':
+        return <DeezerEditorialShelf onToast={(m) => toast(m, 'error')} />;
       case 'build-a-playlist':
         return (
           <BuildPlaylistSection
@@ -1334,6 +1338,109 @@ export function DiscoverPage() {
               </button>
             </div>
           )}
+          {/* Quick Filter Navigation Rail (Spotify / Deezer style) */}
+          <nav className="dsc-quick-filter-bar" aria-label="Discover Categories">
+            <button
+              type="button"
+              className="dsc-filter-pill active"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
+            >
+              <span>✨ For You</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
+            >
+              <span>🎵 Daily Mixes</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('recommended-stations-section')}
+            >
+              <span>📻 Artist Radio</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-new-missing')}
+            >
+              <span>🔥 New Releases</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('deezer-editorial')}
+            >
+              <span>🎧 Deezer Curated</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-tools')}
+            >
+              <span>🪐 Explore & Lab</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-filter-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-library')}
+            >
+              <span>📦 Library Gaps</span>
+            </button>
+          </nav>
+
+          {/* Deezer Flow & Moods Bar */}
+          <div className="dsc-flow-bar" role="toolbar" aria-label="Music Moods">
+            <span className="dsc-flow-title">Flow Moods</span>
+            <button
+              type="button"
+              className="dsc-flow-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
+              title="Energizing high-tempo mixes"
+            >
+              <span className="dsc-flow-icon">⚡</span>
+              <span>Energizing</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-flow-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
+              title="Chill & ambient listening"
+            >
+              <span className="dsc-flow-icon">☕</span>
+              <span>Chill & Lo-Fi</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-flow-pill"
+              onClick={() => scrollToDiscoveryTarget('library-radio-section')}
+              title="Focus radio from your collection"
+            >
+              <span className="dsc-flow-icon">🎯</span>
+              <span>Focus</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-flow-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-library')}
+              title="Deep cuts and nocturnal sounds"
+            >
+              <span className="dsc-flow-icon">🌙</span>
+              <span>Deep Cuts</span>
+            </button>
+            <button
+              type="button"
+              className="dsc-flow-pill"
+              onClick={() => scrollToDiscoveryTarget('discover-zone-tools')}
+              title="Surprise discovery shuffle"
+            >
+              <span className="dsc-flow-icon">🎲</span>
+              <span>Discovery Roulette</span>
+            </button>
+          </div>
+
           <div className="discover-command-grid">
             <div className="discover-command-hero">
               <DiscoverHero
@@ -1458,6 +1565,10 @@ export function DiscoverPage() {
               'cache-genre-explorer',
               'lastfm-radio',
               'listenbrainz',
+              // the page renders sections through these ZONE lists, not from
+              // DISCOVER_LAYOUT - registering a section in the layout alone
+              // gets it an order and a policy but never puts it on screen.
+              'deezer-editorial',
               'build-a-playlist',
             ])}
           </DiscoveryZone>

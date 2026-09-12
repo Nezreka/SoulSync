@@ -167,9 +167,42 @@ export function WatchlistPage() {
     previousScanStatus.current = status;
   }, [scanStatus?.status, queryClient]);
 
+  type AttentionFilterKey = 'all' | 'fresh' | 'never' | 'stale' | 'custom';
+  const [attentionFilter, setAttentionFilter] = useState<AttentionFilterKey>('all');
+  const [isAddArtistOpen, setIsAddArtistOpen] = useState(false);
+  const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+
+  const filteredByAttention = useMemo(() => {
+    if (attentionFilter === 'fresh') {
+      const freshNames = new Set(
+        recentReleases.map((r) => r.artist_name?.toLowerCase()).filter(Boolean),
+      );
+      return artists.filter((a) => freshNames.has(a.artist_name.toLowerCase()));
+    }
+    if (attentionFilter === 'never') {
+      return artists.filter((a) => !a.last_scan_timestamp);
+    }
+    if (attentionFilter === 'stale') {
+      return artists.filter((a) => (daysSince(a.last_scan_timestamp) ?? 999) >= 30);
+    }
+    if (attentionFilter === 'custom') {
+      return artists.filter(
+        (a) =>
+          !a.include_albums ||
+          !a.include_eps ||
+          !a.include_singles ||
+          a.include_live ||
+          a.include_remixes ||
+          a.include_acoustic ||
+          a.include_compilations,
+      );
+    }
+    return artists;
+  }, [artists, attentionFilter, recentReleases]);
+
   const visibleArtists = useMemo(
-    () => sortArtists(filterArtists(artists, search.q), search.sort),
-    [artists, search.q, search.sort],
+    () => sortArtists(filterArtists(filteredByAttention, search.q), search.sort),
+    [filteredByAttention, search.q, search.sort],
   );
   const [activeArtistId, setActiveArtistId] = useState<string | null>(null);
 
@@ -182,6 +215,15 @@ export function WatchlistPage() {
       return fallback ? primaryArtistId(fallback) : null;
     });
   }, [artists, visibleArtists]);
+
+  useEffect(() => {
+    if (!isInspectorOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsInspectorOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isInspectorOpen]);
 
   const activeArtist = useMemo(
     () =>
@@ -478,6 +520,27 @@ export function WatchlistPage() {
 
         <button
           type="button"
+          className={`wl-chip wl-chip--slate${isAddArtistOpen ? ' wl-chip--active' : ''}`}
+          onClick={() => setIsAddArtistOpen((prev) => !prev)}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          {isAddArtistOpen ? 'Close Search' : 'Add Artist'}
+        </button>
+
+        <button
+          type="button"
           className={`wl-chip wl-chip--slate${similarRunning ? ' btn-processing' : ''}`}
           disabled={similarRunning || startSimilar.isPending || isScanning}
           onClick={() => startSimilar.mutate()}
@@ -717,15 +780,21 @@ export function WatchlistPage() {
                 customRuleArtists={customRuleArtists}
                 recentCount={recentReleases.length}
                 globalOverrideActive={globalOverrideActive}
+                activeFilter={attentionFilter}
+                onSelectFilter={(next) =>
+                  setAttentionFilter((prev) => (prev === next ? 'all' : next))
+                }
               />
 
-              <WatchlistAddArtistSearch
-                profileId={profileId}
-                onAddArtist={(artistId, artistName, source) =>
-                  addArtist.mutate({ artistId, artistName, source })
-                }
-                adding={addArtist.isPending}
-              />
+              {isAddArtistOpen ? (
+                <WatchlistAddArtistSearch
+                  profileId={profileId}
+                  onAddArtist={(artistId, artistName, source) =>
+                    addArtist.mutate({ artistId, artistName, source })
+                  }
+                  adding={addArtist.isPending}
+                />
+              ) : null}
 
               <WatchlistRecentReleasesPanel
                 releases={recentReleases}
@@ -824,7 +893,10 @@ export function WatchlistPage() {
                             void navigate({ search: (prev) => ({ ...prev, configId: artistId }) })
                           }
                           onOpenDetail={() => {
-                            if (artistId) setActiveArtistId(artistId);
+                            if (artistId) {
+                              setActiveArtistId(artistId);
+                              setIsInspectorOpen(true);
+                            }
                           }}
                           onOpenFullDetail={() =>
                             artistId &&
@@ -838,21 +910,48 @@ export function WatchlistPage() {
                     })}
                   </div>
                 </div>
-                <WatchlistArtistInspector
-                  profileId={profileId}
-                  artist={activeArtist}
-                  globalOverrideActive={globalOverrideActive}
-                  onOpenConfig={(artistId) =>
-                    void navigate({ search: (prev) => ({ ...prev, configId: artistId }) })
-                  }
-                  onOpenDetail={(artistId) =>
-                    void navigate({ search: (prev) => ({ ...prev, detailId: artistId }) })
-                  }
-                  onRemove={(artistId) => {
-                    const name = activeArtist?.artist_name ?? 'this artist';
-                    void onRemoveOne(artistId, name);
-                  }}
-                />
+
+                {isInspectorOpen && activeArtist ? (
+                  <div
+                    className="watchlist-inspector-backdrop"
+                    onClick={() => setIsInspectorOpen(false)}
+                  >
+                    <div
+                      className="watchlist-inspector-drawer"
+                      onClick={(event) => event.stopPropagation()}
+                      role="dialog"
+                      aria-label={`Managing ${activeArtist.artist_name}`}
+                    >
+                      <div className="watchlist-inspector-header">
+                        <span className="watchlist-panel-kicker">Artist Inspector</span>
+                        <button
+                          type="button"
+                          className="watchlist-inspector-close-btn"
+                          aria-label="Close inspector"
+                          onClick={() => setIsInspectorOpen(false)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <WatchlistArtistInspector
+                        profileId={profileId}
+                        artist={activeArtist}
+                        globalOverrideActive={globalOverrideActive}
+                        onOpenConfig={(artistId) =>
+                          void navigate({ search: (prev) => ({ ...prev, configId: artistId }) })
+                        }
+                        onOpenDetail={(artistId) =>
+                          void navigate({ search: (prev) => ({ ...prev, detailId: artistId }) })
+                        }
+                        onRemove={(artistId) => {
+                          const name = activeArtist?.artist_name ?? 'this artist';
+                          void onRemoveOne(artistId, name);
+                          setIsInspectorOpen(false);
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </>
           )}
@@ -1070,6 +1169,8 @@ function WatchlistAttentionStrip({
   customRuleArtists,
   recentCount,
   globalOverrideActive,
+  activeFilter = 'all',
+  onSelectFilter,
 }: {
   total: number;
   neverScanned: number;
@@ -1077,13 +1178,21 @@ function WatchlistAttentionStrip({
   customRuleArtists: number;
   recentCount: number;
   globalOverrideActive: boolean;
+  activeFilter?: 'all' | 'fresh' | 'never' | 'stale' | 'custom';
+  onSelectFilter?: (filter: 'all' | 'fresh' | 'never' | 'stale' | 'custom') => void;
 }) {
-  const items = [
-    { label: 'Watched artists', value: total, tone: 'neutral' },
-    { label: 'Fresh releases', value: recentCount, tone: 'green' },
-    { label: 'Never scanned', value: neverScanned, tone: neverScanned > 0 ? 'amber' : 'neutral' },
-    { label: 'Stale scans', value: staleArtists, tone: staleArtists > 0 ? 'amber' : 'neutral' },
+  const items: {
+    id: 'all' | 'fresh' | 'never' | 'stale' | 'custom';
+    label: string;
+    value: number;
+    tone: string;
+  }[] = [
+    { id: 'all', label: 'Watched artists', value: total, tone: 'neutral' },
+    { id: 'fresh', label: 'Fresh releases', value: recentCount, tone: 'green' },
+    { id: 'never', label: 'Never scanned', value: neverScanned, tone: neverScanned > 0 ? 'amber' : 'neutral' },
+    { id: 'stale', label: 'Stale scans', value: staleArtists, tone: staleArtists > 0 ? 'amber' : 'neutral' },
     {
+      id: 'custom',
       label: 'Custom rules',
       value: customRuleArtists,
       tone: customRuleArtists > 0 ? 'blue' : 'neutral',
@@ -1093,15 +1202,28 @@ function WatchlistAttentionStrip({
   return (
     <div className="watchlist-attention-strip">
       {items.map((item) => (
-        <div key={item.label} className={`watchlist-attention-card is-${item.tone}`}>
-          <span className="watchlist-attention-value">{item.value}</span>
+        <div
+          key={item.label}
+          className={`watchlist-attention-card is-${item.tone}${
+            activeFilter === item.id ? ' is-active' : ''
+          }`}
+          role="button"
+          tabIndex={0}
+          onClick={() => onSelectFilter?.(item.id)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              onSelectFilter?.(item.id);
+            }
+          }}
+        >
           <span className="watchlist-attention-label">{item.label}</span>
+          <span className="watchlist-attention-value">{item.value}</span>
         </div>
       ))}
       {globalOverrideActive ? (
         <div className="watchlist-attention-card is-amber watchlist-attention-card--wide">
-          <span className="watchlist-attention-value">ON</span>
           <span className="watchlist-attention-label">Global override active</span>
+          <span className="watchlist-attention-value">ON</span>
         </div>
       ) : null}
     </div>

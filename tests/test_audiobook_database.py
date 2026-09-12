@@ -68,7 +68,7 @@ def test_the_schema_holds_only_audiobook_tables(db):
     }
     assert tables == {
         "audiobook_wishlist", "audiobook_downloads",
-        "audiobook_library", "audiobook_watchlist",
+        "audiobook_library", "audiobook_watchlist", "audiobook_library_scan_state", "audiobook_library_file_cache",
         "audiobook_blocklist",
     }
 
@@ -471,3 +471,25 @@ def test_a_failed_scan_records_why(db):
     db.follow_author("Brandon Sanderson")
     db.mark_author_scanned("Brandon Sanderson", error="catalogue unreachable")
     assert db.get_watchlist()[0]["last_error"] == "catalogue unreachable"
+
+
+def test_existing_library_migrates_without_losing_books(tmp_path):
+    import sqlite3
+    path = str(tmp_path / 'existing.db')
+    with sqlite3.connect(path) as conn:
+        conn.execute('''CREATE TABLE audiobook_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, asin TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL, author TEXT DEFAULT '', narrator TEXT DEFAULT '',
+            series_title TEXT DEFAULT '', series_sequence TEXT DEFAULT '',
+            path TEXT NOT NULL, file_count INTEGER DEFAULT 0, size_bytes INTEGER DEFAULT 0,
+            audio_format TEXT DEFAULT '', runtime_minutes INTEGER DEFAULT 0, imported_at REAL NOT NULL)''')
+        conn.execute("INSERT INTO audiobook_library (asin, title, path, imported_at) VALUES ('B000000001', 'Existing Book', '/books/Existing', 1)")
+    migrated = AudiobookDatabase(path)
+    try:
+        row = migrated.get_library()[0]
+        assert row['title'] == 'Existing Book' and row['source'] == 'download'
+        assert row['cover_url'] == '' and row['scan_signature'] == ''
+        migrated.set_library_scan_state({'status': 'completed', 'checked': 1})
+        assert migrated.get_library_scan_state()['checked'] == 1
+    finally:
+        migrated.close()

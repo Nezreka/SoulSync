@@ -163,7 +163,7 @@ def test_plex_is_scanning_falls_back_to_activity_feed():
 
 def test_scan_status_helper_is_none_when_no_server(monkeypatch):
     import core.video.sources as srcmod
-    monkeypatch.setattr(srcmod, "get_active_video_source", lambda: None)
+    monkeypatch.setattr(srcmod, "get_active_video_source", lambda **kwargs: None)
     assert srcmod.video_server_scan_in_progress("all") is None   # caller falls back to fixed wait
 
 
@@ -207,5 +207,5 @@ def test_plex_has_item_checks_specific_episode():
 
 def test_has_item_helper_false_when_no_server(monkeypatch):
     import core.video.sources as srcmod
-    monkeypatch.setattr(srcmod, "get_active_video_source", lambda: None)
+    monkeypatch.setattr(srcmod, "get_active_video_source", lambda **kwargs: None)
     assert srcmod.video_server_has_item("movie", {"title": "X"}) is False

@@ -223,7 +223,7 @@ def test_only_the_acquisition_routes_write_anything():
                        # Deleting a book and putting one back are the two
                        # library writes. Both move files, neither touches a
                        # music path.
-                       "/api/audiobooks/library/<asin>",
+                       "/api/audiobooks/library/<asin>", "/api/audiobooks/library/<asin>/match",
                        "/api/audiobooks/library/recycle/<path:name>",
                        "/api/audiobooks/library/recycle"}
     for rule in _blueprint_app().url_map.iter_rules():

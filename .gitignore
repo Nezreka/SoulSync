@@ -30,6 +30,8 @@ logs/*.log.*
 
 # Auto-downloaded binaries
 bin/
+tools/ffmpeg*
+tools/ffprobe*
 
 # Development compose/config files
 *.dev.yml

@@ -26,6 +26,7 @@ afterEach(() => {
   delete window.discoverMirroredPlaylist;
   delete window.showToast;
   delete window.SoulSyncWebRouter;
+  delete (window as { navigateToPage?: unknown }).navigateToPage;
 });
 
 describe('the frame helpers', () => {
@@ -181,8 +182,10 @@ describe('useExplorerDiscovery', () => {
   });
 
   it('falls back to the Sync page when the discovery modal is absent', async () => {
+    // navigateToPage, not the SoulSyncWebRouter bridge: the bridge moves the
+    // url and leaves the sidebar marking Explorer after the hand-off to Sync
     const navigateToPage = vi.fn(async () => true);
-    window.SoulSyncWebRouter = { navigateToPage } as unknown as Window['SoulSyncWebRouter'];
+    window.navigateToPage = navigateToPage;
     window.showToast = vi.fn();
     const tab = document.createElement('button');
     tab.className = 'sync-tab-button';

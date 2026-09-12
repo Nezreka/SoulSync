@@ -1042,13 +1042,13 @@ def test_the_library_lists_what_is_on_disk(client, catalog, wishlist_db):
 def test_deleting_a_book_recycles_it_and_forgets_it(client, catalog, wishlist_db):
     wishlist_db.add_to_library({"asin": "B1", "title": "PHM"}, "/books/PHM")
     with patch("core.audiobook_recycle.discard",
-               return_value={"ok": True, "permanent": False, "error": ""}) as discard:
+               return_value={"ok": True, "permanent": False, "error": ""}) as discard, \
+         patch("core.audiobook_organizer.library_root", return_value="/books"):
         body = client.delete("/api/audiobooks/library/B1").get_json()
 
     assert body["success"] is True and body["recycled"] is True
     discard.assert_called_once()
-    # The row goes either way: leaving it would put an Owned badge on a book
-    # that is no longer there.
+    # Only successful removal drops ownership.
     assert wishlist_db.is_owned("B1") is False
 
 
@@ -1062,3 +1062,128 @@ def test_the_recycle_bin_reports_what_is_recoverable(client, catalog, wishlist_d
         body = client.get("/api/audiobooks/library/recycle").get_json()
     assert body["entries"][0]["name"] == "x"
     assert body["keep_days"] == 7
+
+
+def test_failed_library_delete_keeps_ownership(client, wishlist_db):
+    wishlist_db.add_to_library({'asin': 'B1', 'title': 'Book'}, '/books/Book')
+    with patch('core.audiobook_recycle.discard', return_value={'ok': False, 'error': 'Permission denied'}), \
+         patch('core.audiobook_organizer.library_root', return_value='/books'):
+        response = client.delete('/api/audiobooks/library/B1')
+    assert response.status_code == 400
+    assert response.get_json()['success'] is False
+    assert wishlist_db.is_owned('B1')
+
+
+def test_library_delete_never_deletes_the_root(client, wishlist_db):
+    wishlist_db.add_to_library({'asin': 'local:bad', 'title': 'Root'}, '/books')
+    with patch('core.audiobook_recycle.discard') as discard, \
+         patch('core.audiobook_organizer.library_root', return_value='/books'):
+        assert client.delete('/api/audiobooks/library/local:bad').status_code == 400
+    discard.assert_not_called()
+
+
+def test_local_cover_and_scan_state_are_in_library_response(client, wishlist_db, tmp_path):
+    book = tmp_path / 'Book'
+    book.mkdir()
+    (book / 'cover.jpg').write_bytes(b'cover data')
+    wishlist_db.add_to_library({'asin': 'local:book', 'title': 'Book'}, str(book))
+    wishlist_db.set_library_scan_state({'status': 'completed', 'adopted': 1})
+    with patch('core.audiobook_organizer.library_root', return_value=str(tmp_path)):
+        body = client.get('/api/audiobooks/library').get_json()
+        assert body['scan']['adopted'] == 1
+        cover = client.get(body['books'][0]['cover_url'])
+    assert cover.status_code == 200 and cover.data == b'cover data'
+
+
+def test_local_cover_cannot_escape_library(client, wishlist_db, tmp_path):
+    root = tmp_path / 'library'
+    book = root / 'Book'
+    book.mkdir(parents=True)
+    outside = tmp_path / 'private.jpg'
+    outside.write_bytes(b'private')
+    (book / 'cover.jpg').symlink_to(outside)
+    wishlist_db.add_to_library({'asin': 'local:book', 'title': 'Book'}, str(book))
+    with patch('core.audiobook_organizer.library_root', return_value=str(root)):
+        assert client.get('/api/audiobooks/library/local:book/cover').status_code == 404
+
+
+def test_embedded_cover_is_served_without_writing_files(client, wishlist_db, tmp_path):
+    file = tmp_path / 'Book.m4b'
+    file.write_bytes(b'unchanged audio')
+    wishlist_db.add_to_library({'asin': 'local:book', 'title': 'Book'}, str(file))
+    audio = MagicMock()
+    audio.tags = {'covr': [b'\x89PNG\r\n\x1a\nimage']}
+    with patch('core.audiobook_organizer.library_root', return_value=str(tmp_path)), \
+         patch('mutagen.File', return_value=audio):
+        response = client.get('/api/audiobooks/library/local:book/cover')
+    assert response.status_code == 200 and response.mimetype == 'image/png'
+    assert file.read_bytes() == b'unchanged audio'
+
+def test_library_match_confirmation_keeps_physical_identity_and_origin(client, catalog, wishlist_db):
+    wishlist_db.add_to_library({'asin': 'local:copy', 'title': 'Local'}, '/books/Local', origin='disk')
+    row = wishlist_db.get_library_entry('local:copy')
+    catalog.get_book.return_value = _item('B000000001')
+    result = client.patch('/api/audiobooks/library/local:copy/match', json={
+        'action': 'confirm', 'catalog_asin': 'B000000001',
+        'scan_signature': row['scan_signature'], 'match_revision': row['match_revision'],
+    })
+    assert result.status_code == 200
+    saved = result.get_json()['book']
+    assert saved['asin'] == 'local:copy'
+    assert saved['origin'] == 'disk'
+    assert saved['path'] == '/books/Local'
+    assert saved['match_status'] == 'confirmed'
+    assert wishlist_db.is_owned('B000000001')
+    stale = client.patch('/api/audiobooks/library/local:copy/match', json={
+        'action': 'ignore', 'scan_signature': row['scan_signature'], 'match_revision': row['match_revision'],
+    })
+    assert stale.status_code == 409
+    assert wishlist_db.is_owned('B000000001')
+    ignored = client.patch('/api/audiobooks/library/local:copy/match', json={
+        'action': 'ignore', 'scan_signature': saved['scan_signature'], 'match_revision': saved['match_revision'],
+    })
+    assert ignored.status_code == 200
+    assert not wishlist_db.is_owned('B000000001')
+
+
+def test_library_match_lookup_failure_does_not_change_ownership(client, catalog, wishlist_db):
+    wishlist_db.add_to_library({'asin': 'local:copy', 'title': 'Local'}, '/books/Local')
+    row = wishlist_db.get_library_entry('local:copy')
+    catalog.get_book.return_value = None
+    result = client.patch('/api/audiobooks/library/local:copy/match', json={
+        'action': 'confirm', 'catalog_asin': 'B000000001',
+        'scan_signature': row['scan_signature'], 'match_revision': row['match_revision'],
+    })
+    assert result.status_code == 503
+    assert not wishlist_db.is_owned('B000000001')
+    assert wishlist_db.get_library_entry('local:copy')['match_revision'] == row['match_revision']
+
+
+def test_delete_shared_folder_only_discards_selected_manifest(client, wishlist_db, tmp_path):
+    first, second, neighbour = [tmp_path / name for name in ('01.mp3', '02.mp3', 'other.m4b')]
+    for file in (first, second, neighbour):
+        file.write_bytes(b'audio')
+    wishlist_db.add_to_library({'asin': 'local:copy', 'title': 'Local'}, str(first),
+        file_scope='files', file_paths=[str(first), str(second)])
+    with patch('core.audiobook_organizer.library_root', return_value=str(tmp_path)), \
+         patch('core.audiobook_recycle.discard', return_value={'ok': True}) as discard:
+        result = client.delete('/api/audiobooks/library/local:copy')
+    assert result.status_code == 200
+    assert [call.args[0] for call in discard.call_args_list] == [str(first), str(second)]
+    assert neighbour.exists()
+    assert wishlist_db.get_library_entry('local:copy') is None
+
+
+def test_delete_rejects_manifest_escape_before_moving_any_file(client, wishlist_db, tmp_path):
+    root = tmp_path / 'library'
+    root.mkdir()
+    first = root / 'book.mp3'
+    first.write_bytes(b'audio')
+    wishlist_db.add_to_library({'asin': 'local:copy', 'title': 'Local'}, str(first),
+        file_scope='files', file_paths=[str(first), str(tmp_path / 'outside.mp3')])
+    with patch('core.audiobook_organizer.library_root', return_value=str(root)), \
+         patch('core.audiobook_recycle.discard') as discard:
+        result = client.delete('/api/audiobooks/library/local:copy')
+    assert result.status_code == 400
+    discard.assert_not_called()
+    assert wishlist_db.get_library_entry('local:copy') is not None

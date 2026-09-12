@@ -151,7 +151,13 @@ export interface AudiobookPersonProfile {
 export type AudiobookNarratorMode = 'exact' | 'any';
 
 /** Where a wishlisted book has got to. */
-export type AudiobookWishlistStatus = 'wanted' | 'searching' | 'grabbed' | 'done' | 'failed';
+export type AudiobookWishlistStatus =
+  | 'wanted'
+  | 'searching'
+  | 'grabbed'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
 
 export interface AudiobookWishlistEntry {
   id: number;
@@ -167,6 +173,7 @@ export interface AudiobookWishlistEntry {
   release_date: string;
   language: string;
   status: AudiobookWishlistStatus;
+  download_status?: string;
   narrator_mode: AudiobookNarratorMode;
   /** Drives the retry backoff, so it doubles as "how hard have we looked". */
   attempt_count: number;
@@ -176,6 +183,7 @@ export interface AudiobookWishlistEntry {
 }
 
 export interface AudiobookWishlistCounts {
+  cancelled?: number;
   wanted: number;
   searching: number;
   grabbed: number;
@@ -267,6 +275,34 @@ export interface AudiobookDownload {
 
 /** One book on disk. */
 export interface AudiobookLibraryEntry {
+  catalog_asin?: string;
+  match_status?:
+    | 'unmatched'
+    | 'identifier'
+    | 'automatic'
+    | 'confirmed'
+    | 'suggested'
+    | 'ignored'
+    | 'changed'
+    | 'error';
+  match_score?: number;
+  match_revision?: number;
+  scan_signature?: string;
+  match_candidates?: AudiobookMatchCandidate[];
+  match_evidence?: string[];
+  origin?: 'soulsync' | 'disk' | 'unknown';
+  grouping?: string;
+  file_paths?: string[];
+  file_scope?: 'folder' | 'files';
+  download?: {
+    download_id: string;
+    source: string;
+    indexer: string;
+    release_title: string;
+    completed_at: number;
+  } | null;
+  cover_url?: string;
+  source?: string;
   asin: string;
   title: string;
   author: string;
@@ -322,4 +358,52 @@ export interface AudiobookFollowedAuthor {
    *  once when the author is followed, because nobody sees the book before it
    *  is queued — there is no modal to ask. */
   narrator_mode?: string;
+}
+
+export interface AudiobookLibraryScan {
+  status: 'never' | 'running' | 'completed' | 'error' | 'interrupted';
+  started_at?: number;
+  finished_at?: number;
+  checked?: number;
+  adopted?: number;
+  updated?: number;
+  removed?: number;
+  local?: number;
+  error?: string;
+  current?: string;
+  phase?: string;
+  matched?: number;
+  review?: number;
+  match_checked?: number;
+  match_pending?: number;
+  match_errors?: number;
+}
+
+export interface AudiobookLibrary {
+  books: AudiobookLibraryEntry[];
+  totalBytes: number;
+  root: string;
+  scan: AudiobookLibraryScan;
+}
+
+export interface AudiobookMatchCandidate {
+  book: {
+    asin: string;
+    title: string;
+    author_names?: string[];
+    narrator_names?: string[];
+    runtime_minutes?: number;
+    cover_url?: string;
+    language?: string;
+    format_type?: string;
+  };
+  score: number;
+  evidence: string[];
+  conflicts: string[];
+  automatic_eligible: boolean;
+}
+export interface AudiobookMatchResults {
+  candidates: AudiobookMatchCandidate[];
+  scan_signature: string;
+  match_revision: number;
 }
