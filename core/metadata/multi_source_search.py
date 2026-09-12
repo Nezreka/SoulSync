@@ -25,7 +25,7 @@ contract is shared.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
@@ -33,6 +33,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from utils.logging_config import get_logger
 
 logger = get_logger('metadata.multi_source_search')
+
+# Cap multi-source search to prevent slow or offline external metadata APIs
+# from monopolizing web-server worker threads.
+DEFAULT_SEARCH_TIMEOUT_SECONDS = 12.0
 
 
 @dataclass
@@ -183,7 +187,8 @@ def _search_one_source(source_name: str, client: Any,
 def search_all_sources(query: TrackQuery,
                        sources: List[Tuple[str, Any]],
                        clean_title: Optional[str] = None,
-                       max_workers: int = 3) -> MultiSourceResult:
+                       max_workers: int = 3,
+                       timeout_seconds: Optional[float] = DEFAULT_SEARCH_TIMEOUT_SECONDS) -> MultiSourceResult:
     """Run a parallel metadata search across every source in ``sources``.
 
     Args:
@@ -201,6 +206,10 @@ def search_all_sources(query: TrackQuery,
             the redownload endpoint's pre-extraction default — bumping
             higher rate-limits on slower sources without speeding up
             the slowest source's response.
+        timeout_seconds: Maximum seconds to wait for all sources before
+            returning completed results (default 12.0s). Prevents slow or
+            failing external metadata providers from holding the HTTP
+            worker indefinitely.
 
     Returns:
         MultiSourceResult with per-source results + cross-source best match.
@@ -213,15 +222,31 @@ def search_all_sources(query: TrackQuery,
 
     metadata_results: Dict[str, List[dict]] = {}
     raw_tracks: Dict[str, List[Any]] = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = {
             pool.submit(_search_one_source, name, client, query, clean_title): name
             for name, client in sources
         }
-        for future in as_completed(futures):
-            source_name, results, raws = future.result()
-            metadata_results[source_name] = results
-            raw_tracks[source_name] = raws
+        try:
+            for future in as_completed(futures, timeout=timeout_seconds):
+                source_name, results, raws = future.result()
+                metadata_results[source_name] = results
+                raw_tracks[source_name] = raws
+        except TimeoutError:
+            pending = [name for f, name in futures.items() if not f.done()]
+            logger.warning(
+                f"[MultiSourceSearch] Search timed out after {timeout_seconds}s for '{query.title}'; "
+                f"omitted slow sources: {pending}"
+            )
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    # Ensure all requested sources exist in result dicts, even if timed out
+    for name, _ in sources:
+        if name not in metadata_results:
+            metadata_results[name] = []
+            raw_tracks[name] = []
 
     best_match: Optional[dict] = None
     for source, results in metadata_results.items():
