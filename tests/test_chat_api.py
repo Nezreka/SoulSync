@@ -671,9 +671,18 @@ def test_chat_connection_requires_network_login(connection):
     assert "slskd" in state["error"]
 
 
-def test_chat_connection_accepts_logged_in_server():
-    client = _RecordingClient({("GET", "server/state"): {"isConnected": True, "isLoggedIn": True}})
+@pytest.mark.parametrize("endpoint", ["server", "server/state"])
+def test_chat_connection_accepts_logged_in_server(endpoint):
+    client = _RecordingClient({("GET", endpoint): {"isConnected": True, "isLoggedIn": True}})
     assert _run(client.get_chat_connection_state()) == {"connected": True}
+
+
+@pytest.mark.parametrize("endpoint", ["server", "server/state"])
+def test_chat_connection_reports_disconnected_per_endpoint(endpoint):
+    client = _RecordingClient({("GET", endpoint): {"isConnected": False, "isLoggedIn": False}})
+    state = _run(client.get_chat_connection_state())
+    assert state["connected"] is False
+    assert state["code"] == "slskd_disconnected"
 
 
 @pytest.mark.parametrize("path,payload", [
