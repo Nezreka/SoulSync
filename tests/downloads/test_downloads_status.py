@@ -983,8 +983,10 @@ def test_manual_pick_rejected_fails_immediately_without_grace():
 
 def test_external_audiobook_progress_survives_music_timeout_and_serializes():
     import time
-    from core.audiobook_download_state import register_download, update_progress, BATCH_ID
+    from core.audiobook_download_state import register_download, update_progress, mark_status, BATCH_ID
     register_download('book', 'Rhythm of War', protocol='soulseek')
+    # The monitor sets status separately from transfer counters.
+    mark_status('book', 'downloading')
     download_tasks['book']['status_change_time'] = time.time() - 3600
     update_progress('book', percent=37.5, bytes_done=375000, bytes_total=1000000, speed=25000)
     deps, submitted = _build_deps()
