@@ -177,12 +177,13 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "bad server"}), 400
         try:
             if which == "plex":
-                from core.video.sources import video_plex_config, PLEX_SCAN_TIMEOUT
+                from core.video.sources import video_plex_config, PLEX_CONNECT_TIMEOUT, invalidate_video_source_cache
                 cfg = video_plex_config()
                 if not cfg.get("base_url") or not cfg.get("token"):
                     return jsonify({"success": False, "error": "Plex URL/token not set"})
                 from plexapi.server import PlexServer
-                srv = PlexServer(cfg["base_url"], cfg["token"], timeout=PLEX_SCAN_TIMEOUT)
+                srv = PlexServer(cfg["base_url"], cfg["token"], timeout=PLEX_CONNECT_TIMEOUT)
+                invalidate_video_source_cache()
                 return jsonify({"success": True, "message": "Connected to " + (srv.friendlyName or "Plex")})
             from core.video.sources import video_jellyfin_config, video_jellyfin_test
             ok, message = video_jellyfin_test(video_jellyfin_config())

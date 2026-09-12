@@ -62,6 +62,11 @@ def _plex_config(db=None) -> Dict[str, str]:
 _server_cache: Dict[str, Any] = {"srv": None, "at": 0.0, "key": ""}
 
 
+def invalidate_plex_server_cache() -> None:
+    """Force the next _plex_server call to reconnect."""
+    _server_cache.update(srv=None, at=0.0, key="")
+
+
 def _plex_server(db=None):
     """A connected PlexServer (cached ~60s so a 3s poll doesn't reconnect each
     time). Returns None when Plex isn't configured or is unreachable."""
@@ -70,7 +75,7 @@ def _plex_server(db=None):
         return None
     key = cfg["base_url"] + "|" + cfg["token"][:6]
     now = time.time()
-    if _server_cache["srv"] is not None and _server_cache["key"] == key and now - _server_cache["at"] < 60:
+    if _server_cache["key"] == key and now - _server_cache["at"] < 60:
         return _server_cache["srv"]
     try:
         from plexapi.server import PlexServer
@@ -419,6 +424,7 @@ def get_activity(db=None) -> Dict[str, Any]:
             platform = "plex"
         except Exception:   # noqa: BLE001 - configured but unreachable
             logger.debug("plex sessions() failed", exc_info=True)
+            _server_cache.update(srv=None, at=time.time(), key=_server_cache.get("key", ""))
 
     jf_sessions, jf_name = _jellyfin_activity(db)
     if jf_name is not None:                       # Jellyfin is configured
@@ -523,6 +529,7 @@ def get_history(db=None, limit: int = 40) -> Dict[str, Any]:
         items = srv.history(maxresults=limit)
     except Exception:   # noqa: BLE001
         logger.debug("plex history() failed", exc_info=True)
+        _server_cache.update(srv=None, at=time.time(), key=_server_cache.get("key", ""))
         return {"ok": False, "reason": "unreachable", "history": []}
     key = str(_g(srv, "machineIdentifier", "") or "plex")
     accounts, devices = _lookups(srv, key)
@@ -607,6 +614,7 @@ def get_stats(db=None, days: int = 30) -> Dict[str, Any]:
         items = srv.history(maxresults=1000, mindate=datetime.now() - timedelta(days=days))
     except Exception:   # noqa: BLE001
         logger.debug("plex history() for stats failed", exc_info=True)
+        _server_cache.update(srv=None, at=time.time(), key=_server_cache.get("key", ""))
         return {"ok": False, "reason": "unreachable"}
     accounts, devices = _lookups(srv, str(_g(srv, "machineIdentifier", "") or "plex"))
     data = compute_stats(items or [], accounts, devices, days)

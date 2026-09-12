@@ -14,6 +14,8 @@ these adapters.
 from __future__ import annotations
 
 import re
+import time
+from typing import Any, Dict
 
 from utils.logging_config import get_logger
 
@@ -21,7 +23,17 @@ logger = get_logger("video_sources")
 
 # Library scans are bulk operations — a far longer per-request timeout than the
 # shared client's interactive one, so big libraries don't read-timeout mid-scan.
+# However, connection attempts (TCP SYN) must fail quickly (8s) to avoid stalling
+# Gunicorn workers on unreachable or offline servers.
+PLEX_CONNECT_TIMEOUT = 8
 PLEX_SCAN_TIMEOUT = 120
+
+_plex_srv_cache: Dict[str, Any] = {"srv": None, "at": 0.0, "key": ""}
+
+
+def invalidate_video_source_cache() -> None:
+    """Force the next _build_source call to re-establish connections."""
+    _plex_srv_cache.update(srv=None, at=0.0, key="")
 
 
 def _to_int(val):
@@ -245,12 +257,20 @@ def _build_source(movies_lib=None, tv_lib=None):
         base_url, token = cfg.get("base_url"), cfg.get("token")
         if not base_url or not token:
             return None
+        key = f"{base_url}|{token[:6]}"
+        now = time.time()
+        if _plex_srv_cache["key"] == key and now - _plex_srv_cache["at"] < 60:
+            srv = _plex_srv_cache["srv"]
+            return PlexVideoSource(srv, movies_lib=movies_lib, tv_lib=tv_lib) if srv is not None else None
+
         try:
             from plexapi.server import PlexServer
-            srv = PlexServer(base_url, token, timeout=PLEX_SCAN_TIMEOUT)
+            srv = PlexServer(base_url, token, timeout=(PLEX_CONNECT_TIMEOUT, PLEX_SCAN_TIMEOUT))
+            _plex_srv_cache.update(srv=srv, at=now, key=key)
             return PlexVideoSource(srv, movies_lib=movies_lib, tv_lib=tv_lib)
-        except Exception:
-            logger.exception("video sources: Plex connect failed")
+        except Exception as e:
+            logger.warning("video sources: Plex connect failed: %s", e)
+            _plex_srv_cache.update(srv=None, at=now, key=key)
             return None
 
     if server == "jellyfin":
@@ -306,6 +326,7 @@ def refresh_video_server_sections(media_type="all"):
         return src.refresh_sections(media_type)
     except Exception as e:   # noqa: BLE001 - surface any server error to the automation
         logger.exception("video sources: refresh failed")
+        invalidate_video_source_cache()
         return {"ok": False, "error": str(e)}
 
 
@@ -324,6 +345,7 @@ def set_video_poster(server_id, *, image_url=None, image_bytes=None, kind="movie
                               delete_key=delete_key)
     except Exception as e:   # noqa: BLE001 - surface any server error to the caller
         logger.exception("video sources: set_poster failed")
+        invalidate_video_source_cache()
         return {"ok": False, "error": str(e)}
 
 
@@ -339,6 +361,7 @@ def video_server_scan_in_progress(media_type="all"):
         return bool(src.is_scanning(media_type))
     except Exception:
         logger.debug("video sources: scan-status check failed", exc_info=True)
+        invalidate_video_source_cache()
         return None
 
 
@@ -356,6 +379,7 @@ def video_server_has_item(media_type, item) -> bool:
         return bool(src.has_item(media_type, item))
     except Exception:
         logger.debug("video sources: has_item probe failed", exc_info=True)
+        invalidate_video_source_cache()
         return False
 
 
