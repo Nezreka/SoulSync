@@ -459,8 +459,18 @@ def status_for(client_id: Any, client: Any = None) -> Optional[Dict[str, Any]]:
         logger.debug("Soulseek status poll failed: %s", exc)
         return None
 
-    mine = [status for status in (everything or [])
-            if str(getattr(status, "id", "")) in wanted]
+    # slskd can acknowledge enqueue without returning a transfer ID. The
+    # shared client then returns the full remote filename. Match that fallback
+    # only within the submitting peer, never by basename or folder alone.
+    filenames = {ref.replace("\\", "/") for ref in wanted if "\\" in ref or "/" in ref}
+    peer = unpacked["username"]
+    mine = []
+    for status in everything or []:
+        transfer_id = str(getattr(status, "id", ""))
+        filename = str(getattr(status, "filename", "")).replace("\\", "/")
+        username = str(getattr(status, "username", ""))
+        if transfer_id in wanted or (peer and username == peer and filename in filenames):
+            mine.append(status)
     rolled = aggregate(mine, expected=len(wanted))
     if not mine:
         rolled["state"] = "unavailable"

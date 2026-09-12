@@ -397,3 +397,30 @@ def test_cancelling_a_row_with_no_refs_is_not_an_error():
 @pytest.mark.parametrize("state", ["Queued, Remotely", "Requested", "Initializing"])
 def test_non_transferring_files_do_not_claim_to_download(state):
     assert aggregate([_status("a", state)])["state"] == "queued"
+
+
+def test_filename_refs_track_live_chapters_only_from_the_selected_peer():
+    client = MagicMock()
+    client.download_path = "/downloads"
+    def transfer(ref, filename, peer, state, size, done):
+        item = _status(ref, state, size, done)
+        item.filename = filename
+        item.username = peer
+        return item
+    async def everything():
+        return [
+            transfer("uuid-1", "Books/Book/01.mp3", "peer", "Completed, Succeeded", 100, 100),
+            transfer("uuid-2", "Books/Book/02.mp3", "peer", "InProgress", 100, 50),
+            transfer("uuid-3", "Books/Book/03.mp3", "peer", "Queued, Remotely", 100, 0),
+            transfer("other-peer", "Books/Book/02.mp3", "other", "InProgress", 900, 900),
+            transfer("other-folder", "Other/02.mp3", "peer", "InProgress", 900, 900),
+        ]
+    client.get_all_downloads = everything
+    refs = [r"Books\Book\01.mp3", r"Books\Book\02.mp3", r"Books\Book\03.mp3"]
+    result = status_for(encode_refs(refs, "peer", "Book"), client=client)
+    assert result["state"] == "downloading"
+    assert result["size"] == 300
+    assert result["transferred"] == 150
+    assert result["progress"] == 50
+    assert result["finished"] == 1
+    assert result["total"] == 3
