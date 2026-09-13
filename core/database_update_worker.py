@@ -223,6 +223,7 @@ class DatabaseUpdateWorker:
                     # on the singleton client, and that pre-import view then
                     # poisoned the NEXT deep scan (#torrent-album-missing).
                     self._clear_media_cache("after incremental (no new content)")
+                    self._repair_navidrome_identities()
                     self._emit_finished(0, 0, 0, 0, 0)
                     return
                 logger.info(f"Incremental update: Found {len(artists_to_process)} artists to process")
@@ -263,6 +264,8 @@ class DatabaseUpdateWorker:
                 except Exception as e:
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
             
+            self._repair_navidrome_identities()
+
             # Detect and remove content deleted from the media server
             # Only run on full refreshes — fetching the entire catalog on every
             # incremental scan is too expensive (especially for Plex) and unnecessary
@@ -329,6 +332,25 @@ class DatabaseUpdateWorker:
             logger.error(f"Database update failed: {str(e)}")
             self._emit_signal('error', f"Database update failed: {str(e)}")
     
+    def _repair_navidrome_identities(self):
+        if self.server_type != 'navidrome':
+            return True
+        if not self.database or self.should_stop:
+            return False
+        try:
+            # No inventory fetch unless same-path duplicates need investigation.
+            with self.database._get_connection() as conn:
+                duplicate = conn.execute("SELECT 1 FROM tracks WHERE server_source='navidrome' AND file_path IS NOT NULL AND file_path!='' GROUP BY file_path HAVING COUNT(*) > 1 LIMIT 1").fetchone()
+            if not duplicate:
+                return True
+            from core.library.navidrome_identity import read_inventory, repair_rekeyed_tracks
+            repaired = repair_rekeyed_tracks(self.database, read_inventory(self.media_client))
+            logger.info("Navidrome identity repair: %s obsolete same-path rows merged", repaired)
+            return True
+        except Exception as exc:
+            logger.warning("Navidrome identity repair skipped: %s", exc)
+            return False
+
     def run_deep_scan(self):
         """Deep library scan: fetch ALL content, insert only NEW tracks, remove STALE tracks.
         Never calls clear_server_data() — preserves all enrichment data."""
@@ -397,12 +419,17 @@ class DatabaseUpdateWorker:
             seen_track_ids = set()
             self._deep_scan_process_all_artists(artists, seen_track_ids)
 
+            identity_repair_ok = self._repair_navidrome_identities()
+
             # Phase 3: Stale track removal
             self._emit_signal('phase_changed', "Deep scan: Checking for stale tracks...")
             db_track_ids = self.database.get_all_track_ids_for_server(self.server_type)
             stale = db_track_ids - seen_track_ids
             stale_removed = 0
 
+            if stale and not identity_repair_ok:
+                logger.warning("Skipping stale removal: Navidrome identity repair could not complete")
+                stale = set()
             if stale:
                 # A fully-trusted scan may exceed the 50% threshold: the server
                 # answered (verified fetch), every artist processed cleanly, and

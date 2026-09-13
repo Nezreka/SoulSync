@@ -325,6 +325,14 @@ class PlaylistSyncService:
         fn = getattr(client, 'reconcile_playlist', None)
         if fn is None:
             return client.update_playlist(playlist_name, tracks)
+        from core.navidrome_client import NavidromeClient
+        if isinstance(client, NavidromeClient):
+            # A refused/failed Navidrome write must not trigger another destructive attempt.
+            try:
+                return bool(fn(playlist_name, tracks))
+            except Exception as exc:
+                logger.error("Navidrome reconcile failed for %r: %s", playlist_name, exc)
+                return False
         try:
             if fn(playlist_name, tracks):
                 return True
@@ -523,7 +531,11 @@ class PlaylistSyncService:
                     else:
                         sync_success = media_client.update_playlist(playlist.name, plex_tracks)
 
-                synced_tracks = len(plex_tracks) if sync_success else 0
+                if not sync_success:
+                    return self._create_error_result(playlist.name, [
+                        f"{server_type.title()} playlist write failed or could not be verified; sync is incomplete. Check the server connection and run a library scan."
+                    ])
+                synced_tracks = len(plex_tracks)
                 # Not in library (for wishlist), not "total minus playlist size".
                 failed_tracks = unmatched_count
             

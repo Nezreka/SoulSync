@@ -16824,7 +16824,8 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                    return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
                 _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced"})
             return jsonify({"success": False, "error": "Old track not found"}), 404
@@ -17014,7 +17015,8 @@ def server_playlist_add_track(playlist_id):
             plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
             if plan['should_insert']:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
-                media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                    return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
@@ -17101,7 +17103,8 @@ def server_playlist_remove_track(playlist_id):
             if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
             return jsonify({"success": True, "message": "Track removed"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400

@@ -1,4 +1,6 @@
-"""Navidrome reconcile must read the CURRENT playlist via ratingKey (#905).
+"""Test the reconcile delta beneath the separately tested live-ID guard.
+
+Navidrome reconcile must read the CURRENT playlist via ratingKey (#905).
 
 NavidromeTrack exposes the Subsonic song id as ``ratingKey`` — it has no ``.id``.
 reconcile_playlist used ``t.id``, so the current-track list came back empty, the
@@ -48,7 +50,7 @@ def test_no_change_resync_is_a_noop():
     # Playlist already == desired → reconcile must add/remove NOTHING.
     c, captured = _client_with_existing(['1', '2', '3', '4'])
     desired = [_track('1'), _track('2'), _track('3'), _track('4')]
-    assert c.reconcile_playlist('My Playlist', desired) is True
+    assert NavidromeClient.reconcile_playlist.__wrapped__(c, 'My Playlist', desired) is True
     # plan empty → early return, updatePlaylist never called (no re-add).
     assert 'params' not in captured
 
@@ -57,7 +59,7 @@ def test_removed_source_track_is_removed_not_everything_readded():
     # warl0ck's exact case: server has 1..5, source now has 1..4 (5 removed).
     c, captured = _client_with_existing(['1', '2', '3', '4', '5'])
     desired = [_track('1'), _track('2'), _track('3'), _track('4')]
-    assert c.reconcile_playlist('My Playlist', desired) is True
+    assert NavidromeClient.reconcile_playlist.__wrapped__(c, 'My Playlist', desired) is True
     params = captured['params']
     assert params['playlistId'] == 'PL1'
     assert 'songIdToAdd' not in params           # the bug: would re-add 1..4 → doubling
@@ -68,7 +70,7 @@ def test_added_source_track_is_appended_once():
     # Server has 1..3, source now has 1..4 → add only '4'.
     c, captured = _client_with_existing(['1', '2', '3'])
     desired = [_track('1'), _track('2'), _track('3'), _track('4')]
-    assert c.reconcile_playlist('My Playlist', desired) is True
+    assert NavidromeClient.reconcile_playlist.__wrapped__(c, 'My Playlist', desired) is True
     params = captured['params']
     assert params['songIdToAdd'] == ['4']
     assert 'songIndexToRemove' not in params
