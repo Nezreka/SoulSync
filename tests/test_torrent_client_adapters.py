@@ -744,3 +744,49 @@ def test_qbit_add_torrent_file_handles_qbittorrent_5_json_response():
     res = adapter._add_torrent_file_sync(b"fake_torrent_bytes", "music", None)
     assert res == "filehash123"
 
+
+# ---------------------------------------------------------------------------
+# qBittorrent 4.x backwards compatibility ('Ok.' / 'Fails.')
+# ---------------------------------------------------------------------------
+
+def test_qbit_add_torrent_handles_qbittorrent_4_ok_response():
+    """qBittorrent 4.x returns plaintext 'Ok.' on successful add."""
+    adapter = _qbit_with_config()
+    adapter._all_hashes = MagicMock(return_value=set())
+
+    resp = _mock_response(200, text="Ok.")
+    adapter._call = MagicMock(return_value=resp)
+
+    magnet = "magnet:?xt=urn:btih:2c54add476a0a48e07b79a0282e058424c19aa7f"
+    res = adapter._add_torrent_sync(magnet, "music", None)
+    assert res == "2c54add476a0a48e07b79a0282e058424c19aa7f"
+
+
+def test_qbit_add_torrent_handles_qbittorrent_4_fails_duplicate_adoption():
+    """qBittorrent 4.x returns plaintext 'Fails.' when torrent already exists in client;
+    must adopt existing hash."""
+    adapter = _qbit_with_config()
+    existing_hash = "2c54add476a0a48e07b79a0282e058424c19aa7f"
+    adapter._all_hashes = MagicMock(return_value={existing_hash})
+
+    resp = _mock_response(200, text="Fails.")
+    adapter._call = MagicMock(return_value=resp)
+
+    magnet = f"magnet:?xt=urn:btih:{existing_hash}"
+    res = adapter._add_torrent_sync(magnet, "music", None)
+    assert res == existing_hash
+
+
+def test_qbit_add_torrent_handles_qbittorrent_4_fails_not_held():
+    """qBittorrent 4.x returns plaintext 'Fails.' when rejected; must return None."""
+    adapter = _qbit_with_config()
+    adapter._all_hashes = MagicMock(return_value={"other_hash"})
+
+    resp = _mock_response(200, text="Fails.")
+    adapter._call = MagicMock(return_value=resp)
+
+    magnet = "magnet:?xt=urn:btih:2c54add476a0a48e07b79a0282e058424c19aa7f"
+    res = adapter._add_torrent_sync(magnet, "music", None)
+    assert res is None
+
+
