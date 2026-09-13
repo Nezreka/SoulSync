@@ -287,3 +287,83 @@ def test_check_album_completion_parity_uncached_vs_cached(tmp_path):
     assert res_cached['formats'] == ['FLAC']
 
 
+def test_unowned_releases_do_not_call_external_api(tmp_path, monkeypatch):
+    """Verify that unowned albums, EPs, and singles with missing/zero track counts
+    never make external HTTP calls to fetch tracklists, returning 'missing' immediately.
+    """
+    from core.metadata import completion as metadata_completion
+    from core.metadata.completion import check_album_completion, check_single_completion
+
+    db_path = str(tmp_path / 'no_external.db')
+    db = MusicDatabase(db_path)
+
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name, server_source) VALUES (1, 'Bicep', 'local')")
+        conn.commit()
+
+    candidate_albums = db.get_candidate_albums_for_artist('Bicep', server_source='local')
+
+    # Spy on get_album_tracks_for_source — if called, fail the test
+    external_calls = []
+
+    def mock_get_album_tracks(source, album_id):
+        external_calls.append((source, album_id))
+        return []
+
+    monkeypatch.setattr(metadata_completion, 'get_album_tracks_for_source', mock_get_album_tracks)
+
+    # 1. Unowned album with total_tracks = 0 (e.g. Deezer discography item)
+    unowned_album = {
+        'id': 'DZ-999',
+        'name': 'Isles',
+        'total_tracks': 0,
+        'album_type': 'album',
+        'year': 2021,
+    }
+    res_album = check_album_completion(
+        db, unowned_album, 'Bicep',
+        source_override='deezer',
+        candidate_albums=candidate_albums,
+    )
+    assert res_album['status'] == 'missing'
+    assert res_album['owned_tracks'] == 0
+    assert res_album['found_in_db'] is False
+    assert len(external_calls) == 0, "External API was called for an unowned album!"
+
+    # 2. Unowned EP with total_tracks = 0
+    unowned_ep = {
+        'id': 'DZ-888',
+        'name': 'Glue EP',
+        'total_tracks': 0,
+        'album_type': 'ep',
+        'year': 2017,
+    }
+    res_ep = check_single_completion(
+        db, unowned_ep, 'Bicep',
+        source_override='deezer',
+        candidate_albums=candidate_albums,
+    )
+    assert res_ep['status'] == 'missing'
+    assert res_ep['owned_tracks'] == 0
+    assert res_ep['found_in_db'] is False
+    assert len(external_calls) == 0, "External API was called for an unowned EP!"
+
+    # 3. Unowned single with total_tracks = 0
+    unowned_single = {
+        'id': 'DZ-777',
+        'name': 'Apricots',
+        'total_tracks': 0,
+        'album_type': 'single',
+        'year': 2020,
+    }
+    res_single = check_single_completion(
+        db, unowned_single, 'Bicep',
+        source_override='deezer',
+        candidate_albums=candidate_albums,
+    )
+    assert res_single['status'] == 'missing'
+    assert res_single['owned_tracks'] == 0
+    assert len(external_calls) == 0, "External API was called for an unowned single!"
+
+
+

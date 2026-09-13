@@ -317,13 +317,9 @@ def check_album_completion(
     try:
         source_chain = source_chain or _get_completion_source_chain(source_override)
         album_name = album_data.get('name', '')
-        total_tracks = _resolve_completion_track_total(album_data, source_chain, track_cache=track_cache)
+        raw_total_tracks = _extract_lookup_value(album_data, 'total_tracks', default=0) or 0
+        total_tracks = int(raw_total_tracks) if raw_total_tracks else 0
         album_id = album_data.get('id', '')
-
-        # If total_tracks is 0 (Discogs masters don't include track counts),
-        # try to fetch the real count from the prioritized metadata sources.
-        if total_tracks == 0 and album_id:
-            logger.debug("No track count found for '%s' (%s)", album_name, album_id)
 
         logger.debug(f"Checking album: '{album_name}' ({total_tracks} tracks)")
 
@@ -382,6 +378,25 @@ def check_album_completion(
                     except TypeError:
                         owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
                             _proven.id, total_tracks if total_tracks > 0 else None)
+                else:
+                    # Album is not in the library at all — mark missing immediately without
+                    # making expensive external HTTP calls to count tracks on an unowned album.
+                    return {
+                        "id": album_id,
+                        "name": album_name,
+                        "status": "missing",
+                        "owned_tracks": 0,
+                        "expected_tracks": total_tracks,
+                        "completion_percentage": 0,
+                        "confidence": 0.0,
+                        "found_in_db": False,
+                        "formats": [],
+                    }
+
+            # If the card had no track count but matched in the library, and the library entry
+            # has no stored count, try resolving the upstream count for this matched album.
+            if total_tracks == 0 and (expected_tracks == 0 or expected_tracks is None):
+                total_tracks = _resolve_completion_track_total(album_data, source_chain, track_cache=track_cache)
 
             # Canonical pin deny: the files are pinned to a specific release of
             # this card's source, and this card is a different one — a name
@@ -500,14 +515,14 @@ def check_single_completion(
     try:
         source_chain = source_chain or _get_completion_source_chain(source_override)
         single_name = single_data.get('name', '')
-        raw_total_tracks = single_data.get('total_tracks', 1)
-        total_tracks = raw_total_tracks if raw_total_tracks is not None else 1
+        album_type = (single_data.get('album_type') or 'single').lower()
+        raw_total_tracks = single_data.get('total_tracks')
+        if album_type == 'single':
+            total_tracks = int(raw_total_tracks) if raw_total_tracks is not None else 1
+        else:
+            total_tracks = int(raw_total_tracks) if raw_total_tracks else 0
         single_id = single_data.get('id', '')
-        album_type = single_data.get('album_type', 'single')
         formats = []
-
-        if total_tracks == 0:
-            total_tracks = _resolve_completion_track_total(single_data, source_chain, track_cache=track_cache) or 1
 
         logger.debug(
             "Checking %s: name=%r tracks=%s",
@@ -529,7 +544,7 @@ def check_single_completion(
                     db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
                         title=single_name,
                         artist=artist_name,
-                        expected_track_count=total_tracks,
+                        expected_track_count=total_tracks if total_tracks > 0 else None,
                         confidence_threshold=0.7,
                         server_source=active_server,
                         candidate_albums=candidate_albums,
@@ -542,7 +557,7 @@ def check_single_completion(
                     db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
                         title=single_name,
                         artist=artist_name,
-                        expected_track_count=total_tracks,
+                        expected_track_count=total_tracks if total_tracks > 0 else None,
                         confidence_threshold=0.7,
                         server_source=active_server,
                         candidate_albums=candidate_albums,
@@ -570,6 +585,24 @@ def check_single_completion(
                     except TypeError:
                         owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
                             _proven.id, total_tracks if total_tracks > 0 else None)
+                else:
+                    # EP is not in the library at all — mark missing immediately without
+                    # making expensive external HTTP calls to count tracks on an unowned EP.
+                    return {
+                        "id": single_id,
+                        "name": single_name,
+                        "status": "missing",
+                        "owned_tracks": 0,
+                        "expected_tracks": total_tracks or 0,
+                        "completion_percentage": 0,
+                        "confidence": 0.0,
+                        "found_in_db": False,
+                        "type": album_type,
+                        "formats": [],
+                    }
+
+            if total_tracks == 0 and (expected_tracks == 0 or expected_tracks is None):
+                total_tracks = _resolve_completion_track_total(single_data, source_chain, track_cache=track_cache) or 1
 
             if expected_tracks > 0:
                 completion_percentage = (owned_tracks / expected_tracks) * 100

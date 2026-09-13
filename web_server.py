@@ -8069,7 +8069,7 @@ def library_completion_stream():
                     mapped = {
                         'id': item['id'],
                         'name': item['title'],
-                        'total_tracks': item.get('track_count', 0),
+                        'total_tracks': item.get('total_tracks') or item.get('track_count') or 0,
                         'album_type': item.get('album_type', 'album'),
                         'year': item.get('year'),
                         'release_date': item.get('release_date') or item.get('releaseDate'),
