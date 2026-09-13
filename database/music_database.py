@@ -9726,14 +9726,40 @@ class MusicDatabase:
         
         return max(0.0, similarity)
     
-    def check_album_completeness(self, album_id: int, expected_track_count: Optional[int] = None) -> Tuple[int, int, bool, List[str]]:
+    def check_album_completeness(self, album_id: int, expected_track_count: Optional[int] = None, completeness_cache: Optional[Dict[Any, Any]] = None) -> Tuple[int, int, bool, List[str]]:
         """
         Check if we have all tracks for an album.
         Merges counts across split album entries (same title+year+artist) so that
         albums split by the media server (e.g. Navidrome) are treated as one.
         Returns (owned_tracks, expected_tracks, is_complete, formats)
-        where formats is a list of distinct format strings like ["FLAC"] or ["FLAC", "MP3-320"]
+        where formats is a list of distinct format strings like ["FLAC"] or ["FLAC", "MP3-320"].
+
+        When `completeness_cache` is provided (via build_candidate_completeness_cache),
+        completeness is evaluated in O(1) in-memory from pre-fetched candidate albums and tracks
+        without firing 5 SQL queries per matched album.
         """
+        if completeness_cache and album_id in completeness_cache:
+            cached = completeness_cache[album_id]
+            owned_tracks = cached.get('owned_tracks', 0)
+            stored_track_count = cached.get('stored_track_count', 0)
+            formats = cached.get('formats', [])
+
+            if (expected_track_count is not None and stored_track_count > 0
+                    and owned_tracks >= stored_track_count
+                    and stored_track_count >= expected_track_count * 0.6):
+                expected_tracks = stored_track_count
+            elif expected_track_count is not None:
+                expected_tracks = expected_track_count
+            else:
+                expected_tracks = stored_track_count
+
+            if expected_tracks and expected_tracks > 0:
+                is_complete = owned_tracks >= expected_tracks
+            else:
+                is_complete = owned_tracks > 0
+
+            return owned_tracks, expected_tracks or 0, is_complete, formats
+
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -9826,6 +9852,72 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting album formats: {e}")
             return []
+
+    def build_candidate_completeness_cache(self, candidate_albums: Optional[List[Any]], candidate_tracks: Optional[List[Any]]) -> Dict[Any, Any]:
+        """Precompute completeness metrics (owned tracks, stored track count, formats)
+        for all candidate albums in memory using candidate_tracks.
+        Eliminates the 5 SQL queries per matched album in check_album_completeness."""
+        if not candidate_albums:
+            return {}
+
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for album in candidate_albums:
+            title = (getattr(album, 'title', None) or '').strip().lower()
+            artist_id = getattr(album, 'artist_id', None)
+            year = getattr(album, 'year', None)
+            groups[(title, artist_id, year)].append(album)
+
+        tracks_by_album = defaultdict(list)
+        if candidate_tracks:
+            for track in candidate_tracks:
+                aid = getattr(track, 'album_id', None)
+                if aid is not None:
+                    tracks_by_album[aid].append(track)
+
+        cache = {}
+        for (title, artist_id, year), siblings in groups.items():
+            sibling_ids = [getattr(s, 'id', None) for s in siblings if getattr(s, 'id', None) is not None]
+            stored_track_count = max(((getattr(s, 'track_count', None) or 0) for s in siblings), default=0)
+
+            sibling_tracks = []
+            for sid in sibling_ids:
+                sibling_tracks.extend(tracks_by_album.get(sid, []))
+
+            distinct_track_set = set()
+            format_set = set()
+            for t in sibling_tracks:
+                fp = getattr(t, 'file_path', None)
+                if not fp or not str(fp).strip():
+                    continue
+                t_title = (getattr(t, 'title', None) or '').strip().lower()
+                t_num = getattr(t, 'track_number', None)
+                distinct_track_set.add((t_title, t_num))
+
+                ext = os.path.splitext(str(fp))[1].lstrip('.').upper()
+                if not ext:
+                    continue
+                bitrate = getattr(t, 'bitrate', None)
+                if ext == 'MP3' and bitrate:
+                    format_set.add(f"MP3-{bitrate}")
+                elif ext == 'MP3':
+                    format_set.add('MP3')
+                else:
+                    format_set.add(ext)
+
+            owned_tracks = len(distinct_track_set)
+            formats = sorted(format_set)
+
+            summary = {
+                'owned_tracks': owned_tracks,
+                'stored_track_count': stored_track_count,
+                'formats': formats,
+                'sibling_ids': sibling_ids,
+            }
+            for sid in sibling_ids:
+                cache[sid] = summary
+
+        return cache
     
     def get_candidate_albums_for_artist(self, artist: str, server_source: Optional[str] = None, limit: int = 200) -> List[DatabaseAlbum]:
         """
@@ -9983,7 +10075,7 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, completeness_cache: Optional[Dict[Any, Any]] = None, candidate_tracks: Optional[List[Any]] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
@@ -10000,8 +10092,11 @@ class MusicDatabase:
             if not album:
                 return None, 0.0, 0, 0, False, []
 
+            if completeness_cache is None and candidate_albums is not None and candidate_tracks is not None:
+                completeness_cache = self.build_candidate_completeness_cache(candidate_albums, candidate_tracks)
+
             # Now check completeness (includes formats)
-            owned_tracks, expected_tracks, is_complete, formats = self.check_album_completeness(album.id, expected_track_count)
+            owned_tracks, expected_tracks, is_complete, formats = self.check_album_completeness(album.id, expected_track_count, completeness_cache=completeness_cache)
 
             return album, confidence, owned_tracks, expected_tracks, is_complete, formats
 
@@ -10262,7 +10357,8 @@ class MusicDatabase:
         try:
             # Simple confidence based on string similarity
             title_similarity = self._string_similarity(search_title.lower(), db_album.title.lower())
-            artist_similarity = self._string_similarity(search_artist.lower(), db_album.artist_name.lower())
+            db_artist = getattr(db_album, 'artist_name', None) or search_artist
+            artist_similarity = self._string_similarity(search_artist.lower(), db_artist.lower())
 
             # Also try with cleaned versions (removing edition markers)
             clean_search_title = self._clean_album_title_for_comparison(search_title)

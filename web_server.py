@@ -8039,6 +8039,21 @@ def library_completion_stream():
                 _t3 = time.perf_counter()
                 print(f"[completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
 
+            completeness_cache = None
+            album_source_ids_cache = None
+            canonical_cache = {}
+            track_cache = {}
+            if candidate_albums and candidate_tracks and hasattr(db, 'build_candidate_completeness_cache'):
+                try:
+                    completeness_cache = db.build_candidate_completeness_cache(candidate_albums, candidate_tracks)
+                except Exception as _b_err:
+                    print(f"[completion-stream] Failed building completeness cache: {_b_err}")
+            if candidate_albums and hasattr(db, 'get_album_source_ids'):
+                try:
+                    album_source_ids_cache = db.get_album_source_ids([a.id for a in candidate_albums])
+                except Exception as _s_err:
+                    print(f"[completion-stream] Failed fetching album source IDs: {_s_err}")
+
             yield f"data: {json.dumps({'type': 'start', 'total_items': len(all_items)})}\n\n"
 
             _loop_start = time.perf_counter()
@@ -8068,9 +8083,27 @@ def library_completion_stream():
                                    or source_override)
 
                     if category == 'singles':
-                        result = check_single_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
+                        result = check_single_completion(
+                            db, mapped, artist_name,
+                            source_override=item_source,
+                            candidate_albums=candidate_albums,
+                            candidate_tracks=candidate_tracks,
+                            completeness_cache=completeness_cache,
+                            album_source_ids_cache=album_source_ids_cache,
+                            canonical_cache=canonical_cache,
+                            track_cache=track_cache,
+                        )
                     else:
-                        result = check_album_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums)
+                        result = check_album_completion(
+                            db, mapped, artist_name,
+                            source_override=item_source,
+                            candidate_albums=candidate_albums,
+                            candidate_tracks=candidate_tracks,
+                            completeness_cache=completeness_cache,
+                            album_source_ids_cache=album_source_ids_cache,
+                            canonical_cache=canonical_cache,
+                            track_cache=track_cache,
+                        )
 
                     result['id'] = item['id']
                     result['category'] = category
@@ -8079,11 +8112,8 @@ def library_completion_stream():
                 except Exception as e:
                     yield f"data: {json.dumps({'type': 'completion', 'category': category, 'id': item['id'], 'status': 'error', 'owned_tracks': 0, 'expected_tracks': item.get('track_count', 0), 'completion_percentage': 0, 'confidence': 0.0, 'error': str(e)})}\n\n"
 
-                time.sleep(0.05)  # 50ms between items for visible streaming
-
             _loop_elapsed = time.perf_counter() - _loop_start
-            _sleep_floor = 0.05 * len(all_items)
-            print(f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms (sleep floor: {_sleep_floor * 1000:.0f}ms)")
+            print(f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms")
 
             yield f"data: {json.dumps({'type': 'complete', 'processed_count': len(all_items)})}\n\n"
 
