@@ -4456,10 +4456,22 @@
 
     // username -> avatar id, from the hello beacons AND from anything they've
     // said (messages carry the id, so history alone is enough to paint faces).
+    // Discovered avatars are persisted to localStorage so silent peers who
+    // have spoken previously keep their faces across reloads.
     function _avatarMap() {
         var out = {};
+        try {
+            var cached = JSON.parse(localStorage.getItem('chat_avatar_cache') || '{}');
+            if (cached && typeof cached === 'object') {
+                Object.keys(cached).forEach(function (u) {
+                    var cid = _avatarId(cached[u]);
+                    if (cid) out[u] = cid;
+                });
+            }
+        } catch (e) { /* ignore parse errors */ }
         if (window.ChatProtocol && window.ChatProtocol.reduceAvatars) {
-            out = window.ChatProtocol.reduceAvatars(_roomEvents(), CHAT_AVATARS);
+            var reduced = window.ChatProtocol.reduceAvatars(_roomEvents(), CHAT_AVATARS);
+            Object.keys(reduced || {}).forEach(function (u) { out[u] = reduced[u]; });
         }
         (state.msgs || []).forEach(function (m) {
             var n = _avatarId(m && m.av);
@@ -4471,6 +4483,9 @@
         Object.keys(out).forEach(function (u) {
             if (!_avatarAllowed(out[u], u)) delete out[u];
         });
+        try {
+            localStorage.setItem('chat_avatar_cache', JSON.stringify(out));
+        } catch (e) { /* quota exceeded or private mode */ }
         return out;
     }
 
@@ -6073,7 +6088,10 @@
     function _sendJoinBeacon() {
         // Announce capability ONCE per room per session — powers the
         // assume-SoulSync presence for users who haven't typed anything.
+        // Suppressed in Plain Mode (All Messages view) and when the user
+        // has no custom avatar to announce, stopping empty noise lines.
         if (!state.canSend || !state.room || state.beaconed[state.room]) return;
+        if (_plainOn() || !_myAvatar()) return;
         state.beaconed[state.room] = 1;
         // carry the avatar so we get a face before we've said anything
         sendProtocol('hello', _myAvatar() ? { av: _myAvatar() } : {}).then(function (r) {
@@ -6092,7 +6110,7 @@
     var _TYP_TTL = 25000;      // matches the ≤20s re-emit cadence + slack
 
     function _maybeSendTyping(input) {
-        if (state.view !== 'room' || !state.canSend) return;
+        if (state.view !== 'room' || !state.canSend || _plainOn()) return;
         if (!input || !(input.value || '').trim()) return;
         if ((input.value || '')[0] === '/') return;      // commands aren't messages
         if (Date.now() - state.lastTypSentAt < 20000) return;
