@@ -69,7 +69,7 @@ def test_new_file_adopts_sibling_album_tags(tmp_path):
     assert res['success'] and res.get('adopted') is True
     assert res['release_mbid'] == 'EXISTING-REL'
     written = FLAC(str(new))
-    assert written['MUSICBRAINZ_RELEASE_ID'] == ['EXISTING-REL']
+    assert written['MUSICBRAINZ_ALBUMID'] == ['EXISTING-REL']
     assert written['MUSICBRAINZ_RELEASEGROUPID'] == ['EXISTING-RG']
     assert written['ALBUM'] == ['Some Album']
     assert written['ALBUMARTIST'] == ['Some Artist']
@@ -100,7 +100,7 @@ def test_majority_wins_across_siblings(tmp_path):
     file_infos = [{'path': str(new), 'track_number': 4, 'disc_number': 1, 'title': 'x'}]
     res = ac.run_album_consistency(file_infos, "A", "Some Artist", mb_service=SimpleNamespace())
     assert res.get('adopted') is True
-    assert FLAC(str(new))['MUSICBRAINZ_RELEASE_ID'] == ['REL-MAJ']
+    assert FLAC(str(new))['MUSICBRAINZ_ALBUMID'] == ['REL-MAJ']
 
 
 # --- fallback path ----------------------------------------------------------
@@ -125,7 +125,7 @@ def test_no_siblings_falls_back_to_mb(tmp_path, monkeypatch):
                                    mb_service=SimpleNamespace())
     assert res.get('adopted') is not True
     assert res['release_mbid'] == 'MB-REL'
-    assert FLAC(str(t1))['MUSICBRAINZ_RELEASE_ID'] == ['MB-REL']
+    assert FLAC(str(t1))['MUSICBRAINZ_ALBUMID'] == ['MB-REL']
 
 
 def test_untagged_siblings_do_not_trigger_adopt(tmp_path, monkeypatch):

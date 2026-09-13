@@ -515,15 +515,20 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     mb_svc = deps.mb_worker.mb_service if deps.mb_worker else None
                     if mb_svc:
                         from core.album_consistency import _find_best_release
-                        release = _find_best_release(album_name_pf, artist_name_pf, len(tracks_json), mb_svc)
+                        from core.metadata.musicbrainz_tags import selected_release_id
+                        selected = selected_release_id(batch_album_context)
+                        release = (mb_svc.mb_client.get_release(
+                            selected, includes=['release-groups', 'labels', 'media', 'artist-credits', 'recordings'])
+                            if selected else _find_best_release(album_name_pf, artist_name_pf, len(tracks_json), mb_svc))
                         if release and release.get('id'):
                             release_mbid = release['id']
                             _artist_key = artist_name_pf.lower().strip()
                             _rc_key_norm = (deps.normalize_album_cache_key(album_name_pf), _artist_key)
                             _rc_key_exact = (album_name_pf.lower().strip(), _artist_key)
-                            with deps.mb_release_cache_lock:
-                                deps.mb_release_cache[_rc_key_norm] = release_mbid
-                                deps.mb_release_cache[_rc_key_exact] = release_mbid
+                            if not selected:
+                                with deps.mb_release_cache_lock:
+                                    deps.mb_release_cache[_rc_key_norm] = release_mbid
+                                    deps.mb_release_cache[_rc_key_exact] = release_mbid
                             # Also cache the full release detail for tag extraction
                             with deps.mb_release_detail_cache_lock:
                                 deps.mb_release_detail_cache[release_mbid] = release
