@@ -519,6 +519,12 @@ class PlaylistSyncService:
                 if not media_client:
                     logger.error("No active media client available for playlist sync")
                     sync_success = False
+                elif not matched_tracks and media_client.is_connected():
+                    # There is nothing safe to write, but these missing tracks
+                    # still need the wishlist step below. Never empty an existing
+                    # playlist just because this scan found no matches.
+                    logger.info("No library matches for %r; keeping the server playlist and processing missing tracks", playlist.name)
+                    sync_success = True
                 else:
                     logger.info(
                         f"Syncing playlist '{playlist.name}' to {server_type.upper()} server "
