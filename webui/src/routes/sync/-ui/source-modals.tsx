@@ -179,9 +179,8 @@ export function SourceModals({
         onRediscover={
           config.api.reset
             ? async () => {
-                await vertical.resetDiscovery(openId);
-                const current = vertical.states[openId];
-                if (current && current.phase !== 'fresh') {
+                const reset = await vertical.resetDiscovery(openId);
+                if (!reset) {
                   return; // Reset failed
                 }
                 const body =

@@ -6,6 +6,7 @@ ListenBrainz cancel, so its idempotency is the fix."""
 from __future__ import annotations
 
 import threading
+from concurrent.futures import Future
 
 from core.discovery.endpoints import cancel_sync
 
@@ -24,15 +25,18 @@ def test_cancel_missing_key_is_idempotent_success_not_404():
     assert 'not found' not in str(body).lower()   # the wedge message must be gone
 
 
-def test_cancel_present_key_cancels_and_clears_worker():
+def test_cancel_present_key_cancels_queued_worker():
     states = {'h': {'phase': 'syncing', 'sync_playlist_id': 'sp1'}}
-    sync_states, workers = {}, {'sp1': 'worker'}
+    worker = Future()
+    sync_states, workers = {}, {'sp1': worker}
     body, code = cancel_sync(
         states, 'h', label='YouTube', not_found_message='x',
         sync_lock=_lock(), sync_states=sync_states, active_sync_workers=workers)
     assert code == 200 and body['success'] is True
     assert sync_states['sp1'] == {'status': 'cancelled'}
-    assert 'sp1' not in workers
+    assert workers['sp1'] is worker
+    assert worker.cancelled()
+    assert worker.done()  # A subsequent start is allowed once the handle is done.
     assert states['h']['phase'] == 'discovered'
     assert states['h']['sync_playlist_id'] is None
 

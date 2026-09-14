@@ -2,10 +2,16 @@ import { useCallback, useEffect, useId, useState } from 'react';
 
 import { useAccessibleModal } from '@/components/dialog';
 import { CompactPlaylist } from '@/routes/discover/-ui/mix-modal';
-import { fetchDeezerLinkPlaylist, postMirrorPlaylist } from '@/routes/sync/-sync.api';
+import {
+  fetchDeezerLinkPlaylist,
+  fetchSpotifyPlaylistTracks,
+  postMirrorPlaylist,
+} from '@/routes/sync/-sync.api';
 import { buildMirrorPayload } from '@/routes/sync/-sync.import';
 
 import type { SearchPlaylist } from '../-search.types';
+
+import { streamSearchTrack } from '../-search.actions';
 
 export interface PlaylistPreviewModalProps {
   playlist: SearchPlaylist;
@@ -32,6 +38,8 @@ export function PlaylistPreviewModal({
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setTracks(null);
+    setMirrored(false);
 
     const playlistId = String(playlist.id ?? '');
     if (!playlistId) {
@@ -40,9 +48,26 @@ export function PlaylistPreviewModal({
       return;
     }
 
-    fetchDeezerLinkPlaylist(playlistId)
+    const source = playlist.source || 'deezer';
+    const load =
+      source === 'deezer'
+        ? fetchDeezerLinkPlaylist
+        : source === 'spotify'
+          ? fetchSpotifyPlaylistTracks
+          : null;
+    if (!load) {
+      setLoading(false);
+      setError(`Playlist preview is not supported for ${source}`);
+      return;
+    }
+
+    load(playlistId)
       .then((data) => {
         if (cancelled) return;
+        if (data.error)
+          throw new Error(
+            typeof data.error === 'string' ? data.error : 'Could not load playlist tracks',
+          );
         const list = (data.tracks as unknown[]) || [];
         setTracks(list);
         setLoading(false);
@@ -56,7 +81,7 @@ export function PlaylistPreviewModal({
     return () => {
       cancelled = true;
     };
-  }, [playlist.id]);
+  }, [playlist.id, playlist.source]);
 
   const handleMirror = useCallback(async () => {
     if (mirroring || mirrored || !tracks || tracks.length === 0) return;
@@ -81,10 +106,7 @@ export function PlaylistPreviewModal({
         window.showToast?.(`Added "${playlist.name}" to Playlists!`, 'success');
       }
     } catch (err) {
-      window.showToast?.(
-        err instanceof Error ? err.message : 'Failed to mirror playlist',
-        'error',
-      );
+      window.showToast?.(err instanceof Error ? err.message : 'Failed to mirror playlist', 'error');
     } finally {
       setMirroring(false);
     }
@@ -98,23 +120,33 @@ export function PlaylistPreviewModal({
         onPlayTrack(tracks[index]);
       } else {
         const t = tracks[index] as Record<string, unknown>;
-        const trackTitle = String(t.title || t.name || '');
-        const artistName = String(
-          t.artist || (t.artist_name as string) || ((t.artist as Record<string, unknown>)?.name as string) || '',
-        );
-        if (window.playTrackDirectly && trackTitle && artistName) {
-          window.playTrackDirectly({
+        const textName = (value: unknown): string => {
+          if (typeof value === 'string') return value;
+          if (!value || typeof value !== 'object') return '';
+          const record = value as Record<string, unknown>;
+          return typeof record.name === 'string'
+            ? record.name
+            : typeof record.title === 'string'
+              ? record.title
+              : '';
+        };
+        const trackTitle = textName(t.title || t.name);
+        const credits = Array.isArray(t.artists) ? t.artists : [t.artist || t.artist_name];
+        const artistName = credits.map(textName).filter(Boolean).join(', ');
+        if (trackTitle && artistName) {
+          void streamSearchTrack({
             name: trackTitle,
             artist: artistName,
-            album: String(t.album || ((t.album as Record<string, unknown>)?.title as string) || ''),
-            image_url: String(t.cover || playlist.image_url || ''),
-            source: playlist.source || 'deezer',
+            album: textName(t.album),
+            duration_ms: Number(t.duration_ms || 0),
           });
+        } else {
+          window.showToast?.('Track title or artist is missing', 'error');
         }
       }
       setTimeout(() => setPlayingIndex(null), 1500);
     },
-    [tracks, onPlayTrack, playlist],
+    [tracks, onPlayTrack],
   );
 
   const trackCountLabel = tracks
@@ -155,12 +187,7 @@ export function PlaylistPreviewModal({
             >
               {mirroring ? 'Mirroring…' : mirrored ? 'Added ✓' : '+ Add to Playlists'}
             </button>
-            <button
-              type="button"
-              className="mix-modal-close"
-              aria-label="Close"
-              onClick={onClose}
-            >
+            <button type="button" className="mix-modal-close" aria-label="Close" onClick={onClose}>
               ✕
             </button>
           </div>

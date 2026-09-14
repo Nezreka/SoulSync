@@ -286,3 +286,45 @@ def test_issue4_unmatch_discovery_track_clears_fields():
     assert res["matched_data"] is None
     assert res["match_data"] is None
     assert res["confidence"] == 0
+
+
+@pytest.mark.parametrize('source,candidate', [('Earth', 'Earth, Wind & Fire'), ('AC', 'AC/DC'), ('Br', 'Brand New')])
+def test_full_band_names_are_not_split(source, candidate):
+    engine = MusicMatchingEngine()
+    init_scoring(engine)
+    match, confidence, _ = _discovery_score_candidates('Song', source, 180000, [_DummyCandidate('Song', [candidate], 180000)])
+    assert confidence < 0.9
+
+
+@pytest.mark.parametrize('artist', ['Earth, Wind & Fire', 'AC/DC', 'Brand New'])
+def test_full_band_identity_still_matches(artist):
+    engine = MusicMatchingEngine()
+    init_scoring(engine)
+    _, confidence, _ = _discovery_score_candidates('Song', artist, 180000, [_DummyCandidate('Song', [artist], 180000)])
+    assert confidence >= 0.9
+
+
+def test_tidal_cancel_signals_only_named_playlist_and_keeps_running_handle():
+    from concurrent.futures import Future
+    from types import SimpleNamespace
+    worker = Future()
+    worker.set_running_or_notify_cancel()
+    workers = {'job': worker}
+    service = _MockSyncService()
+    state = {'tidal': {'phase': 'syncing', 'sync_playlist_id': 'job', 'playlist': SimpleNamespace(name='Tidal Mix')}}
+    body, code = cancel_sync(state, 'tidal', label='Tidal', not_found_message='missing', sync_lock=threading.Lock(), sync_states={}, active_sync_workers=workers, sync_service=service)
+    assert code == 200 and body['success']
+    assert service.cancelled_playlists == ['Tidal Mix']
+    assert workers['job'] is worker and worker.running()
+
+
+def test_missing_provider_state_cannot_unmatch_another_provider(monkeypatch):
+    import api.source_playlists as routes
+    row = {'status_class': 'found', 'spotify_data': {'id': 'keep'}}
+    monkeypatch.setattr(routes, 'qobuz_discovery_states', {})
+    monkeypatch.setattr(routes, 'deezer_discovery_states', {'123': {'discovery_results': [row]}})
+    app = Flask(__name__)
+    app.register_blueprint(routes.bp)
+    response = app.test_client().post('/api/qobuz/discovery/unmatch', json={'identifier': '123', 'track_index': 0})
+    assert response.status_code == 404
+    assert row['spotify_data'] == {'id': 'keep'}

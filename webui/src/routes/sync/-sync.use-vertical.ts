@@ -92,7 +92,7 @@ export interface SourceVertical {
    * resetBeatportChart 10837): POST, stop polling, zero the discovery + sync
    * fields, toast, and tell the caller to close the modal.
    */
-  resetDiscovery: (sourceId: string) => Promise<void>;
+  resetDiscovery: (sourceId: string) => Promise<boolean>;
 }
 
 export interface SourceVerticalOptions {
@@ -426,7 +426,7 @@ export function useSourceVertical(
     async (sourceId: string) => {
       const state = statesRef.current[sourceId];
       // 10787 / 10841 — no state, nothing to reset.
-      if (!state) return;
+      if (!state) return false;
       const name = (state.playlist?.name as string) ?? '';
       try {
         await resetSourceDiscovery(config, sourceId);
@@ -449,9 +449,11 @@ export function useSourceVertical(
         // A fresh run must be announceable again.
         announced.current.delete(sourceId);
         window.showToast?.(`Reset "${name}" to fresh state`, 'success');
+        return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'unknown error';
         window.showToast?.(`Error resetting ${config.ux.resetErrorNoun}: ${message}`, 'error');
+        return false;
       }
     },
     [config, patch, stopDiscoveryPoll, stopSyncPoll],

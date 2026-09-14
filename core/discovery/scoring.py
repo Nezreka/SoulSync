@@ -108,28 +108,8 @@ def _discovery_score_candidates(source_title, source_artist, source_duration_ms,
                     best_artist_sim = 1.0
                     break
 
-                # Collaboration check: split on collaboration delimiters (&, and, feat., ft., with, x, /)
-                cand_collaborators = re.split(
-                    r'\s*(?:&|and|,|\/|\\|\bwith\b|\bfeat\.?\b|\bft\.?\b|\bx\b)\s*',
-                    cand_artist,
-                    flags=re.IGNORECASE
-                )
-                matched_collaborator = False
-                if len(cand_collaborators) > 1:
-                    for collab in cand_collaborators:
-                        collab_cleaned = matching_engine.clean_artist(collab)
-                        collab_normalized = matching_engine.normalize_string(collab)
-                        if source_artist_cleaned and (source_artist_cleaned == collab_cleaned or source_artist_cleaned == collab_normalized):
-                            best_artist_sim = 1.0
-                            matched_collaborator = True
-                            break
-                        collab_score = matching_engine.similarity_score(source_artist_cleaned, collab_cleaned)
-                        if collab_score > best_artist_sim:
-                            best_artist_sim = collab_score
-
-                if matched_collaborator:
-                    break
-
+                # Commas, slashes, ampersands and 'and' can belong to a band name.
+                # Separate credits arrive as artist list entries; clean_artist handles feat.
                 sim = matching_engine.similarity_score(source_artist_cleaned, cand_cleaned)
                 if sim > best_artist_sim:
                     best_artist_sim = sim

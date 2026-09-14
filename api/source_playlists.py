@@ -4006,17 +4006,6 @@ def unmatch_discovery_track():
         elif '/qobuz/' in path:
             state = qobuz_discovery_states.get(identifier)
 
-        # Fallback if path didn't resolve (e.g. internal or unusual caller)
-        if not state:
-            state = (youtube_playlist_states.get(identifier)
-                     or tidal_discovery_states.get(identifier)
-                     or deezer_discovery_states.get(identifier)
-                     or spotify_public_discovery_states.get(identifier)
-                     or itunes_link_discovery_states.get(identifier)
-                     or beatport_chart_states.get(identifier)
-                     or listenbrainz_playlist_states.get(identifier)
-                     or qobuz_discovery_states.get(identifier))
-
         if not state:
             return jsonify({'success': False, 'error': 'Discovery state not found'}), 404
 

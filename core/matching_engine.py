@@ -378,28 +378,8 @@ class MusicMatchingEngine:
                     best_artist_score = 1.0
                     break
 
-                # Collaboration check: split on collaboration delimiters (&, and, feat., ft., with, x, /)
-                cand_collaborators = re.split(
-                    r'\s*(?:&|and|,|\/|\\|\bwith\b|\bfeat\.?\b|\bft\.?\b|\bx\b)\s*',
-                    raw_cand_artist,
-                    flags=re.IGNORECASE
-                )
-                matched_collaborator = False
-                if len(cand_collaborators) > 1:
-                    for collab in cand_collaborators:
-                        collab_cleaned = self.clean_artist(collab)
-                        collab_normalized = self.normalize_string(collab)
-                        if src_artist and (src_artist == collab_cleaned or src_artist == collab_normalized):
-                            best_artist_score = 1.0
-                            matched_collaborator = True
-                            break
-                        collab_score = self.similarity_score(src_artist, collab_cleaned)
-                        if collab_score > best_artist_score:
-                            best_artist_score = collab_score
-
-                if matched_collaborator:
-                    break
-
+                # Commas, slashes, ampersands and 'and' can belong to a band name.
+                # Separate credits arrive as artist list entries; clean_artist handles feat.
                 # Fuzzy similarity against full candidate artist
                 score = self.similarity_score(src_artist, cand_artist_cleaned)
                 if score > best_artist_score:

@@ -152,23 +152,29 @@ def cancel_sync(
         if sync_playlist_id:
             with sync_lock:
                 sync_states[sync_playlist_id] = {"status": "cancelled"}
-            worker = active_sync_workers.pop(sync_playlist_id, None)
+            # Future.cancel() cannot stop running work. Keep its handle so
+            # start_sync refuses a replacement until that worker has exited.
+            worker = active_sync_workers.get(sync_playlist_id)
             if worker is not None and hasattr(worker, 'cancel'):
                 try:
                     worker.cancel()
                 except Exception as ce:
                     logger.debug(f"Error calling worker.cancel(): {ce}")
 
-        if sync_service is not None and hasattr(sync_service, 'cancel_sync'):
+        if sync_playlist_id and sync_service is not None and hasattr(sync_service, 'cancel_sync'):
+            playlist = state.get('playlist')
             playlist_name = (
                 state.get('playlist_name')
                 or state.get('name')
-                or (state.get('playlist') or {}).get('name')
+                or (playlist.get('name') if isinstance(playlist, dict) else getattr(playlist, 'name', None))
             )
+            if not playlist_name:
+                return {'error': 'Cannot identify the playlist to cancel'}, 409
             try:
                 sync_service.cancel_sync(playlist_name=playlist_name)
             except Exception as se:
-                logger.debug(f"Error calling sync_service.cancel_sync: {se}")
+                logger.error(f"Error calling sync_service.cancel_sync: {se}")
+                return {"error": "Could not signal sync cancellation"}, 500
 
         state['phase'] = 'discovered'
         state['sync_playlist_id'] = None

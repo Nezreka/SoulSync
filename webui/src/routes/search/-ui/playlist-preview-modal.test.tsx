@@ -2,14 +2,21 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SearchPlaylist } from '../-search.types';
+
 import { PlaylistPreviewModal } from './playlist-preview-modal';
 
 const mockFetchDeezerLinkPlaylist = vi.fn();
 const mockPostMirrorPlaylist = vi.fn();
+const mockFetchSpotifyPlaylistTracks = vi.fn();
+const mockStreamSearchTrack = vi.fn();
+vi.mock('../-search.actions', () => ({
+  streamSearchTrack: (...args: unknown[]) => mockStreamSearchTrack(...args),
+}));
 const mockBuildMirrorPayload = vi.fn();
 
 vi.mock('@/routes/sync/-sync.api', () => ({
   fetchDeezerLinkPlaylist: (...args: unknown[]) => mockFetchDeezerLinkPlaylist(...args),
+  fetchSpotifyPlaylistTracks: (...args: unknown[]) => mockFetchSpotifyPlaylistTracks(...args),
   postMirrorPlaylist: (...args: unknown[]) => mockPostMirrorPlaylist(...args),
 }));
 
@@ -64,12 +71,8 @@ describe('PlaylistPreviewModal', () => {
     window.showToast = vi.fn();
   });
 
-  afterEach(cleanup);
-
   it('renders loading state initially and then displays tracks', async () => {
-    render(
-      <PlaylistPreviewModal playlist={samplePlaylist} onClose={vi.fn()} />,
-    );
+    render(<PlaylistPreviewModal playlist={samplePlaylist} onClose={vi.fn()} />);
 
     expect(screen.getByText('Top Deezer Hits')).toBeInTheDocument();
     expect(screen.getByText(/Deezer Editor/)).toBeInTheDocument();
@@ -83,9 +86,7 @@ describe('PlaylistPreviewModal', () => {
   });
 
   it('mirrors playlist when "Add to Playlists" button is clicked', async () => {
-    render(
-      <PlaylistPreviewModal playlist={samplePlaylist} onClose={vi.fn()} />,
-    );
+    render(<PlaylistPreviewModal playlist={samplePlaylist} onClose={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByText('Hit Track 1')).toBeInTheDocument();
@@ -129,4 +130,49 @@ describe('PlaylistPreviewModal', () => {
 
     expect(onClose).toHaveBeenCalled();
   });
+});
+
+afterEach(cleanup);
+
+it('loads Spotify playlists from Spotify and never sends their IDs to Deezer', async () => {
+  vi.clearAllMocks();
+  mockFetchSpotifyPlaylistTracks.mockResolvedValue({
+    tracks: [{ name: 'Spotify Song', artists: ['Artist'] }],
+  });
+  render(
+    <PlaylistPreviewModal
+      playlist={{ ...samplePlaylist, source: 'spotify', id: 'spotify-id' }}
+      onClose={vi.fn()}
+    />,
+  );
+  await screen.findByText('Spotify Song');
+  expect(mockFetchSpotifyPlaylistTracks).toHaveBeenCalledWith('spotify-id');
+  expect(mockFetchDeezerLinkPlaylist).not.toHaveBeenCalled();
+});
+
+it('streams real Deezer artist-array payloads through the search player', async () => {
+  vi.clearAllMocks();
+  mockFetchDeezerLinkPlaylist.mockResolvedValue({
+    tracks: [
+      {
+        id: '1',
+        name: 'Real Song',
+        artists: ['Real Artist'],
+        album: 'Real Album',
+        duration_ms: 180000,
+      },
+    ],
+  });
+  render(<PlaylistPreviewModal playlist={samplePlaylist} onClose={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Play Real Song' }));
+  await waitFor(() =>
+    expect(mockStreamSearchTrack).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Real Song',
+        artist: 'Real Artist',
+        album: 'Real Album',
+        duration_ms: 180000,
+      }),
+    ),
+  );
 });
