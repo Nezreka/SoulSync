@@ -260,6 +260,7 @@ def test_short_query_skips_remote_search():
     assert result['spotify_artists'] == []
     assert result['spotify_albums'] == []
     assert result['spotify_tracks'] == []
+    assert result['spotify_playlists'] == []
     assert result['primary_source'] == 'spotify'
     assert result['alternate_sources'] == []
 
@@ -269,6 +270,21 @@ def test_short_query_with_explicit_source_uses_that_source_label():
     result = orchestrator.run_enhanced_search('aa', 'deezer', deps)
     assert result['primary_source'] == 'deezer'
     assert result['metadata_source'] == 'deezer'
+    assert result['spotify_playlists'] == []
+
+
+def test_single_source_deezer_includes_playlists():
+    deezer = _Client(name='deezer')
+    deezer.search_playlists = lambda q, limit=10: [
+        {'id': 'p1', 'title': 'Lofi Beats', 'creator': 'ChilledCow', 'nb_tracks': 40, 'image_url': 'http://img', 'link': 'http://link'}
+    ]
+    deps = _build_deps(get_deezer_client=lambda: deezer)
+    result = orchestrator.run_enhanced_search('lofi', 'deezer', deps)
+    assert result['source_available'] is True
+    assert len(result['spotify_playlists']) == 1
+    assert result['spotify_playlists'][0]['name'] == 'Lofi Beats'
+    assert result['spotify_playlists'][0]['creator'] == 'ChilledCow'
+    assert result['spotify_playlists'][0]['track_count'] == 40
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { BasicAlbum, BasicTrack } from '../-basic.types';
-import type { SearchAlbum, SearchArtist, SearchLabel, SearchTrack } from '../-search.types';
+import type { SearchAlbum, SearchArtist, SearchLabel, SearchPlaylist, SearchTrack } from '../-search.types';
 import type { LibraryCheckTrack } from '../-search.types';
+import { PlaylistPreviewModal } from './playlist-preview-modal';
 
 import {
   downloadAlbum,
@@ -71,6 +72,7 @@ export function SearchPage() {
   const [labels, setLabels] = useState<SearchLabel[]>([]);
   const [idLookupPending, setIdLookupPending] = useState(false);
   const [recents, setRecents] = useState<string[]>(loadRecentSearches);
+  const [previewPlaylist, setPreviewPlaylist] = useState<SearchPlaylist | null>(null);
 
   const basic = useBasicSearchController();
   const basicSearchRef = useRef(basic.search);
@@ -203,6 +205,7 @@ export function SearchPage() {
       results.artists.length +
       results.albums.length +
       results.tracks.length +
+      results.playlists.length +
       results.videos.length >
     0;
   useEffect(() => {
@@ -418,6 +421,7 @@ export function SearchPage() {
                     albums={splitAlbums(results.albums).albums.length}
                     singles={splitAlbums(results.albums).singlesAndEps.length}
                     tracks={results.tracks.length}
+                    playlists={results.playlists.length}
                     labels={labels.length}
                   />
                 ) : null}
@@ -428,6 +432,7 @@ export function SearchPage() {
                   artists={results.artists}
                   albums={results.albums}
                   tracks={results.tracks}
+                  playlists={results.playlists}
                   labels={labels}
                   videos={results.videos}
                   videoProgress={videoProgress}
@@ -439,6 +444,7 @@ export function SearchPage() {
                     void openSearchAlbum(album, state.activeSource)
                   }
                   onTrackClick={(track: SearchTrack) => void openSearchTrack(track)}
+                  onPlaylistClick={(playlist: SearchPlaylist) => setPreviewPlaylist(playlist)}
                   onTrackPlay={(track: SearchTrack, row: LibraryCheckTrack | undefined) => {
                     if (row) playOwnedTrack(row);
                     else void streamSearchTrack(track);
@@ -469,6 +475,13 @@ export function SearchPage() {
           </div>
         </div>
       </div>
+
+      {previewPlaylist && (
+        <PlaylistPreviewModal
+          playlist={previewPlaylist}
+          onClose={() => setPreviewPlaylist(null)}
+        />
+      )}
     </div>
   );
 }
@@ -480,12 +493,14 @@ function JumpChips({
   albums,
   singles,
   tracks,
+  playlists = 0,
   labels,
 }: {
   artists: number;
   albums: number;
   singles: number;
   tracks: number;
+  playlists?: number;
   labels: number;
 }) {
   const chips: [string, number, string][] = [
@@ -493,6 +508,7 @@ function JumpChips({
     ['Albums', albums, 'enh-albums-section'],
     ['Singles & EPs', singles, 'enh-singles-section'],
     ['Tracks', tracks, 'enh-tracks-section'],
+    ['Playlists', playlists, 'enh-playlists-section'],
     ['Labels', labels, 'enh-labels-section'],
   ];
   const visible = chips.filter(([, count]) => count > 0);

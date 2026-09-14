@@ -3,6 +3,7 @@ import type {
   SearchAlbum,
   SearchArtist,
   SearchLabel,
+  SearchPlaylist,
   SearchTrack,
   SearchVideo,
 } from '../-search.types';
@@ -81,6 +82,13 @@ function albumImage(album: SearchAlbum): string | undefined {
   return album.image_url || album.images?.[0]?.url || undefined;
 }
 
+function playlistMetaLine(playlist: SearchPlaylist): string {
+  const parts: string[] = [];
+  if (playlist.creator) parts.push(`by ${playlist.creator}`);
+  if (playlist.track_count) parts.push(`${playlist.track_count} tracks`);
+  return parts.length > 0 ? parts.join(' · ') : 'Playlist';
+}
+
 /** True for the two sources that show no metadata sections at all. */
 function suppressesLabels(source: string): boolean {
   // search.js:429-434 — the Labels section is fetched additively, so it has to
@@ -111,6 +119,7 @@ export function SearchResults({
   artists,
   albums,
   tracks,
+  playlists = [],
   labels,
   videos,
   videoProgress,
@@ -120,6 +129,7 @@ export function SearchResults({
   onLabelHref,
   onAlbumClick,
   onTrackClick,
+  onPlaylistClick,
   onTrackPlay,
   onVideoDownload,
 }: {
@@ -129,6 +139,7 @@ export function SearchResults({
   artists: SearchArtist[];
   albums: SearchAlbum[];
   tracks: SearchTrack[];
+  playlists?: SearchPlaylist[];
   labels: SearchLabel[];
   videos: SearchVideo[];
   videoProgress: Record<string, VideoProgress>;
@@ -143,6 +154,7 @@ export function SearchResults({
   onLabelHref: (label: SearchLabel) => string;
   onAlbumClick: (album: SearchAlbum) => void;
   onTrackClick: (track: SearchTrack) => void;
+  onPlaylistClick?: (playlist: SearchPlaylist) => void;
   /** The library row is present only for an owned track with a local file. */
   onTrackPlay: (track: SearchTrack, libraryRow: LibraryCheckTrack | undefined) => void;
   onVideoDownload: (video: SearchVideo) => void;
@@ -190,6 +202,7 @@ export function SearchResults({
   const topArtist = dbArtists[0] ?? artists[0];
   const topAlbum = topArtist ? undefined : (fullAlbums[0] ?? singlesAndEps[0]);
   const topTrack = topArtist || topAlbum ? undefined : tracks[0];
+  const topPlaylist = topArtist || topAlbum || topTrack ? undefined : playlists[0];
   const spotlight = topArtist
     ? {
         kind: topArtist === dbArtists[0] ? 'Artist · In your library' : 'Artist',
@@ -220,7 +233,16 @@ export function SearchResults({
             href: undefined,
             onOpen: () => onTrackClick(topTrack),
           }
-        : null;
+        : topPlaylist
+          ? {
+              kind: 'Playlist',
+              name: topPlaylist.name ?? '',
+              image: topPlaylist.image_url || undefined,
+              round: false,
+              href: undefined,
+              onOpen: () => onPlaylistClick?.(topPlaylist),
+            }
+          : null;
 
   const spotlightBody = spotlight ? (
     <>
@@ -407,6 +429,30 @@ export function SearchResults({
           );
         })}
       </ResultSection>
+
+      {playlists.length > 0 ? (
+        <ResultSection
+          id="enh-playlists-section"
+          listId="enh-playlists-list"
+          countId="enh-playlists-count"
+          icon="📋"
+          title="Playlists"
+          kind="playlist"
+          count={playlists.length}
+        >
+          {playlists.map((playlist, index) => (
+            <CompactItem
+              key={`${playlist.id ?? playlist.name}::${index}`}
+              kind="playlist"
+              name={playlist.name ?? ''}
+              meta={playlistMetaLine(playlist)}
+              placeholder="📋"
+              image={playlist.image_url}
+              onClick={() => onPlaylistClick?.(playlist)}
+            />
+          ))}
+        </ResultSection>
+      ) : null}
 
       <ResultSection
         id="enh-labels-section"

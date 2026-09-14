@@ -453,6 +453,36 @@ describe('SearchResults', () => {
     renderResults({ albums: [album()] });
     expect(document.getElementById('enh-videos-section')).toBeNull();
   });
+
+  it('renders a Playlists section when playlists are present and handles clicks', () => {
+    const onPlaylistClick = vi.fn();
+    renderResults({
+      playlists: [
+        {
+          id: 'pl-1',
+          name: 'Chill Vibes',
+          creator: 'DJ Chill',
+          track_count: 25,
+          image_url: 'cover.jpg',
+          source: 'deezer',
+        },
+      ],
+      onPlaylistClick,
+    });
+
+    const section = document.getElementById('enh-playlists-section');
+    expect(section).not.toBeNull();
+    expect(section?.textContent).toContain('Playlists');
+    expect(section?.textContent).toContain('Chill Vibes');
+    expect(section?.textContent).toContain('by DJ Chill');
+
+    const card = section?.querySelector('.enh-compact-item');
+    expect(card).not.toBeNull();
+    fireEvent.click(card!);
+    expect(onPlaylistClick).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'pl-1', name: 'Chill Vibes' }),
+    );
+  });
 });
 
 /**

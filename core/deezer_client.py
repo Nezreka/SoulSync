@@ -1607,6 +1607,13 @@ class DeezerClient:
                     'name': t.get('title', ''),
                     'artists': [artist_name],
                     'album': t.get('album', {}).get('title', ''),
+                    'album_cover_url': (
+                        t.get('album', {}).get('cover_xl')
+                        or t.get('album', {}).get('cover_big')
+                        or t.get('album', {}).get('cover_medium')
+                        or t.get('album', {}).get('cover_small')
+                        or ''
+                    ),
                     'duration_ms': t.get('duration', 0) * 1000,
                     # REAL album position; the playlist index is a last resort only.
                     'track_number': track_positions.get(str(t.get('id'))) or i,

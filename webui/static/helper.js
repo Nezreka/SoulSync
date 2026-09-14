@@ -41,7 +41,7 @@ const HELPER_CONTENT = {
         docsId: 'dashboard'
     },
     '.nav-button[data-page="sync"]': {
-        title: 'Playlist Sync',
+        title: 'Playlists',
         description: 'Mirror playlists from Spotify, YouTube, Tidal, Deezer, ListenBrainz, and Beatport. SoulSync matches each track to your download sources and downloads what\'s missing from your library.',
         tips: [
             'Select playlists from the left panel to begin syncing',
