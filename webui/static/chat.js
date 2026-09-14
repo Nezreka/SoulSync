@@ -496,11 +496,17 @@
                     (r.n > 1 ? ' <b>' + r.n + '</b>' : '') + '</span>';
             }).join('') + '</div>';
         }
-        var bodyHtml = (m.overlay && m.overlay.n)
-            ? _overlayCardHtml(m)
-            : (m.file && m.file.n)
-                ? _fileCardHtml(m)
-                : (m.rich ? renderRich(showText) : renderPlain(showText));
+        var npData = m.np || _extractNpFromText(m.message);
+        var wantData = m.want || _extractWantFromText(m.message);
+        var bodyHtml = (npData && npData.t)
+            ? _nowPlayingCardHtml(m, npData)
+            : (wantData && wantData.t)
+                ? _wantedCardHtml(m, wantData)
+                : (m.overlay && m.overlay.n)
+                    ? _overlayCardHtml(m)
+                    : (m.file && m.file.n)
+                        ? _fileCardHtml(m)
+                        : (m.rich ? renderRich(showText) : renderPlain(showText));
         // An edited message wears the marker; hovering it shows every prior
         // version, oldest first (the history is retained, not replaced).
         if (versions) {
@@ -814,6 +820,503 @@
                 btn.textContent = was;
                 if (typeof showToast === 'function') showToast('Could not save that file', 'error');
             });
+    }
+
+    // ── Now Playing & Wanted / ISO Cards ────────────────────────────────────
+    function _extractNpFromText(text) {
+        if (!text || typeof text !== 'string') return null;
+        var m = text.match(/🎵\s*Now Playing:\s*([^\-]+?)\s*-\s*([^(]+?)(?:\s*\(([^)]+)\))?$/i);
+        if (!m) return null;
+        return { a: m[1].trim(), t: m[2].trim(), al: (m[3] || '').trim(), src: 'shared' };
+    }
+
+    function _extractWantFromText(text) {
+        if (!text || typeof text !== 'string') return null;
+        var m = text.match(/🔍\s*In Search Of:\s*([^\-]+?)\s*-\s*([^(]+?)(?:\s*\(([^)]+)\))?$/i);
+        if (!m) return null;
+        return { a: m[1].trim(), t: m[2].trim(), y: (m[3] || '').trim(), ty: 'album', src: 'shared' };
+    }
+
+    function _nowPlayingCardHtml(m, npOverride) {
+        var np = npOverride || m.np || _extractNpFromText(m.message);
+        if (!np) return m.rich ? renderRich(m.message) : renderPlain(m.message);
+        var t = esc(np.t || 'Unknown Track');
+        var a = esc(np.a || 'Unknown Artist');
+        var al = esc(np.al || '');
+        var src = esc((np.src || 'MUSIC').toUpperCase());
+        var br = np.br ? '<span class="chat-np-badge chat-np-badge--br">' + esc(np.br) + 'k</span>' : '';
+        var img = (np.img && /^https:\/\//.test(np.img))
+            ? '<img class="chat-np-thumb" src="' + attr(np.img) + '" alt="" loading="lazy">'
+            : '<div class="chat-np-thumb chat-np-thumb--ph">🎵</div>';
+
+        return '<div class="chat-np-card" data-np-title="' + attr(np.t) + '" data-np-artist="' + attr(np.a) + '" data-np-album="' + attr(np.al || '') + '" data-np-id="' + attr(np.id || '') + '" data-np-src="' + attr(np.src || '') + '">' +
+            '<div class="chat-np-header">' +
+                '<span class="chat-np-tag"><span class="chat-np-eq"><i></i><i></i><i></i></span> NOW PLAYING</span>' +
+                '<span class="chat-np-src-pill">' + src + '</span>' +
+                br +
+            '</div>' +
+            '<div class="chat-np-body">' +
+                img +
+                '<div class="chat-np-meta">' +
+                    '<div class="chat-np-title" title="' + attr(np.t) + '">' + t + '</div>' +
+                    '<div class="chat-np-artist" title="' + attr(np.a) + '">' + a + '</div>' +
+                    (al ? '<div class="chat-np-album" title="' + attr(np.al) + '">' + al + '</div>' : '') +
+                '</div>' +
+            '</div>' +
+            '<div class="chat-np-actions">' +
+                '<button type="button" class="chat-card-btn chat-card-btn--primary" data-chat-card-stream title="Preview audio stream">▶ Preview</button>' +
+                '<button type="button" class="chat-card-btn chat-card-btn--accent" data-chat-card-dl title="Open Download Missing Tracks modal">📥 Download Missing</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-card-artist title="Go to ' + attr(np.a) + ' artist page">👤 Artist</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-card-search title="Search SoulSync for this release">🔍 Search</button>' +
+            '</div>' +
+        '</div>';
+    }
+
+    var _wantedPresenceCache = {};
+    var _wantedPresencePending = {};
+
+    function _scheduleWantedPresenceProbe(w) {
+        var key = (w.a || '').toLowerCase().trim() + '|||' + (w.t || '').toLowerCase().trim();
+        if (key in _wantedPresenceCache || _wantedPresencePending[key]) return;
+        _wantedPresencePending[key] = true;
+
+        var reqData = {
+            albums: (w.ty === 'album' || w.ty === 'ep') ? [{ title: w.t, artist: w.a }] : [],
+            tracks: (w.ty === 'track' || w.ty === 'single') ? [{ name: w.t, artist: w.a, album: w.al || '' }] : []
+        };
+        if (!reqData.albums.length && !reqData.tracks.length) {
+            reqData.albums = [{ title: w.t, artist: w.a }];
+        }
+
+        fetch('/api/enhanced-search/library-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqData)
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            delete _wantedPresencePending[key];
+            var owned = false;
+            if (data && data.albums && data.albums[0] === true) owned = true;
+            if (data && data.tracks && data.tracks[0] && data.tracks[0].in_library === true) owned = true;
+            _wantedPresenceCache[key] = owned;
+            document.querySelectorAll('[data-chat-wanted-probe="' + attr(key) + '"]').forEach(function (el) {
+                el.className = 'chat-wanted-badge ' + (owned ? 'chat-wanted-badge--owned' : 'chat-wanted-badge--miss');
+                el.textContent = owned ? '✓ In Your Library' : 'Not in library';
+                if (owned) {
+                    var card = el.closest('.chat-wanted-card');
+                    if (card) {
+                        var btn = card.querySelector('[data-chat-wanted-have]');
+                        if (btn) btn.classList.add('chat-card-btn--glow');
+                    }
+                }
+            });
+        })
+        .catch(function () { delete _wantedPresencePending[key]; });
+    }
+
+    function _wantedCardHtml(m, wantOverride) {
+        var w = wantOverride || m.want || _extractWantFromText(m.message);
+        if (!w) return m.rich ? renderRich(m.message) : renderPlain(m.message);
+        var t = esc(w.t || 'Unknown Title');
+        var a = esc(w.a || 'Unknown Artist');
+        var ty = esc((w.ty || 'album').toUpperCase());
+        var y = w.y ? esc(w.y) : '';
+        var src = esc(w.src || '');
+        var requester = m.username || 'user';
+        var isMe = (m.username === state.selfName || m.self === true || requester === 'you');
+
+        var cacheKey = (w.a || '').toLowerCase().trim() + '|||' + (w.t || '').toLowerCase().trim();
+        var inLib = _wantedPresenceCache[cacheKey];
+
+        var img = (w.img && /^https:\/\//.test(w.img))
+            ? '<img class="chat-wanted-thumb" src="' + attr(w.img) + '" alt="" loading="lazy">'
+            : '<div class="chat-wanted-thumb chat-wanted-thumb--ph">💿</div>';
+
+        var statusChip = '';
+        if (inLib === true) {
+            statusChip = '<span class="chat-wanted-badge chat-wanted-badge--owned">✓ In Your Library</span>';
+        } else if (inLib === false) {
+            statusChip = '<span class="chat-wanted-badge chat-wanted-badge--miss">Not in library</span>';
+        } else {
+            statusChip = '<span class="chat-wanted-badge chat-wanted-badge--checking" data-chat-wanted-probe="' + attr(cacheKey) + '">Checking library…</span>';
+            _scheduleWantedPresenceProbe(w);
+        }
+
+        var haveBtn = '';
+        if (!isMe) {
+            haveBtn = '<button type="button" class="chat-card-btn chat-card-btn--success' + (inLib === true ? ' chat-card-btn--glow' : '') + '" ' +
+                'data-chat-wanted-have data-wanted-user="' + attr(requester) + '" data-wanted-title="' + attr(w.t) + '" data-wanted-artist="' + attr(w.a) + '" ' +
+                'title="Send @' + attr(requester) + ' a direct message saying you have this!">' +
+                '💬 I Have This! (Send PM)</button>';
+        }
+
+        return '<div class="chat-wanted-card" data-wanted-title="' + attr(w.t) + '" data-wanted-artist="' + attr(w.a) + '" data-wanted-key="' + attr(cacheKey) + '">' +
+            '<div class="chat-wanted-header">' +
+                '<span class="chat-wanted-tag">🔍 IN SEARCH OF</span>' +
+                '<span class="chat-wanted-type-pill">' + ty + '</span>' +
+                (src ? '<span class="chat-wanted-src-pill">' + src.toUpperCase() + '</span>' : '') +
+                statusChip +
+            '</div>' +
+            '<div class="chat-wanted-body">' +
+                img +
+                '<div class="chat-wanted-meta">' +
+                    '<div class="chat-wanted-title" title="' + attr(w.t) + '">' + t + '</div>' +
+                    '<div class="chat-wanted-artist" title="' + attr(w.a) + '">' + a + (y ? ' <span class="chat-wanted-year">(' + y + ')</span>' : '') + '</div>' +
+                    '<div class="chat-wanted-req">Requested by <b>@' + esc(requester) + '</b></div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="chat-wanted-actions">' +
+                haveBtn +
+                '<button type="button" class="chat-card-btn" data-chat-wanted-wishlist title="Add to your Wishlist to find later">➕ Add to Wishlist</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-card-search title="Search Soulseek for this release">🔍 Search Soulseek</button>' +
+            '</div>' +
+        '</div>';
+    }
+
+    function shareNowPlaying() {
+        var cur = window.__ssCurrentTrack || (typeof window.getCurrentTrack === 'function' ? window.getCurrentTrack() : null) || state.localNowPlaying;
+        if (!cur || (!cur.title && !cur.name)) {
+            if (typeof showToast === 'function') {
+                showToast('🎵 Nothing is currently playing in SoulSync. Start a track first!', 'info');
+            }
+            return;
+        }
+        var t = String(cur.title || cur.name || 'Unknown Track').replace(/^[a-z0-9_-]+\|\|/i, '');
+        var a = String(cur.artist || 'Unknown Artist').replace(/^[a-z0-9_-]+\|\|/i, '');
+        var al = String(cur.album || '').replace(/^[a-z0-9_-]+\|\|/i, '');
+        var src = cur.source || (cur.is_library ? 'library' : 'stream');
+        var id = String(cur.id || '');
+        var img = String(cur.image_url || cur.thumb_url || '');
+        if (img && !/^https:\/\//.test(img)) img = '';
+        var dur = cur.duration_ms || cur.duration || 0;
+        var br = cur.bitrate || 0;
+
+        var fallbackText = '🎵 Now Playing: ' + a + ' - ' + t + (al ? ' (' + al + ')' : '');
+        var payload = {
+            message: fallbackText,
+            np: { t: t, a: a, al: al, src: src, id: id, img: img, dur: dur, br: br }
+        };
+        if (state.view === 'room') _tagRoomPayload(payload);
+        var url = state.view === 'room'
+            ? '/api/chat/room/message'
+            : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
+        postJSON(url, payload).then(function (res) {
+            if (res.ok) {
+                refresh();
+                if (typeof showToast === 'function') showToast('🎵 Shared Now Playing to chat!', 'success');
+            } else if (typeof showToast === 'function') {
+                showToast(res.body && res.body.error || 'Failed to share Now Playing', 'error');
+            }
+        });
+    }
+
+    var _wantSearchTimer = null;
+    var _wantActiveSource = 'auto';
+
+    function openWantedModal(query) {
+        var modal = q('[data-chat-want-modal]');
+        var backdrop = q('[data-chat-want-backdrop]');
+        if (!modal) return;
+        modal.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+        var inp = q('[data-chat-want-input]');
+        if (inp) {
+            if (query) inp.value = query;
+            inp.focus();
+            if (query) searchWanted();
+        }
+    }
+
+    function closeWantedModal() {
+        var modal = q('[data-chat-want-modal]');
+        var backdrop = q('[data-chat-want-backdrop]');
+        if (modal) modal.hidden = true;
+        if (backdrop) backdrop.hidden = true;
+    }
+
+    function searchWanted() {
+        var inp = q('[data-chat-want-input]');
+        var resultsEl = q('[data-chat-want-results]');
+        var statusEl = q('[data-chat-want-status]');
+        var clearBtn = q('[data-chat-want-clear]');
+        if (!inp || !resultsEl) return;
+
+        var query = (inp.value || '').trim();
+        if (clearBtn) clearBtn.hidden = !query;
+
+        if (query.length < 2) {
+            resultsEl.innerHTML = '';
+            if (statusEl) {
+                statusEl.hidden = false;
+                statusEl.textContent = 'Type 2+ letters to search across metadata providers';
+            }
+            return;
+        }
+
+        if (statusEl) {
+            statusEl.hidden = false;
+            statusEl.textContent = 'Searching metadata providers…';
+        }
+
+        var fetchFn = (typeof enhancedSearchFetch === 'function')
+            ? enhancedSearchFetch
+            : function (q, opt) {
+                var b = { query: q };
+                if (opt && opt.source && opt.source !== 'auto') b.source = opt.source;
+                return fetch('/api/enhanced-search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(b)
+                }).then(function (r) { return r.json(); });
+            };
+
+        fetchFn(query, { source: _wantActiveSource })
+            .then(function (data) {
+                if (!data) {
+                    if (statusEl) statusEl.textContent = 'No results returned';
+                    return;
+                }
+                var items = [];
+                var albums = data.albums || data.spotify_albums || data.results || [];
+                albums.slice(0, 15).forEach(function (al) {
+                    items.push({
+                        name: al.name || al.title || '',
+                        artist: al.artist || (al.artists && al.artists[0] && al.artists[0].name) || '',
+                        type: al.album_type || 'album',
+                        year: al.release_date ? al.release_date.slice(0, 4) : (al.year || ''),
+                        source: al.source || 'spotify',
+                        id: al.id || '',
+                        image_url: al.image_url || (al.images && al.images[0] && al.images[0].url) || ''
+                    });
+                });
+                var tracks = data.tracks || data.spotify_tracks || [];
+                tracks.slice(0, 15).forEach(function (tr) {
+                    items.push({
+                        name: tr.name || tr.title || '',
+                        artist: tr.artist || (tr.artists && tr.artists[0] && tr.artists[0].name) || '',
+                        album: tr.album || (tr.album && tr.album.name) || '',
+                        type: 'track',
+                        year: tr.release_date ? tr.release_date.slice(0, 4) : '',
+                        source: tr.source || 'spotify',
+                        id: tr.id || '',
+                        image_url: tr.image_url || (tr.images && tr.images[0] && tr.images[0].url) || ''
+                    });
+                });
+
+                if (!items.length) {
+                    if (statusEl) statusEl.textContent = 'No releases found for "' + query + '"';
+                    resultsEl.innerHTML = '';
+                    return;
+                }
+
+                if (statusEl) statusEl.hidden = true;
+                resultsEl.innerHTML = items.map(function (item, idx) {
+                    var thumb = item.image_url
+                        ? '<img class="chat-want-res-img" src="' + attr(item.image_url) + '" alt="" loading="lazy">'
+                        : '<div class="chat-want-res-img chat-want-res-img--ph">' + (item.type === 'track' ? '🎵' : '💿') + '</div>';
+                    return '<div class="chat-want-res-row">' +
+                        thumb +
+                        '<div class="chat-want-res-meta">' +
+                            '<div class="chat-want-res-name">' + esc(item.name) + '</div>' +
+                            '<div class="chat-want-res-sub">' + esc(item.artist) + (item.year ? ' · ' + esc(item.year) : '') + '</div>' +
+                            '<div class="chat-want-res-badges">' +
+                                '<span class="chat-want-res-pill">' + esc(item.type.toUpperCase()) + '</span>' +
+                                '<span class="chat-want-res-pill chat-want-res-pill--src">' + esc(item.source.toUpperCase()) + '</span>' +
+                            '</div>' +
+                        '</div>' +
+                        '<button type="button" class="chat-card-btn chat-card-btn--primary" data-chat-want-post-idx="' + idx + '">⭐ Post to Chat</button>' +
+                    '</div>';
+                }).join('');
+
+                resultsEl._items = items;
+            })
+            .catch(function (err) {
+                if (statusEl) statusEl.textContent = 'Search failed: ' + (err.message || err);
+            });
+    }
+
+    function postWantedCard(item) {
+        if (!item || !state.canSend) return;
+        var t = item.name || item.title || 'Unknown Title';
+        var a = item.artist || (item.artists && item.artists[0] && item.artists[0].name) || 'Unknown Artist';
+        var ty = item.type || (item.album_type ? 'album' : 'track');
+        var al = item.album || '';
+        var src = item.source || 'spotify';
+        var id = String(item.id || '');
+        var img = (item.image_url && /^https:\/\//.test(item.image_url)) ? item.image_url : '';
+        var y = String(item.year || item.release_date || '').slice(0, 4);
+
+        var fallbackText = '🔍 In Search Of: ' + a + ' - ' + t + (y ? ' (' + y + ')' : '');
+        var payload = {
+            message: fallbackText,
+            want: { t: t, a: a, ty: ty, al: al, src: src, id: id, img: img, y: y }
+        };
+        if (state.view === 'room') _tagRoomPayload(payload);
+        var url = state.view === 'room'
+            ? '/api/chat/room/message'
+            : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
+        postJSON(url, payload).then(function (res) {
+            closeWantedModal();
+            if (res.ok) {
+                refresh();
+                if (typeof showToast === 'function') showToast('⭐ Posted Wanted card to chat!', 'success');
+            } else if (typeof showToast === 'function') {
+                showToast(res.body && res.body.error || 'Failed to post card', 'error');
+            }
+        });
+    }
+
+    function _openDownloadForCard(artist, title, album, id, src) {
+        if (typeof window.openDownloadMissingModalForArtistAlbum !== 'function') {
+            if (typeof showToast === 'function') showToast('Download missing modal unavailable', 'error');
+            return;
+        }
+        var virtualId = 'np_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        var albumName = album || title;
+        var spotifyTracks = [{
+            id: id || virtualId,
+            name: title,
+            artist: artist,
+            album: albumName,
+            source: src || 'spotify',
+            duration_ms: 0,
+            image_url: null,
+            total_tracks: 1
+        }];
+        var albumObj = {
+            id: null,
+            name: albumName,
+            album_type: 'single',
+            images: [],
+            artists: [{ name: artist }]
+        };
+        var artistObj = {
+            id: null,
+            name: artist,
+            source: src || 'spotify'
+        };
+        window.openDownloadMissingModalForArtistAlbum(
+            virtualId,
+            '[' + artist + '] ' + albumName,
+            spotifyTracks,
+            albumObj,
+            artistObj,
+            false
+        );
+    }
+
+    function _openArtistPage(artist, artist_id, src) {
+        if (artist_id && typeof navigateToArtistDetail === 'function') {
+            navigateToArtistDetail(artist_id, artist, src);
+            return;
+        }
+        if (typeof _navigateToArtistFromWishlist === 'function') {
+            _navigateToArtistFromWishlist(artist);
+            return;
+        }
+        _searchFromCard(artist, '');
+    }
+
+    function _searchFromCard(artist, title) {
+        var qstr = ((artist ? artist + ' ' : '') + (title || '')).trim();
+        if (typeof navigateToPage === 'function') {
+            navigateToPage('search');
+            setTimeout(function () {
+                var inp = document.getElementById('enhanced-search-input') || document.getElementById('search-input');
+                if (inp) {
+                    inp.value = qstr;
+                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    inp.focus();
+                }
+            }, 300);
+        }
+    }
+
+    function _streamFromCard(title, artist, album) {
+        if (typeof showToast === 'function') showToast('🔍 Finding preview for "' + title + '"…', 'info');
+        fetch('/api/enhanced-search/stream-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_name: title,
+                artist_name: artist,
+                album_name: album || ''
+            })
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+            if (res && res.success && res.track) {
+                if (typeof startStream === 'function') {
+                    startStream(res.track);
+                } else if (typeof setTrackInfo === 'function') {
+                    setTrackInfo(res.track);
+                }
+                if (typeof showToast === 'function') showToast('▶ Playing preview for ' + title, 'success');
+            } else {
+                if (typeof showToast === 'function') showToast((res && res.error) || 'Could not find a stream preview for this track', 'warning');
+            }
+        })
+        .catch(function () {
+            if (typeof showToast === 'function') showToast('Failed to start stream preview', 'error');
+        });
+    }
+
+    function _onHaveWanted(username, title, artist) {
+        if (!username || username === 'you' || username === state.selfName) {
+            if (typeof showToast === 'function') showToast('This is your own wanted card!', 'info');
+            return;
+        }
+        openPm(username);
+        var input = q('[data-chat-input]');
+        if (input) {
+            input.value = 'Hey @' + username + '! I saw your request for "' + title + '" by ' + artist + ' — I have this in my library! Feel free to browse my shares or let me know if you want me to send it over.';
+            input.focus();
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (typeof showToast === 'function') {
+            showToast('Switched to PM with @' + username + ' — message ready to send!', 'success');
+        }
+    }
+
+    function _addWantedToWishlist(w) {
+        if (typeof showToast === 'function') showToast('Added "' + w.t + '" to Wishlist search!', 'success');
+        _searchFromCard(w.a, w.t);
+    }
+
+    function _bindChatDragAndDrop() {
+        var zone = q('.chat-main') || q('[data-chat-messages]');
+        var overlay = q('[data-chat-drop-overlay]');
+        if (!zone || !overlay) return;
+
+        var dragCounter = 0;
+        zone.addEventListener('dragenter', function (e) {
+            e.preventDefault();
+            dragCounter++;
+            overlay.hidden = false;
+        });
+        zone.addEventListener('dragover', function (e) {
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            overlay.hidden = false;
+        });
+        zone.addEventListener('dragleave', function (e) {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                overlay.hidden = true;
+            }
+        });
+        zone.addEventListener('drop', function (e) {
+            e.preventDefault();
+            dragCounter = 0;
+            overlay.hidden = true;
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+                var file = e.dataTransfer.files[0];
+                attachUploadFile(file);
+            }
+        });
     }
 
     // ── developer identification (SoulSync creator & lead dev) ─────────────
@@ -4455,14 +4958,22 @@
 
     // ── slash commands (room only — power-user glue over existing features)
     var SLASH_COMMANDS = [
-        { c: '/play',  a: '<song or link>', d: 'queue it on the jukebox' },
-        { c: '/skip',  a: '', d: 'vote to skip the current track' },
-        { c: '/tune',  a: '', d: 'tune in or out of the jukebox' },
-        { c: '/topic', a: '<text>', d: 'set the room topic' },
-        { c: '/poll',  a: '<question>', d: 'start a room poll' },
-        { c: '/pin',   a: '', d: 'pin the latest message' },
-        { c: '/gif',   a: '<search>', d: 'find a GIF' },
-        { c: '/shrug', a: '[message]', d: 'appends \u00af\\_(\u30c4)_/\u00af' },
+        { c: '/np',        a: '', d: 'share what you are playing right now' },
+        { c: '/want',      a: '<query>', d: 'search & post an In Search Of (Wanted) card' },
+        { c: '/iso',       a: '<query>', d: 'alias for /want' },
+        { c: '/friends',   a: '', d: 'open your Friends list' },
+        { c: '/blocklist', a: '', d: 'open your Blocklist' },
+        { c: '/bookmarks', a: '', d: 'open your Bookmarked Peers' },
+        { c: '/browse',    a: '<user>', d: "browse a peer's shared files" },
+        { c: '/upload',    a: '', d: 'upload & share a file via filepost.dev' },
+        { c: '/play',      a: '<song or link>', d: 'queue it on the jukebox' },
+        { c: '/skip',      a: '', d: 'vote to skip the current track' },
+        { c: '/tune',      a: '', d: 'tune in or out of the jukebox' },
+        { c: '/topic',     a: '<text>', d: 'set the room topic' },
+        { c: '/poll',      a: '<question>', d: 'start a room poll' },
+        { c: '/pin',       a: '', d: 'pin the latest message' },
+        { c: '/gif',       a: '<search>', d: 'find a GIF' },
+        { c: '/shrug',     a: '[message]', d: 'appends \u00af\\_(\u30c4)_/\u00af' },
     ];
 
     function updateSlashPop(input) {
@@ -4512,6 +5023,36 @@
         var toast = function (msg, kind) {
             if (typeof showToast === 'function') showToast(msg, kind || 'info');
         };
+        if (cmd === 'np') {
+            shareNowPlaying();
+            return true;
+        }
+        if (cmd === 'want' || cmd === 'iso') {
+            openWantedModal(arg);
+            return true;
+        }
+        if (cmd === 'friends') {
+            openSocialModal('friends');
+            return true;
+        }
+        if (cmd === 'blocklist') {
+            openSocialModal('blocked');
+            return true;
+        }
+        if (cmd === 'bookmarks') {
+            openSocialModal('bookmarks');
+            return true;
+        }
+        if (cmd === 'browse') {
+            if (arg) openBrowse(arg);
+            else toast('Specify a username: /browse <user>');
+            return true;
+        }
+        if (cmd === 'upload') {
+            var fileInp = q('[data-chat-attach-file]');
+            if (fileInp) fileInp.click();
+            return true;
+        }
         if (cmd === 'shrug') {
             return (arg ? arg + ' ' : '') + '\u00af\\_(\u30c4)_/\u00af';
         }
@@ -6340,6 +6881,110 @@
                 renderJukebox();
                 return;
             }
+            // ── Now Playing & Wanted action buttons ──
+            t = e.target.closest('[data-chat-np-btn]') || e.target.closest('[data-chat-np-quick]');
+            if (t) { shareNowPlaying(); return; }
+            t = e.target.closest('[data-chat-want-btn]');
+            if (t) { openWantedModal(); return; }
+            t = e.target.closest('[data-chat-want-close]');
+            if (t) { closeWantedModal(); return; }
+            var wantOv = e.target.closest('[data-chat-want-backdrop]');
+            if (wantOv) { closeWantedModal(); return; }
+            t = e.target.closest('[data-want-src]');
+            if (t) {
+                document.querySelectorAll('[data-want-src]').forEach(function (b) {
+                    b.classList.remove('chat-want-src-btn--active');
+                });
+                t.classList.add('chat-want-src-btn--active');
+                _wantActiveSource = t.getAttribute('data-want-src') || 'auto';
+                searchWanted();
+                return;
+            }
+            t = e.target.closest('[data-chat-want-clear]');
+            if (t) {
+                var wInp = q('[data-chat-want-input]');
+                if (wInp) { wInp.value = ''; wInp.focus(); }
+                searchWanted();
+                return;
+            }
+            t = e.target.closest('[data-chat-want-post-idx]');
+            if (t) {
+                var idx = parseInt(t.getAttribute('data-chat-want-post-idx'), 10);
+                var resEl = q('[data-chat-want-results]');
+                if (resEl && resEl._items && resEl._items[idx]) {
+                    postWantedCard(resEl._items[idx]);
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-stream]');
+            if (t) {
+                var c1 = t.closest('.chat-np-card');
+                if (c1) {
+                    _streamFromCard(
+                        c1.getAttribute('data-np-title') || '',
+                        c1.getAttribute('data-np-artist') || '',
+                        c1.getAttribute('data-np-album') || ''
+                    );
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-dl]');
+            if (t) {
+                var c2 = t.closest('.chat-np-card');
+                if (c2) {
+                    _openDownloadForCard(
+                        c2.getAttribute('data-np-artist') || '',
+                        c2.getAttribute('data-np-title') || '',
+                        c2.getAttribute('data-np-album') || '',
+                        c2.getAttribute('data-np-id') || '',
+                        c2.getAttribute('data-np-src') || ''
+                    );
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-artist]');
+            if (t) {
+                var c3 = t.closest('.chat-np-card');
+                if (c3) {
+                    _openArtistPage(
+                        c3.getAttribute('data-np-artist') || '',
+                        c3.getAttribute('data-np-id') || '',
+                        c3.getAttribute('data-np-src') || ''
+                    );
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-search]');
+            if (t) {
+                var c4 = t.closest('.chat-np-card') || t.closest('.chat-wanted-card');
+                if (c4) {
+                    _searchFromCard(
+                        c4.getAttribute('data-np-artist') || c4.getAttribute('data-wanted-artist') || '',
+                        c4.getAttribute('data-np-title') || c4.getAttribute('data-wanted-title') || ''
+                    );
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-wanted-have]');
+            if (t) {
+                _onHaveWanted(
+                    t.getAttribute('data-wanted-user') || '',
+                    t.getAttribute('data-wanted-title') || '',
+                    t.getAttribute('data-wanted-artist') || ''
+                );
+                return;
+            }
+            t = e.target.closest('[data-chat-wanted-wishlist]');
+            if (t) {
+                var c5 = t.closest('.chat-wanted-card');
+                if (c5) {
+                    _addWantedToWishlist({
+                        t: c5.getAttribute('data-wanted-title') || '',
+                        a: c5.getAttribute('data-wanted-artist') || ''
+                    });
+                }
+                return;
+            }
             // ── movie night ──
             t = e.target.closest('[data-chat-watch-btn]');
             if (t) { _openWatchModal(); return; }
@@ -6840,8 +7485,26 @@
                 if (bm && !bm.hidden) { closeBrowse(); }
                 var socD = q('[data-chat-social-drawer]');
                 if (socD && !socD.hidden) { closeSocialModal(); }
+                var wantD = q('[data-chat-want-modal]');
+                if (wantD && !wantD.hidden) { closeWantedModal(); }
             }
         });
+
+        var wantInputEl = q('[data-chat-want-input]');
+        if (wantInputEl) {
+            wantInputEl.addEventListener('input', function () {
+                clearTimeout(_wantSearchTimer);
+                _wantSearchTimer = setTimeout(searchWanted, 350);
+            });
+            wantInputEl.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    clearTimeout(_wantSearchTimer);
+                    searchWanted();
+                }
+            });
+        }
+        _bindChatDragAndDrop();
 
         window.addEventListener('popstate', function () {
             var bm = q('[data-chat-browse-modal]');

@@ -243,6 +243,12 @@ def _unwrap_room_messages(messages):
             f = chat_codec.file_of(dec)
             if f:
                 m["file"] = f
+            np = chat_codec.np_of(dec)
+            if np:
+                m["np"] = np
+            w = chat_codec.want_of(dec)
+            if w:
+                m["want"] = w
             # A shared overlay template. The definition rides its own envelope
             # key (protocol_of would reject layers-of-objects), and the card
             # carries the asset refs it depends on so the reader is told what
@@ -1493,6 +1499,14 @@ def create_blueprint() -> Blueprint:
         if fmeta:
             extra = dict(extra or {})
             extra["f"] = fmeta
+        npmeta = chat_codec.np_of({"np": body.get("np")})
+        if npmeta:
+            extra = dict(extra or {})
+            extra["np"] = npmeta
+        wantmeta = chat_codec.want_of({"want": body.get("want")})
+        if wantmeta:
+            extra = dict(extra or {})
+            extra["want"] = wantmeta
         # Virtual channel tag. Slug-validated here so a hostile client can't
         # stuff arbitrary text into the envelope; the default channel is left
         # untagged so old clients (and vanilla Soulseek) read it as #general.

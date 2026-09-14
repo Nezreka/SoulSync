@@ -7682,6 +7682,39 @@
                                 <!-- Scrollable List -->
                                 <div class="chat-social-scroll-body" data-chat-social-list></div>
                             </div>
+                            <!-- Discord-style Slide-over Wanted / ISO Search & Post Modal -->
+                            <div class="chat-peer-backdrop chat-want-backdrop" data-chat-want-backdrop hidden></div>
+                            <div class="chat-peer-drawer chat-want-drawer" data-chat-want-modal hidden>
+                                <div class="chat-want-hero">
+                                    <div class="chat-want-hero-top">
+                                        <div class="chat-want-identity">
+                                            <div class="chat-want-hero-icon">🔍</div>
+                                            <div class="chat-want-title-wrap">
+                                                <div class="chat-want-title">Post Wanted / ISO Card</div>
+                                                <div class="chat-want-subtitle">Search metadata &amp; post an In Search Of card to chat</div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-want-close title="Close (Esc)">&times;</button>
+                                    </div>
+                                    <div class="chat-want-search-bar">
+                                        <span class="chat-want-search-icon">🔍</span>
+                                        <input type="text" class="chat-want-search-input" data-chat-want-input placeholder="Search track, album, EP or artist…" autocomplete="off">
+                                        <button type="button" class="chat-want-search-clear" data-chat-want-clear hidden title="Clear">&times;</button>
+                                    </div>
+                                    <div class="chat-want-sources-bar">
+                                        <button type="button" class="chat-want-src-btn chat-want-src-btn--active" data-want-src="auto">All Sources</button>
+                                        <button type="button" class="chat-want-src-btn" data-want-src="spotify">Spotify</button>
+                                        <button type="button" class="chat-want-src-btn" data-want-src="deezer">Deezer</button>
+                                        <button type="button" class="chat-want-src-btn" data-want-src="itunes">Apple Music</button>
+                                        <button type="button" class="chat-want-src-btn" data-want-src="discogs">Discogs</button>
+                                        <button type="button" class="chat-want-src-btn" data-want-src="musicbrainz">MusicBrainz</button>
+                                    </div>
+                                </div>
+                                <div class="chat-want-body">
+                                    <div class="chat-want-status" data-chat-want-status>Type 2+ letters to search across metadata providers</div>
+                                    <div class="chat-want-results" data-chat-want-results></div>
+                                </div>
+                            </div>
                             <!-- jukebox YouTube search: rich pop-in, search-page video-card look -->
                             <div class="chat-settings-overlay" data-chat-jbx-search-modal hidden>
                                 <div class="chat-settings-modal chat-jbx-search-modal">
@@ -7771,6 +7804,13 @@
                                 </div>
                             </div>
                             <div class="chat-scroll" data-chat-messages></div>
+                            <div class="chat-drop-overlay" data-chat-drop-overlay hidden>
+                                <div class="chat-drop-card">
+                                    <div class="chat-drop-icon">📤</div>
+                                    <div class="chat-drop-title">Drop file to share in chat</div>
+                                    <div class="chat-drop-sub">Audio, images, or files upload via filepost.dev</div>
+                                </div>
+                            </div>
                             <button class="chat-jump-pill" type="button" data-chat-jump hidden>New messages ↓</button>
                             <div class="chat-mention-pop" data-chat-mention-pop hidden></div>
                             <form class="chat-composer" data-chat-composer>
@@ -7797,6 +7837,13 @@
                                             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.5 10c-.2 0-.4 0-.6.1.2-1.8 1.5-3.1 3.1-3.6l-.6-1.5C5.9 5.9 4 8.3 4 11.5 4 13.4 5.1 15 7 15s2.9-1.3 2.9-2.8c0-1.4-1-2.2-3.4-2.2zm9 0c-.2 0-.4 0-.6.1.2-1.8 1.5-3.1 3.1-3.6l-.6-1.5c-2.5.9-4.4 3.3-4.4 6.5 0 1.9 1.1 3.5 3 3.5s2.9-1.3 2.9-2.8c0-1.4-1-2.2-3.4-2.2z"/></svg></button>
                                         <button type="button" class="chat-tbtn" data-chat-fmt="spoiler" title="Spoiler — ||text||">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
+                                        <span class="chat-tbtn-sep"></span>
+                                        <button type="button" class="chat-tbtn chat-tbtn--pill" data-chat-np-btn title="Share what you're playing (/np)">
+                                            <span class="chat-tbtn-pill-icon">🎵</span> <span class="chat-tbtn-pill-txt">Now Playing</span>
+                                        </button>
+                                        <button type="button" class="chat-tbtn chat-tbtn--pill" data-chat-want-btn title="Search metadata &amp; post Wanted card (/want)">
+                                            <span class="chat-tbtn-pill-icon">🔍</span> <span class="chat-tbtn-pill-txt">Wanted / ISO</span>
+                                        </button>
                                         <span class="chat-toolbar-hint">**bold** · *italic* · `code` · ||spoiler||</span>
                                         <div class="chat-emoji-pop" data-chat-emoji-pop hidden></div>
                                         <div class="chat-gif-pop chat-attach-pop" data-chat-attach-pop hidden>
@@ -7838,6 +7885,7 @@
                                     <div class="chat-composer-row">
                                         <textarea class="chat-input chat-input--area chat-input--bare" data-chat-input maxlength="1000"
                                                   placeholder="Message…" autocomplete="off" rows="1"></textarea>
+                                        <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-np-quick title="Share Now Playing to chat (/np)">🎵</button>
                                         <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-emoji-btn title="Emoji">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></button>
                                         <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-attach-btn title="Share a file (filepost.dev)">
