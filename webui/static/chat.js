@@ -845,15 +845,24 @@
         var al = esc(np.al || '');
         var src = esc((np.src || 'MUSIC').toUpperCase());
         var br = np.br ? '<span class="chat-np-badge chat-np-badge--br">' + esc(np.br) + 'k</span>' : '';
-        var img = (np.img && /^https:\/\//.test(np.img))
+        var durBadge = '';
+        if (np.dur && Number(np.dur) > 0) {
+            var rawD = Number(np.dur);
+            var secTotal = Math.round(rawD > 1000 ? rawD / 1000 : rawD);
+            var dMin = Math.floor(secTotal / 60);
+            var dSec = Math.floor(secTotal % 60);
+            durBadge = '<span class="chat-np-badge chat-np-badge--dur">' + dMin + ':' + (dSec < 10 ? '0' : '') + dSec + '</span>';
+        }
+        var img = (np.img && (/^https?:\/\//.test(np.img) || /^\/api\//.test(np.img)))
             ? '<img class="chat-np-thumb" src="' + attr(np.img) + '" alt="" loading="lazy">'
             : '<div class="chat-np-thumb chat-np-thumb--ph">🎵</div>';
 
-        return '<div class="chat-np-card" data-np-title="' + attr(np.t) + '" data-np-artist="' + attr(np.a) + '" data-np-album="' + attr(np.al || '') + '" data-np-id="' + attr(np.id || '') + '" data-np-src="' + attr(np.src || '') + '">' +
+        return '<div class="chat-np-card" data-np-title="' + attr(np.t) + '" data-np-artist="' + attr(np.a) + '" data-np-album="' + attr(np.al || '') + '" data-np-id="' + attr(np.id || '') + '" data-np-src="' + attr(np.src || '') + '" data-np-dur="' + attr(np.dur || 0) + '" data-np-img="' + attr(np.img || '') + '">' +
             '<div class="chat-np-header">' +
                 '<span class="chat-np-tag"><span class="chat-np-eq"><i></i><i></i><i></i></span> NOW PLAYING</span>' +
                 '<span class="chat-np-src-pill">' + src + '</span>' +
                 br +
+                durBadge +
             '</div>' +
             '<div class="chat-np-body">' +
                 img +
@@ -987,9 +996,26 @@
         var al = String(cur.album || '').replace(/^[a-z0-9_-]+\|\|/i, '');
         var src = cur.source || (cur.is_library ? 'library' : 'stream');
         var id = String(cur.id || '');
-        var img = String(cur.image_url || cur.thumb_url || '');
-        if (img && !/^https:\/\//.test(img)) img = '';
-        var dur = cur.duration_ms || cur.duration || 0;
+        var img = String(cur.image_url || cur.album_cover_url || cur.thumb_url || '');
+        if (!img) {
+            var artEl = document.getElementById('album-art') || document.getElementById('np-cover-art') || document.getElementById('mini-player-album-art');
+            if (artEl && artEl.src && !artEl.src.endsWith('/default-artwork.png')) img = artEl.src;
+        }
+        if (img && !/^https?:\/\//.test(img) && !/^\/api\//.test(img)) img = '';
+
+        var dur = 0;
+        if (cur.duration_ms && Number(cur.duration_ms) > 0) {
+            dur = Math.round(Number(cur.duration_ms));
+        } else if (cur.duration && Number(cur.duration) > 0) {
+            var rawD = Number(cur.duration);
+            dur = rawD > 1000 ? Math.round(rawD) : Math.round(rawD * 1000);
+        }
+        if (!dur) {
+            var apEl = document.getElementById('audio-player');
+            if (apEl && isFinite(apEl.duration) && apEl.duration > 0) {
+                dur = Math.round(apEl.duration * 1000);
+            }
+        }
         var br = cur.bitrate || 0;
 
         var fallbackText = '🎵 Now Playing: ' + a + ' - ' + t + (al ? ' (' + al + ')' : '');
@@ -1167,35 +1193,104 @@
         });
     }
 
-    function _openDownloadForCard(artist, title, album, id, src) {
+    async function _openDownloadForCard(artist, title, album, id, src, durationMs, imageUrl) {
         if (typeof window.openDownloadMissingModalForArtistAlbum !== 'function') {
             if (typeof showToast === 'function') showToast('Download missing modal unavailable', 'error');
             return;
         }
-        var virtualId = 'np_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+
         var albumName = album || title;
+        durationMs = Number(durationMs) || 0;
+        if (durationMs > 0 && durationMs < 1000) {
+            durationMs = Math.round(durationMs * 1000);
+        }
+
+        // 1. Check active audio player if duration is missing
+        if (!durationMs) {
+            var cur = (typeof window.getCurrentTrack === 'function' && window.getCurrentTrack())
+                || window.__ssCurrentTrack
+                || (typeof currentTrack !== 'undefined' ? currentTrack : null);
+            if (cur && (cur.title === title || cur.name === title || !title)) {
+                if (cur.duration_ms) durationMs = Math.round(Number(cur.duration_ms));
+                else if (cur.duration) {
+                    var rd = Number(cur.duration);
+                    durationMs = rd > 1000 ? Math.round(rd) : Math.round(rd * 1000);
+                }
+                if (!imageUrl) imageUrl = cur.image_url || cur.album_cover_url || cur.thumb_url || '';
+            }
+            if (!durationMs) {
+                var ap = document.getElementById('audio-player');
+                if (ap && isFinite(ap.duration) && ap.duration > 0) {
+                    durationMs = Math.round(ap.duration * 1000);
+                }
+            }
+        }
+
+        // 2. If duration or image is still missing, query enhanced search
+        if ((!durationMs || !imageUrl) && (artist || title)) {
+            try {
+                var searchQ = (artist ? artist + ' ' : '') + (title || '');
+                var searchRes = await fetch('/api/enhanced-search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: searchQ.trim() })
+                });
+                if (searchRes.ok) {
+                    var sData = await searchRes.json();
+                    var tracksList = sData.spotify_tracks || sData.tracks || [];
+                    if (tracksList.length > 0) {
+                        var match = tracksList.find(function (tr) {
+                            return tr.name && title && tr.name.toLowerCase() === title.toLowerCase();
+                        }) || tracksList[0];
+                        if (match) {
+                            if (!durationMs && match.duration_ms) durationMs = match.duration_ms;
+                            if (!imageUrl && match.image_url) imageUrl = match.image_url;
+                            if ((!albumName || albumName === title) && match.album) albumName = match.album;
+                            if (!id && match.id) id = match.id;
+                            if (!src && match.source) src = match.source;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.debug('Enhanced search lookup for download modal failed:', err);
+            }
+        }
+
+        var virtualId = 'np_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        var imagesArray = imageUrl ? [{ url: imageUrl }] : [];
+
         var spotifyTracks = [{
             id: id || virtualId,
             name: title,
             artist: artist,
-            album: albumName,
+            artists: [{ name: artist, id: null }],
+            album: {
+                name: albumName,
+                id: null,
+                album_type: 'single',
+                images: imagesArray,
+                total_tracks: 1
+            },
             source: src || 'spotify',
-            duration_ms: 0,
-            image_url: null,
+            duration_ms: durationMs || 0,
+            image_url: imageUrl || null,
             total_tracks: 1
         }];
+
         var albumObj = {
             id: null,
             name: albumName,
             album_type: 'single',
-            images: [],
+            images: imagesArray,
             artists: [{ name: artist }]
         };
+
         var artistObj = {
             id: null,
             name: artist,
             source: src || 'spotify'
         };
+
         window.openDownloadMissingModalForArtistAlbum(
             virtualId,
             '[' + artist + '] ' + albumName,
@@ -6937,7 +7032,9 @@
                         c2.getAttribute('data-np-title') || '',
                         c2.getAttribute('data-np-album') || '',
                         c2.getAttribute('data-np-id') || '',
-                        c2.getAttribute('data-np-src') || ''
+                        c2.getAttribute('data-np-src') || '',
+                        parseInt(c2.getAttribute('data-np-dur') || '0', 10),
+                        c2.getAttribute('data-np-img') || ''
                     );
                 }
                 return;

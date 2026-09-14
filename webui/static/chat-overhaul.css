@@ -2761,6 +2761,15 @@
     margin-left: auto;
 }
 
+.chat-np-badge--dur {
+    font-size: 9.5px;
+    padding: 1.5px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.65);
+    font-weight: 600;
+}
+
 .chat-np-body {
     display: flex;
     align-items: center;
