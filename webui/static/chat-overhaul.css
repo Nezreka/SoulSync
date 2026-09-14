@@ -2661,36 +2661,24 @@
    DISCORD-STYLE NOW PLAYING & WANTED / ISO CARDS
    ════════════════════════════════════════════════════════════════════════════ */
 
-/* Toolbar Pill Buttons */
-.chat-tbtn--pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.85);
-    font-size: 11.5px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
+/* Composer Action Buttons: Now Playing & In Search Of */
+.chat-tbtn--np {
+    color: rgba(165, 180, 252, 0.75);
+    position: relative;
 }
 
-.chat-tbtn--pill:hover {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.25);
-    color: #fff;
+.chat-tbtn--np:hover {
+    color: #a5b4fc;
+    background: rgba(99, 102, 241, 0.16);
 }
 
-.chat-tbtn-pill-icon {
-    font-size: 13px;
-    line-height: 1;
+.chat-tbtn--want {
+    color: rgba(251, 191, 36, 0.75);
 }
 
-.chat-tbtn-pill-txt {
-    font-size: 11px;
-    font-weight: 600;
+.chat-tbtn--want:hover {
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.16);
 }
 
 /* Now Playing Card */
