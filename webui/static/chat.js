@@ -837,6 +837,82 @@
         return { a: m[1].trim(), t: m[2].trim(), y: (m[3] || '').trim(), ty: 'album', src: 'shared' };
     }
 
+    var _npArtCache = {};
+    var _npArtPending = {};
+
+    function _scheduleNpArtProbe(title, artist) {
+        if (!title && !artist) return;
+        var key = (artist || '').toLowerCase().trim() + '|||' + (title || '').toLowerCase().trim();
+        if (key in _npArtCache || _npArtPending[key]) return;
+        _npArtPending[key] = true;
+
+        var qStr = (artist && artist !== 'Unknown Artist' ? artist + ' ' : '') + (title && title !== 'Unknown Track' ? title : '');
+        qStr = qStr.trim();
+        if (!qStr) {
+            delete _npArtPending[key];
+            return;
+        }
+
+        fetch('/api/enhanced-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: qStr })
+        })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+            delete _npArtPending[key];
+            if (!data) return;
+            var trs = data.tracks || data.spotify_tracks || [];
+            var als = data.albums || data.spotify_albums || [];
+            var hit = trs[0] || als[0];
+            var imgUrl = (hit && hit.image_url) ? hit.image_url : '';
+            if (imgUrl) {
+                _npArtCache[key] = imgUrl;
+                _applyNpArtToDom(key, imgUrl);
+            }
+        })
+        .catch(function () {
+            delete _npArtPending[key];
+        });
+    }
+
+    function _applyNpArtToDom(key, imgUrl) {
+        document.querySelectorAll('.chat-np-card').forEach(function (card) {
+            var cTitle = (card.getAttribute('data-np-title') || '').toLowerCase().trim();
+            var cArtist = (card.getAttribute('data-np-artist') || '').toLowerCase().trim();
+            var cKey = cArtist + '|||' + cTitle;
+            if (cKey === key) {
+                card.setAttribute('data-np-img', imgUrl);
+                var ph = card.querySelector('.chat-np-thumb--ph');
+                if (ph) {
+                    var img = document.createElement('img');
+                    img.className = 'chat-np-thumb';
+                    img.src = imgUrl;
+                    img.alt = '';
+                    img.loading = 'lazy';
+                    ph.replaceWith(img);
+                }
+            }
+        });
+        document.querySelectorAll('.chat-wanted-card').forEach(function (card) {
+            var cTitle = (card.getAttribute('data-wanted-title') || '').toLowerCase().trim();
+            var cArtist = (card.getAttribute('data-wanted-artist') || '').toLowerCase().trim();
+            var cKey = cArtist + '|||' + cTitle;
+            if (cKey === key) {
+                card.setAttribute('data-wanted-img', imgUrl);
+                var ph = card.querySelector('.chat-wanted-thumb--ph');
+                if (ph) {
+                    var img = document.createElement('img');
+                    img.className = 'chat-wanted-thumb';
+                    img.src = imgUrl;
+                    img.alt = '';
+                    img.loading = 'lazy';
+                    ph.replaceWith(img);
+                }
+            }
+        });
+    }
+
     function _nowPlayingCardHtml(m, npOverride) {
         var np = npOverride || m.np || _extractNpFromText(m.message);
         if (!np) return m.rich ? renderRich(m.message) : renderPlain(m.message);
@@ -853,11 +929,17 @@
             var dSec = Math.floor(secTotal % 60);
             durBadge = '<span class="chat-np-badge chat-np-badge--dur">' + dMin + ':' + (dSec < 10 ? '0' : '') + dSec + '</span>';
         }
-        var img = (np.img && (/^https?:\/\//.test(np.img) || /^\/api\//.test(np.img)))
-            ? '<img class="chat-np-thumb" src="' + attr(np.img) + '" alt="" loading="lazy">'
-            : '<div class="chat-np-thumb chat-np-thumb--ph">🎵</div>';
 
-        return '<div class="chat-np-card" data-np-title="' + attr(np.t) + '" data-np-artist="' + attr(np.a) + '" data-np-album="' + attr(np.al || '') + '" data-np-id="' + attr(np.id || '') + '" data-np-src="' + attr(np.src || '') + '" data-np-dur="' + attr(np.dur || 0) + '" data-np-img="' + attr(np.img || '') + '">' +
+        var probeKey = (np.a || '').toLowerCase().trim() + '|||' + (np.t || '').toLowerCase().trim();
+        var resolvedImg = np.img || _npArtCache[probeKey] || '';
+        var img = (resolvedImg && (/^https?:\/\//.test(resolvedImg) || /^\/api\//.test(resolvedImg)))
+            ? '<img class="chat-np-thumb" src="' + attr(resolvedImg) + '" alt="" loading="lazy">'
+            : '<div class="chat-np-thumb chat-np-thumb--ph">🎵</div>';
+        if (!resolvedImg && (np.t || np.a)) {
+            _scheduleNpArtProbe(np.t, np.a);
+        }
+
+        return '<div class="chat-np-card" data-np-title="' + attr(np.t) + '" data-np-artist="' + attr(np.a) + '" data-np-album="' + attr(np.al || '') + '" data-np-id="' + attr(np.id || '') + '" data-np-src="' + attr(np.src || '') + '" data-np-dur="' + attr(np.dur || 0) + '" data-np-img="' + attr(resolvedImg || np.img || '') + '">' +
             '<div class="chat-np-header">' +
                 '<span class="chat-np-tag"><span class="chat-np-eq"><i></i><i></i><i></i></span> NOW PLAYING</span>' +
                 '<span class="chat-np-src-pill">' + src + '</span>' +
@@ -938,9 +1020,14 @@
         var cacheKey = (w.a || '').toLowerCase().trim() + '|||' + (w.t || '').toLowerCase().trim();
         var inLib = _wantedPresenceCache[cacheKey];
 
-        var img = (w.img && /^https:\/\//.test(w.img))
-            ? '<img class="chat-wanted-thumb" src="' + attr(w.img) + '" alt="" loading="lazy">'
+        var probeKey = (w.a || '').toLowerCase().trim() + '|||' + (w.t || '').toLowerCase().trim();
+        var resolvedImg = w.img || _npArtCache[probeKey] || '';
+        var img = (resolvedImg && (/^https?:\/\//.test(resolvedImg) || /^\/api\//.test(resolvedImg)))
+            ? '<img class="chat-wanted-thumb" src="' + attr(resolvedImg) + '" alt="" loading="lazy">'
             : '<div class="chat-wanted-thumb chat-wanted-thumb--ph">💿</div>';
+        if (!resolvedImg && (w.t || w.a)) {
+            _scheduleNpArtProbe(w.t, w.a);
+        }
 
         var statusChip = '';
         if (inLib === true) {
@@ -960,7 +1047,7 @@
                 '💬 I Have This! (Send PM)</button>';
         }
 
-        return '<div class="chat-wanted-card" data-wanted-title="' + attr(w.t) + '" data-wanted-artist="' + attr(w.a) + '" data-wanted-key="' + attr(cacheKey) + '">' +
+        return '<div class="chat-wanted-card" data-wanted-title="' + attr(w.t) + '" data-wanted-artist="' + attr(w.a) + '" data-wanted-album="' + attr(w.al || '') + '" data-wanted-id="' + attr(w.id || '') + '" data-wanted-src="' + attr(w.src || '') + '" data-wanted-img="' + attr(resolvedImg || w.img || '') + '" data-wanted-key="' + attr(cacheKey) + '">' +
             '<div class="chat-wanted-header">' +
                 '<span class="chat-wanted-tag">🔍 IN SEARCH OF</span>' +
                 '<span class="chat-wanted-type-pill">' + ty + '</span>' +
@@ -977,13 +1064,14 @@
             '</div>' +
             '<div class="chat-wanted-actions">' +
                 haveBtn +
+                '<button type="button" class="chat-card-btn chat-card-btn--accent" data-chat-card-dl title="Open Download Missing Tracks modal">📥 Download</button>' +
                 '<button type="button" class="chat-card-btn" data-chat-wanted-wishlist title="Add to your Wishlist to find later">➕ Add to Wishlist</button>' +
                 '<button type="button" class="chat-card-btn" data-chat-card-search title="Search Soulseek for this release">🔍 Search Soulseek</button>' +
             '</div>' +
         '</div>';
     }
 
-    function shareNowPlaying() {
+    async function shareNowPlaying() {
         var cur = window.__ssCurrentTrack || (typeof window.getCurrentTrack === 'function' ? window.getCurrentTrack() : null) || state.localNowPlaying;
         if (!cur || (!cur.title && !cur.name)) {
             if (typeof showToast === 'function') {
@@ -998,8 +1086,10 @@
         var id = String(cur.id || '');
         var img = String(cur.image_url || cur.album_cover_url || cur.thumb_url || '');
         if (!img) {
-            var artEl = document.getElementById('album-art') || document.getElementById('np-cover-art') || document.getElementById('mini-player-album-art');
-            if (artEl && artEl.src && !artEl.src.endsWith('/default-artwork.png')) img = artEl.src;
+            var artEl = document.getElementById('sidebar-album-art') || document.getElementById('np-album-art');
+            if (artEl && artEl.src && !artEl.src.endsWith('/trans2.png') && !artEl.src.endsWith('/default-artwork.png')) {
+                img = artEl.src;
+            }
         }
         if (img && !/^https?:\/\//.test(img) && !/^\/api\//.test(img)) img = '';
 
@@ -1017,6 +1107,44 @@
             }
         }
         var br = cur.bitrate || 0;
+
+        var probeKey = (a || '').toLowerCase().trim() + '|||' + (t || '').toLowerCase().trim();
+        if (!img && _npArtCache[probeKey]) {
+            img = _npArtCache[probeKey];
+        }
+
+        if (!img && (t || a)) {
+            try {
+                var searchQ = (a && a !== 'Unknown Artist' ? a + ' ' : '') + (t && t !== 'Unknown Track' ? t : '');
+                if (searchQ.trim()) {
+                    var searchRes = await fetch('/api/enhanced-search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: searchQ.trim() })
+                    }).then(function (r) { return r.ok ? r.json() : null; });
+                    if (searchRes) {
+                        var candTracks = searchRes.tracks || searchRes.spotify_tracks || [];
+                        var candAlbums = searchRes.albums || searchRes.spotify_albums || [];
+                        var best = candTracks[0] || candAlbums[0];
+                        if (best) {
+                            if (best.image_url) {
+                                img = best.image_url;
+                                _npArtCache[probeKey] = img;
+                            }
+                            if (!dur && best.duration_ms) dur = Math.round(best.duration_ms);
+                            if (!al && best.album) al = best.album;
+                            if (cur && typeof cur === 'object') {
+                                if (img && !cur.image_url) cur.image_url = img;
+                                if (dur && !cur.duration_ms) cur.duration_ms = dur;
+                                if (al && !cur.album) cur.album = al;
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('[Chat] Failed to probe art before sharing now playing:', err);
+            }
+        }
 
         var fallbackText = '🎵 Now Playing: ' + a + ' - ' + t + (al ? ' (' + al + ')' : '');
         var payload = {
@@ -1046,10 +1174,14 @@
         if (!modal) return;
         modal.hidden = false;
         if (backdrop) backdrop.hidden = false;
+        requestAnimationFrame(function () {
+            modal.classList.add('visible');
+            if (backdrop) backdrop.classList.add('visible');
+        });
         var inp = q('[data-chat-want-input]');
         if (inp) {
             if (query) inp.value = query;
-            inp.focus();
+            setTimeout(function () { inp.focus(); }, 60);
             if (query) searchWanted();
         }
     }
@@ -1057,8 +1189,14 @@
     function closeWantedModal() {
         var modal = q('[data-chat-want-modal]');
         var backdrop = q('[data-chat-want-backdrop]');
-        if (modal) modal.hidden = true;
-        if (backdrop) backdrop.hidden = true;
+        if (modal) {
+            modal.classList.remove('visible');
+            setTimeout(function () { modal.hidden = true; }, 320);
+        }
+        if (backdrop) {
+            backdrop.classList.remove('visible');
+            setTimeout(function () { backdrop.hidden = true; }, 320);
+        }
     }
 
     function searchWanted() {
@@ -5054,8 +5192,8 @@
     // ── slash commands (room only — power-user glue over existing features)
     var SLASH_COMMANDS = [
         { c: '/np',        a: '', d: 'share what you are playing right now' },
-        { c: '/want',      a: '<query>', d: 'search & post an In Search Of (Wanted) card' },
-        { c: '/iso',       a: '<query>', d: 'alias for /want' },
+        { c: '/want',      a: '[query]', d: 'search & post an In Search Of (Wanted) card' },
+        { c: '/iso',       a: '[query]', d: 'alias for /want' },
         { c: '/friends',   a: '', d: 'open your Friends list' },
         { c: '/blocklist', a: '', d: 'open your Blocklist' },
         { c: '/bookmarks', a: '', d: 'open your Bookmarked Peers' },
@@ -5099,6 +5237,11 @@
         var pop = q('[data-chat-mention-pop]');
         if (pop) { pop.hidden = true; pop.innerHTML = ''; }
         if (!input || !cmd) return;
+        if (cmd === '/want' || cmd === '/iso') {
+            input.value = '';
+            openWantedModal();
+            return;
+        }
         var meta = null;
         SLASH_COMMANDS.forEach(function (sc) { if (sc.c === cmd) meta = sc; });
         if (meta && !meta.a) {                     // no-arg commands run on click
@@ -7025,28 +7168,28 @@
             }
             t = e.target.closest('[data-chat-card-dl]');
             if (t) {
-                var c2 = t.closest('.chat-np-card');
+                var c2 = t.closest('.chat-np-card') || t.closest('.chat-wanted-card');
                 if (c2) {
                     _openDownloadForCard(
-                        c2.getAttribute('data-np-artist') || '',
-                        c2.getAttribute('data-np-title') || '',
-                        c2.getAttribute('data-np-album') || '',
-                        c2.getAttribute('data-np-id') || '',
-                        c2.getAttribute('data-np-src') || '',
-                        parseInt(c2.getAttribute('data-np-dur') || '0', 10),
-                        c2.getAttribute('data-np-img') || ''
+                        c2.getAttribute('data-np-artist') || c2.getAttribute('data-wanted-artist') || '',
+                        c2.getAttribute('data-np-title') || c2.getAttribute('data-wanted-title') || '',
+                        c2.getAttribute('data-np-album') || c2.getAttribute('data-wanted-album') || '',
+                        c2.getAttribute('data-np-id') || c2.getAttribute('data-wanted-id') || '',
+                        c2.getAttribute('data-np-src') || c2.getAttribute('data-wanted-src') || '',
+                        parseInt(c2.getAttribute('data-np-dur') || c2.getAttribute('data-wanted-dur') || '0', 10),
+                        c2.getAttribute('data-np-img') || c2.getAttribute('data-wanted-img') || ''
                     );
                 }
                 return;
             }
             t = e.target.closest('[data-chat-card-artist]');
             if (t) {
-                var c3 = t.closest('.chat-np-card');
+                var c3 = t.closest('.chat-np-card') || t.closest('.chat-wanted-card');
                 if (c3) {
                     _openArtistPage(
-                        c3.getAttribute('data-np-artist') || '',
-                        c3.getAttribute('data-np-id') || '',
-                        c3.getAttribute('data-np-src') || ''
+                        c3.getAttribute('data-np-artist') || c3.getAttribute('data-wanted-artist') || '',
+                        c3.getAttribute('data-np-id') || c3.getAttribute('data-wanted-id') || '',
+                        c3.getAttribute('data-np-src') || c3.getAttribute('data-wanted-src') || ''
                     );
                 }
                 return;

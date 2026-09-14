@@ -3106,9 +3106,17 @@
 .chat-want-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(5px);
-    z-index: 90;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    z-index: 10050;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.28s ease;
+}
+
+.chat-want-backdrop.visible {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .chat-want-drawer {
@@ -3116,14 +3124,20 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: 440px;
-    background: #11141d;
+    width: min(560px, 94vw);
+    background: #0e121b;
     border-left: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: -10px 0 32px rgba(0, 0, 0, 0.6);
-    z-index: 95;
+    box-shadow: -10px 0 40px rgba(0, 0, 0, 0.65);
+    z-index: 10060;
     display: flex;
     flex-direction: column;
-    animation: slideInDrawer 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+}
+
+.chat-want-drawer.visible {
+    transform: translateX(0);
 }
 
 .chat-want-hero {
