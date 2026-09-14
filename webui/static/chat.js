@@ -449,7 +449,9 @@
         var acts = '<button type="button" class="chat-line-reply" title="Copy text" ' +
             'data-chat-copy="' + attr(showText) + '">⧉</button>';
         if (state.view === 'room' && state.canSend && !self) {
-            acts = '<button type="button" class="chat-line-reply" title="React" ' +
+            acts = '<button type="button" class="chat-line-reply" title="Browse ' + attr(m.username || '') + '’s files" ' +
+                'data-chat-browse-user="' + attr(m.username || '') + '">📁</button>' +
+                '<button type="button" class="chat-line-reply" title="React" ' +
                 'data-chat-react-user="' + attr(m.username || '') + '" ' +
                 'data-chat-react-text="' + attr(String(m.message || '')) + '">🙂+</button>' +   // FULL text — the react key is a hash of it
                 '<button type="button" class="chat-line-reply" title="Reply" ' +
@@ -853,7 +855,7 @@
                 '<button class="chat-msg-user" type="button" data-chat-user="' + attr(user) +
                     '" style="color:hsl(' + _hue(user) + ',65%,68%)" title="Message ' +
                     attr(user) + '">' + esc(user) + '</button>' +
-                (ext ? '<span class="chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '') +
+                (ext ? '<span class="chat-peer-badge chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '<span class="chat-peer-badge chat-peer-badge--soulsync">SoulSync</span>') +
                 '<span class="chat-msg-time">' + esc(fmtTime(m.timestamp)) + '</span>' +
                 '</div>' + _lineHtml(m) };
         }
@@ -3675,8 +3677,8 @@
         });
     }
 
-    // ── share browser: a peer's files, downloadable in place ─────────────────
-    var _browse = { user: null, dirs: [], dir: null, files: [] };
+    // ── slide-over peer hub & file explorer (better than nicotine+/slskd) ───────
+    var _browse = { user: null, dirs: [], dir: null, files: [], crumbs: [{ name: 'Shares', path: null }] };
 
     function _fmtSize(bytes) {
         if (!bytes) return '';
@@ -3690,128 +3692,391 @@
         return parts[parts.length - 1] || path;
     }
 
+    function _fileQualityBadge(fn) {
+        if (!fn) return '';
+        var lower = fn.toLowerCase();
+        if (lower.endsWith('.flac')) {
+            return '<span class="chat-audio-badge chat-audio-badge--flac">FLAC</span>';
+        }
+        if (lower.endsWith('.wav')) {
+            return '<span class="chat-audio-badge chat-audio-badge--wav">WAV</span>';
+        }
+        if (lower.endsWith('.mp3')) {
+            var match = lower.match(/(320|256|192|v0|v2)/i);
+            var label = match ? match[1].toUpperCase() : 'MP3';
+            return '<span class="chat-audio-badge chat-audio-badge--mp3">' + esc(label) + '</span>';
+        }
+        if (lower.endsWith('.m4a') || lower.endsWith('.aac')) {
+            return '<span class="chat-audio-badge chat-audio-badge--mp3">AAC</span>';
+        }
+        return '';
+    }
+
+    function closeBrowse() {
+        var overlay = q('[data-chat-browse-modal]');
+        var backdrop = q('[data-chat-browse-backdrop]');
+        if (overlay) {
+            overlay.classList.remove('visible');
+            setTimeout(function () { overlay.hidden = true; }, 320);
+        }
+        if (backdrop) {
+            backdrop.classList.remove('visible');
+            setTimeout(function () { backdrop.hidden = true; }, 320);
+        }
+        if (window.location.hash && window.location.hash.indexOf('#browse') === 0) {
+            try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (e) {}
+        }
+    }
+
     function openBrowse(name) {
         if (!name) return;
         closeUserCard();
         var overlay = q('[data-chat-browse-modal]');
+        var backdrop = q('[data-chat-browse-backdrop]');
         if (!overlay) return;
-        _browse = { user: name, dirs: [], dir: null, files: [] };
+        _browse = {
+            user: name,
+            dirs: [],
+            cache: {},
+            expanded: {},
+            selected: {},
+            filter: ''
+        };
         overlay.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+        requestAnimationFrame(function () {
+            overlay.classList.add('visible');
+            if (backdrop) backdrop.classList.add('visible');
+        });
+
+        // Set Hero identity
         var title = q('[data-chat-browse-title]');
-        if (title) title.textContent = name + '’s files';
+        if (title) title.textContent = name;
+        var av = q('[data-chat-browse-av]');
+        if (av) av.textContent = (name[0] || '👤').toUpperCase();
+        var statusText = q('[data-chat-browse-status-text]');
+        if (statusText) statusText.textContent = 'Connecting…';
+
+        // Reset telemetry
+        var spd = q('[data-chat-browse-speed]');
+        if (spd) { spd.textContent = '—'; spd.className = 'chat-peer-stat-val'; }
+        var qEl = q('[data-chat-browse-queue]');
+        if (qEl) qEl.textContent = '—';
+        var slots = q('[data-chat-browse-slots]');
+        if (slots) { slots.textContent = '—'; slots.className = 'chat-peer-stat-val'; }
+        var fCount = q('[data-chat-browse-folders-count]');
+        if (fCount) fCount.textContent = '—';
+        var histPill = q('[data-chat-browse-history]');
+        if (histPill) histPill.hidden = true;
+
         var inp = q('[data-chat-browse-search]');
-        if (inp) { inp.value = ''; inp.placeholder = 'Filter folders…'; }
-        _browseChrome();
+        if (inp) { inp.value = ''; inp.placeholder = 'Filter folders or search files…'; }
+        _syncBrowseDock();
+
         var body = q('[data-chat-browse-body]');
-        if (body) body.innerHTML = '<div class="chat-gif-hint">Browsing ' + esc(name) + '’s shares…</div>';
+        if (body) body.innerHTML = '<div class="chat-gif-hint">Connecting to ' + esc(name) + '’s Soulseek node…</div>';
+
+        // Update hash for browser Back navigation
+        try { history.replaceState(null, '', '#browse/' + encodeURIComponent(name)); } catch (e) {}
+
+        // Fetch User Info / Telemetry in parallel
+        getJSON('/api/chat/user/' + encodeURIComponent(name)).then(function (res) {
+            if (_browse.user !== name) return;
+            var info = (res.ok && res.body.info) || {};
+            var status = (res.ok && res.body.status) || {};
+            var hist = (res.ok && res.body.history) || null;
+
+            if (statusText) {
+                var pres = status.presence || status.status ||
+                    (status.isOnline === true ? 'Online' : (status.isOnline === false ? 'Offline' : 'Soulseek Peer'));
+                statusText.textContent = String(pres);
+            }
+            if (spd) {
+                spd.textContent = info.uploadSpeed ? (_fmtBytes(info.uploadSpeed) + '/s') : (status.uploadSpeed ? _fmtBytes(status.uploadSpeed) + '/s' : 'Available');
+                spd.className = 'chat-peer-stat-val chat-peer-stat-val--good';
+            }
+            if (qEl) {
+                qEl.textContent = info.queueLength != null ? String(info.queueLength) : '0';
+            }
+            if (slots) {
+                slots.textContent = info.hasFreeUploadSlot ? 'Yes' : (info.uploadSlots ? String(info.uploadSlots) : 'Free');
+                if (info.hasFreeUploadSlot) slots.className = 'chat-peer-stat-val chat-peer-stat-val--good';
+            }
+            if (hist && hist.downloads > 0 && histPill) {
+                var ht = q('[data-chat-browse-history-text]');
+                if (ht) {
+                    ht.textContent = hist.downloads + ' downloads · ' +
+                        (hist.success_rate != null ? hist.success_rate + '% success · ' : '') +
+                        (hist.total_bytes > 0 ? _fmtBytes(hist.total_bytes) : '');
+                }
+                histPill.hidden = false;
+            }
+        });
+
+        // Fetch Shares
         getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares').then(function (res) {
             if (_browse.user !== name) return;
             if (!res.ok) {
                 if (body) {
                     body.innerHTML = '<div class="chat-gif-hint">' +
                         esc(res.body && res.body.error || 'Could not browse') + '</div>' +
-                        '<div class="chat-browse-retry-row">' +
+                        '<div class="chat-browse-retry-row" style="text-align:center;margin-top:16px;">' +
                         '<button type="button" class="modal-button modal-button--primary" ' +
                             'data-chat-browse-retry>Try again</button></div>';
                 }
                 return;
             }
             _browse.dirs = res.body.directories || [];
-            renderBrowseDirs('');
+            if (fCount) fCount.textContent = _browse.dirs.length + ' folders';
+            renderBrowseTree('');
         });
     }
 
-    function _browseChrome() {
-        var back = q('[data-chat-browse-back]');
-        var dl = q('[data-chat-browse-dl]');
-        var inp = q('[data-chat-browse-search]');
-        var inFiles = _browse.dir != null;
-        if (back) back.hidden = !inFiles;
-        if (dl) dl.hidden = !inFiles;
-        if (inp) inp.placeholder = inFiles ? 'Filter files…' : 'Filter folders…';
-    }
-
-    function renderBrowseDirs(filter) {
+    function renderBrowseTree(filter) {
         var body = q('[data-chat-browse-body]');
         if (!body) return;
-        _browse.dir = null; _browse.files = [];
-        _browseChrome();
-        var f = String(filter || '').toLowerCase();
+        _browse.filter = filter || '';
+        var f = String(_browse.filter).toLowerCase();
         var dirs = _browse.dirs.filter(function (d) {
-            return !f || d.name.toLowerCase().indexOf(f) > -1;
-        }).slice(0, 400);
+            if (!f) return true;
+            if (d.name.toLowerCase().indexOf(f) > -1) return true;
+            var cached = _browse.cache[d.name];
+            if (cached && cached.some(function (x) { return x.filename.toLowerCase().indexOf(f) > -1; })) return true;
+            return false;
+        }).slice(0, 500);
+
         if (!dirs.length) {
             body.innerHTML = '<div class="chat-gif-hint">' +
-                (_browse.dirs.length ? 'No folders match' : 'Nothing shared') + '</div>';
+                (_browse.dirs.length ? 'No folders match that filter' : 'Nothing shared') + '</div>';
+            _syncBrowseDock();
             return;
         }
+
         body.innerHTML = dirs.map(function (d) {
-            return '<button type="button" class="chat-browse-row" data-chat-browse-dir="' +
-                attr(d.name) + '" title="' + attr(d.name) + '">' +
-                '<span class="chat-browse-icon">📁</span>' +
-                '<span class="chat-browse-name">' + esc(_baseName(d.name)) + '</span>' +
-                '<span class="chat-browse-meta">' + d.file_count + ' file' +
-                    (d.file_count === 1 ? '' : 's') + '</span></button>';
+            var isExp = !!_browse.expanded[d.name];
+            return '<div class="chat-folder-tree-item' + (isExp ? ' chat-folder-tree-item--open' : '') + '" data-chat-folder-item="' + attr(d.name) + '">' +
+                '<div class="chat-folder-header" data-chat-browse-toggle="' + attr(d.name) + '">' +
+                    '<button type="button" class="chat-folder-chevron' + (isExp ? ' chat-folder-chevron--expanded' : '') + '" ' +
+                            'data-chat-browse-toggle="' + attr(d.name) + '" title="' + (isExp ? 'Collapse' : 'Expand') + '">' +
+                        '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>' +
+                    '</button>' +
+                    '<span class="chat-folder-icon">' + (isExp ? '📂' : '📁') + '</span>' +
+                    '<div class="chat-folder-info" title="' + attr(d.name) + '">' +
+                        '<span class="chat-folder-name">' + esc(_baseName(d.name)) + '</span>' +
+                        '<span class="chat-folder-meta">' + d.file_count + ' file' + (d.file_count === 1 ? '' : 's') + '</span>' +
+                    '</div>' +
+                    '<div class="chat-folder-actions">' +
+                        '<button type="button" class="chat-folder-dl-btn" data-chat-browse-dl-folder="' + attr(d.name) + '" title="Download entire folder in 1 click">' +
+                            '⬇ Download Folder</button>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="chat-folder-children" data-chat-browse-children="' + attr(d.name) + '"' + (isExp ? '' : ' hidden') + '>' +
+                    (isExp ? _renderFolderChildrenHtml(d.name) : '') +
+                '</div>' +
+            '</div>';
         }).join('');
+
+        _syncBrowseDock();
     }
 
-    function openBrowseDir(dirName) {
+    function _renderFolderChildrenHtml(dirName) {
+        var files = _browse.cache[dirName];
+        if (!files) {
+            return '<div class="chat-folder-loading"><span class="chat-spinner-micro"></span> Loading files in ' + esc(_baseName(dirName)) + '…</div>';
+        }
+        var f = String(_browse.filter || '').toLowerCase();
+        var visibleFiles = files.filter(function (x) {
+            return !f || x.filename.toLowerCase().indexOf(f) > -1 || dirName.toLowerCase().indexOf(f) > -1;
+        });
+        if (!visibleFiles.length) {
+            return '<div class="chat-folder-empty">No matching files</div>';
+        }
+
+        var allChecked = visibleFiles.every(function (x) { return !!_browse.selected[x.filename]; });
+
+        var html = '<div class="chat-folder-subhead">' +
+            '<label class="chat-file-row chat-file-row--folder-all">' +
+                '<input type="checkbox" data-chat-browse-folder-all="' + attr(dirName) + '"' + (allChecked ? ' checked' : '') + '>' +
+                '<span class="chat-file-name" style="font-weight:700;">Select all in this folder (' + visibleFiles.length + ' tracks)</span>' +
+            '</label>' +
+        '</div>';
+
+        html += visibleFiles.map(function (x) {
+            var isSel = !!_browse.selected[x.filename];
+            var qBadge = _fileQualityBadge(x.filename);
+            return '<label class="chat-file-row' + (isSel ? ' chat-file-row--selected' : '') + '">' +
+                '<input type="checkbox" data-chat-browse-file="' + attr(x.filename) + '" data-chat-browse-size="' + (x.size || 0) + '" data-chat-browse-dir="' + attr(dirName) + '"' + (isSel ? ' checked' : '') + '>' +
+                '<span class="chat-file-icon">🎵</span>' +
+                '<span class="chat-file-name" title="' + attr(x.filename) + '">' + esc(_baseName(x.filename)) + '</span>' +
+                qBadge +
+                '<span class="chat-file-size">' + _fmtSize(x.size) + '</span>' +
+                '<button type="button" class="chat-file-quick-dl" data-chat-browse-dl-single="' + attr(x.filename) + '" data-chat-browse-size="' + (x.size || 0) + '" title="Download this track">⬇</button>' +
+            '</label>';
+        }).join('');
+
+        return html;
+    }
+
+    function _findBrowseFolderItem(dirName) {
+        if (!dirName) return null;
         var body = q('[data-chat-browse-body]');
-        if (!body) return;
-        _browse.dir = dirName;
-        _browseChrome();
-        body.innerHTML = '<div class="chat-gif-hint">Loading files…</div>';
+        if (!body) return null;
+        var items = body.querySelectorAll('.chat-folder-tree-item');
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].getAttribute('data-chat-folder-item') === dirName) {
+                return items[i];
+            }
+        }
+        return null;
+    }
+
+    function toggleBrowseFolder(dirName, itemEl) {
+        if (!dirName) return;
+        var willExpand = !_browse.expanded[dirName];
+        _browse.expanded[dirName] = willExpand;
+
+        var item = itemEl || _findBrowseFolderItem(dirName);
+        var childrenEl = item ? item.querySelector('.chat-folder-children') : null;
+        var chevron = item ? item.querySelector('.chat-folder-chevron') : null;
+        var icon = item ? item.querySelector('.chat-folder-icon') : null;
+
+        if (item) {
+            if (willExpand) item.classList.add('chat-folder-tree-item--open');
+            else item.classList.remove('chat-folder-tree-item--open');
+        }
+        if (chevron) {
+            if (willExpand) chevron.classList.add('chat-folder-chevron--expanded');
+            else chevron.classList.remove('chat-folder-chevron--expanded');
+            chevron.setAttribute('title', willExpand ? 'Collapse' : 'Expand');
+        }
+        if (icon) {
+            icon.textContent = willExpand ? '📂' : '📁';
+        }
+
+        if (childrenEl) {
+            childrenEl.hidden = !willExpand;
+            if (willExpand) {
+                if (_browse.cache[dirName]) {
+                    childrenEl.innerHTML = _renderFolderChildrenHtml(dirName);
+                    _syncBrowseDock();
+                } else {
+                    childrenEl.innerHTML = '<div class="chat-folder-loading"><span class="chat-spinner-micro"></span> Loading files in ' + esc(_baseName(dirName)) + '…</div>';
+                    var name = _browse.user;
+                    getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares/files?dir=' + encodeURIComponent(dirName)).then(function (res) {
+                        if (_browse.user !== name) return;
+                        var curItem = item || _findBrowseFolderItem(dirName);
+                        var curChildren = curItem ? curItem.querySelector('.chat-folder-children') : null;
+                        if (!curChildren) return;
+                        if (!res.ok) {
+                            curChildren.innerHTML = '<div class="chat-folder-empty">' + esc(res.body && res.body.error || 'Could not load folder') + '</div>';
+                            return;
+                        }
+                        _browse.cache[dirName] = res.body.files || [];
+                        curChildren.innerHTML = _renderFolderChildrenHtml(dirName);
+                        _syncBrowseDock();
+                    });
+                }
+            }
+        }
+    }
+
+    function expandAllBrowseFolders() {
+        var dirs = _browse.dirs || [];
+        dirs.forEach(function (d) {
+            _browse.expanded[d.name] = true;
+        });
+        renderBrowseTree(_browse.filter || '');
+        dirs.forEach(function (d) {
+            if (!_browse.cache[d.name]) {
+                var name = _browse.user;
+                getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares/files?dir=' + encodeURIComponent(d.name)).then(function (res) {
+                    if (_browse.user !== name || !_browse.expanded[d.name]) return;
+                    if (res.ok) {
+                        _browse.cache[d.name] = res.body.files || [];
+                        var item = _findBrowseFolderItem(d.name);
+                        var ch = item ? item.querySelector('.chat-folder-children') : null;
+                        if (ch) ch.innerHTML = _renderFolderChildrenHtml(d.name);
+                        _syncBrowseDock();
+                    }
+                });
+            }
+        });
+    }
+
+    function collapseAllBrowseFolders() {
+        _browse.expanded = {};
+        renderBrowseTree(_browse.filter || '');
+    }
+
+    function _syncBrowseDock() {
+        var dock = q('[data-chat-browse-dock]');
+        var countEl = q('[data-chat-dock-count]');
+        var sizeEl = q('[data-chat-dock-size]');
+        if (!dock) return;
+        var selected = _browse.selected || {};
+        var keys = Object.keys(selected);
+        var count = keys.length;
+        var totalBytes = 0;
+        keys.forEach(function (k) {
+            totalBytes += Number(selected[k].size) || 0;
+        });
+
+        if (count > 0) {
+            dock.hidden = false;
+            if (countEl) countEl.textContent = count;
+            if (sizeEl) sizeEl.textContent = _fmtSize(totalBytes);
+        } else {
+            dock.hidden = true;
+        }
+    }
+
+    function downloadFolder(dirName) {
+        if (!_browse.user || !dirName) return;
+        if (typeof showToast === 'function') showToast('Fetching files in ' + _baseName(dirName) + '…', 'info');
         var name = _browse.user;
         getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares/files?dir=' +
                 encodeURIComponent(dirName)).then(function (res) {
-            if (_browse.user !== name || _browse.dir !== dirName) return;
-            if (!res.ok) {
-                body.innerHTML = '<div class="chat-gif-hint">' +
-                    esc(res.body && res.body.error || 'Could not read that folder') + '</div>';
+            if (!res.ok || !res.body.files || !res.body.files.length) {
+                if (typeof showToast === 'function') showToast('Could not read files for that folder', 'error');
                 return;
             }
-            _browse.files = res.body.files || [];
-            renderBrowseFiles('');
+            _browse.cache[dirName] = res.body.files;
+            var files = res.body.files.map(function (x) {
+                return { filename: x.filename, size: x.size };
+            });
+            postJSON('/api/chat/user/' + encodeURIComponent(name) + '/download', { files: files }).then(function (dRes) {
+                if (!dRes.ok) {
+                    if (typeof showToast === 'function') showToast(dRes.body && dRes.body.error || 'Could not queue folder', 'error');
+                    return;
+                }
+                var n = dRes.body.queued || 0;
+                if (typeof showToast === 'function') {
+                    showToast('Queued ' + n + ' files from ' + _baseName(dirName) + ' — check Downloads', 'success');
+                }
+            });
         });
     }
 
-    function renderBrowseFiles(filter) {
-        var body = q('[data-chat-browse-body]');
-        if (!body) return;
-        var f = String(filter || '').toLowerCase();
-        var files = _browse.files.filter(function (x) {
-            return !f || x.filename.toLowerCase().indexOf(f) > -1;
-        }).slice(0, 500);
-        if (!files.length) {
-            body.innerHTML = '<div class="chat-gif-hint">No files here</div>';
-            return;
-        }
-        body.innerHTML =
-            '<label class="chat-browse-row chat-browse-row--all">' +
-                '<input type="checkbox" data-chat-browse-all checked>' +
-                '<span class="chat-browse-name">Select all (' + files.length + ')</span>' +
-            '</label>' +
-            files.map(function (x, i) {
-                return '<label class="chat-browse-row">' +
-                    '<input type="checkbox" data-chat-browse-file="' + i + '" checked>' +
-                    '<span class="chat-browse-name" title="' + attr(x.filename) + '">' +
-                        esc(_baseName(x.filename)) + '</span>' +
-                    '<span class="chat-browse-meta">' + _fmtSize(x.size) + '</span></label>';
-            }).join('');
-        body._files = files;
+    function downloadSingleTrack(filePath, size) {
+        if (!_browse.user || !filePath) return;
+        postJSON('/api/chat/user/' + encodeURIComponent(_browse.user) + '/download',
+                 { files: [{ filename: filePath, size: Number(size) || 0 }] }).then(function (res) {
+            if (!res.ok) {
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'Could not queue track', 'error');
+                }
+                return;
+            }
+            if (typeof showToast === 'function') {
+                showToast('Queued ' + _baseName(filePath) + ' — check Downloads', 'success');
+            }
+        });
     }
 
     function browseDownloadSelected() {
-        var body = q('[data-chat-browse-body]');
         var dl = q('[data-chat-browse-dl]');
-        if (!body || !body._files) return;
-        var picked = [];
-        body.querySelectorAll('[data-chat-browse-file]').forEach(function (cb) {
-            if (cb.checked) {
-                var x = body._files[Number(cb.getAttribute('data-chat-browse-file'))];
-                if (x) picked.push({ filename: x.filename, size: x.size });
-            }
-        });
+        var selected = _browse.selected || {};
+        var picked = Object.values(selected);
         if (!picked.length) {
             if (typeof showToast === 'function') showToast('Nothing selected', 'info');
             return;
@@ -3819,7 +4084,7 @@
         if (dl) { dl.disabled = true; dl.textContent = 'Queueing…'; }
         postJSON('/api/chat/user/' + encodeURIComponent(_browse.user) + '/download',
                  { files: picked }).then(function (res) {
-            if (dl) { dl.disabled = false; dl.textContent = 'Download selected'; }
+            if (dl) { dl.disabled = false; dl.textContent = 'Download Selected'; }
             if (!res.ok) {
                 if (typeof showToast === 'function') {
                     showToast(res.body && res.body.error || 'Could not queue downloads', 'error');
@@ -3831,6 +4096,17 @@
                 showToast('Queued ' + n + ' file' + (n === 1 ? '' : 's') + ' from ' +
                           _browse.user + ' — check Downloads', 'success');
             }
+            _browse.selected = {};
+            var body = q('[data-chat-browse-body]');
+            if (body) {
+                body.querySelectorAll('[data-chat-browse-file], [data-chat-browse-folder-all]').forEach(function (cb) {
+                    cb.checked = false;
+                });
+                body.querySelectorAll('.chat-file-row--selected').forEach(function (r) {
+                    r.classList.remove('chat-file-row--selected');
+                });
+            }
+            _syncBrowseDock();
         });
     }
 
@@ -5718,37 +5994,75 @@
                 if (cOv) _arcChallengeRow(cOv);
                 return;
             }
+            t = e.target.closest('[data-chat-browse-user]');
+            if (t) {
+                openBrowse(t.getAttribute('data-chat-browse-user'));
+                return;
+            }
             t = e.target.closest('[data-chat-card-browse]');
             if (t) {
                 var bOv = q('[data-chat-user-card]');
                 openBrowse(bOv && bOv.getAttribute('data-chat-user-card-for'));
                 return;
             }
-            t = e.target.closest('[data-chat-browse-dir]');
-            if (t) { openBrowseDir(t.getAttribute('data-chat-browse-dir')); return; }
-            t = e.target.closest('[data-chat-browse-back]');
+            t = e.target.closest('[data-chat-browse-dl-single]');
             if (t) {
-                var bsIn = q('[data-chat-browse-search]');
-                if (bsIn) bsIn.value = '';
-                renderBrowseDirs('');
+                downloadSingleTrack(t.getAttribute('data-chat-browse-dl-single'), t.getAttribute('data-chat-browse-size'));
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-dl-folder]');
+            if (t) {
+                downloadFolder(t.getAttribute('data-chat-browse-dl-folder'));
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-toggle]');
+            if (t) {
+                var folderItem = t.closest('.chat-folder-tree-item');
+                var dir = t.getAttribute('data-chat-browse-toggle') || (folderItem && folderItem.getAttribute('data-chat-folder-item'));
+                toggleBrowseFolder(dir, folderItem);
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-expand-all]');
+            if (t) { expandAllBrowseFolders(); return; }
+            t = e.target.closest('[data-chat-browse-collapse-all]');
+            if (t) { collapseAllBrowseFolders(); return; }
+            t = e.target.closest('[data-chat-dock-clear]');
+            if (t) {
+                _browse.selected = {};
+                var bBody = q('[data-chat-browse-body]');
+                if (bBody) {
+                    bBody.querySelectorAll('[data-chat-browse-file], [data-chat-browse-folder-all]').forEach(function (cb) {
+                        cb.checked = false;
+                    });
+                    bBody.querySelectorAll('.chat-file-row--selected').forEach(function (r) {
+                        r.classList.remove('chat-file-row--selected');
+                    });
+                }
+                _syncBrowseDock();
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-msg]');
+            if (t) {
+                var peerName = _browse.user;
+                closeBrowse();
+                if (peerName) openPm(peerName);
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-challenge]');
+            if (t) {
+                var peerName2 = _browse.user;
+                closeBrowse();
+                if (peerName2) openUserCard(peerName2);
                 return;
             }
             t = e.target.closest('[data-chat-browse-dl]');
             if (t) { browseDownloadSelected(); return; }
             t = e.target.closest('[data-chat-browse-close]');
-            if (t) { var bm = q('[data-chat-browse-modal]'); if (bm) bm.hidden = true; return; }
+            if (t) { closeBrowse(); return; }
+            t = e.target.closest('[data-chat-browse-backdrop]');
+            if (t) { closeBrowse(); return; }
             var bmo = e.target.closest('[data-chat-browse-modal]');
-            if (bmo && e.target === bmo) { bmo.hidden = true; return; }
-            t = e.target.closest('[data-chat-browse-all]');
-            if (t) {
-                var bBody = q('[data-chat-browse-body]');
-                if (bBody) {
-                    bBody.querySelectorAll('[data-chat-browse-file]').forEach(function (cb) {
-                        cb.checked = t.checked;
-                    });
-                }
-                return;
-            }
+            if (bmo && e.target === bmo) { closeBrowse(); return; }
             t = e.target.closest('[data-chat-card-ignore]');
             if (t) {
                 var cardOv = q('[data-chat-user-card]');
@@ -5786,6 +6100,59 @@
                 }
             });
         }
+
+        document.addEventListener('change', function (e) {
+            if (e.target && e.target.matches('[data-chat-browse-file]')) {
+                var fn = e.target.getAttribute('data-chat-browse-file');
+                var sz = Number(e.target.getAttribute('data-chat-browse-size')) || 0;
+                var row = e.target.closest('.chat-file-row');
+                if (e.target.checked) {
+                    _browse.selected[fn] = { size: sz };
+                    if (row) row.classList.add('chat-file-row--selected');
+                } else {
+                    delete _browse.selected[fn];
+                    if (row) row.classList.remove('chat-file-row--selected');
+                }
+                _syncBrowseDock();
+            } else if (e.target && e.target.matches('[data-chat-browse-folder-all]')) {
+                var dir = e.target.getAttribute('data-chat-browse-folder-all');
+                var files = _browse.cache[dir] || [];
+                var chk = e.target.checked;
+                var container = e.target.closest('.chat-folder-children');
+                files.forEach(function (x) {
+                    if (chk) {
+                        _browse.selected[x.filename] = { size: x.size || 0 };
+                    } else {
+                        delete _browse.selected[x.filename];
+                    }
+                });
+                if (container) {
+                    container.querySelectorAll('[data-chat-browse-file]').forEach(function (cb) {
+                        cb.checked = chk;
+                        var r = cb.closest('.chat-file-row');
+                        if (r) {
+                            if (chk) r.classList.add('chat-file-row--selected');
+                            else r.classList.remove('chat-file-row--selected');
+                        }
+                    });
+                }
+                _syncBrowseDock();
+            }
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                var bm = q('[data-chat-browse-modal]');
+                if (bm && !bm.hidden) { closeBrowse(); }
+            }
+        });
+
+        window.addEventListener('popstate', function () {
+            var bm = q('[data-chat-browse-modal]');
+            if (bm && !bm.hidden && (!window.location.hash || window.location.hash.indexOf('#browse') !== 0)) {
+                closeBrowse();
+            }
+        });
 
         var inputEl = q('[data-chat-input]');
         if (inputEl) {
@@ -5868,9 +6235,60 @@
                 }
             }
             if (e.target && e.target.matches('[data-chat-browse-search]')) {
-                var v = e.target.value.trim();
-                if (_browse.dir != null) renderBrowseFiles(v);
-                else renderBrowseDirs(v);
+                renderBrowseTree(e.target.value.trim());
+            }
+        });
+
+        document.addEventListener('change', function (e) {
+            var cb = e.target.closest('[data-chat-browse-file]');
+            if (cb) {
+                var fn = cb.getAttribute('data-chat-browse-file');
+                var sz = Number(cb.getAttribute('data-chat-browse-size')) || 0;
+                var row = cb.closest('.chat-file-row');
+                if (cb.checked) {
+                    _browse.selected[fn] = { filename: fn, size: sz };
+                    if (row) row.classList.add('chat-file-row--selected');
+                } else {
+                    delete _browse.selected[fn];
+                    if (row) row.classList.remove('chat-file-row--selected');
+                }
+                var dir = cb.getAttribute('data-chat-browse-dir');
+                if (dir) {
+                    var folderAll = q('[data-chat-browse-folder-all="' + attr(dir) + '"]');
+                    if (folderAll) {
+                        var cached = _browse.cache[dir] || [];
+                        folderAll.checked = cached.length > 0 && cached.every(function (x) { return !!_browse.selected[x.filename]; });
+                    }
+                }
+                _syncBrowseDock();
+                return;
+            }
+
+            var fAll = e.target.closest('[data-chat-browse-folder-all]');
+            if (fAll) {
+                var dirName = fAll.getAttribute('data-chat-browse-folder-all');
+                var files = _browse.cache[dirName] || [];
+                var checked = fAll.checked;
+                files.forEach(function (x) {
+                    if (checked) {
+                        _browse.selected[x.filename] = { filename: x.filename, size: x.size };
+                    } else {
+                        delete _browse.selected[x.filename];
+                    }
+                });
+                var chEl = q('[data-chat-browse-children="' + attr(dirName) + '"]');
+                if (chEl) {
+                    chEl.querySelectorAll('[data-chat-browse-file]').forEach(function (c) {
+                        c.checked = checked;
+                        var r = c.closest('.chat-file-row');
+                        if (r) {
+                            if (checked) r.classList.add('chat-file-row--selected');
+                            else r.classList.remove('chat-file-row--selected');
+                        }
+                    });
+                }
+                _syncBrowseDock();
+                return;
             }
         });
 
