@@ -81,6 +81,16 @@ describe('the search route', () => {
     expect(document.getElementById('enhanced-search-input')).not.toBeNull();
   });
 
+  it('shows explore and browse categories when search is idle', async () => {
+    await renderRoute('/search');
+    await settled();
+
+    const explore = document.getElementById('enh-explore-section');
+    expect(explore).not.toBeNull();
+    expect(screen.getByText('Explore & browse')).toBeInTheDocument();
+    expect(screen.getByText('Top Trending')).toBeInTheDocument();
+  });
+
   it('renders #enhanced-main-results-area, where download bubbles land', async () => {
     // showSearchDownloadBubbles renders into this id and silently returns
     // without it, so every download started from search would draw nowhere.

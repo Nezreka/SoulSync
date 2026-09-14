@@ -136,6 +136,11 @@ export function CompactItem({
           {placeholder}
         </div>
       )}
+      {(kind === 'album' || kind === 'playlist') && (
+        <span className="enh-card-floating-play" aria-hidden="true">
+          ▶
+        </span>
+      )}
       <div className="enh-item-info">
         <div className="enh-item-name">{name}</div>
         <div className="enh-item-meta">{meta}</div>

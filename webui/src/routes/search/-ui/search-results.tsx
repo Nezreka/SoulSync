@@ -246,25 +246,30 @@ export function SearchResults({
 
   const spotlightBody = spotlight ? (
     <>
-      {spotlight.image ? (
-        <img
-          className={`enh-top-result-art${spotlight.round ? ' enh-top-result-art--round' : ''}`}
-          src={spotlight.image}
-          alt=""
-          onError={(event) => {
-            event.currentTarget.style.display = 'none';
-          }}
-        />
-      ) : (
-        <div
-          className={`enh-top-result-art enh-top-result-art--ph${spotlight.round ? ' enh-top-result-art--round' : ''}`}
-        >
-          {spotlight.round ? '🎤' : '💿'}
+      <div className="enh-top-result-art-wrap">
+        {spotlight.image ? (
+          <img
+            className={`enh-top-result-art${spotlight.round ? ' enh-top-result-art--round' : ''}`}
+            src={spotlight.image}
+            alt=""
+            onError={(event) => {
+              event.currentTarget.style.display = 'none';
+            }}
+          />
+        ) : (
+          <div
+            className={`enh-top-result-art enh-top-result-art--ph${spotlight.round ? ' enh-top-result-art--round' : ''}`}
+          >
+            {spotlight.round ? '🎤' : '💿'}
+          </div>
+        )}
+        <div className="enh-top-result-play-affordance" aria-hidden="true">
+          <span>▶</span>
         </div>
-      )}
+      </div>
       <div className="enh-top-result-text">
-        <div className="enh-top-result-name">{spotlight.name}</div>
         <div className="enh-top-result-kind">{spotlight.kind}</div>
+        <div className="enh-top-result-name">{spotlight.name}</div>
       </div>
     </>
   ) : null;

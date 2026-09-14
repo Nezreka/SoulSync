@@ -483,6 +483,13 @@ describe('SearchResults', () => {
       expect.objectContaining({ id: 'pl-1', name: 'Chill Vibes' }),
     );
   });
+
+  it('renders top result play affordance and card floating play button', () => {
+    renderResults({ albums: [album()] });
+    const spot = document.querySelector('#enh-top-result .enh-top-result-card')!;
+    expect(spot.querySelector('.enh-top-result-play-affordance')).not.toBeNull();
+    expect(document.querySelector('.enh-card-floating-play')).not.toBeNull();
+  });
 });
 
 /**
