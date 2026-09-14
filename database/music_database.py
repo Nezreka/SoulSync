@@ -9863,7 +9863,7 @@ class MusicDatabase:
         from collections import defaultdict
         groups = defaultdict(list)
         for album in candidate_albums:
-            title = (getattr(album, 'title', None) or '').strip().lower()
+            title = getattr(album, 'title', None)
             artist_id = getattr(album, 'artist_id', None)
             year = getattr(album, 'year', None)
             groups[(title, artist_id, year)].append(album)
@@ -9875,8 +9875,9 @@ class MusicDatabase:
                 if aid is not None:
                     tracks_by_album[aid].append(track)
 
+        ascii_lower = str.maketrans('ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')
         cache = {}
-        for (title, artist_id, year), siblings in groups.items():
+        for siblings in groups.values():
             sibling_ids = [getattr(s, 'id', None) for s in siblings if getattr(s, 'id', None) is not None]
             stored_track_count = max(((getattr(s, 'track_count', None) or 0) for s in siblings), default=0)
 
@@ -9888,9 +9889,12 @@ class MusicDatabase:
             format_set = set()
             for t in sibling_tracks:
                 fp = getattr(t, 'file_path', None)
-                if not fp or not str(fp).strip():
+                if fp is None or fp == '':
                     continue
-                t_title = (getattr(t, 'title', None) or '').strip().lower()
+                # Match SQLite LOWER: ASCII only, preserving whitespace and NULL.
+                t_title = getattr(t, 'title', None)
+                if t_title is not None:
+                    t_title = t_title.translate(ascii_lower)
                 t_num = getattr(t, 'track_number', None)
                 distinct_track_set.add((t_title, t_num))
 

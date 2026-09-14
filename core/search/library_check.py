@@ -20,20 +20,16 @@ from core.wishlist.presence import load_wishlist_keys as _load_wishlist_keys_sha
 
 logger = logging.getLogger(__name__)
 
-# Multi-artist delimiters — the same set used by the matching engine's
-# featured-artist splitter, plus a comma which MusicBrainz join-phrases
-# and CSV-formatted metadata both use.
-_ARTIST_SPLIT_RE = re.compile(
-    r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b)\s*',
-    re.IGNORECASE,
-)
+# Only explicit featured-artist credits are safe to split without artist IDs.
+# Commas and ampersands also occur inside indivisible band names.
+_ARTIST_SPLIT_RE = re.compile(r'\s+\b(?:feat|ft|featuring)\b\.?\s*', re.IGNORECASE)
 
 
 def _norm_key(text: str) -> str:
     """Normalise text for ownership-key comparison.
 
     Applies accent folding (Björk → bjork), lowercases, and strips every
-    non-alphanumeric character so that punctuation / spacing / "The" prefix
+    non-alphanumeric character so that punctuation / spacing
     differences never break a match.
     """
     from core.text.normalize import normalize_for_comparison
@@ -44,13 +40,7 @@ def _norm_key(text: str) -> str:
 
 
 def _first_artist(name: str) -> str:
-    """The first artist from a potentially multi-artist string.
-
-    MusicBrainz join-phrases ('A & B', 'A feat. B') and CSV metadata
-    ('A, B') produce combined artist names. Library albums are filed under
-    the primary artist, so splitting and trying the first one is the right
-    heuristic.
-    """
+    """Return the primary credit when an explicit featured artist is present."""
     parts = _ARTIST_SPLIT_RE.split(name or '')
     return parts[0].strip() if parts else (name or '').strip()
 
@@ -120,8 +110,7 @@ def check_library_presence(
             db_title, db_artist = row[0] or '', row[1] or ''
             # Full artist name key
             owned_albums.add(_album_key(db_title, db_artist))
-            # Also index the FIRST artist so "Nirvana" matches a query for
-            # "Nirvana & Foo Fighters" (and vice-versa).
+            # Also index explicit featured-artist credits under the primary artist.
             first = _first_artist(db_artist)
             if first and first != db_artist:
                 owned_albums.add(_album_key(db_title, first))
@@ -172,15 +161,11 @@ def check_library_presence(
         for a in albums:
             q_name = a.get('name', '')
             q_artist = a.get('artist', '')
-            # Try: full artist → first-artist-of-query → first-artist-of-csv
+            # Try the full credit before an explicit featured-artist fallback.
             keys_to_try = {_album_key(q_name, q_artist)}
             first_q = _first_artist(q_artist)
             if first_q:
                 keys_to_try.add(_album_key(q_name, first_q))
-            # CSV split (legacy behaviour: comma-separated)
-            csv_first = q_artist.split(',')[0].strip()
-            if csv_first:
-                keys_to_try.add(_album_key(q_name, csv_first))
             album_results.append(bool(keys_to_try & owned_albums))
 
         plex_base, plex_token = _resolve_plex_credentials(plex_client, config_manager)
@@ -194,9 +179,6 @@ def check_library_presence(
             first_t = _first_artist(t_artist)
             if first_t:
                 keys_to_try.append(_norm_key(t_name) + '|||' + _norm_key(first_t))
-            csv_first = t_artist.split(',')[0].strip()
-            if csv_first:
-                keys_to_try.append(_norm_key(t_name) + '|||' + _norm_key(csv_first))
 
             in_wishlist = any(k in wishlist_keys for k in keys_to_try)
             match = None

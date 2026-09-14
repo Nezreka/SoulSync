@@ -76,7 +76,7 @@ def _resolve_completion_artist_name(
     return resolved_name or 'Unknown Artist'
 
 
-def _resolve_completion_track_total(release: Dict[str, Any], source_chain: List[str], track_cache: Optional[Dict[str, int]] = None) -> int:
+def _resolve_completion_track_total(release: Dict[str, Any], source_chain: List[str], track_cache: Optional[Dict[tuple, int]] = None) -> int:
     total_tracks = _extract_lookup_value(release, 'total_tracks', default=0) or 0
     if total_tracks:
         return int(total_tracks)
@@ -85,7 +85,7 @@ def _resolve_completion_track_total(release: Dict[str, Any], source_chain: List[
     if not release_id:
         return 0
 
-    cache_key = str(release_id)
+    cache_key = (tuple(source_chain), str(release_id))
     if track_cache is not None and cache_key in track_cache:
         return track_cache[cache_key]
 
@@ -222,18 +222,18 @@ def _canonical_pin_denies_card(db, db_album: Any, card_source: Optional[str],
 
     cache_key = (pin_source, str(card_id))
     if pin_tracks_cache is not None and cache_key in pin_tracks_cache:
-        return pin_tracks_cache[cache_key]
+        return pin_tracks_cache[cache_key] > 0
 
     try:
         items = _extract_track_items(
             get_album_tracks_for_source(pin_source, str(card_id)))
-        resolved = bool(items)
+        resolved = len(items)
     except Exception:
-        resolved = False   # can't prove the card belongs to the pin's source
+        resolved = 0   # can't prove the card belongs to the pin's source
 
     if pin_tracks_cache is not None:
         pin_tracks_cache[cache_key] = resolved
-    return resolved
+    return resolved > 0
 
 
 def _resolve_canonical_album_completion(db, db_album: Any,
@@ -310,7 +310,7 @@ def check_album_completion(
     completeness_cache: Optional[Dict[Any, Any]] = None,
     album_source_ids_cache: Optional[Dict[Any, Any]] = None,
     canonical_cache: Optional[Dict[Any, Any]] = None,
-    track_cache: Optional[Dict[str, int]] = None,
+    track_cache: Optional[Dict[tuple, int]] = None,
     pin_tracks_cache: Optional[Dict[Any, Any]] = None,
 ) -> Dict[str, Any]:
     """Check completion status for a single album."""
@@ -522,7 +522,7 @@ def check_single_completion(
     completeness_cache: Optional[Dict[Any, Any]] = None,
     album_source_ids_cache: Optional[Dict[Any, Any]] = None,
     canonical_cache: Optional[Dict[Any, Any]] = None,
-    track_cache: Optional[Dict[str, int]] = None,
+    track_cache: Optional[Dict[tuple, int]] = None,
 ) -> Dict[str, Any]:
     """Check completion status for a single/EP."""
     try:
@@ -530,10 +530,7 @@ def check_single_completion(
         single_name = single_data.get('name', '')
         album_type = (single_data.get('album_type') or 'single').lower()
         raw_total_tracks = single_data.get('total_tracks')
-        if album_type == 'single':
-            total_tracks = int(raw_total_tracks) if raw_total_tracks is not None else 1
-        else:
-            total_tracks = int(raw_total_tracks) if raw_total_tracks else 0
+        total_tracks = int(raw_total_tracks) if raw_total_tracks else 0
         single_id = single_data.get('id', '')
         formats = []
 
@@ -544,7 +541,8 @@ def check_single_completion(
             total_tracks,
         )
 
-        if album_type == 'ep' or total_tracks > 1:
+        # Unknown counts must use release ownership, not assume a one-track single.
+        if album_type == 'ep' or total_tracks != 1:
             # When candidate_albums is None (legacy or mock tests), resolve upstream count
             # before querying DB to satisfy test contracts.
             if total_tracks == 0 and candidate_albums is None:

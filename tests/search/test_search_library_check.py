@@ -195,7 +195,7 @@ def test_album_not_in_library_returns_false(db):
     assert result['albums'] == [False]
 
 
-def test_album_lookup_uses_first_artist_in_csv(db):
+def test_album_ambiguous_comma_credit_does_not_match_primary(db):
     aid = _seed_artist(db, 'Pink Floyd')
     _seed_album(db, aid, 'DSOTM')
     cfg = _FakeConfigManager({})
@@ -204,7 +204,7 @@ def test_album_lookup_uses_first_artist_in_csv(db):
         albums=[{'name': 'DSOTM', 'artist': 'Pink Floyd, Roger Waters'}],
         tracks=[],
     )
-    assert result['albums'] == [True]
+    assert result['albums'] == [False]
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +269,7 @@ def test_track_in_library_and_wishlist_both_set(db):
     assert result['tracks'][0]['in_wishlist'] is True
 
 
-def test_track_artist_csv_uses_first_only(db):
+def test_track_ambiguous_comma_credit_does_not_match_primary(db):
     aid = _seed_artist(db, 'Kendrick Lamar')
     alb = _seed_album(db, aid, 'DAMN.')
     _seed_track(db, alb, aid, 'HUMBLE.', file_path='/x.flac')
@@ -279,7 +279,7 @@ def test_track_artist_csv_uses_first_only(db):
         albums=[],
         tracks=[{'name': 'HUMBLE.', 'artist': 'Kendrick Lamar, J. Cole'}],
     )
-    assert result['tracks'][0]['in_library'] is True
+    assert result['tracks'][0]['in_library'] is False
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +299,7 @@ def test_album_accent_mismatch_matches(db):
     assert result['albums'] == [True]
 
 
-def test_album_multi_artist_query_matches_single_artist_library(db):
+def test_album_ampersand_query_does_not_match_primary(db):
     """Library has 'Nirvana', query has 'Nirvana & Foo Fighters'."""
     aid = _seed_artist(db, 'Nirvana')
     _seed_album(db, aid, 'Bleach')
@@ -309,10 +309,10 @@ def test_album_multi_artist_query_matches_single_artist_library(db):
         albums=[{'name': 'Bleach', 'artist': 'Nirvana & Foo Fighters'}],
         tracks=[],
     )
-    assert result['albums'] == [True]
+    assert result['albums'] == [False]
 
 
-def test_album_single_artist_query_matches_multi_artist_library(db):
+def test_album_primary_does_not_match_ampersand_credit(db):
     """Library has 'Artist A & Artist B', query has 'Artist A'."""
     aid = _seed_artist(db, 'Artist A & Artist B')
     _seed_album(db, aid, 'Collab Album')
@@ -322,7 +322,7 @@ def test_album_single_artist_query_matches_multi_artist_library(db):
         albums=[{'name': 'Collab Album', 'artist': 'Artist A'}],
         tracks=[],
     )
-    assert result['albums'] == [True]
+    assert result['albums'] == [False]
 
 
 def test_album_punctuation_difference_matches(db):
@@ -378,8 +378,8 @@ def test_track_accent_mismatch_matches(db):
     assert result['tracks'][0]['in_library'] is True
 
 
-def test_track_multi_artist_matches(db):
-    """Track-level multi-artist matching."""
+def test_track_ampersand_credit_does_not_match_primary(db):
+    """An ampersand alone is not proof of separate artists."""
     aid = _seed_artist(db, 'Kendrick Lamar')
     alb = _seed_album(db, aid, 'DAMN.')
     _seed_track(db, alb, aid, 'HUMBLE.', file_path='/x.flac')
@@ -389,4 +389,18 @@ def test_track_multi_artist_matches(db):
         albums=[],
         tracks=[{'name': 'HUMBLE.', 'artist': 'Kendrick Lamar & J. Cole'}],
     )
-    assert result['tracks'][0]['in_library'] is True
+    assert result['tracks'][0]['in_library'] is False
+
+
+@pytest.mark.parametrize('stored,query', [('Earth, Wind & Fire', 'Earth'), ('Earth', 'Earth, Wind & Fire'), ('Simon & Garfunkel', 'Simon')])
+def test_band_names_do_not_match_partial_artist(db, stored, query):
+    aid = _seed_artist(db, stored)
+    alb = _seed_album(db, aid, 'Example')
+    _seed_track(db, alb, aid, 'Example', file_path='/example.flac')
+    result = library_check.check_library_presence(
+        db, None, _FakeConfigManager(), 1,
+        [{'name': 'Example', 'artist': query}],
+        [{'name': 'Example', 'artist': query}],
+    )
+    assert result['albums'] == [False]
+    assert result['tracks'][0]['in_library'] is False

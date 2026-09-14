@@ -367,3 +367,60 @@ def test_unowned_releases_do_not_call_external_api(tmp_path, monkeypatch):
 
 
 
+
+
+def test_track_count_cache_separates_sources(monkeypatch):
+    from core.metadata import completion as c
+    monkeypatch.setattr(c, 'get_album_tracks_for_source', lambda source, rid: [{}] * (10 if source == 'itunes' else 3))
+    cache = {}
+    assert c._resolve_completion_track_total({'id': '123'}, ['itunes'], cache) == 10
+    assert c._resolve_completion_track_total({'id': '123'}, ['deezer'], cache) == 3
+
+
+def test_pin_existence_cache_keeps_actual_track_count(monkeypatch):
+    from core.metadata import completion as c
+    monkeypatch.setattr(c, 'get_album_tracks_for_source', lambda *args: [{}] * 10)
+    db = types.SimpleNamespace(
+        get_album_canonical=lambda aid: {'source': 'itunes', 'album_id': aid},
+        check_album_completeness=lambda aid, total, **kw: (2, total, 2 >= total, []),
+    )
+    cache = {}
+    assert c._canonical_pin_denies_card(db, types.SimpleNamespace(id='A'), 'itunes', 'B', pin_tracks_cache=cache)
+    result = c._resolve_canonical_album_completion(db, types.SimpleNamespace(id='B'), pin_tracks_cache=cache)
+    assert result['canonical_track_count'] == 10
+    assert result['is_complete'] is False
+
+
+def test_unknown_count_single_uses_release_completeness(monkeypatch):
+    from core.metadata import completion as c
+    monkeypatch.setattr(c, 'get_album_tracks_for_source', lambda *args: [{}] * 3)
+    album = types.SimpleNamespace(id='local')
+    db = types.SimpleNamespace(
+        check_album_exists_with_completeness=lambda **kw: (album, 1, 1, 3, False, []),
+        check_album_completeness=lambda *args, **kw: (1, 3, False, []),
+        get_album_canonical=lambda aid: None,
+    )
+    result = c.check_single_completion(db, {'id': 'release', 'name': 'Song', 'album_type': 'single', 'total_tracks': 0}, 'Artist', source_chain=['discogs'], candidate_albums=[album])
+    assert result['owned_tracks'] == 1
+    assert result['expected_tracks'] == 3
+    assert result['status'] != 'completed'
+
+
+def test_cached_completeness_matches_sql_title_semantics():
+    import sqlite3
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.executescript('CREATE TABLE albums(id,title,year,artist_id,track_count); CREATE TABLE tracks(album_id,title,track_number,file_path,bitrate);')
+    db = object.__new__(MusicDatabase)
+    db._get_connection = lambda: conn
+    albums = [types.SimpleNamespace(id=i, title=title, year=2000, artist_id=1, track_count=10) for i, title in [(1, 'Album'), (2, 'album'), (3, 'Album ')]]
+    tracks = [types.SimpleNamespace(album_id=i, title=title, track_number=1, file_path='/song.flac', bitrate=None) for i in [1, 2, 3] for title in ['Song', 'song', 'song ', 'Ä', 'ä']]
+    conn.executemany('INSERT INTO albums VALUES(?,?,?,?,?)', [(a.id, a.title, a.year, a.artist_id, a.track_count) for a in albums])
+    conn.executemany('INSERT INTO tracks VALUES(?,?,?,?,?)', [(t.album_id, t.title, t.track_number, t.file_path, t.bitrate) for t in tracks])
+    try:
+        cache = db.build_candidate_completeness_cache(albums, tracks)
+        for album in albums:
+            assert cache[album.id]['sibling_ids'] == [album.id]
+            assert db.check_album_completeness(album.id, completeness_cache=cache) == db.check_album_completeness(album.id)
+    finally:
+        conn.close()
