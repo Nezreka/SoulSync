@@ -116,6 +116,7 @@ export function useSourceVertical(
 
   const discoveryPollers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
   const syncPollers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  const syncGenerations = useRef<Record<string, number>>({});
   /**
    * Ids whose completion has already been announced. The vanilla can announce
    * twice — its socket callback and its always-on HTTP poll both run the
@@ -274,10 +275,20 @@ export function useSourceVertical(
   const startSyncPoll = useCallback(
     (sourceId: string) => {
       stopSyncPoll(sourceId);
+      const generation = (syncGenerations.current[sourceId] ?? 0) + 1;
+      syncGenerations.current[sourceId] = generation;
+
+      let consecutiveErrors = 0;
+      const MAX_RETRIES = 5;
+
       const tick = async () => {
+        if (syncGenerations.current[sourceId] !== generation) return;
         try {
           const status = await fetchSourceSyncStatus(config, sourceId);
+          if (syncGenerations.current[sourceId] !== generation) return;
+          consecutiveErrors = 0;
           if (status.error) {
+            patch(sourceId, (s) => applySyncStatus(s, status));
             stopSyncPoll(sourceId);
             return;
           }
@@ -291,7 +302,17 @@ export function useSourceVertical(
             status.sync_status === 'cancelled';
           if (terminal) stopSyncPoll(sourceId);
         } catch {
-          stopSyncPoll(sourceId);
+          if (syncGenerations.current[sourceId] !== generation) return;
+          consecutiveErrors += 1;
+          if (consecutiveErrors >= MAX_RETRIES) {
+            patch(sourceId, (s) =>
+              applySyncStatus(s, {
+                status: 'error',
+                error: 'Lost connection to sync service',
+              }),
+            );
+            stopSyncPoll(sourceId);
+          }
         }
       };
       // The vanilla runs the poll body immediately on start/resume (1105).

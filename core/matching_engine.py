@@ -63,6 +63,25 @@ class MusicMatchingEngine:
             # REMOVED: r',.*' - This can break legitimate artist names with commas
         ]
     
+        self.derivative_artist_keywords = [
+            'tribute', 'tribute band', 'cover', 'covers', 'cover band',
+            'karaoke', 'orchestra', 'orchestral', 'salute', 'parody',
+            'soundalike', 'instrumental', 'backing track', 'backing band'
+        ]
+    
+    def has_derivative_artist_mismatch(self, src_artist: str, cand_artist: str) -> bool:
+        """Detect if candidate artist contains derivative indicators (tribute, cover, etc.)
+        that are not present in the source artist."""
+        if not cand_artist:
+            return False
+        src_lower = src_artist.lower() if src_artist else ""
+        cand_lower = cand_artist.lower()
+        for kw in self.derivative_artist_keywords:
+            if re.search(r'\b' + re.escape(kw) + r'\b', cand_lower):
+                if not re.search(r'\b' + re.escape(kw) + r'\b', src_lower):
+                    return True
+        return False
+
     def normalize_string(self, text: str) -> str:
         """
         Normalizes string by handling common stylizations, converting to ASCII,
@@ -343,16 +362,45 @@ class MusicMatchingEngine:
             for raw_cand_artist in candidate_artists:
                 if not raw_cand_artist:
                     continue
+
+                # Check for derivative artist mismatch (e.g., "Queen Tribute" vs "Queen")
+                if self.has_derivative_artist_mismatch(src_artist, raw_cand_artist):
+                    score = 0.20
+                    if score > best_artist_score:
+                        best_artist_score = score
+                    continue
+
                 cand_artist_normalized = self.normalize_string(raw_cand_artist)
                 cand_artist_cleaned = self.clean_artist(raw_cand_artist)
-                # Check containment (e.g., "drake" in "drake 21 savage")
-                # Skip for very short names (≤2 chars) — "b" matches everything
-                if src_artist and len(src_artist) > 2 and src_artist in cand_artist_normalized:
+
+                # Exact match against whole candidate artist string
+                if src_artist and (src_artist == cand_artist_cleaned or src_artist == cand_artist_normalized):
                     best_artist_score = 1.0
                     break
-                elif src_artist and src_artist == cand_artist_normalized:
-                    best_artist_score = 1.0
+
+                # Collaboration check: split on collaboration delimiters (&, and, feat., ft., with, x, /)
+                cand_collaborators = re.split(
+                    r'\s*(?:&|and|,|\/|\\|\bwith\b|\bfeat\.?\b|\bft\.?\b|\bx\b)\s*',
+                    raw_cand_artist,
+                    flags=re.IGNORECASE
+                )
+                matched_collaborator = False
+                if len(cand_collaborators) > 1:
+                    for collab in cand_collaborators:
+                        collab_cleaned = self.clean_artist(collab)
+                        collab_normalized = self.normalize_string(collab)
+                        if src_artist and (src_artist == collab_cleaned or src_artist == collab_normalized):
+                            best_artist_score = 1.0
+                            matched_collaborator = True
+                            break
+                        collab_score = self.similarity_score(src_artist, collab_cleaned)
+                        if collab_score > best_artist_score:
+                            best_artist_score = collab_score
+
+                if matched_collaborator:
                     break
+
+                # Fuzzy similarity against full candidate artist
                 score = self.similarity_score(src_artist, cand_artist_cleaned)
                 if score > best_artist_score:
                     best_artist_score = score
@@ -360,11 +408,19 @@ class MusicMatchingEngine:
                 break
         artist_score = best_artist_score
 
+        # Check for duration mismatch if both durations are known (> 0)
+        has_durations = source_duration_ms > 0 and candidate_duration_ms > 0
+        diff_ms = abs(source_duration_ms - candidate_duration_ms) if has_durations else 0
+        max_duration = max(source_duration_ms, candidate_duration_ms) if has_durations else 1
+        diff_ratio = diff_ms / max_duration if has_durations else 0.0
+        significant_duration_mismatch = has_durations and diff_ms > 15000 and diff_ratio > 0.15
+
         # --- Priority 1: Core Title Match ---
         source_core_title = self.get_core_string(source_title)
         candidate_core_title = self.get_core_string(candidate_title)
 
-        if source_core_title and source_core_title == candidate_core_title:
+        # Core title fast path requires compatible duration (cannot be a preview clip or mismatched cut)
+        if source_core_title and source_core_title == candidate_core_title and not significant_duration_mismatch:
             if artist_score >= 0.75:
                 confidence = 0.90 + (artist_score * 0.09)
                 return confidence, "core_title_match"
@@ -377,6 +433,12 @@ class MusicMatchingEngine:
         duration_score = self.duration_similarity(source_duration_ms, candidate_duration_ms)
 
         confidence = (title_score * 0.60) + (artist_score * 0.30) + (duration_score * 0.10)
+
+        # Apply duration penalty when there is a significant duration mismatch (>15s and >15%)
+        if significant_duration_mismatch:
+            duration_penalty = min(0.35, max(0.15, diff_ratio * 0.35))
+            confidence = max(0.0, confidence - duration_penalty)
+
         return confidence, "standard_match"
 
     def calculate_match_confidence(self, spotify_track: SpotifyTrack, plex_track: TrackInfo) -> Tuple[float, str]:

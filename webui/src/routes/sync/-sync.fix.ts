@@ -27,6 +27,13 @@ export interface FixTrack {
   album?: string | Record<string, unknown>;
   duration_ms?: number;
   image_url?: string | null;
+  source?: string;
+  provider?: string;
+  isrc?: string;
+  track_number?: number;
+  disc_number?: number;
+  release_date?: string;
+  [key: string]: unknown;
 }
 
 /* ── The search cascade (179-236) ─────────────────────────────────────────── */
@@ -125,6 +132,8 @@ export function unmatchApiBase(source: SyncSourceId): string {
       return '/api/beatport';
     case 'listenbrainz':
       return '/api/listenbrainz';
+    case 'qobuz':
+      return '/api/qobuz';
     default:
       return '/api/youtube';
   }
@@ -138,19 +147,27 @@ export function buildUpdateMatchBody(
   sourceArtist: string,
   track: FixTrack,
 ): Record<string, unknown> {
+  const spotifyTrack: Record<string, unknown> = {
+    id: track.id,
+    name: track.name,
+    artists: track.artists,
+    album: track.album,
+    duration_ms: track.duration_ms,
+    image_url: track.image_url || null,
+  };
+  if (track.source) spotifyTrack.source = track.source;
+  if (track.provider) spotifyTrack.provider = track.provider;
+  if (track.isrc) spotifyTrack.isrc = track.isrc;
+  if (track.track_number !== undefined) spotifyTrack.track_number = track.track_number;
+  if (track.disc_number !== undefined) spotifyTrack.disc_number = track.disc_number;
+  if (track.release_date !== undefined) spotifyTrack.release_date = track.release_date;
+
   return {
     identifier: sourceId,
     track_index: trackIndex,
     original_name: sourceTrack || '',
     original_artist: sourceArtist || '',
-    spotify_track: {
-      id: track.id,
-      name: track.name,
-      artists: track.artists,
-      album: track.album,
-      duration_ms: track.duration_ms,
-      image_url: track.image_url || null,
-    },
+    spotify_track: spotifyTrack,
   };
 }
 

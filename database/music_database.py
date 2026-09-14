@@ -20694,8 +20694,9 @@ class MusicDatabase:
         playlist_id: int,
         *,
         profile_id: Optional[int] = None,
+        preserve_manual_matches: bool = True,
     ) -> int:
-        """Clear extra_data for all tracks in a mirrored playlist (resets discovery)."""
+        """Clear extra_data for tracks in a mirrored playlist (resets discovery)."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -20706,13 +20707,24 @@ class MusicDatabase:
                         " AND playlist_id IN (SELECT id FROM mirrored_playlists WHERE profile_id=?)"
                     )
                     owner_params = [int(profile_id)]
+                manual_sql = ""
+                if preserve_manual_matches:
+                    manual_sql = (
+                        " AND (extra_data IS NULL OR "
+                        "IFNULL(json_extract(extra_data, '$.manual_match'), 0) != 1)"
+                    )
                 cursor.execute(
                     "UPDATE mirrored_playlist_tracks SET extra_data = NULL "
-                    "WHERE playlist_id = ?" + owner_sql,
+                    "WHERE playlist_id = ?" + owner_sql + manual_sql,
                     [playlist_id, *owner_params],
                 )
+                cleared_count = cursor.rowcount
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET cover_tiles = NULL WHERE id = ?",
+                    (playlist_id,)
+                )
                 conn.commit()
-                return cursor.rowcount
+                return cleared_count
         except Exception as e:
             logger.error(f"Error clearing mirrored playlist discovery: {e}")
             return 0

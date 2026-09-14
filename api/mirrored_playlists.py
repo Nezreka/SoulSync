@@ -708,6 +708,23 @@ def clear_mirrored_discovery_endpoint(playlist_id):
             logger.warning(f"Error clearing discovery cache: {cache_err}")
 
         cleared = database.clear_mirrored_playlist_discovery(playlist_id, profile_id=profile_id)
+
+        url_hash = f"mirrored_{playlist_id}"
+        if url_hash in youtube_playlist_states:
+            st = youtube_playlist_states[url_hash]
+            st['phase'] = 'fresh'
+            st['status'] = 'parsed'
+            st['discovery_results'] = []
+            st['discovery_progress'] = 0
+            st['spotify_matches'] = 0
+            st['discovery_future'] = None
+            if 'playlist' in st and isinstance(st['playlist'], dict) and 'tracks' in st['playlist']:
+                for tr in st['playlist']['tracks']:
+                    ex = tr.get('extra_data')
+                    if not (isinstance(ex, dict) and ex.get('manual_match')):
+                        tr.pop('extra_data', None)
+                    tr.pop('skip_discovery', None)
+
         return jsonify({"success": True, "cleared": cleared})
     except Exception as e:
         logger.error(f"Error clearing mirrored discovery: {e}")

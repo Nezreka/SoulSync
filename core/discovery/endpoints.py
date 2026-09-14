@@ -59,19 +59,51 @@ def convert_results_to_spotify_tracks(
                 'album': spotify_data['album'],
                 'duration_ms': spotify_data.get('duration_ms', 0),
             }
+            for k in ('source', 'provider', 'isrc', 'release_date'):
+                if spotify_data.get(k) is not None:
+                    track[k] = spotify_data[k]
+                elif result.get(k) is not None:
+                    track[k] = result[k]
             if spotify_data.get('track_number'):
                 track['track_number'] = spotify_data['track_number']
+            elif result.get('track_number'):
+                track['track_number'] = result['track_number']
             if spotify_data.get('disc_number'):
                 track['disc_number'] = spotify_data['disc_number']
+            elif result.get('disc_number'):
+                track['disc_number'] = result['disc_number']
             spotify_tracks.append(track)
-        elif result.get('spotify_track') and result.get('status_class') == 'found':
-            spotify_tracks.append({
+        elif result.get('spotify_track') and (result.get('status_class') == 'found' or result.get('status') in ('found', 'Found', '✅ Found')):
+            dur = result.get('duration_ms', 0)
+            if not dur and result.get('duration'):
+                try:
+                    parts = str(result['duration']).split(':')
+                    if len(parts) == 2:
+                        dur = (int(parts[0]) * 60 + int(parts[1])) * 1000
+                except Exception:
+                    dur = 0
+            track = {
                 'id': result.get('spotify_id', 'unknown'),
                 'name': result.get('spotify_track', 'Unknown Track'),
                 'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
                 'album': result.get('spotify_album', 'Unknown Album'),
-                'duration_ms': 0,
-            })
+                'duration_ms': dur,
+            }
+            match_data = result.get('match_data') or result.get('matched_data') or {}
+            for k in ('source', 'provider', 'isrc', 'release_date'):
+                if result.get(k) is not None:
+                    track[k] = result[k]
+                elif isinstance(match_data, dict) and match_data.get(k) is not None:
+                    track[k] = match_data[k]
+            if result.get('track_number'):
+                track['track_number'] = result['track_number']
+            elif isinstance(match_data, dict) and match_data.get('track_number'):
+                track['track_number'] = match_data['track_number']
+            if result.get('disc_number'):
+                track['disc_number'] = result['disc_number']
+            elif isinstance(match_data, dict) and match_data.get('disc_number'):
+                track['disc_number'] = match_data['disc_number']
+            spotify_tracks.append(track)
 
     logger.info(f"Converted {len(spotify_tracks)} {source_label} matches to Spotify tracks for sync")
     return spotify_tracks
@@ -86,6 +118,7 @@ def cancel_sync(
     sync_lock: Any,
     sync_states: Dict[str, Any],
     active_sync_workers: Dict[str, Any],
+    sync_service: Optional[Any] = None,
 ) -> Tuple[Dict[str, Any], int]:
     """Cancel an in-progress sync for one discovery playlist.
 
@@ -119,8 +152,23 @@ def cancel_sync(
         if sync_playlist_id:
             with sync_lock:
                 sync_states[sync_playlist_id] = {"status": "cancelled"}
-            if sync_playlist_id in active_sync_workers:
-                del active_sync_workers[sync_playlist_id]
+            worker = active_sync_workers.pop(sync_playlist_id, None)
+            if worker is not None and hasattr(worker, 'cancel'):
+                try:
+                    worker.cancel()
+                except Exception as ce:
+                    logger.debug(f"Error calling worker.cancel(): {ce}")
+
+        if sync_service is not None and hasattr(sync_service, 'cancel_sync'):
+            playlist_name = (
+                state.get('playlist_name')
+                or state.get('name')
+                or (state.get('playlist') or {}).get('name')
+            )
+            try:
+                sync_service.cancel_sync(playlist_name=playlist_name)
+            except Exception as se:
+                logger.debug(f"Error calling sync_service.cancel_sync: {se}")
 
         state['phase'] = 'discovered'
         state['sync_playlist_id'] = None
@@ -658,7 +706,11 @@ def update_discovery_match(
             else:
                 result['duration'] = '0:00'
 
-            result['spotify_data'] = build_fix_modal_spotify_data(spotify_track)
+            fixed_data = build_fix_modal_spotify_data(spotify_track)
+            result['spotify_data'] = fixed_data
+            result['match_data'] = fixed_data
+            result['matched_data'] = fixed_data
+            result['confidence'] = 1.0
             result['wing_it_fallback'] = False
             result['manual_match'] = True
 
@@ -667,6 +719,32 @@ def update_discovery_match(
 
             logger.info(f"Manual match updated: {source_log_label} - {identifier} - track {track_index}")
             logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+
+            # Immediate mirrored DB persistence if this is a mirrored playlist
+            if str(identifier).startswith('mirrored_'):
+                try:
+                    db = get_database()
+                    tracks = state.get('tracks') or (state.get('playlist') or {}).get('tracks') or []
+                    if 0 <= track_index < len(tracks):
+                        t = tracks[track_index]
+                        db_track_id = t.get('db_track_id') if isinstance(t, dict) else getattr(t, 'db_track_id', None)
+                        if not db_track_id and isinstance(t, dict):
+                            db_track_id = t.get('id')
+                        if db_track_id:
+                            from core.discovery.manual_match import derive_manual_match_provider
+                            m_provider = derive_manual_match_provider(spotify_track, get_active_discovery_source())
+                            db.update_mirrored_track_extra_data(db_track_id, {
+                                'discovered': True,
+                                'provider': m_provider,
+                                'confidence': 1.0,
+                                'matched_data': fixed_data,
+                                'manual_match': True,
+                                'wing_it_fallback': False,
+                                'unmatched_by_user': False,
+                            })
+                            logger.info(f"Persisted manual fix immediately to mirrored DB for track {db_track_id}")
+                except Exception as db_err:
+                    logger.error(f"Error persisting manual fix to mirrored DB: {db_err}")
 
             original_track = result.get(original_track_key, {})
             original_name = original_track.get('name', spotify_track['name'])
@@ -715,6 +793,8 @@ def update_discovery_match(
                     album_obj['image_url'] = image_url
                     album_obj['images'] = [{'url': image_url}]
 
+            from core.discovery.manual_match import derive_manual_match_provider
+            m_source = derive_manual_match_provider(spotify_track, get_active_discovery_source())
             matched_data = {
                 'id': spotify_track['id'],
                 'name': spotify_track['name'],
@@ -722,8 +802,11 @@ def update_discovery_match(
                 'album': album_obj,
                 'duration_ms': spotify_track.get('duration_ms', 0),
                 'image_url': image_url,
-                'source': 'spotify',
+                'source': m_source,
             }
+            for k in ('provider', 'isrc', 'track_number', 'disc_number', 'release_date'):
+                if spotify_track.get(k) is not None:
+                    matched_data[k] = spotify_track[k]
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
                 cache_key[0], cache_key[1], get_active_discovery_source(), 1.0, matched_data,

@@ -20821,6 +20821,10 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
    =============================== */
 
 .youtube-discovery-modal {
+    --modal-accent: #ff0000;
+    --modal-accent-rgb: 255, 0, 0;
+    --modal-glow: rgba(var(--modal-accent-rgb), 0.15);
+    --modal-border: rgba(var(--modal-accent-rgb), 0.25);
     max-width: 1200px;
     width: 90%;
     max-height: 90vh;
@@ -20829,17 +20833,76 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 
     /* Premium glassmorphic foundation */
     background: linear-gradient(135deg,
-            rgba(20, 20, 20, 0.95) 0%,
-            rgba(12, 12, 12, 0.98) 100%);
-    backdrop-filter: blur(20px) saturate(1.2);
+            rgba(20, 20, 24, 0.96) 0%,
+            rgba(12, 12, 16, 0.98) 100%);
+    backdrop-filter: blur(24px) saturate(1.3);
     border-radius: 20px;
-    border: 1px solid rgba(255, 0, 0, 0.2);
-    border-top: 1px solid rgba(255, 0, 0, 0.3);
+    border: 1px solid var(--modal-border);
+    border-top: 1px solid rgba(var(--modal-accent-rgb), 0.4);
 
     box-shadow:
-        0 20px 60px rgba(0, 0, 0, 0.5),
-        0 8px 32px rgba(255, 0, 0, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        0 20px 60px rgba(0, 0, 0, 0.6),
+        0 8px 32px var(--modal-glow),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.youtube-discovery-modal[data-source="spotify_public"] {
+    --modal-accent: #1db954;
+    --modal-accent-rgb: 29, 185, 84;
+}
+
+.youtube-discovery-modal[data-source="tidal"] {
+    --modal-accent: #00ffff;
+    --modal-accent-rgb: 0, 255, 255;
+}
+
+.youtube-discovery-modal[data-source="deezer"] {
+    --modal-accent: #a238ff;
+    --modal-accent-rgb: 162, 56, 255;
+}
+
+.youtube-discovery-modal[data-source="qobuz"] {
+    --modal-accent: #0084ff;
+    --modal-accent-rgb: 0, 132, 255;
+}
+
+.youtube-discovery-modal[data-source="beatport"] {
+    --modal-accent: #00ff7f;
+    --modal-accent-rgb: 0, 255, 127;
+}
+
+.youtube-discovery-modal[data-source="listenbrainz"] {
+    --modal-accent: #eb743b;
+    --modal-accent-rgb: 235, 116, 59;
+}
+
+.youtube-discovery-modal[data-source="itunes_link"] {
+    --modal-accent: #fa243c;
+    --modal-accent-rgb: 250, 36, 60;
+}
+
+.discovery-error-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 18px;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.16) 0%, rgba(185, 28, 28, 0.1) 100%);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 12px;
+    color: #fca5a5;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.1);
+}
+
+.discovery-error-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.discovery-error-text {
+    flex: 1;
+    word-break: break-word;
 }
 
 .youtube-discovery-modal .modal-header {
@@ -20894,8 +20957,8 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .youtube-discovery-modal .modal-close-btn:hover {
-    background: rgba(255, 0, 0, 0.2);
-    border-color: rgba(255, 0, 0, 0.4);
+    background: rgba(var(--modal-accent-rgb), 0.2);
+    border-color: rgba(var(--modal-accent-rgb), 0.4);
 }
 
 .youtube-discovery-modal .modal-body {
@@ -20931,7 +20994,8 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 
 .youtube-discovery-modal .progress-bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-light-rgb)) 100%);
+    background: linear-gradient(90deg, var(--modal-accent) 0%, rgba(var(--modal-accent-rgb), 0.7) 100%);
+    box-shadow: 0 0 12px var(--modal-glow);
     width: 0%;
     transition: width 0.5s ease;
 }

@@ -178,11 +178,18 @@ export function SourceModals({
         onDownloadMissing={(options) => void onDownloadMissing(options)}
         onRediscover={
           config.api.reset
-            ? () => {
-                // The vanilla closes the modal after resetting (10826/10895).
-                // hideWithoutReset, not close: closeModalReset would POST the
-                // phase back to 'discovered' over the reset we just made.
-                void vertical.resetDiscovery(openId).then(hideWithoutReset);
+            ? async () => {
+                await vertical.resetDiscovery(openId);
+                const current = vertical.states[openId];
+                if (current && current.phase !== 'fresh') {
+                  return; // Reset failed
+                }
+                const body =
+                  discoveryStartBody?.(state) ??
+                  (config.discovery.startBody === 'playlist'
+                    ? { playlist: { name: state.playlist?.name, tracks: statePlaylistTracks(state) } }
+                    : undefined);
+                void vertical.startDiscovery(openId, body);
               }
             : undefined
         }
