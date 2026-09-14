@@ -1027,6 +1027,44 @@
         renderUsersList();
     }
 
+    // ── social badges updater (sidebar buttons, drawer tabs, peer bookmarks button) ──
+    function _updateSocialBadges() {
+        var frCount = friendsSet().length;
+        var blCount = blockedSet().length;
+        var bmCount = peerBookmarksSet().length;
+
+        // Sidebar navigation badges
+        var sideFr = q('[data-chat-side-count-friends]');
+        if (sideFr) {
+            sideFr.textContent = frCount;
+            sideFr.hidden = (frCount === 0);
+        }
+        var sideBl = q('[data-chat-side-count-blocked]');
+        if (sideBl) {
+            sideBl.textContent = blCount;
+            sideBl.hidden = (blCount === 0);
+        }
+        var sideBm = q('[data-chat-side-count-bookmarks]');
+        if (sideBm) {
+            sideBm.textContent = bmCount;
+            sideBm.hidden = (bmCount === 0);
+        }
+
+        // Drawer tab pills
+        var dFr = q('[data-chat-count-friends]');
+        if (dFr) dFr.textContent = frCount;
+        var dBl = q('[data-chat-count-blocked]');
+        if (dBl) dBl.textContent = blCount;
+        var dBm = q('[data-chat-count-bookmarks]');
+        if (dBm) dBm.textContent = bmCount;
+
+        // Peer explorer drawer bookmarks button
+        var peerBmBtn = q('[data-chat-browse-saved-peers]');
+        if (peerBmBtn) {
+            peerBmBtn.textContent = '📚 Bookmarks (' + bmCount + ')';
+        }
+    }
+
     // ── friend list (local only — special shiny star & badge, no requesting) ──
     function friendsSet() {
         try { return JSON.parse(localStorage.getItem('chat_friends') || '[]'); }
@@ -1054,6 +1092,7 @@
         state.lastStamp = null;
         renderMessages(state.msgs);
         renderUsersList();
+        _updateSocialBadges();
         return isNow;
     }
 
@@ -1084,6 +1123,7 @@
         state.lastStamp = null;
         renderMessages(state.msgs);
         renderUsersList();
+        _updateSocialBadges();
         return isNowBlocked;
     }
 
@@ -1111,6 +1151,7 @@
             isNowBookmarked = true;
         }
         try { localStorage.setItem('chat_peer_bookmarks', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        _updateSocialBadges();
         return isNowBookmarked;
     }
 
@@ -3431,7 +3472,9 @@
             (state.isAdmin
                 ? '<button class="chat-userpanel-btn" type="button" data-chat-settings-btn ' +
                     'title="Chat settings">⚙</button>'
-                : '');
+                : '') +
+            '<button class="chat-userpanel-btn" type="button" data-chat-open-social="friends" ' +
+                'title="Social & Lists (Friends, Blocklist, Bookmarks)">👥</button>';
     }
 
     function renderHead() {
@@ -5412,48 +5455,186 @@
     // ── room browser (join any public Soulseek room) ─────────────────────────
     var _availRooms = null;
 
-    function _updateSavedPeersBtn() {
-        var btn = q('[data-chat-browse-saved-peers]');
-        if (!btn) return;
-        var bms = peerBookmarksSet();
-        btn.textContent = '📚 Bookmarks (' + bms.length + ')';
+    // ── Discord-style Social & Lists Drawer (Friends, Blocklist, Bookmarks) ──
+    var _socialTab = 'friends';
+    var _socialFilter = '';
+
+    function openSocialModal(tab) {
+        if (tab) _socialTab = tab;
+        closeUserCard();
+        var drawer = q('[data-chat-social-drawer]');
+        var backdrop = q('[data-chat-social-backdrop]');
+        if (!drawer) return;
+        drawer.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+        requestAnimationFrame(function () {
+            drawer.classList.add('visible');
+            if (backdrop) backdrop.classList.add('visible');
+        });
+        _socialFilter = '';
+        var fInp = drawer.querySelector('[data-chat-social-filter]');
+        if (fInp) fInp.value = '';
+        var aInp = drawer.querySelector('[data-chat-social-input]');
+        if (aInp) {
+            aInp.value = '';
+            aInp.focus();
+        }
+        renderSocialList();
+        _updateSocialBadges();
+    }
+
+    function closeSocialModal() {
+        var drawer = q('[data-chat-social-drawer]');
+        var backdrop = q('[data-chat-social-backdrop]');
+        if (drawer) {
+            drawer.classList.remove('visible');
+            setTimeout(function () { drawer.hidden = true; }, 320);
+        }
+        if (backdrop) {
+            backdrop.classList.remove('visible');
+            setTimeout(function () { backdrop.hidden = true; }, 320);
+        }
+    }
+
+    function renderSocialList() {
+        var drawer = q('[data-chat-social-drawer]');
+        if (!drawer || drawer.hidden) return;
+
+        var friends = friendsSet();
+        var blocked = blockedSet();
+        var bookmarks = peerBookmarksSet();
+
+        // Update tab navigation active state
+        drawer.querySelectorAll('[data-chat-social-tab]').forEach(function (tabEl) {
+            var tabId = tabEl.getAttribute('data-chat-social-tab');
+            tabEl.classList.toggle('chat-social-nav-tab--active', tabId === _socialTab);
+        });
+
+        // Update add banner label & placeholder
+        var addLabel = drawer.querySelector('[data-chat-social-add-label]');
+        var addInp = drawer.querySelector('[data-chat-social-input]');
+        if (_socialTab === 'friends') {
+            if (addLabel) addLabel.textContent = 'ADD FRIEND';
+            if (addInp) addInp.placeholder = 'Enter Soulseek username to add as friend…';
+        } else if (_socialTab === 'blocked') {
+            if (addLabel) addLabel.textContent = 'BLOCK USER';
+            if (addInp) addInp.placeholder = 'Enter Soulseek username to block…';
+        } else {
+            if (addLabel) addLabel.textContent = 'BOOKMARK PEER';
+            if (addInp) addInp.placeholder = 'Enter Soulseek username to bookmark…';
+        }
+
+        var listEl = drawer.querySelector('[data-chat-social-list]');
+        if (!listEl) return;
+
+        var items = [];
+        if (_socialTab === 'friends') items = friends;
+        else if (_socialTab === 'blocked') items = blocked;
+        else items = bookmarks;
+
+        var f = String(_socialFilter || '').trim().toLowerCase();
+        if (f) {
+            items = items.filter(function (u) { return String(u).toLowerCase().indexOf(f) > -1; });
+        }
+
+        var totalEl = drawer.querySelector('[data-chat-social-total]');
+        if (totalEl) {
+            var unit = _socialTab === 'friends' ? 'friend' : (_socialTab === 'blocked' ? 'blocked' : 'peer');
+            totalEl.textContent = items.length + ' ' + unit + (items.length === 1 ? '' : 's');
+        }
+
+        if (!items.length) {
+            var emptyIcon = _socialTab === 'friends' ? '⭐' : (_socialTab === 'blocked' ? '🚫' : '📚');
+            var emptyTitle = _socialTab === 'friends' ? 'No friends yet' : (_socialTab === 'blocked' ? 'No blocked users' : 'No saved peers yet');
+            var emptyDesc = _socialTab === 'friends'
+                ? 'Add friends using the input above or click ⭐ Add Friend on any user in chat!'
+                : (_socialTab === 'blocked'
+                    ? 'Blocked users have their room messages and private messages completely hidden.'
+                    : 'Click ⭐ Bookmark while exploring peer files or add their username above to save them.');
+            if (f) {
+                emptyTitle = 'No matches found';
+                emptyDesc = 'No ' + _socialTab + ' match "' + esc(f) + '"';
+            }
+            listEl.innerHTML = '<div class="chat-social-empty">' +
+                '<div style="font-size:32px;margin-bottom:8px;opacity:0.8;">' + emptyIcon + '</div>' +
+                '<div style="font-weight:700;font-size:15px;color:#fff;margin-bottom:4px;">' + emptyTitle + '</div>' +
+                '<div>' + emptyDesc + '</div>' +
+            '</div>';
+            return;
+        }
+
+        var avMap = _avatarMap();
+        var onlineUsers = state.users || [];
+        var onlineMap = {};
+        onlineUsers.forEach(function (u) { onlineMap[String(u).toLowerCase()] = true; });
+
+        listEl.innerHTML = items.map(function (u) {
+            var av = avMap && avMap[u];
+            var isOnline = !!onlineMap[String(u).toLowerCase()];
+
+            var subText = '';
+            if (_socialTab === 'friends') {
+                subText = isOnline ? '⭐ Friend • Online in room' : '⭐ Friend • Soulseek user';
+            } else if (_socialTab === 'blocked') {
+                subText = '🚫 Blocked • Chat & PMs suppressed';
+            } else {
+                subText = isOnline ? '📚 Saved Peer • Online in room' : '📚 Saved Peer';
+            }
+
+            var html = '<div class="chat-social-row">' +
+                '<div class="chat-social-row-av">' +
+                    '<span class="chat-user-av" style="width:36px;height:36px;font-size:13px;">' +
+                        _avatarHtml(u, av, 'chat-av--fill') +
+                        '<span class="chat-user-dot' + (isOnline ? ' chat-user-dot--tuned' : '') + '"></span>' +
+                    '</span>' +
+                '</div>' +
+                '<div class="chat-social-row-info">' +
+                    '<div class="chat-social-row-name" data-chat-user="' + attr(u) + '" title="View user card">' + esc(u) + '</div>' +
+                    '<div class="chat-social-row-sub">' + subText + '</div>' +
+                '</div>' +
+                '<div class="chat-social-row-actions">';
+
+            if (_socialTab === 'friends') {
+                html += '<button type="button" class="chat-social-action-btn" data-chat-browse-user="' + attr(u) + '" title="Browse their files">📁 Browse</button>' +
+                        '<button type="button" class="chat-social-action-btn" data-chat-open-pm="' + attr(u) + '" title="Send direct message">💬 Message</button>' +
+                        '<button type="button" class="chat-social-action-btn chat-social-action-btn--danger" data-chat-social-remove-friend="' + attr(u) + '" title="Remove from friends">✕ Remove</button>';
+            } else if (_socialTab === 'blocked') {
+                html += '<button type="button" class="chat-social-action-btn chat-social-action-btn--danger" data-chat-social-unblock="' + attr(u) + '" title="Unblock user">Unblock</button>';
+            } else {
+                html += '<button type="button" class="chat-social-action-btn" data-chat-browse-user="' + attr(u) + '" title="Browse their files">📁 Browse</button>' +
+                        '<button type="button" class="chat-social-action-btn" data-chat-open-pm="' + attr(u) + '" title="Send direct message">💬 Message</button>' +
+                        '<button type="button" class="chat-social-action-btn chat-social-action-btn--danger" data-chat-social-remove-bookmark="' + attr(u) + '" title="Remove bookmark">★ Remove</button>';
+            }
+            html += '</div></div>';
+            return html;
+        }).join('');
+    }
+
+    function addSocialUser() {
+        var drawer = q('[data-chat-social-drawer]');
+        if (!drawer) return;
+        var inp = drawer.querySelector('[data-chat-social-input]');
+        if (!inp) return;
+        var val = String(inp.value || '').trim();
+        if (!val) return;
+
+        if (_socialTab === 'friends') {
+            if (!isFriend(val)) toggleFriend(val);
+            if (typeof showToast === 'function') showToast('Added ' + val + ' to friends', 'success');
+        } else if (_socialTab === 'blocked') {
+            if (!isBlocked(val)) toggleBlocked(val);
+            if (typeof showToast === 'function') showToast('Blocked ' + val, 'info');
+        } else {
+            if (!isPeerBookmarked(val)) togglePeerBookmark(val);
+            if (typeof showToast === 'function') showToast('Bookmarked peer ' + val, 'success');
+        }
+        inp.value = '';
+        _updateSocialBadges();
+        renderSocialList();
     }
 
     function _openSavedPeersPicker() {
-        var bms = peerBookmarksSet();
-        if (!bms.length) {
-            if (typeof showToast === 'function') showToast('No saved peers yet. Click ⭐ Bookmark on any peer to save them!', 'info');
-            return;
-        }
-        var overlay = q('[data-chat-rooms-modal]');
-        if (!overlay) return;
-        overlay.hidden = false;
-        var titleEl = overlay.querySelector('.chat-settings-title') || overlay.querySelector('.chat-card-name');
-        if (titleEl) titleEl.textContent = 'Bookmarked Peers (' + bms.length + ')';
-        var listEl = q('[data-chat-rooms-list]');
-        var inp = q('[data-chat-rooms-search]');
-        if (inp) { inp.value = ''; inp.placeholder = 'Filter saved peers…'; inp.focus(); }
-
-        function renderSaved(filter) {
-            if (!listEl) return;
-            var f = String(filter || '').toLowerCase();
-            var matches = bms.filter(function (p) { return !f || p.toLowerCase().indexOf(f) > -1; });
-            if (!matches.length) {
-                listEl.innerHTML = '<div class="chat-gif-hint">No matching saved peers</div>';
-                return;
-            }
-            listEl.innerHTML = matches.map(function (p) {
-                return '<div class="chat-room-row">' +
-                    '<span class="chat-room-name" style="cursor:pointer;" data-chat-browse-user="' + attr(p) + '">⭐ ' + esc(p) + '</span>' +
-                    '<button type="button" class="chat-room-join" data-chat-browse-user="' + attr(p) + '">Browse Files</button>' +
-                    '<button type="button" class="chat-side-convo-close" style="opacity:1;" data-chat-saved-peer-remove="' + attr(p) + '" title="Remove bookmark">×</button>' +
-                '</div>';
-            }).join('');
-        }
-        renderSaved('');
-        if (inp) {
-            inp.oninput = function () { renderSaved(inp.value); };
-        }
+        openSocialModal('bookmarks');
     }
 
     function openRoomBrowser() {
@@ -6384,6 +6565,57 @@
                 }
                 return;
             }
+            t = e.target.closest('[data-chat-open-social]');
+            if (t) {
+                var tabChoice = t.getAttribute('data-chat-open-social') || 'friends';
+                openSocialModal(tabChoice);
+                return;
+            }
+            t = e.target.closest('[data-chat-social-close]');
+            if (t) { closeSocialModal(); return; }
+            t = e.target.closest('[data-chat-social-backdrop]');
+            if (t) { closeSocialModal(); return; }
+            t = e.target.closest('[data-chat-social-tab]');
+            if (t) {
+                _socialTab = t.getAttribute('data-chat-social-tab') || 'friends';
+                renderSocialList();
+                return;
+            }
+            t = e.target.closest('[data-chat-social-add-btn]');
+            if (t) {
+                addSocialUser();
+                return;
+            }
+            t = e.target.closest('[data-chat-social-remove-friend]');
+            if (t) {
+                var rf = t.getAttribute('data-chat-social-remove-friend');
+                if (rf) {
+                    toggleFriend(rf);
+                    renderSocialList();
+                    if (typeof showToast === 'function') showToast('Removed ' + rf + ' from friends', 'info');
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-social-unblock]');
+            if (t) {
+                var ub = t.getAttribute('data-chat-social-unblock');
+                if (ub) {
+                    toggleBlocked(ub);
+                    renderSocialList();
+                    if (typeof showToast === 'function') showToast('Unblocked ' + ub, 'info');
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-social-remove-bookmark]');
+            if (t) {
+                var rb = t.getAttribute('data-chat-social-remove-bookmark');
+                if (rb) {
+                    togglePeerBookmark(rb);
+                    renderSocialList();
+                    if (typeof showToast === 'function') showToast('Removed bookmark for ' + rb, 'info');
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-browse-saved-peers]');
             if (t) {
                 _openSavedPeersPicker();
@@ -6519,15 +6751,26 @@
         if (watchSearchForm) watchSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _watchSearchSubmit(); });
         var watchSearchIn = q('[data-chat-watch-searchinput]');
         if (watchSearchIn) watchSearchIn.addEventListener('input', _watchQueueSearch);
+        var socFilterIn = q('[data-chat-social-filter]');
+        if (socFilterIn) {
+            socFilterIn.addEventListener('input', function (e) {
+                _socialFilter = e.target.value;
+                renderSocialList();
+            });
+        }
         // The trivia answer input is re-rendered with its card, so Enter is
         // caught by delegation on the page rather than a per-render listener.
         var chatPageEl = document.getElementById('chat-page');
         if (chatPageEl) {
             chatPageEl.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter' && e.target && e.target.matches &&
-                        e.target.matches('[data-chat-triv-guess]')) {
-                    e.preventDefault();
-                    _trivGuess();
+                if (e.key === 'Enter' && e.target && e.target.matches) {
+                    if (e.target.matches('[data-chat-triv-guess]')) {
+                        e.preventDefault();
+                        _trivGuess();
+                    } else if (e.target.matches('[data-chat-social-input]')) {
+                        e.preventDefault();
+                        addSocialUser();
+                    }
                 }
             });
         }
@@ -6575,6 +6818,8 @@
             if (e.key === 'Escape') {
                 var bm = q('[data-chat-browse-modal]');
                 if (bm && !bm.hidden) { closeBrowse(); }
+                var socD = q('[data-chat-social-drawer]');
+                if (socD && !socD.hidden) { closeSocialModal(); }
             }
         });
 
@@ -6791,6 +7036,7 @@
 
     function open() {
         bind();
+        _updateSocialBadges();
         if (state.configured !== true) {
             getJSON('/api/chat/status').then(function (res) {
                 state.configured = !!(res.ok && res.body.configured);

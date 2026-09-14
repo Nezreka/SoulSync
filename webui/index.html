@@ -7443,7 +7443,30 @@
                                      Rooms live in the guild rail, Discord-style — they are
                                      deliberately NOT listed again here. -->
                                 <div class="chat-side-list chat-chanlist" data-chat-channels></div>
-                                <div class="chat-side-label">Direct Messages</div>
+
+                                <!-- Discord-style Social & Lists Navigation -->
+                                <div class="chat-social-nav-group">
+                                    <button type="button" class="chat-social-nav-btn" data-chat-open-social="friends" title="Open Friends List">
+                                        <span class="chat-social-nav-icon">⭐</span>
+                                        <span class="chat-social-nav-text">Friends</span>
+                                        <span class="chat-social-nav-badge" data-chat-side-count-friends hidden>0</span>
+                                    </button>
+                                    <button type="button" class="chat-social-nav-btn" data-chat-open-social="blocked" title="Open Blocked Users">
+                                        <span class="chat-social-nav-icon">🚫</span>
+                                        <span class="chat-social-nav-text">Blocklist</span>
+                                        <span class="chat-social-nav-badge" data-chat-side-count-blocked hidden>0</span>
+                                    </button>
+                                    <button type="button" class="chat-social-nav-btn" data-chat-open-social="bookmarks" title="Open Bookmarked Peers">
+                                        <span class="chat-social-nav-icon">📚</span>
+                                        <span class="chat-social-nav-text">Bookmarks</span>
+                                        <span class="chat-social-nav-badge" data-chat-side-count-bookmarks hidden>0</span>
+                                    </button>
+                                </div>
+
+                                <div class="chat-side-label-row">
+                                    <div class="chat-side-label">Direct Messages</div>
+                                    <button type="button" class="chat-side-manage-btn" data-chat-open-social="friends" title="Manage Friends, Blocklist & Bookmarks">👥 Manage</button>
+                                </div>
                                 <div class="chat-side-list" data-chat-convos></div>
                             </div>
                             <!-- bottom-left user panel (Discord's account strip) -->
@@ -7602,6 +7625,62 @@
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-rooms-close>Close</button>
                                     </div>
                                 </div>
+                            </div>
+                            <!-- Discord-style Slide-over Social & Lists Drawer (Friends, Blocklist, Bookmarks) -->
+                            <div class="chat-peer-backdrop chat-social-backdrop" data-chat-social-backdrop hidden></div>
+                            <div class="chat-peer-drawer chat-social-drawer" data-chat-social-drawer hidden>
+                                <!-- Drawer Hero / Header -->
+                                <div class="chat-social-hero">
+                                    <div class="chat-social-hero-top">
+                                        <div class="chat-social-identity">
+                                            <div class="chat-social-hero-icon">👥</div>
+                                            <div class="chat-social-title-wrap">
+                                                <div class="chat-social-title">Social &amp; Lists</div>
+                                                <div class="chat-social-subtitle">Local Friends, Blocklist &amp; Bookmarked Peers</div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-social-close title="Close (Esc)">&times;</button>
+                                    </div>
+
+                                    <!-- Discord-style Navigation Tabs -->
+                                    <div class="chat-social-nav-tabs">
+                                        <button type="button" class="chat-social-nav-tab chat-social-nav-tab--active" data-chat-social-tab="friends">
+                                            <span class="chat-social-tab-icon">⭐</span> Friends
+                                            <span class="chat-social-tab-pill" data-chat-count-friends>0</span>
+                                        </button>
+                                        <button type="button" class="chat-social-nav-tab" data-chat-social-tab="blocked">
+                                            <span class="chat-social-tab-icon">🚫</span> Blocked
+                                            <span class="chat-social-tab-pill" data-chat-count-blocked>0</span>
+                                        </button>
+                                        <button type="button" class="chat-social-nav-tab" data-chat-social-tab="bookmarks">
+                                            <span class="chat-social-tab-icon">📚</span> Bookmarks
+                                            <span class="chat-social-tab-pill" data-chat-count-bookmarks>0</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Add User Box (Discord-style add banner) -->
+                                <div class="chat-social-add-box">
+                                    <div class="chat-social-add-label" data-chat-social-add-label>ADD FRIEND</div>
+                                    <div class="chat-social-add-input-wrap">
+                                        <input class="chat-social-add-input" data-chat-social-input type="text"
+                                               placeholder="Enter a Soulseek username…" autocomplete="off" spellcheck="false">
+                                        <button type="button" class="chat-social-submit-btn" data-chat-social-add-btn>+ Add</button>
+                                    </div>
+                                </div>
+
+                                <!-- Filter toolbar -->
+                                <div class="chat-social-filter-bar">
+                                    <div class="chat-social-search-wrap">
+                                        <span class="chat-social-search-icon">🔍</span>
+                                        <input class="chat-social-filter-input" data-chat-social-filter type="text"
+                                               placeholder="Filter list…" autocomplete="off">
+                                    </div>
+                                    <span class="chat-social-total-count" data-chat-social-total>0 users</span>
+                                </div>
+
+                                <!-- Scrollable List -->
+                                <div class="chat-social-scroll-body" data-chat-social-list></div>
                             </div>
                             <!-- jukebox YouTube search: rich pop-in, search-page video-card look -->
                             <div class="chat-settings-overlay" data-chat-jbx-search-modal hidden>
