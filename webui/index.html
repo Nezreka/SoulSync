@@ -6400,6 +6400,16 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label for="music-max-mb-per-minute">Maximum music download size (MB/min)</label>
+                                    <input type="number" id="music-max-mb-per-minute" min="0" step="0.1" value="0"
+                                        onchange="if(typeof debouncedAutoSaveSettings==='function')debouncedAutoSaveSettings()">
+                                    <div class="help-text">0 disables the limit. At 10 MB/min, a 3:30 track may be up to 35 MB (1 MB = 1,000,000 bytes).
+                                        Oversized candidates are skipped before download. Uses the advertised duration, or the requested track length when unavailable.
+                                        Album releases use the album length. Sources without size or duration information cannot be checked.
+                                        This does not resize existing files or limit post-processing output.</div>
+                                </div>
+
+                                <div class="form-group">
                                     <label for="preferred-version">Prefer a version when one exists</label>
                                     <select id="preferred-version" onchange="if(typeof debouncedAutoSaveSettings==='function')debouncedAutoSaveSettings()">
                                         <option value="">Off &mdash; take what the source asked for</option>
