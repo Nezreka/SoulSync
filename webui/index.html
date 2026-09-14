@@ -7487,6 +7487,9 @@
                                     <div data-chat-user-card-body></div>
                                     <div class="chat-settings-actions">
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-close>Close</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-friend title="Toggle local friend status">⭐ Add Friend</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-block title="Hide all messages from this user (local block)">🚫 Block</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-bookmark title="Bookmark this peer">⭐ Bookmark</button>
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-ignore>Mute</button>
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-challenge title="Invite them to a private Arcade game">⚔ Challenge</button>
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-browse>Browse files</button>
@@ -7510,7 +7513,11 @@
                                                 </div>
                                             </div>
                                         </div>
-                                        <button type="button" class="chat-peer-close" data-chat-browse-close title="Close (Esc)">&times;</button>
+                                        <div class="chat-peer-hero-actions">
+                                            <button type="button" class="chat-peer-bm-btn" data-chat-peer-bookmark title="Bookmark this peer">⭐ Bookmark</button>
+                                            <button type="button" class="chat-peer-saved-btn" data-chat-browse-saved-peers title="Switch to bookmarked peer">📚 Bookmarks</button>
+                                            <button type="button" class="chat-peer-close" data-chat-browse-close title="Close (Esc)">&times;</button>
+                                        </div>
                                     </div>
 
                                     <!-- Telemetry & Soulseek connection stats -->
@@ -7539,6 +7546,8 @@
                                             ⭐ <span data-chat-browse-history-text></span>
                                         </div>
                                         <div class="chat-peer-actions">
+                                            <button type="button" class="chat-peer-act-btn" data-chat-browse-friend title="Toggle local friend">⭐ Friend</button>
+                                            <button type="button" class="chat-peer-act-btn" data-chat-browse-block title="Block user messages">🚫 Block</button>
                                             <button type="button" class="chat-peer-act-btn" data-chat-browse-msg>💬 Message</button>
                                             <button type="button" class="chat-peer-act-btn" data-chat-browse-challenge title="Challenge to an Arcade game">⚔ Challenge</button>
                                         </div>
@@ -7547,11 +7556,20 @@
 
                                 <!-- Filter & Tree Tools Bar -->
                                 <div class="chat-browse-filter-bar">
-                                    <input class="chat-browse-filter-input" data-chat-browse-search type="text"
-                                           placeholder="Filter folders or search files…" autocomplete="off">
-                                    <div class="chat-browse-tree-tools">
-                                        <button type="button" class="chat-peer-act-btn" data-chat-browse-expand-all title="Expand all folders">Expand all</button>
-                                        <button type="button" class="chat-peer-act-btn" data-chat-browse-collapse-all title="Collapse all folders">Collapse all</button>
+                                    <div class="chat-browse-search-row">
+                                        <input class="chat-browse-filter-input" data-chat-browse-search type="text"
+                                               placeholder="Filter folders or search files…" autocomplete="off">
+                                        <div class="chat-browse-tree-tools">
+                                            <button type="button" class="chat-peer-act-btn" data-chat-browse-expand-all title="Expand all folders">Expand all</button>
+                                            <button type="button" class="chat-peer-act-btn" data-chat-browse-collapse-all title="Collapse all folders">Collapse all</button>
+                                        </div>
+                                    </div>
+                                    <div class="chat-browse-format-filters">
+                                        <span class="chat-fmt-filter-label">Format:</span>
+                                        <button type="button" class="chat-fmt-pill chat-fmt-pill--active" data-chat-browse-fmt="all">All</button>
+                                        <button type="button" class="chat-fmt-pill" data-chat-browse-fmt="flac">FLAC / Lossless</button>
+                                        <button type="button" class="chat-fmt-pill" data-chat-browse-fmt="320">MP3 320k</button>
+                                        <button type="button" class="chat-fmt-pill" data-chat-browse-fmt="vbr">VBR / Other</button>
                                     </div>
                                 </div>
 

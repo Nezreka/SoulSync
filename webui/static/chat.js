@@ -855,6 +855,7 @@
                 '<button class="chat-msg-user" type="button" data-chat-user="' + attr(user) +
                     '" style="color:hsl(' + _hue(user) + ',65%,68%)" title="Message ' +
                     attr(user) + '">' + esc(user) + '</button>' +
+                (!self && isFriend(user) ? '<span class="chat-friend-badge" title="Friend">⭐ Friend</span>' : '') +
                 (ext ? '<span class="chat-peer-badge chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '<span class="chat-peer-badge chat-peer-badge--soulsync">SoulSync</span>') +
                 '<span class="chat-msg-time">' + esc(fmtTime(m.timestamp)) + '</span>' +
                 '</div>' + _lineHtml(m) };
@@ -902,6 +903,18 @@
         var editFold = _applyEdits(msgs);
         _editsByKey = editFold.edits;
         var shown = editFold.list, hidden = 0, muted = 0;
+        // Suppress messages from locally blocked users (both in rooms and PMs)
+        var blk = blockedSet();
+        if (blk.length) {
+            shown = shown.filter(function (m) {
+                var u = String(m.username || m.user || '');
+                if (isBlocked(u) && !(m.self === true || m.direction === 'Out')) {
+                    muted++;
+                    return false;
+                }
+                return true;
+            });
+        }
         if (state.view === 'room') {
             var ign = ignoredSet();
             if (ign.length) {
@@ -1014,6 +1027,120 @@
         renderUsersList();
     }
 
+    // ── friend list (local only — special shiny star & badge, no requesting) ──
+    function friendsSet() {
+        try { return JSON.parse(localStorage.getItem('chat_friends') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isFriend(name) {
+        if (!name) return false;
+        return friendsSet().some(function (f) { return String(f).toLowerCase() === String(name).toLowerCase(); });
+    }
+    function toggleFriend(name) {
+        if (!name) return false;
+        var list = friendsSet();
+        var idx = -1;
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i]).toLowerCase() === String(name).toLowerCase()) { idx = i; break; }
+        }
+        var isNow = false;
+        if (idx > -1) {
+            list.splice(idx, 1);
+        } else {
+            list.push(name);
+            isNow = true;
+        }
+        try { localStorage.setItem('chat_friends', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        state.lastStamp = null;
+        renderMessages(state.msgs);
+        renderUsersList();
+        return isNow;
+    }
+
+    // ── block list (local only — completely suppresses chat messages by user) ──
+    function blockedSet() {
+        try { return JSON.parse(localStorage.getItem('chat_blocked') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isBlocked(name) {
+        if (!name) return false;
+        return blockedSet().some(function (b) { return String(b).toLowerCase() === String(name).toLowerCase(); });
+    }
+    function toggleBlocked(name) {
+        if (!name) return false;
+        var list = blockedSet();
+        var idx = -1;
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i]).toLowerCase() === String(name).toLowerCase()) { idx = i; break; }
+        }
+        var isNowBlocked = false;
+        if (idx > -1) {
+            list.splice(idx, 1);
+        } else {
+            list.push(name);
+            isNowBlocked = true;
+        }
+        try { localStorage.setItem('chat_blocked', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        state.lastStamp = null;
+        renderMessages(state.msgs);
+        renderUsersList();
+        return isNowBlocked;
+    }
+
+    // ── peer bookmarks (local only — saved peers to browse or bookmark) ──
+    function peerBookmarksSet() {
+        try { return JSON.parse(localStorage.getItem('chat_peer_bookmarks') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isPeerBookmarked(name) {
+        if (!name) return false;
+        return peerBookmarksSet().some(function (p) { return String(p).toLowerCase() === String(name).toLowerCase(); });
+    }
+    function togglePeerBookmark(name) {
+        if (!name) return false;
+        var list = peerBookmarksSet();
+        var idx = -1;
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i]).toLowerCase() === String(name).toLowerCase()) { idx = i; break; }
+        }
+        var isNowBookmarked = false;
+        if (idx > -1) {
+            list.splice(idx, 1);
+        } else {
+            list.push(name);
+            isNowBookmarked = true;
+        }
+        try { localStorage.setItem('chat_peer_bookmarks', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        return isNowBookmarked;
+    }
+
+    // ── direct message closed / hidden list (dismissed so they don't show in list) ──
+    function hiddenDmsSet() {
+        try { return JSON.parse(localStorage.getItem('chat_hidden_dms') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isDmHidden(name) {
+        if (!name) return false;
+        return hiddenDmsSet().some(function (h) { return String(h).toLowerCase() === String(name).toLowerCase(); });
+    }
+    function hideDm(name) {
+        if (!name) return;
+        var list = hiddenDmsSet();
+        var exists = list.some(function (h) { return String(h).toLowerCase() === String(name).toLowerCase(); });
+        if (!exists) {
+            list.push(name);
+            try { localStorage.setItem('chat_hidden_dms', JSON.stringify(list)); } catch (e) {}
+        }
+    }
+    function unhideDm(name) {
+        if (!name) return;
+        var list = hiddenDmsSet();
+        var filtered = list.filter(function (h) { return String(h).toLowerCase() !== String(name).toLowerCase(); });
+        if (filtered.length !== list.length) {
+            try { localStorage.setItem('chat_hidden_dms', JSON.stringify(filtered)); } catch (e) {}
+        }
+    }
+
     // Users who spoke through SoulSync (the envelope is the app signature) —
     // sourced from the loaded messages, so it's an approximation of "runs
     // SoulSync", not a directory.
@@ -1039,17 +1166,21 @@
         // Discord-style member row: avatar + presence dot, name, and an activity
         // subline (the jukebox listen state doubles as "playing a game").
         var ign = isIgnored(n);
+        var blk = isBlocked(n);
+        var fr = isFriend(n);
         var tuned = tunedMap && tunedMap[n];
         var np = npMap && npMap[n];
         return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
+            (blk ? ' chat-user--blocked' : '') + (fr ? ' chat-user--friend' : '') +
             '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) +
+            (fr ? ' (Friend)' : '') + (blk ? ' (Blocked)' : '') +
             (tuned ? ' — listening to the room jukebox' : '') + '">' +
             '<span class="chat-user-av">' +
                 _avatarHtml(n, avMap && avMap[n], 'chat-av--fill') +
                 '<span class="chat-user-dot' + (tuned ? ' chat-user-dot--tuned' : '') + '"></span>' +
             '</span>' +
             '<span class="chat-user-main">' +
-                '<span class="chat-user-name">' + esc(n) + '</span>' +
+                '<span class="chat-user-name">' + esc(n) + (fr ? '<span class="chat-user-friend-star" title="Friend">⭐</span>' : '') + '</span>' +
                 // the shared jukebox wins the line — it's what the room is doing
                 // together; a personal now-playing shows otherwise
                 (tuned
@@ -1059,7 +1190,7 @@
                             '">♪ ' + esc(np.t) + (np.a ? ' · ' + esc(np.a) : '') + '</span>'
                         : '')) +
             '</span>' +
-            (ign ? '<span class="chat-user-mute">muted</span>' : '') + '</button>';
+            (blk ? '<span class="chat-user-mute">blocked</span>' : (ign ? '<span class="chat-user-mute">muted</span>' : '')) + '</button>';
     }
 
     function renderUsers(users) {
@@ -1089,9 +1220,10 @@
         });
         if (f) names = names.filter(function (n) { return n.toLowerCase().indexOf(f) > -1; });
         var cls = _userClassification();
-        var self = [], apps = [], rest = [];
+        var self = [], friends = [], apps = [], rest = [];
         names.forEach(function (n) {
             if (state.selfName && n === state.selfName) self.push(n);
+            else if (isFriend(n)) friends.push(n);
             // the flip: unknown (never spoke) = assumed SoulSync
             else if (cls[n] !== 'vanilla') apps.push(n);
             else rest.push(n);
@@ -1108,6 +1240,10 @@
             html += '<div class="chat-users-label chat-users-label--sub">You</div>' +
                 self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap, npMap, avMap); }).join('');
         }
+        if (friends.length) {
+            html += '<div class="chat-users-label chat-users-label--sub" style="color:#fbbf24;">⭐ Friends &mdash; ' + friends.length + '</div>' +
+                friends.map(function (n) { return _userBtn(n, '', tunedMap, npMap, avMap); }).join('');
+        }
         if (apps.length) {
             html += '<div class="chat-users-label chat-users-label--sub">SoulSync &mdash; ' + apps.length + '</div>' +
                 apps.map(function (n) { return _userBtn(n, '', tunedMap, npMap, avMap); }).join('');
@@ -1119,7 +1255,7 @@
                 rest.length + '</div>' +
                 rest.map(function (n) { return _userBtn(n, '', tunedMap, npMap, avMap); }).join('');
         }
-        if (!self.length && !apps.length && !rest.length) {
+        if (!self.length && !friends.length && !apps.length && !rest.length) {
             html += '<div class="chat-side-none">No users match</div>';
         }
         listHost.innerHTML = html;
@@ -1133,14 +1269,28 @@
         // lists saying the same thing).
         var host = q('[data-chat-convos]');
         if (!host) return;
-        var list = (convos || []).map(function (c) {
+        var list = (convos || []).filter(function (c) {
             var name = c.username || c.name || '';
-            if (!name) return '';
+            if (!name) return false;
+            var unread = c.hasUnAcknowledgedMessages || c.unAcknowledgedMessageCount > 0;
+            if (unread) {
+                unhideDm(name);
+                return true;
+            }
+            if (state.view === 'pm' && state.pmUser === name) {
+                return true;
+            }
+            return !isDmHidden(name);
+        }).map(function (c) {
+            var name = c.username || c.name || '';
             var unread = c.hasUnAcknowledgedMessages || c.unAcknowledgedMessageCount > 0;
             var on = state.view === 'pm' && state.pmUser === name;
-            return '<button class="chat-side-item' + (on ? ' chat-side-item--on' : '') +
+            return '<div class="chat-side-convo' + (on ? ' chat-side-item--on' : '') + '">' +
+                '<button class="chat-side-item' + (on ? ' chat-side-item--on' : '') +
                 '" type="button" data-chat-open-pm="' + attr(name) + '">' + esc(name) +
-                (unread ? '<span class="chat-side-dot"></span>' : '') + '</button>';
+                (unread ? '<span class="chat-side-dot"></span>' : '') + '</button>' +
+                '<button class="chat-side-convo-close" type="button" data-chat-close-pm="' + attr(name) + '" title="Close conversation">×</button>' +
+            '</div>';
         }).join('');
         host.innerHTML = list || '<div class="chat-side-none">No conversations</div>';
         renderGuilds();
@@ -3350,8 +3500,14 @@
               (state.ssOnly ? 'SoulSync only' : 'All messages') + '</button>' +
               (state.isAdmin ? '<button class="chat-cog-btn" type="button" data-chat-settings-btn ' +
                   'title="Chat settings">⚙</button>' : '')
-            : '<span class="chat-head-title">' + esc(state.pmUser || '') + '</span>' +
-              '<span class="chat-head-sub">private message</span>';
+            : '<span class="chat-head-title">' + esc(state.pmUser || '') +
+              (isFriend(state.pmUser) ? ' <span class="chat-friend-badge" title="Friend">⭐ Friend</span>' : '') +
+              '</span>' +
+              '<span class="chat-head-sub">private message</span>' +
+              '<div class="chat-head-actions" style="margin-left:auto;display:flex;align-items:center;gap:8px;">' +
+              '<button type="button" class="chat-filter-btn" data-chat-browse-user="' + attr(state.pmUser || '') + '" title="Browse their files">📁 Browse Files</button>' +
+              '<button type="button" class="chat-head-close-pm" data-chat-head-close-pm title="Close this conversation">✕ Close Chat</button>' +
+              '</div>';
     }
 
     function renderComposer() {
@@ -3527,12 +3683,29 @@
         if (!overlay) { openPm(name); return; }
         var body = q('[data-chat-user-card-body]');
         if (body) {
+            var isFr = isFriend(name);
             body.innerHTML = '<div class="chat-card-head">' + _avatar(name) +
-                '<span class="chat-card-name">' + esc(name) + '</span></div>' +
+                '<span class="chat-card-name">' + esc(name) + '</span>' +
+                (isFr ? '<span class="chat-friend-badge" style="margin-left:8px;">⭐ Friend</span>' : '') +
+                '</div>' +
                 '<div class="chat-card-info">Loading…</div>';
         }
         overlay.hidden = false;
         overlay.setAttribute('data-chat-user-card-for', name);
+        var frBtn = overlay.querySelector('[data-chat-card-friend]');
+        if (frBtn) {
+            frBtn.hidden = state.selfName && name === state.selfName;
+            frBtn.textContent = isFriend(name) ? '⭐ Remove Friend' : '⭐ Add Friend';
+        }
+        var blkBtn = overlay.querySelector('[data-chat-card-block]');
+        if (blkBtn) {
+            blkBtn.hidden = state.selfName && name === state.selfName;
+            blkBtn.textContent = isBlocked(name) ? 'Unblock' : '🚫 Block';
+        }
+        var bmBtn = overlay.querySelector('[data-chat-card-bookmark]');
+        if (bmBtn) {
+            bmBtn.textContent = isPeerBookmarked(name) ? '★ Bookmarked' : '⭐ Bookmark';
+        }
         var ignBtn = overlay.querySelector('[data-chat-card-ignore]');
         if (ignBtn) {
             ignBtn.hidden = state.selfName && name === state.selfName;
@@ -3712,6 +3885,36 @@
         return '';
     }
 
+    function _folderFormatBadge(dirName) {
+        if (!dirName) return '';
+        var s = String(dirName).toLowerCase();
+        // Hi-Res / 24-bit FLAC
+        if (/(24[\s\-]?bit|24\/96|24\/192|96khz|192khz|hi[\s\-]?res)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--flac">FLAC 24-bit</span>';
+        }
+        // Standard FLAC / Lossless / ALAC
+        if (/(flac|lossless|alac)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--flac">FLAC</span>';
+        }
+        // Vinyl rips
+        if (/(vinyl|lp[\s\-_]rip|vinylrip)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--vinyl">VINYL</span>';
+        }
+        // WAV
+        if (/(\bwav\b|\.wav)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--wav">WAV</span>';
+        }
+        // MP3 320k
+        if (/(320|320k|320kbps|cbr)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--320">320K</span>';
+        }
+        // V0 / V2 / VBR
+        if (/(v0|v2|vbr)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--vbr">V0 VBR</span>';
+        }
+        return '';
+    }
+
     function closeBrowse() {
         var overlay = q('[data-chat-browse-modal]');
         var backdrop = q('[data-chat-browse-backdrop]');
@@ -3740,7 +3943,8 @@
             cache: {},
             expanded: {},
             selected: {},
-            filter: ''
+            filter: '',
+            formatFilter: 'all'
         };
         overlay.hidden = false;
         if (backdrop) backdrop.hidden = false;
@@ -3756,6 +3960,33 @@
         if (av) av.textContent = (name[0] || '👤').toUpperCase();
         var statusText = q('[data-chat-browse-status-text]');
         if (statusText) statusText.textContent = 'Connecting…';
+
+        // Setup format filter pills
+        var pBar = q('.chat-browse-format-filters');
+        if (pBar) {
+            pBar.querySelectorAll('.chat-fmt-pill').forEach(function (pill) {
+                pill.classList.toggle('chat-fmt-pill--active', pill.getAttribute('data-chat-browse-fmt') === 'all');
+            });
+        }
+
+        // Setup bookmark button & saved peers count
+        var bmBtn = q('[data-chat-peer-bookmark]');
+        if (bmBtn) {
+            var isBm = isPeerBookmarked(name);
+            bmBtn.textContent = isBm ? '★ Bookmarked' : '⭐ Bookmark';
+            bmBtn.classList.toggle('chat-peer-bm-btn--active', isBm);
+        }
+        _updateSavedPeersBtn();
+
+        // Setup friend and block quickbar buttons
+        var frBtn = q('[data-chat-browse-friend]');
+        if (frBtn) {
+            frBtn.textContent = isFriend(name) ? '⭐ Friend (Remove)' : '⭐ Friend';
+        }
+        var blkBtn = q('[data-chat-browse-block]');
+        if (blkBtn) {
+            blkBtn.textContent = isBlocked(name) ? 'Unblock' : '🚫 Block';
+        }
 
         // Reset telemetry
         var spd = q('[data-chat-browse-speed]');
@@ -3835,13 +4066,34 @@
     function renderBrowseTree(filter) {
         var body = q('[data-chat-browse-body]');
         if (!body) return;
-        _browse.filter = filter || '';
+        _browse.filter = filter != null ? filter : (_browse.filter || '');
         var f = String(_browse.filter).toLowerCase();
+        var fmt = _browse.formatFilter || 'all';
+
         var dirs = _browse.dirs.filter(function (d) {
+            if (fmt === 'flac') {
+                var s = d.name.toLowerCase();
+                var isFlac = /(flac|24bit|24-bit|lossless|alac|vinyl)/i.test(s);
+                var cached = _browse.cache[d.name];
+                if (!isFlac && cached) isFlac = cached.some(function (x) { return /\.flac$/i.test(x.filename); });
+                if (!isFlac) return false;
+            } else if (fmt === '320') {
+                var s = d.name.toLowerCase();
+                var is320 = /(320|320k|320kbps|cbr)/i.test(s);
+                var cached = _browse.cache[d.name];
+                if (!is320 && cached) is320 = cached.some(function (x) { return /320/i.test(x.filename); });
+                if (!is320) return false;
+            } else if (fmt === 'vbr') {
+                var s = d.name.toLowerCase();
+                var isVbr = /(v0|v2|vbr|mp3)/i.test(s) && !/(320|flac|lossless)/i.test(s);
+                var cached = _browse.cache[d.name];
+                if (!isVbr && cached) isVbr = cached.some(function (x) { return /\.(mp3|aac|m4a)$/i.test(x.filename) && !/320/i.test(x.filename); });
+                if (!isVbr) return false;
+            }
             if (!f) return true;
             if (d.name.toLowerCase().indexOf(f) > -1) return true;
-            var cached = _browse.cache[d.name];
-            if (cached && cached.some(function (x) { return x.filename.toLowerCase().indexOf(f) > -1; })) return true;
+            var cached2 = _browse.cache[d.name];
+            if (cached2 && cached2.some(function (x) { return x.filename.toLowerCase().indexOf(f) > -1; })) return true;
             return false;
         }).slice(0, 500);
 
@@ -3854,6 +4106,7 @@
 
         body.innerHTML = dirs.map(function (d) {
             var isExp = !!_browse.expanded[d.name];
+            var fmtBadge = _folderFormatBadge(d.name);
             return '<div class="chat-folder-tree-item' + (isExp ? ' chat-folder-tree-item--open' : '') + '" data-chat-folder-item="' + attr(d.name) + '">' +
                 '<div class="chat-folder-header" data-chat-browse-toggle="' + attr(d.name) + '">' +
                     '<button type="button" class="chat-folder-chevron' + (isExp ? ' chat-folder-chevron--expanded' : '') + '" ' +
@@ -3862,7 +4115,10 @@
                     '</button>' +
                     '<span class="chat-folder-icon">' + (isExp ? '📂' : '📁') + '</span>' +
                     '<div class="chat-folder-info" title="' + attr(d.name) + '">' +
-                        '<span class="chat-folder-name">' + esc(_baseName(d.name)) + '</span>' +
+                        '<div class="chat-folder-title-row">' +
+                            '<span class="chat-folder-name">' + esc(_baseName(d.name)) + '</span>' +
+                            fmtBadge +
+                        '</div>' +
                         '<span class="chat-folder-meta">' + d.file_count + ' file' + (d.file_count === 1 ? '' : 's') + '</span>' +
                     '</div>' +
                     '<div class="chat-folder-actions">' +
@@ -5156,6 +5412,50 @@
     // ── room browser (join any public Soulseek room) ─────────────────────────
     var _availRooms = null;
 
+    function _updateSavedPeersBtn() {
+        var btn = q('[data-chat-browse-saved-peers]');
+        if (!btn) return;
+        var bms = peerBookmarksSet();
+        btn.textContent = '📚 Bookmarks (' + bms.length + ')';
+    }
+
+    function _openSavedPeersPicker() {
+        var bms = peerBookmarksSet();
+        if (!bms.length) {
+            if (typeof showToast === 'function') showToast('No saved peers yet. Click ⭐ Bookmark on any peer to save them!', 'info');
+            return;
+        }
+        var overlay = q('[data-chat-rooms-modal]');
+        if (!overlay) return;
+        overlay.hidden = false;
+        var titleEl = overlay.querySelector('.chat-settings-title') || overlay.querySelector('.chat-card-name');
+        if (titleEl) titleEl.textContent = 'Bookmarked Peers (' + bms.length + ')';
+        var listEl = q('[data-chat-rooms-list]');
+        var inp = q('[data-chat-rooms-search]');
+        if (inp) { inp.value = ''; inp.placeholder = 'Filter saved peers…'; inp.focus(); }
+
+        function renderSaved(filter) {
+            if (!listEl) return;
+            var f = String(filter || '').toLowerCase();
+            var matches = bms.filter(function (p) { return !f || p.toLowerCase().indexOf(f) > -1; });
+            if (!matches.length) {
+                listEl.innerHTML = '<div class="chat-gif-hint">No matching saved peers</div>';
+                return;
+            }
+            listEl.innerHTML = matches.map(function (p) {
+                return '<div class="chat-room-row">' +
+                    '<span class="chat-room-name" style="cursor:pointer;" data-chat-browse-user="' + attr(p) + '">⭐ ' + esc(p) + '</span>' +
+                    '<button type="button" class="chat-room-join" data-chat-browse-user="' + attr(p) + '">Browse Files</button>' +
+                    '<button type="button" class="chat-side-convo-close" style="opacity:1;" data-chat-saved-peer-remove="' + attr(p) + '" title="Remove bookmark">×</button>' +
+                '</div>';
+            }).join('');
+        }
+        renderSaved('');
+        if (inp) {
+            inp.oninput = function () { renderSaved(inp.value); };
+        }
+    }
+
     function openRoomBrowser() {
         var overlay = q('[data-chat-rooms-modal]');
         if (!overlay) return;
@@ -5253,6 +5553,7 @@
 
     function openPm(username) {
         if (!username) return;
+        unhideDm(username);
         state.view = 'pm'; state.pmUser = username; state.lastStamp = null; state.stickBottom = true;
         state.searchMode = false; state.renderedOk = false;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
@@ -5263,6 +5564,7 @@
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
         refresh();
+        if (state.convos) renderSide(state.convos);
     }
 
     function send() {
@@ -5953,6 +6255,30 @@
             if (t) { var rm = q('[data-chat-rooms-modal]'); if (rm) rm.hidden = true; return; }
             var rmo = e.target.closest('[data-chat-rooms-modal]');
             if (rmo && e.target === rmo) { rmo.hidden = true; return; }
+            t = e.target.closest('[data-chat-close-pm]');
+            if (t) {
+                var userToClose = t.getAttribute('data-chat-close-pm');
+                if (userToClose) {
+                    hideDm(userToClose);
+                    if (state.view === 'pm' && state.pmUser === userToClose) {
+                        openRoom(state.room || undefined);
+                    }
+                    if (state.convos) renderSide(state.convos);
+                    if (typeof showToast === 'function') showToast('Conversation closed', 'info');
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-head-close-pm]');
+            if (t) {
+                if (state.view === 'pm' && state.pmUser) {
+                    var uClosed = state.pmUser;
+                    hideDm(uClosed);
+                    openRoom(state.room || undefined);
+                    if (state.convos) renderSide(state.convos);
+                    if (typeof showToast === 'function') showToast('Conversation closed', 'info');
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-open-pm]');
             if (t) { openPm(t.getAttribute('data-chat-open-pm')); return; }
             t = e.target.closest('[data-chat-react-user]');
@@ -5973,6 +6299,46 @@
                 var ov = q('[data-chat-user-card]');
                 closeUserCard();
                 if (ov) openPm(ov.getAttribute('data-chat-user-card-for'));
+                return;
+            }
+            t = e.target.closest('[data-chat-card-friend]');
+            if (t) {
+                var fCard = q('[data-chat-user-card]');
+                var uFor = fCard && fCard.getAttribute('data-chat-user-card-for');
+                if (uFor) {
+                    var isNowF = toggleFriend(uFor);
+                    t.textContent = isNowF ? '⭐ Remove Friend' : '⭐ Add Friend';
+                    if (typeof showToast === 'function') {
+                        showToast(isNowF ? 'Added ' + uFor + ' to friends' : 'Removed from friends', 'info');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-block]');
+            if (t) {
+                var bCard = q('[data-chat-user-card]');
+                var uToBlk = bCard && bCard.getAttribute('data-chat-user-card-for');
+                if (uToBlk) {
+                    var isNowBlk = toggleBlocked(uToBlk);
+                    t.textContent = isNowBlk ? 'Unblock' : '🚫 Block';
+                    if (typeof showToast === 'function') {
+                        showToast(isNowBlk ? 'Blocked ' + uToBlk : 'Unblocked ' + uToBlk, 'info');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-bookmark]');
+            if (t) {
+                var bmCard = q('[data-chat-user-card]');
+                var uToBm = bmCard && bmCard.getAttribute('data-chat-user-card-for');
+                if (uToBm) {
+                    var isNowBm = togglePeerBookmark(uToBm);
+                    t.textContent = isNowBm ? '★ Bookmarked' : '⭐ Bookmark';
+                    _updateSavedPeersBtn();
+                    if (typeof showToast === 'function') {
+                        showToast(isNowBm ? 'Bookmarked ' + uToBm : 'Bookmark removed', 'info');
+                    }
+                }
                 return;
             }
             t = e.target.closest('[data-chat-card-challenge-v]');
@@ -6003,6 +6369,71 @@
             if (t) {
                 var bOv = q('[data-chat-user-card]');
                 openBrowse(bOv && bOv.getAttribute('data-chat-user-card-for'));
+                return;
+            }
+            t = e.target.closest('[data-chat-peer-bookmark]');
+            if (t) {
+                if (_browse.user) {
+                    var isBm2 = togglePeerBookmark(_browse.user);
+                    t.textContent = isBm2 ? '★ Bookmarked' : '⭐ Bookmark';
+                    t.classList.toggle('chat-peer-bm-btn--active', isBm2);
+                    _updateSavedPeersBtn();
+                    if (typeof showToast === 'function') {
+                        showToast(isBm2 ? 'Peer bookmarked' : 'Bookmark removed', 'info');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-saved-peers]');
+            if (t) {
+                _openSavedPeersPicker();
+                return;
+            }
+            t = e.target.closest('[data-chat-saved-peer-remove]');
+            if (t) {
+                var pRem = t.getAttribute('data-chat-saved-peer-remove');
+                if (pRem) {
+                    togglePeerBookmark(pRem);
+                    _updateSavedPeersBtn();
+                    var pRow = t.closest('.chat-room-row');
+                    if (pRow) pRow.remove();
+                    if (typeof showToast === 'function') showToast('Bookmark removed', 'info');
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-friend]');
+            if (t) {
+                if (_browse.user) {
+                    var isFrNow = toggleFriend(_browse.user);
+                    t.textContent = isFrNow ? '⭐ Friend (Remove)' : '⭐ Friend';
+                    if (typeof showToast === 'function') {
+                        showToast(isFrNow ? 'Added ' + _browse.user + ' to friends' : 'Removed from friends', 'info');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-block]');
+            if (t) {
+                if (_browse.user) {
+                    var isBlkNow = toggleBlocked(_browse.user);
+                    t.textContent = isBlkNow ? 'Unblock' : '🚫 Block';
+                    if (typeof showToast === 'function') {
+                        showToast(isBlkNow ? 'Blocked ' + _browse.user : 'Unblocked ' + _browse.user, 'info');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-fmt]');
+            if (t) {
+                var fmtChoice = t.getAttribute('data-chat-browse-fmt') || 'all';
+                _browse.formatFilter = fmtChoice;
+                var pBarEl = q('.chat-browse-format-filters');
+                if (pBarEl) {
+                    pBarEl.querySelectorAll('.chat-fmt-pill').forEach(function (pill) {
+                        pill.classList.toggle('chat-fmt-pill--active', pill === t);
+                    });
+                }
+                renderBrowseTree(_browse.filter);
                 return;
             }
             t = e.target.closest('[data-chat-browse-dl-single]');
