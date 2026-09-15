@@ -8064,8 +8064,12 @@ def library_completion_stream():
             yield f"data: {json.dumps({'type': 'start', 'total_items': len(all_items)})}\n\n"
 
             _loop_start = time.perf_counter()
+            _loop_cpu_start = time.thread_time()
             # per-item timing, so a slow page can be told apart from a slow
-            # item: the log names the slowest few and how many took a second
+            # item: the log names the slowest few and how many took a second.
+            # thread cpu time next to wall time tells work apart from waiting
+            # (the gil, a lock, the disk): a loop that spent 18 s of wall on
+            # 0.5 s of cpu was starved, not slow.
             _item_times = []
             for _i, (category, item) in enumerate(all_items):
                 _item_start = time.perf_counter()
@@ -8129,10 +8133,12 @@ def library_completion_stream():
                     _item_times.append((time.perf_counter() - _item_start, category, str(item.get('title') or item.get('name') or item.get('id'))))
 
             _loop_elapsed = time.perf_counter() - _loop_start
+            _loop_cpu = time.thread_time() - _loop_cpu_start
             _slow = sorted(_item_times, reverse=True)[:3]
             _over_1s = sum(1 for t, _c, _n in _item_times if t >= 1.0)
             logger.info(
-                f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms "
+                f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms wall / "
+                f"{_loop_cpu * 1000:.0f}ms cpu "
                 f"(total {(time.perf_counter() - _t0) * 1000:.0f}ms with pre-fetch; {_over_1s} items over 1s; slowest: "
                 + ", ".join(f"{n} [{c}] {t * 1000:.0f}ms" for t, c, n in _slow) + ")")
 
