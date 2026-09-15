@@ -1097,6 +1097,12 @@
     }
 
     async function shareNowPlaying() {
+        if (state.view !== 'room' || _plainOn() || !state.canSend) {
+            if (typeof showToast === 'function') {
+                showToast('🎵 Now Playing cards can only be shared in SoulSync rooms.', 'warning');
+            }
+            return;
+        }
         var cur = window.__ssCurrentTrack || (typeof window.getCurrentTrack === 'function' ? window.getCurrentTrack() : null) || state.localNowPlaying;
         if (!cur || (!cur.title && !cur.name)) {
             if (typeof showToast === 'function') {
@@ -1176,11 +1182,8 @@
             message: fallbackText,
             np: { t: t, a: a, al: al, src: src, id: id, img: img, dur: dur, br: br }
         };
-        if (state.view === 'room') _tagRoomPayload(payload);
-        var url = state.view === 'room'
-            ? '/api/chat/room/message'
-            : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
-        postJSON(url, payload).then(function (res) {
+        _tagRoomPayload(payload);
+        postJSON('/api/chat/room/message', payload).then(function (res) {
             if (res.ok) {
                 refresh();
                 if (typeof showToast === 'function') showToast('🎵 Shared Now Playing to chat!', 'success');
@@ -1194,6 +1197,12 @@
     var _wantActiveSource = 'auto';
 
     function openWantedModal(query) {
+        if (state.view !== 'room' || _plainOn() || !state.canSend) {
+            if (typeof showToast === 'function') {
+                showToast('🔍 Wanted cards can only be posted in SoulSync rooms.', 'warning');
+            }
+            return;
+        }
         var modal = q('[data-chat-want-modal]');
         var backdrop = q('[data-chat-want-backdrop]');
         if (!modal) return;
@@ -1335,7 +1344,7 @@
     }
 
     function postWantedCard(item) {
-        if (!item || !state.canSend) return;
+        if (!item || !state.canSend || state.view !== 'room' || _plainOn()) return;
         var t = item.name || item.title || 'Unknown Title';
         var a = item.artist || (item.artists && item.artists[0] && item.artists[0].name) || 'Unknown Artist';
         var ty = item.type || (item.album_type ? 'album' : 'track');
@@ -1359,11 +1368,8 @@
             message: fallbackText,
             want: wantObj
         };
-        if (state.view === 'room') _tagRoomPayload(payload);
-        var url = state.view === 'room'
-            ? '/api/chat/room/message'
-            : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
-        postJSON(url, payload).then(function (res) {
+        _tagRoomPayload(payload);
+        postJSON('/api/chat/room/message', payload).then(function (res) {
             closeWantedModal();
             if (res.ok) {
                 refresh();
@@ -4583,15 +4589,20 @@
             : 'Read-only — chat sending is admin-only on this server';
         // Formatting only exists inside the envelope — the toolbar is a ROOM
         // thing (PMs are plaintext for non-SoulSync readers + the ProveIt bots).
+        var isRoomCanSend = (state.view === 'room' && state.canSend);
         var bar = q('[data-chat-toolbar]');
-        if (bar) bar.hidden = !(state.view === 'room' && state.canSend);
+        if (bar) bar.hidden = !isRoomCanSend;
         // GIF = sending a CDN URL through the room pipeline — room-only. The
         // emoji button stays everywhere (plain unicode is fine in PMs).
         var gifBtn = q('[data-chat-gif-btn]');
-        if (gifBtn) gifBtn.hidden = !(state.view === 'room' && state.canSend);
+        if (gifBtn) gifBtn.hidden = !isRoomCanSend;
         // polls are a room thing (bus events mean nothing in a PM)
         var pollBtn = q('[data-chat-poll-btn]');
-        if (pollBtn) pollBtn.hidden = !(state.view === 'room' && state.canSend);
+        if (pollBtn) pollBtn.hidden = !isRoomCanSend;
+        var npBtn = q('[data-chat-np-btn]');
+        if (npBtn) npBtn.hidden = !isRoomCanSend;
+        var wantBtn = q('[data-chat-want-btn]');
+        if (wantBtn) wantBtn.hidden = !isRoomCanSend;
         if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); togglePollPop(true); }
         // last, because plain mode overrides the placeholder and hides the
         // rich controls this function just showed
@@ -5480,7 +5491,12 @@
             if (pop.querySelector('[data-chat-slash-pick]')) { pop.hidden = true; pop.innerHTML = ''; }
             return;
         }
-        var hits = SLASH_COMMANDS.filter(function (sc) { return sc.c.indexOf(v) === 0; });
+        var hits = SLASH_COMMANDS.filter(function (sc) {
+            if (_plainOn() && (sc.c === '/np' || sc.c === '/want' || sc.c === '/iso' || sc.c === '/poll' || sc.c === '/upload' || sc.c === '/gif')) {
+                return false;
+            }
+            return sc.c.indexOf(v) === 0;
+        });
         if (!hits.length) { pop.hidden = true; return; }
         pop.innerHTML = hits.map(function (sc) {
             return '<button type="button" class="chat-mention-opt chat-slash-opt" ' +
@@ -5499,6 +5515,12 @@
         if (!input || !cmd) return;
         if (cmd === '/want' || cmd === '/iso') {
             input.value = '';
+            if (state.view !== 'room' || _plainOn() || !state.canSend) {
+                if (typeof showToast === 'function') {
+                    showToast('🔍 Wanted cards can only be posted in SoulSync rooms.', 'warning');
+                }
+                return;
+            }
             openWantedModal();
             return;
         }
@@ -5522,10 +5544,18 @@
             if (typeof showToast === 'function') showToast(msg, kind || 'info');
         };
         if (cmd === 'np') {
+            if (state.view !== 'room' || _plainOn() || !state.canSend) {
+                toast('🎵 Now Playing cards can only be shared in SoulSync rooms.', 'warning');
+                return true;
+            }
             shareNowPlaying();
             return true;
         }
         if (cmd === 'want' || cmd === 'iso') {
+            if (state.view !== 'room' || _plainOn() || !state.canSend) {
+                toast('🔍 Wanted cards can only be posted in SoulSync rooms.', 'warning');
+                return true;
+            }
             openWantedModal(arg);
             return true;
         }
@@ -5766,13 +5796,25 @@
         var hint = q('[data-chat-mode-hint]');
         var on = _plainOn() && state.canSend;
         if (hint) hint.hidden = !on;
-        if (!on) return;    // everything below is the exception, not the default
+        if (!on) {
+            if (state.view === 'room' && state.canSend) {
+                var bar = q('[data-chat-toolbar]');
+                if (bar) bar.hidden = false;
+                ['[data-chat-gif-btn]', '[data-chat-poll-btn]', '[data-chat-attach-btn]',
+                 '[data-chat-np-btn]', '[data-chat-want-btn]'].forEach(function (sel) {
+                    var el = q(sel);
+                    if (el) el.hidden = false;
+                });
+            }
+            return;
+        }
 
         // none of these survive without an envelope. leaving them live would
         // let someone attach a template the send is about to refuse.
         var bar = q('[data-chat-toolbar]');
         if (bar) bar.hidden = true;                 // markdown IS the envelope
-        ['[data-chat-gif-btn]', '[data-chat-poll-btn]', '[data-chat-attach-btn]'].forEach(function (sel) {
+        ['[data-chat-gif-btn]', '[data-chat-poll-btn]', '[data-chat-attach-btn]',
+         '[data-chat-np-btn]', '[data-chat-want-btn]'].forEach(function (sel) {
             var el = q(sel);
             if (el) el.hidden = true;
         });
@@ -5787,7 +5829,7 @@
         // channel tag or a thread id. attaching them anyway would make the
         // server refuse a message the user had no way to know was tagged.
         // Rich cards (np, want, overlay, file) are NEVER sent as plain text.
-        if (_plainOn() && !payload.np && !payload.want && !payload.overlay && !payload.file) {
+        if (_plainOn()) {
             payload.plain = true;
             return payload;
         }
@@ -7218,7 +7260,7 @@
                 state.renderedCount = 0; hideJumpPill();   // a filter flip isn't 'new messages'
                 // the filter also picks the SEND format, so a half-built rich
                 // message cannot survive the flip to plain
-                if (_plainOn()) { cancelReply(); cancelEdit(); toggleAttachPanel(true); }
+                if (_plainOn()) { cancelReply(); cancelEdit(); toggleAttachPanel(true); closeWantedModal(); }
                 renderHead(); renderComposer(); refresh();
                 return;
             }

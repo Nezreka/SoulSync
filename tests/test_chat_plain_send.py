@@ -99,6 +99,22 @@ def test_a_file_card_is_refused(chat_app):
     assert len(state["client"].sent_room) == before
 
 
+def test_a_now_playing_card_is_refused(chat_app):
+    http, state = chat_app
+    before = len(state["client"].sent_room)
+    r = _refused(http, {"np": {"t": "Track", "a": "Artist"}})
+    assert r.status_code == 400 and "Now Playing card" in r.get_json()["error"]
+    assert len(state["client"].sent_room) == before
+
+
+def test_a_wanted_card_is_refused(chat_app):
+    http, state = chat_app
+    before = len(state["client"].sent_room)
+    r = _refused(http, {"want": {"t": "Track", "a": "Artist", "ty": "track"}})
+    assert r.status_code == 400 and "Wanted card" in r.get_json()["error"]
+    assert len(state["client"].sent_room) == before
+
+
 def test_a_reply_is_refused(chat_app):
     http, _ = chat_app
     r = _refused(http, {"reply": {"u": "someone", "x": "earlier"}})

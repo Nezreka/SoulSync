@@ -117,7 +117,7 @@ describe('the hint explains the exception', () => {
 
   it('hides the controls that cannot work without an envelope', () => {
     const sync = extractFunction('_syncModeBtn', JS);
-    for (const sel of ['chat-gif-btn', 'chat-poll-btn', 'chat-attach-btn', 'chat-toolbar']) {
+    for (const sel of ['chat-gif-btn', 'chat-poll-btn', 'chat-attach-btn', 'chat-toolbar', 'chat-np-btn', 'chat-want-btn']) {
       expect(sync, `${sel} must be hidden in plain mode`).toContain(sel);
     }
   });
