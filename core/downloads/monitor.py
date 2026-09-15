@@ -8,6 +8,7 @@ flag mirrored from web_server's own flag in ``_shutdown_runtime_components``.
 import threading
 import time
 
+from core.downloads.observed_speed import ObservedSpeedTracker
 from core.settings import config_manager
 from core.runtime_state import (
     download_batches,
@@ -847,8 +848,12 @@ class WebUIDownloadMonitor:
                     return True  # Signal that we need to call completion outside the lock
                 return False
 
+        if self._retry_slow_soulseek_transfer(
+                task_id, task, live_info, state_str, current_time, deferred_ops):
+            return False
+
         # Check for queued timeout (90 seconds like GUI)
-        elif 'Queued' in state_str or task['status'] == 'queued':
+        if 'Queued' in state_str or task['status'] == 'queued':
             if 'queued_start_time' not in task:
                 task['queued_start_time'] = current_time
                 return False
@@ -918,6 +923,7 @@ class WebUIDownloadMonitor:
                     elif retry_count < 3:
                         # Wait longer before next retry
                         return False
+
                     else:
                         # Too many retries, mark as failed
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
@@ -1128,6 +1134,99 @@ class WebUIDownloadMonitor:
                         return False
 
         return False
+
+    def _retry_slow_soulseek_transfer(
+            self, task_id, task, live_info, state_str, current_time, deferred_ops):
+        """Replace a sustained crawling Soulseek transfer with its next candidate.
+
+        This runs under ``tasks_lock``. Cancellation, context cleanup and worker
+        submission are deferred in the same way as the existing timeout paths.
+        """
+        try:
+            minimum_kbps = float(config_manager.get(
+                'soulseek.min_observed_download_speed_kbps', 500) or 0)
+        except (TypeError, ValueError):
+            minimum_kbps = 500.0
+
+        is_active = 'InProgress' in str(state_str or '')
+        if (minimum_kbps <= 0 or not is_active
+                or _resolve_download_source(task.get('username')) != 'soulseek'
+                or task.get('_user_manual_pick') or task.get('_observed_speed_exempt')):
+            task.pop('_observed_speed_tracker', None)
+            return False
+
+        tracker = task.get('_observed_speed_tracker')
+        if not isinstance(tracker, ObservedSpeedTracker):
+            tracker = ObservedSpeedTracker()
+            task['_observed_speed_tracker'] = tracker
+
+        average_bps, should_retry = tracker.observe(
+            current_time,
+            live_info.get('bytesTransferred', 0),
+            minimum_kbps * 1000,
+        )
+        if not should_retry:
+            return False
+
+        username = task.get('username')
+        filename = task.get('filename')
+        download_id = task.get('download_id')
+        source_key = f"{username}_{filename}" if username and filename else None
+        candidate_count = int(task.get('candidate_count', 0) or 0)
+        candidate_index = int(task.get('current_candidate_index', 0) or 0)
+
+        # There is no known alternative left in this candidate set. Keep the
+        # accepted transfer and exempt it from further speed checks rather than
+        # turning a slow possible download into a guaranteed missing track.
+        if not source_key or candidate_count <= 1 or candidate_index >= candidate_count - 1:
+            task['_observed_speed_exempt'] = True
+            task.pop('_observed_speed_tracker', None)
+            task.pop('_slow_fallback_source_key', None)
+            task.pop('_slow_fallback_speed_bps', None)
+            logger.warning(
+                "[Observed Speed] Task %s remains below %.0f KB/s (%.0f KB/s "
+                "observed), but no candidate remains — allowing it to continue",
+                task_id, minimum_kbps, (average_bps or 0) / 1000,
+            )
+            return True
+
+        previous_fallback_speed = float(task.get('_slow_fallback_speed_bps', -1) or -1)
+        if (average_bps or 0) >= previous_fallback_speed:
+            task['_slow_fallback_source_key'] = source_key
+            task['_slow_fallback_speed_bps'] = average_bps or 0
+
+        if download_id:
+            deferred_ops.append((
+                'cancel_download', download_id, username, 'observed_speed_below_minimum'))
+
+        used_sources = task.get('used_sources', set())
+        used_sources.add(source_key)
+        task['used_sources'] = used_sources
+
+        old_context_key = _make_context_key(username, filename)
+        _orphaned_download_keys.add(old_context_key)
+        deferred_ops.append(('cleanup_orphan', old_context_key))
+
+        task.pop('download_id', None)
+        task.pop('username', None)
+        task.pop('filename', None)
+        task.pop('_observed_speed_tracker', None)
+        task['status'] = 'searching'
+        task['status_change_time'] = current_time
+        task['retry_info'] = 'observed speed below minimum — trying next candidate'
+        task['retry_trigger'] = 'observed_speed'
+        task.pop('queued_start_time', None)
+        task.pop('downloading_start_time', None)
+
+        batch_id = task.get('batch_id')
+        if task_id and batch_id:
+            deferred_ops.append(('restart_worker', task_id, batch_id))
+        logger.warning(
+            "[Observed Speed] Task %s averaged %.0f KB/s below the %.0f KB/s "
+            "minimum — trying the next candidate",
+            task_id, (average_bps or 0) / 1000, minimum_kbps,
+        )
+        return True
     
     
     def _validate_worker_counts(self):

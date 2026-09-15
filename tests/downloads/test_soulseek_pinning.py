@@ -892,6 +892,27 @@ def test_search_reads_wrapped_slskd_responses_payload():
     assert tracks[0].quality == 'mp3'
 
 
+@pytest.mark.parametrize(
+    ('response_fields', 'expected_slots'),
+    [
+        ({'hasFreeUploadSlot': True}, 1),
+        ({'hasFreeUploadSlot': False, 'freeUploadSlots': 4}, 0),
+        ({'freeUploadSlots': 3}, 3),
+    ],
+)
+def test_search_parses_current_and_legacy_free_slot_fields(configured_client, response_fields, expected_slots):
+    response = {
+        'username': 'peer-a',
+        'files': [{'filename': 'Artist - Song.flac', 'size': 10}],
+        **response_fields,
+    }
+
+    tracks, _albums = configured_client._process_search_responses([response])
+
+    assert len(tracks) == 1
+    assert tracks[0].free_upload_slots == expected_slots
+
+
 def test_search_does_not_skip_late_inserted_responses():
     """Regression: slskd can return the current response set in a different
     order from the previous poll. Index slicing skipped newly inserted earlier

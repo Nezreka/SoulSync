@@ -409,7 +409,13 @@ class SoulseekClient(DownloadSourcePlugin):
                     bitrate=file_data.get('bitRate') or slskd_attrs.get(0),
                     duration=duration_ms,
                     quality=quality,
-                    free_upload_slots=response_data.get('freeUploadSlots', 0),
+                    # Current slskd returns a boolean; retain the old numeric
+                    # field for compatibility with older releases.
+                    free_upload_slots=(
+                        int(bool(response_data.get('hasFreeUploadSlot')))
+                        if 'hasFreeUploadSlot' in response_data
+                        else response_data.get('freeUploadSlots', 0)
+                    ),
                     upload_speed=response_data.get('uploadSpeed', 0),
                     queue_length=response_data.get('queueLength', 0),
                     sample_rate=file_data.get('sampleRate') or slskd_attrs.get(4),
@@ -2502,5 +2508,4 @@ def get_shared_soulseek_client():
         _SHARED_CACHE["key"] = key
         _SHARED_CACHE["client"] = client
         return client
-
 

@@ -272,6 +272,14 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         task = download_tasks.get(task_id)
         if not task:
             return False
+        slow_fallback_key = task.get('_slow_fallback_source_key')
+        if slow_fallback_key:
+            # The monitor kept this accepted-but-slow source as a failsafe.
+            # Try every alternative first, then permit this already-used source
+            # once at the very end if nothing else accepts the transfer.
+            candidates.sort(
+                key=lambda c: f"{c.username}_{c.filename}" == slow_fallback_key
+            )
         # for the live status payload (#1156): "candidate 2/14"
         task['candidate_count'] = len(candidates)
         used_sources = task.get('used_sources', set())
@@ -296,7 +304,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
             
         # Create source key to avoid duplicate attempts (like GUI)
         source_key = f"{candidate.username}_{candidate.filename}"
-        if source_key in used_sources:
+        is_slow_fallback = source_key == slow_fallback_key
+        if source_key in used_sources and not is_slow_fallback:
             logger.info(f"[Modal Worker] Skipping already tried source: {source_key}")
             continue
 
@@ -314,6 +323,9 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['used_sources'].add(source_key)
+                download_tasks[task_id].pop('_observed_speed_tracker', None)
+                if not is_slow_fallback:
+                    download_tasks[task_id].pop('_observed_speed_exempt', None)
                 logger.info(f"[Modal Worker] Marked source as used before download attempt: {source_key}")
             
         logger.info(f"[Modal Worker] Trying candidate {candidate_index + 1}/{len(candidates)}: {candidate.filename} (Confidence: {candidate.confidence:.2f})")
@@ -446,6 +458,17 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
             )
 
             if download_id:
+                if is_slow_fallback:
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id].pop('_slow_fallback_source_key', None)
+                            download_tasks[task_id].pop('_slow_fallback_speed_bps', None)
+                            download_tasks[task_id]['_observed_speed_exempt'] = True
+                    logger.warning(
+                        "[Observed Speed] Alternatives exhausted for task %s — "
+                        "continuing with retained slow candidate %s",
+                        task_id, source_key,
+                    )
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
                 context_key = deps.make_context_key(username, filename)
                 with matched_context_lock:

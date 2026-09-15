@@ -130,15 +130,12 @@ def _candidate_ordering(track_info: Optional[dict] = None):
 
 
 def _try_cached_candidates(task_id, batch_id, track, deps):
-    """Quarantine-retry fast path: attempt the already-found candidates before
-    re-searching anything.
+    """Retry fast path: attempt the already-found candidates before searching.
 
-    When a verified-bad file is re-queued, the connection was fine (the file
-    downloaded, it was just the wrong/broken content) — so the next-best pick is
-    almost always already sitting in ``cached_candidates``. Walk those (skipping
-    sources already tried or budget-exhausted) and hand them to the normal
-    download path. Returns True if a download was started; False to fall through
-    to a fresh search (which only happens for a not-yet-searched source).
+    Quarantine retries reuse candidates because the connection worked and only
+    the content was bad. Slow-transfer retries do the same, but retain the best
+    crawling source at the end as a last resort. Returns True if a download was
+    started; False to fall through to a fresh search.
     """
     with tasks_lock:
         task = download_tasks.get(task_id)
@@ -147,24 +144,32 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         cached = list(task.get('cached_candidates') or [])
         used = set(task.get('used_sources') or ())
         exhausted = {str(s).lower() for s in (task.get('exhausted_download_sources') or ())}
+        slow_fallback_key = task.get('_slow_fallback_source_key')
         task_track_info = task.get('track_info')
 
     remaining = []
+    slow_fallback = None
     for c in cached:
         uname, fname = _cand_user_file(c)
         if not uname or not fname:
             continue
-        if f"{uname}_{fname}" in used:
+        source_key = f"{uname}_{fname}"
+        if source_key in used:
+            if source_key == slow_fallback_key:
+                slow_fallback = c
             continue
         if _resolve_worker_source(uname).lower() in exhausted:
             continue
         remaining.append(c)
 
+    if slow_fallback is not None:
+        remaining.append(slow_fallback)
+
     if not remaining:
         return False
 
     logger.info(
-        f"[Modal Worker] Quarantine retry: trying {len(remaining)} cached "
+        f"[Modal Worker] Retry: trying {len(remaining)} cached "
         f"candidate(s) before re-searching (task {task_id})"
     )
     _qf, _qt = _candidate_ordering(task_track_info)
@@ -374,19 +379,16 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     download_tasks[task_id]['used_sources'] = set()
                 # Else: keep existing used_sources to avoid retrying same failed hosts
 
-        # Cached-first quarantine retry. The monitor sets ``_quarantine_retry``
-        # when a verified-bad file is re-queued; in that case we walk the
-        # already-found candidates before re-searching (the connection was fine,
-        # just the content was wrong). A NON-quarantine entry (fresh download, or
-        # the monitor's dead-connection/stuck retry) instead starts a new search
-        # generation: clear the searched-source memory so each source can be
-        # searched fresh again.
+        # Cached-first retry. Verified-bad and observably slow downloads both
+        # already have useful candidates to walk before issuing another search.
+        # Other retry paths start a new search generation.
         with tasks_lock:
             _t = download_tasks.get(task_id, {})
             is_quarantine_retry = bool(_t.pop('_quarantine_retry', False))
-            if not is_quarantine_retry:
+            is_slow_retry = bool(_t.get('_slow_fallback_source_key'))
+            if not is_quarantine_retry and not is_slow_retry:
                 _t.pop('searched_queries', None)
-        if is_quarantine_retry and _try_cached_candidates(task_id, batch_id, track, deps):
+        if (is_quarantine_retry or is_slow_retry) and _try_cached_candidates(task_id, batch_id, track, deps):
             with tasks_lock:
                 used_filename = download_tasks.get(task_id, {}).get('filename')
                 used_username = download_tasks.get(task_id, {}).get('username')
