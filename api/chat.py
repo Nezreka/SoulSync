@@ -1453,7 +1453,8 @@ def create_blueprint() -> Blueprint:
         # attached a template is the same class of lie this mode exists to fix.
         if body.get("plain") is True:
             for field, label in (("overlay", "an overlay template"), ("file", "a file"),
-                                 ("reply", "a reply"), ("edit", "an edit")):
+                                 ("reply", "a reply"), ("edit", "an edit"),
+                                 ("np", "a Now Playing card"), ("want", "a Wanted card")):
                 if body.get(field):
                     return jsonify({"error": "Plain text can't carry %s — every Soulseek "
                                              "client has to be able to read it. Switch back "

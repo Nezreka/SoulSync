@@ -832,15 +832,16 @@
 
     function _extractWantFromText(text) {
         if (!text || typeof text !== 'string') return null;
-        var m = text.match(/🔍\s*In Search Of:\s*([^\-]+?)\s*-\s*([^(]+?)(?:\s*\(([^)]+)\))?$/i);
+        var m = text.match(/🔍\s*In Search Of:\s*(?:\[(ALBUM|TRACK|EP|SINGLE)\]\s*)?([^\-]+?)\s*-\s*([^(]+?)(?:\s*\(([^)]+)\))?$/i);
         if (!m) return null;
-        return { a: m[1].trim(), t: m[2].trim(), y: (m[3] || '').trim(), ty: 'album', src: 'shared' };
+        var ty = (m[1] || 'album').toLowerCase();
+        return { a: m[2].trim(), t: m[3].trim(), y: (m[4] || '').trim(), ty: ty, src: 'shared' };
     }
 
     var _npArtCache = {};
     var _npArtPending = {};
 
-    function _scheduleNpArtProbe(title, artist) {
+    function _scheduleNpArtProbe(title, artist, isAlbum) {
         if (!title && !artist) return;
         var key = (artist || '').toLowerCase().trim() + '|||' + (title || '').toLowerCase().trim();
         if (key in _npArtCache || _npArtPending[key]) return;
@@ -864,11 +865,17 @@
             if (!data) return;
             var trs = data.tracks || data.spotify_tracks || [];
             var als = data.albums || data.spotify_albums || [];
-            var hit = trs[0] || als[0];
-            var imgUrl = (hit && hit.image_url) ? hit.image_url : '';
-            if (imgUrl) {
-                _npArtCache[key] = imgUrl;
-                _applyNpArtToDom(key, imgUrl);
+            var candidates = isAlbum ? als.concat(trs) : trs.concat(als);
+            var hit = candidates.find(function (c) {
+                return c && (c.image_url || (c.images && c.images[0] && (typeof c.images[0] === 'string' ? c.images[0] : c.images[0].url)));
+            }) || candidates[0];
+
+            if (hit) {
+                var imgUrl = hit.image_url || (hit.images && hit.images[0] && (typeof hit.images[0] === 'string' ? hit.images[0] : hit.images[0].url)) || '';
+                if (imgUrl) {
+                    _npArtCache[key] = imgUrl;
+                    _applyNpArtToDom(key, imgUrl, hit);
+                }
             }
         })
         .catch(function () {
@@ -876,7 +883,7 @@
         });
     }
 
-    function _applyNpArtToDom(key, imgUrl) {
+    function _applyNpArtToDom(key, imgUrl, hit) {
         document.querySelectorAll('.chat-np-card').forEach(function (card) {
             var cTitle = (card.getAttribute('data-np-title') || '').toLowerCase().trim();
             var cArtist = (card.getAttribute('data-np-artist') || '').toLowerCase().trim();
@@ -900,6 +907,13 @@
             var cKey = cArtist + '|||' + cTitle;
             if (cKey === key) {
                 card.setAttribute('data-wanted-img', imgUrl);
+                if (hit) {
+                    if (hit.id && !card.getAttribute('data-wanted-id')) card.setAttribute('data-wanted-id', hit.id);
+                    if (hit.source && (!card.getAttribute('data-wanted-src') || card.getAttribute('data-wanted-src') === 'shared')) {
+                        card.setAttribute('data-wanted-src', hit.source);
+                    }
+                    if (hit.album && !card.getAttribute('data-wanted-album')) card.setAttribute('data-wanted-album', hit.album);
+                }
                 var ph = card.querySelector('.chat-wanted-thumb--ph');
                 if (ph) {
                     var img = document.createElement('img');
@@ -1026,7 +1040,7 @@
             ? '<img class="chat-wanted-thumb" src="' + attr(resolvedImg) + '" alt="" loading="lazy">'
             : '<div class="chat-wanted-thumb chat-wanted-thumb--ph">💿</div>';
         if (!resolvedImg && (w.t || w.a)) {
-            _scheduleNpArtProbe(w.t, w.a);
+            _scheduleNpArtProbe(w.t, w.a, (w.ty === 'album' || w.ty === 'ep'));
         }
 
         var statusChip = '';
@@ -1047,7 +1061,17 @@
                 '💬 I Have This! (Send PM)</button>';
         }
 
-        return '<div class="chat-wanted-card" data-wanted-title="' + attr(w.t) + '" data-wanted-artist="' + attr(w.a) + '" data-wanted-album="' + attr(w.al || '') + '" data-wanted-id="' + attr(w.id || '') + '" data-wanted-src="' + attr(w.src || '') + '" data-wanted-img="' + attr(resolvedImg || w.img || '') + '" data-wanted-key="' + attr(cacheKey) + '">' +
+        return '<div class="chat-wanted-card" ' +
+            'data-wanted-title="' + attr(w.t) + '" ' +
+            'data-wanted-artist="' + attr(w.a) + '" ' +
+            'data-wanted-album="' + attr(w.al || '') + '" ' +
+            'data-wanted-type="' + attr(w.ty || 'album') + '" ' +
+            'data-wanted-id="' + attr(w.id || '') + '" ' +
+            'data-wanted-src="' + attr(w.src || '') + '" ' +
+            'data-wanted-img="' + attr(resolvedImg || w.img || '') + '" ' +
+            'data-wanted-year="' + attr(w.y || '') + '" ' +
+            'data-wanted-dur="' + attr(w.dur || 0) + '" ' +
+            'data-wanted-key="' + attr(cacheKey) + '">' +
             '<div class="chat-wanted-header">' +
                 '<span class="chat-wanted-tag">🔍 IN SEARCH OF</span>' +
                 '<span class="chat-wanted-type-pill">' + ty + '</span>' +
@@ -1243,29 +1267,38 @@
                     return;
                 }
                 var items = [];
+                var primarySrc = data.metadata_source || data.primary_source || 'spotify';
                 var albums = data.albums || data.spotify_albums || data.results || [];
                 albums.slice(0, 15).forEach(function (al) {
+                    var albumImg = al.image_url ||
+                        (al.images && al.images[0] && (typeof al.images[0] === 'string' ? al.images[0] : al.images[0].url)) ||
+                        al.cover_xl || al.cover_big || al.cover_medium || '';
                     items.push({
                         name: al.name || al.title || '',
                         artist: al.artist || (al.artists && al.artists[0] && al.artists[0].name) || '',
                         type: al.album_type || 'album',
                         year: al.release_date ? al.release_date.slice(0, 4) : (al.year || ''),
-                        source: al.source || 'spotify',
-                        id: al.id || '',
-                        image_url: al.image_url || (al.images && al.images[0] && al.images[0].url) || ''
+                        source: al.source || primarySrc,
+                        id: String(al.id || ''),
+                        image_url: albumImg
                     });
                 });
                 var tracks = data.tracks || data.spotify_tracks || [];
                 tracks.slice(0, 15).forEach(function (tr) {
+                    var trImg = tr.image_url ||
+                        (tr.images && tr.images[0] && (typeof tr.images[0] === 'string' ? tr.images[0] : tr.images[0].url)) ||
+                        (tr.album && tr.album.images && tr.album.images[0] && (typeof tr.album.images[0] === 'string' ? tr.album.images[0] : tr.album.images[0].url)) ||
+                        '';
                     items.push({
                         name: tr.name || tr.title || '',
                         artist: tr.artist || (tr.artists && tr.artists[0] && tr.artists[0].name) || '',
-                        album: tr.album || (tr.album && tr.album.name) || '',
+                        album: (typeof tr.album === 'string' ? tr.album : (tr.album && tr.album.name)) || '',
                         type: 'track',
                         year: tr.release_date ? tr.release_date.slice(0, 4) : '',
-                        source: tr.source || 'spotify',
-                        id: tr.id || '',
-                        image_url: tr.image_url || (tr.images && tr.images[0] && tr.images[0].url) || ''
+                        source: tr.source || primarySrc,
+                        id: String(tr.id || ''),
+                        image_url: trImg,
+                        duration_ms: tr.duration_ms || 0
                     });
                 });
 
@@ -1309,13 +1342,22 @@
         var al = item.album || '';
         var src = item.source || 'spotify';
         var id = String(item.id || '');
-        var img = (item.image_url && /^https:\/\//.test(item.image_url)) ? item.image_url : '';
+        var img = item.image_url || '';
+        if (img && !/^https?:\/\//.test(img) && !/^\/api\//.test(img)) img = '';
         var y = String(item.year || item.release_date || '').slice(0, 4);
+        var dur = item.duration_ms || 0;
 
-        var fallbackText = '🔍 In Search Of: ' + a + ' - ' + t + (y ? ' (' + y + ')' : '');
+        // Cache art immediately so local rendering never flickers
+        var key = a.toLowerCase().trim() + '|||' + t.toLowerCase().trim();
+        if (img) _npArtCache[key] = img;
+
+        var fallbackText = '🔍 In Search Of: [' + ty.toUpperCase() + '] ' + a + ' - ' + t + (y ? ' (' + y + ')' : '');
+        var wantObj = { t: t, a: a, ty: ty, al: al, src: src, id: id, img: img, y: y };
+        if (dur) wantObj.dur = dur;
+
         var payload = {
             message: fallbackText,
-            want: { t: t, a: a, ty: ty, al: al, src: src, id: id, img: img, y: y }
+            want: wantObj
         };
         if (state.view === 'room') _tagRoomPayload(payload);
         var url = state.view === 'room'
@@ -1332,13 +1374,14 @@
         });
     }
 
-    async function _openDownloadForCard(artist, title, album, id, src, durationMs, imageUrl) {
+    async function _openDownloadForCard(artist, title, album, id, src, durationMs, imageUrl, cardType) {
         if (typeof window.openDownloadMissingModalForArtistAlbum !== 'function') {
             if (typeof showToast === 'function') showToast('Download missing modal unavailable', 'error');
             return;
         }
 
         var albumName = album || title;
+        var isAlbum = (cardType === 'album' || cardType === 'ep');
         durationMs = Number(durationMs) || 0;
         if (durationMs > 0 && durationMs < 1000) {
             durationMs = Math.round(durationMs * 1000);
@@ -1365,8 +1408,8 @@
             }
         }
 
-        // 2. If duration or image is still missing, query enhanced search
-        if ((!durationMs || !imageUrl) && (artist || title)) {
+        // 2. If duration, image or id is still missing, query enhanced search
+        if ((!durationMs || !imageUrl || !id) && (artist || title)) {
             try {
                 var searchQ = (artist ? artist + ' ' : '') + (title || '');
                 var searchRes = await fetch('/api/enhanced-search', {
@@ -1377,7 +1420,18 @@
                 if (searchRes.ok) {
                     var sData = await searchRes.json();
                     var tracksList = sData.spotify_tracks || sData.tracks || [];
-                    if (tracksList.length > 0) {
+                    var albumsList = sData.spotify_albums || sData.albums || [];
+                    if (isAlbum && albumsList.length > 0) {
+                        var matchAl = albumsList.find(function (al) {
+                            return al.name && title && al.name.toLowerCase() === title.toLowerCase();
+                        }) || albumsList[0];
+                        if (matchAl) {
+                            if (!imageUrl && matchAl.image_url) imageUrl = matchAl.image_url;
+                            if ((!albumName || albumName === title) && matchAl.name) albumName = matchAl.name;
+                            if (!id && matchAl.id) id = String(matchAl.id);
+                            if (!src && matchAl.source) src = matchAl.source;
+                        }
+                    } else if (tracksList.length > 0) {
                         var match = tracksList.find(function (tr) {
                             return tr.name && title && tr.name.toLowerCase() === title.toLowerCase();
                         }) || tracksList[0];
@@ -1385,7 +1439,7 @@
                             if (!durationMs && match.duration_ms) durationMs = match.duration_ms;
                             if (!imageUrl && match.image_url) imageUrl = match.image_url;
                             if ((!albumName || albumName === title) && match.album) albumName = match.album;
-                            if (!id && match.id) id = match.id;
+                            if (!id && match.id) id = String(match.id);
                             if (!src && match.source) src = match.source;
                         }
                     }
@@ -1395,7 +1449,7 @@
             }
         }
 
-        var virtualId = 'np_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        var virtualId = (isAlbum ? 'album_' : 'np_') + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
         var imagesArray = imageUrl ? [{ url: imageUrl }] : [];
 
         var spotifyTracks = [{
@@ -1405,8 +1459,8 @@
             artists: [{ name: artist, id: null }],
             album: {
                 name: albumName,
-                id: null,
-                album_type: 'single',
+                id: id || null,
+                album_type: isAlbum ? (cardType || 'album') : 'single',
                 images: imagesArray,
                 total_tracks: 1
             },
@@ -1417,9 +1471,9 @@
         }];
 
         var albumObj = {
-            id: null,
+            id: id || null,
             name: albumName,
-            album_type: 'single',
+            album_type: isAlbum ? (cardType || 'album') : 'single',
             images: imagesArray,
             artists: [{ name: artist }]
         };
@@ -1429,6 +1483,38 @@
             name: artist,
             source: src || 'spotify'
         };
+
+        // If it's an album and we have an ID and source, fetch the full album tracks
+        if (isAlbum && id && src && src !== 'shared') {
+            try {
+                var albRes = await fetch('/api/spotify/album/' + encodeURIComponent(id) + '?source=' + encodeURIComponent(src) + '&name=' + encodeURIComponent(albumName) + '&artist=' + encodeURIComponent(artist));
+                if (albRes.ok) {
+                    var albData = await albRes.json();
+                    if (albData && albData.tracks && albData.tracks.length > 0) {
+                        spotifyTracks = albData.tracks.map(function (tr, idx) {
+                            return {
+                                id: tr.id || (virtualId + '_' + idx),
+                                name: tr.name || tr.title || ('Track ' + (idx + 1)),
+                                artist: artist,
+                                artists: tr.artists || [{ name: artist, id: null }],
+                                album: albumObj,
+                                track_number: tr.track_number || (idx + 1),
+                                disc_number: tr.disc_number || 1,
+                                duration_ms: tr.duration_ms || 0,
+                                source: src,
+                                image_url: imageUrl || null
+                            };
+                        });
+                        albumObj.total_tracks = spotifyTracks.length;
+                        if (albData.images && albData.images.length) {
+                            albumObj.images = albData.images;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.debug('[Chat] Album tracks fetch for download failed:', err);
+            }
+        }
 
         window.openDownloadMissingModalForArtistAlbum(
             virtualId,
@@ -1520,72 +1606,137 @@
         var albumName = w.al || w.t || title;
         var imgUrl = w.img || '';
         var src = w.src || 'spotify';
+        if (src === 'shared') src = 'spotify';
         var id = w.id || '';
-        var ty = w.ty || 'album';
+        var ty = (w.ty || 'album').toLowerCase();
+        var isAlbum = (ty === 'album' || ty === 'ep');
 
-        // Use openAddToWishlistModal if available (the proper standard)
-        if (typeof window.openAddToWishlistModal === 'function') {
-            var albumObj = {
-                id: id || null,
-                name: albumName,
-                album_type: ty,
-                image_url: imgUrl,
-                images: imgUrl ? [{ url: imgUrl }] : [],
-                artists: [{ name: artist }],
-                source: src
-            };
-            var artistObj = {
-                id: null,
-                name: artist,
-                image_url: '',
-                source: src
-            };
+        if (typeof showToast === 'function') {
+            showToast('Loading ' + (isAlbum ? 'album details' : 'track') + ' for wishlist…', 'info');
+        }
 
-            // Build a tracks array — if we have no duration, try to look it up
-            var dur = Number(w.dur) || 0;
-            if (!dur) {
-                try {
-                    var searchQ = (artist !== 'Unknown Artist' ? artist + ' ' : '') + title;
-                    var sr = await fetch('/api/enhanced-search', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ query: searchQ.trim() })
-                    }).then(function (r) { return r.ok ? r.json() : null; });
-                    if (sr) {
-                        var trs = sr.tracks || sr.spotify_tracks || [];
-                        var als = sr.albums || sr.spotify_albums || [];
-                        var hit = trs[0] || als[0];
-                        if (hit) {
-                            if (hit.duration_ms) dur = hit.duration_ms;
-                            if (!imgUrl && hit.image_url) {
-                                imgUrl = hit.image_url;
-                                albumObj.image_url = imgUrl;
-                                albumObj.images = [{ url: imgUrl }];
-                            }
-                            if (!id && hit.id) {
-                                id = String(hit.id);
-                                albumObj.id = id;
+        var fullAlbumData = null;
+        var tracks = [];
+
+        // 1. If it's an album and we have an ID and source, fetch the full album tracks directly
+        if (isAlbum && id && src) {
+            try {
+                var albRes = await fetch('/api/spotify/album/' + encodeURIComponent(id) + '?source=' + encodeURIComponent(src) + '&name=' + encodeURIComponent(albumName) + '&artist=' + encodeURIComponent(artist));
+                if (albRes.ok) {
+                    fullAlbumData = await albRes.json();
+                }
+            } catch (e) {
+                console.debug('[Chat] Direct album fetch failed:', e);
+            }
+        }
+
+        // 2. If we don't have full album data, or if id was missing, query enhanced-search
+        if ((isAlbum && (!fullAlbumData || !fullAlbumData.tracks || !fullAlbumData.tracks.length)) || !id || !imgUrl) {
+            try {
+                var searchQ = (artist !== 'Unknown Artist' ? artist + ' ' : '') + title;
+                var sr = await fetch('/api/enhanced-search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: searchQ.trim() })
+                }).then(function (r) { return r.ok ? r.json() : null; });
+                if (sr) {
+                    var als = sr.albums || sr.spotify_albums || [];
+                    var trs = sr.tracks || sr.spotify_tracks || [];
+                    if (isAlbum && als.length > 0) {
+                        var matchAl = als.find(function (a) {
+                            return a.name && title && a.name.toLowerCase() === title.toLowerCase();
+                        }) || als[0];
+                        if (matchAl) {
+                            if (!id) id = String(matchAl.id || '');
+                            if (!imgUrl && matchAl.image_url) imgUrl = matchAl.image_url;
+                            if (matchAl.source) src = matchAl.source;
+                            if (matchAl.name) albumName = matchAl.name;
+                            // Fetch full tracks using the resolved ID and source
+                            if (id) {
+                                var albRes2 = await fetch('/api/spotify/album/' + encodeURIComponent(id) + '?source=' + encodeURIComponent(src) + '&name=' + encodeURIComponent(albumName) + '&artist=' + encodeURIComponent(artist));
+                                if (albRes2.ok) {
+                                    fullAlbumData = await albRes2.json();
+                                }
                             }
                         }
+                    } else if (!isAlbum && trs.length > 0) {
+                        var matchTr = trs.find(function (t) {
+                            return t.name && title && t.name.toLowerCase() === title.toLowerCase();
+                        }) || trs[0];
+                        if (matchTr) {
+                            if (!id) id = String(matchTr.id || '');
+                            if (!imgUrl && matchTr.image_url) imgUrl = matchTr.image_url;
+                            if (matchTr.album) albumName = matchTr.album;
+                            if (matchTr.source) src = matchTr.source;
+                            if (matchTr.duration_ms) w.dur = matchTr.duration_ms;
+                        }
                     }
-                } catch (e) { /* best-effort */ }
+                }
+            } catch (e) {
+                console.debug('[Chat] Enhanced-search fallback for wishlist failed:', e);
             }
+        }
 
-            var tracks = [{
-                id: id || 'wanted_' + Date.now(),
+        // 3. Build albumObj and tracks array with full context
+        var albumObj = {
+            id: id || null,
+            name: (fullAlbumData && fullAlbumData.name) || albumName,
+            album_type: ty,
+            image_url: (fullAlbumData && fullAlbumData.images && fullAlbumData.images[0] && fullAlbumData.images[0].url) || imgUrl,
+            images: (fullAlbumData && fullAlbumData.images && fullAlbumData.images.length)
+                ? fullAlbumData.images
+                : (imgUrl ? [{ url: imgUrl }] : []),
+            artists: (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists.length)
+                ? fullAlbumData.artists
+                : [{ name: artist }],
+            release_date: (fullAlbumData && fullAlbumData.release_date) || w.y || '',
+            total_tracks: (fullAlbumData && fullAlbumData.total_tracks) || 0,
+            source: src
+        };
+
+        var artistObj = {
+            id: (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists[0] && fullAlbumData.artists[0].id) || null,
+            name: artist,
+            image_url: '',
+            source: src
+        };
+
+        if (fullAlbumData && fullAlbumData.tracks && fullAlbumData.tracks.length > 0) {
+            tracks = fullAlbumData.tracks.map(function (tr, idx) {
+                return {
+                    id: tr.id || ('wanted_' + id + '_' + idx),
+                    name: tr.name || tr.title || ('Track ' + (idx + 1)),
+                    artist: artist,
+                    artists: (tr.artists && tr.artists.length) ? tr.artists : [{ name: artist }],
+                    album: albumObj,
+                    track_number: tr.track_number || (idx + 1),
+                    disc_number: tr.disc_number || 1,
+                    duration_ms: tr.duration_ms || 0,
+                    image_url: albumObj.image_url,
+                    source: src
+                };
+            });
+            albumObj.total_tracks = tracks.length;
+        } else {
+            tracks = [{
+                id: id || ('wanted_' + Date.now()),
                 name: title,
                 artist: artist,
                 artists: [{ name: artist }],
                 album: albumObj,
-                duration_ms: dur || 0,
-                image_url: imgUrl,
-                source: src,
                 track_number: 1,
-                total_tracks: 1
+                total_tracks: 1,
+                duration_ms: Number(w.dur) || 0,
+                image_url: imgUrl,
+                source: src
             }];
+        }
 
+        // Use openAddToWishlistModal if available (the proper standard)
+        if (typeof window.openAddToWishlistModal === 'function') {
             try {
                 window.openAddToWishlistModal(albumObj, artistObj, tracks, ty, null);
+                return;
             } catch (err) {
                 console.error('[Chat] openAddToWishlistModal failed:', err);
                 if (typeof showToast === 'function') showToast('Could not open wishlist modal', 'error');
@@ -1595,7 +1746,7 @@
 
         // Fallback: direct API call
         try {
-            var trackObj = {
+            var trackObj = tracks[0] || {
                 id: id || 'wanted_' + Date.now(),
                 name: title,
                 artist: artist,
@@ -1609,8 +1760,8 @@
                 body: JSON.stringify({
                     track: trackObj,
                     artist: { id: null, name: artist, source: src },
-                    album: { id: null, name: albumName, album_type: ty, images: imgUrl ? [{ url: imgUrl }] : [] },
-                    source_type: 'album',
+                    album: { id: id || null, name: albumName, album_type: ty, images: imgUrl ? [{ url: imgUrl }] : [] },
+                    source_type: ty,
                     source_context: { album_name: albumName, artist_name: artist, album_type: ty }
                 })
             });
@@ -5635,7 +5786,11 @@
         // plain text has no envelope, so there is nowhere to put an avatar, a
         // channel tag or a thread id. attaching them anyway would make the
         // server refuse a message the user had no way to know was tagged.
-        if (_plainOn()) { payload.plain = true; return payload; }
+        // Rich cards (np, want, overlay, file) are NEVER sent as plain text.
+        if (_plainOn() && !payload.np && !payload.want && !payload.overlay && !payload.file) {
+            payload.plain = true;
+            return payload;
+        }
         if (_myAvatar()) payload.avatar = _myAvatar();
         if (_chanRoom()) {
             payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;
@@ -7286,7 +7441,8 @@
                         c2.getAttribute('data-np-id') || c2.getAttribute('data-wanted-id') || '',
                         c2.getAttribute('data-np-src') || c2.getAttribute('data-wanted-src') || '',
                         parseInt(c2.getAttribute('data-np-dur') || c2.getAttribute('data-wanted-dur') || '0', 10),
-                        c2.getAttribute('data-np-img') || c2.getAttribute('data-wanted-img') || ''
+                        c2.getAttribute('data-np-img') || c2.getAttribute('data-wanted-img') || '',
+                        c2.getAttribute('data-wanted-type') || (c2.classList.contains('chat-wanted-card') ? 'album' : 'single')
                     );
                 }
                 return;
@@ -7334,7 +7490,9 @@
                         id: c5.getAttribute('data-wanted-id') || '',
                         src: c5.getAttribute('data-wanted-src') || '',
                         img: c5.getAttribute('data-wanted-img') || '',
-                        ty: 'album'
+                        ty: c5.getAttribute('data-wanted-type') || 'album',
+                        dur: c5.getAttribute('data-wanted-dur') || 0,
+                        y: c5.getAttribute('data-wanted-year') || ''
                     });
                 }
                 return;

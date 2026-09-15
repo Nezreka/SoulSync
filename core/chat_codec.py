@@ -327,8 +327,8 @@ def np_of(payload) -> dict | None:
     tid = str(np.get("id") or "").strip()[:120]
     if tid:
         out["id"] = tid
-    img = str(np.get("img") or "").strip()[:500]
-    if img and img.startswith("https://"):
+    img = str(np.get("img") or "").strip()[:1000]
+    if img and (img.startswith("https://") or img.startswith("http://") or img.startswith("/api/")):
         out["img"] = img
     try:
         dur = int(np.get("dur") or 0)
@@ -371,11 +371,17 @@ def want_of(payload) -> dict | None:
     wid = str(w.get("id") or "").strip()[:120]
     if wid:
         out["id"] = wid
-    img = str(w.get("img") or "").strip()[:500]
-    if img and img.startswith("https://"):
+    img = str(w.get("img") or "").strip()[:1000]
+    if img and (img.startswith("https://") or img.startswith("http://") or img.startswith("/api/")):
         out["img"] = img
     y = str(w.get("y") or "").strip()[:10]
     if y:
         out["y"] = y
+    try:
+        dur = int(w.get("dur") or 0)
+        if 0 < dur < 10**7:
+            out["dur"] = dur
+    except (TypeError, ValueError):
+        pass
     return out
 
