@@ -9819,32 +9819,32 @@ class MusicDatabase:
                 LIMIT ?
             """, params)
             
-            rows = cursor.fetchall()
-            
-            albums = []
-            for row in rows:
-                genres = json.loads(row['genres']) if row['genres'] else None
-                album = DatabaseAlbum(
-                    id=row['id'],
-                    artist_id=row['artist_id'],
-                    title=row['title'],
-                    year=row['year'],
-                    thumb_url=row['thumb_url'],
-                    genres=genres,
-                    track_count=row['track_count'],
-                    duration=row['duration'],
-                    created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-                    updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
-                )
-                # Add artist info for compatibility with Plex responses
-                album.artist_name = row['artist_name']
-                albums.append(album)
-            
-            return albums
+            return [self._album_row_to_dataclass(row) for row in cursor.fetchall()]
             
         except Exception as e:
             logger.error(f"Error searching albums with title='{title}', artist='{artist}': {e}")
             return []
+
+    @staticmethod
+    def _album_row_to_dataclass(row) -> DatabaseAlbum:
+        """an albums row joined with artists.name as artist_name -> DatabaseAlbum,
+        the shape search_albums has always returned."""
+        genres = json.loads(row['genres']) if row['genres'] else None
+        album = DatabaseAlbum(
+            id=row['id'],
+            artist_id=row['artist_id'],
+            title=row['title'],
+            year=row['year'],
+            thumb_url=row['thumb_url'],
+            genres=genres,
+            track_count=row['track_count'],
+            duration=row['duration'],
+            created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
+            updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+        )
+        # Add artist info for compatibility with Plex responses
+        album.artist_name = row['artist_name']
+        return album
         
 
 
@@ -10435,7 +10435,55 @@ class MusicDatabase:
         candidates: List[DatabaseAlbum] = []
         try:
             seen_ids = set()
-            for artist_var in self._get_artist_variations(artist):
+            variations = self._get_artist_variations(artist)
+            # the artist's own rows by indexed name (norm and punctuation-folded
+            # key), then albums by artist_id. this ran search_albums per name
+            # variation, each a LIKE substring scan of every album in the
+            # library: 5.4 s for 16 albums on a 70k-album library, before a
+            # single card was checked. the substring path stays as the
+            # fallback for a name the indexes cannot resolve.
+            artist_ids: List[Any] = []
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                if self._norm_ready(cursor):
+                    from core.text.normalize import normalize_key
+                    norms = list(dict.fromkeys(self._normalize_for_comparison(v) for v in variations if v))
+                    keys = list(dict.fromkeys(normalize_key(v) for v in variations if v))
+                    keys = [k for k in keys if k]
+                    if norms:
+                        cursor.execute(f"SELECT id FROM artists WHERE name_norm IN ({','.join('?' for _ in norms)})", norms)
+                        artist_ids += [r[0] for r in cursor.fetchall()]
+                    if keys:
+                        cursor.execute(f"SELECT id FROM artists WHERE name_key IN ({','.join('?' for _ in keys)})", keys)
+                        artist_ids += [r[0] for r in cursor.fetchall()]
+                artist_ids = list(dict.fromkeys(artist_ids))
+                if artist_ids:
+                    ph = ','.join('?' for _ in artist_ids)
+                    params: list = list(artist_ids)
+                    src = ""
+                    if server_source:
+                        src = " AND albums.server_source = ?"
+                        params.append(server_source)
+                    params.append(limit)
+                    cursor.execute(f"""
+                        SELECT albums.*, artists.name as artist_name
+                        FROM albums
+                        JOIN artists ON albums.artist_id = artists.id
+                        WHERE albums.artist_id IN ({ph}){src}
+                        ORDER BY albums.title, artists.name
+                        LIMIT ?
+                    """, params)
+                    for row in cursor.fetchall():
+                        if row['id'] in seen_ids:
+                            continue
+                        seen_ids.add(row['id'])
+                        candidates.append(self._album_row_to_dataclass(row))
+            finally:
+                conn.close()
+            if candidates:
+                return candidates
+            for artist_var in variations:
                 found = self.search_albums(title="", artist=artist_var, limit=limit, server_source=server_source)
                 for album in found:
                     if album.id not in seen_ids:

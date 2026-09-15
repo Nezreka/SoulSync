@@ -323,3 +323,27 @@ def test_scan_upsert_fills_norms_and_credits(db):
     assert db.insert_or_update_media_track(track, "20", "10", server_source="plex")
     assert c.execute("SELECT title_norm FROM tracks WHERE id = 30").fetchone()[0] == "we found love (extended)"
     assert db.ensure_norm_backfilled() == 0 or True   # only the artist/album rows above were raw
+
+
+def test_candidate_albums_come_from_the_indexed_artist_lookup(db, monkeypatch):
+    """the artist page's album pre-fetch ran search_albums per name variation,
+    each a substring scan of every album; it resolves the artist by index now
+    and only falls back to the scan for a name the indexes cannot place."""
+    _seed(db, LIB + [(7, "\"Weird Al\" Yankovic", "Even Worse", "Fat", None),
+                     (8, "Weird Al Yankovic", "Alapalooza", "Jurassic Park", None)])
+    db.ensure_norm_backfilled()
+    scans = []
+    real = db.search_albums
+    monkeypatch.setattr(db, "search_albums", lambda *a, **k: scans.append(k.get("artist")) or real(*a, **k))
+
+    titles = sorted(a.title for a in db.get_candidate_albums_for_artist("Bjork", server_source="plex"))
+    assert titles == ["Debut"]
+    titles = sorted(a.title for a in db.get_candidate_albums_for_artist("ACDC", server_source="plex"))
+    assert titles == ["Back In Black"]
+    # both artist rows that are the same name once punctuation is dropped
+    titles = sorted(a.title for a in db.get_candidate_albums_for_artist("Weird Al Yankovic", server_source="plex"))
+    assert titles == ["Alapalooza", "Even Worse"]
+    assert scans == []                     # never the substring scan
+    # an artist the indexes cannot place still gets the old substring path
+    assert db.get_candidate_albums_for_artist("Yankovic", server_source="plex") != []
+    assert scans                           # the fallback ran, for that one only

@@ -91,6 +91,10 @@ def _resolve_completion_track_total(release: Dict[str, Any], source_chain: List[
 
     for source in source_chain:
         try:
+            # the one network call per item on an artist page; named so a slow
+            # page can be traced to the cards that needed it
+            logger.info("[completion] fetching track count for '%s' (%s:%s)",
+                        _extract_lookup_value(release, 'name', default=''), source, release_id)
             api_tracks = get_album_tracks_for_source(source, str(release_id))
             items = _extract_track_items(api_tracks)
             if items:
