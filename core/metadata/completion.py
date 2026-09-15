@@ -107,6 +107,52 @@ def _resolve_completion_track_total(release: Dict[str, Any], source_chain: List[
     return 0
 
 
+def _stored_track_total_for_card(db, db_album, card_source, card_id, candidate_albums,
+                                 id_map_cache=None, api_counts_cache=None) -> int:
+    """the provider's track count already on the matched library album, when
+    that album is PROVABLY the card's release (its stored id for the card's
+    source equals the card's id). the enrichment workers fill
+    albums.api_track_count for nearly every album; the artist page used to
+    ignore it and fetch the tracklist per owned album instead. 0 when there is
+    no proof or no stored count, and the caller fetches exactly as before."""
+    if db_album is None:
+        return 0
+    proven = _library_album_by_source_id(db, card_source, card_id, candidate_albums, id_map_cache=id_map_cache)
+    local_id = _extract_lookup_value(db_album, 'id')
+    if proven is None or _extract_lookup_value(proven, 'id') != local_id:
+        return 0
+    if api_counts_cache is not None and local_id in api_counts_cache:
+        return int(api_counts_cache[local_id] or 0)
+    get_counts = getattr(db, 'get_album_api_track_counts', None)
+    if not callable(get_counts):
+        return 0
+    try:
+        counts = get_counts([local_id])
+    except Exception:
+        return 0
+    if api_counts_cache is not None:
+        api_counts_cache[local_id] = counts.get(local_id, 0)
+    return int(counts.get(local_id, 0) or 0)
+
+
+def _remember_track_total(db, db_album, card_source, card_id, candidate_albums, total, id_map_cache=None, api_counts_cache=None) -> None:
+    """after a fetch: write the count onto the matched album when it is the
+    card's release and has no count yet, so it is never fetched again."""
+    if db_album is None or not total or total <= 0:
+        return
+    proven = _library_album_by_source_id(db, card_source, card_id, candidate_albums, id_map_cache=id_map_cache)
+    local_id = _extract_lookup_value(db_album, 'id')
+    if proven is None or _extract_lookup_value(proven, 'id') != local_id:
+        return
+    remember = getattr(db, 'set_album_api_track_count', None)
+    if callable(remember):
+        try:
+            if remember(local_id, total) and api_counts_cache is not None:
+                api_counts_cache[local_id] = int(total)
+        except Exception as e:  # noqa: BLE001 - bookkeeping never fails a check
+            logger.debug("could not remember api track count for %s: %s", local_id, e)
+
+
 def _release_year_of(release: Dict[str, Any]) -> Optional[str]:
     """The card's release year ('2024') or None — feeds the matcher's re-release
     year gate. Never raises; unknown/blank stays None (gate stays off)."""
@@ -329,6 +375,7 @@ def check_album_completion(
     canonical_cache: Optional[Dict[Any, Any]] = None,
     track_cache: Optional[Dict[tuple, int]] = None,
     pin_tracks_cache: Optional[Dict[Any, Any]] = None,
+    api_counts_cache: Optional[Dict[Any, int]] = None,
 ) -> Dict[str, Any]:
     """Check completion status for a single album."""
     try:
@@ -417,8 +464,17 @@ def check_album_completion(
 
             # If the card had no track count but matched in the library, resolve the upstream count
             # now so completion percentage and expected tracks are accurate for the owned item.
+            # the library's own stored count first (proven same release), the
+            # network only for the few albums that have none yet.
             if total_tracks == 0:
-                total_tracks = _resolve_completion_track_total(album_data, source_chain, track_cache=track_cache)
+                card_source = source_chain[0] if source_chain else None
+                total_tracks = _stored_track_total_for_card(
+                    db, db_album, card_source, album_id, candidate_albums,
+                    id_map_cache=album_source_ids_cache, api_counts_cache=api_counts_cache)
+                if total_tracks == 0:
+                    total_tracks = _resolve_completion_track_total(album_data, source_chain, track_cache=track_cache)
+                    _remember_track_total(db, db_album, card_source, album_id, candidate_albums, total_tracks,
+                                          id_map_cache=album_source_ids_cache, api_counts_cache=api_counts_cache)
                 if total_tracks > 0 and db_album is not None:
                     try:
                         owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
@@ -540,6 +596,7 @@ def check_single_completion(
     album_source_ids_cache: Optional[Dict[Any, Any]] = None,
     canonical_cache: Optional[Dict[Any, Any]] = None,
     track_cache: Optional[Dict[tuple, int]] = None,
+    api_counts_cache: Optional[Dict[Any, int]] = None,
 ) -> Dict[str, Any]:
     """Check completion status for a single/EP."""
     try:
@@ -635,7 +692,15 @@ def check_single_completion(
                     }
 
             if total_tracks == 0:
-                total_tracks = _resolve_completion_track_total(single_data, source_chain, track_cache=track_cache) or 1
+                card_source = source_chain[0] if source_chain else None
+                total_tracks = _stored_track_total_for_card(
+                    db, db_album, card_source, single_id, candidate_albums,
+                    id_map_cache=album_source_ids_cache, api_counts_cache=api_counts_cache)
+                if total_tracks == 0:
+                    fetched = _resolve_completion_track_total(single_data, source_chain, track_cache=track_cache)
+                    _remember_track_total(db, db_album, card_source, single_id, candidate_albums, fetched,
+                                          id_map_cache=album_source_ids_cache, api_counts_cache=api_counts_cache)
+                    total_tracks = fetched or 1
                 if total_tracks > 0 and db_album is not None:
                     try:
                         owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
@@ -796,6 +861,12 @@ def iter_artist_discography_completion_events(
     canonical_cache = {}
     track_cache = {}
     pin_tracks_cache = {}
+    api_counts_cache = {}
+    if candidate_albums and hasattr(db, 'get_album_api_track_counts'):
+        try:
+            api_counts_cache = dict(db.get_album_api_track_counts([a.id for a in candidate_albums]))
+        except Exception as _c_err:
+            logger.debug("Failed pre-fetching api track counts: %s", _c_err)
     if candidate_albums and candidate_tracks and hasattr(db, 'build_candidate_completeness_cache'):
         try:
             completeness_cache = db.build_candidate_completeness_cache(candidate_albums, candidate_tracks)
@@ -823,6 +894,7 @@ def iter_artist_discography_completion_events(
                 canonical_cache=canonical_cache,
                 track_cache=track_cache,
                 pin_tracks_cache=pin_tracks_cache,
+                api_counts_cache=api_counts_cache,
             )
             completion_data['type'] = 'album_completion'
             completion_data['container_type'] = 'albums'
@@ -852,6 +924,7 @@ def iter_artist_discography_completion_events(
                 album_source_ids_cache=album_source_ids_cache,
                 canonical_cache=canonical_cache,
                 track_cache=track_cache,
+                api_counts_cache=api_counts_cache,
             )
             completion_data['type'] = 'single_completion'
             completion_data['container_type'] = 'singles'

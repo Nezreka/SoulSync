@@ -10552,6 +10552,60 @@ class MusicDatabase:
         'amazon_id', 'audiodb_id', 'jiosaavn_id',
     )
 
+    def get_album_api_track_counts(self, album_ids) -> Dict[Any, int]:
+        """{album_db_id: api_track_count} for the rows that have one, one
+        query. the enrichment workers fill this column from the metadata
+        provider; the artist page reads it so an owned album's expected
+        count is a lookup, not a fetch."""
+        if not album_ids:
+            return {}
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(albums)")
+            if 'api_track_count' not in {row[1] for row in cursor.fetchall()}:
+                return {}
+            placeholders = ','.join(['?'] * len(album_ids))
+            cursor.execute(
+                f"SELECT id, api_track_count FROM albums WHERE id IN ({placeholders}) "
+                "AND api_track_count IS NOT NULL AND api_track_count > 0",
+                [str(a) for a in album_ids])
+            return {row['id']: int(row['api_track_count']) for row in cursor.fetchall()}
+        except Exception as e:
+            logger.debug("get_album_api_track_counts failed: %s", e)
+            return {}
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def set_album_api_track_count(self, album_id, count) -> bool:
+        """remember a provider's track count for an album (only when it has
+        none yet, and only a positive number). same column and same rule as
+        the enrichment workers' set_album_api_track_count."""
+        try:
+            n = int(count)
+        except (TypeError, ValueError):
+            return False
+        if n <= 0:
+            return False
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE albums SET api_track_count = ? WHERE id = ? "
+                "AND (api_track_count IS NULL OR api_track_count <= 0)",
+                (n, album_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug("set_album_api_track_count failed for %s: %s", album_id, e)
+            return False
+        finally:
+            if conn is not None:
+                conn.close()
+
     def get_album_source_ids(self, album_ids):
         """{album_db_id: {column: value}} for the per-source enrichment id
         columns, one indexed query. Columns missing from an older schema are
