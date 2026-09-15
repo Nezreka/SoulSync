@@ -391,8 +391,10 @@ class MusicDatabase:
         last_error = None
         for attempt in range(4):
             connection = None
+            _t_open = time.perf_counter()
             try:
                 connection = sqlite3.connect(str(self.database_path), timeout=30.0)
+                _t_connected = time.perf_counter()
                 connection.row_factory = sqlite3.Row
                 # Register Unicode-normalizing function for diacritics-aware LIKE queries
                 try:
@@ -410,6 +412,15 @@ class MusicDatabase:
                 connection.execute("PRAGMA foreign_keys = ON")
                 connection.execute("PRAGMA journal_mode = WAL")
                 connection.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
+                # diagnostic: on one install every db-touching request cost
+                # 1-2 s regardless of the query, which points at the open
+                # itself (file open + wal pragma), not the sql. say so.
+                _elapsed = time.perf_counter() - _t_open
+                if _elapsed > 0.2:
+                    logger.warning(
+                        "slow sqlite connect: %.0f ms total (connect %.0f ms, pragmas %.0f ms) for %s",
+                        _elapsed * 1000, (_t_connected - _t_open) * 1000,
+                        (time.perf_counter() - _t_connected) * 1000, self.database_path)
                 return connection
             except sqlite3.OperationalError as e:
                 last_error = e
