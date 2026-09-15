@@ -455,8 +455,9 @@ class ImageCache:
         except Exception:
             try:
                 tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+            except Exception as cleanup_err:
+                # the write failure below is the real error; a leftover .tmp is a note
+                logger.debug("could not remove partial cache file %s: %s", tmp_path, cleanup_err)
             raise
 
         expires_at = now + self.ttl_seconds
@@ -525,8 +526,9 @@ class ImageCache:
                 if ua:
                     headers["User-Agent"] = ua
                 headers["Referer"] = "https://ext.to/"
-            except Exception:
-                pass
+            except Exception as clearance_err:
+                # no clearance is fine, the fetch just goes without it
+                logger.debug("ext.to clearance unavailable for poster fetch: %s", clearance_err)
 
         response = self.fetcher(url, **kwargs)
         try:

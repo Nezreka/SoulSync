@@ -1450,6 +1450,7 @@ def test_img_proxy_allows_youtube_cdn_only(tmp_path, monkeypatch):
     class FakeResp:
         status_code = 200
         headers = {"Content-Type": "image/jpeg"}
+        content = b"x"   # the proxy reads the body whole now to cache it
         def iter_content(self, n): yield b"x"
     monkeypatch.setattr(requests, "get", lambda *a, **k: FakeResp())
     assert client.get("/api/video/img?u=https://yt3.googleusercontent.com/abc=s900").status_code == 200
