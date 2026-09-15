@@ -634,6 +634,7 @@ def _enforce_launch_pin():
 def _set_profile_context():
     """Set g.profile_id from session for every request"""
     g.request_start_monotonic = time.perf_counter()
+    g.request_start_cpu = time.thread_time()
     # Skip for profile management, static, and root routes
     path = request.path
     if (path.startswith('/api/profiles') or
@@ -688,12 +689,18 @@ def _log_slow_request(response):
         elapsed_ms = (time.perf_counter() - start) * 1000
         slow_threshold_ms = 1000.0
         if elapsed_ms >= slow_threshold_ms:
+            # cpu next to wall: a request that spent 2 s of wall on 30 ms of
+            # cpu was waiting (the gil, a lock, the disk), not working, and
+            # the fix is somewhere else entirely
+            cpu_start = getattr(g, 'request_start_cpu', None)
+            cpu_ms = (time.thread_time() - cpu_start) * 1000 if cpu_start is not None else -1
             logger.warning(
-                "Slow request: %s %s -> %s in %.1fms",
+                "Slow request: %s %s -> %s in %.1fms (cpu %.0fms)",
                 request.method,
                 request.full_path.rstrip('?'),
                 response.status_code,
                 elapsed_ms,
+                cpu_ms,
             )
     except Exception as e:
         logger.debug("slow request log failed: %s", e)
