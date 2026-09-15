@@ -3635,8 +3635,49 @@ class MusicDatabase:
                     DELETE FROM track_credits WHERE track_id = OLD.id;
                 END
             """)
+            self._add_albums_fts(cursor)
         except Exception as e:
             logger.error(f"Error adding normalized text columns: {e}")
+
+    def _add_albums_fts(self, cursor):
+        """a full-text index over albums.title_norm, so a title search that
+        used to be `title_norm LIKE '%…%'` over every album (1-2 s warm, 12 s
+        cold on a 70k-album library; run once per unowned card on an artist
+        page) becomes a token lookup. external-content fts5 kept in step by
+        triggers; rebuilt once when created. optional: an sqlite without
+        fts5 logs once and every reader falls back to the scan."""
+        try:
+            cursor.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'albums_fts'")
+            if cursor.fetchone():
+                return
+            # trigram: LIKE on the fts table has the scan's exact substring
+            # semantics (mid-word needles included) and uses the index for
+            # any pattern of three or more characters. sqlite >= 3.34.
+            cursor.execute("""
+                CREATE VIRTUAL TABLE albums_fts USING fts5(
+                    title_norm, content='albums', content_rowid='rowid', tokenize='trigram'
+                )
+            """)
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS trg_albums_fts_ai AFTER INSERT ON albums BEGIN
+                    INSERT INTO albums_fts(rowid, title_norm) VALUES (NEW.rowid, NEW.title_norm);
+                END
+            """)
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS trg_albums_fts_ad AFTER DELETE ON albums BEGIN
+                    INSERT INTO albums_fts(albums_fts, rowid, title_norm) VALUES ('delete', OLD.rowid, OLD.title_norm);
+                END
+            """)
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS trg_albums_fts_au AFTER UPDATE OF title_norm ON albums BEGIN
+                    INSERT INTO albums_fts(albums_fts, rowid, title_norm) VALUES ('delete', OLD.rowid, OLD.title_norm);
+                    INSERT INTO albums_fts(rowid, title_norm) VALUES (NEW.rowid, NEW.title_norm);
+                END
+            """)
+            cursor.execute("INSERT INTO albums_fts(albums_fts) VALUES ('rebuild')")
+            logger.info("Built albums_fts full-text index over album titles")
+        except Exception as e:
+            logger.warning(f"albums_fts unavailable (title searches use the scan): {e}")
 
     def _norm_unfilled_count(self, cursor, table: str, norm: str, limit: int) -> int:
         cursor.execute(
@@ -9810,6 +9851,30 @@ class MusicDatabase:
             tracks.append(track)
         return tracks
     
+    _FTS_MAX_ROWIDS = 20000
+
+    def _albums_fts_rowids(self, cursor, needle: str) -> Optional[List[int]]:
+        """album rowids whose normalized title contains the needle, from the
+        trigram index: the same rows `title_norm LIKE '%needle%'` finds over
+        the table, without the table scan. None means "no index, do the
+        scan": no fts table, an empty needle, or more hits than are worth
+        listing (a one-letter needle matches most of the library)."""
+        if not needle:
+            return None
+        try:
+            cursor.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'albums_fts'")
+            if not cursor.fetchone():
+                return None
+            cursor.execute("SELECT rowid FROM albums_fts WHERE title_norm LIKE ? LIMIT ?",
+                           (f"%{needle}%", self._FTS_MAX_ROWIDS + 1))
+            rowids = [r[0] for r in cursor.fetchall()]
+            if len(rowids) > self._FTS_MAX_ROWIDS:
+                return None
+            return rowids
+        except Exception as e:
+            logger.debug(f"albums_fts lookup failed, scanning instead: {e}")
+            return None
+
     def search_albums(self, title: str = "", artist: str = "", limit: int = 50, server_source: Optional[str] = None) -> List[DatabaseAlbum]:
         """Search albums by title and/or artist name with fuzzy matching"""
         try:
@@ -9825,8 +9890,19 @@ class MusicDatabase:
             a_name = self._norm_expr(ready, 'artists', 'name', 'name_norm')
 
             if title:
+                needle = self._normalize_for_comparison(title)
+                fts_rowids = self._albums_fts_rowids(cursor, needle) if ready else None
+                if fts_rowids is not None:
+                    # the trigram index answers the same LIKE; the LIKE is
+                    # still applied to the listed rows, so the rows are exactly
+                    # the scan's rows without the scan
+                    if not fts_rowids:
+                        return []
+                    ph = ','.join('?' for _ in fts_rowids)
+                    where_conditions.append(f"albums.rowid IN ({ph})")
+                    params.extend(fts_rowids)
                 where_conditions.append(f"{al_title} LIKE ?")
-                params.append(f"%{self._normalize_for_comparison(title)}%")
+                params.append(f"%{needle}%")
 
             if artist:
                 where_conditions.append(f"{a_name} LIKE ?")

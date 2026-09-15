@@ -1108,6 +1108,19 @@ def database_maintenance_info():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _rebuild_fts_after_vacuum(conn):
+    """albums_fts is an external-content index keyed by albums.rowid, and
+    VACUUM may renumber the rowids of a table without an INTEGER PRIMARY KEY.
+    a rebuild puts the index back in step; skipped when there is no index."""
+    try:
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'albums_fts'").fetchone():
+            conn.execute("INSERT INTO albums_fts(albums_fts) VALUES ('rebuild')")
+            conn.commit()
+            logger.info("Rebuilt albums_fts after VACUUM")
+    except Exception as e:
+        logger.warning(f"albums_fts rebuild after VACUUM failed: {e}")
+
+
 @bp.route('/api/database/maintenance/vacuum', methods=['POST'])
 @admin_only
 def database_vacuum():
@@ -1123,6 +1136,7 @@ def database_vacuum():
         start = time.time()
         conn.execute('VACUUM')
         elapsed = time.time() - start
+        _rebuild_fts_after_vacuum(conn)
         conn.close()
 
         size_after = os.path.getsize(db_path)
@@ -1165,6 +1179,7 @@ def enable_incremental_vacuum():
         start = time.time()
         conn.execute('VACUUM')
         elapsed = time.time() - start
+        _rebuild_fts_after_vacuum(conn)
         conn.close()
 
         size_after = os.path.getsize(db_path)

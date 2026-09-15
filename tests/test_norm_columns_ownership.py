@@ -347,3 +347,87 @@ def test_candidate_albums_come_from_the_indexed_artist_lookup(db, monkeypatch):
     # an artist the indexes cannot place still gets the old substring path
     assert db.get_candidate_albums_for_artist("Yankovic", server_source="plex") != []
     assert scans                           # the fallback ran, for that one only
+
+
+# ---------------------------------------------------------------------------
+# albums_fts: the title-only album search
+# ---------------------------------------------------------------------------
+
+ALBUMS = [
+    (1, "Oasis", "(What's the Story) Morning Glory?", "Some Might Say", None),
+    (2, "Oasis", "Definitely Maybe", "Live Forever", None),
+    (3, "Various Artists", "Greatest Hits, Vol. 2", "A", None),
+    (4, "\"Weird Al\" Yankovic", "Greatest Hits", "B", None),
+    (5, "Björk", "Debut", "Human Behaviour", None),
+    (6, "Rock Band", "Rock", "C", None),
+]
+
+
+def _scan_titles(db, needle):
+    """the old query, verbatim: a LIKE over every album."""
+    c = _raw(db)
+    n = f"%{needle}%"
+    return sorted(r[0] for r in c.execute(
+        "SELECT title FROM albums WHERE title_norm LIKE ? AND server_source = 'plex'", (n,)))
+
+
+def test_albums_fts_exists_and_matches_the_scan(db):
+    _seed(db, ALBUMS)
+    db.ensure_norm_backfilled()
+    c = _raw(db)
+    assert c.execute("SELECT COUNT(*) FROM albums_fts").fetchone()[0] == 6
+    from core.text.normalize import normalize_for_comparison
+    for q in ["Greatest Hits", "greatest hits, vol. 2", "Morning Glory", "(What's the Story) Morning Glory?",
+              "Debut", "Rock", "roc", "ock", "hits", "e", "ini", "Nothing Here", "Bjork", "vol. 2", "?"]:
+        needle = normalize_for_comparison(q)
+        got = sorted(a.title for a in db.search_albums(title=q, artist="", limit=50, server_source="plex"))
+        assert got == _scan_titles(db, needle), q
+
+
+def test_albums_fts_stays_in_step_with_writes(db):
+    _seed(db, ALBUMS)
+    db.ensure_norm_backfilled()
+    c = _raw(db)
+    # insert (raw, no norm) -> backfill fills the norm -> the trigger indexes it
+    c.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES (7, 1, 'Heathen Chemistry', 'plex')")
+    c.commit()
+    assert [a.title for a in db.search_albums(title="Heathen", artist="", server_source="plex")] == ["Heathen Chemistry"]
+    # a raw title change nulls the norm (stale trigger) and drops it from the index until refilled
+    c.execute("UPDATE albums SET title = 'Standing on the Shoulder of Giants' WHERE id = 7")
+    c.commit()
+    assert db.search_albums(title="Heathen", artist="", server_source="plex") == []
+    assert [a.title for a in db.search_albums(title="Shoulder of Giants", artist="", server_source="plex")] == ["Standing on the Shoulder of Giants"]
+    # delete
+    c.execute("DELETE FROM albums WHERE id = 7")
+    c.commit()
+    assert db.search_albums(title="Shoulder", artist="", server_source="plex") == []
+    assert c.execute("SELECT COUNT(*) FROM albums_fts").fetchone()[0] == 6
+
+
+def test_albums_fts_falls_back_to_the_scan_when_it_cannot_help(db, monkeypatch):
+    _seed(db, ALBUMS)
+    db.ensure_norm_backfilled()
+    # an empty needle
+    assert db._albums_fts_rowids(db._get_connection().cursor(), "") is None
+    # a punctuation-only needle still answers, with the scan's semantics
+    assert sorted(db._albums_fts_rowids(db._get_connection().cursor(), "?")) == [1]
+    # too many hits (one-letter needle) -> None -> the scan
+    monkeypatch.setattr(MusicDatabase, "_FTS_MAX_ROWIDS", 2)
+    conn = db._get_connection()
+    assert db._albums_fts_rowids(conn.cursor(), "e") is None
+    # and the scan still answers
+    assert len(db.search_albums(title="e", artist="", limit=50, server_source="plex")) == len(_scan_titles(db, "e"))
+
+
+def test_albums_fts_survives_a_vacuum_via_the_rebuild(db):
+    _seed(db, ALBUMS)
+    db.ensure_norm_backfilled()
+    from api.database_admin import _rebuild_fts_after_vacuum
+    c = sqlite3.connect(str(db.database_path))
+    c.execute("DELETE FROM albums WHERE id = 3")
+    c.commit()
+    c.execute("VACUUM")
+    _rebuild_fts_after_vacuum(c)
+    c.close()
+    got = sorted(a.title for a in db.search_albums(title="Greatest Hits", artist="", server_source="plex"))
+    assert got == ["Greatest Hits"]
