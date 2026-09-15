@@ -8024,40 +8024,51 @@ def library_completion_stream():
             try:
                 candidate_albums = db.get_candidate_albums_for_artist(artist_name, server_source=_active_server)
             except Exception as _cand_err:
-                print(f"[completion-stream] Failed to pre-fetch album candidates for '{artist_name}': {_cand_err}")
+                logger.info(f"[completion-stream] Failed to pre-fetch album candidates for '{artist_name}': {_cand_err}")
                 candidate_albums = None
             _t1 = time.perf_counter()
-            print(f"[completion-stream] Pre-fetched {len(candidate_albums) if candidate_albums is not None else 0} library albums for '{artist_name}' in {(_t1 - _t0) * 1000:.0f}ms")
+            logger.info(f"[completion-stream] Pre-fetched {len(candidate_albums) if candidate_albums is not None else 0} library albums for '{artist_name}' in {(_t1 - _t0) * 1000:.0f}ms")
 
             if candidate_albums:
                 _t2 = time.perf_counter()
                 try:
                     candidate_tracks = db.get_candidate_tracks_for_albums([a.id for a in candidate_albums])
                 except Exception as _tr_err:
-                    print(f"[completion-stream] Failed to pre-fetch track candidates for '{artist_name}': {_tr_err}")
+                    logger.info(f"[completion-stream] Failed to pre-fetch track candidates for '{artist_name}': {_tr_err}")
                     candidate_tracks = None
                 _t3 = time.perf_counter()
-                print(f"[completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
+                logger.info(f"[completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
 
             completeness_cache = None
             album_source_ids_cache = None
             canonical_cache = {}
             track_cache = {}
+            pin_tracks_cache = {}
+            api_counts_cache = {}
+            if candidate_albums and hasattr(db, 'get_album_api_track_counts'):
+                try:
+                    api_counts_cache = dict(db.get_album_api_track_counts([a.id for a in candidate_albums]))
+                except Exception as _c_err:
+                    logger.debug(f"[completion-stream] Failed pre-fetching api track counts: {_c_err}")
             if candidate_albums and candidate_tracks and hasattr(db, 'build_candidate_completeness_cache'):
                 try:
                     completeness_cache = db.build_candidate_completeness_cache(candidate_albums, candidate_tracks)
                 except Exception as _b_err:
-                    print(f"[completion-stream] Failed building completeness cache: {_b_err}")
+                    logger.info(f"[completion-stream] Failed building completeness cache: {_b_err}")
             if candidate_albums and hasattr(db, 'get_album_source_ids'):
                 try:
                     album_source_ids_cache = db.get_album_source_ids([a.id for a in candidate_albums])
                 except Exception as _s_err:
-                    print(f"[completion-stream] Failed fetching album source IDs: {_s_err}")
+                    logger.info(f"[completion-stream] Failed fetching album source IDs: {_s_err}")
 
             yield f"data: {json.dumps({'type': 'start', 'total_items': len(all_items)})}\n\n"
 
             _loop_start = time.perf_counter()
+            # per-item timing, so a slow page can be told apart from a slow
+            # item: the log names the slowest few and how many took a second
+            _item_times = []
             for _i, (category, item) in enumerate(all_items):
+                _item_start = time.perf_counter()
                 try:
                     # Map Library field names to helper field names.
                     # CRUCIAL: carry the card's YEAR through — the re-release
@@ -8092,6 +8103,7 @@ def library_completion_stream():
                             album_source_ids_cache=album_source_ids_cache,
                             canonical_cache=canonical_cache,
                             track_cache=track_cache,
+                            api_counts_cache=api_counts_cache,
                         )
                     else:
                         result = check_album_completion(
@@ -8103,6 +8115,8 @@ def library_completion_stream():
                             album_source_ids_cache=album_source_ids_cache,
                             canonical_cache=canonical_cache,
                             track_cache=track_cache,
+                            pin_tracks_cache=pin_tracks_cache,
+                            api_counts_cache=api_counts_cache,
                         )
 
                     result['id'] = item['id']
@@ -8111,9 +8125,16 @@ def library_completion_stream():
                     yield f"data: {json.dumps(result)}\n\n"
                 except Exception as e:
                     yield f"data: {json.dumps({'type': 'completion', 'category': category, 'id': item['id'], 'status': 'error', 'owned_tracks': 0, 'expected_tracks': item.get('track_count', 0), 'completion_percentage': 0, 'confidence': 0.0, 'error': str(e)})}\n\n"
+                finally:
+                    _item_times.append((time.perf_counter() - _item_start, category, str(item.get('title') or item.get('name') or item.get('id'))))
 
             _loop_elapsed = time.perf_counter() - _loop_start
-            print(f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms")
+            _slow = sorted(_item_times, reverse=True)[:3]
+            _over_1s = sum(1 for t, _c, _n in _item_times if t >= 1.0)
+            logger.info(
+                f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms "
+                f"(total {(time.perf_counter() - _t0) * 1000:.0f}ms with pre-fetch; {_over_1s} items over 1s; slowest: "
+                + ", ".join(f"{n} [{c}] {t * 1000:.0f}ms" for t, c, n in _slow) + ")")
 
             yield f"data: {json.dumps({'type': 'complete', 'processed_count': len(all_items)})}\n\n"
 
