@@ -355,8 +355,10 @@ class QBittorrentAdapter:
                     added_ids = payload.get('added_torrent_ids') or []
                     if added_ids:
                         return str(added_ids[0]).lower()
-            except Exception:
-                pass
+            except Exception as e:
+                # a body that looked like json but wasn't; the hash poll
+                # below still finds the torrent, so this is just a note
+                logger.debug("qBittorrent add: could not read json body (%s), polling for the hash", e)
         return self._poll_for_new_hash(before)
 
     async def get_status(self, torrent_id: str) -> Optional[TorrentStatus]:
