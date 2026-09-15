@@ -767,21 +767,21 @@ def iter_artist_discography_completion_events(
 
     candidate_albums = None
     candidate_tracks = None
+    _t0 = _time_metadata.perf_counter()
     try:
         from core.settings import config_manager as _cm_metadata
 
         _active_server = _cm_metadata.get_active_media_server()
-        _t0 = _time_metadata.perf_counter()
         candidate_albums = db.get_candidate_albums_for_artist(resolved_artist_name, server_source=_active_server)
         _t1 = _time_metadata.perf_counter()
-        print(f"[artist-completion-stream] Pre-fetched {len(candidate_albums) if candidate_albums is not None else 0} library albums for '{resolved_artist_name}' in {(_t1 - _t0) * 1000:.0f}ms")
+        logger.info(f"[artist-completion-stream] Pre-fetched {len(candidate_albums) if candidate_albums is not None else 0} library albums for '{resolved_artist_name}' in {(_t1 - _t0) * 1000:.0f}ms")
         if candidate_albums:
             _t2 = _time_metadata.perf_counter()
             candidate_tracks = db.get_candidate_tracks_for_albums([a.id for a in candidate_albums])
             _t3 = _time_metadata.perf_counter()
-            print(f"[artist-completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
+            logger.info(f"[artist-completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
     except Exception as _pre_err:
-        print(f"[artist-completion-stream] Failed to pre-fetch candidates for '{resolved_artist_name}': {_pre_err}")
+        logger.info(f"[artist-completion-stream] Failed to pre-fetch candidates for '{resolved_artist_name}': {_pre_err}")
         candidate_albums = None
         candidate_tracks = None
 
@@ -868,7 +868,10 @@ def iter_artist_discography_completion_events(
             }
 
     _loop_elapsed = _time_metadata.perf_counter() - _loop_start
-    print(f"[artist-completion-stream] Processed {total_items} items for '{resolved_artist_name}' in {_loop_elapsed * 1000:.0f}ms")
+    # the timing used to go to stdout only, so app.log could not say whether a
+    # slow artist page was this check or the network calls around it
+    logger.info(f"[artist-completion-stream] Processed {total_items} items for '{resolved_artist_name}' in {_loop_elapsed * 1000:.0f}ms "
+                f"(total {(_time_metadata.perf_counter() - _t0) * 1000:.0f}ms including candidate pre-fetch)")
 
     yield {
         'type': 'complete',
