@@ -3647,9 +3647,17 @@ class MusicDatabase:
         triggers; rebuilt once when created. optional: an sqlite without
         fts5 logs once and every reader falls back to the scan."""
         try:
-            cursor.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'albums_fts'")
-            if cursor.fetchone():
+            cursor.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'albums_fts'")
+            row = cursor.fetchone()
+            if row and "tokenize='trigram'" in (row[0] or ''):
                 return
+            if row:
+                # an index built with another tokenizer answers a LIKE by
+                # scanning; only the trigram one indexes it. rebuild.
+                logger.info("albums_fts was built with another tokenizer; rebuilding as trigram")
+                for trg in ('trg_albums_fts_ai', 'trg_albums_fts_ad', 'trg_albums_fts_au'):
+                    cursor.execute(f"DROP TRIGGER IF EXISTS {trg}")
+                cursor.execute("DROP TABLE IF EXISTS albums_fts")
             # trigram: LIKE on the fts table has the scan's exact substring
             # semantics (mid-word needles included) and uses the index for
             # any pattern of three or more characters. sqlite >= 3.34.

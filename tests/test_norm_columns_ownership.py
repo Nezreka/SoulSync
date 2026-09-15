@@ -431,3 +431,23 @@ def test_albums_fts_survives_a_vacuum_via_the_rebuild(db):
     c.close()
     got = sorted(a.title for a in db.search_albums(title="Greatest Hits", artist="", server_source="plex"))
     assert got == ["Greatest Hits"]
+
+
+def test_an_albums_fts_built_with_another_tokenizer_is_rebuilt_as_trigram(db):
+    _seed(db, ALBUMS)
+    db.ensure_norm_backfilled()
+    c = sqlite3.connect(str(db.database_path))
+    for trg in ('trg_albums_fts_ai', 'trg_albums_fts_ad', 'trg_albums_fts_au'):
+        c.execute(f"DROP TRIGGER IF EXISTS {trg}")
+    c.execute("DROP TABLE albums_fts")
+    c.execute("CREATE VIRTUAL TABLE albums_fts USING fts5(title_norm, content='albums', content_rowid='rowid', tokenize='unicode61')")
+    c.commit()
+    cur = c.cursor()
+    db._add_albums_fts(cur)
+    c.commit()
+    assert "tokenize='trigram'" in c.execute("SELECT sql FROM sqlite_master WHERE name='albums_fts'").fetchone()[0]
+    assert c.execute("SELECT COUNT(*) FROM albums_fts").fetchone()[0] == 6
+    assert {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_albums_fts%'")} == \
+        {'trg_albums_fts_ai', 'trg_albums_fts_ad', 'trg_albums_fts_au'}
+    c.close()
+    assert [a.title for a in db.search_albums(title="ini", artist="", server_source="plex")] == ["Definitely Maybe"]
