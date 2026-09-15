@@ -39,6 +39,7 @@
     "api_key": "",
     "download_path": "/app/downloads",
     "transfer_path": "/app/Transfer",
+    "min_observed_download_speed_kbps": 500,
     "search_timeout": 60,
     "search_timeout_buffer": 15
   },

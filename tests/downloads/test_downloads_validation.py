@@ -12,7 +12,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 from core.downloads import validation
-from core.downloads.validation import filter_soundcloud_previews, get_valid_candidates
+from core.downloads.validation import (
+    filter_soundcloud_previews,
+    get_valid_candidates,
+    source_reuse_title_matches,
+)
 
 
 @dataclass
@@ -37,6 +41,46 @@ class _MatchingEngine:
 
     def normalize_string(self, text):
         return (text or '').lower()
+
+
+class _BareTitleEngine:
+    @staticmethod
+    def base_title_of(text, artist='', *, from_filename=False):
+        from core.matching_engine import MusicMatchingEngine
+        engine = object.__new__(MusicMatchingEngine)
+        return engine.base_title_of(text, artist, from_filename=from_filename)
+
+
+def test_source_reuse_requires_same_bare_title(monkeypatch):
+    monkeypatch.setattr(validation, 'matching_engine', _BareTitleEngine())
+    expected = _Track(duration_ms=240_000, name='Lost Souls', artists=('Doves',))
+
+    matching = _Candidate(
+        username='peer', duration=240_000,
+        filename=r'music\Doves\Lost Souls\06 - Doves - Lost Souls.flac',
+    )
+    sibling = _Candidate(
+        username='peer', duration=240_000,
+        filename=r'music\Doves\Lost Souls\05 - Doves - Rise.flac',
+    )
+
+    assert source_reuse_title_matches(expected, matching) is True
+    assert source_reuse_title_matches(expected, sibling) is False
+
+
+def test_source_reuse_title_gate_fails_closed_for_unknown_layout(monkeypatch):
+    monkeypatch.setattr(validation, 'matching_engine', _BareTitleEngine())
+    expected = _Track(duration_ms=240_000, name='SexyBack',
+                      artists=('Justin Timberlake',))
+    candidate = _Candidate(
+        username='peer', duration=240_000,
+        filename=('media\\Justin Timberlake\\FutureSex+LoveSounds (2006)\\'
+                  'Justin Timberlake - FutureSex+LoveSounds - 02 - SexyBack.flac'),
+    )
+
+    # Phase 1 source reuse is deliberately conservative. The generalized
+    # filename interpreter planned separately will recognize this layout.
+    assert source_reuse_title_matches(expected, candidate) is False
 
 
 def test_drops_soundcloud_30s_preview_when_expected_long():

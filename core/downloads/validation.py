@@ -39,6 +39,29 @@ def init(matching_engine_obj, download_orchestrator_obj):
     download_orchestrator = download_orchestrator_obj
 
 
+def source_reuse_title_matches(expected_track, candidate) -> bool:
+    """Whether a browsed folder file is unambiguously the requested track.
+
+    Source reuse is only an optimization: rejecting an unfamiliar filename
+    falls through to the normal search, while accepting a sibling song imports
+    the wrong recording. Use the matching engine's existing bare-title
+    normalization and therefore fail closed unless the two titles are equal.
+    The generalized filename interpreter belongs in a later change.
+    """
+    if matching_engine is None or expected_track is None or candidate is None:
+        return False
+
+    artists = list(getattr(expected_track, 'artists', None) or [])
+    artist = str(artists[0]) if artists else ''
+    expected = matching_engine.base_title_of(
+        getattr(expected_track, 'name', ''), artist,
+    )
+    actual = matching_engine.base_title_of(
+        getattr(candidate, 'filename', ''), artist, from_filename=True,
+    )
+    return bool(expected and actual and expected == actual)
+
+
 def _youtube_probe_targets(profile_id=None):
     """Profile targets for YouTube itag probing. None if the DB is unavailable."""
     try:

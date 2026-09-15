@@ -587,6 +587,32 @@ def test_quarantine_retry_tries_cached_candidates_without_searching():
     assert attempted == [['f2.flac']]
 
 
+def test_slow_retry_tries_cached_candidates_before_source_reuse():
+    _seed_task(
+        cached_candidates=[_Cand('slow-peer', 'slow.flac'),
+                           _Cand('next-peer', 'next.flac')],
+        used_sources={'slow-peer_slow.flac'},
+        _slow_fallback_source_key='slow-peer_slow.flac',
+    )
+    calls = []
+
+    def _attempt(task_id, candidates, track, batch_id, **kwargs):
+        calls.append(('cached', [c.filename for c in candidates]))
+        return True
+
+    def _reuse(*args):
+        calls.append(('reuse', None))
+        return True
+
+    deps, _ = _build_deps(
+        try_source_reuse=_reuse,
+        attempt_download_with_candidates=_attempt,
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+
+    assert calls == [('cached', ['next.flac', 'slow.flac'])]
+
+
 def test_quarantine_retry_skips_cached_from_exhausted_source():
     # hifi is budget-exhausted; its cached candidate must be skipped, soulseek's tried.
     _seed_task(

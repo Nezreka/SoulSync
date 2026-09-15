@@ -336,35 +336,6 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         )
         logger.info(f"[Modal Worker] Starting download task for: {track.name} by {track.artists[0] if track.artists else 'Unknown'}")
 
-        # === SOURCE REUSE: Check batch's last good source before searching ===
-        if deps.try_source_reuse(task_id, batch_id, track):
-            # Store source for next worker (cascading reuse)
-            with tasks_lock:
-                used_filename = download_tasks.get(task_id, {}).get('filename')
-                used_username = download_tasks.get(task_id, {}).get('username')
-            if used_filename and used_username:
-                deps.store_batch_source(batch_id, used_username, used_filename)
-            return
-
-        # === STAGING CHECK: Check staging folder for existing file before searching ===
-        if deps.try_staging_match(task_id, batch_id, track):
-            return
-        staging_miss_reason = _private_album_bundle_staging_miss_reason(batch_id, deps)
-        if staging_miss_reason:
-            logger.warning(
-                "[Modal Worker] %s for '%s'; skipping redundant per-track %s search",
-                staging_miss_reason,
-                track.name,
-                getattr(deps.download_orchestrator, 'mode', 'release-source'),
-            )
-            with tasks_lock:
-                if task_id in download_tasks:
-                    download_tasks[task_id]['status'] = 'not_found'
-                    download_tasks[task_id]['error_message'] = staging_miss_reason
-            if batch_id:
-                deps.on_download_completed(batch_id, task_id, False)
-            return
-
         # Initialize task state tracking (like GUI's parallel_search_tracking)
         with tasks_lock:
             if task_id in download_tasks:
@@ -394,6 +365,38 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 used_username = download_tasks.get(task_id, {}).get('username')
             if used_filename and used_username:
                 deps.store_batch_source(batch_id, used_username, used_filename)
+            return
+
+        # === SOURCE REUSE: Check batch's last good source before searching ===
+        # Retry candidates were already validated for this exact track. Walk
+        # them first so a slow retry cannot be intercepted by the batch folder's
+        # broader source-reuse matching.
+        if deps.try_source_reuse(task_id, batch_id, track):
+            # Store source for next worker (cascading reuse)
+            with tasks_lock:
+                used_filename = download_tasks.get(task_id, {}).get('filename')
+                used_username = download_tasks.get(task_id, {}).get('username')
+            if used_filename and used_username:
+                deps.store_batch_source(batch_id, used_username, used_filename)
+            return
+
+        # === STAGING CHECK: Check staging folder for existing file before searching ===
+        if deps.try_staging_match(task_id, batch_id, track):
+            return
+        staging_miss_reason = _private_album_bundle_staging_miss_reason(batch_id, deps)
+        if staging_miss_reason:
+            logger.warning(
+                "[Modal Worker] %s for '%s'; skipping redundant per-track %s search",
+                staging_miss_reason,
+                track.name,
+                getattr(deps.download_orchestrator, 'mode', 'release-source'),
+            )
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'not_found'
+                    download_tasks[task_id]['error_message'] = staging_miss_reason
+            if batch_id:
+                deps.on_download_completed(batch_id, task_id, False)
             return
 
         # 1. Generate multiple search queries (like GUI's generate_smart_search_queries)
