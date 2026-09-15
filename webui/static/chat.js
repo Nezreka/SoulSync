@@ -153,9 +153,42 @@
         return m ? u.slice(0, -m[0].length) : u;
     }
 
+    function _classifyUrl(u) {
+        var raw = (u || '').replace(/&amp;/g, '&').toLowerCase();
+        if (raw.indexOf('youtube.com') > -1 || raw.indexOf('youtu.be') > -1) {
+            return { cls: 'chat-link--yt', brand: 'YouTube' };
+        }
+        if (raw.indexOf('spotify.com') > -1) {
+            return { cls: 'chat-link--spotify', brand: 'Spotify' };
+        }
+        if (raw.indexOf('soundcloud.com') > -1) {
+            return { cls: 'chat-link--sc', brand: 'SoundCloud' };
+        }
+        if (raw.indexOf('bandcamp.com') > -1) {
+            return { cls: 'chat-link--bc', brand: 'Bandcamp' };
+        }
+        if (raw.indexOf('deezer.com') > -1) {
+            return { cls: 'chat-link--dz', brand: 'Deezer' };
+        }
+        if (raw.indexOf('music.apple.com') > -1) {
+            return { cls: 'chat-link--apple', brand: 'Apple Music' };
+        }
+        if (raw.indexOf('github.com') > -1) {
+            return { cls: 'chat-link--github', brand: 'GitHub' };
+        }
+        if (raw.indexOf('wikipedia.org') > -1) {
+            return { cls: 'chat-link--wiki', brand: 'Wikipedia' };
+        }
+        if (raw.indexOf('reddit.com') > -1) {
+            return { cls: 'chat-link--reddit', brand: 'Reddit' };
+        }
+        return { cls: 'chat-link--web', brand: '' };
+    }
+
     function _linkHtml(u) {
         // u is already-escaped text (esc ran first) — safe in attr + label.
-        return '<a class="chat-link" href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>';
+        var info = _classifyUrl(u);
+        return '<a class="chat-link ' + info.cls + '" href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>';
     }
 
     // ── embeds (richchat P3): click-to-load, never auto-load ─────────────────
@@ -171,6 +204,27 @@
                 raw.match(/youtu\.be\/([A-Za-z0-9_-]{6,20})/) ||
                 raw.match(/youtube\.com\/shorts\/([A-Za-z0-9_-]{6,20})/);
         return m ? m[1] : null;
+    }
+
+    function _spotifyEmbedInfo(u) {
+        var raw = u.replace(/&amp;/g, '&');
+        var m = raw.match(/open\.spotify\.com\/(track|album|playlist|episode)\/([A-Za-z0-9]{15,30})/i);
+        return m ? { type: m[1].toLowerCase(), id: m[2] } : null;
+    }
+
+    function _deezerEmbedInfo(u) {
+        var raw = u.replace(/&amp;/g, '&');
+        var m = raw.match(/deezer\.com\/(?:[a-z]{2}\/)?(track|album|playlist)\/([0-9]{3,15})/i);
+        return m ? { type: m[1].toLowerCase(), id: m[2] } : null;
+    }
+
+    function _soundcloudEmbedInfo(u) {
+        var raw = u.replace(/&amp;/g, '&');
+        var m = raw.match(/^https?:\/\/(?:www\.)?soundcloud\.com\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_-]+)(?:[?#]|$)/i);
+        if (m && m[1] !== 'you' && m[1] !== 'discover' && m[1] !== 'stream' && m[1] !== 'search' && m[1] !== 'upload') {
+            return { user: m[1], track: m[2] };
+        }
+        return null;
     }
 
     // ── SoulSync deep links (richchat P4) ────────────────────────────────────
@@ -210,8 +264,25 @@
         var yt = _ytId(u);
         if (yt) {
             // id is regex-constrained to [A-Za-z0-9_-] — attribute-safe by shape
-            return html + ' <button type="button" class="chat-embed-chip" data-chat-embed-yt="' +
-                yt + '" title="Play here (YouTube)">▶ play</button>';
+            return html + ' <button type="button" class="chat-embed-chip chat-embed-chip--yt" data-chat-embed-yt="' +
+                yt + '" title="Play YouTube video inline in chat">▶ play</button>' +
+                ' <button type="button" class="chat-embed-action chat-embed-action--jbx" data-chat-jbx-add="' +
+                yt + '" title="Queue to Room Jukebox">🎵 jukebox</button>';
+        }
+        var sp = _spotifyEmbedInfo(u);
+        if (sp) {
+            return html + ' <button type="button" class="chat-embed-chip chat-embed-chip--sp" data-chat-embed-spotify="' +
+                sp.type + '/' + sp.id + '" title="Open Spotify player inline">🟢 spotify</button>';
+        }
+        var dz = _deezerEmbedInfo(u);
+        if (dz) {
+            return html + ' <button type="button" class="chat-embed-chip chat-embed-chip--dz" data-chat-embed-deezer="' +
+                dz.type + '/' + dz.id + '" title="Open Deezer player inline">💜 deezer</button>';
+        }
+        var sc = _soundcloudEmbedInfo(u);
+        if (sc) {
+            return html + ' <button type="button" class="chat-embed-chip chat-embed-chip--sc" data-chat-embed-sc="' +
+                encodeURIComponent(u) + '" title="Open SoundCloud player inline">☁ soundcloud</button>';
         }
         if (IMG_RE.test(u)) {
             return html + ' <button type="button" class="chat-embed-chip" data-chat-embed-img="' +
@@ -288,7 +359,8 @@
         s = _extract(s, /\[([^\]\n]{1,80})\]\((https?:\/\/[^\s)]+)\)/g, hold, function (m) {
             var mm = m.match(/^\[([^\]]+)\]\((.+)\)$/);
             var label = mm[1], url = mm[2];
-            return '<a class="chat-link" href="' + url + '" target="_blank" rel="noopener noreferrer">' +
+            var info = _classifyUrl(url);
+            return '<a class="chat-link ' + info.cls + '" href="' + url + '" target="_blank" rel="noopener noreferrer">' +
                 label + '</a><span class="chat-link-domain">(' + _hostOf(url) + ')</span>';
         });
         s = _extract(s, URL_RE, hold, function (m) {
@@ -1978,6 +2050,7 @@
                 ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden — show</button>' : '') +
             (muted ? '<div class="chat-hidden-note">' + muted +
                 ' message' + (muted === 1 ? '' : 's') + ' from muted users hidden</div>' : '');
+        _unfurlPendingLinks(host);
         if (state.stickBottom) {
             host.scrollTop = host.scrollHeight;
             // deep-scrollback cleanup: once the reader is back at the bottom,
@@ -6436,6 +6509,7 @@
                 (msgs.length ? renderGroups(msgs)
                              : '<div class="chat-empty">Nothing in the archive matches.</div>');
             host.scrollTop = 0;
+            _unfurlPendingLinks(host);
         });
     }
 
@@ -6558,7 +6632,150 @@
         });
     }
 
-    // ── room browser (join any public Soulseek room) ─────────────────────────
+    // ── rich link unfurling & inline web preview ─────────────────────────────
+    var _linkPreviewCache = {};
+
+    function _unfurlCardHtml(p) {
+        var theme = p.theme_color || '#6366f1';
+        var domain = p.domain || '';
+        var site = p.site_name || domain || 'Website';
+        var title = p.title || p.url;
+        var desc = p.description ? String(p.description).slice(0, 260) : '';
+        var thumb = p.image || '';
+
+        return '<div class="chat-unfurl-card" data-unfurl-url="' + attr(p.url) + '" style="--unfurl-color:' + attr(theme) + '">' +
+            '<div class="chat-unfurl-bar"></div>' +
+            '<div class="chat-unfurl-main">' +
+                '<div class="chat-unfurl-head">' +
+                    '<span class="chat-unfurl-site">' +
+                        (domain ? '<img class="chat-unfurl-favicon" src="https://www.google.com/s2/favicons?domain=' + attr(domain) + '&sz=32" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') +
+                        '<span>' + esc(site) + '</span>' +
+                    '</span>' +
+                    '<div class="chat-unfurl-actions">' +
+                        '<button type="button" class="chat-unfurl-btn chat-unfurl-btn--preview" data-chat-preview-url="' + attr(p.url) + '" title="Open interactive inline preview">👁 Preview Inline</button>' +
+                        '<a href="' + attr(p.url) + '" target="_blank" rel="noopener noreferrer" class="chat-unfurl-btn" title="Open in browser">↗ Open</a>' +
+                        '<button type="button" class="chat-unfurl-btn chat-unfurl-btn--close" data-chat-unfurl-close title="Dismiss preview">✕</button>' +
+                    '</div>' +
+                '</div>' +
+                '<a href="' + attr(p.url) + '" target="_blank" rel="noopener noreferrer" class="chat-unfurl-title">' + esc(title) + '</a>' +
+                (desc ? '<div class="chat-unfurl-desc">' + esc(desc) + '</div>' : '') +
+                (thumb ? '<div class="chat-unfurl-thumb-wrap"><img class="chat-unfurl-thumb" src="' + attr(thumb) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="var w=this.closest(\'.chat-unfurl-thumb-wrap\'); if(w) w.remove();"></div>' : '') +
+            '</div>' +
+        '</div>';
+    }
+
+    function _attachUnfurlCard(line, p, container) {
+        if (!line || !p || !p.url) return;
+        if (line.querySelector('.chat-unfurl-card[data-unfurl-url="' + attr(p.url) + '"]')) return;
+        var div = document.createElement('div');
+        div.innerHTML = _unfurlCardHtml(p);
+        var card = div.firstElementChild;
+        if (card) {
+            line.appendChild(card);
+            if (state.stickBottom && container) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+    }
+
+    function _unfurlPendingLinks(container) {
+        if (!container) return;
+        var links = container.querySelectorAll('a.chat-link:not([data-unfurl-checked])');
+        if (!links.length) return;
+
+        links.forEach(function (link) {
+            link.setAttribute('data-unfurl-checked', '1');
+            var href = link.getAttribute('href') || '';
+            if (!href || href.charAt(0) === '/' || href.indexOf('javascript:') === 0) return;
+            if (IMG_RE.test(href)) return;
+            if (_ytId(href) || _spotifyEmbedInfo(href) || _deezerEmbedInfo(href) || _soundcloudEmbedInfo(href)) return;
+
+            var line = link.closest('.chat-line');
+            if (!line) return;
+
+            if (_linkPreviewCache[href]) {
+                var cached = _linkPreviewCache[href];
+                if (cached.ok && cached.preview && (cached.preview.title || cached.preview.description)) {
+                    _attachUnfurlCard(line, cached.preview, container);
+                }
+                return;
+            }
+
+            getJSON('/api/chat/link-preview?url=' + encodeURIComponent(href)).then(function (res) {
+                if (!res.ok || !res.body || !res.body.ok) {
+                    _linkPreviewCache[href] = { ok: false };
+                    return;
+                }
+                var p = res.body.preview || res.body;
+                if (!p || (!p.title && !p.description)) {
+                    _linkPreviewCache[href] = { ok: false };
+                    return;
+                }
+                _linkPreviewCache[href] = { ok: true, preview: p };
+                _attachUnfurlCard(line, p, container);
+            }).catch(function () {
+                _linkPreviewCache[href] = { ok: false };
+            });
+        });
+    }
+
+    function openWebPreviewModal(url) {
+        var modal = document.getElementById('chat-web-preview-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'chat-web-preview-modal';
+            modal.className = 'chat-web-modal-overlay';
+            modal.innerHTML =
+                '<div class="chat-web-modal-dialog">' +
+                    '<div class="chat-web-modal-header">' +
+                        '<div class="chat-web-modal-title">' +
+                            '<span class="chat-web-modal-lock">🔒</span>' +
+                            '<span class="chat-web-modal-url"></span>' +
+                        '</div>' +
+                        '<div class="chat-web-modal-actions">' +
+                            '<button type="button" class="chat-web-modal-btn" data-chat-web-modal-copy title="Copy Link">📋 Copy</button>' +
+                            '<a href="#" target="_blank" rel="noopener noreferrer" class="chat-web-modal-btn chat-web-modal-ext" title="Open in External Tab">↗ External</a>' +
+                            '<button type="button" class="chat-web-modal-btn chat-web-modal-close" title="Close Preview">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="chat-web-modal-body">' +
+                        '<iframe class="chat-web-modal-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerpolicy="no-referrer"></iframe>' +
+                    '</div>' +
+                '</div>';
+            document.body.appendChild(modal);
+
+            modal.querySelector('.chat-web-modal-close').addEventListener('click', function () {
+                closeWebPreviewModal();
+            });
+            modal.addEventListener('click', function (e) {
+                if (e.target === modal) closeWebPreviewModal();
+            });
+            modal.querySelector('[data-chat-web-modal-copy]').addEventListener('click', function () {
+                var currUrl = modal.getAttribute('data-url');
+                if (currUrl && navigator.clipboard) {
+                    navigator.clipboard.writeText(currUrl);
+                    _ovToast('Copied link to clipboard!', 'success');
+                }
+            });
+        }
+        modal.setAttribute('data-url', url);
+        var domain = '';
+        try { domain = new URL(url).hostname; } catch (e) { domain = url; }
+        modal.querySelector('.chat-web-modal-url').textContent = domain + ' (' + url.slice(0, 50) + (url.length > 50 ? '…' : '') + ')';
+        modal.querySelector('.chat-web-modal-ext').href = url;
+        var ifr = modal.querySelector('.chat-web-modal-iframe');
+        if (ifr) ifr.src = url;
+        modal.classList.add('chat-web-modal-overlay--open');
+    }
+
+    function closeWebPreviewModal() {
+        var modal = document.getElementById('chat-web-preview-modal');
+        if (modal) {
+            modal.classList.remove('chat-web-modal-overlay--open');
+            var ifr = modal.querySelector('.chat-web-modal-iframe');
+            if (ifr) ifr.src = 'about:blank';
+        }
+    }
     var _availRooms = null;
 
     // ── Discord-style Social & Lists Drawer (Friends, Blocklist, Bookmarks) ──
@@ -6924,6 +7141,7 @@
                 }]));
                 host.scrollTop = host.scrollHeight;
                 state.lastStamp = null;
+                _unfurlPendingLinks(host);
             }
             state.stickBottom = true;
             cancelReply();
@@ -6964,10 +7182,222 @@
             if (g) { sendGif(g.getAttribute('data-chat-gif-send')); return; }
             var t = e.target.closest('[data-chat-embed-yt]');
             if (t) {
-                t.outerHTML = '<span class="chat-embed-frame"><iframe src="https://www.youtube-nocookie.com/embed/' +
-                    t.getAttribute('data-chat-embed-yt') +
-                    '" allow="encrypted-media; picture-in-picture" allowfullscreen ' +
-                    'referrerpolicy="no-referrer" loading="lazy"></iframe></span>';
+                var vid = t.getAttribute('data-chat-embed-yt');
+                var jbxBtn = t.nextElementSibling && t.nextElementSibling.matches('[data-chat-jbx-add]') ? t.nextElementSibling : null;
+                if (jbxBtn) jbxBtn.remove();
+                t.outerHTML = '<div class="chat-embed-card chat-embed-card--yt" data-embed-yt="' + attr(vid) + '">' +
+                    '<div class="chat-embed-card-head">' +
+                        '<div class="chat-embed-card-brand">' +
+                            '<span class="chat-embed-dot chat-embed-dot--yt"></span>' +
+                            '<span class="chat-embed-brand-label">YouTube Video</span>' +
+                        '</div>' +
+                        '<div class="chat-embed-card-actions">' +
+                            '<button type="button" class="chat-embed-card-btn chat-embed-card-btn--jbx" data-chat-jbx-add="' + attr(vid) + '" title="Queue to Room Jukebox">🎵 Jukebox</button>' +
+                            '<a href="https://www.youtube.com/watch?v=' + encodeURIComponent(vid) + '" target="_blank" rel="noopener noreferrer" class="chat-embed-card-btn" title="Open on YouTube">↗ Watch</a>' +
+                            '<button type="button" class="chat-embed-card-btn chat-embed-card-btn--close" data-chat-embed-close title="Close Player">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="chat-embed-card-body">' +
+                        '<span class="chat-embed-frame"><iframe src="https://www.youtube-nocookie.com/embed/' +
+                        attr(vid) +
+                        '?autoplay=1&rel=0" allow="encrypted-media; picture-in-picture; autoplay" allowfullscreen ' +
+                        'referrerpolicy="no-referrer" loading="lazy"></iframe></span>' +
+                    '</div>' +
+                '</div>';
+                return;
+            }
+            t = e.target.closest('[data-chat-jbx-add]');
+            if (t) {
+                var jvid = t.getAttribute('data-chat-jbx-add');
+                if (jvid) _jbxPick({ id: jvid, title: 'YouTube Video' });
+                return;
+            }
+            t = e.target.closest('[data-chat-embed-spotify]');
+            if (t) {
+                var spPath = t.getAttribute('data-chat-embed-spotify');
+                var isAlbum = spPath.indexOf('album') === 0 || spPath.indexOf('playlist') === 0;
+                var sph = isAlbum ? 352 : 152;
+                t.outerHTML = '<div class="chat-embed-card chat-embed-card--spotify">' +
+                    '<div class="chat-embed-card-head">' +
+                        '<div class="chat-embed-card-brand">' +
+                            '<span class="chat-embed-dot chat-embed-dot--sp"></span>' +
+                            '<span class="chat-embed-brand-label">Spotify Player</span>' +
+                        '</div>' +
+                        '<div class="chat-embed-card-actions">' +
+                            '<a href="https://open.spotify.com/' + attr(spPath) + '" target="_blank" rel="noopener noreferrer" class="chat-embed-card-btn" title="Open on Spotify">↗ Open</a>' +
+                            '<button type="button" class="chat-embed-card-btn chat-embed-card-btn--close" data-chat-embed-close title="Close Player">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="chat-embed-card-body">' +
+                        '<iframe class="chat-embed-spotify-frame" src="https://open.spotify.com/embed/' + attr(spPath) + '?utm_source=generator&theme=0" ' +
+                        'width="100%" height="' + sph + '" frameborder="0" allowfullscreen="" ' +
+                        'allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" ' +
+                        'loading="lazy" referrerpolicy="no-referrer"></iframe>' +
+                    '</div>' +
+                '</div>';
+                return;
+            }
+            t = e.target.closest('[data-chat-embed-deezer]');
+            if (t) {
+                var dzPath = t.getAttribute('data-chat-embed-deezer');
+                var isDzAlb = dzPath.indexOf('album') === 0 || dzPath.indexOf('playlist') === 0;
+                var dzh = isDzAlb ? 300 : 150;
+                t.outerHTML = '<div class="chat-embed-card chat-embed-card--deezer">' +
+                    '<div class="chat-embed-card-head">' +
+                        '<div class="chat-embed-card-brand">' +
+                            '<span class="chat-embed-dot chat-embed-dot--dz"></span>' +
+                            '<span class="chat-embed-brand-label">Deezer Player</span>' +
+                        '</div>' +
+                        '<div class="chat-embed-card-actions">' +
+                            '<a href="https://www.deezer.com/' + attr(dzPath) + '" target="_blank" rel="noopener noreferrer" class="chat-embed-card-btn" title="Open on Deezer">↗ Open</a>' +
+                            '<button type="button" class="chat-embed-card-btn chat-embed-card-btn--close" data-chat-embed-close title="Close Player">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="chat-embed-card-body">' +
+                        '<iframe class="chat-embed-deezer-frame" src="https://widget.deezer.com/widget/dark/' + attr(dzPath) + '" ' +
+                        'width="100%" height="' + dzh + '" frameborder="0" allowtransparency="true" ' +
+                        'allow="encrypted-media; clipboard-write" loading="lazy" referrerpolicy="no-referrer"></iframe>' +
+                    '</div>' +
+                '</div>';
+                return;
+            }
+            t = e.target.closest('[data-chat-embed-sc]');
+            if (t) {
+                var scRaw = decodeURIComponent(t.getAttribute('data-chat-embed-sc'));
+                t.outerHTML = '<div class="chat-embed-card chat-embed-card--sc">' +
+                    '<div class="chat-embed-card-head">' +
+                        '<div class="chat-embed-card-brand">' +
+                            '<span class="chat-embed-dot chat-embed-dot--sc"></span>' +
+                            '<span class="chat-embed-brand-label">SoundCloud Player</span>' +
+                        '</div>' +
+                        '<div class="chat-embed-card-actions">' +
+                            '<a href="' + attr(scRaw) + '" target="_blank" rel="noopener noreferrer" class="chat-embed-card-btn" title="Open on SoundCloud">↗ Open</a>' +
+                            '<button type="button" class="chat-embed-card-btn chat-embed-card-btn--close" data-chat-embed-close title="Close Player">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="chat-embed-card-body">' +
+                        '<iframe class="chat-embed-sc-frame" width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" ' +
+                        'src="https://w.soundcloud.com/player/?url=' + encodeURIComponent(scRaw) + '&color=%23ff5500&auto_play=true&hide_related=true&show_comments=false&show_user=true&show_reposts=false&show_teaser=false" ' +
+                        'loading="lazy" referrerpolicy="no-referrer"></iframe>' +
+                    '</div>' +
+                '</div>';
+                return;
+            }
+            t = e.target.closest('[data-chat-embed-close]');
+            if (t) {
+                var card = t.closest('.chat-embed-card');
+                if (card) {
+                    var ytid = card.getAttribute('data-embed-yt');
+                    if (ytid) {
+                        card.outerHTML = '<button type="button" class="chat-embed-chip chat-embed-chip--yt" data-chat-embed-yt="' +
+                            attr(ytid) + '" title="Play YouTube video inline in chat">▶ play</button>' +
+                            ' <button type="button" class="chat-embed-action chat-embed-action--jbx" data-chat-jbx-add="' +
+                            attr(ytid) + '" title="Queue to Room Jukebox">🎵 jukebox</button>';
+                    } else {
+                        card.remove();
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-preview-url]');
+            if (t) {
+                var pUrl = t.getAttribute('data-chat-preview-url');
+                var uCard = t.closest('.chat-unfurl-card');
+                if (uCard) {
+                    var existingFrame = uCard.querySelector('.chat-inline-web-frame');
+                    if (existingFrame) {
+                        existingFrame.remove();
+                        t.classList.remove('chat-unfurl-btn--active');
+                        t.textContent = '👁 Preview Inline';
+                        return;
+                    }
+                    t.classList.add('chat-unfurl-btn--active');
+                    t.textContent = '✕ Close Preview';
+
+                    var pDomain = '';
+                    try { pDomain = new URL(pUrl).hostname; } catch (err) { pDomain = pUrl; }
+
+                    var frameContainer = document.createElement('div');
+                    frameContainer.className = 'chat-inline-web-frame';
+                    frameContainer.innerHTML =
+                        '<div class="chat-inline-web-toolbar">' +
+                            '<div class="chat-inline-web-ssl" title="Secure web preview"><span class="chat-inline-ssl-lock">🔒</span> ' + esc(pDomain) + '</div>' +
+                            '<div class="chat-inline-web-actions">' +
+                                '<button type="button" class="chat-inline-web-btn" data-chat-web-reload title="Reload frame">⟳</button>' +
+                                '<button type="button" class="chat-inline-web-btn" data-chat-web-expand="' + attr(pUrl) + '" title="Expand to slide-over modal">⛶</button>' +
+                                '<a href="' + attr(pUrl) + '" target="_blank" rel="noopener noreferrer" class="chat-inline-web-btn" title="Open in browser tab">↗</a>' +
+                                '<button type="button" class="chat-inline-web-btn chat-inline-web-btn--close" data-chat-web-close title="Close inline preview">✕</button>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="chat-inline-web-body">' +
+                            '<div class="chat-inline-web-loader">Loading preview…</div>' +
+                            '<iframe src="' + attr(pUrl) + '" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" ' +
+                                'loading="lazy" referrerpolicy="no-referrer"></iframe>' +
+                            '<div class="chat-inline-web-fallback" style="display:none;">' +
+                                '<span>If this site restricts inline frame viewing (X-Frame-Options), </span>' +
+                                '<a href="' + attr(pUrl) + '" target="_blank" rel="noopener noreferrer" class="chat-inline-fallback-btn">Open in New Tab ↗</a>' +
+                            '</div>' +
+                        '</div>';
+                    uCard.appendChild(frameContainer);
+
+                    var ifr = frameContainer.querySelector('iframe');
+                    var loader = frameContainer.querySelector('.chat-inline-web-loader');
+                    var fallback = frameContainer.querySelector('.chat-inline-web-fallback');
+
+                    var loadTimer = setTimeout(function () {
+                        if (loader) loader.style.display = 'none';
+                        if (fallback) fallback.style.display = 'flex';
+                    }, 4500);
+
+                    ifr.onload = function () {
+                        clearTimeout(loadTimer);
+                        if (loader) loader.style.display = 'none';
+                    };
+                    ifr.onerror = function () {
+                        clearTimeout(loadTimer);
+                        if (loader) loader.style.display = 'none';
+                        if (fallback) fallback.style.display = 'flex';
+                    };
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-web-close]');
+            if (t) {
+                var fr = t.closest('.chat-inline-web-frame');
+                if (fr) {
+                    var pc = fr.closest('.chat-unfurl-card');
+                    if (pc) {
+                        var pb = pc.querySelector('[data-chat-preview-url]');
+                        if (pb) {
+                            pb.classList.remove('chat-unfurl-btn--active');
+                            pb.textContent = '👁 Preview Inline';
+                        }
+                    }
+                    fr.remove();
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-web-reload]');
+            if (t) {
+                var rf = t.closest('.chat-inline-web-frame');
+                var rifr = rf && rf.querySelector('iframe');
+                if (rifr) {
+                    var osrc = rifr.src;
+                    rifr.src = '';
+                    rifr.src = osrc;
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-web-expand]');
+            if (t) {
+                var expUrl = t.getAttribute('data-chat-web-expand');
+                if (expUrl) openWebPreviewModal(expUrl);
+                return;
+            }
+            t = e.target.closest('[data-chat-unfurl-close]');
+            if (t) {
+                var uc = t.closest('.chat-unfurl-card');
+                if (uc) uc.remove();
                 return;
             }
             t = e.target.closest('[data-chat-embed-img]');
@@ -9957,6 +10387,7 @@
                         _bsPlaceAt: _bsPlaceAt, _bsDraft: _bsDraft,
                         _slotPayout: function (r, s2) { return _slotPayout(r, s2); },
                         renderUserPanel: renderUserPanel, renderGuilds: renderGuilds,
+                        openWebPreviewModal: openWebPreviewModal, closeWebPreviewModal: closeWebPreviewModal,
                         _testSetSelf: function (n) { state.selfName = n; },
                         _testSetState: function (patch) {
                             Object.keys(patch || {}).forEach(function (k) { state[k] = patch[k]; });
