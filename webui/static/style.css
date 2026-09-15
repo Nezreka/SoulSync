@@ -20278,6 +20278,86 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     color: rgba(255, 255, 255, 0.75);
 }
 
+/* select mode (#1219). a toggle by Update list, one bar for the selection,
+   and the card itself becomes the checkbox: the hover actions go away so a
+   click can only mean "this one too". */
+.library-select-toggle {
+    margin-right: 10px;
+    padding: 7px 14px;
+    border-radius: 17px;
+    font-size: 11px;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    cursor: pointer;
+    transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+.library-select-toggle:hover { color: #fff; border-color: rgba(255, 255, 255, 0.25); }
+.library-select-toggle.active {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.library-selection {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin: 0 6px 12px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    font-size: 12px;
+}
+.library-selection-count { font-weight: 600; color: rgba(255, 255, 255, 0.85); }
+.library-selection .library-source-clear:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
+.library-selection-delete {
+    margin-left: auto;
+    padding: 6px 14px;
+    border-radius: 9px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid rgba(224, 85, 78, 0.45);
+    background: rgba(224, 85, 78, 0.18);
+    color: #f0928c;
+    transition: background 0.18s;
+}
+.library-selection-delete:hover:not(:disabled) { background: rgba(224, 85, 78, 0.3); }
+.library-selection-delete:disabled { opacity: 0.4; cursor: default; }
+
+.pl-card--selecting .pl-card-hover { display: none; }
+.pl-card--selecting { cursor: pointer; }
+.pl-card--selected {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    background: rgba(var(--accent-rgb), 0.08);
+}
+.pl-card-check {
+    position: absolute;
+    top: -6px;
+    left: -6px;
+    z-index: 2;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    color: #000;
+    background: rgba(18, 18, 22, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    transition: background 0.15s, border-color 0.15s;
+}
+.pl-card--selected .pl-card-check {
+    background: rgb(var(--accent-rgb));
+    border-color: rgb(var(--accent-rgb));
+}
+
 @media (max-width: 699px) {
     .library-filters {
         flex-direction: column;

@@ -645,6 +645,39 @@ def delete_mirrored_playlist_endpoint(playlist_id):
         logger.error(f"Error deleting mirrored playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
+@bp.route('/api/mirrored-playlists/batch-delete', methods=['POST'])
+def batch_delete_mirrored_playlists_endpoint():
+    """delete many mirrors in one call (#1219). the reporter had four tidal
+    playlists sharing a name, deleted three upstream, and was left clicking
+    through the card menu one at a time. same ownership scope as the single
+    delete: a foreign id is reported as not deleted, never as an error that
+    would confirm it exists."""
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_ids = data.get('ids')
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return jsonify({"error": "ids must be a non-empty list"}), 400
+        ids = []
+        for raw in raw_ids:
+            pid = parse_strict_int(raw)
+            if pid is None:
+                return jsonify({"error": "ids must be integers"}), 400
+            ids.append(pid)
+        if len(ids) > 500:
+            return jsonify({"error": "at most 500 ids per call"}), 400
+        database = get_database()
+        scope = _mirror_scope_profile_id()
+        deleted, not_deleted = [], []
+        for pid in dict.fromkeys(ids):
+            if database.delete_mirrored_playlist(pid, profile_id=scope):
+                deleted.append(pid)
+            else:
+                not_deleted.append(pid)
+        return jsonify({"success": True, "deleted": deleted, "not_deleted": not_deleted})
+    except Exception as e:
+        logger.error(f"Error batch-deleting mirrored playlists: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/server-link', methods=['POST'])
 def link_mirrored_playlist_server_endpoint(playlist_id):
     """Record which server playlist this mirror corresponds to.

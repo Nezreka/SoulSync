@@ -98,6 +98,14 @@ export interface PlaylistCardProps {
    * matching against it would break the moment the wording changes.
    */
   scheduled?: boolean;
+  /**
+   * select mode (#1219). while the tab is selecting, a click on the card
+   * toggles it instead of opening it, the hover actions stay hidden, and a
+   * check sits on the art corner. `selected` says whether this one is in.
+   */
+  selecting?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }
 
 /**
@@ -180,27 +188,39 @@ export function PlaylistCard({
   onMore,
   onSchedule,
   scheduled,
+  selecting,
+  selected,
+  onToggleSelect,
 }: PlaylistCardProps) {
   const state = libraryCardState(row);
   const pct = libraryCoveragePct(row);
+  // in select mode the whole card is the checkbox. one hit target the size
+  // of the card beats a 16px box you have to aim for forty times over.
+  const activate = selecting && onToggleSelect ? onToggleSelect : onOpen;
 
   return (
     <div
-      className="pl-card"
+      className={`pl-card${selecting ? ' pl-card--selecting' : ''}${selected ? ' pl-card--selected' : ''}`}
       id={`mirrored-card-${row.id}`}
       data-state={state}
       data-playlist-id={row.id}
-      onClick={onOpen}
-      role="button"
+      onClick={activate}
+      role={selecting ? 'checkbox' : 'button'}
+      aria-checked={selecting ? Boolean(selected) : undefined}
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onOpen();
+          activate();
         }
       }}
     >
       <div className="pl-card-art">
+        {selecting && (
+          <span className="pl-card-check" aria-hidden="true">
+            {selected ? '✓' : ''}
+          </span>
+        )}
         <div className={`pl-card-art-img ${row.source ?? ''}`}>
           {/* A real poster beats a mosaic of the playlist's albums; the collage
               is the fallback for the sources that supply no poster at all. */}
@@ -265,6 +285,11 @@ export function PlaylistCard({
             title="Change how often this playlist syncs"
             onClick={(e) => {
               e.stopPropagation();
+              // while selecting, the pill is just part of the card
+              if (selecting) {
+                activate();
+                return;
+              }
               onSchedule(e.currentTarget);
             }}
           >
