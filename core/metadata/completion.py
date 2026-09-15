@@ -261,13 +261,30 @@ def _resolve_canonical_album_completion(db, db_album: Any,
 
     if canonical_source and canonical_album_id:
         cache_key = (str(canonical_source), str(canonical_album_id))
+        stored_total = _extract_lookup_value(canonical, 'track_count', default=None)
         if pin_tracks_cache is not None and cache_key in pin_tracks_cache and isinstance(pin_tracks_cache[cache_key], int):
             canonical_total = pin_tracks_cache[cache_key]
+        elif isinstance(stored_total, int) and stored_total > 0:
+            # remembered from an earlier fetch: a release's tracklist does not
+            # change, so this is the same number without the live call (and
+            # without waiting through musicbrainz's retries when it is down)
+            canonical_total = stored_total
+            if pin_tracks_cache is not None:
+                pin_tracks_cache[cache_key] = canonical_total
         else:
             api_tracks = get_album_tracks_for_source(str(canonical_source), str(canonical_album_id))
             canonical_total = len(_extract_track_items(api_tracks))
             if pin_tracks_cache is not None:
                 pin_tracks_cache[cache_key] = canonical_total
+            if canonical_total > 0:
+                # remember it; a failed fetch (0) stays unremembered so the
+                # next check tries again exactly as before
+                remember = getattr(db, 'set_album_canonical_track_count', None)
+                if callable(remember):
+                    try:
+                        remember(local_album_id, str(canonical_source), str(canonical_album_id), canonical_total)
+                    except Exception as remember_err:  # noqa: BLE001 - bookkeeping never fails a check
+                        logger.debug("could not remember canonical track count for %s: %s", local_album_id, remember_err)
 
     if canonical_total == 0:
         logger.warning(

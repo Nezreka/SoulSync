@@ -1866,6 +1866,12 @@ class MusicDatabase:
                 # auto resolve job (and any re-resolution) must never overwrite
                 # a locked pin, so a manual match stays put across cycles.
                 'canonical_locked': 'INTEGER DEFAULT 0',
+                # the pinned release's track count, remembered the first time
+                # it is fetched. a release's tracklist does not change, so the
+                # artist page reads it here instead of asking musicbrainz live
+                # (and waiting through its retries) on every completion check.
+                # NULL until fetched; cleared by a re-pin.
+                'canonical_track_count': 'INTEGER DEFAULT NULL',
             }
             for _col, _typedef in _canonical_cols.items():
                 if album_cols and _col not in album_cols:
@@ -2024,6 +2030,9 @@ class MusicDatabase:
                 "UPDATE albums SET canonical_source = ?, canonical_album_id = ?, "
                 "canonical_score = ?, canonical_locked = ?, "
                 "canonical_resolved_at = CURRENT_TIMESTAMP, "
+                # a different release has a different tracklist: forget the
+                # remembered count so the next check fetches this one's once
+                "canonical_track_count = NULL, "
                 "updated_at = CURRENT_TIMESTAMP "
                 f"WHERE id = ?{guard}",
                 (source, str(canonical_album_id), float(score), 1 if locked else 0, album_id),
@@ -2046,7 +2055,8 @@ class MusicDatabase:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT canonical_source, canonical_album_id, canonical_score, "
-                "canonical_resolved_at, canonical_locked FROM albums WHERE id = ?",
+                "canonical_resolved_at, canonical_locked, canonical_track_count "
+                "FROM albums WHERE id = ?",
                 (album_id,),
             )
             row = cursor.fetchone()
@@ -2058,10 +2068,38 @@ class MusicDatabase:
                 'score': row[2],
                 'resolved_at': row[3],
                 'locked': bool(row[4]),
+                # None until the release has been fetched once
+                'track_count': int(row[5]) if row[5] else None,
             }
         except Exception as e:
             logger.error("Error reading album canonical for %s: %s", album_id, e)
             return None
+        finally:
+            conn.close()
+
+    def set_album_canonical_track_count(self, album_id, source: str, canonical_album_id: str, track_count: int) -> bool:
+        """remember the pinned release's track count. guarded on the pin still
+        being (source, canonical_album_id) so a count fetched for one release
+        can't land on a pin that changed underneath the fetch."""
+        try:
+            count = int(track_count)
+        except (TypeError, ValueError):
+            return False
+        if count <= 0:
+            return False
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE albums SET canonical_track_count = ? "
+                "WHERE id = ? AND canonical_source = ? AND canonical_album_id = ?",
+                (count, album_id, source, str(canonical_album_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error setting canonical track count for %s: %s", album_id, e)
+            return False
         finally:
             conn.close()
 
