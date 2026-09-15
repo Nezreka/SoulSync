@@ -373,6 +373,7 @@ class MusicDatabase:
             if db_key in _database_initialized_paths:
                 return
 
+            self._ensure_wal_mode()
             self._initialize_database()
             _database_initialized_paths.add(db_key)
         # first boot after the norm-column upgrade: start filling now rather
@@ -386,6 +387,21 @@ class MusicDatabase:
         except Exception as e:
             logger.debug(f"norm readiness check at init skipped: {e}")
     
+    def _ensure_wal_mode(self):
+        """put the database in wal mode, once per process. the mode lives in
+        the file, so every later connection inherits it without asking."""
+        try:
+            conn = sqlite3.connect(str(self.database_path), timeout=30.0)
+            try:
+                conn.execute("PRAGMA busy_timeout = 30000")
+                mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()
+                if mode and str(mode[0]).lower() != 'wal':
+                    logger.warning("could not switch %s to wal mode (journal_mode=%s)", self.database_path, mode[0])
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning("wal mode check failed for %s: %s", self.database_path, e)
+
     def _get_connection(self) -> sqlite3.Connection:
         """Get a NEW database connection for each operation (thread-safe)"""
         last_error = None
@@ -409,12 +425,18 @@ class MusicDatabase:
                 # Enable foreign key constraints and WAL mode for better concurrency.
                 # Docker Desktop bind mounts can briefly fail while SQLite opens the
                 # sidecar WAL/SHM files; retrying avoids surfacing transient 500s.
-                connection.execute("PRAGMA foreign_keys = ON")
-                connection.execute("PRAGMA journal_mode = WAL")
+                # busy_timeout first, so anything below that has to wait for a
+                # writer waits politely instead of failing
                 connection.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
-                # diagnostic: on one install every db-touching request cost
-                # 1-2 s regardless of the query, which points at the open
-                # itself (file open + wal pragma), not the sql. say so.
+                connection.execute("PRAGMA foreign_keys = ON")
+                # NOT `PRAGMA journal_mode = WAL` here. wal mode is persistent in
+                # the file and is set once per process in _ensure_wal_mode; the
+                # pragma takes a lock, and on an install with enrichment
+                # workers writing constantly every fresh connection sat ~250 ms
+                # in the busy backoff behind them before it could run a single
+                # query. with a connection per db call that was 1-2 s on every
+                # request that touched the database.
+                # diagnostic: say so when an open is still slow.
                 _elapsed = time.perf_counter() - _t_open
                 if _elapsed > 0.2:
                     logger.warning(
