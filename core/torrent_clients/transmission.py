@@ -46,6 +46,42 @@ def _map_state(status_code: int, percent_done: float) -> str:
     return base
 
 
+def normalize_transmission_url(raw: str) -> str:
+    """Normalize a user-entered Transmission URL to its RPC endpoint.
+
+    Transmission's RPC endpoint is always ``<base>/rpc`` (standard default:
+    ``http://host:9091/transmission/rpc``). Users frequently enter:
+      - Bare host/port: ``http://transmission:9091`` or ``transmission:9091``
+      - Web UI URL copied from browser: ``http://transmission:9091/transmission/web/``
+      - Base path: ``http://transmission:9091/transmission`` or ``.../transmission/``
+      - Trailing slash on RPC: ``http://transmission:9091/transmission/rpc/``
+    All of these normalize to the RPC endpoint ``.../transmission/rpc``.
+    """
+    url = normalize_client_url(raw)
+    if not url:
+        return ''
+    url = url.rstrip('/')
+
+    if url.endswith('/transmission/rpc') or url.endswith('/rpc'):
+        return url
+
+    # Web UI URL copied from browser (/transmission/web or /web)
+    if url.endswith('/transmission/web'):
+        return url[:-4] + '/rpc'
+    if url.endswith('/web'):
+        return url[:-4] + '/rpc'
+
+    # Base path ending with /transmission
+    if url.endswith('/transmission'):
+        return f"{url}/rpc"
+
+    # Bare host with no /transmission in path
+    if '/transmission' not in url:
+        return f"{url}/transmission/rpc"
+
+    return f"{url}/rpc"
+
+
 class TransmissionAdapter:
     """Transmission RPC adapter (transmission-rpc protocol v17+)."""
 
@@ -57,14 +93,7 @@ class TransmissionAdapter:
         self._load_config()
 
     def _load_config(self) -> None:
-        url = normalize_client_url(config_manager.get('torrent_client.url', ''))
-        # Transmission's RPC endpoint is always /transmission/rpc — if the
-        # user pasted a bare host URL, append it. If they pasted the full
-        # /transmission/rpc URL, leave it.
-        if url and not url.endswith('/transmission/rpc'):
-            if '/transmission' not in url:
-                url = f"{url}/transmission/rpc"
-        self._url = url
+        self._url = normalize_transmission_url(config_manager.get('torrent_client.url', ''))
         self._username = config_manager.get('torrent_client.username', '') or ''
         self._password = config_manager.get('torrent_client.password', '') or ''
         self._category = str(
@@ -122,7 +151,18 @@ class TransmissionAdapter:
                 if not resp.ok:
                     logger.warning("Transmission RPC %s returned HTTP %s", method, resp.status_code)
                     return None
-                data = resp.json()
+                try:
+                    data = resp.json()
+                except Exception:
+                    body_excerpt = resp.text[:200] if resp.text else '(empty)'
+                    logger.error(
+                        "Transmission RPC %s returned non-JSON response from %s (HTTP %s, Content-Type: %s): %r. "
+                        "Check that the Transmission URL points to the RPC endpoint (/transmission/rpc)",
+                        method, self._url, resp.status_code,
+                        resp.headers.get('Content-Type', 'unknown'),
+                        body_excerpt,
+                    )
+                    return None
                 if data.get('result') != 'success':
                     logger.warning("Transmission RPC %s result=%s", method, data.get('result'))
                     return None

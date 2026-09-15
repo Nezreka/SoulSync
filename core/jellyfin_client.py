@@ -179,13 +179,7 @@ class JellyfinClient(MediaServerClient):
 
     def _auth_header(self) -> str:
         """The modern Authorization value Jellyfin expects."""
-        return (
-            f'MediaBrowser Client="{self.CLIENT_NAME}", '
-            f'Device="{self.DEVICE_NAME}", '
-            f'DeviceId="{self.DEVICE_ID}", '
-            f'Version="1.0.0", '
-            f'Token="{self.api_key or ""}"'
-        )
+        return jellyfin_auth_headers(self.api_key)["Authorization"]
 
     def __init__(self):
         self.base_url: Optional[str] = None
@@ -2198,3 +2192,22 @@ class JellyfinClient(MediaServerClient):
         except Exception as e:
             logger.error(f"Error setting metadata-only mode: {e}")
             return False
+
+
+def jellyfin_auth_headers(api_key) -> dict:
+    """both auth headers jellyfin accepts, for code that talks to the server with
+    bare requests instead of a JellyfinClient (video side, server activity).
+    the #1232 fix only reached the client; every hand-rolled header dict still
+    sent x-emby-token alone and jellyfin 12 answered 401 (#1250). always build
+    headers here so a new call site can't miss one."""
+    token = api_key or ""
+    return {
+        "X-Emby-Token": token,
+        "Authorization": (
+            f'MediaBrowser Client="{JellyfinClient.CLIENT_NAME}", '
+            f'Device="{JellyfinClient.DEVICE_NAME}", '
+            f'DeviceId="{JellyfinClient.DEVICE_ID}", '
+            f'Version="1.0.0", '
+            f'Token="{token}"'
+        ),
+    }

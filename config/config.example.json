@@ -31,6 +31,9 @@
     "password": "",
     "auto_detect": true
   },
+  "download_source": {
+    "max_mb_per_minute": 0
+  },
   "soulseek": {
     "slskd_url": "http://host.docker.internal:5030",
     "api_key": "",

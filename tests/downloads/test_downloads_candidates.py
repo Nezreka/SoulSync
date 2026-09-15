@@ -561,3 +561,19 @@ def test_equal_confidence_candidates_prefer_better_peer_quality():
     dc.attempt_download_with_candidates("t14", candidates, track, batch_id=None, deps=deps)
 
     assert deps.download_orchestrator.download_calls[0][1] == "fast.flac"
+
+
+@pytest.mark.parametrize('smaller_available', [True, False])
+def test_size_limit_skips_oversized_candidate_before_download(monkeypatch, smaller_available):
+    from core.downloads import size_limit
+    monkeypatch.setattr(size_limit, 'configured_limit', lambda: 10)
+    deps = _build_deps()
+    _seed_task('size-cap')
+    track = _Track()
+    track.duration_ms = 210_000
+    rows = [_Candidate(filename='huge.flac', size=180_000_000, confidence=0.99)]
+    if smaller_available:
+        rows.append(_Candidate(filename='small.flac', size=35_000_000, confidence=0.9))
+    result = dc.attempt_download_with_candidates('size-cap', rows, track, deps=deps)
+    assert result is smaller_available
+    assert deps.download_orchestrator.download_calls == ([('user1', 'small.flac', 35_000_000)] if smaller_available else [])

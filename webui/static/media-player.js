@@ -132,6 +132,10 @@ function _stripSourceIdPrefix(value) {
 
 function setTrackInfo(track) {
     currentTrack = track;
+    window.__ssCurrentTrack = track;
+    if (typeof window.getCurrentTrack !== 'function') {
+        window.getCurrentTrack = function () { return currentTrack; };
+    }
     npPlayLogged = false;   // new track — allow one play-log once it's heard a bit
     // Chat now-playing (opt-in, chat.js owns the gate + throttle). Never let a
     // chat problem break playback.
@@ -237,6 +241,7 @@ function checkAndEnableScrolling(element, text) {
 function clearTrack() {
     // Clear track state
     currentTrack = null;
+    window.__ssCurrentTrack = null;
     isPlaying = false;
     try {
         if (typeof window.__ssNowPlaying === 'function') window.__ssNowPlaying(null);

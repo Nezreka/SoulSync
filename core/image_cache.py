@@ -430,25 +430,107 @@ class ImageCache:
             return f"{parsed.scheme}://{parsed.netloc}/"
         return url
 
+    def store_bytes(self, url: str, data: bytes, mime_type: str = "image/jpeg") -> CachedImage:
+        """Store pre-fetched image bytes directly into the cache."""
+        if not self.is_cacheable_url(url):
+            raise ImageCacheError("URL is not cacheable")
+        if not data:
+            raise ImageCacheError("Image data is empty")
+        if len(data) > self.max_download_bytes:
+            raise ImageCacheError("Image exceeds configured size limit")
+
+        key = self.key_for_url(url)
+        now = time.time()
+        ext = mimetypes.guess_extension(mime_type) or ".jpg"
+        if ext == ".jpe":
+            ext = ".jpg"
+        path = self._path_for_key(key, ext)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+
+        try:
+            with open(tmp_path, "wb") as handle:
+                handle.write(data)
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception as cleanup_err:
+                # the write failure below is the real error; a leftover .tmp is a note
+                logger.debug("could not remove partial cache file %s: %s", tmp_path, cleanup_err)
+            raise
+
+        expires_at = now + self.ttl_seconds
+        total = len(data)
+        with self._db_lock:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO image_cache
+                        (key, original_url, status, created_at, updated_at, last_accessed,
+                         expires_at, size, mime_type, file_path, last_error)
+                    VALUES (?, ?, 'ok', ?, ?, ?, ?, ?, ?, ?, '')
+                    ON CONFLICT(key) DO UPDATE SET
+                        original_url=excluded.original_url,
+                        status='ok',
+                        updated_at=excluded.updated_at,
+                        last_accessed=excluded.last_accessed,
+                        expires_at=excluded.expires_at,
+                        size=excluded.size,
+                        mime_type=excluded.mime_type,
+                        file_path=excluded.file_path,
+                        last_error=''
+                    """,
+                    (key, url, now, now, now, expires_at, total, mime_type, str(path)),
+                )
+        self._maybe_prune()
+        return CachedImage(key, path, mime_type, total, "miss")
+
+    def precache_url(self, url: str) -> Optional[CachedImage]:
+        """Pre-warm a URL into the image cache without raising. Returns CachedImage or None."""
+        if not url or not self.is_cacheable_url(url):
+            return None
+        try:
+            return self.get_url(url)
+        except Exception as exc:
+            logger.debug("precache_url failed for %s: %s", url, exc)
+            return None
+
     def _fetch_and_store(self, url: str, key: str, now: float) -> CachedImage:
         if not self._is_fetch_allowed(url):
             raise ImageCacheError("Image host is not allowed")
 
         referer = self._referer_for(url)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Referer": referer,
+        }
+        kwargs = {
+            "timeout": self.fetch_timeout,
+            "stream": True,
+            "headers": headers,
+        }
 
-        response = self.fetcher(
-            url,
-            timeout=self.fetch_timeout,
-            stream=True,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                ),
-                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-                "Referer": referer,
-            },
-        )
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if host == "ext.to" or host.endswith(".ext.to") or host.endswith("extto.com"):
+            try:
+                from core.video.extto_search import clearance
+                cookies, ua = clearance()
+                if cookies:
+                    kwargs["cookies"] = cookies
+                if ua:
+                    headers["User-Agent"] = ua
+                headers["Referer"] = "https://ext.to/"
+            except Exception as clearance_err:
+                # no clearance is fine, the fetch just goes without it
+                logger.debug("ext.to clearance unavailable for poster fetch: %s", clearance_err)
+
+        response = self.fetcher(url, **kwargs)
         try:
             if response.status_code != 200:
                 raise ImageCacheError(f"Upstream image returned HTTP {response.status_code}")

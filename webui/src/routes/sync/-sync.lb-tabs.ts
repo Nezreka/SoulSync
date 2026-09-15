@@ -57,7 +57,7 @@ export type LbSubTabType = 'created_for_user' | 'user_created' | 'collaborative'
 
 export const LB_SUB_TABS: readonly { type: LbSubTabType; label: string }[] = [
   { type: 'created_for_user', label: 'For You' },
-  { type: 'user_created', label: 'My Playlists' },
+  { type: 'user_created', label: 'Playlists' },
   { type: 'collaborative', label: 'Collaborative' },
 ];
 

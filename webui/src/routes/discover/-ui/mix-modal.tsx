@@ -29,8 +29,8 @@ import { SyncStatus } from './sync-status';
  * `#mix-dl-selected`, and the track list in `#mix-modal-tracks`.
  *
  * `selectable` is opt-in per call and it is not cosmetic: it adds the checkbox
- * AND the per-row preview button AND the `has-select` class the grid reflows on.
- * The plain playlist renderers pass nothing and get none of it.
+ * and the `has-select` class the grid reflows on. A supplied onPlay handler
+ * also enables playback without requiring selection controls.
  */
 
 export interface CompactPlaylistProps {
@@ -109,7 +109,7 @@ function CompactTrackRow({
       <div className="track-compact-number">{row.position}</div>
       <div className="track-compact-image">
         <img src={row.cover} alt={row.album} loading="lazy" />
-        {row.selectable && (
+        {(row.selectable || onPlay) && (
           <button
             type="button"
             className="track-compact-play"

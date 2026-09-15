@@ -195,7 +195,7 @@ def test_album_not_in_library_returns_false(db):
     assert result['albums'] == [False]
 
 
-def test_album_lookup_uses_first_artist_in_csv(db):
+def test_album_ambiguous_comma_credit_does_not_match_primary(db):
     aid = _seed_artist(db, 'Pink Floyd')
     _seed_album(db, aid, 'DSOTM')
     cfg = _FakeConfigManager({})
@@ -204,7 +204,7 @@ def test_album_lookup_uses_first_artist_in_csv(db):
         albums=[{'name': 'DSOTM', 'artist': 'Pink Floyd, Roger Waters'}],
         tracks=[],
     )
-    assert result['albums'] == [True]
+    assert result['albums'] == [False]
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +269,7 @@ def test_track_in_library_and_wishlist_both_set(db):
     assert result['tracks'][0]['in_wishlist'] is True
 
 
-def test_track_artist_csv_uses_first_only(db):
+def test_track_ambiguous_comma_credit_does_not_match_primary(db):
     aid = _seed_artist(db, 'Kendrick Lamar')
     alb = _seed_album(db, aid, 'DAMN.')
     _seed_track(db, alb, aid, 'HUMBLE.', file_path='/x.flac')
@@ -279,4 +279,172 @@ def test_track_artist_csv_uses_first_only(db):
         albums=[],
         tracks=[{'name': 'HUMBLE.', 'artist': 'Kendrick Lamar, J. Cole'}],
     )
+    assert result['tracks'][0]['in_library'] is False
+
+
+# ---------------------------------------------------------------------------
+# Fuzzy matching — the label watchlist bug: MB names ≠ library names
+# ---------------------------------------------------------------------------
+
+def test_album_accent_mismatch_matches(db):
+    """Library has 'Björk', query has 'Bjork' — accent folding fixes this."""
+    aid = _seed_artist(db, 'Björk')
+    _seed_album(db, aid, 'Homogenic')
+    cfg = _FakeConfigManager({})
+    result = library_check.check_library_presence(
+        db, _NoServerPlexClient(), cfg, profile_id=1,
+        albums=[{'name': 'Homogenic', 'artist': 'Bjork'}],
+        tracks=[],
+    )
+    assert result['albums'] == [True]
+
+
+def test_album_ampersand_query_does_not_match_primary(db):
+    """Library has 'Nirvana', query has 'Nirvana & Foo Fighters'."""
+    aid = _seed_artist(db, 'Nirvana')
+    _seed_album(db, aid, 'Bleach')
+    cfg = _FakeConfigManager({})
+    result = library_check.check_library_presence(
+        db, _NoServerPlexClient(), cfg, profile_id=1,
+        albums=[{'name': 'Bleach', 'artist': 'Nirvana & Foo Fighters'}],
+        tracks=[],
+    )
+    assert result['albums'] == [False]
+
+
+def test_album_primary_does_not_match_ampersand_credit(db):
+    """Library has 'Artist A & Artist B', query has 'Artist A'."""
+    aid = _seed_artist(db, 'Artist A & Artist B')
+    _seed_album(db, aid, 'Collab Album')
+    cfg = _FakeConfigManager({})
+    result = library_check.check_library_presence(
+        db, _NoServerPlexClient(), cfg, profile_id=1,
+        albums=[{'name': 'Collab Album', 'artist': 'Artist A'}],
+        tracks=[],
+    )
+    assert result['albums'] == [False]
+
+
+def test_album_punctuation_difference_matches(db):
+    """Library has 'AC/DC', query has 'ACDC' — punctuation stripped."""
+    aid = _seed_artist(db, 'AC/DC')
+    _seed_album(db, aid, 'Back In Black')
+    cfg = _FakeConfigManager({})
+    result = library_check.check_library_presence(
+        db, _NoServerPlexClient(), cfg, profile_id=1,
+        albums=[{'name': 'Back In Black', 'artist': 'ACDC'}],
+        tracks=[],
+    )
+    assert result['albums'] == [True]
+
+
+def test_album_case_and_spacing_difference_matches(db):
+    """Library has 'The   Beatles', query has 'the beatles' — case + spacing normalised."""
+    aid = _seed_artist(db, 'The   Beatles')
+    _seed_album(db, aid, 'Abbey Road')
+    cfg = _FakeConfigManager({})
+    result = library_check.check_library_presence(
+        db, _NoServerPlexClient(), cfg, profile_id=1,
+        albums=[{'name': 'Abbey Road', 'artist': 'the beatles'}],
+        tracks=[],
+    )
+    assert result['albums'] == [True]
+
+
+def test_album_feat_delimiter_matches(db):
+    """Library has 'Drake', query has 'Drake feat. Rihanna'."""
+    aid = _seed_artist(db, 'Drake')
+    _seed_album(db, aid, 'Views')
+    cfg = _FakeConfigManager({})
+    result = library_check.check_library_presence(
+        db, _NoServerPlexClient(), cfg, profile_id=1,
+        albums=[{'name': 'Views', 'artist': 'Drake feat. Rihanna'}],
+        tracks=[],
+    )
+    assert result['albums'] == [True]
+
+
+def test_track_accent_mismatch_matches(db):
+    """Track-level accent folding."""
+    aid = _seed_artist(db, 'Björk')
+    alb = _seed_album(db, aid, 'Homogenic')
+    _seed_track(db, alb, aid, 'Jóga', file_path='/joga.flac')
+    cfg = _FakeConfigManager({})
+    result = library_check.check_library_presence(
+        db, _NoServerPlexClient(), cfg, profile_id=1,
+        albums=[],
+        tracks=[{'name': 'Joga', 'artist': 'Bjork'}],
+    )
     assert result['tracks'][0]['in_library'] is True
+
+
+def test_track_ampersand_credit_does_not_match_primary(db):
+    """An ampersand alone is not proof of separate artists."""
+    aid = _seed_artist(db, 'Kendrick Lamar')
+    alb = _seed_album(db, aid, 'DAMN.')
+    _seed_track(db, alb, aid, 'HUMBLE.', file_path='/x.flac')
+    cfg = _FakeConfigManager({})
+    result = library_check.check_library_presence(
+        db, _NoServerPlexClient(), cfg, profile_id=1,
+        albums=[],
+        tracks=[{'name': 'HUMBLE.', 'artist': 'Kendrick Lamar & J. Cole'}],
+    )
+    assert result['tracks'][0]['in_library'] is False
+
+
+@pytest.mark.parametrize('stored,query', [('Earth, Wind & Fire', 'Earth'), ('Earth', 'Earth, Wind & Fire'), ('Simon & Garfunkel', 'Simon')])
+def test_band_names_do_not_match_partial_artist(db, stored, query):
+    aid = _seed_artist(db, stored)
+    alb = _seed_album(db, aid, 'Example')
+    _seed_track(db, alb, aid, 'Example', file_path='/example.flac')
+    result = library_check.check_library_presence(
+        db, None, _FakeConfigManager(), 1,
+        [{'name': 'Example', 'artist': query}],
+        [{'name': 'Example', 'artist': query}],
+    )
+    assert result['albums'] == [False]
+    assert result['tracks'][0]['in_library'] is False
+
+
+def test_cost_scales_with_the_results_not_the_library(db, monkeypatch):
+    """the check used to SELECT every album and every track in the library
+    per call. seed a thousand tracks, ask about one, and count what came back
+    from sqlite: the answer must be bounded by the one artist's rows."""
+    import sqlite3
+    from database.music_database import MusicDatabase
+    for a in range(50):
+        aid = _seed_artist(db, f'Artist {a}')
+        alb = _seed_album(db, aid, f'Album {a}')
+        for t in range(20):
+            _seed_track(db, alb, aid, f'Song {a}-{t}', file_path=f'/{a}/{t}.flac')
+    db.ensure_norm_backfilled()
+
+    fetched = []
+    real = MusicDatabase._get_connection
+
+    class Cursor(sqlite3.Cursor):
+        def fetchall(self):
+            rows = super().fetchall()
+            fetched.append(len(rows))
+            return rows
+
+    class Conn(sqlite3.Connection):
+        def cursor(self, *a, **k):
+            return super().cursor(Cursor)
+
+    def counting(self):
+        c = sqlite3.connect(str(self.database_path), factory=Conn)
+        c.row_factory = sqlite3.Row
+        return c
+
+    monkeypatch.setattr(MusicDatabase, "_get_connection", counting)
+    result = library_check.check_library_presence(
+        db, None, _FakeConfigManager(), 1,
+        [{'name': 'Album 7', 'artist': 'Artist 7'}],
+        [{'name': 'Song 7-3', 'artist': 'Artist 7'}, {'name': 'Nope', 'artist': 'Artist 8'}],
+    )
+    assert result['albums'] == [True]
+    assert result['tracks'][0]['in_library'] is True
+    assert result['tracks'][1]['in_library'] is False
+    # artist 7: 1 id row + 1 album row + 20 track rows; artist 8: 1 + 20. far from 1000.
+    assert sum(fetched) < 60, fetched

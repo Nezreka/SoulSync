@@ -234,11 +234,22 @@ def register_routes(bp):
                 # falls back) — a quiet 404, never an ERROR traceback in the log.
                 logger.debug("img proxy upstream %s for %s", upstream.status_code, url)
                 abort(404)
-            resp = Response(upstream.iter_content(8192),
-                            content_type=upstream.headers.get("Content-Type", "image/jpeg"))
-            resp.headers["Cache-Control"] = "public, max-age=604800"
-            resp.headers["Access-Control-Allow-Origin"] = "*"
-            return resp
+            ctype = upstream.headers.get("Content-Type", "image/jpeg")
+            raw_data = upstream.content
+            try:
+                from core.image_cache import get_image_cache
+                saved = get_image_cache().store_bytes(url, raw_data, ctype)
+                resp = send_file(saved.path, mimetype=saved.mime_type, conditional=True)
+                resp.headers["Cache-Control"] = "public, max-age=604800"
+                resp.headers["Access-Control-Allow-Origin"] = "*"
+                resp.headers["X-SoulSync-Image-Cache"] = "miss"
+                return resp
+            except Exception as store_err:
+                logger.debug("image_cache store_bytes failed for %s: %s", url, store_err)
+                resp = Response(raw_data, content_type=ctype)
+                resp.headers["Cache-Control"] = "public, max-age=604800"
+                resp.headers["Access-Control-Allow-Origin"] = "*"
+                return resp
         except HTTPException:
             raise   # our own abort(404) above — already handled, don't re-log it
         except Exception:

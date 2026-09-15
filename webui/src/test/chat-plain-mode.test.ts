@@ -79,6 +79,17 @@ describe('what a plain send puts on the wire', () => {
     const plainBranch = TAG.slice(TAG.indexOf('_plainOn()'), TAG.indexOf('_myAvatar()'));
     expect(plainBranch).toContain('return payload');
   });
+
+  it('suppresses typing indicators in plain mode to avoid base64 noise lines', () => {
+    const typingFn = JS.slice(JS.indexOf('function _maybeSendTyping'), JS.indexOf('function renderTyping'));
+    expect(typingFn).toContain('_plainOn()');
+  });
+
+  it('suppresses join beacons in plain mode and when user has no avatar', () => {
+    const beaconFn = JS.slice(JS.indexOf('function _sendJoinBeacon'), JS.indexOf('function onRoomProtocol'));
+    expect(beaconFn).toContain('_plainOn()');
+    expect(beaconFn).toContain('!_myAvatar()');
+  });
 });
 
 describe('flipping the filter cleans up after itself', () => {
@@ -106,7 +117,7 @@ describe('the hint explains the exception', () => {
 
   it('hides the controls that cannot work without an envelope', () => {
     const sync = extractFunction('_syncModeBtn', JS);
-    for (const sel of ['chat-gif-btn', 'chat-poll-btn', 'chat-attach-btn', 'chat-toolbar']) {
+    for (const sel of ['chat-gif-btn', 'chat-poll-btn', 'chat-attach-btn', 'chat-toolbar', 'chat-np-btn', 'chat-want-btn']) {
       expect(sync, `${sel} must be hidden in plain mode`).toContain(sel);
     }
   });

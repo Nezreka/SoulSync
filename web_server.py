@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.1"
+_SOULSYNC_BASE_VERSION = "3.4.2"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -8039,6 +8039,21 @@ def library_completion_stream():
                 _t3 = time.perf_counter()
                 print(f"[completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
 
+            completeness_cache = None
+            album_source_ids_cache = None
+            canonical_cache = {}
+            track_cache = {}
+            if candidate_albums and candidate_tracks and hasattr(db, 'build_candidate_completeness_cache'):
+                try:
+                    completeness_cache = db.build_candidate_completeness_cache(candidate_albums, candidate_tracks)
+                except Exception as _b_err:
+                    print(f"[completion-stream] Failed building completeness cache: {_b_err}")
+            if candidate_albums and hasattr(db, 'get_album_source_ids'):
+                try:
+                    album_source_ids_cache = db.get_album_source_ids([a.id for a in candidate_albums])
+                except Exception as _s_err:
+                    print(f"[completion-stream] Failed fetching album source IDs: {_s_err}")
+
             yield f"data: {json.dumps({'type': 'start', 'total_items': len(all_items)})}\n\n"
 
             _loop_start = time.perf_counter()
@@ -8054,7 +8069,7 @@ def library_completion_stream():
                     mapped = {
                         'id': item['id'],
                         'name': item['title'],
-                        'total_tracks': item.get('track_count', 0),
+                        'total_tracks': item.get('total_tracks') or item.get('track_count') or 0,
                         'album_type': item.get('album_type', 'album'),
                         'year': item.get('year'),
                         'release_date': item.get('release_date') or item.get('releaseDate'),
@@ -8068,9 +8083,27 @@ def library_completion_stream():
                                    or source_override)
 
                     if category == 'singles':
-                        result = check_single_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
+                        result = check_single_completion(
+                            db, mapped, artist_name,
+                            source_override=item_source,
+                            candidate_albums=candidate_albums,
+                            candidate_tracks=candidate_tracks,
+                            completeness_cache=completeness_cache,
+                            album_source_ids_cache=album_source_ids_cache,
+                            canonical_cache=canonical_cache,
+                            track_cache=track_cache,
+                        )
                     else:
-                        result = check_album_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums)
+                        result = check_album_completion(
+                            db, mapped, artist_name,
+                            source_override=item_source,
+                            candidate_albums=candidate_albums,
+                            candidate_tracks=candidate_tracks,
+                            completeness_cache=completeness_cache,
+                            album_source_ids_cache=album_source_ids_cache,
+                            canonical_cache=canonical_cache,
+                            track_cache=track_cache,
+                        )
 
                     result['id'] = item['id']
                     result['category'] = category
@@ -8079,11 +8112,8 @@ def library_completion_stream():
                 except Exception as e:
                     yield f"data: {json.dumps({'type': 'completion', 'category': category, 'id': item['id'], 'status': 'error', 'owned_tracks': 0, 'expected_tracks': item.get('track_count', 0), 'completion_percentage': 0, 'confidence': 0.0, 'error': str(e)})}\n\n"
 
-                time.sleep(0.05)  # 50ms between items for visible streaming
-
             _loop_elapsed = time.perf_counter() - _loop_start
-            _sleep_floor = 0.05 * len(all_items)
-            print(f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms (sleep floor: {_sleep_floor * 1000:.0f}ms)")
+            print(f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms")
 
             yield f"data: {json.dumps({'type': 'complete', 'processed_count': len(all_items)})}\n\n"
 
@@ -16824,7 +16854,8 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                    return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
                 _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced"})
             return jsonify({"success": False, "error": "Old track not found"}), 404
@@ -17014,7 +17045,8 @@ def server_playlist_add_track(playlist_id):
             plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
             if plan['should_insert']:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
-                media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                    return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
@@ -17101,7 +17133,8 @@ def server_playlist_remove_track(playlist_id):
             if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
             return jsonify({"success": True, "message": "Track removed"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400

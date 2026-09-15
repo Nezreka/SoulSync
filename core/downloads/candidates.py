@@ -258,6 +258,11 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         except Exception:  # noqa: BLE001 - ranking still works without chain order
             source_order = None
 
+    from core.downloads.size_limit import filter_music_candidates
+    expected_duration_ms = (track.get('duration_ms') if isinstance(track, dict)
+                            else getattr(track, 'duration_ms', None))
+    candidates = filter_music_candidates(candidates, expected_duration_ms=expected_duration_ms)
+
     candidates = order_candidates(
         candidates, quality_first=quality_first, targets=quality_targets,
         source_order=source_order,

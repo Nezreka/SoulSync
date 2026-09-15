@@ -112,18 +112,69 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
             logger.warning(f"Track search failed for {source_label}: {e}", exc_info=True)
         return tracks
 
+    if kind == "playlists":
+        playlists = []
+        try:
+            if hasattr(client, "search_playlists"):
+                playlist_objs = client.search_playlists(query, limit=10)
+                for playlist in (playlist_objs or []):
+                    if isinstance(playlist, dict):
+                        playlists.append({
+                            "id": str(playlist.get("id") or ""),
+                            "name": playlist.get("title") or playlist.get("name") or "",
+                            "creator": playlist.get("creator") or (playlist.get("owner") or {}).get("display_name", "") or "",
+                            "track_count": int(playlist.get("track_count") or playlist.get("nb_tracks") or 0),
+                            "image_url": playlist.get("image_url") or "",
+                            "source": source_name or playlist.get("source") or "",
+                            "link": playlist.get("link") or "",
+                        })
+                    else:
+                        playlists.append({
+                            "id": str(getattr(playlist, "id", "") or ""),
+                            "name": getattr(playlist, "name", "") or getattr(playlist, "title", "") or "",
+                            "creator": getattr(playlist, "creator", "") or "",
+                            "track_count": int(getattr(playlist, "track_count", 0) or 0),
+                            "image_url": getattr(playlist, "image_url", "") or "",
+                            "source": source_name or getattr(playlist, "source", "") or "",
+                            "link": getattr(playlist, "link", "") or "",
+                        })
+            elif (hasattr(client, "sp") and client.sp
+                  and hasattr(client, "is_spotify_authenticated")
+                  and client.is_spotify_authenticated()):
+                results = client.sp.search(q=query, type='playlist', limit=10)
+                items = ((results or {}).get('playlists') or {}).get('items') or []
+                for p in items:
+                    if not p:
+                        continue
+                    images = p.get('images') or []
+                    image_url = images[0].get('url', '') if images else ''
+                    owner = p.get('owner') or {}
+                    playlists.append({
+                        "id": str(p.get("id") or ""),
+                        "name": p.get("name") or "",
+                        "creator": owner.get("display_name") or "Spotify",
+                        "track_count": int((p.get("tracks") or {}).get("total") or 0),
+                        "image_url": image_url,
+                        "source": source_name or "spotify",
+                        "link": (p.get("external_urls") or {}).get("spotify", ""),
+                    })
+        except Exception as e:
+            logger.debug(f"Playlist search failed for {source_label}: {e}")
+        return playlists
+
     raise ValueError(f"Unknown metadata search kind: {kind}")
 
 
 def search_source(query: str, client, source_name: Optional[str] = None,
                   prefer_free: bool = False) -> dict:
-    """Run all three search-kinds against a single client in parallel."""
-    results: dict[str, Any] = {"artists": [], "albums": [], "tracks": []}
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    """Run search-kinds against a single client in parallel."""
+    results: dict[str, Any] = {"artists": [], "albums": [], "tracks": [], "playlists": []}
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
             executor.submit(search_kind, client, query, "artists", source_name, prefer_free): "artists",
             executor.submit(search_kind, client, query, "albums", source_name, prefer_free): "albums",
             executor.submit(search_kind, client, query, "tracks", source_name, prefer_free): "tracks",
+            executor.submit(search_kind, client, query, "playlists", source_name, prefer_free): "playlists",
         }
         for future in as_completed(futures):
             kind = futures[future]
@@ -140,5 +191,6 @@ def search_source(query: str, client, source_name: Optional[str] = None,
         "artists": results["artists"],
         "albums": results["albums"],
         "tracks": results["tracks"],
+        "playlists": results["playlists"],
         "available": True,
     }

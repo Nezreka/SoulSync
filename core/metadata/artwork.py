@@ -8,7 +8,7 @@ import re
 import time
 import urllib.request
 from ipaddress import ip_address
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from core.imports.context import get_import_context_album, get_import_context_artist
 from core.metadata.common import (
@@ -201,6 +201,13 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
                     return _browser_safe_image_url(fixed_url)
 
             elif active_server == 'navidrome':
+                parsed_cover = urlparse(thumb_url)
+                cover_id = parse_qs(parsed_cover.query).get('id', [''])[0]
+                if parsed_cover.path.rstrip('/').endswith('/getCoverArt') and cover_id:
+                    # Keep the cover identity, not a newly salted auth URL. The
+                    # existing proxy authenticates and caches when the image is
+                    # requested, outside library JSON serialization.
+                    return '/api/navidrome/cover/' + quote(cover_id, safe='')
                 navidrome_config = cfg.get_navidrome_config()
                 navidrome_base_url = navidrome_config.get('base_url', '')
                 navidrome_username = navidrome_config.get('username', '')
@@ -248,7 +255,8 @@ def is_image_proxy_url(url: str) -> bool:
 
     try:
         parsed = urlparse(url)
-        return parsed.path == '/api/image-proxy' or parsed.path.startswith('/api/image-cache/')
+        return (parsed.path == '/api/image-proxy' or parsed.path.startswith('/api/image-cache/')
+                or parsed.path.startswith('/api/navidrome/cover/'))
     except Exception:
         return False
 

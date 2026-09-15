@@ -27,6 +27,11 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 
+import re
+
+_MBID_UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+
+
 def derive_manual_match_provider(
     payload_track: Dict[str, Any],
     active_provider: Optional[str],
@@ -34,19 +39,22 @@ def derive_manual_match_provider(
     """Return the provider string to stamp on a manually-fixed match.
 
     Resolution order:
-        1. ``payload_track['source']`` — every *_search_tracks endpoint
-           sets this; the MBID-paste path doesn't.
-        2. ``active_provider`` — what the user has configured as their
+        1. ``payload_track['source']`` or ``payload_track['provider']`` —
+           explicit source identifier.
+        2. MusicBrainz MBID UUID format on track id (the MBID-paste lookup).
+        3. ``active_provider`` — what the user has configured as their
            primary discovery source.
-        3. ``'spotify'`` — last-ditch default matching the historic
-           hardcode (so behaviour is identical when both upstream
-           signals are absent).
+        4. ``'spotify'`` — last-ditch default matching the historic
+           hardcode.
     """
     if not isinstance(payload_track, dict):
         payload_track = {}
-    source = payload_track.get('source')
+    source = payload_track.get('source') or payload_track.get('provider')
     if source:
         return source
+    track_id = str(payload_track.get('id') or '').strip()
+    if track_id and _MBID_UUID_RE.match(track_id):
+        return 'musicbrainz'
     if active_provider:
         return active_provider
     return 'spotify'

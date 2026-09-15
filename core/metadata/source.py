@@ -120,6 +120,12 @@ SOURCE_TAG_CONFIG = {
     "MUSICBRAINZ_RELEASETRACKID": "musicbrainz.tags.release_track_id",
     "RELEASETYPE": "musicbrainz.tags.release_type",
     "ORIGINALDATE": "musicbrainz.tags.original_date",
+    "ORIGINALYEAR": "musicbrainz.tags.original_date",
+    "DATE": "musicbrainz.tags.release_date",
+    "LABEL": "musicbrainz.tags.label",
+    "ARTISTSORT": "musicbrainz.tags.artist_sort",
+    "ALBUMARTISTSORT": "musicbrainz.tags.album_artist_sort",
+    "ARTISTS": "musicbrainz.tags.artists",
     "RELEASESTATUS": "musicbrainz.tags.release_status",
     "RELEASECOUNTRY": "musicbrainz.tags.release_country",
     "BARCODE": "musicbrainz.tags.barcode",
@@ -157,6 +163,8 @@ ID3_TAG_MAP = {
     "RELEASECOUNTRY": ("TXXX", "MusicBrainz Album Release Country"),
     "ORIGINALDATE": ("TDOR", None),
     "MEDIA": ("TMED", None),
+    "ARTISTS": ("TXXX", "Artists"),
+    "ORIGINALYEAR": ("TXXX", "originalyear"),
 }
 
 VORBIS_TAG_MAP = {
@@ -178,6 +186,9 @@ MP4_TAG_MAP = {
     "RELEASETYPE": "MusicBrainz Album Type",
     "RELEASESTATUS": "MusicBrainz Album Status",
     "RELEASECOUNTRY": "MusicBrainz Album Release Country",
+    "LABEL": "LABEL",
+    "ORIGINALDATE": "ORIGINALDATE",
+    "ORIGINALYEAR": "ORIGINALYEAR",
 }
 
 
@@ -261,15 +272,19 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
     if not mb_service:
         return
 
-    result = _call_source_lookup("MusicBrainz recording", mb_service.match_recording, track_title, artist_name)
+    pinned_release = metadata.get("musicbrainz_release_id")
+    details = {}
+    searched_recording = None
+    result = None if pinned_release else _call_source_lookup("MusicBrainz recording", mb_service.match_recording, track_title, artist_name)
     if result and result.get("mbid"):
         pp["recording_mbid"] = result["mbid"]
+        searched_recording = result["mbid"]
         pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = pp["recording_mbid"]
         details = _call_source_lookup(
             "MusicBrainz recording details",
             mb_service.mb_client.get_recording,
             pp["recording_mbid"],
-            includes=["isrcs", "genres"],
+            includes=["isrcs", "genres", "artist-credits"],
         )
         if details:
             isrcs = details.get("isrcs", [])
@@ -280,57 +295,58 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
     track_artist_name = metadata.get("artist", "") or artist_name
     if ", " in track_artist_name:
         track_artist_name = track_artist_name.split(", ")[0]
-    artist_result = _call_source_lookup("MusicBrainz artist", mb_service.match_artist, track_artist_name)
+    artist_result = None if pinned_release else _call_source_lookup("MusicBrainz artist", mb_service.match_artist, track_artist_name)
     if artist_result and artist_result.get("mbid"):
         pp["artist_mbid"] = artist_result["mbid"]
         pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = pp["artist_mbid"]
 
     album_name_for_mb = metadata.get("album", "")
-    if album_name_for_mb:
+    if album_name_for_mb or pinned_release:
         artist_key = (pp.get("batch_artist_name") or artist_name).lower().strip()
         normalized_album_key = normalize_album_cache_key(album_name_for_mb)
         rc_key_norm = (normalized_album_key, artist_key)
         rc_key_exact = (album_name_for_mb.lower().strip(), artist_key)
-        release_mbid = None
-        with mb_release_cache_lock:
-            cached = _bounded_cache_get(mb_release_cache, rc_key_norm)
-            if cached is None:
-                cached = _bounded_cache_get(mb_release_cache, rc_key_exact)
-            if cached:
-                release_mbid = cached
-            else:
-                # Persistent cache check BEFORE the live MB lookup. If a
-                # previous SoulSync run already resolved this album's
-                # release MBID, reuse it — guarantees every track of the
-                # same album gets the SAME MUSICBRAINZ_ALBUMID tag, even
-                # across server restarts and after the in-memory bounded
-                # cache evicts the entry. Strictly additive: any failure
-                # in the persistent lookup falls through to the live MB
-                # query exactly as today.
-                try:
-                    from core.metadata import album_mbid_cache as _persisted_cache
-                    persisted = _persisted_cache.lookup(normalized_album_key, artist_key)
-                except Exception:
-                    persisted = None
-
-                if persisted:
-                    release_mbid = persisted
+        release_mbid = metadata.get("musicbrainz_release_id")
+        if not release_mbid:
+            with mb_release_cache_lock:
+                cached = _bounded_cache_get(mb_release_cache, rc_key_norm)
+                if cached is None:
+                    cached = _bounded_cache_get(mb_release_cache, rc_key_exact)
+                if cached:
+                    release_mbid = cached
                 else:
-                    rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
-                    if rc_result and rc_result.get("mbid"):
-                        release_mbid = rc_result["mbid"]
-
-                if release_mbid:
-                    _bounded_cache_set(mb_release_cache, rc_key_norm, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
-                    _bounded_cache_set(mb_release_cache, rc_key_exact, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
-                    # Also persist for future SoulSync runs. Defensive
-                    # try/except so a DB write failure can't block the
-                    # in-memory store + tag write that follow.
+                    # Persistent cache check BEFORE the live MB lookup. If a
+                    # previous SoulSync run already resolved this album's
+                    # release MBID, reuse it — guarantees every track of the
+                    # same album gets the SAME MUSICBRAINZ_ALBUMID tag, even
+                    # across server restarts and after the in-memory bounded
+                    # cache evicts the entry. Strictly additive: any failure
+                    # in the persistent lookup falls through to the live MB
+                    # query exactly as today.
                     try:
                         from core.metadata import album_mbid_cache as _persisted_cache
-                        _persisted_cache.record(normalized_album_key, artist_key, release_mbid)
-                    except Exception as e:
-                        logger.debug("MBID cache persist failed: %s", e)
+                        persisted = _persisted_cache.lookup(normalized_album_key, artist_key)
+                    except Exception:
+                        persisted = None
+
+                    if persisted:
+                        release_mbid = persisted
+                    else:
+                        rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
+                        if rc_result and rc_result.get("mbid"):
+                            release_mbid = rc_result["mbid"]
+
+                    if release_mbid:
+                        _bounded_cache_set(mb_release_cache, rc_key_norm, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
+                        _bounded_cache_set(mb_release_cache, rc_key_exact, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
+                        # Also persist for future SoulSync runs. Defensive
+                        # try/except so a DB write failure can't block the
+                        # in-memory store + tag write that follow.
+                        try:
+                            from core.metadata import album_mbid_cache as _persisted_cache
+                            _persisted_cache.record(normalized_album_key, artist_key, release_mbid)
+                        except Exception as e:
+                            logger.debug("MBID cache persist failed: %s", e)
         pp["release_mbid"] = release_mbid or ""
         if pp["release_mbid"]:
             pp["id_tags"]["MUSICBRAINZ_RELEASE_ID"] = pp["release_mbid"]
@@ -345,47 +361,17 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                 pp["release_mbid"],
                 includes=["release-groups", "labels", "media", "artist-credits", "recordings", "genres"],
             ) or {}
-            with mb_release_detail_cache_lock:
-                _bounded_cache_set(mb_release_detail_cache, pp["release_mbid"], release_detail, _MB_RELEASE_DETAIL_CACHE_MAX_ENTRIES)
+            if release_detail and (not pinned_release or release_detail.get("id") == pinned_release):
+                with mb_release_detail_cache_lock:
+                    _bounded_cache_set(mb_release_detail_cache, pp["release_mbid"], release_detail, _MB_RELEASE_DETAIL_CACHE_MAX_ENTRIES)
+        if pinned_release and release_detail.get("id") != pinned_release:
+            release_detail = {}
         if release_detail:
             rg = release_detail.get("release-group", {})
-            if rg.get("id"):
-                pp["id_tags"]["MUSICBRAINZ_RELEASEGROUPID"] = rg["id"]
-            ac = release_detail.get("artist-credit", [])
-            if ac and isinstance(ac[0], dict):
-                aa = ac[0].get("artist", {})
-                if aa.get("id"):
-                    pp["id_tags"]["MUSICBRAINZ_ALBUMARTISTID"] = aa["id"]
-            if rg.get("primary-type"):
-                pp["id_tags"]["RELEASETYPE"] = rg["primary-type"]
-            if rg.get("first-release-date"):
-                pp["id_tags"]["ORIGINALDATE"] = rg["first-release-date"]
-                if not pp["release_year"] and len(rg["first-release-date"]) >= 4:
-                    year = rg["first-release-date"][:4]
-                    if year.isdigit():
-                        pp["release_year"] = year
-            if release_detail.get("status"):
-                pp["id_tags"]["RELEASESTATUS"] = release_detail["status"]
-            if release_detail.get("country"):
-                pp["id_tags"]["RELEASECOUNTRY"] = release_detail["country"]
-            if release_detail.get("barcode"):
-                pp["id_tags"]["BARCODE"] = release_detail["barcode"]
+            original_date = rg.get("first-release-date", "")
+            if not pp["release_year"] and original_date[:4].isdigit():
+                pp["release_year"] = original_date[:4]
             media_list = release_detail.get("media", [])
-            if media_list:
-                fmt = media_list[0].get("format", "")
-                if fmt:
-                    pp["id_tags"]["MEDIA"] = fmt
-                pp["id_tags"]["TOTALDISCS"] = str(len(media_list))
-            label_info = release_detail.get("label-info", [])
-            if label_info and isinstance(label_info[0], dict):
-                cat = label_info[0].get("catalog-number", "")
-                if cat:
-                    pp["id_tags"]["CATALOGNUMBER"] = cat
-            text_rep = release_detail.get("text-representation", {})
-            if isinstance(text_rep, dict) and text_rep.get("script"):
-                pp["id_tags"]["SCRIPT"] = text_rep["script"]
-            if release_detail.get("asin"):
-                pp["id_tags"]["ASIN"] = release_detail["asin"]
             track_num = metadata.get("track_number")
             disc_num = metadata.get("disc_number") or 1
             if track_num and media_list:
@@ -396,6 +382,9 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                         if medium.get("position", 1) == disc_num_int:
                             for mtrack in (medium.get("tracks") or medium.get("track-list", [])):
                                 if mtrack.get("position") == track_num_int:
+                                    from core.metadata.musicbrainz_tags import track_matches_title
+                                    if pinned_release and not track_matches_title(track_title, mtrack):
+                                        break
                                     if mtrack.get("id"):
                                         pp["id_tags"]["MUSICBRAINZ_RELEASETRACKID"] = mtrack["id"]
                                     release_recording = mtrack.get("recording", {})
@@ -406,6 +395,21 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                             break
                 except (ValueError, TypeError):
                     pass
+
+    if pp["release_mbid"] and release_detail:
+        from core.metadata.musicbrainz_tags import release_tags, credit_tags
+        pp["id_tags"].update(release_tags(release_detail))
+        # Recording details must correspond to the final release recording,
+        # not the earlier name-search result (which can be a different version).
+        if pp["recording_mbid"]:
+            final_recording = details if searched_recording == pp["recording_mbid"] else _call_source_lookup(
+                "MusicBrainz selected recording", mb_service.mb_client.get_recording,
+                pp["recording_mbid"], includes=["isrcs", "genres", "artist-credits"],
+            ) or {}
+            pp["isrc"] = (final_recording.get("isrcs") or [None])[0]
+            pp["mb_isrcs"] = final_recording.get("isrcs") or []
+            pp["mb_genres"] = [g["name"] for g in sorted(final_recording.get("genres", []), key=lambda g: g.get("count", 0), reverse=True)]
+            pp["id_tags"].update(credit_tags(final_recording.get("artist-credit")))
 
     # Genre fallback chain: most MusicBrainz recordings don't carry genres at
     # the track level, but releases and artists usually do. If the recording
@@ -837,35 +841,12 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
     written = []
     release_year = pp["release_year"]
 
-    if isinstance(audio_file.tags, symbols.ID3):
-        for tag_name, value in filtered_tags.items():
-            spec = ID3_TAG_MAP.get(tag_name)
-            if spec:
-                frame_type, desc = spec
-                if frame_type == "UFID":
-                    audio_file.tags.add(symbols.UFID(owner=desc, data=str(value).encode("ascii")))
-                    written.append(f"UFID:{desc}")
-                elif frame_type == "TDOR":
-                    audio_file.tags.add(symbols.TDOR(encoding=3, text=[value]))
-                    written.append("TDOR")
-                elif frame_type == "TMED":
-                    audio_file.tags.add(symbols.TMED(encoding=3, text=[value]))
-                    written.append("TMED")
-                else:
-                    audio_file.tags.add(symbols.TXXX(encoding=3, desc=desc, text=[value]))
-                    written.append(f"TXXX:{desc}")
-            else:
-                audio_file.tags.add(symbols.TXXX(encoding=3, desc=tag_name, text=[str(value)]))
-                written.append(f"TXXX:{tag_name}")
-    elif isinstance(audio_file, symbols.MP4):
-        for tag_name, value in filtered_tags.items():
-            key = f"----:com.apple.iTunes:{MP4_TAG_MAP.get(tag_name, tag_name)}"
-            audio_file[key] = [symbols.MP4FreeForm(str(value).encode("utf-8"))]
-            written.append(key)
-    elif is_vorbis_like(audio_file, symbols):
-        for tag_name, value in filtered_tags.items():
-            audio_file[VORBIS_TAG_MAP.get(tag_name, tag_name)] = [str(value)]
-            written.append(VORBIS_TAG_MAP.get(tag_name, tag_name))
+    from core.metadata.musicbrainz_tags import write_tag
+    for tag_name, value in filtered_tags.items():
+        write_tag(audio_file, tag_name, value, symbols)
+        written.append(tag_name)
+    if filtered_tags.get("DATE"):
+        metadata["date"] = str(filtered_tags["DATE"])
 
     if written:
         logger.info("Embedded IDs: %s", ", ".join(written))
@@ -961,12 +942,8 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         isrc_candidates.append(("Qobuz", pp["qobuz_isrc"]))
     if isrc_candidates:
         isrc_source, final_isrc = isrc_candidates[0]
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TSRC(encoding=3, text=[final_isrc]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["ISRC"] = [final_isrc]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:ISRC"] = [symbols.MP4FreeForm(final_isrc.encode("utf-8"))]
+        values = pp.get("mb_isrcs") if isrc_source == "MusicBrainz" else None
+        write_tag(audio_file, "ISRC", values or final_isrc, symbols)
         logger.info("ISRC (%s): %s", isrc_source, final_isrc)
 
     copyright_candidates = []
@@ -991,7 +968,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         label_candidates.append(("Qobuz", pp["qobuz_label"]))
     if pp["bandcamp_label"] and _tag_enabled(cfg, "bandcamp.tags.label"):
         label_candidates.append(("Bandcamp", pp["bandcamp_label"]))
-    if label_candidates:
+    if label_candidates and "LABEL" not in filtered_tags:
         label_source, final_label = label_candidates[0]
         if isinstance(audio_file.tags, symbols.ID3):
             audio_file.tags.add(symbols.TPUB(encoding=3, text=[final_label]))
@@ -1086,6 +1063,11 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         "source_artist_id": source_ids["artist_id"],
         "source_album_id": source_ids["album_id"],
     }
+
+    from core.metadata.musicbrainz_tags import selected_release_id
+    release_id = selected_release_id(album_ctx) or selected_release_id(album_info)
+    if release_id:
+        metadata["musicbrainz_release_id"] = release_id
 
     metadata["title"] = get_import_clean_title(context, album_info=album_info, default=original_search.get("title", ""))
     if original_search.get("clean_title"):

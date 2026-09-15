@@ -9,8 +9,8 @@ import {
 } from './-artist-detail.open-release';
 
 describe('isReleaseClickable', () => {
-  it('is inert only while ownership is unresolved', () => {
-    expect(isReleaseClickable({ owned: null })).toBe(false);
+  it('allows opening releases even while ownership is unresolved', () => {
+    expect(isReleaseClickable({ owned: null })).toBe(true);
     expect(isReleaseClickable({ owned: true })).toBe(true);
     expect(isReleaseClickable({ owned: false })).toBe(true);
     // A release with no ownership field at all is still clickable.

@@ -34,14 +34,14 @@ afterEach(() => {
 describe('the header (2229-2243)', () => {
   it('renders the title, icon and subtitle', () => {
     const { container } = renderShell();
-    expect(container.querySelector('.sync-title span')?.textContent).toBe('Playlist Sync');
+    expect(container.querySelector('.sync-title span')?.textContent).toBe('Playlists');
     expect(container.querySelector('.page-header-icon')?.getAttribute('src')).toBe(
       '/static/sync.png',
     );
     // Decorative — the text beside it carries the meaning.
     expect(container.querySelector('.page-header-icon')?.getAttribute('alt')).toBe('');
     expect(container.querySelector('.sync-subtitle')?.textContent).toBe(
-      'Synchronize your Spotify, Tidal, and YouTube playlists with your media server',
+      'Manage, mirror, and synchronize your playlists with your media server',
     );
   });
 

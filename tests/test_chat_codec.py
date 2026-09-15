@@ -169,3 +169,67 @@ class TestEditTag:
         from core.chat_codec import edit_of
         long_key = "user|" + "x" * 500
         assert len(edit_of({"ed": long_key})) == 160
+
+
+class TestNowPlayingAndWantedCards:
+    def test_np_round_trip(self):
+        from core.chat_codec import np_of
+        wire = encode("Now Playing text", {
+            "np": {
+                "t": "One More Time",
+                "a": "Daft Punk",
+                "al": "Discovery",
+                "src": "spotify",
+                "id": "trk-123",
+                "img": "https://i.scdn.co/image/ab67616d0000b273",
+                "dur": 320000,
+                "br": 320,
+            }
+        })
+        dec = decode(wire)
+        assert dec["t"] == "Now Playing text"
+        meta = np_of(dec)
+        assert meta["t"] == "One More Time"
+        assert meta["a"] == "Daft Punk"
+        assert meta["al"] == "Discovery"
+        assert meta["src"] == "spotify"
+        assert meta["id"] == "trk-123"
+        assert meta["img"].startswith("https://")
+        assert meta["dur"] == 320000
+        assert meta["br"] == 320
+
+    def test_np_rejects_missing_required(self):
+        from core.chat_codec import np_of
+        assert np_of({"np": {"t": "Track Only"}}) is None
+        assert np_of({"np": {"a": "Artist Only"}}) is None
+        assert np_of({"np": {}}) is None
+        assert np_of(None) is None
+
+    def test_want_round_trip(self):
+        from core.chat_codec import want_of
+        wire = encode("ISO text", {
+            "want": {
+                "t": "Selected Ambient Works 85-92",
+                "a": "Aphex Twin",
+                "ty": "album",
+                "src": "spotify",
+                "id": "alb-456",
+                "img": "https://i.scdn.co/image/ab67616d0000b273",
+                "y": "1992",
+            }
+        })
+        dec = decode(wire)
+        assert dec["t"] == "ISO text"
+        meta = want_of(dec)
+        assert meta["t"] == "Selected Ambient Works 85-92"
+        assert meta["a"] == "Aphex Twin"
+        assert meta["ty"] == "album"
+        assert meta["y"] == "1992"
+        assert meta["img"].startswith("https://")
+
+    def test_want_rejects_missing_required(self):
+        from core.chat_codec import want_of
+        assert want_of({"want": {"t": "Album Only"}}) is None
+        assert want_of({"want": {}}) is None
+        assert want_of(None) is None
+

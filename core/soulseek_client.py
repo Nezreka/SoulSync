@@ -2146,6 +2146,8 @@ class SoulseekClient(DownloadSourcePlugin):
         # so a previously-quarantined source can't win the quality picker by
         # superior bitrate and re-trigger the same failed download in a loop.
         results = self._drop_quarantined_sources(results)
+        from core.downloads.size_limit import filter_music_candidates
+        results = filter_music_candidates(results)
         if not results:
             return []
 

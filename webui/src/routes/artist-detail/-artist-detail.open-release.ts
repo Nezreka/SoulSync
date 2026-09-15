@@ -83,9 +83,13 @@ export function albumTracksParams(
   return params;
 }
 
-/** Still-checking cards are inert; the vanilla toasted and returned. */
-export function isReleaseClickable(release: DiscographyRelease): boolean {
-  return release.owned !== null;
+/**
+ * Releases can be opened immediately even while background ownership checking
+ * is still in progress. The modal and playback pathways backfill track ownership
+ * dynamically on demand without locking the user out.
+ */
+export function isReleaseClickable(_release: DiscographyRelease): boolean {
+  return true;
 }
 
 export function stillCheckingMessage(release: DiscographyRelease): string {

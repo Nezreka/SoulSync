@@ -971,6 +971,7 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                             _cons_mb_svc = deps.mb_worker.mb_service if deps.mb_worker else None
                             if _cons_mb_svc and deps.config_manager.get('musicbrainz.embed_tags', True):
                                 from core.album_consistency import run_album_consistency
+                                from core.metadata.musicbrainz_tags import selected_release_id
                                 from core.metadata.common import get_file_lock
                                 _cons_result = run_album_consistency(
                                     file_infos=_cons_files,
@@ -978,6 +979,7 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                                     artist_name=_cons_artist_name,
                                     mb_service=_cons_mb_svc,
                                     total_discs=_cons_album.get('total_discs', 1),
+                                    release_mbid=selected_release_id(_cons_album),
                                     file_lock_fn=get_file_lock,
                                 )
                                 if _cons_result.get('success'):
@@ -1191,6 +1193,7 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                             _cons_mb_svc = deps.mb_worker.mb_service if deps.mb_worker else None
                             if _cons_mb_svc and deps.config_manager.get('musicbrainz.embed_tags', True):
                                 from core.album_consistency import run_album_consistency
+                                from core.metadata.musicbrainz_tags import selected_release_id
                                 from core.metadata.common import get_file_lock
                                 _cons_result = run_album_consistency(
                                     file_infos=_cons_files,
@@ -1198,6 +1201,7 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                                     artist_name=_cons_artist_name,
                                     mb_service=_cons_mb_svc,
                                     total_discs=_cons_album.get('total_discs', 1),
+                                    release_mbid=selected_release_id(_cons_album),
                                     file_lock_fn=get_file_lock,
                                 )
                                 if _cons_result.get('success'):

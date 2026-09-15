@@ -217,12 +217,23 @@ export interface SearchVideo {
   upload_date?: string;
 }
 
+export interface SearchPlaylist {
+  id?: string | number;
+  name?: string;
+  creator?: string;
+  track_count?: number;
+  image_url?: string;
+  source?: string;
+  link?: string;
+}
+
 /** One source's slice of results, as cached per (query, source). */
 export interface SourceResults {
   db_artists: SearchArtist[];
   artists: SearchArtist[];
   albums: SearchAlbum[];
   tracks: SearchTrack[];
+  playlists: SearchPlaylist[];
   videos: SearchVideo[];
 }
 
@@ -231,6 +242,7 @@ export interface EnhancedSearchResponse {
   spotify_artists?: SearchArtist[];
   spotify_albums?: SearchAlbum[];
   spotify_tracks?: SearchTrack[];
+  spotify_playlists?: SearchPlaylist[];
   /** What the server ACTUALLY served — differs from the request on fallback. */
   primary_source?: string;
   metadata_source?: string;

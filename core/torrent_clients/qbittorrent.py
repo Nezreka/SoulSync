@@ -225,7 +225,45 @@ class QBittorrentAdapter:
                            resp.status_code if resp else 'no-response',
                            (resp.text[:200] if resp else ''))
             return None
-        if resp.text and resp.text.strip() and resp.text.strip() != 'Ok.':
+
+        body = (resp.text or '').strip()
+
+        # qBittorrent 5.0+ returns a JSON object on /api/v2/torrents/add, e.g.:
+        # {"added_torrent_ids": ["..."], "failure_count": 0, "pending_count": 0, "success_count": 1}
+        # In 4.x it returned plaintext 'Ok.' or 'Fails.'.
+        if body.startswith('{') and body.endswith('}'):
+            try:
+                payload = resp.json()
+                if isinstance(payload, dict):
+                    added_ids = payload.get('added_torrent_ids') or []
+                    if added_ids:
+                        added_hash = str(added_ids[0]).lower()
+                        logger.info("qBittorrent registered torrent hash: %s", added_hash)
+                        return added_hash
+
+                    # Success reported without an explicit ID list:
+                    if payload.get('success_count', 0) > 0:
+                        expected = _magnet_hash(url_or_magnet)
+                        if expected:
+                            return expected
+                        new_hash = self._poll_for_new_hash(before)
+                        if new_hash:
+                            return new_hash
+
+                    # Duplicate / existing check:
+                    existing = _magnet_hash(url_or_magnet)
+                    if existing and existing in {h.lower() for h in before}:
+                        logger.info("qBittorrent already holds %s — adopting the existing "
+                                    "torrent instead of reporting a failed add", existing[:12])
+                        return existing
+
+                    if payload.get('failure_count', 0) > 0:
+                        logger.warning("qBittorrent /torrents/add rejected torrent: %r", payload)
+                        return None
+            except Exception as json_err:
+                logger.debug("Failed parsing qBittorrent /torrents/add JSON: %s", json_err)
+
+        if body and body != 'Ok.':
             # "Fails." is also what qBittorrent answers when it ALREADY HOLDS the
             # torrent. Reporting that as a refusal made the video wishlist drain
             # re-pick the same release every hour forever (one live row reached 133
@@ -309,6 +347,18 @@ class QBittorrentAdapter:
         resp = self._call('POST', '/api/v2/torrents/add', data=data, files=files)
         if not resp or not resp.ok:
             return None
+        body = (resp.text or '').strip()
+        if body.startswith('{') and body.endswith('}'):
+            try:
+                payload = resp.json()
+                if isinstance(payload, dict):
+                    added_ids = payload.get('added_torrent_ids') or []
+                    if added_ids:
+                        return str(added_ids[0]).lower()
+            except Exception as e:
+                # a body that looked like json but wasn't; the hash poll
+                # below still finds the torrent, so this is just a note
+                logger.debug("qBittorrent add: could not read json body (%s), polling for the hash", e)
         return self._poll_for_new_hash(before)
 
     async def get_status(self, torrent_id: str) -> Optional[TorrentStatus]:

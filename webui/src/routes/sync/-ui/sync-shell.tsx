@@ -164,10 +164,10 @@ export function SyncShell({
           <div>
             <h2 className="sync-title">
               <img src="/static/sync.png" className="page-header-icon" alt="" />
-              <span>Playlist Sync</span>
+              <span>Playlists</span>
             </h2>
             <p className="sync-subtitle">
-              Synchronize your Spotify, Tidal, and YouTube playlists with your media server
+              Manage, mirror, and synchronize your playlists with your media server
             </p>
           </div>
           {/* The vanilla styles this row inline (2236). A class is used here

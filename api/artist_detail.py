@@ -2203,9 +2203,6 @@ def check_artist_discography_completion_stream(artist_id):
                 source_override=source_override,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
-                if event.get('type') in ('album_completion', 'single_completion'):
-                    # Small delay to make the streaming effect visible
-                    time.sleep(0.1)  # 100ms delay between items
         except Exception as e:
             logger.error(f"Error in streaming completion check: {e}")
             import traceback

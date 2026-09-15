@@ -309,6 +309,9 @@ def _normalize_album_result(album: Any, source: str) -> Dict[str, Any]:
         suggestion["disambiguation"] = disambiguation
     if release_group_id:
         suggestion["release_group_id"] = release_group_id
+    release_id = _extract_value(album, "musicbrainz_release_id", default="")
+    if release_id:
+        suggestion["musicbrainz_release_id"] = release_id
     return suggestion
 
 

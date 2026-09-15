@@ -92,7 +92,7 @@ export interface SourceVertical {
    * resetBeatportChart 10837): POST, stop polling, zero the discovery + sync
    * fields, toast, and tell the caller to close the modal.
    */
-  resetDiscovery: (sourceId: string) => Promise<void>;
+  resetDiscovery: (sourceId: string) => Promise<boolean>;
 }
 
 export interface SourceVerticalOptions {
@@ -116,6 +116,7 @@ export function useSourceVertical(
 
   const discoveryPollers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
   const syncPollers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  const syncGenerations = useRef<Record<string, number>>({});
   /**
    * Ids whose completion has already been announced. The vanilla can announce
    * twice — its socket callback and its always-on HTTP poll both run the
@@ -274,10 +275,20 @@ export function useSourceVertical(
   const startSyncPoll = useCallback(
     (sourceId: string) => {
       stopSyncPoll(sourceId);
+      const generation = (syncGenerations.current[sourceId] ?? 0) + 1;
+      syncGenerations.current[sourceId] = generation;
+
+      let consecutiveErrors = 0;
+      const MAX_RETRIES = 5;
+
       const tick = async () => {
+        if (syncGenerations.current[sourceId] !== generation) return;
         try {
           const status = await fetchSourceSyncStatus(config, sourceId);
+          if (syncGenerations.current[sourceId] !== generation) return;
+          consecutiveErrors = 0;
           if (status.error) {
+            patch(sourceId, (s) => applySyncStatus(s, status));
             stopSyncPoll(sourceId);
             return;
           }
@@ -291,7 +302,17 @@ export function useSourceVertical(
             status.sync_status === 'cancelled';
           if (terminal) stopSyncPoll(sourceId);
         } catch {
-          stopSyncPoll(sourceId);
+          if (syncGenerations.current[sourceId] !== generation) return;
+          consecutiveErrors += 1;
+          if (consecutiveErrors >= MAX_RETRIES) {
+            patch(sourceId, (s) =>
+              applySyncStatus(s, {
+                status: 'error',
+                error: 'Lost connection to sync service',
+              }),
+            );
+            stopSyncPoll(sourceId);
+          }
         }
       };
       // The vanilla runs the poll body immediately on start/resume (1105).
@@ -405,7 +426,7 @@ export function useSourceVertical(
     async (sourceId: string) => {
       const state = statesRef.current[sourceId];
       // 10787 / 10841 — no state, nothing to reset.
-      if (!state) return;
+      if (!state) return false;
       const name = (state.playlist?.name as string) ?? '';
       try {
         await resetSourceDiscovery(config, sourceId);
@@ -428,9 +449,11 @@ export function useSourceVertical(
         // A fresh run must be announceable again.
         announced.current.delete(sourceId);
         window.showToast?.(`Reset "${name}" to fresh state`, 'success');
+        return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'unknown error';
         window.showToast?.(`Error resetting ${config.ux.resetErrorNoun}: ${message}`, 'error');
+        return false;
       }
     },
     [config, patch, stopDiscoveryPoll, stopSyncPoll],

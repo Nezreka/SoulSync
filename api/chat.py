@@ -17,9 +17,10 @@ re-joins whenever slskd reports us absent — idempotent, one extra call only
 when actually needed.
 """
 
-from __future__ import annotations
-
+import ipaddress
 import re as _re
+import time
+from urllib.parse import urljoin, urlparse
 
 from flask import Blueprint, g, jsonify, request
 
@@ -243,6 +244,12 @@ def _unwrap_room_messages(messages):
             f = chat_codec.file_of(dec)
             if f:
                 m["file"] = f
+            np = chat_codec.np_of(dec)
+            if np:
+                m["np"] = np
+            w = chat_codec.want_of(dec)
+            if w:
+                m["want"] = w
             # A shared overlay template. The definition rides its own envelope
             # key (protocol_of would reject layers-of-objects), and the card
             # carries the asset refs it depends on so the reader is told what
@@ -403,6 +410,129 @@ def _oembed_fetch(video_id):
         timeout=10)
     r.raise_for_status()
     return r.json()
+
+
+_LINK_PREVIEW_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+def _is_safe_preview_url(url: str) -> bool:
+    """SSRF guard for chat link preview fetching.
+
+    Only external http/https addresses. Loopback, private IP ranges,
+    multicast, and internal hostnames are strictly blocked.
+    """
+    try:
+        p = urlparse(str(url or "").strip())
+        if p.scheme not in ("http", "https"):
+            return False
+        host = (p.hostname or "").lower().strip()
+        if not host or host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+            return False
+        if host.endswith((".local", ".internal", ".lan", ".home", ".corp", ".onion")):
+            return False
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                return False
+        except ValueError:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+def _fetch_link_preview(url: str) -> dict | None:
+    """Fetch OpenGraph and basic HTML metadata for a URL posted in chat.
+
+    Returns a dict with title, description, image, site_name, domain, theme_color.
+    Safe against SSRF and cached in memory.
+    """
+    now = time.time()
+    if url in _LINK_PREVIEW_CACHE:
+        cached_time, data = _LINK_PREVIEW_CACHE[url]
+        if now - cached_time < 3600:
+            return data
+
+    if not _is_safe_preview_url(url):
+        return None
+
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 (compatible; SoulSync/1.0; +https://github.com/Nezreka/SoulSync)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        r = requests.get(url, headers=headers, timeout=4, stream=True)
+        r.raise_for_status()
+        ctype = r.headers.get("content-type", "").lower()
+        if "text/html" not in ctype and "xhtml" not in ctype:
+            return None
+
+        chunks = []
+        total = 0
+        for chunk in r.iter_content(chunk_size=8192, decode_unicode=True):
+            if chunk:
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > 65536 or "</head>" in chunk.lower():
+                    break
+        raw_html = "".join(chunks)
+        soup = BeautifulSoup(raw_html, "html.parser")
+
+        # Title
+        title = ""
+        og_title = soup.find("meta", property="og:title") or soup.find("meta", attrs={"name": "twitter:title"})
+        if og_title and og_title.get("content"):
+            title = str(og_title["content"]).strip()
+        elif soup.title and soup.title.string:
+            title = str(soup.title.string).strip()
+
+        # Description
+        desc = ""
+        og_desc = soup.find("meta", property="og:description") or soup.find("meta", attrs={"name": "description"}) or soup.find("meta", attrs={"name": "twitter:description"})
+        if og_desc and og_desc.get("content"):
+            desc = str(og_desc["content"]).strip()
+
+        # Image
+        img = ""
+        og_img = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "twitter:image"})
+        if og_img and og_img.get("content"):
+            img = str(og_img["content"]).strip()
+            if img and not (img.startswith("http://") or img.startswith("https://")):
+                img = urljoin(url, img)
+
+        # Site Name
+        site_name = ""
+        og_site = soup.find("meta", property="og:site_name")
+        if og_site and og_site.get("content"):
+            site_name = str(og_site["content"]).strip()
+
+        # Theme color
+        theme_color = ""
+        tc = soup.find("meta", attrs={"name": "theme-color"})
+        if tc and tc.get("content"):
+            theme_color = str(tc["content"]).strip()
+
+        domain = urlparse(url).hostname or ""
+
+        data = {
+            "ok": True,
+            "url": url,
+            "title": title[:160],
+            "description": desc[:300],
+            "image": img[:500],
+            "site_name": (site_name or domain)[:80],
+            "domain": domain,
+            "theme_color": theme_color[:30],
+        }
+        if len(_LINK_PREVIEW_CACHE) > 500:
+            _LINK_PREVIEW_CACHE.clear()
+        _LINK_PREVIEW_CACHE[url] = (now, data)
+        return data
+    except Exception as e:
+        logger.debug(f"chat: link-preview failed for {url}: {e}")
+        return None
 
 
 def create_blueprint() -> Blueprint:
@@ -1218,6 +1348,18 @@ def create_blueprint() -> Blueprint:
             })
         return jsonify({"results": results})
 
+    @bp.route("/api/chat/link-preview", methods=["GET"])
+    def chat_link_preview():
+        """Fetch OpenGraph and page metadata for an external link in chat."""
+        raw_url = str(request.args.get("url") or "").strip()
+        if not raw_url or len(raw_url) > 500:
+            return jsonify({"error": "Valid url parameter required"}), 400
+
+        meta = _fetch_link_preview(raw_url)
+        if not meta:
+            return jsonify({"error": "Preview unavailable"}), 404
+        return jsonify(meta)
+
     # ── Auto-DJ radio brain ────────────────────────────────────────────────
     # The old radio searched YouTube for the PLAYING TRACK'S OWN TITLE, so the
     # top surviving hit was usually the same song again (another upload, a live
@@ -1447,7 +1589,8 @@ def create_blueprint() -> Blueprint:
         # attached a template is the same class of lie this mode exists to fix.
         if body.get("plain") is True:
             for field, label in (("overlay", "an overlay template"), ("file", "a file"),
-                                 ("reply", "a reply"), ("edit", "an edit")):
+                                 ("reply", "a reply"), ("edit", "an edit"),
+                                 ("np", "a Now Playing card"), ("want", "a Wanted card")):
                 if body.get(field):
                     return jsonify({"error": "Plain text can't carry %s — every Soulseek "
                                              "client has to be able to read it. Switch back "
@@ -1493,6 +1636,14 @@ def create_blueprint() -> Blueprint:
         if fmeta:
             extra = dict(extra or {})
             extra["f"] = fmeta
+        npmeta = chat_codec.np_of({"np": body.get("np")})
+        if npmeta:
+            extra = dict(extra or {})
+            extra["np"] = npmeta
+        wantmeta = chat_codec.want_of({"want": body.get("want")})
+        if wantmeta:
+            extra = dict(extra or {})
+            extra["want"] = wantmeta
         # Virtual channel tag. Slug-validated here so a hostile client can't
         # stuff arbitrary text into the envelope; the default channel is left
         # untagged so old clients (and vanilla Soulseek) read it as #general.

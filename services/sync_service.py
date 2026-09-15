@@ -201,6 +201,7 @@ class PlaylistSyncService:
         self.progress_callbacks = {}  # Playlist-specific progress callbacks
         self.syncing_playlists = set()  # Track multiple syncing playlists
         self._cancelled = False
+        self._cancelled_playlists = set()  # Per-playlist cancellation set
         self.matching_engine = MusicMatchingEngine()
 
     def _media_client(self, name: str):
@@ -294,11 +295,25 @@ class PlaylistSyncService:
         if playlist_name in self.progress_callbacks:
             del self.progress_callbacks[playlist_name]
     
-    def cancel_sync(self):
-        """Cancel the current sync operation"""
-        logger.info("PlaylistSyncService.cancel_sync() called - setting cancellation flag")
-        self._cancelled = True
-        self.is_syncing = False
+    def cancel_sync(self, playlist_name: Optional[str] = None):
+        """Cancel the current sync operation for a specific playlist or all syncing playlists"""
+        if not hasattr(self, '_cancelled_playlists'):
+            self._cancelled_playlists = set()
+        if playlist_name:
+            logger.info(f"PlaylistSyncService.cancel_sync() called for playlist: {playlist_name}")
+            self._cancelled_playlists.add(playlist_name)
+        else:
+            logger.info("PlaylistSyncService.cancel_sync() called - setting cancellation flag for all playlists")
+            self._cancelled = True
+            for pl in list(getattr(self, 'syncing_playlists', [])):
+                self._cancelled_playlists.add(pl)
+
+    def _is_cancelled(self, playlist_name: str) -> bool:
+        """Check whether a sync for playlist_name has been cancelled."""
+        cancelled = getattr(self, '_cancelled_playlists', None)
+        if cancelled and playlist_name in cancelled:
+            return True
+        return bool(getattr(self, '_cancelled', False))
     
     def _update_progress(self, playlist_name: str, step: str, track: str, progress: float, total_steps: int, current_step: int, 
                         total_tracks: int = 0, matched_tracks: int = 0, failed_tracks: int = 0):
@@ -325,6 +340,14 @@ class PlaylistSyncService:
         fn = getattr(client, 'reconcile_playlist', None)
         if fn is None:
             return client.update_playlist(playlist_name, tracks)
+        from core.navidrome_client import NavidromeClient
+        if isinstance(client, NavidromeClient):
+            # A refused/failed Navidrome write must not trigger another destructive attempt.
+            try:
+                return bool(fn(playlist_name, tracks))
+            except Exception as exc:
+                logger.error("Navidrome reconcile failed for %r: %s", playlist_name, exc)
+                return False
         try:
             if fn(playlist_name, tracks):
                 return True
@@ -339,7 +362,11 @@ class PlaylistSyncService:
     async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace') -> SyncResult:
         self._active_profile_id = profile_id
         # Check if THIS specific playlist is already syncing
-        if playlist.name in self.syncing_playlists:
+        syncing = getattr(self, 'syncing_playlists', None)
+        if syncing is None:
+            self.syncing_playlists = set()
+            syncing = self.syncing_playlists
+        if playlist.name in syncing:
             logger.warning(f"Sync already in progress for playlist: {playlist.name}")
             return SyncResult(
                 playlist_name=playlist.name,
@@ -353,14 +380,15 @@ class PlaylistSyncService:
             )
         
         # Add this playlist to syncing set
-        self.syncing_playlists.add(playlist.name)
-        self._cancelled = False
+        syncing.add(playlist.name)
+        if hasattr(self, '_cancelled_playlists'):
+            self._cancelled_playlists.discard(playlist.name)
         errors = []
         
         try:
             logger.info(f"Starting sync for playlist: {playlist.name}")
             
-            if self._cancelled:
+            if self._is_cancelled(playlist.name):
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
             
             # Skip fetching playlist since we already have it
@@ -370,7 +398,7 @@ class PlaylistSyncService:
                 errors.append(f"Playlist '{playlist.name}' has no tracks")
                 return self._create_error_result(playlist.name, errors)
             
-            if self._cancelled:
+            if self._is_cancelled(playlist.name):
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
             
             total_tracks = len(playlist.tracks)
@@ -385,7 +413,7 @@ class PlaylistSyncService:
             # Use the same robust matching approach as "Download Missing Tracks"
             match_results = []
             for i, track in enumerate(playlist.tracks):
-                if self._cancelled:
+                if self._is_cancelled(playlist.name):
                     return self._create_error_result(playlist.name, ["Sync cancelled"])
 
                 # Update progress for each track
@@ -420,7 +448,7 @@ class PlaylistSyncService:
             logger.info(f"Found {len(matched_tracks)} matches out of {len(playlist.tracks)} tracks")
             
             
-            if self._cancelled:
+            if self._is_cancelled(playlist.name):
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
             
             # Update progress with match results
@@ -431,7 +459,7 @@ class PlaylistSyncService:
             
             downloaded_tracks = 0
             if download_missing and unmatched_tracks:
-                if self._cancelled:
+                if self._is_cancelled(playlist.name):
                     return self._create_error_result(playlist.name, ["Sync cancelled"])
                 self._update_progress(playlist.name, "Downloading missing tracks", "", 70, 5, 4, 
                                     total_tracks=total_tracks,
@@ -439,7 +467,7 @@ class PlaylistSyncService:
                                     failed_tracks=len(unmatched_tracks))
                 downloaded_tracks = await self._download_missing_tracks(unmatched_tracks)
             
-            if self._cancelled:
+            if self._is_cancelled(playlist.name):
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
             
             media_client, server_type = self._get_active_media_client()
@@ -511,6 +539,12 @@ class PlaylistSyncService:
                 if not media_client:
                     logger.error("No active media client available for playlist sync")
                     sync_success = False
+                elif not matched_tracks and media_client.is_connected():
+                    # There is nothing safe to write, but these missing tracks
+                    # still need the wishlist step below. Never empty an existing
+                    # playlist just because this scan found no matches.
+                    logger.info("No library matches for %r; keeping the server playlist and processing missing tracks", playlist.name)
+                    sync_success = True
                 else:
                     logger.info(
                         f"Syncing playlist '{playlist.name}' to {server_type.upper()} server "
@@ -523,7 +557,11 @@ class PlaylistSyncService:
                     else:
                         sync_success = media_client.update_playlist(playlist.name, plex_tracks)
 
-                synced_tracks = len(plex_tracks) if sync_success else 0
+                if not sync_success:
+                    return self._create_error_result(playlist.name, [
+                        f"{server_type.title()} playlist write failed or could not be verified; sync is incomplete. Check the server connection and run a library scan."
+                    ])
+                synced_tracks = len(plex_tracks)
                 # Not in library (for wishlist), not "total minus playlist size".
                 failed_tracks = unmatched_count
             
@@ -532,7 +570,10 @@ class PlaylistSyncService:
                                 matched_tracks=len(matched_tracks),
                                 failed_tracks=failed_tracks)
 
-            # Auto-add unmatched tracks to wishlist (skip in Wing It mode)
+            # Auto-add unmatched tracks to wishlist (skip in Wing It mode or if cancelled)
+            if self._is_cancelled(playlist.name):
+                return self._create_error_result(playlist.name, ["Sync cancelled"])
+
             wishlist_added_count = 0
             if unmatched_tracks and getattr(self, '_skip_unmatched_wishlist', False):
                 logger.info(
@@ -676,9 +717,14 @@ class PlaylistSyncService:
         
         finally:
             # Remove this playlist from syncing set and clear its callback
-            self.syncing_playlists.discard(playlist.name)
-            self.clear_progress_callback(playlist.name)
-            self._cancelled = False
+            if hasattr(self, 'syncing_playlists'):
+                self.syncing_playlists.discard(playlist.name)
+            if hasattr(self, 'clear_progress_callback'):
+                self.clear_progress_callback(playlist.name)
+            if hasattr(self, '_cancelled_playlists'):
+                self._cancelled_playlists.discard(playlist.name)
+            if not getattr(self, 'syncing_playlists', None):
+                self._cancelled = False
     
     def _get_or_fetch_artist_candidates(self, candidate_pool: Optional[Dict[str, list]], db, artist_name: str, active_server) -> Optional[list]:
         """Lazy per-artist pool fetch. Returns None when pooling is off so the

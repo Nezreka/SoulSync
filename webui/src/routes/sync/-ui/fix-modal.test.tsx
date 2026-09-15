@@ -225,14 +225,14 @@ describe('the fix reducers', () => {
     expect(applyFixedMatch(base as never, SYNC_SOURCES.tidal, 9, { id: 'x' })).toBe(base);
   });
 
-  it('applyUnmatched: reverts the row, does NOT decrement the counter (the vanilla omission)', () => {
+  it('applyUnmatched: reverts the row and decrements the counter', () => {
     const fixed = applyFixedMatch(base as never, SYNC_SOURCES.tidal, 1, { id: 'sp9', name: 'F' });
     const undone = applyUnmatched(fixed, SYNC_SOURCES.tidal, 1);
     expect(undone.rows[1].status_class).toBe('not-found');
     expect(undone.rows[1].spotify_track).toBe('-');
     expect(undone.rawResults[1].spotify_data).toBe(null);
     expect(undone.rawResults[1].manual_match).toBe(false);
-    expect(undone.spotifyMatches).toBe(2); // transcribed: no decrement
+    expect(undone.spotifyMatches).toBe(1); // decrements previously matched count
   });
 });
 

@@ -296,7 +296,7 @@ def test_fast_fuzzy_pass_scores_identically_to_the_naive_matcher():
     from difflib import SequenceMatcher
 
     from core.sync.playlist_reconcile import (
-        _FUZZY_THRESHOLD, canonical_source_track, norm_title, reconcile_playlist,
+        _FUZZY_THRESHOLD, _artists_agree, _durations_agree, canonical_source_track, norm_title, reconcile_playlist,
     )
 
     rng = random.Random(1005)
@@ -329,6 +329,9 @@ def test_fast_fuzzy_pass_scores_identically_to_the_naive_matcher():
         for j, svr in enumerate(servers):
             if j in used:
                 continue
+            if not (_artists_agree(canon_artist, svr.get('artist', ''))
+                    or _durations_agree(src_entry.get('duration_ms'), svr.get('duration'))):
+                continue
             svr_key = f"{svr.get('artist', '')} {norm_title(svr.get('title', ''))}".strip().lower()
             score = SequenceMatcher(None, src_key, svr_key).ratio()
             if score > best and score >= _FUZZY_THRESHOLD:
@@ -352,3 +355,11 @@ def test_fast_fuzzy_pass_scores_identically_to_the_naive_matcher():
             used.add(j)
         else:
             assert j == -1, f"optimized pass missed a naive match: {e['source_track']['name']} -> {j}"
+
+
+def test_fuzzy_pass_cannot_bypass_artist_rejection_with_long_title():
+    title = "The Long Road Back to the Place We Called Home"
+    result = reconcile_playlist(
+        [{"name": title, "artist": "Madonna", "source_track_id": "source"}],
+        [{"title": title, "artist": "Radiohead", "id": "server"}])
+    assert [row["match_status"] for row in result] == ["missing", "extra"]

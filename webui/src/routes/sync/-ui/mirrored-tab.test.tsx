@@ -1220,3 +1220,168 @@ describe('MirroredTab — the sort control', () => {
     expect(screen.queryByRole('combobox')).toBeNull();
   });
 });
+
+describe('MirroredTab — select mode and batch delete (#1219)', () => {
+  type ConfirmOpts = { title: string; message: string; destructive: boolean };
+  // four tidal playlists sharing a name, the reporter's exact shape
+  const DUPES = [1, 2, 3, 4].map((n) => ({
+    ...ROW,
+    id: n,
+    name: '#wonderbracket',
+    source_playlist_id: `tp${n}`,
+    track_count: 270 - n,
+  }));
+  const OTHER = { ...ROW, id: 9, name: '100 NW Songs', source_playlist_id: 'tp9' };
+
+  async function loadedMany(rows = [...DUPES, OTHER]) {
+    stubFetch();
+    responder = (url, method) => {
+      if (url === '/api/mirrored-playlists') return rows;
+      if (url === '/api/mirrored-playlists/batch-delete' && method === 'POST') {
+        return { success: true, deleted: [1, 2, 3], not_deleted: [] };
+      }
+      return { states: [] };
+    };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('100 NW Songs')).toBeInTheDocument());
+  }
+
+  it('is off by default: no bar, cards are buttons, no checks', async () => {
+    await loadedMany();
+    expect(screen.queryByRole('toolbar')).toBeNull();
+    expect(document.querySelector('.pl-card-check')).toBeNull();
+    expect(document.querySelector('#mirrored-card-1')!.getAttribute('role')).toBe('button');
+  });
+
+  it('Select turns cards into checkboxes; clicking one selects it instead of opening', async () => {
+    await loadedMany();
+    fireEvent.click(screen.getByText('Select'));
+    expect(screen.getByRole('toolbar')).toBeInTheDocument();
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+    const card = document.querySelector('#mirrored-card-1')!;
+    expect(card.getAttribute('role')).toBe('checkbox');
+    expect(card.getAttribute('aria-checked')).toBe('false');
+    expect(card.querySelector('.pl-card-check')).not.toBeNull();
+
+    fireEvent.click(card);
+    expect(card.getAttribute('aria-checked')).toBe('true');
+    expect(card.className).toContain('pl-card--selected');
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    // the click did NOT open the playlist
+    expect(screen.getByTestId('open-id')).toHaveTextContent('none');
+    expect(calls.find((c) => c.url.includes('prepare-discovery'))).toBeUndefined();
+
+    fireEvent.click(card);
+    expect(card.getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+  });
+
+  it('search + Select all visible picks exactly the matching cards', async () => {
+    await loadedMany();
+    fireEvent.click(screen.getByText('Select'));
+    fireEvent.change(screen.getByLabelText('Search playlists'), {
+      target: { value: 'wonder' },
+    });
+    fireEvent.click(screen.getByText('Select all visible (4)'));
+    expect(screen.getByText('4 selected')).toBeInTheDocument();
+    // clearing the search brings the other card back, unselected
+    fireEvent.change(screen.getByLabelText('Search playlists'), { target: { value: '' } });
+    expect(screen.getByText('4 selected')).toBeInTheDocument();
+    expect(document.querySelector('#mirrored-card-9')!.getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText('Select all visible (5)')).toBeInTheDocument();
+  });
+
+  it('Delete confirms once with the names, posts one batch, toasts the count, reloads', async () => {
+    const confirm = vi.fn(async (_opts: ConfirmOpts) => true);
+    const toast = vi.fn();
+    window.showConfirmDialog = confirm as unknown as typeof window.showConfirmDialog;
+    window.showToast = toast as typeof window.showToast;
+    await loadedMany();
+    fireEvent.click(screen.getByText('Select'));
+    for (const id of [1, 2, 3]) fireEvent.click(document.querySelector(`#mirrored-card-${id}`)!);
+    const before = calls.filter((c) => c.url === '/api/mirrored-playlists').length;
+
+    fireEvent.click(screen.getByText('Delete 3'));
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    const arg = confirm.mock.calls[0][0];
+    expect(arg.title).toBe('Delete 3 Playlists');
+    expect(arg.destructive).toBe(true);
+    expect(arg.message).toContain('• #wonderbracket');
+    const posts = calls.filter((c) => c.url === '/api/mirrored-playlists/batch-delete');
+    expect(posts).toHaveLength(1);
+    expect(posts[0].method).toBe('POST');
+    expect(posts[0].body).toEqual({ ids: [1, 2, 3] });
+    // never the one-at-a-time endpoint
+    expect(calls.find((c) => c.method === 'DELETE')).toBeUndefined();
+    expect(toast).toHaveBeenCalledWith('Deleted 3 mirrors', 'success');
+    // reloaded, and select mode closed behind it
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/api/mirrored-playlists').length).toBe(before + 1),
+    );
+    expect(screen.queryByRole('toolbar')).toBeNull();
+  });
+
+  it('a long selection lists six names and counts the rest', async () => {
+    const confirm = vi.fn(async (_opts: ConfirmOpts) => false);
+    window.showConfirmDialog = confirm as unknown as typeof window.showConfirmDialog;
+    const many = Array.from({ length: 9 }, (_, i) => ({
+      ...ROW,
+      id: 10 + i,
+      name: `pl ${i}`,
+      source_playlist_id: `m${i}`,
+    }));
+    await loadedMany([...many, OTHER]);
+    fireEvent.click(screen.getByText('Select'));
+    fireEvent.click(screen.getByText('Select all visible (10)'));
+    fireEvent.click(screen.getByText('Delete 10'));
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    const msg = confirm.mock.calls[0][0].message;
+    expect(msg.split('•')).toHaveLength(7);
+    expect(msg).toContain('…and 4 more');
+  });
+
+  it('declining the confirm sends nothing and keeps the selection', async () => {
+    window.showConfirmDialog = vi.fn(async () => false) as typeof window.showConfirmDialog;
+    window.showToast = vi.fn() as typeof window.showToast;
+    await loadedMany();
+    fireEvent.click(screen.getByText('Select'));
+    fireEvent.click(document.querySelector('#mirrored-card-2')!);
+    fireEvent.click(screen.getByText('Delete 1'));
+    await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
+    expect(calls.find((c) => c.url === '/api/mirrored-playlists/batch-delete')).toBeUndefined();
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+  });
+
+  it('a partial result says how many it could not delete', async () => {
+    const toast = vi.fn();
+    window.showConfirmDialog = vi.fn(async () => true) as typeof window.showConfirmDialog;
+    window.showToast = toast as typeof window.showToast;
+    await loadedMany();
+    responder = (url, method) => {
+      if (url === '/api/mirrored-playlists') return [...DUPES, OTHER];
+      if (url === '/api/mirrored-playlists/batch-delete' && method === 'POST') {
+        return { success: true, deleted: [1], not_deleted: [2] };
+      }
+      return { states: [] };
+    };
+    fireEvent.click(screen.getByText('Select'));
+    fireEvent.click(document.querySelector('#mirrored-card-1')!);
+    fireEvent.click(document.querySelector('#mirrored-card-2')!);
+    fireEvent.click(screen.getByText('Delete 2'));
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+    expect(toast).toHaveBeenCalledWith('Deleted 1 mirror, 1 couldn’t be deleted', 'warning');
+  });
+
+  it('Done leaves select mode and forgets the selection', async () => {
+    await loadedMany();
+    fireEvent.click(screen.getByText('Select'));
+    fireEvent.click(document.querySelector('#mirrored-card-1')!);
+    fireEvent.click(screen.getByText('Done'));
+    expect(screen.queryByRole('toolbar')).toBeNull();
+    expect(document.querySelector('.pl-card--selected')).toBeNull();
+    fireEvent.click(screen.getByText('Select'));
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+  });
+});
