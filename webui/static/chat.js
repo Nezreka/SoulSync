@@ -1065,8 +1065,9 @@
             '<div class="chat-wanted-actions">' +
                 haveBtn +
                 '<button type="button" class="chat-card-btn chat-card-btn--accent" data-chat-card-dl title="Open Download Missing Tracks modal">📥 Download</button>' +
-                '<button type="button" class="chat-card-btn" data-chat-wanted-wishlist title="Add to your Wishlist to find later">➕ Add to Wishlist</button>' +
-                '<button type="button" class="chat-card-btn" data-chat-card-search title="Search Soulseek for this release">🔍 Search Soulseek</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-wanted-wishlist title="Add to your Wishlist">➕ Wishlist</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-card-artist title="Go to ' + attr(w.a) + ' artist page">👤 Artist</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-card-search title="Search SoulSync for this release">🔍 Search</button>' +
             '</div>' +
         '</div>';
     }
@@ -1512,9 +1513,117 @@
         }
     }
 
-    function _addWantedToWishlist(w) {
-        if (typeof showToast === 'function') showToast('Added "' + w.t + '" to Wishlist search!', 'success');
-        _searchFromCard(w.a, w.t);
+    async function _addWantedToWishlist(w) {
+        if (!w || (!w.t && !w.a)) return;
+        var title = w.t || 'Unknown Title';
+        var artist = w.a || 'Unknown Artist';
+        var albumName = w.al || w.t || title;
+        var imgUrl = w.img || '';
+        var src = w.src || 'spotify';
+        var id = w.id || '';
+        var ty = w.ty || 'album';
+
+        // Use openAddToWishlistModal if available (the proper standard)
+        if (typeof window.openAddToWishlistModal === 'function') {
+            var albumObj = {
+                id: id || null,
+                name: albumName,
+                album_type: ty,
+                image_url: imgUrl,
+                images: imgUrl ? [{ url: imgUrl }] : [],
+                artists: [{ name: artist }],
+                source: src
+            };
+            var artistObj = {
+                id: null,
+                name: artist,
+                image_url: '',
+                source: src
+            };
+
+            // Build a tracks array — if we have no duration, try to look it up
+            var dur = Number(w.dur) || 0;
+            if (!dur) {
+                try {
+                    var searchQ = (artist !== 'Unknown Artist' ? artist + ' ' : '') + title;
+                    var sr = await fetch('/api/enhanced-search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: searchQ.trim() })
+                    }).then(function (r) { return r.ok ? r.json() : null; });
+                    if (sr) {
+                        var trs = sr.tracks || sr.spotify_tracks || [];
+                        var als = sr.albums || sr.spotify_albums || [];
+                        var hit = trs[0] || als[0];
+                        if (hit) {
+                            if (hit.duration_ms) dur = hit.duration_ms;
+                            if (!imgUrl && hit.image_url) {
+                                imgUrl = hit.image_url;
+                                albumObj.image_url = imgUrl;
+                                albumObj.images = [{ url: imgUrl }];
+                            }
+                            if (!id && hit.id) {
+                                id = String(hit.id);
+                                albumObj.id = id;
+                            }
+                        }
+                    }
+                } catch (e) { /* best-effort */ }
+            }
+
+            var tracks = [{
+                id: id || 'wanted_' + Date.now(),
+                name: title,
+                artist: artist,
+                artists: [{ name: artist }],
+                album: albumObj,
+                duration_ms: dur || 0,
+                image_url: imgUrl,
+                source: src,
+                track_number: 1,
+                total_tracks: 1
+            }];
+
+            try {
+                window.openAddToWishlistModal(albumObj, artistObj, tracks, ty, null);
+            } catch (err) {
+                console.error('[Chat] openAddToWishlistModal failed:', err);
+                if (typeof showToast === 'function') showToast('Could not open wishlist modal', 'error');
+            }
+            return;
+        }
+
+        // Fallback: direct API call
+        try {
+            var trackObj = {
+                id: id || 'wanted_' + Date.now(),
+                name: title,
+                artist: artist,
+                artists: [{ name: artist }],
+                duration_ms: 0,
+                source: src
+            };
+            var res = await fetch('/api/add-album-to-wishlist', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track: trackObj,
+                    artist: { id: null, name: artist, source: src },
+                    album: { id: null, name: albumName, album_type: ty, images: imgUrl ? [{ url: imgUrl }] : [] },
+                    source_type: 'album',
+                    source_context: { album_name: albumName, artist_name: artist, album_type: ty }
+                })
+            });
+            var result = await res.json();
+            if (result.success) {
+                if (typeof showToast === 'function') showToast('✅ Added "' + title + '" to Wishlist!', 'success');
+            } else {
+                if (typeof showToast === 'function') showToast(result.error || 'Failed to add to wishlist', 'error');
+            }
+        } catch (err) {
+            console.error('[Chat] Failed to add to wishlist:', err);
+            if (typeof showToast === 'function') showToast('Failed to add to wishlist', 'error');
+        }
     }
 
     function _bindChatDragAndDrop() {
@@ -7220,7 +7329,12 @@
                 if (c5) {
                     _addWantedToWishlist({
                         t: c5.getAttribute('data-wanted-title') || '',
-                        a: c5.getAttribute('data-wanted-artist') || ''
+                        a: c5.getAttribute('data-wanted-artist') || '',
+                        al: c5.getAttribute('data-wanted-album') || '',
+                        id: c5.getAttribute('data-wanted-id') || '',
+                        src: c5.getAttribute('data-wanted-src') || '',
+                        img: c5.getAttribute('data-wanted-img') || '',
+                        ty: 'album'
                     });
                 }
                 return;
