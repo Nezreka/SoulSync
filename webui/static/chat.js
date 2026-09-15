@@ -1622,7 +1622,8 @@
         if (typeof navigateToPage === 'function') {
             navigateToPage('search');
             setTimeout(function () {
-                var inp = document.getElementById('enhanced-search-input') || document.getElementById('search-input');
+                // 'search-input' is a class, not an id; the react search bar is the only input
+                var inp = document.getElementById('enhanced-search-input');
                 if (inp) {
                     inp.value = qstr;
                     inp.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2147,6 +2148,10 @@
             peerBmBtn.textContent = '📚 Bookmarks (' + bmCount + ')';
         }
     }
+
+    // the bookmark handlers still call this by its old name; the count now
+    // lives with the rest of the social badges, so it's the same refresh
+    function _updateSavedPeersBtn() { _updateSocialBadges(); }
 
     // ── friend list (local only — special shiny star & badge, no requesting) ──
     function friendsSet() {

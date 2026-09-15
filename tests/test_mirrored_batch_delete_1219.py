@@ -26,9 +26,12 @@ def _mirror(db, name, profile_id):
     )
 
 
-def _client(db, *, is_admin, profile_id=1):
+def _client(db, monkeypatch, *, is_admin):
+    # monkeypatch, never configure(): configure() rebinds the module global for
+    # the rest of the pytest worker, and under -n 8 the next test in that worker
+    # that touches the blueprint reads this tmp db and 404s (ci, sept 15)
     import api.mirrored_playlists as mod
-    mod.configure(get_database=lambda: db)
+    monkeypatch.setattr(mod, "get_database", lambda: db)
     app = Flask(__name__)
 
     @app.before_request
@@ -36,8 +39,6 @@ def _client(db, *, is_admin, profile_id=1):
         g.is_admin = is_admin
 
     app.register_blueprint(mod.create_blueprint())
-    import core.profile_context as pc
-    app.config["_pc"] = pc
     return app.test_client()
 
 
@@ -46,10 +47,10 @@ def _count(db):
         return conn.execute("SELECT COUNT(*) FROM mirrored_playlists").fetchone()[0]
 
 
-def test_admin_deletes_every_listed_mirror(mdb):
-    ids = [_mirror(mdb, f"#wonderbracket", p) for p in (1, 2, 3)]
+def test_admin_deletes_every_listed_mirror(mdb, monkeypatch):
+    ids = [_mirror(mdb, "#wonderbracket", p) for p in (1, 2, 3)]
     keep = _mirror(mdb, "keep me", 1)
-    c = _client(mdb, is_admin=True)
+    c = _client(mdb, monkeypatch, is_admin=True)
     resp = c.post("/api/mirrored-playlists/batch-delete", json={"ids": ids})
     assert resp.status_code == 200, resp.data
     body = resp.get_json()
@@ -60,9 +61,9 @@ def test_admin_deletes_every_listed_mirror(mdb):
     assert mdb.get_mirrored_playlist(keep) is not None
 
 
-def test_unknown_ids_are_reported_not_raised(mdb):
+def test_unknown_ids_are_reported_not_raised(mdb, monkeypatch):
     mine = _mirror(mdb, "a", 1)
-    c = _client(mdb, is_admin=True)
+    c = _client(mdb, monkeypatch, is_admin=True)
     resp = c.post("/api/mirrored-playlists/batch-delete", json={"ids": [mine, 99999, mine]})
     body = resp.get_json()
     assert body["deleted"] == [mine]
@@ -74,7 +75,7 @@ def test_non_admin_cannot_reach_another_profiles_mirror(mdb, monkeypatch):
     theirs = _mirror(mdb, "theirs", 3)
     import api.mirrored_playlists as mod
     monkeypatch.setattr(mod, "get_current_profile_id", lambda: 2)
-    c = _client(mdb, is_admin=False)
+    c = _client(mdb, monkeypatch, is_admin=False)
     resp = c.post("/api/mirrored-playlists/batch-delete", json={"ids": [mine, theirs]})
     body = resp.get_json()
     assert body["deleted"] == [mine]
@@ -86,14 +87,14 @@ def test_non_admin_cannot_reach_another_profiles_mirror(mdb, monkeypatch):
 @pytest.mark.parametrize("payload", [
     {}, {"ids": []}, {"ids": "1,2"}, {"ids": [1, "x"]}, {"ids": [True]},
 ])
-def test_bad_payloads_are_400(mdb, payload):
-    c = _client(mdb, is_admin=True)
+def test_bad_payloads_are_400(mdb, monkeypatch, payload):
+    c = _client(mdb, monkeypatch, is_admin=True)
     resp = c.post("/api/mirrored-playlists/batch-delete", json=payload)
     assert resp.status_code == 400
     assert _count(mdb) == 0
 
 
-def test_cap_on_ids(mdb):
-    c = _client(mdb, is_admin=True)
+def test_cap_on_ids(mdb, monkeypatch):
+    c = _client(mdb, monkeypatch, is_admin=True)
     resp = c.post("/api/mirrored-playlists/batch-delete", json={"ids": list(range(501))})
     assert resp.status_code == 400
