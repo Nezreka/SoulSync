@@ -2683,21 +2683,44 @@
 
 /* Now Playing Card */
 .chat-np-card {
-    background: rgba(18, 20, 31, 0.82);
+    position: relative;
+    background: linear-gradient(135deg, rgba(18, 20, 36, 0.88) 0%, rgba(13, 15, 26, 0.94) 100%);
     border: 1px solid rgba(99, 102, 241, 0.28);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
     border-left: 3.5px solid #6366f1;
     border-radius: 12px;
     padding: 12px 14px;
     max-width: 520px;
     margin: 6px 0;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.38), 0 0 15px rgba(99, 102, 241, 0.12);
-    backdrop-filter: blur(14px);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.38), 0 0 15px rgba(99, 102, 241, 0.1);
+    backdrop-filter: blur(16px);
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+}
+
+.chat-np-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 55px;
+    background: radial-gradient(circle at 18% 0%, rgba(99, 102, 241, 0.18) 0%, transparent 70%);
+    pointer-events: none;
+    opacity: 0.6;
+    transition: opacity 0.22s ease;
 }
 
 .chat-np-card:hover {
-    border-color: rgba(99, 102, 241, 0.5);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), 0 0 20px rgba(99, 102, 241, 0.22);
+    border-color: rgba(99, 102, 241, 0.55);
+    border-top-color: rgba(255, 255, 255, 0.22);
+    border-left-color: #818cf8;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.48), 0 0 24px rgba(99, 102, 241, 0.22);
+    transform: translateY(-1px);
+}
+
+.chat-np-card:hover::before {
+    opacity: 1;
 }
 
 .chat-np-header {
@@ -2779,10 +2802,16 @@
 .chat-np-thumb {
     width: 54px;
     height: 54px;
-    border-radius: 8px;
+    border-radius: 9px;
     object-fit: cover;
     flex-shrink: 0;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease;
+}
+
+.chat-np-card:hover .chat-np-thumb {
+    transform: scale(1.04);
+    box-shadow: 0 5px 16px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
 .chat-np-thumb--ph {
@@ -2833,9 +2862,46 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 6px;
+    margin-top: 0;
+    padding-top: 0;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+    border-top: 1px solid transparent;
+    transform: translateY(4px);
+    transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+                max-height 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+                margin-top 0.2s ease,
+                padding-top 0.2s ease,
+                border-color 0.2s ease;
+}
+
+.chat-np-card:hover .chat-np-actions,
+.chat-wanted-card:hover .chat-wanted-actions,
+.chat-np-card:focus-within .chat-np-actions,
+.chat-wanted-card:focus-within .chat-wanted-actions {
+    opacity: 1;
+    max-height: 90px;
     margin-top: 10px;
     padding-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    border-top-color: rgba(255, 255, 255, 0.08);
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+@media (hover: none) {
+    .chat-np-actions,
+    .chat-wanted-actions {
+        opacity: 1;
+        max-height: none;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top-color: rgba(255, 255, 255, 0.08);
+        pointer-events: auto;
+        transform: none;
+    }
 }
 
 /* Card Action Buttons */
@@ -2843,63 +2909,90 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 5px 10px;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.07);
+    padding: 5px 11px;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.12);
     color: rgba(255, 255, 255, 0.88);
-    font-size: 11.5px;
+    font-size: 11px;
     font-weight: 600;
+    letter-spacing: 0.15px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+    line-height: 1.4;
 }
 
 .chat-card-btn:hover {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.26);
     color: #fff;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+    transform: translateY(-1px);
+}
+
+.chat-card-btn:active {
+    transform: scale(0.96) translateY(0);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .chat-card-btn--primary {
-    background: rgba(99, 102, 241, 0.22);
-    border-color: rgba(99, 102, 241, 0.45);
+    background: rgba(99, 102, 241, 0.18);
+    border-color: rgba(99, 102, 241, 0.38);
     color: #c7d2fe;
 }
 
 .chat-card-btn--primary:hover {
-    background: rgba(99, 102, 241, 0.38);
-    border-color: #6366f1;
+    background: rgba(99, 102, 241, 0.32);
+    border-color: #818cf8;
     color: #fff;
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
 }
 
 .chat-card-btn--accent {
-    background: rgba(var(--accent-rgb, 29, 185, 84), 0.18);
-    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.38);
-    color: rgb(var(--accent-light-rgb, 88, 220, 134));
+    background: rgba(16, 185, 129, 0.16);
+    border-color: rgba(16, 185, 129, 0.36);
+    color: #6ee7b7;
 }
 
 .chat-card-btn--accent:hover {
-    background: rgba(var(--accent-rgb, 29, 185, 84), 0.32);
-    border-color: rgb(var(--accent-rgb, 29, 185, 84));
+    background: rgba(16, 185, 129, 0.3);
+    border-color: #34d399;
     color: #fff;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+}
+
+.chat-card-btn--wishlist {
+    background: rgba(245, 158, 11, 0.16);
+    border-color: rgba(245, 158, 11, 0.36);
+    color: #fde68a;
+}
+
+.chat-card-btn--wishlist:hover {
+    background: rgba(245, 158, 11, 0.32);
+    border-color: #fbbf24;
+    color: #fff;
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
 }
 
 .chat-card-btn--success {
-    background: rgba(16, 185, 129, 0.2);
-    border-color: rgba(16, 185, 129, 0.45);
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(5, 150, 105, 0.32) 100%);
+    border-color: rgba(16, 185, 129, 0.5);
     color: #a7f3d0;
 }
 
 .chat-card-btn--success:hover {
-    background: rgba(16, 185, 129, 0.36);
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.38) 0%, rgba(5, 150, 105, 0.5) 100%);
     border-color: #10b981;
     color: #fff;
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.45);
 }
 
 .chat-card-btn--glow {
-    box-shadow: 0 0 12px rgba(16, 185, 129, 0.35);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.38);
     border-color: #10b981;
-    animation: pulseGreenGlow 2.5s infinite ease-in-out;
+    animation: pulseGreenGlow 2.4s infinite ease-in-out;
 }
 
 @keyframes pulseGreenGlow {
@@ -2909,21 +3002,44 @@
 
 /* Wanted / ISO Card */
 .chat-wanted-card {
-    background: rgba(28, 24, 16, 0.82);
+    position: relative;
+    background: linear-gradient(135deg, rgba(28, 23, 15, 0.88) 0%, rgba(18, 15, 10, 0.94) 100%);
     border: 1px solid rgba(245, 158, 11, 0.3);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
     border-left: 3.5px solid #f59e0b;
     border-radius: 12px;
     padding: 12px 14px;
     max-width: 520px;
     margin: 6px 0;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.38), 0 0 15px rgba(245, 158, 11, 0.12);
-    backdrop-filter: blur(14px);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.38), 0 0 15px rgba(245, 158, 11, 0.1);
+    backdrop-filter: blur(16px);
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+}
+
+.chat-wanted-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 55px;
+    background: radial-gradient(circle at 18% 0%, rgba(245, 158, 11, 0.18) 0%, transparent 70%);
+    pointer-events: none;
+    opacity: 0.6;
+    transition: opacity 0.22s ease;
 }
 
 .chat-wanted-card:hover {
-    border-color: rgba(245, 158, 11, 0.55);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), 0 0 20px rgba(245, 158, 11, 0.22);
+    border-color: rgba(245, 158, 11, 0.58);
+    border-top-color: rgba(255, 255, 255, 0.22);
+    border-left-color: #fbbf24;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.48), 0 0 24px rgba(245, 158, 11, 0.22);
+    transform: translateY(-1px);
+}
+
+.chat-wanted-card:hover::before {
+    opacity: 1;
 }
 
 .chat-wanted-header {
@@ -2996,10 +3112,16 @@
 .chat-wanted-thumb {
     width: 54px;
     height: 54px;
-    border-radius: 8px;
+    border-radius: 9px;
     object-fit: cover;
     flex-shrink: 0;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease;
+}
+
+.chat-wanted-card:hover .chat-wanted-thumb {
+    transform: scale(1.04);
+    box-shadow: 0 5px 16px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
 .chat-wanted-thumb--ph {

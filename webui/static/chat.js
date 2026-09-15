@@ -953,7 +953,7 @@
             _scheduleNpArtProbe(np.t, np.a);
         }
 
-        return '<div class="chat-np-card" data-np-title="' + attr(np.t) + '" data-np-artist="' + attr(np.a) + '" data-np-album="' + attr(np.al || '') + '" data-np-id="' + attr(np.id || '') + '" data-np-src="' + attr(np.src || '') + '" data-np-dur="' + attr(np.dur || 0) + '" data-np-img="' + attr(resolvedImg || np.img || '') + '">' +
+        return '<div class="chat-np-card" data-np-title="' + attr(np.t) + '" data-np-artist="' + attr(np.a) + '" data-np-album="' + attr(np.al || '') + '" data-np-id="' + attr(np.id || '') + '" data-np-src="' + attr(np.src || '') + '" data-np-dur="' + attr(np.dur || 0) + '" data-np-img="' + attr(resolvedImg || np.img || '') + '" data-np-type="track">' +
             '<div class="chat-np-header">' +
                 '<span class="chat-np-tag"><span class="chat-np-eq"><i></i><i></i><i></i></span> NOW PLAYING</span>' +
                 '<span class="chat-np-src-pill">' + src + '</span>' +
@@ -970,7 +970,8 @@
             '</div>' +
             '<div class="chat-np-actions">' +
                 '<button type="button" class="chat-card-btn chat-card-btn--primary" data-chat-card-stream title="Preview audio stream">▶ Preview</button>' +
-                '<button type="button" class="chat-card-btn chat-card-btn--accent" data-chat-card-dl title="Open Download Missing Tracks modal">📥 Download Missing</button>' +
+                '<button type="button" class="chat-card-btn chat-card-btn--accent" data-chat-card-dl title="Open Download Tracks modal">📥 Download</button>' +
+                '<button type="button" class="chat-card-btn chat-card-btn--wishlist" data-chat-card-wishlist title="Add to your Wishlist">➕ Wishlist</button>' +
                 '<button type="button" class="chat-card-btn" data-chat-card-artist title="Go to ' + attr(np.a) + ' artist page">👤 Artist</button>' +
                 '<button type="button" class="chat-card-btn" data-chat-card-search title="Search SoulSync for this release">🔍 Search</button>' +
             '</div>' +
@@ -1088,8 +1089,8 @@
             '</div>' +
             '<div class="chat-wanted-actions">' +
                 haveBtn +
-                '<button type="button" class="chat-card-btn chat-card-btn--accent" data-chat-card-dl title="Open Download Missing Tracks modal">📥 Download</button>' +
-                '<button type="button" class="chat-card-btn" data-chat-wanted-wishlist title="Add to your Wishlist">➕ Wishlist</button>' +
+                '<button type="button" class="chat-card-btn chat-card-btn--accent" data-chat-card-dl title="Open Download Tracks modal">📥 Download</button>' +
+                '<button type="button" class="chat-card-btn chat-card-btn--wishlist" data-chat-wanted-wishlist title="Add to your Wishlist">➕ Wishlist</button>' +
                 '<button type="button" class="chat-card-btn" data-chat-card-artist title="Go to ' + attr(w.a) + ' artist page">👤 Artist</button>' +
                 '<button type="button" class="chat-card-btn" data-chat-card-search title="Search SoulSync for this release">🔍 Search</button>' +
             '</div>' +
@@ -7521,20 +7522,21 @@
                 );
                 return;
             }
-            t = e.target.closest('[data-chat-wanted-wishlist]');
+            t = e.target.closest('[data-chat-wanted-wishlist]') || e.target.closest('[data-chat-card-wishlist]');
             if (t) {
-                var c5 = t.closest('.chat-wanted-card');
+                var c5 = t.closest('.chat-wanted-card') || t.closest('.chat-np-card');
                 if (c5) {
+                    var isWanted = c5.classList.contains('chat-wanted-card');
                     _addWantedToWishlist({
-                        t: c5.getAttribute('data-wanted-title') || '',
-                        a: c5.getAttribute('data-wanted-artist') || '',
-                        al: c5.getAttribute('data-wanted-album') || '',
-                        id: c5.getAttribute('data-wanted-id') || '',
-                        src: c5.getAttribute('data-wanted-src') || '',
-                        img: c5.getAttribute('data-wanted-img') || '',
-                        ty: c5.getAttribute('data-wanted-type') || 'album',
-                        dur: c5.getAttribute('data-wanted-dur') || 0,
-                        y: c5.getAttribute('data-wanted-year') || ''
+                        t: c5.getAttribute(isWanted ? 'data-wanted-title' : 'data-np-title') || '',
+                        a: c5.getAttribute(isWanted ? 'data-wanted-artist' : 'data-np-artist') || '',
+                        al: c5.getAttribute(isWanted ? 'data-wanted-album' : 'data-np-album') || '',
+                        id: c5.getAttribute(isWanted ? 'data-wanted-id' : 'data-np-id') || '',
+                        src: c5.getAttribute(isWanted ? 'data-wanted-src' : 'data-np-src') || '',
+                        img: c5.getAttribute(isWanted ? 'data-wanted-img' : 'data-np-img') || '',
+                        ty: isWanted ? (c5.getAttribute('data-wanted-type') || 'album') : 'track',
+                        dur: c5.getAttribute(isWanted ? 'data-wanted-dur' : 'data-np-dur') || 0,
+                        y: c5.getAttribute(isWanted ? 'data-wanted-year' : 'data-np-year') || ''
                     });
                 }
                 return;
