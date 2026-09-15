@@ -67,6 +67,12 @@
     var freshExpanded = {};        // detail url -> open, so a re-render keeps it open
     var freshLoading = false;
     var freshPeriod = 'day';
+    var freshViewMode = (function () {
+        try { return localStorage.getItem('vsrFreshViewMode') || 'grid'; } catch (e) { return 'grid'; }
+    })();
+    var freshFilterQuery = '';
+    var freshFilterQuality = 'all';
+    var freshFilterCategory = 'all';
     var freshIdentify = null;
     var freshIdentifyTimer = null;
     var freshIdentifySeq = 0;
@@ -586,6 +592,74 @@
             '<div class="vsr-fresh-table">' + rows + '</div></section>';
     }
 
+    function freshSeasonEpisodeLabel(r) {
+        if (!r) return '';
+        var s = r.season;
+        var ep = r.episode;
+        var epEnd = r.episode_end;
+        var isPack = r.is_season_pack;
+        var isSeries = r.is_series_pack;
+        var title = r.title || '';
+
+        if (s == null) {
+            var sm = title.match(/\bS(\d{1,2})\s*(?:E(\d{1,3}))?(?:-?E?(\d{1,3}))?\b/i);
+            if (sm) {
+                s = parseInt(sm[1], 10);
+                if (sm[2]) ep = parseInt(sm[2], 10);
+                if (sm[3]) epEnd = parseInt(sm[3], 10);
+            } else {
+                var sznM = title.match(/\bSeason\s*(\d{1,2})\b/i);
+                if (sznM) {
+                    s = parseInt(sznM[1], 10);
+                    if (/complete|pack|all/i.test(title)) isPack = true;
+                }
+            }
+        }
+
+        if (isSeries) return 'Complete Series';
+        if (s != null) {
+            var sStr = 'S' + (s < 10 ? '0' : '') + s;
+            if (ep != null) {
+                var epStr = 'E' + (ep < 10 ? '0' : '') + ep;
+                if (epEnd != null && epEnd !== ep) {
+                    epStr += '-E' + (epEnd < 10 ? '0' : '') + epEnd;
+                }
+                return sStr + epStr;
+            }
+            if (isPack || /complete|pack|all\s*episodes/i.test(title)) {
+                return 'Season ' + s + ' Complete';
+            }
+            return 'Season ' + s;
+        }
+        return '';
+    }
+
+    function freshMatchesFilter(r, category) {
+        if (freshFilterCategory !== 'all' && freshFilterCategory !== category) return false;
+        if (freshFilterQuality !== 'all') {
+            var q = freshFilterQuality.toLowerCase();
+            var qText = ((r.title || '') + ' ' + ((r.detail && r.detail.quality) || '')).toLowerCase();
+            if (q === '2160p' || q === '4k') {
+                if (!/2160p|4k|uhd/i.test(qText)) return false;
+            } else if (q === '1080p') {
+                if (!/1080p|fhd/i.test(qText)) return false;
+            } else if (q === '720p') {
+                if (!/720p|hd\b/i.test(qText)) return false;
+            }
+        }
+        if (freshFilterQuery && freshFilterQuery.trim()) {
+            var qTerms = freshFilterQuery.trim().toLowerCase().split(/\s+/);
+            var haystack = ((r.title || '') + ' ' + (r.search_title || '') + ' ' +
+                ((r.detail && r.detail.title) || '') + ' ' +
+                ((r.detail && (r.detail.genres || []).join(' ')) || '') + ' ' +
+                ((r.detail && r.detail.year) || '')).toLowerCase();
+            for (var i = 0; i < qTerms.length; i++) {
+                if (haystack.indexOf(qTerms[i]) === -1) return false;
+            }
+        }
+        return true;
+    }
+
     // The facts EXT.to already stated on the release's own detail page, matched in
     // by the board refresh. Purely presentational — the user still identifies the
     // title in the modal; this is here so that call is an informed one.
@@ -623,10 +697,11 @@
     function freshFactsHTML(d) {
         var facts = (d && d.facts) || [];
         if (!facts.length) return '';
+        var hasImdb = facts.some(function (f) { return /imdb/i.test(f.label); });
         return '<div class="vsr-fresh-facts">' + facts.map(function (f) {
             return '<div class="vsr-fresh-fact"><span>' + esc(f.label) + '</span><em>' + esc(f.value) + '</em></div>';
         }).join('') +
-        (d.imdb_id ? '<div class="vsr-fresh-fact"><span>IMDb</span><em>' + esc(d.imdb_id) + '</em></div>' : '') +
+        (!hasImdb && d.imdb_id ? '<div class="vsr-fresh-fact"><span>IMDb</span><em>' + esc(d.imdb_id) + '</em></div>' : '') +
         '</div>';
     }
 
@@ -639,6 +714,7 @@
         var hint = category === 'movies' ? 'Movie' : (r.episode != null ? 'Episode' : 'Season pack');
         var d = r.detail || null;
         var named = d && d.title ? '<b>' + esc(d.title) + '</b> - ' : '';
+        var epLabel = freshSeasonEpisodeLabel(r);
         // Only a matched release has anything to expand into.
         var can = !!(d && (d.facts || []).length);
         var open = can && !!freshExpanded[r.url];
@@ -648,14 +724,21 @@
                 (can ? ' data-vsr-fresh-toggle="' + esc(category) + ':' + index + '" role="button" tabindex="0"' +
                        ' aria-expanded="' + (open ? 'true' : 'false') + '"' : '') + '>' +
             freshArtHTML(d, (d && d.title) || r.search_title || r.title) +
-            '<div class="vsr-fresh-release"><strong title="' + esc(r.title || '') + '">' + esc(r.title || 'Untitled release') + '</strong>' +
+            '<div class="vsr-fresh-release">' +
+                '<strong title="' + esc(r.title || '') + '">' +
+                    esc((d && d.title) || r.search_title || r.title || 'Untitled release') +
+                    (epLabel ? ' <span class="vsr-fresh-ep-pill">' + esc(epLabel) + '</span>' : '') +
+                '</strong>' +
+                '<div class="vsr-fresh-row-raw" title="' + esc(r.title || '') + '">' + esc(r.title || '') + '</div>' +
                 '<span>' + named + esc(r.age || 'Age unknown') + ' - ' + esc(r.source || 'EXT.to') + ' - ' + esc(hint) + '</span>' +
-                freshMetaHTML(d) + '</div>' +
+                freshMetaHTML(d) +
+            '</div>' +
             freshStat('Size', r.size_text || 'Unknown') +
             freshStat('Files', files) +
             freshStat('Seed', seeds, 'vsr-fresh-seed') +
             freshStat('Leech', leech, 'vsr-fresh-leech') +
             '<button class="vsr-fresh-pick" type="button" data-vsr-fresh-pick="' + esc(category) + ':' + index + '" ' + (ready ? '' : 'disabled ') + '>' + (ready ? 'Identify' : 'No magnet') + '</button>' +
+            (ready && (r.download_url || r.magnet_uri) ? '<button class="vsr-fresh-card-btn-icon" type="button" data-vsr-fresh-copy="' + esc(category) + ':' + index + '" title="Copy magnet link" aria-label="Copy magnet link"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>' : '') +
             (can ? '<span class="vsr-fresh-chev" aria-hidden="true"></span>' : '') +
             (open ? freshFactsHTML(d) : '') +
         '</article>';
@@ -664,14 +747,188 @@
     function freshSectionHTML(category, label) {
         var rows = freshRows(category);
         var totalSeeds = rows.reduce(function (sum, r) { var n = Number(r.seeders); return sum + (isFinite(n) ? n : 0); }, 0);
-        var body = rows.length ? rows.slice(0, 18).map(function (r, i) { return freshRowHTML(r, category, i); }).join('') :
-            '<div class="vsr-basic-empty"><div class="vsr-basic-empty-mark">⌕</div><div><strong>No ' + esc(label.toLowerCase()) + ' releases found</strong><p>EXT.to did not publish rows for this period in the current homepage snapshot.</p></div></div>';
+        var filtered = rows.filter(function (r) { return freshMatchesFilter(r, category); });
+        var body = '';
+        if (!rows.length) {
+            body = '<div class="vsr-basic-empty"><div class="vsr-basic-empty-mark">⌕</div><div><strong>No ' + esc(label.toLowerCase()) + ' releases found</strong><p>EXT.to did not publish rows for this period in the current homepage snapshot.</p></div></div>';
+        } else if (!filtered.length) {
+            body = '<div class="vsr-basic-empty"><div class="vsr-basic-empty-mark">⌕</div><div><strong>No matching ' + esc(label.toLowerCase()) + ' releases</strong><p>No releases match your current filters. Try changing quality or search terms.</p></div></div>';
+        } else if (freshViewMode === 'grid') {
+            body = '<div class="vsr-fresh-cards-grid">' + filtered.map(function (r) {
+                var origIndex = rows.indexOf(r);
+                return freshCardHTML(r, category, origIndex);
+            }).join('') + '</div>';
+        } else {
+            body = '<div class="vsr-fresh-table">' + filtered.map(function (r) {
+                var origIndex = rows.indexOf(r);
+                return freshRowHTML(r, category, origIndex);
+            }).join('') + '</div>';
+        }
         return '<section class="vsr-fresh-board" data-vsr-fresh-section="' + esc(category) + '">' +
             '<div class="vsr-fresh-board-head"><div><span>' + esc(label) + '</span><h2>' + esc(freshPeriodLabel(freshPeriod)) + ' releases</h2></div>' +
-            '<div class="vsr-fresh-board-stats">' + freshStat('Rows', freshNum(rows.length)) + freshStat('Seeds', freshNum(totalSeeds), 'vsr-fresh-seed') + '</div></div>' +
+            '<div class="vsr-fresh-board-stats">' +
+                freshStat('Showing', freshNum(filtered.length) + (filtered.length !== rows.length ? ' of ' + freshNum(rows.length) : '')) +
+                freshStat('Total Seeds', freshNum(totalSeeds), 'vsr-fresh-seed') +
+            '</div></div>' +
             '<div class="vsr-fresh-table-head"><span>Release</span><span>Size</span><span>Files</span><span>Seed</span><span>Leech</span><span></span></div>' +
-            '<div class="vsr-fresh-table">' + body + '</div>' +
+            body +
         '</section>';
+    }
+
+    function freshCardHTML(r, category, index) {
+        r = r || {};
+        var seeds = r.seeders == null ? '-' : freshNum(r.seeders);
+        var ready = !!(r.download_url || r.magnet_uri);
+        var d = r.detail || null;
+        var can = !!(d && (d.facts || []).length);
+        var open = can && !!freshExpanded[r.url];
+        var title = (d && d.title) || r.search_title || r.title || 'Untitled release';
+        var epLabel = freshSeasonEpisodeLabel(r);
+        var qual = (d && d.quality) || (r.title && (r.title.match(/\b(2160p|4K|1080p|720p|HDR|DV|Remux)\b/i) || [])[0]) || '';
+        var year = (d && d.year) || (r.title && (r.title.match(/\b(19\d\d|20\d\d)\b/) || [])[0]) || '';
+        var rating = d && d.imdb_rating;
+        var genres = (d && d.genres) || [];
+        var isTv = category === 'tv' || !!epLabel || (r.episode != null);
+        var subText = isTv ? (epLabel || 'TV Series') : 'Movie';
+
+        return '<article class="vsr-fresh-card ' + (ready ? 'vsr-fresh-card--ready' : 'vsr-fresh-card--blocked') +
+                (open ? ' vsr-fresh-card--open' : '') + '">' +
+            '<div class="vsr-fresh-card-media" ' + (can ? 'data-vsr-fresh-toggle="' + esc(category) + ':' + index + '" role="button" tabindex="0" title="Click to inspect release details"' : '') + '>' +
+                freshArtHTML(d, title) +
+                '<div class="vsr-fresh-card-badges-top">' +
+                    '<div class="vsr-fresh-badges-left">' +
+                        (epLabel ? '<span class="vsr-fresh-badge--ep">' + esc(epLabel) + '</span>' : '') +
+                        (qual ? '<span class="vsr-fresh-badge--quality">' + esc(qual) + '</span>' : '') +
+                    '</div>' +
+                    (rating ? '<span class="vsr-fresh-badge--rating">&#9733; ' + esc(rating) + '</span>' : '') +
+                '</div>' +
+                '<div class="vsr-fresh-badge--swarm">' +
+                    '<span class="vsr-fresh-badge--seeds">&#9650; ' + esc(seeds) + ' seeds</span>' +
+                    '<span class="vsr-fresh-badge--size">' + esc(r.size_text || '') + '</span>' +
+                '</div>' +
+            '</div>' +
+            '<div class="vsr-fresh-card-content">' +
+                '<strong class="vsr-fresh-card-title" title="' + esc(title) + '">' + esc(title) + '</strong>' +
+                '<div class="vsr-fresh-card-sub">' +
+                    '<span class="vsr-fresh-card-sub-pill">' + esc(subText) + '</span>' +
+                    (year ? '<span class="vsr-fresh-card-sub-dot">\u00b7</span><span>' + esc(year) + '</span>' : '') +
+                    (d && d.runtime_minutes ? '<span class="vsr-fresh-card-sub-dot">\u00b7</span><span>' + esc(d.runtime_minutes) + 'm</span>' : '') +
+                '</div>' +
+                '<div class="vsr-fresh-card-raw" title="' + esc(r.title || '') + '">' + esc(r.title || '') + '</div>' +
+                '<div class="vsr-fresh-card-meta">' +
+                    '<span>' + esc(r.age || 'Recent') + '</span>' +
+                    '<span class="vsr-fresh-card-sub-dot">\u00b7</span>' +
+                    '<span>' + esc(r.source || 'EXT.to') + '</span>' +
+                '</div>' +
+                (genres.length ? '<div class="vsr-fresh-card-genres">' + genres.slice(0, 2).map(function (g) {
+                    return '<span class="vsr-fresh-card-genre">' + esc(g) + '</span>';
+                }).join('') + '</div>' : '') +
+                '<div class="vsr-fresh-card-actions">' +
+                    '<button class="vsr-fresh-pick" type="button" data-vsr-fresh-pick="' + esc(category) + ':' + index + '" ' + (ready ? '' : 'disabled ') + '>' +
+                        (ready ? 'Identify' : 'No magnet') +
+                    '</button>' +
+                    (can ? '<button class="vsr-fresh-card-btn-icon ' + (open ? 'active' : '') + '" type="button" data-vsr-fresh-toggle="' + esc(category) + ':' + index + '" title="' + (open ? 'Close details' : 'View release details') + '" aria-label="Details"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></button>' : '') +
+                    (ready && (r.download_url || r.magnet_uri) ? '<button class="vsr-fresh-card-btn-icon" type="button" data-vsr-fresh-copy="' + esc(category) + ':' + index + '" title="Copy magnet link" aria-label="Copy magnet link"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>' : '') +
+                '</div>' +
+            '</div>' +
+        '</article>';
+    }
+
+    function freshDetailModalHTML(r, category, index) {
+        var d = r.detail || {};
+        var title = (d && d.title) || r.search_title || r.title || 'Untitled release';
+        var epLabel = freshSeasonEpisodeLabel(r);
+        var ready = !!(r.download_url || r.magnet_uri);
+        var qual = (d && d.quality) || (r.title && (r.title.match(/\b(2160p|4K|1080p|720p|HDR|DV|Remux)\b/i) || [])[0]) || '';
+        var year = (d && d.year) || (r.title && (r.title.match(/\b(19\d\d|20\d\d)\b/) || [])[0]) || '';
+        var rating = d && d.imdb_rating;
+        var seeds = r.seeders == null ? '-' : freshNum(r.seeders);
+        var leech = r.leechers == null ? '-' : freshNum(r.leechers);
+        var files = r.files == null ? '-' : freshNum(r.files);
+
+        return '<div class="vsr-fresh-modal-backdrop" data-vsr-fresh-detail-close>' +
+            '<div class="vsr-fresh-modal" role="dialog" aria-modal="true" aria-label="Release details">' +
+                '<div class="vsr-fresh-modal-head">' +
+                    '<div class="vsr-fresh-modal-hero">' +
+                        freshArtHTML(d, title) +
+                        '<div class="vsr-fresh-modal-titles">' +
+                            '<div class="vsr-fresh-modal-badges">' +
+                                (epLabel ? '<span class="vsr-fresh-badge--ep">' + esc(epLabel) + '</span>' : '') +
+                                (qual ? '<span class="vsr-fresh-badge--quality">' + esc(qual) + '</span>' : '') +
+                                (rating ? '<span class="vsr-fresh-modal-rating">&#9733; ' + esc(rating) + (d.imdb_votes ? ' (' + esc(freshNum(d.imdb_votes)) + ')' : '') + '</span>' : '') +
+                            '</div>' +
+                            '<h2>' + esc(title) + '</h2>' +
+                            '<div class="vsr-fresh-modal-raw-box">' +
+                                '<code title="' + esc(r.title || '') + '">' + esc(r.title || '') + '</code>' +
+                                '<button type="button" class="vsr-fresh-copy-name-btn" data-vsr-fresh-copy-name="' + esc(category) + ':' + index + '" title="Copy raw torrent release name">Copy Name</button>' +
+                            '</div>' +
+                            '<div class="vsr-fresh-modal-meta">' +
+                                (year ? '<span>' + esc(year) + '</span>' : '') +
+                                (d.runtime_minutes ? '<span>\u00b7 ' + esc(d.runtime_minutes) + ' mins</span>' : '') +
+                                (r.age ? '<span>\u00b7 ' + esc(r.age) + '</span>' : '') +
+                                '<span>\u00b7 Sourced from EXT.to</span>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>' +
+                    '<button type="button" class="vsr-fresh-modal-close" data-vsr-fresh-detail-close aria-label="Close">&times;</button>' +
+                '</div>' +
+                '<div class="vsr-fresh-modal-body">' +
+                    '<div class="vsr-fresh-modal-stats-bar">' +
+                        '<span><em>Size</em><strong>' + esc(r.size_text || 'Unknown') + '</strong></span>' +
+                        '<span><em>Seeds</em><strong class="vsr-fresh-seed">' + esc(seeds) + '</strong></span>' +
+                        '<span><em>Leech</em><strong class="vsr-fresh-leech">' + esc(leech) + '</strong></span>' +
+                        '<span><em>Files</em><strong>' + esc(files) + '</strong></span>' +
+                        '<span><em>Category</em><strong>' + esc(category === 'movies' ? 'Movie' : 'TV Series') + '</strong></span>' +
+                    '</div>' +
+                    '<div class="vsr-fresh-modal-section-title">Release Facts & Specifications</div>' +
+                    freshFactsHTML(d) +
+                '</div>' +
+                '<div class="vsr-fresh-modal-foot">' +
+                    (ready && (r.download_url || r.magnet_uri) ? '<button type="button" class="vsr-fresh-modal-btn-sec" data-vsr-fresh-copy="' + esc(category) + ':' + index + '">Copy Magnet URI</button>' : '') +
+                    '<button type="button" class="vsr-fresh-modal-btn-pri" data-vsr-fresh-pick="' + esc(category) + ':' + index + '" ' + (ready ? '' : 'disabled ') + '>' +
+                        (ready ? 'Identify & Grab' : 'No magnet available') +
+                    '</button>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }
+
+    function freshToolbarHTML() {
+        var qPills = ['all', '2160p', '1080p', '720p'].map(function (q) {
+            var on = q === freshFilterQuality;
+            var lbl = q === 'all' ? 'All Qualities' : (q === '2160p' ? '4K UHD' : q);
+            return '<button class="vsr-fresh-pill ' + (on ? 'active' : '') + '" type="button" data-vsr-fresh-qual="' + q + '">' + lbl + '</button>';
+        }).join('');
+
+        var cPills = ['all', 'movies', 'tv'].map(function (c) {
+            var on = c === freshFilterCategory;
+            var lbl = c === 'all' ? 'All Categories' : (c === 'movies' ? 'Movies' : 'TV Series');
+            return '<button class="vsr-fresh-pill ' + (on ? 'active' : '') + '" type="button" data-vsr-fresh-cat="' + c + '">' + lbl + '</button>';
+        }).join('');
+
+        var viewBtns = '<div class="vsr-fresh-views" role="group" aria-label="View mode">' +
+            '<button type="button" class="vsr-fresh-view-btn ' + (freshViewMode === 'grid' ? 'active' : '') + '" data-vsr-fresh-view="grid" title="Poster Grid View">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg> Grid' +
+            '</button>' +
+            '<button type="button" class="vsr-fresh-view-btn ' + (freshViewMode === 'table' ? 'active' : '') + '" data-vsr-fresh-view="table" title="List View">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h18v2H3zm0 7h18v2H3zm0 7h18v2H3z"/></svg> List' +
+            '</button>' +
+        '</div>';
+
+        return '<div class="vsr-fresh-toolbar">' +
+            '<div class="vsr-fresh-toolbar-left">' +
+                '<div class="vsr-fresh-filter-box">' +
+                    '<svg class="vsr-fresh-filter-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>' +
+                    '<input type="text" class="vsr-fresh-filter-input" data-vsr-fresh-filter placeholder="Filter fresh releases by title, year, quality..." value="' + esc(freshFilterQuery) + '">' +
+                    (freshFilterQuery ? '<button type="button" class="vsr-fresh-filter-clear" data-vsr-fresh-filter-clear title="Clear filter">&times;</button>' : '') +
+                '</div>' +
+                '<div class="vsr-fresh-pills">' + cPills + '</div>' +
+                '<div class="vsr-fresh-pills">' + qPills + '</div>' +
+            '</div>' +
+            '<div class="vsr-fresh-toolbar-right">' +
+                viewBtns +
+            '</div>' +
+        '</div>';
     }
 
     function renderFreshReleases() {
@@ -693,16 +950,107 @@
                 '<div class="vsr-basic-empty"><div class="vsr-basic-empty-mark">!</div><div><strong>Could not load Fresh Releases</strong><p>' + esc(freshCache.error) + '</p></div></div></section>';
             return;
         }
+
+        var mSec = freshSectionHTML('movies', 'Movies');
+        var tSec = freshSectionHTML('tv', 'TV Series');
+        var sectionsHtml = '';
+        if (freshFilterCategory === 'movies') sectionsHtml = mSec;
+        else if (freshFilterCategory === 'tv') sectionsHtml = tSec;
+        else sectionsHtml = mSec + tSec;
+
+        var activeModalHtml = '';
+        if (freshViewMode === 'grid') {
+            ['movies', 'tv'].forEach(function (cat) {
+                var rList = freshRows(cat);
+                for (var idx = 0; idx < rList.length; idx++) {
+                    var itm = rList[idx];
+                    if (itm && itm.url && freshExpanded[itm.url]) {
+                        activeModalHtml = freshDetailModalHTML(itm, cat, idx);
+                        break;
+                    }
+                }
+            });
+        }
+        renderFreshDetailModal(activeModalHtml);
+
         host.innerHTML = '<section class="vsr-fresh-results"><div class="vsr-fresh-head"><div><span>Fresh Releases</span><h2>Sourced from EXT.to</h2><p>' +
                 freshStampHTML() + '</p></div><div class="vsr-fresh-actions"><div class="vsr-fresh-periods">' + tabs + '</div>' + freshRefreshHTML() + '</div></div>' +
-            '<div class="vsr-fresh-grid">' + freshSectionHTML('movies', 'Movies') + freshSectionHTML('tv', 'TV Series') + '</div></section>';
+            freshToolbarHTML() +
+            '<div class="vsr-fresh-grid">' + sectionsHtml + '</div></section>';
+    }
+
+    function renderFreshDetailModal(html) {
+        var modalHost = document.querySelector('[data-vsr-fresh-modal-host]');
+        if (html) {
+            if (!modalHost) {
+                modalHost = document.createElement('div');
+                modalHost.setAttribute('data-vsr-fresh-modal-host', '');
+                modalHost.addEventListener('click', function (e) {
+                    var closeBtn = e.target.closest('[data-vsr-fresh-detail-close]');
+                    var isBackdrop = e.target.classList && e.target.classList.contains('vsr-fresh-modal-backdrop');
+                    if (closeBtn || isBackdrop) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        freshExpanded = {};
+                        renderFreshDetailModal('');
+                        renderFreshReleases();
+                        return;
+                    }
+                    var nBtn = e.target.closest('[data-vsr-fresh-copy-name]');
+                    if (nBtn) {
+                        e.preventDefault();
+                        var np = String(nBtn.getAttribute('data-vsr-fresh-copy-name') || '').split(':');
+                        var nRow = freshRows(np[0])[parseInt(np[1], 10)];
+                        var rawTitle = nRow && nRow.title;
+                        if (rawTitle && navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(rawTitle).then(function () {
+                                if (typeof showToast === 'function') showToast('Release title copied to clipboard', 'success');
+                            });
+                        }
+                        return;
+                    }
+                    var cBtn = e.target.closest('[data-vsr-fresh-copy]');
+                    if (cBtn) {
+                        e.preventDefault();
+                        var cp = String(cBtn.getAttribute('data-vsr-fresh-copy') || '').split(':');
+                        var cRow = freshRows(cp[0])[parseInt(cp[1], 10)];
+                        var mag = cRow && (cRow.download_url || cRow.magnet_uri);
+                        if (mag && navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(mag).then(function () {
+                                if (typeof showToast === 'function') showToast('Magnet link copied to clipboard', 'success');
+                            });
+                        }
+                        return;
+                    }
+                    var pBtn = e.target.closest('[data-vsr-fresh-pick]');
+                    if (pBtn && !pBtn.disabled) {
+                        e.preventDefault();
+                        var parts = String(pBtn.getAttribute('data-vsr-fresh-pick') || '').split(':');
+                        freshExpanded = {};
+                        renderFreshDetailModal('');
+                        renderFreshReleases();
+                        freshOpenIdentify(parts[0], parseInt(parts[1], 10));
+                        return;
+                    }
+                });
+                document.body.appendChild(modalHost);
+            }
+            modalHost.innerHTML = html;
+        } else if (modalHost) {
+            modalHost.remove();
+        }
     }
 
     function freshToggleRow(category, index) {
         var row = freshRows(category)[index];
         if (!row || !row.url) return;
         if (freshExpanded[row.url]) delete freshExpanded[row.url];
-        else freshExpanded[row.url] = true;
+        else {
+            if (freshViewMode === 'grid') {
+                freshExpanded = {};
+            }
+            freshExpanded[row.url] = true;
+        }
         renderFreshReleases();
     }
 
@@ -1103,6 +1451,7 @@
             p.classList.toggle('active', on);
             p.hidden = !on;
         });
+        if (mode !== 'fresh') renderFreshDetailModal('');
         reqSeq++;
         if (mode === 'basic') { ensureBasicSourceConfig(); renderBasicPreview(); }
         else if (mode === 'fresh') renderFreshReleases();
@@ -1524,6 +1873,26 @@
                     refreshFreshReleases();
                     return;
                 }
+                var fClose = e.target.closest('[data-vsr-fresh-detail-close]');
+                if (fClose) {
+                    e.preventDefault();
+                    freshExpanded = {};
+                    renderFreshReleases();
+                    return;
+                }
+                var fNameCopy = e.target.closest('[data-vsr-fresh-copy-name]');
+                if (fNameCopy) {
+                    e.preventDefault();
+                    var np = String(fNameCopy.getAttribute('data-vsr-fresh-copy-name') || '').split(':');
+                    var nRow = freshRows(np[0])[parseInt(np[1], 10)];
+                    var rawTitle = nRow && nRow.title;
+                    if (rawTitle && navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(rawTitle).then(function () {
+                            if (typeof showToast === 'function') showToast('Release title copied to clipboard', 'success');
+                        });
+                    }
+                    return;
+                }
                 var ft = e.target.closest('[data-vsr-fresh-toggle]');
                 if (ft && results.contains(ft)) {
                     e.preventDefault();
@@ -1542,6 +1911,48 @@
                 if (fp && results.contains(fp)) {
                     e.preventDefault();
                     freshPeriod = fp.getAttribute('data-vsr-fresh-period') || 'day';
+                    renderFreshReleases();
+                    return;
+                }
+                var fcopy = e.target.closest('[data-vsr-fresh-copy]');
+                if (fcopy && results.contains(fcopy)) {
+                    e.preventDefault();
+                    var cp = String(fcopy.getAttribute('data-vsr-fresh-copy') || '').split(':');
+                    var cRow = freshRows(cp[0])[parseInt(cp[1], 10)];
+                    var mag = cRow && (cRow.download_url || cRow.magnet_uri);
+                    if (mag && navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(mag).then(function () {
+                            if (typeof showToast === 'function') showToast('Magnet link copied to clipboard', 'success');
+                        });
+                    }
+                    return;
+                }
+                var fv = e.target.closest('[data-vsr-fresh-view]');
+                if (fv && results.contains(fv)) {
+                    e.preventDefault();
+                    freshViewMode = fv.getAttribute('data-vsr-fresh-view') || 'grid';
+                    try { localStorage.setItem('vsrFreshViewMode', freshViewMode); } catch (e) {}
+                    renderFreshReleases();
+                    return;
+                }
+                var fq = e.target.closest('[data-vsr-fresh-qual]');
+                if (fq && results.contains(fq)) {
+                    e.preventDefault();
+                    freshFilterQuality = fq.getAttribute('data-vsr-fresh-qual') || 'all';
+                    renderFreshReleases();
+                    return;
+                }
+                var fc = e.target.closest('[data-vsr-fresh-cat]');
+                if (fc && results.contains(fc)) {
+                    e.preventDefault();
+                    freshFilterCategory = fc.getAttribute('data-vsr-fresh-cat') || 'all';
+                    renderFreshReleases();
+                    return;
+                }
+                var fcl = e.target.closest('[data-vsr-fresh-filter-clear]');
+                if (fcl && results.contains(fcl)) {
+                    e.preventDefault();
+                    freshFilterQuery = '';
                     renderFreshReleases();
                     return;
                 }
@@ -1583,6 +1994,26 @@
                 if (!card || !results.contains(card)) return;
                 e.preventDefault();
                 openCard(card);
+            });
+            results.addEventListener('input', function (e) {
+                if (e.target && e.target.hasAttribute('data-vsr-fresh-filter')) {
+                    freshFilterQuery = e.target.value;
+                    var pos = e.target.selectionStart;
+                    renderFreshReleases();
+                    var inp = results.querySelector('[data-vsr-fresh-filter]');
+                    if (inp) {
+                        try {
+                            inp.focus();
+                            inp.setSelectionRange(pos, pos);
+                        } catch (err) {}
+                    }
+                }
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && mode === 'fresh' && Object.keys(freshExpanded).length > 0) {
+                    freshExpanded = {};
+                    renderFreshReleases();
+                }
             });
         }
     }
@@ -1629,6 +2060,16 @@
 
     function init() {
         document.addEventListener('soulsync:video-page-shown', onPageShown);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' || e.keyCode === 27) {
+                var modalHost = document.querySelector('[data-vsr-fresh-modal-host]');
+                if (modalHost && modalHost.innerHTML) {
+                    freshExpanded = {};
+                    renderFreshDetailModal('');
+                    renderFreshReleases();
+                }
+            }
+        });
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

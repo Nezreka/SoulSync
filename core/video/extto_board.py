@@ -180,6 +180,21 @@ def refresh_board(db, *, timeout: int = 25, flaresolverr: Optional[str] = None,
                   "source": board.get("source") or "EXT.to"}
         _store_board(db, stored)
 
+        # Pre-warm poster art for all matched rows so opening the tab is instant
+        try:
+            from core.image_cache import get_image_cache
+            img_cache = get_image_cache()
+            posters = {
+                str((d.get("poster_url") or "")).strip()
+                for d in details.values()
+                if isinstance(d, dict) and d.get("poster_url")
+            }
+            for p_url in posters:
+                if p_url.startswith("http"):
+                    img_cache.precache_url(p_url)
+        except Exception:
+            logger.debug("board poster pre-warming skipped", exc_info=True)
+
         # Say what was left out rather than reporting a partial board as complete.
         if skipped:
             say("%d release(s) left for the next run (%s)"
