@@ -404,3 +404,47 @@ def test_band_names_do_not_match_partial_artist(db, stored, query):
     )
     assert result['albums'] == [False]
     assert result['tracks'][0]['in_library'] is False
+
+
+def test_cost_scales_with_the_results_not_the_library(db, monkeypatch):
+    """the check used to SELECT every album and every track in the library
+    per call. seed a thousand tracks, ask about one, and count what came back
+    from sqlite: the answer must be bounded by the one artist's rows."""
+    import sqlite3
+    from database.music_database import MusicDatabase
+    for a in range(50):
+        aid = _seed_artist(db, f'Artist {a}')
+        alb = _seed_album(db, aid, f'Album {a}')
+        for t in range(20):
+            _seed_track(db, alb, aid, f'Song {a}-{t}', file_path=f'/{a}/{t}.flac')
+    db.ensure_norm_backfilled()
+
+    fetched = []
+    real = MusicDatabase._get_connection
+
+    class Cursor(sqlite3.Cursor):
+        def fetchall(self):
+            rows = super().fetchall()
+            fetched.append(len(rows))
+            return rows
+
+    class Conn(sqlite3.Connection):
+        def cursor(self, *a, **k):
+            return super().cursor(Cursor)
+
+    def counting(self):
+        c = sqlite3.connect(str(self.database_path), factory=Conn)
+        c.row_factory = sqlite3.Row
+        return c
+
+    monkeypatch.setattr(MusicDatabase, "_get_connection", counting)
+    result = library_check.check_library_presence(
+        db, None, _FakeConfigManager(), 1,
+        [{'name': 'Album 7', 'artist': 'Artist 7'}],
+        [{'name': 'Song 7-3', 'artist': 'Artist 7'}, {'name': 'Nope', 'artist': 'Artist 8'}],
+    )
+    assert result['albums'] == [True]
+    assert result['tracks'][0]['in_library'] is True
+    assert result['tracks'][1]['in_library'] is False
+    # artist 7: 1 id row + 1 album row + 20 track rows; artist 8: 1 + 20. far from 1000.
+    assert sum(fetched) < 60, fetched

@@ -11,6 +11,8 @@ Pure functions, no I/O.
 from __future__ import annotations
 
 import logging
+import re
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +25,12 @@ except ImportError:
     logger.warning("unidecode not available, accent matching may be limited")
 
 
+@lru_cache(maxsize=131072)
 def normalize_for_comparison(text: str) -> str:
     """Lowercase + strip whitespace + fold accents to ASCII.
+
+    cached: the matcher normalizes the same search title and the same pool
+    titles once per candidate, thousands of times per playlist.
 
     ``é → e``, ``ñ → n``, ``Björk → bjork``. Used as the dictionary key
     for the sync candidate pool and for fuzzy library lookups where
@@ -39,3 +45,13 @@ def normalize_for_comparison(text: str) -> str:
     if _HAS_UNIDECODE:
         text = _unidecode(text)
     return text.lower().strip()
+
+
+_NON_ALNUM_RE = re.compile(r'[^a-z0-9]')
+
+
+def normalize_key(text: str) -> str:
+    """normalize_for_comparison, then every non-alphanumeric character
+    dropped: 'AC/DC' and 'ACDC', 'The   Beatles' and 'the beatles' key the
+    same. the search library-check's ownership key, and artists.name_key."""
+    return _NON_ALNUM_RE.sub('', normalize_for_comparison(text or ''))

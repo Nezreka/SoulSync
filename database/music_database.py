@@ -8,6 +8,7 @@ import os
 import re
 import threading
 import time
+from functools import lru_cache
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
@@ -19,6 +20,37 @@ logger = get_logger("music_database")
 _database_initialized_paths = set()
 _database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
+
+# normalized-text columns (title_norm / name_norm / track_artist_norm). one
+# backfill at a time per db path, and a short-lived "is every row filled"
+# answer so a matcher loop doesn't re-probe on every call.
+_norm_backfill_lock = threading.Lock()
+_norm_backfill_threads = {}
+# above this many unfilled rows a reader kicks a background backfill and
+# runs the slow query instead of stalling whoever called it
+_NORM_INLINE_LIMIT = 5000
+_NORM_CHUNK = 20000
+# below this many rows a backfill skips the ANALYZE + wal checkpoint
+_NORM_STATS_MIN_ROWS = 1000
+
+# a per-track credit like "A feat. B" or "A; B" is one string in the tracks
+# row; track_credits holds each credited name separately, indexed, so "is B
+# credited anywhere" is a lookup and not a substring scan. same delimiters
+# the confidence scorer splits on.
+_CREDIT_SPLIT_RE = re.compile(r'\s*(?:[;,&]|\b(?:feat|ft|featuring|vs)\.?(?=\s|$)|(?<=\s)x(?=\s))\s*', re.IGNORECASE)
+
+
+def split_credit_names(track_artist_norm: str) -> List[str]:
+    """the distinct credited names inside a normalized per-track artist
+    string, plus the whole string. '' and None give []."""
+    if not track_artist_norm:
+        return []
+    names = [track_artist_norm.strip()]
+    for piece in _CREDIT_SPLIT_RE.split(track_artist_norm):
+        piece = piece.strip()
+        if piece and piece not in names:
+            names.append(piece)
+    return names
 
 
 def _row_value(row, column: str, default=None):
@@ -343,6 +375,16 @@ class MusicDatabase:
 
             self._initialize_database()
             _database_initialized_paths.add(db_key)
+        # first boot after the norm-column upgrade: start filling now rather
+        # than when the first ownership check trips over the gap
+        try:
+            conn = self._get_connection()
+            try:
+                self._norm_ready(conn.cursor())
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"norm readiness check at init skipped: {e}")
     
     def _get_connection(self) -> sqlite3.Connection:
         """Get a NEW database connection for each operation (thread-safe)"""
@@ -358,6 +400,10 @@ class MusicDatabase:
                     connection.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
                 except ImportError:
                     connection.create_function("unidecode_lower", 1, lambda x: x.lower() if x else "")
+                # the exact function the *_norm columns hold, so a query can
+                # COALESCE a not-yet-backfilled row to the same value
+                from core.text.normalize import normalize_for_comparison as _nfc
+                connection.create_function("norm_text", 1, lambda x: _nfc(x) if x else "", deterministic=True)
                 # Enable foreign key constraints and WAL mode for better concurrency.
                 # Docker Desktop bind mounts can briefly fail while SQLite opens the
                 # sidecar WAL/SHM files; retrying avoids surfacing transient 500s.
@@ -1016,6 +1062,7 @@ class MusicDatabase:
 
             # Repair worker v2 tables (findings + job runs)
             self._add_repair_worker_tables(cursor)
+            self._add_norm_columns(cursor)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS genre_translation_cache (
@@ -3437,6 +3484,227 @@ class MusicDatabase:
                     cursor.rowcount)
         except Exception as e:
             logger.error(f"Error clearing deezer-as-itunes watchlist ids: {e}")
+
+    # ── normalized text columns ─────────────────────────────────────────────
+    # every ownership check used to run `unidecode_lower(tracks.title) LIKE ?`,
+    # a python function sqlite calls per row, so one lookup was one pass of the
+    # whole tracks table through python (3.2 s per check on 300k tracks, 6-10 s
+    # on a miss). the normalized text lives in a column now, indexed, filled by
+    # a backfill rather than by every writer: an UPDATE that changes the raw
+    # text nulls the norm (trigger, no udf needed so external tools keep
+    # working) and the next reader fills the gap. see PERF_REVIEW_SYNC_SCAN.md
+    # section 3.
+    _NORM_COLUMNS = (
+        # (table, raw column, norm column, normalizer name)
+        # 'norm' = normalize_for_comparison (accents folded, lowercased);
+        # 'key'  = normalize_key (that, then non-alphanumerics dropped), the
+        #          form the search library-check matches artists by
+        ('artists', 'name', 'name_norm', 'norm'),
+        ('artists', 'name', 'name_key', 'key'),
+        ('albums', 'title', 'title_norm', 'norm'),
+        ('tracks', 'title', 'title_norm', 'norm'),
+        ('tracks', 'track_artist', 'track_artist_norm', 'norm'),
+    )
+
+    @staticmethod
+    def _normalizer(kind: str):
+        from core.text.normalize import normalize_for_comparison, normalize_key
+        return normalize_key if kind == 'key' else normalize_for_comparison
+
+    def _add_norm_columns(self, cursor):
+        """add the *_norm columns, their indexes and the nulling triggers."""
+        try:
+            for table, raw, norm, _kind in self._NORM_COLUMNS:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cols = [c[1] for c in cursor.fetchall()]
+                if norm not in cols:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {norm} TEXT")
+                    logger.info(f"Added {norm} column to {table}")
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_{norm} ON {table} ({norm})")
+                # a writer that changes the raw text without touching the norm
+                # leaves a stale norm behind, and a stale norm can match the
+                # OLD title. null it; the backfill recomputes. skipped when the
+                # statement set the norm itself.
+                cursor.execute(f"""
+                    CREATE TRIGGER IF NOT EXISTS trg_{table}_{norm}_stale
+                    AFTER UPDATE OF {raw} ON {table}
+                    WHEN NEW.{raw} IS NOT OLD.{raw} AND NEW.{norm} IS OLD.{norm}
+                    BEGIN
+                        UPDATE {table} SET {norm} = NULL WHERE rowid = NEW.rowid;
+                    END
+                """)
+            cursor.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'track_credits'")
+            credits_existed = cursor.fetchone() is not None
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS track_credits (
+                    track_id TEXT NOT NULL,
+                    name_norm TEXT NOT NULL,
+                    PRIMARY KEY (track_id, name_norm)
+                ) WITHOUT ROWID
+            """)
+            if not credits_existed:
+                # credits are derived during the track_artist_norm backfill;
+                # a db that already had the norm filled needs that pass again
+                cursor.execute("UPDATE tracks SET track_artist_norm = NULL WHERE track_artist_norm IS NOT NULL")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_track_credits_name ON track_credits (name_norm)")
+            # credits are derived from track_artist_norm; when that is nulled
+            # (raw credit changed) or the track goes, the credits go with it
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS trg_track_credits_stale
+                AFTER UPDATE OF track_artist_norm ON tracks
+                WHEN NEW.track_artist_norm IS NULL
+                BEGIN
+                    DELETE FROM track_credits WHERE track_id = NEW.id;
+                END
+            """)
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS trg_track_credits_gone
+                AFTER DELETE ON tracks
+                BEGIN
+                    DELETE FROM track_credits WHERE track_id = OLD.id;
+                END
+            """)
+        except Exception as e:
+            logger.error(f"Error adding normalized text columns: {e}")
+
+    def _norm_unfilled_count(self, cursor, table: str, norm: str, limit: int) -> int:
+        cursor.execute(
+            f"SELECT COUNT(*) FROM (SELECT 1 FROM {table} WHERE {norm} IS NULL LIMIT ?)",
+            (limit,))
+        return int(cursor.fetchone()[0] or 0)
+
+    def _backfill_norm_chunk(self, conn, table: str, raw: str, norm: str, chunk: int, kind: str = 'norm') -> int:
+        """fill up to `chunk` null rows of one norm column. the caller commits:
+        once per full chunk on a big backfill, once in total for the few-row
+        inline fill a reader does after an import (five commits is five
+        fsyncs, and that was most of the cost of a check after a raw insert)."""
+        normalize_for_comparison = self._normalizer(kind)
+        cursor = conn.cursor()
+        id_col = "id" if table == 'tracks' else "rowid"
+        cursor.execute(f"SELECT {id_col}, {raw} FROM {table} WHERE {norm} IS NULL LIMIT ?", (chunk,))
+        rows = cursor.fetchall()
+        if not rows:
+            return 0
+        # '' for a null raw value so NULL keeps meaning "not computed yet"
+        normed = [(normalize_for_comparison(r[1]) if r[1] else '', r[0]) for r in rows]
+        cursor.executemany(f"UPDATE {table} SET {norm} = ? WHERE {id_col} = ?", normed)
+        if table == 'tracks' and norm == 'track_artist_norm':
+            cursor.executemany("DELETE FROM track_credits WHERE track_id = ?", [(r[0],) for r in rows])
+            cursor.executemany(
+                "INSERT OR IGNORE INTO track_credits (track_id, name_norm) VALUES (?, ?)",
+                [(tid, name) for value, tid in normed for name in split_credit_names(value)])
+        return len(rows)
+
+    def ensure_norm_backfilled(self, *, chunk: int = _NORM_CHUNK, max_rows: Optional[int] = None) -> int:
+        """fill every null *_norm row, in chunks, one transaction per chunk.
+        cheap when there is nothing to do (one indexed probe per column).
+        returns the number of rows filled. safe to call from anywhere; only
+        one backfill runs per db at a time and later callers wait for it."""
+        filled = 0
+        with _norm_backfill_lock:
+            try:
+                conn = self._get_connection()
+                try:
+                    for table, raw, norm, kind in self._NORM_COLUMNS:
+                        while True:
+                            if max_rows is not None and filled >= max_rows:
+                                conn.commit()
+                                return filled
+                            n = self._backfill_norm_chunk(conn, table, raw, norm, chunk, kind)
+                            filled += n
+                            if n < chunk:
+                                break
+                            conn.commit()
+                            if filled and filled % (chunk * 5) == 0:
+                                logger.info(f"norm backfill: {filled} rows so far ({table}.{norm})")
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.error(f"norm backfill failed after {filled} rows: {e}")
+                return filled
+        if filled >= _NORM_STATS_MIN_ROWS:
+            # only a real backfill changes the shape of the data enough to
+            # matter to the planner; the few-row inline fills a reader does
+            # after an import are not worth an ANALYZE and a checkpoint each
+            logger.info(f"norm backfill: filled {filled} rows")
+            self.refresh_planner_stats()
+            # a library-sized backfill rewrites every row; give the wal a
+            # chance to fold back into the main file instead of growing until
+            # the next quiet moment
+            try:
+                conn = self._get_connection()
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.debug(f"wal checkpoint after backfill skipped: {e}")
+        return filled
+
+    def refresh_planner_stats(self) -> None:
+        """ANALYZE the matching tables. without statistics sqlite guesses, and
+        on a real library it guessed the server_source index (one value for
+        every row) over the artist and credit indexes, turning indexed lookups
+        back into full scans. cheap; run after backfills and scans."""
+        try:
+            conn = self._get_connection()
+            try:
+                for table in ('tracks', 'artists', 'albums', 'track_credits'):
+                    conn.execute(f"ANALYZE {table}")
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"ANALYZE skipped: {e}")
+
+    def _kick_norm_backfill_thread(self):
+        """one background backfill per db path per process. a big library's
+        first boot after the upgrade fills hundreds of thousands of rows;
+        that must not sit inside whichever request or worker noticed first."""
+        key = str(self.database_path)
+        with _norm_backfill_lock:
+            t = _norm_backfill_threads.get(key)
+            if t is not None and t.is_alive():
+                return
+            t = threading.Thread(target=self.ensure_norm_backfilled, name="norm-backfill", daemon=True)
+            _norm_backfill_threads[key] = t
+        logger.info("norm backfill: starting in the background (readers use the slow path until it finishes)")
+        t.start()
+
+    def _norm_ready(self, cursor) -> bool:
+        """True when every *_norm column is filled, so a reader may use the
+        indexed columns outright. a small gap (a just-imported album) is filled
+        inline; a large one (first boot after the upgrade, a full rescan) is
+        handed to a background thread and the reader takes the slow path this
+        time.
+
+        probed every call, on purpose: five indexed IS NULL lookups cost tens
+        of microseconds, and a cached "ready" would let a row inserted raw a
+        moment ago (an import, a repair job) be invisible to the indexed path
+        until the cache expired — reported missing, and re-downloaded."""
+        try:
+            # probe every column before filling anything: a ten-row gap in one
+            # column must not drag a 500k-row gap in another into this call
+            gaps = [self._norm_unfilled_count(cursor, table, norm, _NORM_INLINE_LIMIT + 1)
+                    for table, raw, norm, _kind in self._NORM_COLUMNS]
+            if any(n > _NORM_INLINE_LIMIT for n in gaps):
+                self._kick_norm_backfill_thread()
+                return False
+            if any(gaps):
+                self.ensure_norm_backfilled()
+            return True
+        except Exception as e:
+            logger.debug(f"norm readiness probe failed: {e}")
+            return False
+
+    def _norm_expr(self, ready: bool, table: str, raw: str, norm: str) -> str:
+        """the sql expression that yields the normalized text for a row:
+        the column when the backfill is complete, else a COALESCE that only
+        calls the udf for rows the backfill hasn't reached."""
+        if ready:
+            return f"{table}.{norm}"
+        return f"COALESCE({table}.{norm}, norm_text({table}.{raw}))"
 
     def _add_similar_artists_last_featured_column(self, cursor):
         """Add last_featured column to similar_artists for hero slider cycling"""
@@ -8762,12 +9030,18 @@ class MusicDatabase:
                 cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id,))
                 is_new_track = cursor.fetchone() is None
 
+                # the scan is the bulk writer, so it fills the normalized
+                # columns itself instead of leaving a library-sized gap for the
+                # backfill after every deep scan
+                title_norm = self._normalize_for_comparison(title) if title else ''
+                track_artist_norm = self._normalize_for_comparison(track_artist) if track_artist else None
+
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
+                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, title_norm, track_artist_norm, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, title_norm, track_artist_norm or ''))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, and all other enrichment data. file_size uses
@@ -8782,9 +9056,17 @@ class MusicDatabase:
                             server_source = ?,
                             track_artist = COALESCE(?, track_artist),
                             musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
+                            title_norm = ?,
+                            track_artist_norm = COALESCE(?, track_artist_norm),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
+                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, title_norm, track_artist_norm, track_id))
+
+                if is_new_track or track_artist_norm is not None:
+                    cursor.execute("DELETE FROM track_credits WHERE track_id = ?", (track_id,))
+                    cursor.executemany(
+                        "INSERT OR IGNORE INTO track_credits (track_id, name_norm) VALUES (?, ?)",
+                        [(track_id, name) for name in split_credit_names(track_artist_norm or '')])
 
                 conn.commit()
 
@@ -9042,21 +9324,22 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             norm_query = f"%{self._normalize_for_comparison(query)}%"
+            name_expr = self._norm_expr(self._norm_ready(cursor), 'artists', 'name', 'name_norm').replace('artists.', '')
 
             if server_source:
                 cursor.execute("""
                     SELECT * FROM artists
-                    WHERE unidecode_lower(name) LIKE ? AND server_source = ?
+                    WHERE {name_expr} LIKE ? AND server_source = ?
                     ORDER BY name
                     LIMIT ?
-                """, (norm_query, server_source, limit))
+                """.format(name_expr=name_expr), (norm_query, server_source, limit))
             else:
                 cursor.execute("""
                     SELECT * FROM artists
-                    WHERE unidecode_lower(name) LIKE ?
+                    WHERE {name_expr} LIKE ?
                     ORDER BY name
                     LIMIT ?
-                """, (norm_query, limit))
+                """.format(name_expr=name_expr), (norm_query, limit))
             
             rows = cursor.fetchall()
             
@@ -9079,6 +9362,69 @@ class MusicDatabase:
             logger.error(f"Error searching artists with query '{query}': {e}")
             return []
     
+    def _resolve_artist_ids_norm(self, cursor, artist: str) -> List[Any]:
+        """artist ids whose normalized name equals the given name. [] when the
+        artist is not in the library by name (or the backfill isn't done)."""
+        if not artist:
+            return []
+        norm = self._normalize_for_comparison(artist)
+        if not norm or not self._norm_ready(cursor):
+            return []
+        cursor.execute("SELECT id FROM artists WHERE name_norm = ?", (norm,))
+        ids = [r[0] for r in cursor.fetchall()]
+        if ids:
+            return ids
+        # "ACDC" for "AC/DC": same artist once punctuation is dropped
+        from core.text.normalize import normalize_key
+        key = normalize_key(artist)
+        if not key:
+            return []
+        cursor.execute("SELECT id FROM artists WHERE name_key = ?", (key,))
+        return [r[0] for r in cursor.fetchall()]
+
+    def _search_track_rows(self, cursor, title: str, artist: str, limit: int,
+                           server_source: Optional[str] = None, rank_artist: Optional[str] = None):
+        """the one track search, as raw rows. strategies in order, each only
+        when the previous found nothing:
+          1. literal title (and artist) match
+          1b. the base title before a ' - qualifier'
+          2. word-or fuzzy match
+        when the artist is in the library by name, every strategy stays inside
+        that artist's rows and exact per-track credits (indexed) first, then
+        widens to a substring pass over the per-track credit column for "A
+        feat. B" style credits. an unknown artist goes straight to the
+        substring passes, which run over plain columns rather than a python
+        function per row."""
+        from core.text.title_match import base_title_before_dash
+        artist_ids = self._resolve_artist_ids_norm(cursor, artist) if artist else []
+        base_title = base_title_before_dash(title) if title else ''
+        if base_title == title:
+            base_title = ''
+
+        # a known artist: its own rows first, then only the credit column for
+        # "A feat. B" rows filed under someone else. never the whole table: a
+        # word-or match across every artist in the library is where "same
+        # title, different band" false positives come from, and the scorer
+        # rejects those anyway, so the scan was pure cost.
+        if artist_ids:
+            scopes = [dict(artist_ids=artist_ids), dict(credit_only=True)]
+        else:
+            scopes = [dict()]
+        for scope in scopes:
+            rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source, rank_artist, **scope)
+            if rows:
+                return rows
+            if base_title:
+                rows = self._search_tracks_basic_rows(cursor, base_title, artist, limit, server_source, rank_artist, **scope)
+                if rows:
+                    logger.debug("Base-title search matched '%s' via '%s'", title, base_title)
+                    return rows
+            if not scope.get('credit_only'):
+                rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source, artist_ids=scope.get('artist_ids'))
+                if rows:
+                    return rows
+        return []
+
     def search_tracks(self, title: str = "", artist: str = "", limit: int = 50, server_source: str = None,
                        rank_artist: str = None) -> List[DatabaseTrack]:
         """Search tracks by title and/or artist name with Unicode-aware fuzzy matching.
@@ -9089,39 +9435,12 @@ class MusicDatabase:
         try:
             if not title and not artist:
                 return []
-
             conn = self._get_connection()
-            cursor = conn.cursor()
-
-            # STRATEGY 1: Try basic SQL LIKE search first (fastest)
-            basic_results = self._search_tracks_basic(cursor, title, artist, limit, server_source, rank_artist)
-
-            if basic_results:
-                logger.debug(f"Basic search found {len(basic_results)} results")
-                return basic_results
-
-            # STRATEGY 1b: Spotify renders versions as "Title - Qualifier"
-            # ("Calma - Remix") but libraries usually store just the base
-            # ("Calma"), so the literal search misses. Retry on the base title
-            # BEFORE the OR-fuzzy fallback (which would flood on the common
-            # qualifier word — every "... remix" matches "remix"). #: Calma - Remix
-            if title:
-                from core.text.title_match import base_title_before_dash
-                base_title = base_title_before_dash(title)
-                if base_title and base_title != title:
-                    base_results = self._search_tracks_basic(
-                        cursor, base_title, artist, limit, server_source, rank_artist)
-                    if base_results:
-                        logger.debug("Base-title search matched '%s' via '%s'", title, base_title)
-                        return base_results
-
-            # STRATEGY 2: Broader fuzzy search - splits into individual words with OR matching
-            fuzzy_results = self._search_tracks_fuzzy_fallback(cursor, title, artist, limit, server_source)
-            if fuzzy_results:
-                logger.debug(f"Fuzzy fallback search found {len(fuzzy_results)} results")
-            
-            return fuzzy_results
-            
+            try:
+                rows = self._search_track_rows(conn.cursor(), title, artist, limit, server_source, rank_artist)
+            finally:
+                conn.close()
+            return self._rows_to_tracks(rows)
         except Exception as e:
             logger.error(f"Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
@@ -9135,31 +9454,16 @@ class MusicDatabase:
         try:
             if not title and not artist:
                 return []
-
             conn = self._get_connection()
-            cursor = conn.cursor()
-
-            basic_rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source)
-            if basic_rows:
-                return [dict(r) for r in basic_rows]
-
-            # Base-title fallback for Spotify "Title - Qualifier" forms (see
-            # search_tracks STRATEGY 1b) before the OR-fuzzy flood.
-            if title:
-                from core.text.title_match import base_title_before_dash
-                base_title = base_title_before_dash(title)
-                if base_title and base_title != title:
-                    base_rows = self._search_tracks_basic_rows(
-                        cursor, base_title, artist, limit, server_source)
-                    if base_rows:
-                        return [dict(r) for r in base_rows]
-
-            fuzzy_rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source)
-            return [dict(r) for r in fuzzy_rows]
+            try:
+                rows = self._search_track_rows(conn.cursor(), title, artist, limit, server_source)
+            finally:
+                conn.close()
+            return [dict(r) for r in rows]
         except Exception as e:
             logger.error(f"API: Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
-    
+
     def get_tracks_for_m3u_resolution(self, server_source: Optional[str] = None) -> List[Dict[str, str]]:
         """Bulk-load (artist, title, file_path) for in-memory M3U path resolution.
 
@@ -9192,23 +9496,50 @@ class MusicDatabase:
         return self._rows_to_tracks(rows)
 
     def _search_tracks_basic_rows(self, cursor, title: str, artist: str, limit: int,
-                                  server_source: Optional[str] = None, rank_artist: Optional[str] = None):
+                                  server_source: Optional[str] = None, rank_artist: Optional[str] = None,
+                                  artist_ids: Optional[List[Any]] = None, credit_only: bool = False):
         """Basic SQL LIKE search returning raw rows (shared by DatabaseTrack and dict-returning callers).
 
         ``rank_artist`` is a relevance-only hint (does NOT filter): when given,
-        rows by that artist sort to the top so an exact title+artist match wins."""
+        rows by that artist sort to the top so an exact title+artist match wins.
+
+        ``artist_ids`` scopes the search to those artists' rows plus exact
+        per-track credits (all indexed). None means the substring pass over the
+        whole table, which also catches "A feat. B" credits — over plain columns
+        now, not a python udf per row, so even that is a c-speed scan."""
         where_conditions = []
         params = []
+        ready = self._norm_ready(cursor)
+        t_title = self._norm_expr(ready, 'tracks', 'title', 'title_norm')
+        t_tartist = self._norm_expr(ready, 'tracks', 'track_artist', 'track_artist_norm')
+        a_name = self._norm_expr(ready, 'artists', 'name', 'name_norm')
 
         if title:
-            where_conditions.append("unidecode_lower(tracks.title) LIKE ?")
+            where_conditions.append(f"{t_title} LIKE ?")
             params.append(f"%{self._normalize_for_comparison(title)}%")
 
         if artist:
-            norm_artist = f"%{self._normalize_for_comparison(artist)}%"
-            where_conditions.append("(unidecode_lower(artists.name) LIKE ? OR unidecode_lower(COALESCE(tracks.track_artist, '')) LIKE ?)")
-            params.append(norm_artist)
-            params.append(norm_artist)
+            norm_artist_exact = self._normalize_for_comparison(artist)
+            norm_artist = f"%{norm_artist_exact}%"
+            # when the artist is in the library by exact normalized name the
+            # scan collapses to that artist's rows (idx_tracks_artist_id) plus
+            # the per-track credit index. only an unknown artist pays for the
+            # substring scan, and that scan is over a plain column now.
+            if artist_ids:
+                placeholders = ','.join('?' for _ in artist_ids)
+                where_conditions.append(
+                    f"(tracks.artist_id IN ({placeholders}) OR tracks.track_artist_norm = ?)")
+                params.extend(artist_ids)
+                params.append(norm_artist_exact)
+            elif credit_only:
+                # "A feat. B" rows filed under A, looked up by B's credit row
+                where_conditions.append(
+                    "tracks.id IN (SELECT track_id FROM track_credits WHERE name_norm = ?)")
+                params.append(norm_artist_exact)
+            else:
+                where_conditions.append(f"({a_name} LIKE ? OR {t_tartist} LIKE ?)")
+                params.append(norm_artist)
+                params.append(norm_artist)
 
         # Add server filter if specified
         if server_source:
@@ -9231,18 +9562,18 @@ class MusicDatabase:
         if title:
             norm_title = self._normalize_for_comparison(title)
             order_parts.append(
-                "CASE WHEN unidecode_lower(tracks.title) = ? THEN 0 "
-                "WHEN unidecode_lower(tracks.title) LIKE ? THEN 1 ELSE 2 END")
+                f"CASE WHEN {t_title} = ? THEN 0 "
+                f"WHEN {t_title} LIKE ? THEN 1 ELSE 2 END")
             order_params.extend([norm_title, f"{norm_title}%"])
         _rank_artist = artist or rank_artist
         if _rank_artist:
             norm_artist = self._normalize_for_comparison(_rank_artist)
             order_parts.append(
-                "CASE WHEN unidecode_lower(artists.name) = ? THEN 0 "
-                "WHEN unidecode_lower(artists.name) LIKE ? THEN 1 ELSE 2 END")
+                f"CASE WHEN {a_name} = ? THEN 0 "
+                f"WHEN {a_name} LIKE ? THEN 1 ELSE 2 END")
             order_params.extend([norm_artist, f"%{norm_artist}%"])
-        order_parts.append("unidecode_lower(tracks.title)")
-        order_parts.append("unidecode_lower(artists.name)")
+        order_parts.append(t_title)
+        order_parts.append(a_name)
         order_by = ", ".join(order_parts)
 
         params.extend(order_params)
@@ -9293,10 +9624,17 @@ class MusicDatabase:
         return terms
 
     def _search_tracks_fuzzy_rows(self, cursor, title: str, artist: str, limit: int,
-                                  server_source: Optional[str] = None):
-        """Broadest fuzzy search returning raw rows (shared by DatabaseTrack and dict-returning callers)."""
+                                  server_source: Optional[str] = None,
+                                  artist_ids: Optional[List[Any]] = None):
+        """Broadest fuzzy search returning raw rows (shared by DatabaseTrack and dict-returning callers).
+
+        with ``artist_ids`` the word-or match runs on the title only, inside
+        those artists' rows and exact credits: a fuzzy title match across every
+        artist in the library is how a different song by someone else gets
+        credited as owned."""
         # Get broader results by searching for individual words
         search_terms = []
+        title_words = []
         if title:
             title_words = self._fuzzy_terms(self._normalize_for_comparison(title))
             search_terms.extend(title_words)
@@ -9310,15 +9648,31 @@ class MusicDatabase:
 
         like_conditions = []
         params = []
+        ready = self._norm_ready(cursor)
+        t_title = self._norm_expr(ready, 'tracks', 'title', 'title_norm')
+        t_tartist = self._norm_expr(ready, 'tracks', 'track_artist', 'track_artist_norm')
+        a_name = self._norm_expr(ready, 'artists', 'name', 'name_norm')
 
-        for term in search_terms[:5]:
-            like_conditions.append("(unidecode_lower(tracks.title) LIKE ? OR unidecode_lower(artists.name) LIKE ? OR unidecode_lower(COALESCE(tracks.track_artist, '')) LIKE ?)")
-            params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
+        if artist_ids:
+            if not title_words:
+                return []
+            for term in title_words[:5]:
+                like_conditions.append(f"{t_title} LIKE ?")
+                params.append(f"%{term}%")
+        else:
+            for term in search_terms[:5]:
+                like_conditions.append(f"({t_title} LIKE ? OR {a_name} LIKE ? OR {t_tartist} LIKE ?)")
+                params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
 
         if not like_conditions:
             return []
 
         where_parts = [f"({' OR '.join(like_conditions)})"]
+        if artist_ids:
+            placeholders = ','.join('?' for _ in artist_ids)
+            where_parts.append(f"(tracks.artist_id IN ({placeholders}) OR tracks.track_artist_norm = ?)")
+            params.extend(artist_ids)
+            params.append(self._normalize_for_comparison(artist))
         if server_source:
             where_parts.append("tracks.server_source = ?")
             params.append(server_source)
@@ -9395,12 +9749,16 @@ class MusicDatabase:
             where_conditions = []
             params = []
             
+            ready = self._norm_ready(cursor)
+            al_title = self._norm_expr(ready, 'albums', 'title', 'title_norm')
+            a_name = self._norm_expr(ready, 'artists', 'name', 'name_norm')
+
             if title:
-                where_conditions.append("unidecode_lower(albums.title) LIKE ?")
+                where_conditions.append(f"{al_title} LIKE ?")
                 params.append(f"%{self._normalize_for_comparison(title)}%")
 
             if artist:
-                where_conditions.append("unidecode_lower(artists.name) LIKE ?")
+                where_conditions.append(f"{a_name} LIKE ?")
                 params.append(f"%{self._normalize_for_comparison(artist)}%")
 
             if server_source:
@@ -9489,6 +9847,77 @@ class MusicDatabase:
             return list(set(variations))
 
     
+    def _exact_norm_tracks(self, cursor, title_variations: List[str], artist_variations: List[str],
+                           server_source: Optional[str] = None, limit: int = 50) -> List[DatabaseTrack]:
+        """rows whose normalized title AND normalized artist (album artist or
+        per-track credit) equal one of the given variations. one query, every
+        term indexed. requires the norm backfill to be complete."""
+        # the base title before a ' - qualifier' or a trailing bracket group
+        # ("Song - Remastered 2011", "Song (Live)") is what the library most
+        # often holds; it goes in as a candidate and the scorer decides whether
+        # the qualifier makes it a different recording, exactly as it would for
+        # the same row found by the substring search.
+        from core.text.title_match import base_title_before_dash
+        extra = []
+        for t in title_variations:
+            if not t:
+                continue
+            base = base_title_before_dash(t)
+            if base and base != t:
+                extra.append(base)
+            stripped = re.sub(r'\s*[\(\[][^\)\]]*[\)\]]\s*$', '', t).strip()
+            if stripped and stripped != t:
+                extra.append(stripped)
+        titles = list(dict.fromkeys(self._normalize_for_comparison(t) for t in [*title_variations, *extra] if t))
+        artists = list(dict.fromkeys(self._normalize_for_comparison(a) for a in artist_variations if a))
+        if not titles or not artists:
+            return []
+        t_ph = ','.join('?' for _ in titles)
+        a_ph = ','.join('?' for _ in artists)
+        sql = f"""
+            SELECT tracks.*, artists.name as artist_name, albums.title as album_title, albums.thumb_url as album_thumb_url
+            FROM tracks
+            JOIN artists ON tracks.artist_id = artists.id
+            JOIN albums ON tracks.album_id = albums.id
+            WHERE tracks.title_norm IN ({t_ph})
+              AND (artists.name_norm IN ({a_ph}) OR tracks.track_artist_norm IN ({a_ph}))
+        """
+        params: list = [*titles, *artists, *artists]
+        if server_source:
+            sql += " AND tracks.server_source = ?"
+            params.append(server_source)
+        sql += " LIMIT ?"
+        params.append(limit)
+        cursor.execute(sql, params)
+        return self._rows_to_tracks(cursor.fetchall())
+
+    def _artist_present(self, cursor, artist_variations: List[str], server_source: Optional[str] = None) -> bool:
+        """does any of these artist names appear in the library at all: as an
+        artist row, as an exact per-track credit, or as one name inside a
+        credit ("A feat. B")? three index lookups."""
+        names = list(dict.fromkeys(self._normalize_for_comparison(a) for a in artist_variations if a))
+        if not names:
+            return False
+        ph = ','.join('?' for _ in names)
+        cursor.execute(f"SELECT 1 FROM artists WHERE name_norm IN ({ph}) LIMIT 1", names)
+        if cursor.fetchone():
+            return True
+        # punctuation-only differences ("ACDC" for "AC/DC") are the same
+        # artist; name_key drops the punctuation on both sides
+        from core.text.normalize import normalize_key
+        keys = list(dict.fromkeys(normalize_key(a) for a in artist_variations if a))
+        keys = [k for k in keys if k]
+        if keys:
+            kph = ','.join('?' for _ in keys)
+            cursor.execute(f"SELECT 1 FROM artists WHERE name_key IN ({kph}) LIMIT 1", keys)
+            if cursor.fetchone():
+                return True
+        cursor.execute(f"SELECT 1 FROM tracks WHERE track_artist_norm IN ({ph}) LIMIT 1", names)
+        if cursor.fetchone():
+            return True
+        cursor.execute(f"SELECT 1 FROM track_credits WHERE name_norm IN ({ph}) LIMIT 1", names)
+        return cursor.fetchone() is not None
+
     def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
@@ -9519,17 +9948,52 @@ class MusicDatabase:
             else:
                 # LEGACY PATH — generate title variations and fire SQL per variation.
                 title_variations = self._generate_track_title_variations(title)
+                artist_variations = self._get_artist_variations(artist)
 
                 logger.debug(f"Enhanced track matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
                 for i, var in enumerate(title_variations):
                     logger.debug(f"  {i+1}. '{var}'")
 
+                # exact pass first: every (title variation x artist variation)
+                # pair in ONE indexed query on the normalized columns. this is
+                # the common case for an owned track and it never touches the
+                # substring scan. then, when the artist has no rows at all (no
+                # own rows, no exact credit, no "feat." credit) there is nothing
+                # for the variation loop to find, so it is skipped and the
+                # album-aware fallback below gets its turn.
+                run_variation_loop = True
+                # variations that normalize to the same text resolve to the
+                # same rows; search each distinct form once
+                distinct_artist_variations = list({self._normalize_for_comparison(a): a for a in artist_variations if a}.values())
+                conn = self._get_connection()
+                try:
+                    cursor = conn.cursor()
+                    if self._norm_ready(cursor):
+                        for track in self._exact_norm_tracks(cursor, title_variations, artist_variations, server_source):
+                            confidence = self._calculate_track_confidence(title, artist, track)
+                            if confidence > best_confidence:
+                                best_confidence = confidence
+                                best_match = track
+                        if best_confidence >= confidence_threshold:
+                            run_variation_loop = False
+                        else:
+                            # only the forms that exist somewhere in the
+                            # library get searched; a form with no rows would
+                            # send the loop into the whole-table substring pass
+                            distinct_artist_variations = [
+                                a for a in distinct_artist_variations
+                                if self._artist_present(cursor, [a], server_source)]
+                            if not distinct_artist_variations:
+                                logger.debug(f"'{artist}' has no rows in the library — skipping title search")
+                                run_variation_loop = False
+                finally:
+                    conn.close()
+
                 # Try each title variation
-                for title_variation in title_variations:
+                for title_variation in (title_variations if run_variation_loop else []):
                     # Search for potential matches with this variation
                     potential_matches = []
-                    artist_variations = self._get_artist_variations(artist)
-                    for artist_variation in artist_variations:
+                    for artist_variation in distinct_artist_variations:
                         potential_matches.extend(self.search_tracks(title=title_variation, artist=artist_variation, limit=20, server_source=server_source))
 
                     if not potential_matches:
@@ -9961,10 +10425,14 @@ class MusicDatabase:
             cursor.execute("SELECT id FROM artists WHERE name = ?", (name,))
             artist_ids = [r['id'] for r in cursor.fetchall()]
 
-            # Step 2: case-insensitive fallback if exact missed. Full scan, but only
-            # runs on the (uncommon) miss path so amortized cost stays low.
+            # Step 2: case + accent insensitive fallback if exact missed, on the
+            # indexed name_norm column (a LOWER(name) scan of artists before).
             if not artist_ids:
-                cursor.execute("SELECT id FROM artists WHERE LOWER(name) = LOWER(?)", (name,))
+                if self._norm_ready(cursor):
+                    cursor.execute("SELECT id FROM artists WHERE name_norm = ?",
+                                   (self._normalize_for_comparison(name),))
+                else:
+                    cursor.execute("SELECT id FROM artists WHERE LOWER(name) = LOWER(?)", (name,))
                 artist_ids = [r['id'] for r in cursor.fetchall()]
 
             if not artist_ids:
@@ -10626,41 +11094,7 @@ class MusicDatabase:
             
             # Direct similarity with Unicode normalization
             title_similarity = self._string_similarity(search_title_norm, db_title_norm)
-            artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
 
-            # Soundtracks/compilations: the album-level artist (artists.name via JOIN)
-            # often differs from the per-track artist (e.g. Vaiana OST is filed under
-            # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
-            # Jackson). Score against tracks.track_artist too and take the better
-            # match so playlist sync can find these.
-            #
-            # Featured artists: tracks with multiple credits ("Artist1, Artist2",
-            # "Artist1 feat. Artist2", "Artist1 & Artist2") split on common
-            # delimiters and score each piece independently. Without this, a
-            # discography completion check for Artist2 would miss a track stored
-            # in the library under Artist1's album with a "feat. Artist2" credit.
-            db_track_artist = getattr(db_track, 'track_artist', None)
-            if db_track_artist:
-                db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
-                # Whole-string similarity first as the floor.
-                track_artist_sim = self._string_similarity(search_artist_norm, db_track_artist_norm)
-                # Then split on multi-artist delimiters and score each piece —
-                # Spotify's "feat.", "ft.", commas, semicolons, ampersands, and
-                # "x" between names all show up here in real-world tags.
-                pieces = re.split(
-                    r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
-                    db_track_artist_norm,
-                    flags=re.IGNORECASE,
-                )
-                for piece in pieces:
-                    piece = piece.strip()
-                    if not piece:
-                        continue
-                    piece_sim = self._string_similarity(search_artist_norm, piece)
-                    if piece_sim > track_artist_sim:
-                        track_artist_sim = piece_sim
-                artist_similarity = max(artist_similarity, track_artist_sim)
-            
             # Also try with cleaned versions (removing parentheses, brackets, etc.)
             clean_search_title = self._clean_track_title_for_comparison(search_title)
             clean_db_title = self._clean_track_title_for_comparison(db_track.title)
@@ -10745,6 +11179,44 @@ class MusicDatabase:
             if best_title_similarity < 0.6:
                 return best_title_similarity * 0.5  # Can never exceed 0.3, well below any threshold
 
+            # the artist is scored only once the title has cleared its floor:
+            # below 0.6 the result is title-only, and almost every candidate in a
+            # pool is a different song by the same artist
+            artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
+
+            # Soundtracks/compilations: the album-level artist (artists.name via JOIN)
+            # often differs from the per-track artist (e.g. Vaiana OST is filed under
+            # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
+            # Jackson). Score against tracks.track_artist too and take the better
+            # match so playlist sync can find these.
+            #
+            # Featured artists: tracks with multiple credits ("Artist1, Artist2",
+            # "Artist1 feat. Artist2", "Artist1 & Artist2") split on common
+            # delimiters and score each piece independently. Without this, a
+            # discography completion check for Artist2 would miss a track stored
+            # in the library under Artist1's album with a "feat. Artist2" credit.
+            db_track_artist = getattr(db_track, 'track_artist', None)
+            if db_track_artist:
+                db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
+                # Whole-string similarity first as the floor.
+                track_artist_sim = self._string_similarity(search_artist_norm, db_track_artist_norm)
+                # Then split on multi-artist delimiters and score each piece —
+                # Spotify's "feat.", "ft.", commas, semicolons, ampersands, and
+                # "x" between names all show up here in real-world tags.
+                pieces = re.split(
+                    r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
+                    db_track_artist_norm,
+                    flags=re.IGNORECASE,
+                )
+                for piece in pieces:
+                    piece = piece.strip()
+                    if not piece:
+                        continue
+                    piece_sim = self._string_similarity(search_artist_norm, piece)
+                    if piece_sim > track_artist_sim:
+                        track_artist_sim = piece_sim
+                artist_similarity = max(artist_similarity, track_artist_sim)
+            
             # Weight: 50% title, 50% artist (equal weight to prevent false positives)
             # Also require minimum artist similarity to prevent matching wrong artists
             confidence = (best_title_similarity * 0.5) + (artist_similarity * 0.5)
@@ -10761,6 +11233,11 @@ class MusicDatabase:
     
     def _clean_track_title_for_comparison(self, title: str) -> str:
         """Clean track title for comparison by normalizing brackets/dashes and removing noise"""
+        return MusicDatabase._clean_track_title_cached(title)
+
+    @staticmethod
+    @lru_cache(maxsize=131072)
+    def _clean_track_title_cached(title: str) -> str:
         cleaned = title.lower().strip()
 
         # PRE-STEP: Handle "(with Artist)" featuring BEFORE bracket removal.

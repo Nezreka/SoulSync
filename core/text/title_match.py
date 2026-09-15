@@ -22,6 +22,7 @@ get rejected; the real track is then correctly reported missing.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 import unicodedata
 from collections.abc import Callable, Iterable
 from typing import TypeVar
@@ -40,6 +41,7 @@ _TITLE_STOPWORDS = frozenset({
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
+@lru_cache(maxsize=65536)
 def _fold(text: str) -> str:
     """Casefold and drop combining accents, so 'Versión' tokenises to 'version'.
 
@@ -63,8 +65,11 @@ def _fold(text: str) -> str:
 _NEAR_IDENTICAL = 0.85
 
 
-def _content_tokens(text: str) -> set[str]:
-    return {t for t in _TOKEN_RE.findall(_fold(text)) if t not in _TITLE_STOPWORDS}
+@lru_cache(maxsize=65536)
+def _content_tokens(text: str) -> frozenset[str]:
+    # cached and frozen: the pool matcher asks for the same search title's
+    # tokens once per candidate, and callers only read the set
+    return frozenset(t for t in _TOKEN_RE.findall(_fold(text)) if t not in _TITLE_STOPWORDS)
 
 
 def titles_plausibly_same(

@@ -30,13 +30,11 @@ def _norm_key(text: str) -> str:
 
     Applies accent folding (Björk → bjork), lowercases, and strips every
     non-alphanumeric character so that punctuation / spacing
-    differences never break a match.
+    differences never break a match. the same function fills
+    artists.name_key, which is how a result row finds its artist by index.
     """
-    from core.text.normalize import normalize_for_comparison
-    # normalize_for_comparison already lowercases + accent-folds
-    normed = normalize_for_comparison(text or '')
-    # strip non-alphanumeric (keeps digits + letters only)
-    return re.sub(r'[^a-z0-9]', '', normed)
+    from core.text.normalize import normalize_key
+    return normalize_key(text or '')
 
 
 def _first_artist(name: str) -> str:
@@ -81,6 +79,72 @@ def _load_wishlist_keys(cursor, profile_id: int) -> set[str]:
     return _load_wishlist_keys_shared(cursor, profile_id)
 
 
+def _artist_ids_for(cursor, database, names: list[str]) -> list:
+    """library artist ids whose name_key equals any of these names' keys.
+    indexed on artists.name_key; a library that hasn't finished its norm
+    backfill gets the same answer from a scan of the (small) artists table."""
+    keys = list(dict.fromkeys(_norm_key(n) for n in names if n))
+    keys = [k for k in keys if k]
+    if not keys:
+        return []
+    ph = ','.join('?' for _ in keys)
+    if database._norm_ready(cursor):
+        cursor.execute(f"SELECT id FROM artists WHERE name_key IN ({ph})", keys)
+        return [r[0] for r in cursor.fetchall()]
+    cursor.execute("SELECT id, name FROM artists")
+    return [r[0] for r in cursor.fetchall() if _norm_key(r[1] or '') in keys]
+
+
+def _owned_album_keys(cursor, artist_ids: list) -> set[str]:
+    if not artist_ids:
+        return set()
+    ph = ','.join('?' for _ in artist_ids)
+    cursor.execute(
+        f"SELECT al.title, ar.name FROM albums al JOIN artists ar ON ar.id = al.artist_id "
+        f"WHERE al.artist_id IN ({ph})", artist_ids)
+    keys: set[str] = set()
+    for row in cursor.fetchall():
+        db_title, db_artist = row[0] or '', row[1] or ''
+        keys.add(_album_key(db_title, db_artist))
+        first = _first_artist(db_artist)
+        if first and first != db_artist:
+            keys.add(_album_key(db_title, first))
+    return keys
+
+
+def _owned_tracks_for(cursor, artist_ids: list) -> dict[str, dict]:
+    if not artist_ids:
+        return {}
+    ph = ','.join('?' for _ in artist_ids)
+    cursor.execute(
+        f"""
+        SELECT t.title, a.name, t.id, t.file_path, al.title, al.thumb_url
+        FROM tracks t
+        JOIN artists a ON a.id = t.artist_id
+        JOIN albums al ON al.id = t.album_id
+        WHERE t.artist_id IN ({ph})
+        """, artist_ids)
+    owned: dict[str, dict] = {}
+    for r in cursor.fetchall():
+        track_title, artist_name = r[0] or '', r[1] or ''
+        key = _norm_key(track_title) + '|||' + _norm_key(artist_name)
+        if key not in owned:  # keep first match only
+            owned[key] = {
+                'track_id': r[2],
+                'file_path': r[3],
+                'title': r[0],
+                'artist_name': r[1],
+                'album_title': r[4],
+                'album_thumb_url': r[5],
+            }
+        first = _first_artist(artist_name)
+        if first and first != artist_name:
+            first_key = _norm_key(track_title) + '|||' + _norm_key(first)
+            if first_key not in owned:
+                owned[first_key] = owned[key]
+    return owned
+
+
 def check_library_presence(
     database,
     plex_client,
@@ -95,55 +159,47 @@ def check_library_presence(
     - `tracks` returns one dict per input row. Matched rows get the full
       track metadata + resolved thumb URL; unmatched rows get
       `{in_library: False, in_wishlist: bool}`.
+
+    this used to read EVERY album and EVERY track in the library into python
+    on every call, normalizing each, to build two lookup dicts (a million
+    rows per search on a big library, on the request thread, after every
+    search and every chat wanted card). now each result row looks up its
+    artist by indexed key and compares against that artist's rows only, with
+    the same key function, so the answers are identical and the cost is
+    proportional to the results rather than the library.
     """
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
+        artist_cache: dict[tuple, list] = {}
+        album_keys_cache: dict[tuple, set] = {}
+        tracks_cache: dict[tuple, dict] = {}
 
-        # --- Album ownership (normalised) ------------------------------------
-        cursor.execute(
-            "SELECT al.title, ar.name "
-            "FROM albums al JOIN artists ar ON ar.id = al.artist_id"
-        )
-        owned_albums: set[str] = set()
-        for row in cursor.fetchall():
-            db_title, db_artist = row[0] or '', row[1] or ''
-            # Full artist name key
-            owned_albums.add(_album_key(db_title, db_artist))
-            # Also index explicit featured-artist credits under the primary artist.
-            first = _first_artist(db_artist)
-            if first and first != db_artist:
-                owned_albums.add(_album_key(db_title, first))
+        def _ids(q_artist: str) -> tuple:
+            names = [q_artist]
+            first = _first_artist(q_artist)
+            if first:
+                names.append(first)
+            key = tuple(dict.fromkeys(_norm_key(n) for n in names if n))
+            if key not in artist_cache:
+                artist_cache[key] = _artist_ids_for(cursor, database, names)
+            return tuple(artist_cache[key])
 
-        # --- Track ownership (normalised) ------------------------------------
-        cursor.execute(
-            """
-            SELECT t.title, a.name, t.id, t.file_path,
-                   al.title, al.thumb_url
-            FROM tracks t
-            JOIN artists a ON a.id = t.artist_id
-            JOIN albums al ON al.id = t.album_id
-            """
-        )
-        owned_tracks: dict[str, dict] = {}
-        for r in cursor.fetchall():
-            track_title, artist_name = r[0] or '', r[1] or ''
-            key = _norm_key(track_title) + '|||' + _norm_key(artist_name)
-            if key not in owned_tracks:  # keep first match only
-                owned_tracks[key] = {
-                    'track_id': r[2],
-                    'file_path': r[3],
-                    'title': r[0],
-                    'artist_name': r[1],
-                    'album_title': r[4],
-                    'album_thumb_url': r[5],
-                }
-            # Also index by first artist
-            first = _first_artist(artist_name)
-            if first and first != artist_name:
-                first_key = _norm_key(track_title) + '|||' + _norm_key(first)
-                if first_key not in owned_tracks:
-                    owned_tracks[first_key] = owned_tracks[key]
+        # --- Match albums ----------------------------------------------------
+        album_results: list[bool] = []
+        for a in albums:
+            q_name = a.get('name', '')
+            q_artist = a.get('artist', '')
+            ids = _ids(q_artist)
+            if ids not in album_keys_cache:
+                album_keys_cache[ids] = _owned_album_keys(cursor, list(ids))
+            owned_albums = album_keys_cache[ids]
+            # Try the full credit before an explicit featured-artist fallback.
+            keys_to_try = {_album_key(q_name, q_artist)}
+            first_q = _first_artist(q_artist)
+            if first_q:
+                keys_to_try.add(_album_key(q_name, first_q))
+            album_results.append(bool(keys_to_try & owned_albums))
 
         raw_wishlist_keys = _load_wishlist_keys(cursor, profile_id)
         # Normalise wishlist keys the same way we normalise owned keys,
@@ -156,18 +212,6 @@ def check_library_presence(
             else:
                 wishlist_keys.add(_norm_key(wk))
 
-        # --- Match albums ----------------------------------------------------
-        album_results: list[bool] = []
-        for a in albums:
-            q_name = a.get('name', '')
-            q_artist = a.get('artist', '')
-            # Try the full credit before an explicit featured-artist fallback.
-            keys_to_try = {_album_key(q_name, q_artist)}
-            first_q = _first_artist(q_artist)
-            if first_q:
-                keys_to_try.add(_album_key(q_name, first_q))
-            album_results.append(bool(keys_to_try & owned_albums))
-
         plex_base, plex_token = _resolve_plex_credentials(plex_client, config_manager)
 
         # --- Match tracks ----------------------------------------------------
@@ -175,6 +219,10 @@ def check_library_presence(
         for t in tracks:
             t_name = t.get('name', '')
             t_artist = t.get('artist', '')
+            ids = _ids(t_artist)
+            if ids not in tracks_cache:
+                tracks_cache[ids] = _owned_tracks_for(cursor, list(ids))
+            owned_tracks = tracks_cache[ids]
             keys_to_try = [_norm_key(t_name) + '|||' + _norm_key(t_artist)]
             first_t = _first_artist(t_artist)
             if first_t:
@@ -196,4 +244,3 @@ def check_library_presence(
         conn.close()
 
     return {'albums': album_results, 'tracks': track_results}
-

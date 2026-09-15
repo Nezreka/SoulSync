@@ -49,14 +49,16 @@ def _library(titles):
     db = sqlite3.connect(':memory:')
     db.row_factory = sqlite3.Row
     db.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
+    db.create_function("norm_text", 1, lambda x: normalize_for_comparison(x) if x else "")
     db.executescript("""
-        CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT);
-        CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT, thumb_url TEXT);
+        CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT, name_norm TEXT);
+        CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT, thumb_url TEXT, title_norm TEXT);
         CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id INT, artist_id INT,
             title TEXT, track_number INT, duration INT, file_path TEXT, bitrate INT,
-            created_at TEXT, updated_at TEXT, server_source TEXT, track_artist TEXT);
-        INSERT INTO artists VALUES (1,'Taylor Swift'),(2,'Various');
-        INSERT INTO albums VALUES (1,'Midnights',''),(2,'Other','');
+            created_at TEXT, updated_at TEXT, server_source TEXT, track_artist TEXT,
+            title_norm TEXT, track_artist_norm TEXT);
+        INSERT INTO artists (id, name) VALUES (1,'Taylor Swift'),(2,'Various');
+        INSERT INTO albums (id, title, thumb_url) VALUES (1,'Midnights',''),(2,'Other','');
     """)
     for i, title in enumerate(titles, start=1):
         db.execute(
@@ -72,6 +74,10 @@ def _search(db, title, artist='', limit=15):
     stub = types.SimpleNamespace(
         _normalize_for_comparison=normalize_for_comparison,
         _fuzzy_terms=MusicDatabase._fuzzy_terms,
+        # the norm columns are unfilled here, so the query falls back to the
+        # COALESCE(norm_text(...)) form exactly as a not-yet-backfilled library
+        _norm_ready=lambda cursor: False,
+        _norm_expr=lambda ready, table, raw, norm: MusicDatabase._norm_expr(None, ready, table, raw, norm),
     )
     rows = MusicDatabase._search_tracks_fuzzy_rows(
         stub, db.cursor(), title, artist, limit, None)
@@ -186,16 +192,18 @@ def _library_by_artist(pairs):
     db = sqlite3.connect(':memory:')
     db.row_factory = sqlite3.Row
     db.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
+    db.create_function("norm_text", 1, lambda x: normalize_for_comparison(x) if x else "")
     db.executescript("""
-        CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT);
-        CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT, thumb_url TEXT);
+        CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT, name_norm TEXT);
+        CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT, thumb_url TEXT, title_norm TEXT);
         CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id INT, artist_id INT,
             title TEXT, track_number INT, duration INT, file_path TEXT, bitrate INT,
-            created_at TEXT, updated_at TEXT, server_source TEXT, track_artist TEXT);
-        INSERT INTO albums VALUES (1,'A','');
+            created_at TEXT, updated_at TEXT, server_source TEXT, track_artist TEXT,
+            title_norm TEXT, track_artist_norm TEXT);
+        INSERT INTO albums (id, title, thumb_url) VALUES (1,'A','');
     """)
     for i, (artist, title) in enumerate(pairs, start=1):
-        db.execute("INSERT INTO artists VALUES (?,?)", (i, artist))
+        db.execute("INSERT INTO artists (id, name) VALUES (?,?)", (i, artist))
         db.execute(
             "INSERT INTO tracks (id, album_id, artist_id, title, server_source) "
             "VALUES (?,1,?,?,'jellyfin')", (i, i, title))
@@ -213,6 +221,10 @@ def test_a_comma_in_a_band_name_does_not_bury_it():
     stub = types.SimpleNamespace(
         _normalize_for_comparison=normalize_for_comparison,
         _fuzzy_terms=MusicDatabase._fuzzy_terms,
+        # the norm columns are unfilled here, so the query falls back to the
+        # COALESCE(norm_text(...)) form exactly as a not-yet-backfilled library
+        _norm_ready=lambda cursor: False,
+        _norm_expr=lambda ready, table, raw, norm: MusicDatabase._norm_expr(None, ready, table, raw, norm),
     )
     rows = MusicDatabase._search_tracks_fuzzy_rows(
         stub, db.cursor(), '', "Crosby, Stills & Nash", 15, None)

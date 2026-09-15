@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any, Tuple
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from functools import lru_cache
 from unidecode import unidecode
 from utils.logging_config import get_logger
 from core.settings import config_manager
@@ -35,6 +36,40 @@ class MatchResult:
     @property
     def is_match(self) -> bool:
         return self.plex_track is not None and self.confidence >= self.match_threshold
+
+_DIFFERENT_VERSION_KEYWORDS = [
+    'remix', 'mix', 'rmx',  # Remixes (different song)
+    'live', 'live at', 'live from',  # Live versions (different recording)
+    'acoustic', 'unplugged',  # Acoustic versions (different arrangement)
+    'slowed', 'reverb', 'sped up', 'speed up',  # TikTok edits (different)
+    'radio edit', 'radio version',  # Radio edits (different cut)
+    'single edit',  # Single edits (different cut)
+    'album edit',  # Album edits (different cut)
+    'instrumental', 'karaoke',  # Instrumental (different)
+    'extended', 'extended version',  # Extended (different length)
+    'demo', 'rough cut',  # Demos (different recording)
+]
+# (keyword, compiled word-bounded pattern), in list order — order matters for
+# the strip step, which is why this is a list and not a dict
+_VERSION_KEYWORD_PATTERNS = [
+    (kw, re.compile(r'\b' + re.escape(kw) + r'\b')) for kw in _DIFFERENT_VERSION_KEYWORDS
+]
+
+
+@lru_cache(maxsize=262144)
+def _similarity_score_cached_pair(str1: str, str2: str) -> float:
+    return _SIMILARITY_ENGINE._similarity_score_uncached(str1, str2)
+
+
+def _similarity_score_cached(engine, str1: str, str2: str) -> float:
+    global _SIMILARITY_ENGINE
+    if _SIMILARITY_ENGINE is None:
+        _SIMILARITY_ENGINE = engine
+    return _similarity_score_cached_pair(str1, str2)
+
+
+_SIMILARITY_ENGINE = None
+
 
 class MusicMatchingEngine:
     def __init__(self):
@@ -227,6 +262,12 @@ class MusicMatchingEngine:
         return self.normalize_string(cleaned)
     
     def similarity_score(self, str1: str, str2: str) -> float:
+        """cached front for _similarity_score_uncached: pure on its inputs, and
+        the pool matcher asks for the same pairs over and over (the search
+        title's raw and cleaned forms are often the same string)."""
+        return _similarity_score_cached(self, str1, str2)
+
+    def _similarity_score_uncached(self, str1: str, str2: str) -> float:
         """
         Calculates similarity score between two strings with STRICT version handling.
 
@@ -246,18 +287,7 @@ class MusicMatchingEngine:
         # Version vocabulary, shared by the prefix check and the divergent
         # check below.
         remaster_keywords = ['remaster', 'remastered']
-        different_version_keywords = [
-            'remix', 'mix', 'rmx',  # Remixes (different song)
-            'live', 'live at', 'live from',  # Live versions (different recording)
-            'acoustic', 'unplugged',  # Acoustic versions (different arrangement)
-            'slowed', 'reverb', 'sped up', 'speed up',  # TikTok edits (different)
-            'radio edit', 'radio version',  # Radio edits (different cut)
-            'single edit',  # Single edits (different cut)
-            'album edit',  # Album edits (different cut)
-            'instrumental', 'karaoke',  # Instrumental (different)
-            'extended', 'extended version',  # Extended (different length)
-            'demo', 'rough cut',  # Demos (different recording)
-        ]
+        different_version_keywords = _DIFFERENT_VERSION_KEYWORDS
 
         # STRICT VERSION CHECKING: Different versions should score LOW
         # This prevents "Song Title" from matching "Song Title (Remix)" during sync
@@ -301,18 +331,24 @@ class MusicMatchingEngine:
         # pair that survives to here with high base overlap is a genuinely
         # different cut. (Remasters are intentionally excluded — the prefix
         # branch gives them the lenient 0.75 so re-mastered cuts still match.)
+        # the per-keyword patterns are compiled once at import: building and
+        # escaping ~20 of them per comparison was most of the scorer's time in
+        # a pool match (PERF_REVIEW item 3). same keywords, same word-bounded
+        # search, same set semantics.
         def _versions_in(s: str) -> frozenset:
-            return frozenset(
-                kw for kw in different_version_keywords
-                if re.search(r'\b' + re.escape(kw) + r'\b', s))
+            return frozenset(kw for kw, rx in _VERSION_KEYWORD_PATTERNS if rx.search(s))
 
-        v1, v2 = _versions_in(str1), _versions_in(str2)
+        # nothing below applies under 0.5, so don't scan for versions unless it can matter
+        if standard_ratio >= 0.5:
+            v1, v2 = _versions_in(str1), _versions_in(str2)
+        else:
+            v1 = v2 = frozenset()
         if v1 and v2 and standard_ratio >= 0.5:
             # Strip the version words; what remains is base + distinguishing
             # descriptor (remixer / performance / year).
             def _strip_versions(s: str) -> str:
-                for kw in different_version_keywords:
-                    s = re.sub(r'\b' + re.escape(kw) + r'\b', ' ', s)
+                for _kw, rx in _VERSION_KEYWORD_PATTERNS:
+                    s = rx.sub(' ', s)
                 # A "(live)" vs "- live" difference is the SAME version formatted
                 # differently — the source often uses a dash where the metadata
                 # uses parentheses (lilbob5769). Normalise the wrapping punctuation

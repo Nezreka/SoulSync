@@ -117,6 +117,13 @@ class DatabaseUpdateWorker:
                 self.post_scan_hook(self)
             except Exception as e:
                 logger.warning(f"post-scan hook failed (non-fatal): {e}")
+        # the scan writes artists and albums without their normalized text;
+        # fill it now so the first ownership check after a scan is the fast one
+        try:
+            if self.database is not None and hasattr(self.database, 'ensure_norm_backfilled'):
+                self.database.ensure_norm_backfilled()
+        except Exception as e:
+            logger.warning(f"norm backfill after scan failed (non-fatal): {e}")
         self._emit_signal('finished', *args)
 
 
