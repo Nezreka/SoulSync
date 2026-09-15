@@ -207,7 +207,8 @@ def register_routes(bp):
             if not base or not key:
                 return jsonify({"success": False, "users": []})
             import requests
-            r = requests.get(base + "/Users", headers={"X-Emby-Token": key}, timeout=8)
+            from core.jellyfin_client import jellyfin_auth_headers
+            r = requests.get(base + "/Users", headers=jellyfin_auth_headers(key), timeout=8)
             if r.status_code != 200:
                 return jsonify({"success": False, "users": [], "error": "HTTP %d" % r.status_code})
             users = r.json() or []

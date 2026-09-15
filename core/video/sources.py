@@ -222,14 +222,16 @@ def _video_jellyfin_source(cfg, movies_lib=None, tv_lib=None):
 def video_jellyfin_test(cfg):
     """Diagnose the video Jellyfin connection precisely (for the Test button).
     Returns (ok: bool, message: str). Distinguishes 'can't reach the server',
-    'API key rejected', and 'no users' instead of one vague failure — reuses the
-    same X-Emby-Token header the music client uses (_make_request)."""
+    'API key rejected', and 'no users' instead of one vague failure. sends the
+    same header pair the music client does; a bare x-emby-token alone is a 401
+    on jellyfin 12 (#1250)."""
     base = (cfg.get("base_url") or "").rstrip("/")
     key = cfg.get("api_key") or ""
     if not base or not key:
         return False, "Jellyfin URL/API key not set"
     import requests
-    headers = {"X-Emby-Token": key}
+    from core.jellyfin_client import jellyfin_auth_headers
+    headers = jellyfin_auth_headers(key)
     try:
         info = requests.get(base + "/System/Info", headers=headers, timeout=8)
     except requests.exceptions.ConnectionError:
@@ -1258,7 +1260,7 @@ class JellyfinVideoSource:
         base = (self._c.base_url or "").rstrip("/")
         if not base:
             return {"ok": False, "sections": 0}
-        headers = {"X-Emby-Token": self._c.api_key or ""}
+        headers = self._jf()[1]
         views = []
         if media_type in ("all", "movie"):
             views += list(self._scan_views("movies", self._movies_lib))
@@ -1296,7 +1298,7 @@ class JellyfinVideoSource:
             base = (self._c.base_url or "").rstrip("/")
             if not base:
                 return {"ok": False, "error": "Jellyfin not configured"}
-            headers = {"X-Emby-Token": self._c.api_key or "", "Content-Type": "image/jpeg"}
+            headers = {**self._jf()[1], "Content-Type": "image/jpeg"}
             r = _rq.post(base + "/Items/" + str(server_id) + "/Images/Primary",
                          data=_b64.b64encode(image_bytes), headers=headers, timeout=30)
             r.raise_for_status()
@@ -1375,8 +1377,12 @@ class JellyfinVideoSource:
 
     # ── Collections (BoxSets; SoulSync-managed) ───────────────────────────────
     def _jf(self):
+        """base url + the auth header pair for direct requests calls. every
+        hand-rolled header dict in here goes through this so none of them can
+        fall back to x-emby-token alone (401 on jellyfin 12, #1250)."""
+        from core.jellyfin_client import jellyfin_auth_headers
         base = (self._c.base_url or "").rstrip("/")
-        return base, {"X-Emby-Token": self._c.api_key or ""}
+        return base, jellyfin_auth_headers(self._c.api_key)
 
     def find_collection(self, kind: str, name: str):
         resp = self._req(f"/Users/{self.uid}/Items", params={
@@ -1505,8 +1511,7 @@ class JellyfinVideoSource:
         if not base:
             return False
         try:
-            r = requests.get(base + "/ScheduledTasks",
-                             headers={"X-Emby-Token": self._c.api_key or ""}, timeout=10)
+            r = requests.get(base + "/ScheduledTasks", headers=self._jf()[1], timeout=10)
             tasks = r.json() if r.ok else []
         except Exception:
             return False
@@ -1525,7 +1530,7 @@ class JellyfinVideoSource:
         base = (self._c.base_url or "").rstrip("/")
         if not title or not base:
             return False
-        headers = {"X-Emby-Token": self._c.api_key or ""}
+        headers = self._jf()[1]
 
         def _find(item_type):
             try:
