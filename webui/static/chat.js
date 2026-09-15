@@ -7200,8 +7200,8 @@
                     '<div class="chat-embed-card-body">' +
                         '<span class="chat-embed-frame"><iframe src="https://www.youtube-nocookie.com/embed/' +
                         attr(vid) +
-                        '?autoplay=1&rel=0" allow="encrypted-media; picture-in-picture; autoplay" allowfullscreen ' +
-                        'referrerpolicy="no-referrer" loading="lazy"></iframe></span>' +
+                        '?autoplay=1&rel=0&playsinline=1" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen ' +
+                        'referrerpolicy="strict-origin-when-cross-origin" loading="lazy"></iframe></span>' +
                     '</div>' +
                 '</div>';
                 return;
