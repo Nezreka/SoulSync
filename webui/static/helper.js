@@ -3468,19 +3468,20 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.4.1': [
-        { date: 'September 2026 \u00b7 3.4.1' },
-        {"title": "Less waiting on downloads and imports", "desc": "lyrics requests have real network timeouts, manual imports run as background jobs, and file recovery no longer holds up download status updates.", "page": "downloads"},
-        {"title": "More responsive browsing", "desc": "repeated artwork registration is cached, metadata searches have bounded waits and worker capacity, and offline Plex connections are cached instead of retried on every poll."},
-        {"title": "Discover, Watchlist and Settings refreshed", "desc": "new layouts, clearer controls and responsive forms, with shared music and video folder and organization settings.", "page": "settings"},
-        {"title": "Deezer editorial playlists", "desc": "browse editorial playlists across all 28 genres, search playlists, and see what happens as a playlist is handed off to sync.", "page": "discover"},
-        {"title": "Existing audiobook libraries", "desc": "scan books already on disk, browse the rebuilt library, and review catalogue edition matches using metadata and download provenance.", "page": "audiobooks"},
-        {"title": "Audiobook download reliability", "desc": "live progress follows the download client, cancellation persists, Soulseek transfers are matched correctly, and wishlist rows move on from sent to downloads.", "page": "audiobooks"},
-        {"title": "Watchlist progress and cancellation", "desc": "source matching appears on the page and automation card, and a long artist can be cancelled while matching.", "page": "watchlist"},
-        {"title": "Connection and import fixes", "desc": "correct a Last.fm username, import SoundCloud downloads, preserve the selected Deezer track, and keep unsent chat drafts when Soulseek is disconnected."},
-        {"title": "Podcast protections", "desc": "podcast fetches are guarded and watchlist automation respects profile ownership.", "page": "podcasts"},
-        {"title": "Video libraries across drives", "desc": "configure additional video library paths and load shared Library settings from either media side.", "page": "settings"},
-        {"title": "Earlier versions", "desc": "3.4.0 introduced podcasts and audiobooks, reorganized settings, and added reverse proxy base paths. 3.3.3 expanded chat and improved release parsing."},
+    '3.4.2': [
+        { date: 'September 2026 \u00b7 3.4.2' },
+        {"title": "Now Playing and Wanted cards in chat", "desc": "share what you are playing with /np, or ask for a release with /want and /iso. cards carry artwork and actions, check your library, and offer a one-click PM to whoever has it.", "page": "chat"},
+        {"title": "Richer chat", "desc": "inline players and preview cards for links, a friends, block list and bookmarks drawer, a folder-tree peer explorer with one-click downloads, and drag-and-drop uploads.", "page": "chat"},
+        {"title": "Search upgraded", "desc": "an explore hub on the idle page, a hero result, a sticky jump bar with counts, hover play on cards, and Deezer playlist search with preview art.", "page": "search"},
+        {"title": "Discovery correctness", "desc": "duration mismatches and tribute, karaoke and preview copies are rejected, manual matches survive a re-discovery, and cancelling a sync actually stops the work.", "page": "sync"},
+        {"title": "Batch delete mirrored playlists", "desc": "Select on the Mirrored tab, pick the cards or search a name and Select all visible, and delete them in one confirm.", "page": "sync"},
+        {"title": "Sync keeps your playlists", "desc": "a sync that finds no library matches no longer empties the server playlist, and artist agreement is enforced so a long shared title cannot override an artist mismatch.", "page": "sync"},
+        {"title": "Ownership that survives tag differences", "desc": "library checks fold accents, punctuation and multi-artist strings, and discography completion skips upstream calls for releases you do not own.", "page": "library"},
+        {"title": "MusicBrainz release kept through import", "desc": "the release you picked is used for import and completion, every track of an album gets the same release id, and tags are written the way Picard writes them.", "page": "downloads"},
+        {"title": "Music size limit", "desc": "an optional cap on megabytes per minute of audio, applied before a download is chosen.", "page": "settings"},
+        {"title": "Client and server fixes", "desc": "qBittorrent 5.0+ add responses are parsed, Transmission web UI URLs normalize to the RPC endpoint, stale Navidrome playlist ids are no longer reused (#1248), and Jellyfin 12 accepts every video-side call (#1250).", "page": "settings"},
+        {"title": "Matching fixes", "desc": "band names with commas, slashes or ampersands are no longer split into separate artists, releases with unknown track counts are not assumed to be singles, and the Download Missing Tracks modal from a chat card shows real artists, durations and art.", "page": "sync"},
+        {"title": "Earlier versions", "desc": "3.4.1 cut waiting on downloads and imports, refreshed Discover, Watchlist and Settings, and improved audiobook libraries. 3.4.0 introduced podcasts and audiobooks."},
     ],
 };
 
@@ -3511,7 +3512,27 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-    "title": "3.4.1: less waiting, clearer pages and stronger audiobook libraries",
+    "title": "3.4.2: chat that shares music, sharper search and sync you can trust",
+    "description": "This update rebuilds chat around shareable music cards, upgrades search, tightens playlist discovery and sync correctness, and fixes reported Jellyfin, Navidrome and torrent client problems.",
+    "features": [
+        "Now Playing and Wanted cards in chat: /np shares what you are playing with artwork, bitrate and direct actions; /want and /iso search Spotify, Deezer, Apple Music, Discogs and MusicBrainz, check your library, and offer a one-click PM to whoever has it. Vanilla Soulseek clients see plain text.",
+        "Richer chat: inline players and preview cards for links, YouTube embeds, a friends, block list and bookmarks drawer, DM conversations you can close, a folder-tree peer explorer with one-click downloads, format filter pills and drag-and-drop uploads.",
+        "Search upgraded: an explore hub on the idle page, a hero result, a sticky jump bar with counts, hover play on album and playlist cards, and Deezer playlist search with cover art in the preview.",
+        "Discovery correctness: duration mismatches and tribute, karaoke and preview copies are rejected, manual matches and provider metadata survive a re-discovery, cancelling a sync stops the background work, and resetting a mirrored playlist clears both caches.",
+        "Batch delete mirrored playlists (#1219): Select on the Mirrored tab, pick the cards or search a name and Select all visible, and delete them in one confirm.",
+        "Sync keeps your playlists: a sync that finds no library matches no longer empties the server playlist, the missing tracks still go to the wishlist, and artist agreement is enforced in the second matching pass.",
+        "Ownership that survives tag differences: library checks fold accents, punctuation and multi-artist strings, the completeness cache keeps full artist identities, and discography completion skips upstream calls for releases you do not own.",
+        "MusicBrainz release kept through import: the release you picked is used for import and completion, every track of an album gets the same release id across restarts, and tags are written with Picard's native frames and multi-value fields.",
+        "Music size limit: an optional cap on megabytes per minute of audio, applied as a candidate filter before a download is chosen. Unknown sizes and durations stay eligible.",
+        "Client and server fixes: qBittorrent 5.0+ add responses are parsed with 4.x still supported, Transmission web UI URLs normalize to the RPC endpoint, stale Navidrome playlist ids are no longer reused and failed updates are not reported as successful (#1248).",
+        "Jellyfin 12 on the video side (#1250): the modern auth header fix only reached the music client, so every video-side call was rejected while the same key worked for music. The connection test, user picker, library refresh, poster and collection calls and server activity now send the same header pair.",
+        "Watchlist is responsive on mobile with a bottom sheet drawer.",
+        "Matching fixes: band names with commas, slashes, ampersands or 'and' are no longer split into separate artists, a release with an unknown track count uses release ownership instead of being assumed a single, unmatch works on every source, and a release-group is never treated as an edition.",
+        "Chat fixes: the Download Missing Tracks modal from a card shows real artists, durations and art, wanted cards resolve the full album tracklist before wishlist or download, rich cards are never sent as plain text, and plain-mode chat no longer sends typing noise."
+    ]
+},
+    {
+    "title": "Earlier in 3.4.1: less waiting, clearer pages and stronger audiobook libraries",
     "description": "This update addresses slow processing and navigation, refreshes Discover, Watchlist and Settings, and improves existing audiobook libraries and download tracking.",
     "features": [
         "Less waiting on downloads and imports: lyrics requests have real network timeouts, manual imports run as background jobs, and file recovery no longer holds up download status updates.",
