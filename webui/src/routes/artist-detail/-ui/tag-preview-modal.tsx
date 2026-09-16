@@ -68,10 +68,18 @@ export function TagPreviewModal({ trackId, onClose }: { trackId: unknown; onClos
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="tag-preview-modal">
-        <div className="enhanced-bulk-modal-header">
-          <h3 id="tag-preview-title">Write Tags to File</h3>
-          <button className="enhanced-bulk-modal-close" type="button" onClick={onClose}>
+      {/* enhanced-bulk-modal is the card itself; without it the modal is see-through */}
+      <div className="enhanced-bulk-modal tag-preview-modal tagw-modal">
+        <div className="enhanced-bulk-modal-header tagw-header">
+          <div className="tagw-title-wrap">
+            <h3 id="tag-preview-title">Write Tags to File</h3>
+          </div>
+          <button
+            className="enhanced-bulk-modal-close"
+            type="button"
+            title="Close"
+            onClick={onClose}
+          >
             ×
           </button>
         </div>
@@ -89,28 +97,30 @@ export function TagPreviewModal({ trackId, onClose }: { trackId: unknown; onClos
             </>
           )}
         </div>
-        <div className="enhanced-bulk-modal-footer">
-          <label className="tag-preview-option">
-            <input
-              type="checkbox"
-              id="tag-preview-embed-cover"
-              checked={embedCover}
-              onChange={(e) => setEmbedCover(e.target.checked)}
-            />
-            Embed cover art
-          </label>
-          {preview && offersServerSync(preview.serverType) ? (
-            <label className="tag-preview-option" id="tag-preview-sync-label">
+        <div className="enhanced-bulk-modal-footer tagw-footer">
+          <div className="tagw-options">
+            <label className="tag-preview-option">
               <input
                 type="checkbox"
-                id="tag-preview-sync-server"
-                checked={syncToServer}
-                onChange={(e) => setSyncToServer(e.target.checked)}
+                id="tag-preview-embed-cover"
+                checked={embedCover}
+                onChange={(e) => setEmbedCover(e.target.checked)}
               />
-              <span id="tag-preview-sync-text">{serverSyncLabel(preview.serverType)}</span>
+              Embed cover art
             </label>
-          ) : null}
-          <div style={{ marginLeft: 'auto' }}>
+            {preview && offersServerSync(preview.serverType) ? (
+              <label className="tag-preview-option" id="tag-preview-sync-label">
+                <input
+                  type="checkbox"
+                  id="tag-preview-sync-server"
+                  checked={syncToServer}
+                  onChange={(e) => setSyncToServer(e.target.checked)}
+                />
+                <span id="tag-preview-sync-text">{serverSyncLabel(preview.serverType)}</span>
+              </label>
+            ) : null}
+          </div>
+          <div className="tagw-actions">
             <button className="btn btn--sm btn--secondary" type="button" onClick={onClose}>
               Cancel
             </button>

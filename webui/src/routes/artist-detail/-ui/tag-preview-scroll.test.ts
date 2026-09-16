@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -28,6 +27,14 @@ describe('the write-tags modals scroll inside a bounded box', () => {
     expect(rule('.batch-tag-preview-body')).toMatch(/min-height:\s*0/);
     expect(rule('.batch-tag-preview-modal')).toMatch(/max-height:\s*85vh/);
     expect(rule('.batch-tag-preview-modal')).toMatch(/overflow:\s*hidden/);
+  });
+
+  it('both cards carry the base class that paints them', () => {
+    // the port dropped enhanced-bulk-modal, so the card had no background and
+    // rendered see-through over the page (the "very transparent" report)
+    expect(BATCH).toContain('className="enhanced-bulk-modal batch-tag-preview-modal');
+    expect(SINGLE).toContain('className="enhanced-bulk-modal tag-preview-modal');
+    expect(rule('.enhanced-bulk-modal')).toMatch(/background:\s*linear-gradient/);
   });
 
   it('the single-track body does too', () => {

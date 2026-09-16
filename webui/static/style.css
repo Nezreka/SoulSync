@@ -56723,7 +56723,7 @@ tr.tag-diff-same {
        screens, and the buttons sat below the fold (#1254) */
     flex: 1 1 auto;
     min-height: 0;
-    padding: 8px 16px 16px !important;
+    padding: 12px 24px 16px;
 }
 
 .tag-preview-modal {
@@ -56737,6 +56737,49 @@ tr.tag-diff-same {
     overflow-y: auto;
     flex: 1 1 auto;
     min-height: 0;
+    padding: 8px 24px 12px;
+}
+
+/* ── write-tags shell: header kicker, summary hint, pill options, footer ── */
+.tagw-header { align-items: flex-start; padding: 18px 24px 14px; }
+.tagw-title-wrap { min-width: 0; }
+.tagw-kicker {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: rgb(var(--accent-rgb)); margin-bottom: 4px;
+}
+.tagw-header h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tagw-summary { align-items: center; padding: 10px 24px; }
+.tagw-hint { margin-left: auto; font-size: 11.5px; color: rgba(255,255,255,0.35); white-space: nowrap; }
+.tagw-modal .batch-tag-track {
+    background: rgba(255,255,255,0.025);
+    border-color: rgba(255,255,255,0.07);
+    transition: border-color 0.15s ease;
+}
+.tagw-modal .batch-tag-track.expanded { border-color: rgba(var(--accent-rgb), 0.28); }
+.tagw-modal .batch-tag-track.error { border-color: rgba(255,80,80,0.2); }
+.tagw-modal .batch-tag-unchanged-group { background: rgba(255,255,255,0.015); }
+.tagw-footer { flex-wrap: wrap; align-items: center; gap: 10px; }
+.tagw-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.tagw-actions { display: flex; gap: 8px; margin-left: auto; }
+.tag-preview-option {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 12px 7px 10px; border-radius: 999px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    font-size: 12.5px; color: rgba(255,255,255,0.72); cursor: pointer; user-select: none;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.tag-preview-option:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.tag-preview-option:has(input:checked) {
+    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: #fff;
+}
+.tag-preview-option input[type="checkbox"] { accent-color: rgb(var(--accent-rgb)); margin: 0; cursor: pointer; }
+
+@media (max-width: 640px) {
+    .tagw-hint { display: none; }
+    .tagw-actions { width: 100%; }
+    .tagw-actions .btn { flex: 1 1 0; }
 }
 
 .batch-tag-summary {

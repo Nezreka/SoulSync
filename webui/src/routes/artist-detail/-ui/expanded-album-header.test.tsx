@@ -263,9 +263,7 @@ describe('admin actions', () => {
         tracks: [{ id: 1, file_path: '/music/a.flac' }, { id: 2 }],
       });
       fireEvent.click(document.querySelector('.enhanced-write-tags-album-btn') as HTMLElement);
-      expect(document.getElementById('batch-tag-preview-title')?.textContent).toBe(
-        'Write Tags — SAW 85-92',
-      );
+      expect(document.getElementById('batch-tag-preview-title')?.textContent).toBe('SAW 85-92');
       // Only the track that actually has a file goes into the batch (5449).
       await waitFor(() =>
         expect(

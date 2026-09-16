@@ -67,19 +67,29 @@ export function BatchTagPreviewModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="batch-tag-preview-modal">
-        <div className="enhanced-bulk-modal-header">
-          <h3 id="batch-tag-preview-title">
-            {albumTitle ? `Write Tags — ${albumTitle}` : `Write Tags — ${trackIds.length} Tracks`}
-          </h3>
-          <button className="enhanced-bulk-modal-close" type="button" onClick={onClose}>
+      {/* enhanced-bulk-modal is the card itself (background, border, shadow);
+          the port dropped it and the modal rendered see-through */}
+      <div className="enhanced-bulk-modal batch-tag-preview-modal tagw-modal">
+        <div className="enhanced-bulk-modal-header tagw-header">
+          <div className="tagw-title-wrap">
+            <div className="tagw-kicker">Write tags to files</div>
+            <h3 id="batch-tag-preview-title">
+              {albumTitle ?? `${trackIds.length} track${trackIds.length !== 1 ? 's' : ''}`}
+            </h3>
+          </div>
+          <button
+            className="enhanced-bulk-modal-close"
+            type="button"
+            title="Close"
+            onClick={onClose}
+          >
             ×
           </button>
         </div>
 
         <div id="batch-tag-preview-summary">
           {preview && !preview.error ? (
-            <div className="batch-tag-summary">
+            <div className="batch-tag-summary tagw-summary">
               {withChanges.length > 0 ? (
                 <span className="batch-tag-stat changed">{withChanges.length} with changes</span>
               ) : null}
@@ -89,6 +99,9 @@ export function BatchTagPreviewModal({
               {errored.length > 0 ? (
                 <span className="batch-tag-stat errored">{errored.length} unavailable</span>
               ) : null}
+              <span className="tagw-hint">
+                only changed fields are written · file value → new value
+              </span>
             </div>
           ) : null}
         </div>
@@ -124,28 +137,30 @@ export function BatchTagPreviewModal({
           )}
         </div>
 
-        <div className="enhanced-bulk-modal-footer">
-          <label className="tag-preview-option">
-            <input
-              type="checkbox"
-              id="batch-tag-preview-embed-cover"
-              checked={embedCover}
-              onChange={(e) => setEmbedCover(e.target.checked)}
-            />
-            Embed cover art
-          </label>
-          {preview && offersServerSync(preview.serverType) ? (
-            <label className="tag-preview-option" id="batch-tag-preview-sync-label">
+        <div className="enhanced-bulk-modal-footer tagw-footer">
+          <div className="tagw-options">
+            <label className="tag-preview-option">
               <input
                 type="checkbox"
-                id="batch-tag-preview-sync-server"
-                checked={syncToServer}
-                onChange={(e) => setSyncToServer(e.target.checked)}
+                id="batch-tag-preview-embed-cover"
+                checked={embedCover}
+                onChange={(e) => setEmbedCover(e.target.checked)}
               />
-              <span id="batch-tag-preview-sync-text">{serverSyncLabel(preview.serverType)}</span>
+              Embed cover art
             </label>
-          ) : null}
-          <div style={{ marginLeft: 'auto' }}>
+            {preview && offersServerSync(preview.serverType) ? (
+              <label className="tag-preview-option" id="batch-tag-preview-sync-label">
+                <input
+                  type="checkbox"
+                  id="batch-tag-preview-sync-server"
+                  checked={syncToServer}
+                  onChange={(e) => setSyncToServer(e.target.checked)}
+                />
+                <span id="batch-tag-preview-sync-text">{serverSyncLabel(preview.serverType)}</span>
+              </label>
+            ) : null}
+          </div>
+          <div className="tagw-actions">
             <button className="btn btn--sm btn--secondary" type="button" onClick={onClose}>
               Cancel
             </button>
@@ -156,7 +171,9 @@ export function BatchTagPreviewModal({
               disabled={withChanges.length === 0}
               onClick={write}
             >
-              Write Tags
+              {withChanges.length > 0
+                ? `Write ${withChanges.length} track${withChanges.length !== 1 ? 's' : ''}`
+                : 'Nothing to write'}
             </button>
           </div>
         </div>
