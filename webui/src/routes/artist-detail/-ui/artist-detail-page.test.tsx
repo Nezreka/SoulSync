@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -936,5 +936,80 @@ describe('scroll position', () => {
     });
     await waitFor(() => expect(main.scrollTop).toBe(0));
     main.remove();
+  });
+});
+
+describe('the Wrong match? button', () => {
+  const fixBtn = () => document.getElementById('artist-fix-match-btn');
+
+  it('sits in the hero tool row next to DB Record, for an admin on a library artist', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    const tools = document.querySelector('.artist-hero-tools');
+    expect(tools).not.toBeNull();
+    expect(fixBtn()?.parentElement).toBe(tools);
+    expect(document.getElementById('artist-db-record-btn')?.parentElement).toBe(tools);
+    expect(fixBtn()?.nextElementSibling?.id).toBe('artist-db-record-btn');
+  });
+
+  it('is absent for a non-admin and for a source artist', async () => {
+    window.SoulSyncWebShellBridge = createShellBridge({
+      getCurrentProfileContext: vi.fn(() => ({ profileId: 3, isAdmin: false })),
+    });
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    expect(fixBtn()).toBeNull();
+    // DB Record is read-only and stays
+    expect(document.getElementById('artist-db-record-btn')).not.toBeNull();
+    cleanup();
+
+    window.SoulSyncWebShellBridge = createShellBridge();
+    stubDetail({ success: true, artist: { id: 'sp1', name: 'X' }, discography: {} });
+    renderPage();
+    await screen.findByText('X');
+    expect(fixBtn()).toBeNull();
+  });
+
+  it('re-reads the page after a match changes, so the hero badges follow', async () => {
+    let spotifyId: string | null = null;
+    stubDetail(LIBRARY, (url) => {
+      if (url.includes('/record')) {
+        return { success: true, record: { name: 'Aphex Twin', spotify_artist_id: spotifyId } };
+      }
+      if (url.includes('search-service')) {
+        return { success: true, results: [{ id: 'sp-new', name: 'Aphex Twin' }] };
+      }
+      if (url.includes('manual-match')) {
+        spotifyId = 'sp-new';
+        return { success: true, updated_data: null };
+      }
+      if (url.includes('artist-detail/42')) {
+        return {
+          ...LIBRARY,
+          artist: { ...LIBRARY.artist, spotify_artist_id: spotifyId },
+        };
+      }
+      return undefined;
+    });
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    expect(document.querySelector('.artist-hero-badge[title="Spotify"]')).toBeNull();
+
+    fireEvent.click(fixBtn() as HTMLElement);
+    const row = await waitFor(() => {
+      const el = document.querySelector('.amx-row[data-svc="spotify"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(within(row).getByText('Find match'));
+    fireEvent.click(await screen.findByText('Use this'));
+
+    await waitFor(() =>
+      expect(
+        document.querySelector('.artist-hero-badge[title="Spotify"]')?.getAttribute('href'),
+      ).toBe('https://open.spotify.com/artist/sp-new'),
+    );
+    const detailLoads = requested.filter((u) => u.includes('artist-detail/42')).length;
+    expect(detailLoads).toBeGreaterThanOrEqual(2);
   });
 });

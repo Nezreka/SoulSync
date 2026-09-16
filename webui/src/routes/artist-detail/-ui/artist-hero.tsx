@@ -23,6 +23,7 @@ import { bucketCounts } from '../-artist-detail.use-completion';
 import { checkWatchlistRequest, toggleWatchlistRequest } from '../-artist-detail.watchlist-button';
 import { ArtPicker } from './art-picker';
 import { ArtistDbRecord } from './artist-db-record';
+import { ArtistFixMatch } from './artist-matches-modal';
 import { DiscographyModal } from './discography-modal';
 import { EnrichmentCoverage } from './enrichment-coverage';
 import { BodyPortal } from './portal';
@@ -40,6 +41,10 @@ interface Props {
   enrichment?: Record<string, unknown>;
   /** Canonical identity for the watchlist button; null hides its behavior. */
   watchlist?: { id: unknown; name: string } | null;
+  /** Admin on a library artist: shows the "Wrong match?" button beside DB Record. */
+  canFixMatches?: boolean;
+  /** A source match changed; the page re-reads the artist. */
+  onMatchesChanged?: () => void;
 }
 
 /**
@@ -133,6 +138,8 @@ export function ArtistHero({
   streamCompleted = false,
   enrichment,
   watchlist = null,
+  canFixMatches = false,
+  onMatchesChanged,
 }: Props) {
   const image = heroImage(artist, discography);
   const badges = buildHeroBadges(artist);
@@ -422,8 +429,7 @@ export function ArtistHero({
             <div
               ref={bioRef}
               className={
-                `artist-hero-bio${bioExpanded ? ' expanded' : ''}` +
-                (bioFits ? '' : ' has-more')
+                `artist-hero-bio${bioExpanded ? ' expanded' : ''}` + (bioFits ? '' : ' has-more')
               }
               id="artist-hero-bio"
             >
@@ -488,8 +494,16 @@ export function ArtistHero({
       </div>
 
       {/* Appended to the hero SECTION, not the content row — the vanilla did
-          the same and the CSS positions it against the section. */}
-      <ArtistDbRecord artist={artist} isSourceArtist={isSourceArtist} />
+          the same and the CSS positions the tool row against the section. */}
+      <div className="artist-hero-tools">
+        <ArtistFixMatch
+          artist={artist}
+          isSourceArtist={isSourceArtist}
+          isAdmin={canFixMatches}
+          onChanged={() => onMatchesChanged?.()}
+        />
+        <ArtistDbRecord artist={artist} isSourceArtist={isSourceArtist} />
+      </div>
     </div>
   );
 }

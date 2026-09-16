@@ -13,7 +13,8 @@ import type { ArtistInfo } from './-artist-detail.types';
  * two pages.
  */
 
-const LOGOS = {
+/** Brand logos by service slug; the Wrong match panel reuses them. */
+export const SERVICE_LOGOS = {
   musicbrainz: '/static/img/brands/musicbrainz.png',
   deezer: '/static/img/brands/deezer.png',
   spotify: '/static/img/brands/spotify.png',
@@ -27,6 +28,7 @@ const LOGOS = {
   bandcamp: '/static/img/brands/bandcamp.svg',
   soulsync: '/static/trans2.png',
 } as const;
+const LOGOS = SERVICE_LOGOS;
 
 export interface HeroBadge {
   key: string;
