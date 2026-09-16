@@ -39,25 +39,30 @@ export const INBOX_STATUS_META: Record<ImportInboxStatus, InboxStatusMeta> = {
 };
 
 /** statuses a person has to do something about, in the order they should see them */
-const ATTENTION_ORDER: ImportInboxStatus[] = [
-  'needs_review',
-  'needs_identify',
-  'failed',
-  'waiting',
-];
+const ATTENTION_ORDER: ImportInboxStatus[] = ['needs_review', 'needs_identify', 'failed'];
 const HISTORY: ImportInboxStatus[] = ['imported', 'failed', 'dismissed'];
 
-export function isAttention(status: ImportInboxStatus): boolean {
+/**
+ * Waiting counts as attention only while auto-import is OFF. With it on, a
+ * fresh drop is about to be picked up (next scan, once its files stop
+ * changing) and needs nobody; showing it under Needs attention read as
+ * "something is wrong" the moment files landed.
+ */
+export function isAttention(status: ImportInboxStatus, workerRunning: boolean): boolean {
+  if (status === 'waiting') return !workerRunning;
   return ATTENTION_ORDER.includes(status);
 }
 
 export function filterInboxItems(
   items: ImportInboxItem[],
   filter: ImportInboxFilter,
+  workerRunning: boolean,
 ): ImportInboxItem[] {
   switch (filter) {
     case 'attention':
-      return sortInbox(items.filter((item) => item.in_staging && isAttention(item.status)));
+      return sortInbox(
+        items.filter((item) => item.in_staging && isAttention(item.status, workerRunning)),
+      );
     case 'history':
       return items.filter((item) => HISTORY.includes(item.status)).sort(byNewest);
     case 'all':
@@ -98,9 +103,10 @@ export interface InboxCounts {
   history: number;
 }
 
-export function countInbox(items: ImportInboxItem[]): InboxCounts {
+export function countInbox(items: ImportInboxItem[], workerRunning: boolean): InboxCounts {
   return {
-    attention: items.filter((item) => item.in_staging && isAttention(item.status)).length,
+    attention: items.filter((item) => item.in_staging && isAttention(item.status, workerRunning))
+      .length,
     all: items.length,
     history: items.filter((item) => HISTORY.includes(item.status)).length,
   };

@@ -265,15 +265,16 @@ describe('import route', () => {
     expect(await screen.findByTestId('import-page')).toBeInTheDocument();
     expect(await screen.findByText('Album A')).toBeInTheDocument();
     expect(screen.getByText('/music/Staging')).toBeInTheDocument();
-    // needs attention is the default: the review item and the waiting single, not history
+    // needs attention is the default: the review item. the waiting single is
+    // about to be picked up (auto-import is on), so it is not attention.
     const rows = screen.getAllByTestId('import-inbox-row');
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(1);
     expect(within(rows[0]).getByText('Needs review')).toBeInTheDocument();
     expect(within(rows[0]).getByText('82%')).toBeInTheDocument();
     expect(within(rows[0]).getByText('2 tracks · FLAC · 7:22 · 62 MB')).toBeInTheDocument();
     expect(within(rows[0]).getByText('2/2 tracks matched')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('Waiting')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Needs attention\s*2/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Needs attention\s*1/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Everything\s*3/ })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /History\s*1/ })).toBeInTheDocument();
     expect(screen.getByText(/next scan in \d+s/)).toBeInTheDocument();
     expect(history.location.pathname).toBe('/import');
@@ -351,11 +352,23 @@ describe('import route', () => {
     );
   });
 
-  it('a waiting item offers Identify, which opens the matcher', async () => {
-    const { history } = renderImportRoute();
+  it('a waiting item is attention only when auto-import is off', async () => {
+    inbox = inboxPayload(inbox.items!, {
+      worker: { ...inbox.worker!, running: false },
+    });
+    renderImportRoute();
     const rows = await screen.findAllByTestId('import-inbox-row');
-    expect(within(rows[1]).queryByRole('button', { name: 'Approve' })).toBeNull();
-    fireEvent.click(within(rows[1]).getByRole('button', { name: 'Identify' }));
+    expect(rows).toHaveLength(2);
+    expect(within(rows[1]).getByText('Waiting')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Needs attention\s*2/ })).toBeInTheDocument();
+  });
+
+  it('a waiting item offers Identify, which opens the matcher', async () => {
+    const { history } = renderImportRoute(['/import?filter=all']);
+    const rows = await screen.findAllByTestId('import-inbox-row');
+    const waiting = rows.find((row) => within(row).queryByText('Waiting'))!;
+    expect(within(waiting).queryByRole('button', { name: 'Approve' })).toBeNull();
+    fireEvent.click(within(waiting).getByRole('button', { name: 'Identify' }));
     await waitFor(() => expect(history.location.pathname).toBe('/import/match/hash-2'));
     expect(await screen.findByText('Which track is this?')).toBeInTheDocument();
     // the search runs from the file's own tags, and picking a result names the import

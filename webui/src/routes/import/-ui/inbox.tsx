@@ -74,8 +74,9 @@ export function Inbox({
 
   const payload = inbox.data;
   const items = payload?.items ?? [];
-  const visible = filterInboxItems(items, filter);
-  const counts = countInbox(items);
+  const workerRunning = Boolean(payload?.worker?.running);
+  const visible = filterInboxItems(items, filter, workerRunning);
+  const counts = countInbox(items, workerRunning);
 
   // a selection that outlives its rows (the worker imported them) is dropped
   useEffect(() => {

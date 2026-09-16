@@ -48,11 +48,14 @@ describe('filterInboxItems', () => {
   ];
 
   it('attention is what a person has to act on, in urgency order', () => {
-    expect(filterInboxItems(rows, 'attention').map((r) => r.key)).toEqual(['c', 'e', 'b']);
+    // auto-import off: waiting needs a person
+    expect(filterInboxItems(rows, 'attention', false).map((r) => r.key)).toEqual(['c', 'e', 'b']);
+    // auto-import on: a fresh drop is about to be picked up, not a problem
+    expect(filterInboxItems(rows, 'attention', true).map((r) => r.key)).toEqual(['c', 'e']);
   });
 
   it('history is what already happened, newest first', () => {
-    expect(filterInboxItems(rows, 'history').map((r) => r.key)).toEqual(['e', 'a', 'f']);
+    expect(filterInboxItems(rows, 'history', true).map((r) => r.key)).toEqual(['e', 'a', 'f']);
   });
 
   it('all puts live work first and history last', () => {
@@ -60,7 +63,8 @@ describe('filterInboxItems', () => {
   });
 
   it('counts each pill', () => {
-    expect(countInbox(rows)).toEqual({ attention: 3, all: 6, history: 3 });
+    expect(countInbox(rows, false)).toEqual({ attention: 3, all: 6, history: 3 });
+    expect(countInbox(rows, true)).toEqual({ attention: 2, all: 6, history: 3 });
   });
 });
 
