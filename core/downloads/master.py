@@ -74,6 +74,55 @@ def _similarity(left: Any, right: Any) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+def _album_title_similarity(expected: str, artist: str, year: str,
+                            album_title: str, album_path: str) -> float:
+    """Compare the folder's title, treating artist/year/type as separate evidence.
+
+    Do not deduplicate arbitrary words: repetition can be part of a real title.
+    Only remove a leading artist and known release metadata from the leaf.
+    In particular, an eponymous artist prefix is not a second title match.
+    """
+    baseline = max(_similarity(expected, album_title),
+                   _similarity(expected, album_path))
+    leaf = str(album_path or '').replace('\\', '/').rstrip('/').split('/')[-1]
+    title = _norm_text(leaf).replace('-', ' ')
+    artist_key = _norm_text(artist).replace('-', ' ')
+    expected_key = _norm_text(expected).replace('-', ' ')
+    if artist_key and title.startswith(artist_key + ' '):
+        title = title[len(artist_key):].strip()
+    title = re.sub(r'(?<!\d)(?:19|20)\d{2}(?!\d)', ' ', title)
+    title = re.sub(r'\b(?:album|lp|ep|compilation)\b', ' ', title)
+    title = re.sub(r'\s+', ' ', title).strip()
+    title_score = max(baseline, _similarity(expected, title))
+    if title_score < 0.5:
+        return title_score
+
+    path_key = _norm_text(album_path).replace('-', ' ')
+    bonus = 0.0
+    if artist_key and artist_key != expected_key and re.search(
+            rf'(?<!\w){re.escape(artist_key)}(?!\w)', path_key):
+        bonus += 0.08
+    if year and re.search(rf'(?<!\d){re.escape(year)}(?!\d)', path_key):
+        bonus += 0.08
+    return min(1.0, title_score + bonus)
+
+
+def _album_search_queries(artist: str, album: str, year: str) -> list[str]:
+    """Avoid repeating the same term for a self-titled Soulseek album."""
+    clean_artist = re.sub(r'\s*\(.*?\)', '', artist).strip()
+    clean_artist = re.sub(
+        r'\s*(feat\.?|ft\.?|featuring)\s+.*$', '', clean_artist,
+        flags=re.IGNORECASE,
+    ).strip()
+    if _norm_text(clean_artist) == _norm_text(album):
+        return [f'{clean_artist} {year}', album] if year else [album]
+    queries = [f'{artist} {album}']
+    if clean_artist != artist:
+        queries.append(f'{clean_artist} {album}')
+    queries.append(album)
+    return queries
+
+
 def _folder_variant_penalty(expected_album_name: str, folder_text: str) -> float:
     expected = _norm_text(expected_album_name)
     folder = _norm_text(folder_text)
@@ -189,9 +238,12 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
         str(getattr(album_result, attr, '') or '')
         for attr in ('album_title', 'album_path')
     )
-    album_score = max(
-        _similarity(expected_album, getattr(album_result, 'album_title', '')),
-        _similarity(expected_album, getattr(album_result, 'album_path', '')),
+    album_score = _album_title_similarity(
+        expected_album,
+        expected_artist,
+        expected_year,
+        str(getattr(album_result, 'album_title', '') or ''),
+        str(getattr(album_result, 'album_path', '') or ''),
     )
     artist_score = max(
         _similarity(expected_artist, getattr(album_result, 'artist', '')),
@@ -1061,15 +1113,10 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
 
                     slsk = _soulseek_bundle_plugin
 
-                    # Try multiple query variations (banned keywords in artist/album name can return 0 results)
-                    album_queries = [f"{artist_name} {album_name}"]
-                    # Clean artist name (remove feat., parentheticals)
-                    clean_artist = re.sub(r'\s*\(.*?\)', '', artist_name).strip()
-                    clean_artist = re.sub(r'\s*(feat\.?|ft\.?|featuring)\s+.*$', '', clean_artist, flags=re.IGNORECASE).strip()
-                    if clean_artist != artist_name:
-                        album_queries.append(f"{clean_artist} {album_name}")
-                    # Album name only (some users file by album)
-                    album_queries.append(album_name)
+                    album_queries = _album_search_queries(
+                        artist_name, album_name,
+                        str((batch_album_context or {}).get('release_date') or '')[:4],
+                    )
 
                     album_results = []
                     track_results = []

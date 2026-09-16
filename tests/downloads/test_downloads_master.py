@@ -775,6 +775,55 @@ def test_soulseek_album_score_rejects_partial_folder_despite_good_metadata():
     ) == 0.0
 
 
+def test_soulseek_album_title_accepts_eponymous_folder_with_release_metadata():
+    from core.downloads.master import _album_title_similarity, _score_album_folder
+
+    path = 'music/GUNSHIP (synthwave)/GUNSHIP - Album - 2015 - GUNSHIP'
+    assert _album_title_similarity('GUNSHIP', 'Gunship', '2015',
+                                   'GUNSHIP - Album - 2015 - GUNSHIP', path) >= 0.65
+    expected = [{'name': f'Track {number}', 'track_number': number}
+                for number in range(1, 14)]
+    tracks = [_slsk_track(f'Track {number}', number, folder=path)
+              for number in range(1, 14)]
+    album = _album_result('jerb', path, 'GUNSHIP - Album - 2015 - GUNSHIP',
+                          tracks, artist='GUNSHIP', year='2015')
+    assert _score_album_folder(
+        album, {'name': 'GUNSHIP', 'total_tracks': 13, 'release_date': '2015-01-01'},
+        {'name': 'Gunship'}, expected, tracks,
+    ) >= 0.62
+
+
+def test_soulseek_album_title_keeps_distinct_artist_and_year_evidence():
+    from core.downloads.master import _album_title_similarity
+
+    plain = _album_title_similarity('Mezzanine', 'Massive Attack', '1998',
+                                    'Mezzanine [LP] Bonus', 'Mezzanine [LP] Bonus')
+    corroborated = _album_title_similarity(
+        'Mezzanine', 'Massive Attack', '1998', 'Massive Attack - Mezzanine [LP] Bonus (1998)',
+        'music/Massive Attack/Massive Attack - Mezzanine [LP] Bonus (1998)')
+    assert corroborated > plain
+
+
+def test_soulseek_album_title_does_not_confuse_artist_with_another_album():
+    from core.downloads.master import _album_title_similarity
+
+    assert _album_title_similarity(
+        'GUNSHIP', 'Gunship', '2015', 'Gunship - Dark All Day',
+        'music/Gunship/Gunship - Dark All Day (2018)') < 0.65
+
+
+def test_soulseek_eponymous_album_search_uses_year_instead_of_duplicate_name():
+    from core.downloads.master import _album_search_queries
+
+    assert _album_search_queries('Gunship', 'GUNSHIP', '2015') == [
+        'Gunship 2015', 'GUNSHIP',
+    ]
+    assert _album_search_queries('Gunship', 'GUNSHIP', '') == ['GUNSHIP']
+    assert _album_search_queries('Massive Attack', 'Mezzanine', '1998') == [
+        'Massive Attack Mezzanine', 'Mezzanine',
+    ]
+
+
 def test_soulseek_album_preflight_prefers_available_peer_in_equivalent_band(monkeypatch):
     db = _FakeDB()
     monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
