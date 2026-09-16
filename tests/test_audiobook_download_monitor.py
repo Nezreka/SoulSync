@@ -967,3 +967,62 @@ def test_download_page_cancel_routes_persist_before_runtime_cleanup(db, clean_ru
     assert result.get_json()["success"] is True
     assert db.get_downloads()[0]["status"] == "cancelled"
     assert "d1" not in tasks
+
+
+# ---------------------------------------------------------------------------
+# A job the client no longer has is given up on, not waited for forever
+# ---------------------------------------------------------------------------
+
+def test_a_job_the_client_forgot_is_failed_after_enough_misses(db, monkeypatch):
+    import core.audiobook_download_monitor as mon
+    monkeypatch.setattr(mon, "_misses", {})
+    _wishlisted(db)
+    db.record_download("d1", "B1", "The Final Empire", "torrent", client_id="hash-gone")
+
+    with patch("core.audiobook_download_monitor._get_status", return_value=None), \
+         patch("core.audiobook_download_monitor._client_reachable", return_value=True):
+        for _ in range(mon.GIVE_UP_AFTER_MISSES - 1):
+            tick(db=db)
+        assert db.get_downloads()[0]["status"] == "unavailable"
+        assert db.get_wishlist()[0]["status"] != STATUS_FAILED
+        summary = tick(db=db)
+
+    assert summary["failed"] == 1
+    assert db.get_downloads()[0]["status"] == "failed"
+    assert "no longer has this job" in db.get_downloads()[0]["error"]
+    # back on the wishlist for the next pass, not stranded on "grabbed"
+    assert db.get_wishlist()[0]["status"] == STATUS_FAILED
+
+
+def test_a_client_that_is_down_keeps_the_book_waiting(db, monkeypatch):
+    import core.audiobook_download_monitor as mon
+    monkeypatch.setattr(mon, "_misses", {})
+    _wishlisted(db)
+    db.record_download("d1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+
+    with patch("core.audiobook_download_monitor._get_status", return_value=None), \
+         patch("core.audiobook_download_monitor._client_reachable", return_value=False):
+        for _ in range(mon.GIVE_UP_AFTER_MISSES * 3):
+            tick(db=db)
+
+    assert db.get_downloads()[0]["status"] == "unavailable"
+    assert db.get_wishlist()[0]["status"] != STATUS_FAILED
+
+
+def test_a_real_answer_resets_the_miss_count(db, monkeypatch):
+    import core.audiobook_download_monitor as mon
+    monkeypatch.setattr(mon, "_misses", {})
+    _wishlisted(db)
+    db.record_download("d1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+
+    with patch("core.audiobook_download_monitor._client_reachable", return_value=True):
+        with patch("core.audiobook_download_monitor._get_status", return_value=None):
+            for _ in range(mon.GIVE_UP_AFTER_MISSES - 1):
+                tick(db=db)
+        with patch("core.audiobook_download_monitor._get_status", return_value=_status("downloading")):
+            tick(db=db)
+        with patch("core.audiobook_download_monitor._get_status", return_value=None):
+            for _ in range(mon.GIVE_UP_AFTER_MISSES - 1):
+                tick(db=db)
+
+    assert db.get_downloads()[0]["status"] == "unavailable"     # the count started over
