@@ -319,6 +319,8 @@ def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str,
                 "title": meta["title"], "album": meta["album"],
                 "artist": meta["artist"], "albumartist": meta["albumartist"],
                 "track_number": meta["track_number"], "disc_number": meta["disc_number"],
+                "duration_ms": meta.get("duration_ms", 0), "bitrate": meta.get("bitrate", 0),
+                "size": meta.get("size", 0),
                 "top_folder": top_folder,
             })
             if progress is not None:
@@ -371,6 +373,58 @@ def staging_files(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
                 "problems": list(_staging_scan_problems)}, 200
     except Exception as exc:
         runtime.logger.error("Error scanning staging files: %s", exc)
+        return {"success": False, "error": str(exc)}, 500
+
+
+def inbox(runtime: ImportRouteRuntime, worker: Any) -> tuple[Dict[str, Any], int]:
+    """Every staging item with its state: the page's one list.
+
+    ``worker`` is the auto-import worker (its enumeration is the unit of
+    work, its history and live state are the status). None when the worker
+    failed to boot; the inbox then lists staging with nothing joined."""
+    try:
+        staging_path = runtime.get_staging_path()
+        records, scanning = _records_or_scanning_payload(runtime, staging_path)
+        if scanning is not None:
+            return scanning, 200
+
+        from core.imports.inbox import build_inbox, summarize
+
+        problems = list(_staging_scan_problems)
+        candidates: list = []
+        history: list = []
+        status: Dict[str, Any] = {}
+        if worker is not None:
+            candidates, walk_problems = worker.enumerate_candidates(staging_path)
+            seen = {(p["path"], p["error"]) for p in problems}
+            problems.extend(p for p in walk_problems if (p["path"], p["error"]) not in seen)
+            history = worker.get_results(limit=200)
+            status = worker.get_status()
+        else:
+            from core.auto_import_worker import AutoImportWorker
+            bare = AutoImportWorker.__new__(AutoImportWorker)
+            candidates, walk_problems = bare.enumerate_candidates(staging_path)
+            problems.extend(walk_problems)
+
+        rows = build_inbox(candidates, records, history, status.get("active_imports") or [],
+                           staging_root=staging_path)
+        return {
+            "success": True,
+            "staging_path": staging_path,
+            "items": rows,
+            "summary": summarize(rows),
+            "problems": problems,
+            "worker": {
+                "available": worker is not None,
+                "running": bool(status.get("running")),
+                "paused": bool(status.get("paused")),
+                "current_status": status.get("current_status", "idle"),
+                "last_scan_time": status.get("last_scan_time"),
+                "stats": status.get("stats") or {},
+            },
+        }, 200
+    except Exception as exc:
+        runtime.logger.error("Error building import inbox: %s", exc)
         return {"success": False, "error": str(exc)}, 500
 
 

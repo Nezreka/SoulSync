@@ -775,30 +775,38 @@ class AutoImportWorker:
                 return candidate
         return None
 
+    def enumerate_candidates(self, staging: str) -> Tuple[List[FolderCandidate], List[Dict[str, str]]]:
+        """The scan without the side effects: candidates plus the directories
+        it could not list. The inbox endpoint reads staging through this so
+        a page load never rewrites what the worker's own last scan saw."""
+        candidates: List[FolderCandidate] = []
+        problems: List[Dict[str, str]] = []
+        self._scan_directory(staging, candidates, staging_root=staging, problems=problems)
+        return candidates, problems
+
     def _enumerate_folders(self, staging: str) -> List[FolderCandidate]:
         """Find album folder and single file candidates in staging directory (recursive)."""
-        candidates = []
-        self._scan_problems = []
-        self._scan_directory(staging, candidates, staging_root=staging)
-        if not self._scan_problems:
+        candidates, problems = self.enumerate_candidates(staging)
+        self._scan_problems = problems
+        for problem in problems:
+            self._warn_scan_problem(problem)
+        if not problems:
             self._warned_scan_problems.clear()
         return candidates
 
-    def _note_scan_problem(self, directory: str, error: OSError) -> None:
-        """A directory the scan could not list. Kept for the status endpoint
-        and logged at WARNING the first time each path fails."""
-        message = error.strerror or str(error)
-        self._scan_problems.append({'path': directory, 'error': message})
-        key = (directory, message)
+    def _warn_scan_problem(self, problem: Dict[str, str]) -> None:
+        """WARNING the first time each path fails, DEBUG after."""
+        key = (problem['path'], problem['error'])
         if key in self._warned_scan_problems:
-            logger.debug(f"[Auto-Import] Still cannot read {directory}: {message}")
+            logger.debug(f"[Auto-Import] Still cannot read {problem['path']}: {problem['error']}")
             return
         self._warned_scan_problems.add(key)
-        logger.warning(f"[Auto-Import] Cannot read {directory}: {message}. "
+        logger.warning(f"[Auto-Import] Cannot read {problem['path']}: {problem['error']}. "
                        f"Files in it will not be found. If this is a bind mount, check the "
                        f"folder's owner against the container's PUID/PGID.")
 
-    def _scan_directory(self, directory: str, candidates: List[FolderCandidate], staging_root: str = ''):
+    def _scan_directory(self, directory: str, candidates: List[FolderCandidate], staging_root: str = '',
+                        problems: Optional[List[Dict[str, str]]] = None):
         """Recursively scan a directory for album folders and loose audio files.
 
         Loose-file handling:
@@ -821,10 +829,12 @@ class AutoImportWorker:
           common when a user moves some tracks out of an album folder
           while leaving the parent album folder intact.
         """
+        if problems is None:
+            problems = []
         try:
             entries = sorted(os.listdir(directory))
         except OSError as e:
-            self._note_scan_problem(directory, e)
+            problems.append({'path': directory, 'error': e.strerror or str(e)})
             return
 
         loose_files = []
@@ -851,14 +861,15 @@ class AutoImportWorker:
                               if os.path.isfile(os.path.join(sub_path, f))
                               and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
             except OSError as e:
-                self._note_scan_problem(sub_path, e)
+                problems.append({'path': sub_path, 'error': e.strerror or str(e)})
                 disc_files = []
             if disc_files:
                 disc_files_by_num[disc_num] = disc_files
 
         if loose_files:
+            is_root = bool(staging_root) and os.path.normpath(directory) == os.path.normpath(staging_root)
             self._build_loose_file_candidates(
-                directory, loose_files, disc_files_by_num, candidates,
+                directory, loose_files, disc_files_by_num, candidates, is_root=is_root,
             )
         elif disc_files_by_num and not non_disc_subdirs:
             # Disc-only directory — treat THIS directory as the album.
@@ -885,7 +896,7 @@ class AutoImportWorker:
         # beside loose tracks get silently ignored (the bug a chaotic
         # staging root surfaced on 2026-05-09).
         for _sub_name, sub_path in non_disc_subdirs:
-            self._scan_directory(sub_path, candidates, staging_root=staging_root)
+            self._scan_directory(sub_path, candidates, staging_root=staging_root, problems=problems)
 
     def _build_loose_file_candidates(
         self,
@@ -893,14 +904,19 @@ class AutoImportWorker:
         loose_files: List[str],
         disc_files_by_num: Dict[int, List[str]],
         candidates: List[FolderCandidate],
+        is_root: bool = True,
     ) -> None:
         """Group loose audio files by `album` tag, build one candidate
         per album group + attach matching disc folders.
 
         - Tagged files cluster by their album name (case-insensitive,
           whitespace-stripped).
-        - Untagged files become individual single candidates (can't
-          group what we don't have a key for).
+        - Untagged files at the staging ROOT become individual single
+          candidates (can't group what we don't have a key for).
+        - Untagged files inside a subfolder are that folder's album. The
+          folder name is the key we do have, and folder-name
+          identification exists for exactly this case; splitting them
+          into singles meant it never ran on them.
         - Disc folders attach to whichever loose group's album tag
           matches the first disc-folder track's album tag. Disc folders
           with no matching loose group fall through to a standalone
@@ -970,14 +986,34 @@ class AutoImportWorker:
                 folder_hash=folder_hash,
             ))
 
-        # Untagged singles — one candidate per file. Can't group them.
-        for f in untagged:
-            audio_files = [f]
-            folder_hash = _compute_folder_hash(audio_files)
+        if untagged and not is_root:
+            # A subfolder of untagged files is one album named by the folder.
+            # Discs nobody claimed by tag belong to it too.
+            audio_files = list(untagged)
+            disc_structure: Dict[int, List[str]] = {}
+            for disc_num, disc_files in disc_files_by_num.items():
+                if disc_num not in merged_disc_nums:
+                    audio_files.extend(disc_files)
+                    disc_structure[disc_num] = list(disc_files)
+                    merged_disc_nums.add(disc_num)
+            if disc_structure:
+                disc_structure[0] = list(untagged)
             candidates.append(FolderCandidate(
-                path=f, name=os.path.basename(f),
-                audio_files=audio_files, folder_hash=folder_hash, is_single=True,
+                path=directory,
+                name=os.path.basename(directory),
+                audio_files=audio_files,
+                disc_structure=disc_structure,
+                folder_hash=_compute_folder_hash(audio_files),
             ))
+        else:
+            # Untagged singles at the root — one candidate per file.
+            for f in untagged:
+                audio_files = [f]
+                folder_hash = _compute_folder_hash(audio_files)
+                candidates.append(FolderCandidate(
+                    path=f, name=os.path.basename(f),
+                    audio_files=audio_files, folder_hash=folder_hash, is_single=True,
+                ))
 
         # Standalone disc folders (no loose group claimed them) — bundle
         # into a multi-disc candidate scoped to the directory.

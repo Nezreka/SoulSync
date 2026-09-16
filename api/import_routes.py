@@ -14,6 +14,7 @@ from core.imports.album import build_album_import_match_payload
 from core.imports.routes import ImportRouteRuntime as _ImportRouteRuntime
 from core.imports.routes import album_match as _import_album_match
 from core.imports.routes import album_process as _import_album_process
+from core.imports.routes import inbox as _import_inbox
 from core.imports.routes import process_single_import_file as _import_process_single_import_file
 from core.imports.routes import search_albums as _import_search_albums
 from core.imports.routes import search_sources as _import_search_sources
@@ -73,6 +74,12 @@ def _build_import_route_runtime():
 @bp.route('/api/import/staging/files', methods=['GET'])
 def import_staging_files():
     payload, status = _import_staging_files(_build_import_route_runtime())
+    return jsonify(payload), status
+
+
+@bp.route('/api/import/inbox', methods=['GET'])
+def import_inbox():
+    payload, status = _import_inbox(_build_import_route_runtime(), auto_import_worker)
     return jsonify(payload), status
 
 
