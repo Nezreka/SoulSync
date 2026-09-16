@@ -3959,16 +3959,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     padding-left: 1px;
 }
 
-.form-group {
-    option {
-        color: black;
-
-        &:hover {
-            color: white;
-        }
-    }
-}
-
 .form-group label {
     display: block;
     font-size: 11px;
