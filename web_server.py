@@ -5590,9 +5590,13 @@ def enhanced_search_source(source_name):
         youtube_client = _search_orchestrator.resolve_youtube_videos_client(deps)
         if youtube_client is None:
             return jsonify({"videos": [], "available": False})
+        # the artist page's "show more" asks for a bigger pool; everyone else
+        # sends no limit and gets the default
+        max_results = _search_orchestrator.clamp_youtube_video_limit(data.get('limit'))
         try:
             return app.response_class(
-                _search_orchestrator.stream_youtube_videos(query, youtube_client, run_async),
+                _search_orchestrator.stream_youtube_videos(
+                    query, youtube_client, run_async, max_results=max_results),
                 mimetype='application/x-ndjson',
             )
         except Exception as e:

@@ -42961,7 +42961,7 @@ div.artist-hero-badge {
 .artist-video-spotlight {
     position: relative;
     display: grid;
-    min-height: 430px;
+    min-height: 520px;
     overflow: hidden;
     border-radius: 14px;
     border: 1px solid rgba(255, 255, 255, 0.105);
@@ -43169,11 +43169,30 @@ div.artist-hero-badge {
 }
 
 .artist-video-rail {
+    position: relative;
     min-width: 0;
+    min-height: 0;
     border-radius: 14px;
     border: 1px solid rgba(255, 255, 255, 0.075);
     background: rgba(255, 255, 255, 0.026);
     overflow: hidden;
+}
+
+/* two-column stage: the rail is as tall as the spotlight or player beside
+   it and scrolls inside. taken out of flow on purpose: a grid row grows to
+   fit a scroll container's content anyway, and with sixty videos loaded that
+   stretched the spotlight to five thousand pixels. */
+@media (min-width: 1181px) {
+    .artist-video-rail-list {
+        position: absolute;
+        top: 48px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+    }
 }
 
 .artist-video-rail-header {
@@ -43365,6 +43384,279 @@ div.artist-hero-badge {
     min-height: 340px;
 }
 
+/* the in-page player: the spotlight's slot once something is playing */
+.artist-video-player-slot {
+    position: relative;
+    min-width: 0;
+}
+
+.artist-video-player {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.105);
+    background: #090909;
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.34);
+}
+
+.artist-video-player-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+}
+
+.artist-video-embed,
+.artist-video-embed iframe,
+.artist-video-embed-loading,
+.artist-video-player-blocked {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.artist-video-embed iframe {
+    border: 0;
+    display: block;
+}
+
+.artist-video-embed-loading img,
+.artist-video-player-blocked img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.35;
+}
+
+.artist-video-embed-loading span {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 999px;
+    padding: 8px 14px;
+    background: rgba(0, 0, 0, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 12px;
+    font-weight: 760;
+    animation: artist-video-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes artist-video-pulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+}
+
+.artist-video-player-blocked {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.artist-video-player-blocked-copy {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    max-width: 420px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.66);
+    font-size: 13px;
+}
+
+.artist-video-player-blocked-copy strong {
+    color: #fff;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.artist-video-player-blocked-copy .artist-video-actions {
+    justify-content: center;
+    margin-top: 12px;
+}
+
+.artist-video-player-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 14px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+}
+
+.artist-video-player-copy {
+    min-width: 0;
+}
+
+.artist-video-player-copy .artist-video-eyebrow {
+    margin-bottom: 6px;
+}
+
+.artist-video-player-copy .artist-video-title {
+    font-size: 16px;
+    font-weight: 800;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.artist-video-player-copy .artist-video-meta {
+    margin-top: 4px;
+    font-size: 12px;
+}
+
+.artist-video-live-dot::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    border-radius: 999px;
+    background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22);
+    animation: artist-video-pulse 1.6s ease-in-out infinite;
+}
+
+.artist-video-player-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.artist-video-player-controls .artist-video-icon-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 13px;
+}
+
+.artist-video-toggle {
+    min-height: 30px;
+    border-radius: 999px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 11px;
+    font-weight: 780;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.artist-video-toggle.on {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: #fff;
+}
+
+.artist-video-close {
+    font-size: 18px;
+}
+
+/* the queue item that is playing */
+.artist-video-rail-item.playing {
+    background: rgba(var(--accent-rgb), 0.1);
+    box-shadow: inset 3px 0 0 rgb(var(--accent-rgb));
+}
+
+.artist-video-rail-item.playing .artist-video-index {
+    color: rgb(var(--accent-rgb));
+    animation: artist-video-pulse 1.6s ease-in-out infinite;
+}
+
+.artist-video-rail-item.playing .artist-video-title {
+    color: #fff;
+}
+
+/* docked: the stage scrolled away mid-video, so the player rides along in
+   the corner. the slot above keeps its height (set inline) so nothing jumps. */
+.artist-video-player.docked {
+    position: fixed;
+    left: calc(var(--sidebar-w, 240px) + 24px);
+    bottom: 24px;
+    z-index: 9000;
+    width: min(420px, calc(100vw - var(--sidebar-w, 240px) - 48px));
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+    border-color: rgba(255, 255, 255, 0.16);
+    animation: artist-video-dock-in 0.24s ease;
+}
+
+@keyframes artist-video-dock-in {
+    from { transform: translateY(12px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.artist-video-player.docked .artist-video-player-bar {
+    padding: 10px 12px;
+    gap: 10px;
+}
+
+.artist-video-player.docked .artist-video-eyebrow,
+.artist-video-player.docked .artist-video-meta,
+.artist-video-player.docked .artist-video-toggle {
+    display: none;
+}
+
+.artist-video-player.docked .artist-video-player-copy .artist-video-title {
+    font-size: 13px;
+}
+
+.artist-video-player.docked .artist-video-player-controls .artist-video-icon-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+}
+
+/* show more */
+.artist-videos-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.artist-videos-more-btn {
+    min-height: 38px;
+    border-radius: 999px;
+    padding: 0 20px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 780;
+    cursor: pointer;
+    transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.artist-videos-more-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.11);
+    border-color: rgba(255, 255, 255, 0.26);
+    transform: translateY(-1px);
+}
+
+.artist-videos-more-btn:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+
+.artist-videos-more-count {
+    color: rgba(255, 255, 255, 0.46);
+    font-size: 12px;
+    font-weight: 700;
+}
+
 .artist-videos-empty {
     padding: 24px;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -43416,6 +43708,22 @@ div.artist-hero-badge {
     .artist-video-rail-list,
     .artist-videos-loading {
         grid-template-columns: 1fr;
+    }
+
+    .artist-video-player-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .artist-video-player-controls {
+        flex-wrap: wrap;
+    }
+
+    .artist-video-player.docked {
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        width: auto;
     }
 
     .artist-video-rail-item {

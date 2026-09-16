@@ -358,14 +358,37 @@ def resolve_youtube_videos_client(deps: SearchDeps):
     return deps.download_orchestrator.client('youtube')
 
 
-def stream_youtube_videos(query: str, youtube_client, run_async: Callable) -> Iterator[str]:
+# how many videos one yt-dlp search may ask for. the default is what the
+# search page has always fetched; the ceiling is the artist page's "show more"
+# path. above 60 yt-dlp pages through search results slowly enough that the
+# request stops feeling like a click.
+YOUTUBE_VIDEO_LIMIT_DEFAULT = 20
+YOUTUBE_VIDEO_LIMIT_MAX = 60
+
+
+def clamp_youtube_video_limit(value) -> int:
+    """the `limit` a client may send, pinned to [1, YOUTUBE_VIDEO_LIMIT_MAX].
+
+    anything that isn't a number (None, '', 'abc') means the default, so an
+    old client that never sends limit keeps its old result count.
+    """
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return YOUTUBE_VIDEO_LIMIT_DEFAULT
+    return max(1, min(YOUTUBE_VIDEO_LIMIT_MAX, limit))
+
+
+def stream_youtube_videos(query: str, youtube_client, run_async: Callable,
+                          max_results: int = YOUTUBE_VIDEO_LIMIT_DEFAULT) -> Iterator[str]:
     """yt-dlp video search generator — yields one videos chunk + done marker.
 
-    Caller is responsible for verifying youtube_client is not None.
+    Caller is responsible for verifying youtube_client is not None and for
+    clamping max_results (clamp_youtube_video_limit).
     """
     try:
         video_query = f"{query} official music video"
-        results = run_async(youtube_client.search_videos(video_query, max_results=20))
+        results = run_async(youtube_client.search_videos(video_query, max_results=max_results))
         videos = []
         for v in (results or []):
             videos.append({
