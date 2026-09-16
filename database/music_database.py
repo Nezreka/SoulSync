@@ -6404,7 +6404,9 @@ class MusicDatabase:
             cursor.execute(f"""
                 SELECT a.genres, COUNT(*) as play_count
                 FROM listening_history lh
-                JOIN tracks t ON t.id = lh.db_track_id
+                -- CAST: tracks.id is TEXT, db_track_id INTEGER; without it the
+                -- join scans tracks per history row (see core/stats/queries.py)
+                JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
                 JOIN artists a ON a.id = t.artist_id
                 {where}
                 AND a.genres IS NOT NULL AND a.genres != ''
@@ -6504,7 +6506,9 @@ class MusicDatabase:
             cursor.execute(f"""
                 SELECT a.genres, COUNT(*) AS plays
                 FROM listening_history lh
-                JOIN tracks t ON t.id = lh.db_track_id
+                -- CAST: tracks.id is TEXT, db_track_id INTEGER; without it the
+                -- join scans tracks per history row (see core/stats/queries.py)
+                JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
                 JOIN artists a ON a.id = t.artist_id
                 {where}
                 AND a.genres IS NOT NULL AND a.genres != ''
