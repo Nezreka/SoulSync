@@ -20429,12 +20429,19 @@ class MusicDatabase:
             return False
 
     def update_sync_history_completion(self, batch_id, tracks_found=0, tracks_downloaded=0, tracks_failed=0):
-        """Update a sync_history entry with completion stats."""
+        """Update a sync_history entry with completion stats.
+
+        ``tracks_found=None`` keeps the value already on the row. two writers
+        share this row: the sync (which knows how many tracks matched) and the
+        download batch that follows it (which knows what downloaded). a batch
+        with no analysis of its own used to write tracks_found = 0 over the
+        sync's count, so the dashboard read "0/240 in library" against a
+        details modal that listed 236 matched."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                UPDATE sync_history SET tracks_found = ?, tracks_downloaded = ?,
+                UPDATE sync_history SET tracks_found = COALESCE(?, tracks_found), tracks_downloaded = ?,
                     tracks_failed = ?, completed_at = CURRENT_TIMESTAMP
                 WHERE batch_id = ?
             """, (tracks_found, tracks_downloaded, tracks_failed, batch_id))
