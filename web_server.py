@@ -15419,7 +15419,11 @@ def _build_status_deps():
             # and pushed every real download out of the cap
             exclude_download_sources=('acoustid_scan',),
         )[0],
-        get_unverified_download_history=lambda: get_database().get_library_history_unverified(),
+        # same exclusion as the tail above: a scan-flagged library file is
+        # reviewed from the acoustid scanner's findings, not as a download
+        get_unverified_download_history=lambda: get_database().get_library_history_unverified(
+            exclude_download_sources=('acoustid_scan',),
+        ),
     )
 
 
