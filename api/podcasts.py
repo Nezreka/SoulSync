@@ -170,6 +170,39 @@ def show_to_dict(show: PodcastShow, include_episodes: bool = True) -> Dict[str, 
     return d
 
 
+def _with_downloaded_flags(show_data: Dict[str, Any], feed_url: str) -> Dict[str, Any]:
+    """the show with each episode saying whether it is on disk.
+
+    the page used to learn "downloaded" only from the in-memory download
+    list, which a restart empties: every episode looked downloadable again
+    and a click fetched it a second time. the database remembers; this is
+    read per request, after the feed cache, so it is never stale. a pruned
+    episode (retention took the file) is not on disk and reads as not
+    downloaded, which is what a manual click should see."""
+    db = _db()
+    if not db or not feed_url:
+        return show_data
+    try:
+        rows = db.get_downloaded_podcast_episodes(feed_url=feed_url, unpruned_only=True)
+    except Exception as exc:
+        logger.debug("Could not read downloaded episodes for %s: %s", feed_url[:80], exc)
+        return show_data
+    on_disk = {}
+    for row in rows:
+        if not row.get("file_path"):
+            continue
+        for key in (row.get("enclosure_url"), row.get("guid")):
+            if key:
+                on_disk[str(key)] = row["file_path"]
+    if not on_disk:
+        return show_data
+    episodes = []
+    for ep in show_data.get("episodes") or []:
+        path = on_disk.get(str(ep.get("enclosure_url") or "")) or on_disk.get(str(ep.get("guid") or ""))
+        episodes.append({**ep, "downloaded": True, "file_path": path} if path else ep)
+    return {**show_data, "episodes": episodes}
+
+
 # ---------------------------------------------------------------------------
 # Proxy helper
 # ---------------------------------------------------------------------------
@@ -812,7 +845,7 @@ def create_podcasts_blueprint() -> Blueprint:
         now = time.time()
         cached_show = _show_cache.get(feed_url)
         if cached_show and (now - cached_show["timestamp"]) < _SHOW_CACHE_TTL:
-            return jsonify({"success": True, "show": cached_show["show"]})
+            return jsonify({"success": True, "show": _with_downloaded_flags(cached_show["show"], feed_url)})
 
         show = client.fetch_feed(feed_url, show_hint=show_hint)
         if show is None:
@@ -821,7 +854,7 @@ def create_podcasts_blueprint() -> Blueprint:
         show_data = show_to_dict(show, include_episodes=True)
         _show_cache[feed_url] = {"timestamp": now, "show": show_data}
 
-        return jsonify({"success": True, "show": show_data})
+        return jsonify({"success": True, "show": _with_downloaded_flags(show_data, feed_url)})
 
     @bp.route("/download", methods=["POST"])
     def download_episode():

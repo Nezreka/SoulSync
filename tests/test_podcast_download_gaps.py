@@ -191,3 +191,60 @@ def test_the_title_fallback_is_scoped_to_the_show(db):
     assert db.is_podcast_episode_downloaded("https://a/feed", title="Episode 1", show_title="Show A") is True
     # a caller that cannot name the show keeps the old, looser answer
     assert db.is_podcast_episode_downloaded("https://b/feed", title="Episode 1") is True
+
+
+# ── the page knows what is on disk after a restart ───────────────────────────
+
+def test_the_show_says_which_episodes_are_on_disk(client, db):
+    from core.podcast_client import PodcastEpisode, PodcastShow
+    feed = "https://example.com/feed.xml"
+    show = PodcastShow(
+        title="Show", author="Host", description="", artwork_url="", feed_url=feed,
+        itunes_id=1, website="", language="en", explicit=False, categories=[], episode_count=3,
+        episodes=[
+            PodcastEpisode(guid="g1", title="One", enclosure_url="https://example.com/1.mp3",
+                           enclosure_type="audio/mpeg", enclosure_length=1, pub_date=None,
+                           duration_seconds=1, description="", show_notes="", season=None,
+                           episode_number=None, episode_type="full", artwork_url=None,
+                           chapter_url=None, transcript_url=None),
+            PodcastEpisode(guid="g2", title="Two", enclosure_url="https://example.com/2.mp3",
+                           enclosure_type="audio/mpeg", enclosure_length=1, pub_date=None,
+                           duration_seconds=1, description="", show_notes="", season=None,
+                           episode_number=None, episode_type="full", artwork_url=None,
+                           chapter_url=None, transcript_url=None),
+            PodcastEpisode(guid="g3", title="Three", enclosure_url="https://example.com/3.mp3",
+                           enclosure_type="audio/mpeg", enclosure_length=1, pub_date=None,
+                           duration_seconds=1, description="", show_notes="", season=None,
+                           episode_number=None, episode_type="full", artwork_url=None,
+                           chapter_url=None, transcript_url=None),
+        ],
+    )
+    # one landed, one was only queued (a restart mid-download), one pruned by retention
+    db.record_downloaded_podcast_episode(feed_url=feed, enclosure_url="https://example.com/1.mp3",
+                                         guid="g1", file_path="/pod/1.mp3")
+    db.record_downloaded_podcast_episode(feed_url=feed, enclosure_url="https://example.com/2.mp3", guid="g2")
+    db.record_downloaded_podcast_episode(feed_url=feed, enclosure_url="https://example.com/3.mp3",
+                                         guid="g3", file_path="/pod/3.mp3")
+    pruned = next(r for r in db.get_downloaded_podcast_episodes(feed_url=feed) if r["guid"] == "g3")
+    db.mark_podcast_episode_pruned(pruned["id"])
+
+    fake_client = MagicMock()
+    fake_client.fetch_feed.return_value = show
+    with patch("api.podcasts.get_podcast_client", return_value=fake_client), \
+         patch("api.podcasts._db", return_value=db), \
+         patch("api.podcasts._show_cache", {}):
+        body = client.get("/api/podcasts/show", query_string={"url": feed}).get_json()
+        assert body["success"]
+        flags = {ep["guid"]: (ep.get("downloaded"), ep.get("file_path")) for ep in body["show"]["episodes"]}
+        assert flags["g1"] == (True, "/pod/1.mp3")
+        assert flags["g2"] == (None, None), "queued-only is not on disk"
+        assert flags["g3"] == (None, None), "pruned is not on disk"
+
+        # the cached copy of the show carries no flags of its own: a download
+        # that lands later shows up on the next request without waiting out
+        # the feed cache
+        db.record_downloaded_podcast_episode(feed_url=feed, enclosure_url="https://example.com/2.mp3",
+                                             guid="g2", file_path="/pod/2.mp3")
+        body = client.get("/api/podcasts/show", query_string={"url": feed}).get_json()
+        assert next(ep for ep in body["show"]["episodes"] if ep["guid"] == "g2")["downloaded"] is True
+        assert fake_client.fetch_feed.call_count == 1
