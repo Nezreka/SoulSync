@@ -792,7 +792,7 @@ class MusicDatabase:
             # whole row (add_chat_messages requires a message) and a template
             # shared into the room simply vanished on reload.
             for _chat_col in ('chan TEXT', 'thread TEXT', 'thread_name TEXT', 'av INTEGER',
-                              'edit_target TEXT', 'overlay TEXT'):
+                              'edit_target TEXT', 'overlay TEXT', 'np TEXT', 'want TEXT'):
                 try:
                     cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN " + _chat_col)
                 except sqlite3.OperationalError:
@@ -13417,9 +13417,58 @@ class MusicDatabase:
                         ovl_json = None
                 except (ValueError, TypeError):
                     ovl_json = None
+            np = m.get('np')
+            np_json = None
+            if isinstance(np, dict) and np.get('t') and np.get('a'):
+                try:
+                    np_data = {
+                        't': str(np.get('t'))[:200],
+                        'a': str(np.get('a'))[:160],
+                    }
+                    if np.get('al'): np_data['al'] = str(np['al'])[:160]
+                    if np.get('src'): np_data['src'] = str(np['src'])[:32]
+                    if np.get('id'): np_data['id'] = str(np['id'])[:120]
+                    if np.get('img'): np_data['img'] = str(np['img'])[:1000]
+                    if np.get('dur'):
+                        try:
+                            d = int(np['dur'])
+                            if 0 < d < 10**7: np_data['dur'] = d
+                        except (TypeError, ValueError): pass
+                    if np.get('br'):
+                        try:
+                            b = int(np['br'])
+                            if 0 < b < 20000: np_data['br'] = b
+                        except (TypeError, ValueError): pass
+                    np_json = json.dumps(np_data)
+                except (ValueError, TypeError):
+                    np_json = None
+
+            want = m.get('want')
+            want_json = None
+            if isinstance(want, dict) and want.get('t') and want.get('a'):
+                try:
+                    want_data = {
+                        't': str(want.get('t'))[:200],
+                        'a': str(want.get('a'))[:160],
+                        'ty': str(want.get('ty') or 'album')[:16],
+                    }
+                    if want.get('al'): want_data['al'] = str(want['al'])[:160]
+                    if want.get('src'): want_data['src'] = str(want['src'])[:32]
+                    if want.get('id'): want_data['id'] = str(want['id'])[:120]
+                    if want.get('img'): want_data['img'] = str(want['img'])[:1000]
+                    if want.get('y'): want_data['y'] = str(want['y'])[:10]
+                    if want.get('dur'):
+                        try:
+                            d = int(want['dur'])
+                            if 0 < d < 10**7: want_data['dur'] = d
+                        except (TypeError, ValueError): pass
+                    want_json = json.dumps(want_data)
+                except (ValueError, TypeError):
+                    want_json = None
+
             # An overlay share carries no text ON PURPOSE - the card is the
             # message. Requiring one dropped every share from the archive.
-            if not user or not ts or (not msg and not ovl_json):
+            if not user or not ts or (not msg and not ovl_json and not np_json and not want_json):
                 continue
             rep = m.get('reply')
             rep_json = None
@@ -13446,7 +13495,9 @@ class MusicDatabase:
                          str(_tn)[:80] if _tn else None,
                          _av,
                          str(_ed)[:160] if _ed else None,
-                         ovl_json))
+                         ovl_json,
+                         np_json,
+                         want_json))
         if not rows:
             return 0
         try:
@@ -13454,8 +13505,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -13686,7 +13737,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -13699,7 +13750,7 @@ class MusicDatabase:
             rows.reverse()
             for r in rows:
                 r['rich'] = bool(r['rich'])
-                for k in ('reply', 'file'):
+                for k in ('reply', 'file', 'np', 'want'):
                     if r.get(k):
                         try:
                             r[k] = json.loads(r[k])

@@ -47,6 +47,7 @@ def _avatar_allowed(av: int, username: str) -> bool:
         return True
     return str(username or "").strip().casefold() == owner
 _INGEST_AT: dict = {}      # room -> last full-buffer archive ingest (epoch)
+_INGEST_KEY: dict = {}     # room -> last buffer fingerprint (live-tail change tracking)
 _SELF = {"name": "", "at": 0.0}   # our slskd username, cached (network call)
 _AVAILABLE = {"rooms": None, "at": 0.0}   # /rooms/available cache (big list, 5-min TTL)
 
@@ -1210,8 +1211,14 @@ def create_blueprint() -> Blueprint:
             try:
                 import time as _time
                 now = _time.time()
-                if now - _INGEST_AT.get(room, 0) > 60:
+                if not _INGEST_AT:
+                    _INGEST_KEY.clear()
+                live_key = (str(live[-1].get("timestamp") or "") + ":" + str(len(live))) if live else ""
+                last_key = _INGEST_KEY.get(room)
+                should_ingest = (now - _INGEST_AT.get(room, 0) > 60) or (live_key and live_key != last_key)
+                if should_ingest:
                     _INGEST_AT[room] = now
+                    _INGEST_KEY[room] = live_key
                     db.add_chat_messages(room, live)
                     # The WRITE is throttled with the messages; the read below
                     # is not. Reactions are carriers, so the message archive
@@ -1234,7 +1241,16 @@ def create_blueprint() -> Blueprint:
                 db.add_chat_game_carriers(room, protocol_events)
                 arch = db.get_chat_messages(room, limit=100)
                 if arch:
-                    out = arch
+                    seen = {}
+                    for m in arch:
+                        k = (str(m.get("username") or ""), str(m.get("timestamp") or ""), str(m.get("message") or ""))
+                        seen[k] = m
+                    for m in live:
+                        k = (str(m.get("username") or ""), str(m.get("timestamp") or ""), str(m.get("message") or ""))
+                        seen[k] = m
+                    merged = list(seen.values())
+                    merged.sort(key=lambda x: str(x.get("timestamp") or ""))
+                    out = merged[-100:]
             except Exception:
                 logger.debug("chat: archive unavailable, serving live buffer", exc_info=True)
         # Games outlive slskd's buffer: replay the archived gm.* carriers

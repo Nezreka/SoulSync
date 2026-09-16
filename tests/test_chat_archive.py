@@ -99,6 +99,48 @@ class TestArchiveFileCard:
         assert "file" not in rows[0]
 
 
+class TestArchiveNowPlayingAndWant:
+    def test_now_playing_metadata_survives_the_archive(self, mdb):
+        mdb.add_chat_messages("SoulSync", [
+            {"username": "dj", "message": "/np Song - Artist",
+             "timestamp": "2026-07-19 10:00:00",
+             "np": {"t": "Song", "a": "Artist", "al": "Album", "img": "https://img.jpg",
+                    "dur": 210, "br": 320, "src": "spotify", "id": "sp123"}},
+            {"username": "b", "message": "plain msg",
+             "timestamp": "2026-07-19 10:01:00"},
+        ])
+        rows = mdb.get_chat_messages("SoulSync")
+        assert rows[0]["np"] == {
+            "t": "Song", "a": "Artist", "al": "Album",
+            "img": "https://img.jpg", "dur": 210, "br": 320,
+            "src": "spotify", "id": "sp123"
+        }
+        assert "np" not in rows[1]
+
+    def test_wanted_card_metadata_survives_the_archive(self, mdb):
+        mdb.add_chat_messages("SoulSync", [
+            {"username": "collector", "message": "/want Rare Album - Band",
+             "timestamp": "2026-07-19 10:00:00",
+             "want": {"t": "Rare Album", "a": "Band", "ty": "album", "y": "1994", "img": "https://want.jpg"}},
+        ])
+        rows = mdb.get_chat_messages("SoulSync")
+        assert rows[0]["want"] == {
+            "t": "Rare Album", "a": "Band", "ty": "album",
+            "y": "1994", "img": "https://want.jpg"
+        }
+
+    def test_malformed_np_and_want_dropped_gracefully(self, mdb):
+        mdb.add_chat_messages("SoulSync", [
+            {"username": "x", "message": "bad np", "timestamp": "2026-07-19 10:02:00",
+             "np": {"t": "Only Title"}},      # missing 'a' (artist)
+            {"username": "y", "message": "bad want", "timestamp": "2026-07-19 10:03:00",
+             "want": "not even a dict"},
+        ])
+        rows = mdb.get_chat_messages("SoulSync")
+        assert "np" not in rows[0]
+        assert "want" not in rows[1]
+
+
 class TestArchiveApi:
     def _app(self, mdb):
         import api.chat as chat_api
@@ -149,6 +191,43 @@ class TestArchiveApi:
         http.get("/api/chat/room")
         http.get("/api/chat/room")      # 4s poll — must NOT re-ingest the buffer
         assert len(calls) == 1
+
+    def test_hydrate_merges_live_tail_with_archive_without_dropping_fresh_messages(self, mdb):
+        http, client = self._app(mdb)
+        mdb.add_chat_messages("SoulSync", [_m(1), _m(2)])
+        client.get_room_messages = lambda room: [
+            {"username": "alice", "message": "msg 2", "timestamp": "2026-07-19 10:02:00"},
+            {"username": "alice", "message": "msg 3 (fresh)", "timestamp": "2026-07-19 10:03:00"},
+        ]
+        res = http.get("/api/chat/room").get_json()
+        messages = [m["message"] for m in res["messages"]]
+        assert "msg 1" in messages
+        assert "msg 2" in messages
+        assert "msg 3 (fresh)" in messages
+
+    def test_hydrate_ingests_immediately_when_new_live_message_arrives(self, mdb, monkeypatch):
+        http, client = self._app(mdb)
+        calls = []
+        real = mdb.add_chat_messages
+        monkeypatch.setattr(mdb, "add_chat_messages",
+                            lambda room, msgs: calls.append(len(msgs)) or real(room, msgs))
+        client.get_room_messages = lambda room: [
+            {"username": "alice", "message": "hello", "timestamp": "2026-07-19 10:00:00"},
+        ]
+        http.get("/api/chat/room")
+        assert len(calls) == 1
+
+        # Unchanged buffer within 60s should be throttled (no duplicate ingest)
+        http.get("/api/chat/room")
+        assert len(calls) == 1
+
+        # New message arrives in live buffer -> fingerprint changes -> immediate ingest!
+        client.get_room_messages = lambda room: [
+            {"username": "alice", "message": "hello", "timestamp": "2026-07-19 10:00:00"},
+            {"username": "bob", "message": "world", "timestamp": "2026-07-19 10:00:05"},
+        ]
+        http.get("/api/chat/room")
+        assert len(calls) == 2
 
 
 def test_push_loop_feeds_the_archive():

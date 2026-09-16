@@ -20803,6 +20803,18 @@ def _emit_chat_push_loop():
                             _ed2 = chat_codec.edit_of(dec)
                             if _ed2:
                                 out['ed'] = _ed2
+                            _np = chat_codec.np_of(dec)
+                            if _np:
+                                out['np'] = _np
+                            _w = chat_codec.want_of(dec)
+                            if _w:
+                                out['want'] = _w
+                            _ov = chat_codec.overlay_of(dec)
+                            if _ov:
+                                out['overlay'] = {'n': _ov['n'],
+                                                  'layers': len(_ov['d'].get('layers') or []),
+                                                  'assets': chat_codec.overlay_assets(_ov['d']),
+                                                  'd': _ov['d']}
                         return out
                     decoded = [x for x in (_unwrap(m) for m in fresh) if x]
                     if proto_events:
