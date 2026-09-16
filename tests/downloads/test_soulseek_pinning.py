@@ -145,6 +145,136 @@ def _track(username='peer', filename='Artist/Album/01 - Song.flac', title='Song'
     )
 
 
+def test_album_bundle_switch_keeps_completed_track_and_queues_only_missing(configured_client, tmp_path):
+    first = _track(filename='Artist/Album/01 - First.flac', title='First', number=1)
+    crawling = _track(filename='Artist/Album/02 - Second.flac', title='Second', number=2)
+    replacement_first = _track(username='other', filename='Artist/Album/01 - First.flac',
+                               title='First', number=1)
+    replacement_second = _track(username='other', filename='Artist/Album/02 - Second.flac',
+                                title='Second', number=2)
+    first_path = tmp_path / 'first.flac'
+    second_path = tmp_path / 'second.flac'
+    first_path.write_bytes(b'first')
+    second_path.write_bytes(b'second')
+    polls = [
+        {'completed': {('peer', first.filename): first_path}, 'pending': [('peer', crawling.filename)],
+         'reason': 'crawling', 'speed_bps': 20_000, 'sample_seconds': 60},
+        {'completed': {('other', replacement_second.filename): second_path}, 'pending': [],
+         'reason': 'complete', 'speed_bps': 2_000_000, 'sample_seconds': 20},
+    ]
+    expected = [
+        {'name': 'First', 'artists': ['Artist'], 'track_number': 1},
+        {'name': 'Second', 'artists': ['Artist'], 'track_number': 2},
+    ]
+    active = DownloadStatus(id='dl-slow', username='peer', filename=crawling.filename,
+                            state='InProgress', progress=1, size=10,
+                            transferred=1, speed=20_000)
+    with patch('core.soulseek_client.run_async', side_effect=_run_async), \
+         patch.object(configured_client, 'filter_results_by_quality_preference',
+                      side_effect=lambda tracks, profile_id=None: tracks), \
+         patch.object(configured_client, 'download', AsyncMock(return_value='queued')) as enqueue, \
+         patch.object(configured_client, '_poll_album_bundle_downloads', side_effect=polls), \
+         patch.object(configured_client, 'get_all_downloads', AsyncMock(side_effect=[[active], []])), \
+         patch.object(configured_client, 'cancel_download', AsyncMock(return_value=True)) as cancel, \
+         patch('core.soulseek_client.copy_audio_files_atomically',
+               side_effect=lambda paths, staging, remove_source: list(paths)):
+        result = configured_client.download_album_to_staging(
+            'Album', 'Artist', str(tmp_path / 'staging'),
+            preferred_source={'username': 'peer', 'folder_path': 'Artist/Album'},
+            preferred_tracks=[first, crawling],
+            preferred_alternatives=[{'username': 'other', 'folder_path': 'Artist/Album',
+                                     'tracks': [replacement_first, replacement_second]}],
+            expected_tracks=expected,
+        )
+
+    assert result['success'] is True
+    assert result['partial'] is False
+    assert result['completed_count'] == 2
+    assert enqueue.await_count == 3
+    enqueue.assert_any_await('other', replacement_second.filename, replacement_second.size)
+    cancel.assert_awaited_once_with('dl-slow', 'peer', remove=True)
+
+
+def test_album_bundle_does_not_overlap_when_cancellation_fails(configured_client, tmp_path):
+    slow = _track(filename='Artist/Album/01 - Song.flac')
+    alternative = _track(username='other', filename='Artist/Album/01 - Song.flac')
+    local = tmp_path / 'song.flac'
+    local.write_bytes(b'audio')
+    polls = [
+        {'completed': {}, 'pending': [('peer', slow.filename)], 'reason': 'crawling',
+         'speed_bps': 20_000, 'sample_seconds': 60},
+        {'completed': {('peer', slow.filename): local}, 'pending': [], 'reason': 'complete',
+         'speed_bps': 20_000, 'sample_seconds': 20},
+    ]
+    active = DownloadStatus(id='dl-slow', username='peer', filename=slow.filename,
+                            state='InProgress', progress=1, size=10,
+                            transferred=1, speed=20_000)
+    with patch('core.soulseek_client.run_async', side_effect=_run_async), \
+         patch.object(configured_client, 'filter_results_by_quality_preference',
+                      side_effect=lambda tracks, profile_id=None: tracks), \
+         patch.object(configured_client, 'download', AsyncMock(return_value='queued')) as enqueue, \
+         patch.object(configured_client, '_poll_album_bundle_downloads', side_effect=polls), \
+         patch.object(configured_client, 'get_all_downloads', AsyncMock(return_value=[active])), \
+         patch.object(configured_client, 'cancel_download', AsyncMock(return_value=False)), \
+         patch('core.soulseek_client.copy_audio_files_atomically',
+               side_effect=lambda paths, staging, remove_source: list(paths)):
+        result = configured_client.download_album_to_staging(
+            'Album', 'Artist', str(tmp_path / 'staging'),
+            preferred_source={'username': 'peer', 'folder_path': 'Artist/Album'},
+            preferred_tracks=[slow],
+            preferred_alternatives=[{'username': 'other', 'folder_path': 'Artist/Album',
+                                     'tracks': [alternative]}],
+            expected_tracks=[{'name': 'Song', 'artists': ['Artist'], 'track_number': 1}],
+        )
+
+    assert result['success'] is True
+    enqueue.assert_awaited_once_with('peer', slow.filename, slow.size)
+
+
+def test_album_bundle_measures_aggregate_peer_speed_not_queued_siblings(configured_client):
+    moving = _track(filename='Artist/Album/01 - First.flac', title='First', number=1,
+                    size=100_000_000)
+    queued = _track(filename='Artist/Album/02 - Second.flac', title='Second', number=2,
+                    size=100_000_000)
+
+    class Clock:
+        now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+    clock = Clock()
+
+    async def downloads():
+        return [
+            DownloadStatus(id='moving', username='peer', filename=moving.filename,
+                           state='InProgress', progress=1, size=moving.size,
+                           transferred=int(clock.now * 50_000), speed=50_000),
+            DownloadStatus(id='queued', username='peer', filename=queued.filename,
+                           state='Queued, Remotely', progress=0, size=queued.size,
+                           transferred=0, speed=0),
+        ]
+
+    with patch('core.soulseek_client.time', clock), \
+         patch('core.soulseek_client.run_async', side_effect=_run_async), \
+         patch.object(configured_client, 'get_all_downloads', side_effect=downloads), \
+         patch('core.soulseek_client.get_poll_timeout', return_value=80), \
+         patch('core.soulseek_client.get_poll_interval', return_value=1), \
+         patch('core.settings.config_manager.get', return_value=500):
+        outcome = configured_client._poll_album_bundle_downloads(
+            {('peer', moving.filename): moving, ('peer', queued.filename): queued},
+            lambda state, **kwargs: None,
+            return_detail=True, switch_on_crawl=True,
+        )
+
+    assert outcome['reason'] == 'crawling'
+    assert set(outcome['pending']) == {('peer', moving.filename), ('peer', queued.filename)}
+    assert clock.now >= 60
+
+
 def test_album_bundle_stages_one_selected_soulseek_folder(configured_client, tmp_path):
     configured_client.download_path = tmp_path
     local_file = tmp_path / '01 - Song.flac'
@@ -953,3 +1083,62 @@ def test_search_does_not_skip_late_inserted_responses():
     assert albums == []
     assert {track.username for track in tracks} == {'peer-a', 'peer-b'}
     assert any(track.filename == 'Marshall James - Vortex.flac' for track in tracks)
+
+
+def test_search_keeps_more_than_thirty_peers_and_merges_late_files():
+    client = _search_ready_client()
+    first = [
+        {'username': f'peer-{i}', 'files': [{'filename': f'Artist/Album/{i:02d} - Song {i}.flac', 'size': i + 1}]}
+        for i in range(35)
+    ]
+    second = first + [
+        {'username': 'peer-0', 'files': [
+            {'filename': 'Artist/Album/00 - Song 0.flac', 'size': 1},
+            {'filename': 'Artist/Album/36 - Late Song.flac', 'size': 36},
+        ]},
+    ]
+    snapshots = [first, second]
+
+    async def fake_request(method, endpoint, **kwargs):
+        if method == 'POST':
+            return {'id': 'search-1'}
+        return snapshots.pop(0) if snapshots else second
+
+    with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
+         patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
+         patch.object(client, '_make_request', side_effect=fake_request), \
+         patch('core.soulseek_client.asyncio.sleep', AsyncMock()):
+        tracks, albums = _run_async(client.search('Artist Album', timeout=12))
+
+    assert len(albums) == 1
+    assert len(albums[0].tracks) == 2
+    assert len(tracks) == 34
+
+
+def test_search_uses_terminal_state_after_initial_collection_grace():
+    client = _search_ready_client()
+    counts = {'responses': 0, 'status': 0}
+
+    async def fake_request(method, endpoint, **kwargs):
+        if method == 'POST':
+            return {'id': 'search-1'}
+        if endpoint.endswith('/responses'):
+            counts['responses'] += 1
+            return [{'username': 'peer', 'files': [
+                {'filename': 'Artist - Song.flac', 'size': 10},
+            ]}]
+        if endpoint == 'searches/search-1':
+            counts['status'] += 1
+            return {'state': 'Completed'}
+        raise AssertionError(endpoint)
+
+    with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
+         patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
+         patch.object(client, '_make_request', side_effect=fake_request), \
+         patch('core.soulseek_client.asyncio.sleep', AsyncMock()):
+        tracks, _ = _run_async(client.search('Artist Song', timeout=30))
+
+    assert len(tracks) == 1
+    assert counts['responses'] >= 16
+    assert counts['responses'] < 30
+    assert counts['status'] == 1

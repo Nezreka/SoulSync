@@ -195,6 +195,16 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
         )
         return False
 
+    soulseek_bundle = False
+    if batch_id and deps.get_batch_field is not None:
+        try:
+            soulseek_bundle = (
+                deps.get_batch_field(batch_id, 'album_bundle_source') == 'soulseek'
+                and bool(deps.get_batch_field(batch_id, 'album_bundle_private_staging'))
+            )
+        except Exception as exc:
+            logger.debug('Could not inspect staging source: %s', exc)
+
     from difflib import SequenceMatcher
     normalize = deps.matching_engine.normalize_string
     norm_title = normalize(track_title)
@@ -209,6 +219,13 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
     candidate_scores: list = []
 
     for sf in staging_files:
+        if soulseek_bundle:
+            from core.downloads.soulseek_identity import match_track
+            from types import SimpleNamespace
+            if not os.path.exists(sf['full_path']) or not match_track(
+                track, SimpleNamespace(filename=sf['full_path']),
+            ).matches:
+                continue
         sf_title_variants = _staging_title_variants(sf['title'], normalize)
         sf_norm_artist = normalize(sf['artist'])
 

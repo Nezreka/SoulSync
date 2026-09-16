@@ -68,7 +68,7 @@ def test_source_reuse_requires_same_bare_title(monkeypatch):
     assert source_reuse_title_matches(expected, sibling) is False
 
 
-def test_source_reuse_title_gate_fails_closed_for_unknown_layout(monkeypatch):
+def test_source_reuse_recognizes_embedded_album_and_track_number(monkeypatch):
     monkeypatch.setattr(validation, 'matching_engine', _BareTitleEngine())
     expected = _Track(duration_ms=240_000, name='SexyBack',
                       artists=('Justin Timberlake',))
@@ -78,9 +78,7 @@ def test_source_reuse_title_gate_fails_closed_for_unknown_layout(monkeypatch):
                   'Justin Timberlake - FutureSex+LoveSounds - 02 - SexyBack.flac'),
     )
 
-    # Phase 1 source reuse is deliberately conservative. The generalized
-    # filename interpreter planned separately will recognize this layout.
-    assert source_reuse_title_matches(expected, candidate) is False
+    assert source_reuse_title_matches(expected, candidate) is True
 
 
 def test_drops_soundcloud_30s_preview_when_expected_long():
@@ -293,6 +291,34 @@ def test_soulseek_first_pool_does_not_run_p2p_matcher_on_streaming(monkeypatch):
     assert tidal in result
     assert engine.slskd_usernames == [['alice']]
     assert slsk.batches == [['alice']]
+
+
+def test_exact_path_identity_recovers_low_generic_score_without_rescuing_sibling(monkeypatch):
+    class LowScoreEngine(_DispatchEngine):
+        def find_best_slskd_matches_enhanced(self, spotify_track, results, max_peer_queue=0):
+            for row in results:
+                row.confidence = 0.45
+            return []
+
+    slsk = _SoulseekQuality()
+
+    class Orch:
+        def client(self, name):
+            return slsk
+
+    monkeypatch.setattr(validation, 'matching_engine', LowScoreEngine())
+    monkeypatch.setattr(validation, 'download_orchestrator', Orch())
+    target = _Track(duration_ms=180_000, name='SexyBack', artists=('Justin Timberlake',))
+    candidate, _, _ = _peer_and_stream_hits()
+    candidate.filename = ('Justin Timberlake/FutureSex+LoveSounds/'
+                          'Justin Timberlake - FutureSex+LoveSounds - 02 - SexyBack.flac')
+    sibling, _, _ = _peer_and_stream_hits()
+    sibling.filename = 'Justin Timberlake/FutureSex+LoveSounds/03 - My Love.flac'
+
+    result = get_valid_candidates([candidate, sibling], target, 'Justin Timberlake SexyBack')
+
+    assert result == [candidate]
+    assert candidate.confidence == 0.45
 
 
 def test_soulseek_first_pool_still_duration_gates_tidal(monkeypatch):

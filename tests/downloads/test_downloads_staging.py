@@ -400,6 +400,29 @@ def test_private_album_bundle_staging_keeps_task_number_when_file_has_no_number(
     assert ctx['original_search_result']['track_number'] == 4
 
 
+def test_soulseek_private_staging_does_not_claim_similar_sibling_title(tmp_path):
+    src_file = tmp_path / 'private' / '02 - Lost Souls Live.flac'
+    src_file.parent.mkdir()
+    src_file.write_bytes(b'audio')
+
+    def get_batch_field(_batch_id, field):
+        return {'album_bundle_source': 'soulseek',
+                'album_bundle_private_staging': True}.get(field)
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[{'full_path': str(src_file), 'title': 'Lost Souls Live',
+                        'artist': 'Doves'}],
+        get_batch_field=get_batch_field,
+    )
+    _seed_task('t_sibling')
+
+    assert not ds.try_staging_match(
+        't_sibling', 'b_sibling', _Track(name='Lost Souls', artists=['Doves']), deps,
+    )
+    assert src_file.exists()
+
+
 def test_staging_title_match_accepts_feature_suffix_from_release_file(tmp_path):
     """Album releases can include featured artists in filenames."""
     src_file = tmp_path / 'staging' / '05-kendrick_lamar-money_trees_(feat._jay_rock).flac'

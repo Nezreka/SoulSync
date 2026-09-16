@@ -9,6 +9,7 @@ import threading
 import time
 
 from core.downloads.observed_speed import ObservedSpeedTracker
+from core.downloads.peer_observation import observe_peer
 from core.settings import config_manager
 from core.runtime_state import (
     download_batches,
@@ -489,6 +490,16 @@ class WebUIDownloadMonitor:
                         if has_completion and not has_error and (
                             task['status'] == 'downloading' or release_recoverable
                         ):
+                            tracker = task.pop('_observed_speed_tracker', None)
+                            if (isinstance(tracker, ObservedSpeedTracker)
+                                    and len(tracker.samples) >= 2
+                                    and _resolve_download_source(task.get('username')) == 'soulseek'):
+                                start_at, start_bytes = tracker.samples[0]
+                                end_at, end_bytes = tracker.samples[-1]
+                                if end_at > start_at and end_bytes > start_bytes:
+                                    observe_peer(task.get('username'),
+                                                 (end_bytes - start_bytes) / (end_at - start_at),
+                                                 end_at - start_at)
                             task.pop('_incomplete_warned', None)
                             # CRITICAL FIX: Transition to 'post_processing' HERE so downloads
                             # don't depend on browser polling to trigger post-processing.
@@ -1174,6 +1185,7 @@ class WebUIDownloadMonitor:
         source_key = f"{username}_{filename}" if username and filename else None
         candidate_count = int(task.get('candidate_count', 0) or 0)
         candidate_index = int(task.get('current_candidate_index', 0) or 0)
+        observe_peer(username, average_bps or 0, 60)
 
         # There is no known alternative left in this candidate set. Keep the
         # accepted transfer and exempt it from further speed checks rather than

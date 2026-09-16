@@ -9,6 +9,7 @@ from utils.logging_config import get_logger
 import re
 
 from core.settings import config_manager
+from core.downloads.soulseek_identity import match_track
 from core.imports.file_integrity import resolve_duration_tolerance
 # One definition of "could this release satisfy the profile", shared with the
 # album-bundle picker. It lived here and the picker used the probed-file rule
@@ -43,23 +44,12 @@ def source_reuse_title_matches(expected_track, candidate) -> bool:
     """Whether a browsed folder file is unambiguously the requested track.
 
     Source reuse is only an optimization: rejecting an unfamiliar filename
-    falls through to the normal search, while accepting a sibling song imports
-    the wrong recording. Use the matching engine's existing bare-title
-    normalization and therefore fail closed unless the two titles are equal.
-    The generalized filename interpreter belongs in a later change.
+    falls through to normal search, while accepting a sibling song imports the
+    wrong recording. Use the same target-aware path identity gate as search.
     """
-    if matching_engine is None or expected_track is None or candidate is None:
+    if expected_track is None or candidate is None:
         return False
-
-    artists = list(getattr(expected_track, 'artists', None) or [])
-    artist = str(artists[0]) if artists else ''
-    expected = matching_engine.base_title_of(
-        getattr(expected_track, 'name', ''), artist,
-    )
-    actual = matching_engine.base_title_of(
-        getattr(candidate, 'filename', ''), artist, from_filename=True,
-    )
-    return bool(expected and actual and expected == actual)
+    return match_track(expected_track, candidate).matches
 
 
 def _youtube_probe_targets(profile_id=None):
@@ -561,6 +551,41 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
     # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)
     _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
     initial_candidates = matching_engine.find_best_slskd_matches_enhanced(spotify_track, results, max_peer_queue=_max_q)
+    # The generic path scorer can put a structurally unusual but exact title
+    # below its 0.58 threshold. It has already scored and version-checked all
+    # rows; recover only positive-confidence, exact-identity Soulseek files.
+    # Keep the configured queue gate's all-filtered fallback semantics.
+    if results and all(getattr(row, 'username', None) not in _STREAMING_USERNAMES
+                       for row in results):
+        eligible = list(results)
+        if _max_q > 0:
+            within_queue = [row for row in eligible
+                            if (getattr(row, 'queue_length', 0) or 0) <= _max_q]
+            if within_queue:
+                eligible = within_queue
+        accepted_ids = {id(row) for row in initial_candidates}
+        initial_candidates.extend(
+            row for row in eligible
+            if id(row) not in accepted_ids
+            and (getattr(row, 'confidence', 0) or 0) > 0
+            and match_track(spotify_track, row).matches
+        )
+    if not initial_candidates:
+        return []
+
+    # Fuzzy confidence can be lifted by artist/album/duration even when the
+    # file is a sibling song. Soulseek filenames have no structured title, so
+    # require an interpreted identity before quality and peer ranking.
+    identity_checked = []
+    for candidate in initial_candidates:
+        if getattr(candidate, 'username', None) in _STREAMING_USERNAMES:
+            identity_checked.append(candidate)
+            continue
+        identity = match_track(spotify_track, candidate)
+        if identity.matches:
+            candidate.soulseek_match_evidence = identity
+            identity_checked.append(candidate)
+    initial_candidates = identity_checked
     if not initial_candidates:
         return []
 

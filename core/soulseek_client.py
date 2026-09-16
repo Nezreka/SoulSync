@@ -349,17 +349,13 @@ class SoulseekClient(DownloadSourcePlugin):
 
         return []
 
-    def _search_response_key(self, response_data: Dict[str, Any]) -> tuple:
-        username = response_data.get('username', '')
-        files = response_data.get('files') or response_data.get('fileList') or []
-        file_keys = []
-        for file_data in files:
-            if not isinstance(file_data, dict):
-                continue
-            filename = file_data.get('filename') or file_data.get('fileName') or file_data.get('path') or ''
-            size = file_data.get('size', 0)
-            file_keys.append((filename, size))
-        return username, tuple(file_keys)
+    @staticmethod
+    def _search_is_terminal(payload: Any) -> bool:
+        """Use slskd's search state only when it is explicitly terminal."""
+        if not isinstance(payload, dict):
+            return False
+        state = str(payload.get('state') or payload.get('status') or '').lower()
+        return state in {'completed', 'cancelled', 'failed', 'errored', 'timedout', 'timed out'}
 
     def _process_search_responses(self, responses_data: List[Dict[str, Any]]) -> tuple[List[TrackResult], List[AlbumResult]]:
         """Process search response data into TrackResult and AlbumResult objects"""
@@ -526,6 +522,9 @@ class SoulseekClient(DownloadSourcePlugin):
         # Clean up common patterns
         # Remove leading numbers and separators
         cleaned = re.sub(r'^\d+\s*[-\.\s]+', '', album_dir)
+        # Year-prefixed folders such as "(2000) Lost Souls" are common on
+        # Soulseek; the previous trailing-only cleanup retained the year.
+        cleaned = re.sub(r'^[\[(](?:19|20)\d{2}[\])]\s*[-. ]*', '', cleaned)
         
         # Remove year patterns at the end: (2023), [2023], - 2023
         cleaned = re.sub(r'\s*[-\(\[]?\d{4}[-\)\]]?\s*$', '', cleaned)
@@ -556,6 +555,14 @@ class SoulseekClient(DownloadSourcePlugin):
             potential_artist = artist_match.group(1).strip()
             if len(potential_artist) > 1:
                 return potential_artist
+
+        # A distinct parent directory often supplies the artist when filenames
+        # only contain track numbers and titles (Artist/(Year) Album/01 Song).
+        parts = album_path.replace('\\', '/').split('/')
+        if len(parts) >= 2:
+            parent = parts[-2].strip()
+            if parent and parent.lower() not in {'music', 'audio', 'albums', 'downloads', 'flac', 'mp3'}:
+                return parent
         
         return None
     
@@ -640,12 +647,16 @@ class SoulseekClient(DownloadSourcePlugin):
             from core.settings import config_manager
             timeout_buffer = config_manager.get('soulseek.search_timeout_buffer', 15)
 
-            # Poll for results - process and emit results immediately when found
-            all_responses = []
-            seen_response_keys = set()
+            # Merge snapshots by peer/file. slskd may reorder responses or add
+            # more files to an existing peer response on later polls.
+            responses_by_peer = {}
+            seen_files = set()
             all_tracks = []
             all_albums = []
             poll_interval = 1  # Check every 1 second for responsive updates
+            last_new_poll = 0
+            max_peers = 250
+            max_files = 20_000
 
             # IMPORTANT: Poll for LONGER than slskd searches to catch all results
             # slskd timeout: how long slskd searches for
@@ -667,26 +678,32 @@ class SoulseekClient(DownloadSourcePlugin):
                 responses_data = await self._make_request('GET', f'searches/{search_id}/responses')
                 responses = self._normalize_search_responses(responses_data)
                 if responses:
-                    new_responses = []
+                    new_file_count = 0
                     for response_data in responses:
-                        response_key = self._search_response_key(response_data)
-                        if response_key in seen_response_keys:
+                        username = response_data.get('username')
+                        if not username or (username not in responses_by_peer and len(responses_by_peer) >= max_peers):
                             continue
-                        seen_response_keys.add(response_key)
-                        new_responses.append(response_data)
+                        peer = responses_by_peer.setdefault(username, {'username': username, 'files': []})
+                        peer.update({key: value for key, value in response_data.items() if key not in ('files', 'fileList')})
+                        for file_data in response_data.get('files') or response_data.get('fileList') or []:
+                            if not isinstance(file_data, dict):
+                                continue
+                            filename = file_data.get('filename') or file_data.get('fileName') or file_data.get('path')
+                            file_key = (username, filename, file_data.get('size', 0))
+                            if not filename or file_key in seen_files or len(seen_files) >= max_files:
+                                continue
+                            seen_files.add(file_key)
+                            peer['files'].append(file_data)
+                            new_file_count += 1
 
-                    if new_responses:
-                        all_responses.extend(new_responses)
-                        new_response_count = len(new_responses)
-                        
-                        logger.info(f"Found {new_response_count} new responses ({len(all_responses)} total) at {poll_count * poll_interval:.1f}s")
-                        
-                        # Process new responses immediately
-                        new_tracks, new_albums = self._process_search_responses(new_responses)
-                        
-                        # Add to cumulative results
-                        all_tracks.extend(new_tracks)
-                        all_albums.extend(new_albums)
+                    if new_file_count:
+                        last_new_poll = poll_count
+                        logger.info("Found %d new files from %d peers at %.1fs",
+                                    new_file_count, len(responses_by_peer), poll_count * poll_interval)
+
+                        # Reprocess complete peer snapshots so a folder that
+                        # arrives over multiple polls has one coherent album.
+                        all_tracks, all_albums = self._process_search_responses(list(responses_by_peer.values()))
                         
                         # Sort by quality score for better display order
                         all_tracks.sort(key=lambda x: x.quality_score, reverse=True)
@@ -695,22 +712,38 @@ class SoulseekClient(DownloadSourcePlugin):
                         # Call progress callback with processed results immediately
                         if progress_callback:
                             try:
-                                progress_callback(all_tracks, all_albums, len(all_responses))
+                                progress_callback(all_tracks, all_albums, len(responses_by_peer))
                             except Exception as e:
                                 logger.error(f"Error in progress callback: {e}")
                         
                         logger.info(f"Processed results: {len(all_tracks)} tracks, {len(all_albums)} albums")
                         
-                        # Early termination if we have enough responses
-                        if len(all_responses) >= 30:  # Stop after 30 responses for better performance
-                            logger.info(f"Early termination: Found {len(all_responses)} responses, stopping search")
+                        if len(seen_files) >= max_files or len(responses_by_peer) >= max_peers:
+                            logger.warning("Soulseek search reached local result cap (%d peers, %d files)",
+                                           len(responses_by_peer), len(seen_files))
                             break
-                    elif len(all_responses) > 0:
-                        logger.debug(f"No new responses, total still: {len(all_responses)}")
+                    elif responses_by_peer:
+                        logger.debug("No new files, %d peers so far", len(responses_by_peer))
                     else:
                         logger.debug(f"Still waiting for responses... ({poll_count * poll_interval:.1f}s elapsed)")
                 else:
                     logger.debug(f"Still waiting for responses... ({poll_count * poll_interval:.1f}s elapsed)")
+
+                # slskd exposes GET searches/{id} state. A completed search
+                # still gets one response poll after its final additions;
+                # missing/unknown state uses the bounded quiet-period fallback.
+                if responses_by_peer and poll_count >= 15 and poll_count - last_new_poll >= 2:
+                    try:
+                        search_state = await self._make_request('GET', f'searches/{search_id}')
+                    except Exception as exc:
+                        logger.debug("Soulseek search status unavailable: %s", exc)
+                        search_state = None
+                    if self._search_is_terminal(search_state):
+                        logger.info("Soulseek search reached terminal state after %d peers", len(responses_by_peer))
+                        break
+                    if poll_count - last_new_poll >= 5:
+                        logger.info("Soulseek search quiet for five polls after %d peers", len(responses_by_peer))
+                        break
                 
                 # Wait before next poll (unless this is the last attempt)
                 if poll_count < max_polls - 1:
@@ -1540,19 +1573,16 @@ class SoulseekClient(DownloadSourcePlugin):
         *,
         preferred_source: Optional[Dict[str, Any]] = None,
         preferred_tracks: Optional[List[TrackResult]] = None,
+        preferred_alternatives: Optional[List[Dict[str, Any]]] = None,
+        expected_tracks: Optional[List[Dict[str, Any]]] = None,
         quality_profile_id=None,
         expected_duration_seconds=None,
     ) -> Dict[str, Any]:
-        """One-shot Soulseek album download.
+        """Stage requested album tracks, with bounded same-release peer fallback.
 
-        Search for one album folder, enqueue files from that single
-        ``username + folder_path``, wait for slskd to report completion,
-        then copy completed files into the private album-bundle staging
-        directory. If the folder cannot be selected or enqueued cleanly,
-        callers may fall back to the existing per-track Soulseek flow.
-        Once files are staged, the per-track staging matcher owns final
-        import, same as torrent / usenet album bundles.
-                ``expected_duration_seconds`` is part of the album-bundle plugin
+        Completed tracks are retained when another eligible folder can supply
+        unresolved tracks. The private staging matcher owns final import.
+        ``expected_duration_seconds`` is part of the album-bundle plugin
         contract the master worker calls every source with. Soulseek picks a
         folder rather than a single release, so it has nothing to compare a
         duration against and ignores it; the parameter exists because a
@@ -1606,6 +1636,7 @@ class SoulseekClient(DownloadSourcePlugin):
                 album_name,
                 artist_name,
                 quality_profile_id=quality_profile_id,
+                expected_tracks=expected_tracks,
             )
             if picked is None:
                 result['error'] = 'No suitable Soulseek album folder after filtering'
@@ -1613,6 +1644,14 @@ class SoulseekClient(DownloadSourcePlugin):
 
             folder_path = getattr(picked, 'album_path', '') or ''
             username = getattr(picked, 'username', '') or ''
+            if expected_tracks and preferred_alternatives is None:
+                preferred_alternatives = [
+                    {'username': album.username, 'folder_path': album.album_path,
+                     'tracks': album.tracks}
+                    for album in albums if album is not picked
+                    and self._bundle_similarity(album_name, album.album_path) >= 0.65
+                    and self._bundle_similarity(artist_name, album.album_path) >= 0.65
+                ][:4]
         if not username or not folder_path:
             result['error'] = 'No suitable Soulseek album folder after filtering'
             return result
@@ -1666,6 +1705,22 @@ class SoulseekClient(DownloadSourcePlugin):
             result['error'] = 'Selected Soulseek album folder contained no audio files'
             return result
 
+        from core.downloads.soulseek_identity import assign_album_tracks
+        from core.downloads.peer_observation import observe_peer
+
+        expected_tracks = list(expected_tracks or [])
+        initial_assignment = assign_album_tracks(expected_tracks, folder_tracks, album=album_name)
+        if expected_tracks:
+            folder_tracks = [folder_tracks[file_index] for _, file_index in initial_assignment.pairs]
+            if not folder_tracks:
+                result['error'] = 'Selected Soulseek album folder has no matching requested tracks'
+                return result
+        source_options = list(preferred_alternatives or [])[:4]
+        key_to_expected = {}
+        if expected_tracks:
+            for kept, (expected_index, _) in zip(folder_tracks, initial_assignment.pairs, strict=True):
+                key_to_expected[(kept.username, kept.filename)] = expected_index
+
         transfer_keys: Dict[tuple, TrackResult] = {}
         _emit(
             'downloading',
@@ -1686,14 +1741,125 @@ class SoulseekClient(DownloadSourcePlugin):
             return result
 
         result['fallback'] = False
-        completed = self._poll_album_bundle_downloads(transfer_keys, _emit)
+        deadline = time.monotonic() + get_poll_timeout()
+        switch_possible = False
+        if expected_tracks and initial_assignment.coverage >= 0.8:
+            for option in source_options:
+                advertised_tracks = list(option.get('tracks') or [])
+                if advertised_tracks:
+                    eligible = self.filter_results_by_quality_preference(
+                        advertised_tracks, profile_id=quality_profile_id)
+                    option['_eligible_tracks'] = eligible
+                    if assign_album_tracks(expected_tracks, eligible, album=album_name).coverage == 1.0:
+                        switch_possible = True
+        poll_result = self._poll_album_bundle_downloads(
+            transfer_keys, _emit, deadline=deadline, return_detail=True,
+            switch_on_crawl=switch_possible,
+        )
+        completed_by_expected = {
+            key_to_expected[key]: path for key, path in poll_result['completed'].items()
+            if key in key_to_expected
+        }
+        completed = list(poll_result['completed'].values())
+        if poll_result['speed_bps'] is not None:
+            observe_peer(username, poll_result['speed_bps'], poll_result['sample_seconds'])
+
+        if expected_tracks and source_options and time.monotonic() < deadline:
+            safe_to_retry_original = True
+            if poll_result['pending']:
+                if not self._cancel_album_pending(poll_result['pending'], transfer_keys):
+                    logger.warning('[Soulseek album] Cancellation unconfirmed; keeping current folder')
+                    resumed = self._poll_album_bundle_downloads(
+                        transfer_keys, _emit, deadline=deadline, return_detail=True,
+                        initial_completed=poll_result['completed'],
+                    )
+                    completed = list(resumed['completed'].values())
+                    completed_by_expected = {
+                        key_to_expected[key]: path for key, path in resumed['completed'].items()
+                        if key in key_to_expected
+                    }
+                    source_options = []
+            for option_index, option in enumerate(source_options):
+                remaining = [index for index in range(len(expected_tracks))
+                             if index not in completed_by_expected]
+                if not remaining or time.monotonic() >= deadline:
+                    break
+                option_tracks = list(option.get('_eligible_tracks') or option.get('tracks') or [])
+                if not option_tracks:
+                    try:
+                        browsed = run_async(self.browse_user_directory(
+                            option['username'], option['folder_path']))
+                        option_tracks = self.parse_browse_results_to_tracks(
+                            option['username'], browsed or [], directory=option['folder_path'])
+                    except Exception as exc:
+                        logger.warning('[Soulseek album] Alternative browse failed: %s', exc)
+                        continue
+                option_tracks = self.filter_results_by_quality_preference(
+                    option_tracks, profile_id=quality_profile_id)
+                subset = [expected_tracks[index] for index in remaining]
+                assignment = assign_album_tracks(subset, option_tracks, album=album_name)
+                if assignment.coverage < 1.0:
+                    continue
+                alt_keys = {}
+                alt_expected = {}
+                for relative_index, file_index in assignment.pairs:
+                    track = option_tracks[file_index]
+                    key = (track.username, track.filename)
+                    try:
+                        queued = run_async(self.download(track.username, track.filename, track.size))
+                    except Exception as exc:
+                        logger.warning('[Soulseek album] Alternative enqueue failed: %s', exc)
+                        continue
+                    if queued:
+                        alt_keys[key] = track
+                        alt_expected[key] = remaining[relative_index]
+                if not alt_keys:
+                    continue
+                alt_result = self._poll_album_bundle_downloads(
+                    alt_keys, _emit, deadline=deadline, return_detail=True,
+                    switch_on_crawl=option_index < len(source_options) - 1,
+                )
+                for key, path in alt_result['completed'].items():
+                    completed_by_expected[alt_expected[key]] = path
+                if alt_result['speed_bps'] is not None:
+                    observe_peer(option['username'], alt_result['speed_bps'], alt_result['sample_seconds'])
+                if alt_result['reason'] == 'crawling' and not self._cancel_album_pending(
+                        alt_result['pending'], alt_keys):
+                    safe_to_retry_original = False
+                    resumed = self._poll_album_bundle_downloads(
+                        alt_keys, _emit, deadline=deadline, return_detail=True,
+                        initial_completed=alt_result['completed'],
+                    )
+                    for key, path in resumed['completed'].items():
+                        completed_by_expected[alt_expected[key]] = path
+                    break
+            # The original accepted crawler remains a failsafe. If every
+            # replacement failed outright, retry only its unresolved tracks
+            # once without another speed-driven switch.
+            if (safe_to_retry_original and poll_result['reason'] == 'crawling' and source_options
+                    and len(completed_by_expected) < len(expected_tracks)
+                    and time.monotonic() < deadline):
+                retry_keys = {
+                    key: track for key, track in transfer_keys.items()
+                    if key_to_expected[key] not in completed_by_expected
+                }
+                queued_retry = {}
+                for key, track in retry_keys.items():
+                    try:
+                        if run_async(self.download(track.username, track.filename, track.size)):
+                            queued_retry[key] = track
+                    except Exception as exc:
+                        logger.warning('[Soulseek album] Slow fallback enqueue failed: %s', exc)
+                if queued_retry:
+                    retry_result = self._poll_album_bundle_downloads(
+                        queued_retry, _emit, deadline=deadline, return_detail=True,
+                    )
+                    for key, path in retry_result['completed'].items():
+                        completed_by_expected[key_to_expected[key]] = path
+            completed = list(completed_by_expected.values())
         if not completed:
-            # The selected folder yielded ZERO usable files — every transfer
-            # failed / aborted / stalled (a dead or unwilling peer). Don't hard-
-            # fail the batch: fall back to the per-track flow, which searches ALL
-            # sources per track and can pull each from a live peer. We reuse that
-            # proven multi-source robustness instead of looping candidate folders
-            # here. (Per-track only fires for a genuinely-missing album anyway.)
+            # No folder yielded a usable track. The per-track worker retains
+            # its normal multi-source search/fallback path.
             result['error'] = ('Soulseek album folder produced no usable files '
                                '(peer failed/aborted/stalled) — falling back to per-track')
             result['fallback'] = True
@@ -1708,13 +1874,14 @@ class SoulseekClient(DownloadSourcePlugin):
             result['error'] = 'No Soulseek album files copied to staging'
             return result
 
-        partial = len(copied) < len(transfer_keys)
+        expected_count = len(expected_tracks) if expected_tracks else len(transfer_keys)
+        partial = len(copied) < expected_count
         if partial:
             logger.warning(
                 "[Soulseek album] Staged partial album for '%s': %d/%d files",
                 album_name,
                 len(copied),
-                len(transfer_keys),
+                expected_count,
             )
         else:
             logger.info("[Soulseek album] Staged %d files for '%s'", len(copied), album_name)
@@ -1722,9 +1889,57 @@ class SoulseekClient(DownloadSourcePlugin):
         result['success'] = True
         result['files'] = copied
         result['partial'] = partial
-        result['expected_count'] = len(transfer_keys)
+        result['expected_count'] = expected_count
         result['completed_count'] = len(copied)
         return result
+
+    def _cancel_album_pending(self, pending, transfer_keys) -> bool:
+        """Confirm unfinished transfers stopped before another peer is queued."""
+        if not pending:
+            return True
+        try:
+            downloads = run_async(self.get_all_downloads())
+        except Exception as exc:
+            logger.warning('[Soulseek album] Cannot inspect pending transfers: %s', exc)
+            return False
+        by_key = {(row.username, row.filename): row for row in downloads}
+        for row in downloads:
+            by_key.setdefault((row.username, os.path.basename(
+                (row.filename or '').replace('\\', '/'))), row)
+        for key in pending:
+            row = by_key.get(key) or by_key.get((
+                key[0], os.path.basename((key[1] or '').replace('\\', '/')),
+            ))
+            if row is None:
+                continue
+            try:
+                cancelled = run_async(self.cancel_download(row.id, key[0], remove=True))
+            except Exception as exc:
+                logger.warning('[Soulseek album] Cannot cancel %s: %s', transfer_keys[key].filename, exc)
+                return False
+            if not cancelled:
+                logger.warning('[Soulseek album] Cancellation rejected for %s', transfer_keys[key].filename)
+                return False
+        terminal = ('Completed', 'Succeeded', 'Failed', 'Errored', 'Cancelled', 'Aborted', 'Rejected')
+        for _ in range(3):
+            try:
+                rows = run_async(self.get_all_downloads())
+            except Exception:
+                return False
+            active = [row for row in rows if not any(
+                token in (row.state or '') for token in terminal)]
+            if not any(
+                row.username == key[0] and (
+                    row.filename == key[1]
+                    or os.path.basename((row.filename or '').replace('\\', '/'))
+                    == os.path.basename((key[1] or '').replace('\\', '/'))
+                )
+                for row in active for key in pending
+            ):
+                return True
+            time.sleep(min(1.0, get_poll_interval()))
+        logger.warning('[Soulseek album] Pending cancellation did not reach a terminal state')
+        return False
 
     def _pick_album_bundle_folder(
         self,
@@ -1732,7 +1947,10 @@ class SoulseekClient(DownloadSourcePlugin):
         album_name: str,
         artist_name: str,
         quality_profile_id=None,
+        expected_tracks=None,
     ) -> Optional[AlbumResult]:
+        from core.downloads.soulseek_identity import assign_album_tracks
+
         scored = []
         for album in albums:
             album_tracks = list(getattr(album, 'tracks', []) or [])
@@ -1745,18 +1963,26 @@ class SoulseekClient(DownloadSourcePlugin):
                 )
             if not tracks:
                 continue
+            coverage = 0.0
+            if expected_tracks:
+                coverage = assign_album_tracks(expected_tracks, tracks, album=album_name).coverage
+                if coverage < 0.8:
+                    continue
             album_text = f"{getattr(album, 'album_title', '')} {getattr(album, 'album_path', '')}"
             artist_text = f"{getattr(album, 'artist', '')} {getattr(album, 'album_path', '')}"
             album_score = self._bundle_similarity(album_name, album_text)
             artist_score = self._bundle_similarity(artist_name, artist_text)
+            if expected_tracks and (album_score < 0.65 or artist_score < 0.65):
+                continue
             track_count = int(getattr(album, 'track_count', 0) or len(tracks))
             count_score = 1.0 if track_count >= 3 else 0.35
             score = (
-                album_score * 0.42
-                + artist_score * 0.22
+                album_score * 0.32
+                + artist_score * 0.18
                 + count_score * 0.12
                 + min(1.0, len(tracks) / max(1, track_count)) * 0.12
-                + float(getattr(album, 'quality_score', 0.0) or 0.0) * 0.12
+                + float(getattr(album, 'quality_score', 0.0) or 0.0) * 0.10
+                + (coverage if expected_tracks else 1.0) * 0.16
             )
             scored.append((score, len(tracks), album))
         if not scored:
@@ -1788,11 +2014,37 @@ class SoulseekClient(DownloadSourcePlugin):
             return min(len(left), len(right)) / max(len(left), len(right))
         return SequenceMatcher(None, left, right).ratio()
 
-    def _poll_album_bundle_downloads(self, transfer_keys: Dict[tuple, TrackResult], emit) -> List[Path]:
-        deadline = time.monotonic() + get_poll_timeout()
+    def _poll_album_bundle_downloads(self, transfer_keys: Dict[tuple, TrackResult], emit, *,
+                                     deadline=None, return_detail=False, switch_on_crawl=False,
+                                     initial_completed=None):
+        from core.downloads.observed_speed import ObservedSpeedTracker
+        from core.settings import config_manager
+
+        deadline = deadline if deadline is not None else time.monotonic() + get_poll_timeout()
         interval = get_poll_interval()
-        completed_paths: Dict[tuple, Path] = {}
+        completed_paths: Dict[tuple, Path] = dict(initial_completed or {})
         failed_states: Dict[tuple, str] = {}
+        aggregate_bytes: Dict[tuple, int] = {}
+        speed_tracker = ObservedSpeedTracker()
+        try:
+            minimum_bps = max(0.0, float(config_manager.get(
+                'soulseek.min_observed_download_speed_kbps', 500) or 0) * 1000)
+        except (TypeError, ValueError):
+            minimum_bps = 500_000.0
+
+        def finish(reason):
+            if return_detail:
+                sample_seconds = (
+                    speed_tracker.samples[-1][0] - speed_tracker.samples[0][0]
+                    if len(speed_tracker.samples) >= 2 else 0
+                )
+                return {'completed': dict(completed_paths), 'reason': reason,
+                        'pending': [key for key in transfer_keys
+                                    if key not in completed_paths and key not in failed_states],
+                        'speed_bps': speed_tracker.observe(
+                            time.monotonic(), sum(aggregate_bytes.values()), 0,
+                        )[0], 'sample_seconds': sample_seconds}
+            return list(completed_paths.values())
         # Track keys where slskd reports the transfer Completed /
         # Succeeded but the local file finder can't yet locate the
         # file on disk. Usually transient (slskd writes the file
@@ -1845,6 +2097,9 @@ class SoulseekClient(DownloadSourcePlugin):
                     key[0],
                     os.path.basename((key[1] or '').replace('\\', '/')),
                 ))
+                if dl:
+                    aggregate_bytes[key] = max(aggregate_bytes.get(key, 0),
+                                               int(getattr(dl, 'transferred', 0) or 0))
                 state = (getattr(dl, 'state', '') or '') if dl else ''
                 # NOTE: check failure tokens BEFORE the 'Completed' branch — slskd
                 # reports terminal failures as "Completed, <reason>" (e.g.
@@ -1884,6 +2139,18 @@ class SoulseekClient(DownloadSourcePlugin):
                 count=len(completed_paths),
                 failed=len(failed_states),
             )
+
+            if minimum_bps > 0 and aggregate_bytes:
+                observed_bps, crawling = speed_tracker.observe(
+                    time.monotonic(), sum(aggregate_bytes.values()), minimum_bps,
+                )
+                if switch_on_crawl and crawling and any(
+                    key not in completed_paths and key not in failed_states
+                    for key in transfer_keys
+                ):
+                    logger.warning('[Soulseek album] Aggregate throughput %.0f KB/s; '
+                                   'trying another validated folder', (observed_bps or 0) / 1000)
+                    return finish('crawling')
 
             # Bundle-level stall detection (see ``_stall_grace`` above). Advance
             # the progress marker on ANY forward motion — a transfer reaching a
@@ -1944,12 +2211,12 @@ class SoulseekClient(DownloadSourcePlugin):
                     len(completed_paths),
                     len(failed_states),
                 )
-                return list(completed_paths.values())
+                return finish('partial')
             if not completed_paths and len(failed_states) == len(transfer_keys):
                 logger.warning("[Soulseek album] All %d transfer(s) failed from selected folder", len(failed_states))
-                return []
+                return finish('failed')
             if len(completed_paths) == len(transfer_keys):
-                return list(completed_paths.values())
+                return finish('complete')
 
             # Early exit when every remaining key is "slskd done +
             # locally unresolved past grace". Pre-fix this was the
@@ -1975,7 +2242,7 @@ class SoulseekClient(DownloadSourcePlugin):
                     _unresolved_grace,
                     [transfer_keys[k].filename for k in still_pending[:5]],
                 )
-                return list(completed_paths.values())
+                return finish('unresolved')
 
             time.sleep(interval)
         pending = len(transfer_keys) - len(completed_paths) - len(failed_states)
@@ -1986,7 +2253,7 @@ class SoulseekClient(DownloadSourcePlugin):
                 len(failed_states),
                 pending,
             )
-            return list(completed_paths.values())
+        return finish('timeout')
         logger.error(
             "[Soulseek album] Timed out waiting for %d album files (%d failed, %d pending)",
             len(transfer_keys),
@@ -2508,4 +2775,3 @@ def get_shared_soulseek_client():
         _SHARED_CACHE["key"] = key
         _SHARED_CACHE["client"] = client
         return client
-
