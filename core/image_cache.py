@@ -124,6 +124,13 @@ class ImageCache:
         self._pending_touches: dict[str, float] = {}
         self._pending_touches_lock = threading.Lock()
         self._pending_touches_since = 0.0
+        # registrations waiting to be written, key -> (url, variant, time).
+        # a page that fixes seventy-five artist urls used to write each one
+        # in its own transaction behind the process lock before it could
+        # answer; they collect here and go down together, and a serve that
+        # arrives first flushes them.
+        self._pending_registrations: dict[str, tuple[str, str, float]] = {}
+        self._pending_registrations_since = 0.0
         self._key_locks: dict[str, threading.RLock] = {}
         self._key_locks_lock = threading.Lock()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -142,29 +149,50 @@ class ImageCache:
             variant = ""
         key = self.key_for_url(str(url), variant)
         now = time.time()
-        with self._db_lock:
+        flush = False
+        with self._pending_touches_lock:
             # Coalesce repeat page registrations, with bounded memory. Serving
             # still touches LRU timestamps; registration refreshes once/minute.
             registered = self._registrations.get(key)
             if registered is not None and 0 <= now - registered < 60:
                 return f"/api/image-cache/{key}"
-            with self._connect() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO image_cache
-                        (key, original_url, status, created_at, updated_at, last_accessed,
-                         expires_at, size, mime_type, file_path, last_error, variant)
-                    VALUES (?, ?, 'pending', ?, ?, ?, 0, 0, '', '', '', ?)
-                    ON CONFLICT(key) DO UPDATE SET
-                        original_url=excluded.original_url,
-                        last_accessed=excluded.last_accessed
-                    """,
-                    (key, str(url), now, now, now, variant),
-                )
             if len(self._registrations) >= 4096:
                 self._registrations.pop(next(iter(self._registrations)))
             self._registrations[key] = now
+            if not self._pending_registrations:
+                self._pending_registrations_since = now
+            self._pending_registrations[key] = (str(url), variant, now)
+            if (len(self._pending_registrations) >= self.TOUCH_FLUSH_MAX
+                    or now - self._pending_registrations_since >= self.TOUCH_FLUSH_SECONDS):
+                flush = True
+        if flush:
+            self._flush_registrations()
         return f"/api/image-cache/{key}"
+
+    def _flush_registrations(self) -> None:
+        """write every pending registration in one transaction."""
+        with self._pending_touches_lock:
+            pending = self._pending_registrations
+            self._pending_registrations = {}
+        if not pending:
+            return
+        try:
+            with self._db_lock:
+                with self._connect() as conn:
+                    conn.executemany(
+                        """
+                        INSERT INTO image_cache
+                            (key, original_url, status, created_at, updated_at, last_accessed,
+                             expires_at, size, mime_type, file_path, last_error, variant)
+                        VALUES (?, ?, 'pending', ?, ?, ?, 0, 0, '', '', '', ?)
+                        ON CONFLICT(key) DO UPDATE SET
+                            original_url=excluded.original_url,
+                            last_accessed=excluded.last_accessed
+                        """,
+                        [(key, url, ts, ts, ts, variant) for key, (url, variant, ts) in pending.items()])
+        except Exception as e:
+            logger.debug("image cache registration flush failed (%d entries): %s", len(pending), e)
+            # a lost registration only costs a 404 until the page registers it again
 
     def get(self, key: str) -> CachedImage:
         row = self._get_row(key)
@@ -223,6 +251,7 @@ class ImageCache:
 
     def stats(self) -> dict:
         """What the cache is holding, for the Settings panel."""
+        self._flush_registrations()
         self._flush_touches()
         with self._db_lock:
             with self._connect() as conn:
@@ -267,6 +296,7 @@ class ImageCache:
         mean), then least-recently-used entries until the total fits. Eviction
         is by ``last_accessed``, which the serve path already maintains, so the
         art someone actually browses is the art that survives."""
+        self._flush_registrations()
         self._flush_touches()
         now = time.time() if now is None else now
         expired = evicted = 0
@@ -696,6 +726,12 @@ class ImageCache:
     TOUCH_FLUSH_MAX = 200
 
     def _get_row(self, key: str) -> Optional[sqlite3.Row]:
+        # a serve that arrives before the page's registrations were written
+        # writes them now; the browser asks within milliseconds of the render
+        with self._pending_touches_lock:
+            pending = key in self._pending_registrations
+        if pending:
+            self._flush_registrations()
         # a read on its own connection needs no process lock under wal
         with self._connect() as conn:
             return conn.execute("SELECT * FROM image_cache WHERE key = ?", (key,)).fetchone()

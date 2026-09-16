@@ -219,3 +219,35 @@ def test_the_cache_db_runs_in_wal_mode(tmp_path):
     cache = _cache(tmp_path, max_cache_bytes=0)
     c = sqlite3.connect(str(cache.db_path))
     assert c.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+
+
+def test_registrations_batch_and_a_serve_finds_a_pending_one(tmp_path, monkeypatch):
+    """the library page registers seventy-five urls before it can answer; they
+    used to be seventy-five transactions behind the lock. now one, and a
+    browser that asks for one of them first still gets it."""
+    import sqlite3
+    cache = _cache(tmp_path, max_cache_bytes=0)
+    flushes = []
+    real = cache._flush_registrations
+
+    def counting():
+        n = len(cache._pending_registrations)
+        real()
+        if n:
+            flushes.append(n)
+
+    monkeypatch.setattr(cache, "_flush_registrations", counting)
+    urls = [cache.cache_url_for(f"https://img.example.test/reg{i}.jpg") for i in range(10)]
+    assert all(u.startswith("/api/image-cache/") for u in urls)
+    assert flushes == []
+    c = sqlite3.connect(str(cache.db_path))
+    assert c.execute("SELECT COUNT(*) FROM image_cache WHERE original_url LIKE '%reg%'").fetchone()[0] == 0
+    # a serve of one pending key writes the batch first, then finds its row
+    key = urls[3].rsplit("/", 1)[1]
+    row = cache._get_row(key)
+    assert row is not None and row["original_url"] == "https://img.example.test/reg3.jpg"
+    assert flushes == [10]
+    assert c.execute("SELECT COUNT(*) FROM image_cache WHERE original_url LIKE '%reg%'").fetchone()[0] == 10
+    # a repeat registration within the minute is coalesced, no pending entry
+    cache.cache_url_for("https://img.example.test/reg3.jpg")
+    assert cache._pending_registrations == {}
