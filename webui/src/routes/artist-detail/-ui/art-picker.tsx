@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ArtCandidate, ArtPickerTarget } from '../-artist-detail.manage-actions';
 
 import {
+  albumArtAppliedMessage,
   applyArtRequest,
   releaseArtRequest,
   artistArtAppliedMessage,
@@ -124,7 +125,9 @@ export function ArtPicker({ target, currentUrl, subtitle, onApplied, onClose }: 
       const result = await applyArtRequest(target, selected);
       if (result && result.success) {
         window.showToast?.(
-          target.kind === 'artist' ? artistArtAppliedMessage(result) : 'Cover art updated',
+          target.kind === 'artist'
+            ? artistArtAppliedMessage(result)
+            : albumArtAppliedMessage(result),
           'success',
         );
         onApplied(selected);

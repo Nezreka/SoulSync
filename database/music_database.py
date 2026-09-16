@@ -8436,6 +8436,42 @@ class MusicDatabase:
             logger.error(f"Error getting artist IDs for {server_source}: {e}")
             return set()
 
+    def clear_phantom_artist_thumbs(self, artist_ids, server_source: str) -> int:
+        """drop the stored photo url for artists the server just said have no
+        image, when that url is the server-built one that 404s (#1253).
+
+        surgical on purpose: only the exact ``/Items/<id>/Images/Primary``
+        shape for that id, only unlocked rows. a hand-picked photo or one an
+        enrichment worker wrote is not ours to touch. returns rows cleared.
+        """
+        ids = [str(i) for i in (artist_ids or []) if i]
+        if not ids:
+            return 0
+        cleared = 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                lock_clause = (
+                    "AND COALESCE(art_locked, 0) = 0"
+                    if self._art_lock_supported(cursor, 'artists') else ""
+                )
+                for start in range(0, len(ids), 500):
+                    chunk = ids[start:start + 500]
+                    placeholders = ','.join('?' * len(chunk))
+                    cursor.execute(f"""
+                        UPDATE artists
+                        SET thumb_url = NULL, updated_at = CURRENT_TIMESTAMP
+                        WHERE server_source = ?
+                          AND id IN ({placeholders})
+                          AND thumb_url = '/Items/' || id || '/Images/Primary'
+                          {lock_clause}
+                    """, [server_source, *chunk])
+                    cleared += cursor.rowcount
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error clearing phantom artist thumbs for {server_source}: {e}")
+        return cleared
+
     def get_all_album_ids_for_server(self, server_source: str) -> set:
         """Get all album IDs stored in the database for a specific server."""
         try:

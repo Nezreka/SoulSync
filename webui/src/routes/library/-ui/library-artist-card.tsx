@@ -91,9 +91,21 @@ function BadgeIcon({ badge }: { badge: ArtistBadge }) {
  * hop would silently lose artwork for every artist whose stored image_url has
  * rotted but who has a deezer_id.
  */
+type ImageStage = 'primary' | 'deezer' | 'placeholder';
+
+/**
+ * where the image chain starts. no stored photo but a deezer id is the
+ * #1253 shape: a server with no art for the artist, and enrichment that
+ * matched them but never got to backfill. the artist page already shows
+ * deezer's photo for that artist; the grid should not sit on a music note.
+ */
+export function initialImageStage(artist: LibraryArtist, hasImage: boolean): ImageStage {
+  if (hasImage) return 'primary';
+  return artist.deezer_id ? 'deezer' : 'placeholder';
+}
+
 function ArtistImage({ artist, hasImage }: { artist: LibraryArtist; hasImage: boolean }) {
-  type Stage = 'primary' | 'deezer' | 'placeholder';
-  const [stage, setStage] = useState<Stage>(hasImage ? 'primary' : 'placeholder');
+  const [stage, setStage] = useState<ImageStage>(() => initialImageStage(artist, hasImage));
   // the picture eases in from the dark tile once its bytes have arrived,
   // instead of popping. reset per stage so a deezer retry fades too.
   const [loaded, setLoaded] = useState(false);

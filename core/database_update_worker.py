@@ -290,6 +290,14 @@ class DatabaseUpdateWorker:
                 except Exception as e:
                     logger.warning(f"Removal detection failed (non-fatal): {e}")
 
+            # #1253: artists the server has no photo for used to get a url that
+            # 404s, which also kept enrichment from ever filling a real one in.
+            # a full refresh rewrites every artist so it heals on its own; an
+            # incremental scan never revisits them, so sweep here. one
+            # lightweight call, jellyfin/emby only (the client decides).
+            if self.database:
+                self._clear_phantom_artist_thumbs()
+
             # Cleanup orphaned records after incremental updates (catches fixed matches)
             if not self.full_refresh and self.database:
                 try:
@@ -1164,6 +1172,23 @@ class DatabaseUpdateWorker:
             logger.debug(f"Error checking for metadata changes: {e}")
             return False  # Assume no changes if we can't check
     
+    def _clear_phantom_artist_thumbs(self):
+        """null the server-built photo url of every artist the server says has
+        no image. non-fatal, and a client that can't answer is left alone."""
+        getter = getattr(self.media_client, 'get_artist_ids_without_image', None)
+        if not callable(getter):
+            return
+        try:
+            without_image = getter()
+            if not without_image:
+                return
+            cleared = self.database.clear_phantom_artist_thumbs(without_image, self.server_type)
+            if cleared:
+                logger.info(f"Cleared {cleared} phantom artist photo urls "
+                            f"({self.server_type} has no image for them)")
+        except Exception as e:
+            logger.warning(f"Phantom artist photo sweep failed (non-fatal): {e}")
+
     def _detect_and_remove_stale_content(self):
         """Detect and remove content that was deleted from the media server.
 
