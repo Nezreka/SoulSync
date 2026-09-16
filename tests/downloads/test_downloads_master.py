@@ -812,6 +812,19 @@ def test_soulseek_album_title_does_not_confuse_artist_with_another_album():
         'music/Gunship/Gunship - Dark All Day (2018)') < 0.65
 
 
+@pytest.mark.parametrize(('album', 'artist', 'year', 'folder'), [
+    ('Bad Company', 'Bad Company', '1974', 'Bad Company - [LP] - 1974 - Bad Company'),
+    ('Rumours', 'Fleetwood Mac', '1977', 'Fleetwood Mac - Rumours [LP] (1977)'),
+    ('The Album', 'Artist', '1999', 'The Album'),
+])
+def test_soulseek_album_title_handles_structured_names_generally(
+        album, artist, year, folder):
+    from core.downloads.master import _album_title_similarity
+
+    assert _album_title_similarity(
+        album, artist, year, folder, f'music/{artist}/{folder}') >= 0.65
+
+
 def test_soulseek_eponymous_album_search_uses_year_instead_of_duplicate_name():
     from core.downloads.master import _album_search_queries
 

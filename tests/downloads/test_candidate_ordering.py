@@ -150,6 +150,14 @@ def test_soulseek_band_interleaves_peer_candidates():
     assert [r.name for r in order_candidates(rows)] == ['a1', 'b1', 'a2']
 
 
+def test_soulseek_band_preserves_input_order_when_all_signals_tie():
+    rows = [
+        _NamedCand('first', FLAC_CD, 0.90, 'same-peer'),
+        _NamedCand('second', FLAC_CD, 0.90, 'same-peer'),
+    ]
+    assert [r.name for r in order_candidates(rows)] == ['first', 'second']
+
+
 def test_observed_peer_speed_and_batch_occupancy_are_separate_ordering_signals():
     a = _NamedCand('a', FLAC_CD, 0.90, 'a', upload_speed=5_000_000,
                    free_upload_slots=1)

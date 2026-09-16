@@ -260,8 +260,6 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
                     getattr(row, 'upload_speed', 0) or 0,
                     getattr(row, 'quality_score', 0) or 0,
                     getattr(row, 'confidence', 0) or 0,
-                    str(getattr(row, 'username', '') or ''),
-                    str(getattr(row, 'filename', '') or ''),
                 )
 
             band.sort(key=availability, reverse=True)
