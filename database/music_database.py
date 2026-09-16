@@ -2564,6 +2564,12 @@ class MusicDatabase:
             # page. this index covers it, so neither statement reads the
             # table: ~750 ms each per click on a 5k-artist install -> 4 ms.
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_source_name_id ON artists (server_source, name, id)")
+            # /api/database/stats asks MAX(updated_at) per server on all three
+            # tables; without these it read every track row (2 s warm, 21 s
+            # cold on 300k tracks) on every dashboard and library load
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_source_updated ON tracks (server_source, updated_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_source_updated ON albums (server_source, updated_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_source_updated ON artists (server_source, updated_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_server_source ON albums (server_source)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_server_source ON tracks (server_source)")
             
@@ -2678,6 +2684,12 @@ class MusicDatabase:
             # page. this index covers it, so neither statement reads the
             # table: ~750 ms each per click on a 5k-artist install -> 4 ms.
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_source_name_id ON artists (server_source, name, id)")
+            # /api/database/stats asks MAX(updated_at) per server on all three
+            # tables; without these it read every track row (2 s warm, 21 s
+            # cold on 300k tracks) on every dashboard and library load
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_source_updated ON tracks (server_source, updated_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_source_updated ON albums (server_source, updated_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_source_updated ON artists (server_source, updated_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_server_source ON albums (server_source)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_server_source ON tracks (server_source)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_name ON artists (name)")
@@ -19865,19 +19877,35 @@ class MusicDatabase:
                     by_key[key] = card
                     cards.append(card)
 
+                # the normalized columns are indexed; the LOWER(TRIM()) form
+                # this replaced scanned every album per card (1.3 s of cpu per
+                # dashboard load on 70k albums). the norm also folds accents,
+                # which for an art lookup only finds more.
+                norm_ready = self._norm_ready(cursor)
                 for card in cards:
                     if card['thumb_url']:
                         continue
                     try:
-                        cursor.execute(
-                            """
-                            SELECT al.thumb_url, ar.thumb_url
-                            FROM albums al JOIN artists ar ON al.artist_id = ar.id
-                            WHERE LOWER(TRIM(ar.name)) = LOWER(TRIM(?))
-                              AND LOWER(TRIM(al.title)) = LOWER(TRIM(?))
-                            LIMIT 1
-                            """,
-                            (card['artist_name'], card['album_name']))
+                        if norm_ready:
+                            cursor.execute(
+                                """
+                                SELECT al.thumb_url, ar.thumb_url
+                                FROM albums al JOIN artists ar ON al.artist_id = ar.id
+                                WHERE ar.name_norm = ? AND al.title_norm = ?
+                                LIMIT 1
+                                """,
+                                (self._normalize_for_comparison(card['artist_name'] or ''),
+                                 self._normalize_for_comparison(card['album_name'] or '')))
+                        else:
+                            cursor.execute(
+                                """
+                                SELECT al.thumb_url, ar.thumb_url
+                                FROM albums al JOIN artists ar ON al.artist_id = ar.id
+                                WHERE LOWER(TRIM(ar.name)) = LOWER(TRIM(?))
+                                  AND LOWER(TRIM(al.title)) = LOWER(TRIM(?))
+                                LIMIT 1
+                                """,
+                                (card['artist_name'], card['album_name']))
                         hit = cursor.fetchone()
                         if hit:
                             card['thumb_url'] = hit[0] or hit[1] or ''
@@ -19899,11 +19927,18 @@ class MusicDatabase:
                         if idx > 0:
                             candidates.append(name[:idx])
                     for candidate in candidates:
-                        cursor.execute(
-                            "SELECT thumb_url FROM artists"
-                            " WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))"
-                            " AND thumb_url IS NOT NULL AND thumb_url != '' LIMIT 1",
-                            (candidate,))
+                        if norm_ready:
+                            cursor.execute(
+                                "SELECT thumb_url FROM artists"
+                                " WHERE name_norm = ?"
+                                " AND thumb_url IS NOT NULL AND thumb_url != '' LIMIT 1",
+                                (self._normalize_for_comparison(candidate),))
+                        else:
+                            cursor.execute(
+                                "SELECT thumb_url FROM artists"
+                                " WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))"
+                                " AND thumb_url IS NOT NULL AND thumb_url != '' LIMIT 1",
+                                (candidate,))
                         hit = cursor.fetchone()
                         if hit and hit[0]:
                             return hit[0]
