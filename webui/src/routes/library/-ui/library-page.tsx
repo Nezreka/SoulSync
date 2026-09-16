@@ -68,14 +68,16 @@ function UnmatchedImportsBanner() {
 
   return (
     <div className="library-unmatched-banner" role="status">
-      <span className="library-unmatched-icon" aria-hidden="true">?</span>
+      <span className="library-unmatched-icon" aria-hidden="true">
+        ?
+      </span>
       <div className="library-unmatched-text">
         <strong>
           {count} {count === 1 ? 'track' : 'tracks'} imported without a match
         </strong>
         <span>
-          Their tags could not be read, so they are filed under Unknown Artist instead of the
-          album they belong to. Open the artist and use Re-identify on a track to put it back.
+          Their tags could not be read, so they are filed under Unknown Artist instead of the album
+          they belong to. Open the artist and use Re-identify on a track to put it back.
         </span>
       </div>
       <a className="library-unmatched-btn" href={`/artist-detail/library/${data.artist_id}`}>
@@ -246,6 +248,12 @@ export function LibraryPage() {
     window.showLibraryDownloadsSection?.();
   }, []);
 
+  const clearSearch = () => {
+    setDraft('');
+    committed.current = '';
+    void navigate({ search: (prev) => ({ ...prev, q: '', page: 1 }), replace: true });
+  };
+
   return (
     // The ids below are the guided tour's anchors (helper.js HELP_CONTENT).
     // The vanilla page owned them until it was deleted; nothing else renders
@@ -293,38 +301,61 @@ export function LibraryPage() {
       <UnmatchedImportsBanner />
 
       <div className="library-controls">
-        <div className="library-search-container">
-          <input
-            type="text"
-            className="library-search-input"
-            id="library-search-input"
-            placeholder="Filter your library…"
-            aria-label="Filter your library"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              // Escape clears the box AND reloads, as the vanilla handler did.
-              if (e.key !== 'Escape') return;
-              setDraft('');
-              committed.current = '';
-              void navigate({ search: (prev) => ({ ...prev, q: '', page: 1 }), replace: true });
-            }}
-          />
-          <div className="library-search-icon">🔍</div>
-        </div>
+        {/* One row for the three filters. They used to stack, and with the
+            header and the alphabet strip the cards started 435px down. */}
+        <div className="library-toolbar">
+          <div className="library-search-container">
+            <div className="library-search-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <circle cx="11" cy="11" r="7" />
+                <path d="M20 20l-3.5-3.5" strokeLinecap="round" />
+              </svg>
+            </div>
+            <input
+              type="text"
+              className="library-search-input"
+              id="library-search-input"
+              placeholder="Filter your library…"
+              aria-label="Filter your library"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                // Escape clears the box AND reloads, as the vanilla handler did.
+                if (e.key !== 'Escape') return;
+                clearSearch();
+              }}
+            />
+            {draft ? (
+              <button
+                type="button"
+                className="library-search-clear-btn"
+                aria-label="Clear search"
+                title="Clear"
+                onClick={clearSearch}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
 
-        <div className="watchlist-filter" id="watchlist-filter">
-          {(['all', 'watched', 'unwatched'] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              className={`watchlist-filter-btn${search.watchlist === f ? ' active' : ''}`}
-              data-filter={f}
-              onClick={() => setSearch({ watchlist: f })}
-            >
-              {f === 'all' ? 'All' : f === 'watched' ? 'Watched' : 'Unwatched'}
-            </button>
-          ))}
+          <div
+            className="watchlist-filter"
+            id="watchlist-filter"
+            role="group"
+            aria-label="Watchlist"
+          >
+            {(['all', 'watched', 'unwatched'] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                className={`watchlist-filter-btn${search.watchlist === f ? ' active' : ''}`}
+                data-filter={f}
+                onClick={() => setSearch({ watchlist: f })}
+              >
+                {f === 'all' ? 'All' : f === 'watched' ? 'Watched' : 'Unwatched'}
+              </button>
+            ))}
+          </div>
           {/* Only offered while filtered to unwatched — it acts on that set. */}
           <button
             type="button"
@@ -334,32 +365,32 @@ export function LibraryPage() {
             <span className="watchlist-all-icon">👁️</span>
             <span className="watchlist-all-text">Watch All Unwatched</span>
           </button>
-        </div>
 
-        <div className="library-source-filter">
-          <select
-            className="library-source-filter-select"
-            aria-label="Filter by metadata source"
-            value={search.source}
-            onChange={(e) => setSearch({ source: e.target.value })}
-          >
-            <option value="">All Sources</option>
-            {/* The `!` prefix means "unmatched to", and the backend parses it. */}
-            <optgroup label="Unmatched to">
-              {SOURCES.map((s) => (
-                <option key={`!${s}`} value={`!${s}`}>
-                  No {SOURCE_LABELS[s]}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Matched to">
-              {SOURCES.map((s) => (
-                <option key={s} value={s}>
-                  Has {SOURCE_LABELS[s]}
-                </option>
-              ))}
-            </optgroup>
-          </select>
+          <div className="library-source-filter">
+            <select
+              className="library-source-filter-select"
+              aria-label="Filter by metadata source"
+              value={search.source}
+              onChange={(e) => setSearch({ source: e.target.value })}
+            >
+              <option value="">All Sources</option>
+              {/* The `!` prefix means "unmatched to", and the backend parses it. */}
+              <optgroup label="Unmatched to">
+                {SOURCES.map((s) => (
+                  <option key={`!${s}`} value={`!${s}`}>
+                    No {SOURCE_LABELS[s]}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Matched to">
+                {SOURCES.map((s) => (
+                  <option key={s} value={s}>
+                    Has {SOURCE_LABELS[s]}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
         </div>
 
         <div className="alphabet-selector" id="alphabet-selector">
