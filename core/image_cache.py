@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import mimetypes
 import os
+import re
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -68,6 +71,26 @@ def _resolved_variant_widths() -> dict:
 
 
 VARIANT_MAX_WIDTH = _resolved_variant_widths()
+
+
+# what sqlite says when the index file itself is damaged. a crash mid-write,
+# a second process (a test run from wsl) scribbling on the wal, a full disk.
+_CORRUPTION_MARKERS = ("malformed", "not a database", "database disk image", "file is encrypted")
+
+
+def _is_corruption(exc: BaseException) -> bool:
+    if not isinstance(exc, sqlite3.DatabaseError):
+        return False
+    message = str(exc).lower()
+    return any(marker in message for marker in _CORRUPTION_MARKERS)
+
+
+def _looks_like_image(head: bytes) -> bool:
+    """magic-byte sniff for what the cache stores: jpeg, png, gif, webp, bmp,
+    and the ftyp box that avif/heif start with."""
+    return (head[:2] == b"\xff\xd8" or head[:8] == b"\x89PNG\r\n\x1a\n"
+            or head[:4] == b"GIF8" or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
+            or head[:2] == b"BM" or head[4:8] == b"ftyp")
 
 
 def _row_get(row, column: str, default=""):
@@ -133,8 +156,34 @@ class ImageCache:
         self._pending_registrations_since = 0.0
         self._key_locks: dict[str, threading.RLock] = {}
         self._key_locks_lock = threading.Lock()
+        # when the index was last rebuilt after corruption; a damaged file we
+        # could not move aside must not have us rebuilding on every request
+        self._rebuilt_at = 0.0
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        try:
+            self._init_db()
+        except sqlite3.DatabaseError as exc:
+            if not _is_corruption(exc):
+                raise
+            self._rebuild_index(str(exc))
+        self._verify_on_start()
+
+    def _verify_on_start(self) -> None:
+        """quick_check the index once, at construction. a restart is the one
+        moment nothing has the file open, so a rebuild that failed with
+        WinError 32 while the server was busy goes through here."""
+        try:
+            with self._db() as conn:
+                verdict = conn.execute("PRAGMA quick_check").fetchone()
+            if verdict and str(verdict[0]).lower() == "ok":
+                return
+            reason = f"quick_check: {verdict[0] if verdict else 'no answer'}"
+        except sqlite3.DatabaseError as exc:
+            if not _is_corruption(exc):
+                logger.debug("image cache startup check skipped: %s", exc)
+                return
+            reason = str(exc)
+        self._rebuild_index(reason)
 
     def cache_url_for(self, url: str | None, variant: str = "") -> str | None:
         """Register a URL and return its browser-facing cached path."""
@@ -178,7 +227,7 @@ class ImageCache:
             return
         try:
             with self._db_lock:
-                with self._connect() as conn:
+                with self._db() as conn:
                     conn.executemany(
                         """
                         INSERT INTO image_cache
@@ -187,20 +236,49 @@ class ImageCache:
                         VALUES (?, ?, 'pending', ?, ?, ?, 0, 0, '', '', '', ?)
                         ON CONFLICT(key) DO UPDATE SET
                             original_url=excluded.original_url,
-                            last_accessed=excluded.last_accessed
+                            last_accessed=excluded.last_accessed,
+                            variant=COALESCE(NULLIF(excluded.variant, ''), variant)
                         """,
                         [(key, url, ts, ts, ts, variant) for key, (url, variant, ts) in pending.items()])
         except Exception as e:
             logger.debug("image cache registration flush failed (%d entries): %s", len(pending), e)
             # a lost registration only costs a 404 until the page registers it again
+            if _is_corruption(e):
+                self._rebuild_index(str(e))
+
+    def _healing(self, operation: Callable[[], CachedImage]) -> CachedImage:
+        """run a serve; if the index turns out to be corrupt, rebuild it from
+        the files on disk and run the serve once more against the new one."""
+        try:
+            return operation()
+        except sqlite3.DatabaseError as exc:
+            if not _is_corruption(exc):
+                raise
+            reason = str(exc)
+        # deliberately outside the except block: python drops `exc` here, and
+        # with it the traceback whose frames still hold the connection that
+        # raised. rebuilding inside the block kept that handle open, and
+        # windows refused the rename.
+        self._rebuild_index(reason)
+        return operation()
 
     def get(self, key: str) -> CachedImage:
+        return self._healing(lambda: self._get(key))
+
+    def get_url(self, url: str) -> CachedImage:
+        return self._healing(lambda: self._get_url(url))
+
+    def _get(self, key: str) -> CachedImage:
         row = self._get_row(key)
         if not row:
             raise ImageCacheError("Image cache key not found")
 
         variant = _row_get(row, "variant")
         if not variant:
+            if not row["original_url"]:
+                # re-indexed from disk after a rebuild: the file is known, the
+                # url is not until the page registers it again. serve the file.
+                return self._recovered(row, key)
             return self.get_url(row["original_url"])
 
         now = time.time()
@@ -213,7 +291,14 @@ class ImageCache:
         with self._lock_for_key(key):
             return self._build_variant(row, now)
 
-    def get_url(self, url: str) -> CachedImage:
+    def _recovered(self, row, key: str) -> CachedImage:
+        path = Path(row["file_path"] or "")
+        if row["status"] == "ok" and row["file_path"] and path.exists():
+            self._touch(key, time.time(), row["last_accessed"])
+            return CachedImage(key, path, row["mime_type"] or "image/jpeg", int(row["size"] or 0), "hit")
+        raise ImageCacheError("Image cache key not found")
+
+    def _get_url(self, url: str) -> CachedImage:
         if not self.is_cacheable_url(url):
             raise ImageCacheError("URL is not cacheable")
 
@@ -226,12 +311,22 @@ class ImageCache:
                 path = Path(row["file_path"])
                 if path.exists():
                     self._touch(key, now, row["last_accessed"])
+                    if not row["original_url"]:
+                        # a row re-indexed from disk just learned its url;
+                        # write it now so variants and refreshes work again
+                        self.cache_url_for(url)
+                        self._flush_registrations()
                     if float(row["expires_at"] or 0) > now:
                         return CachedImage(key, path, row["mime_type"] or "image/jpeg", int(row["size"] or 0), "hit")
 
             try:
                 return self._fetch_and_store(url, key, now)
             except Exception as exc:
+                if _is_corruption(exc):
+                    # the download worked and the file is on disk; what failed
+                    # is recording it. let _healing rebuild the index and redo
+                    # the serve rather than logging "stale" forever.
+                    raise
                 if row and row["status"] == "ok" and row["file_path"]:
                     stale_path = Path(row["file_path"])
                     if stale_path.exists():
@@ -254,7 +349,7 @@ class ImageCache:
         self._flush_registrations()
         self._flush_touches()
         with self._db_lock:
-            with self._connect() as conn:
+            with self._db() as conn:
                 row = conn.execute(
                     "SELECT COUNT(*) AS entries, "
                     "       COALESCE(SUM(CASE WHEN status='ok' THEN size ELSE 0 END), 0) AS bytes, "
@@ -301,7 +396,7 @@ class ImageCache:
         now = time.time() if now is None else now
         expired = evicted = 0
         with self._db_lock:
-            with self._connect() as conn:
+            with self._db() as conn:
                 expired = self._delete_rows(conn, [
                     r["key"] for r in conn.execute(
                         "SELECT key FROM image_cache WHERE expires_at > 0 AND expires_at < ?",
@@ -332,7 +427,7 @@ class ImageCache:
     def clear(self) -> dict:
         """Empty the cache completely (the Settings button). Files and rows."""
         with self._db_lock:
-            with self._connect() as conn:
+            with self._db() as conn:
                 keys = [r["key"] for r in conn.execute("SELECT key FROM image_cache").fetchall()]
                 removed = self._delete_rows(conn, keys)
                 conn.commit()
@@ -374,6 +469,11 @@ class ImageCache:
             raise ImageCacheError("Image cache key not found")
         if _row_get(row, "variant"):
             return self.get(original_key)      # already a variant; don't nest
+        if not row["original_url"]:
+            # re-indexed after a rebuild and not registered again yet: the
+            # variant key comes from the url, which nobody has told us. the
+            # original as it is beats a 404.
+            return self._healing(lambda: self._recovered(row, original_key))
         self.cache_url_for(row["original_url"], variant=variant)
         return self.get(self.key_for_url(row["original_url"], variant))
 
@@ -418,7 +518,7 @@ class ImageCache:
         os.replace(tmp_path, path)
         size = path.stat().st_size
         with self._db_lock:
-            with self._connect() as conn:
+            with self._db() as conn:
                 conn.execute(
                     "UPDATE image_cache SET status='ok', updated_at=?, last_accessed=?, "
                     "expires_at=?, size=?, mime_type='image/jpeg', file_path=?, last_error='' "
@@ -502,7 +602,7 @@ class ImageCache:
         expires_at = now + self.ttl_seconds
         total = len(data)
         with self._db_lock:
-            with self._connect() as conn:
+            with self._db() as conn:
                 conn.execute(
                     """
                     INSERT INTO image_cache
@@ -634,7 +734,7 @@ class ImageCache:
             os.replace(tmp_path, path)
             expires_at = now + self.ttl_seconds
             with self._db_lock:
-                with self._connect() as conn:
+                with self._db() as conn:
                     conn.execute(
                         """
                         INSERT INTO image_cache
@@ -682,9 +782,26 @@ class ImageCache:
         conn.execute("PRAGMA busy_timeout = 10000")
         return conn
 
+    @contextmanager
+    def _db(self):
+        """a connection that is CLOSED on the way out, not just committed.
+
+        sqlite3's own context manager commits or rolls back and leaves the
+        handle open until the object is collected. on windows an open handle
+        (and the mmap'd -shm behind it) is exactly what stops the corrupt
+        index from being moved aside: WinError 32 on boulder's server,
+        sept 15 2026, one minute after the heal first fired.
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
         with self._db_lock:
-            with self._connect() as conn:
+            with self._db() as conn:
                 # wal + synchronous=NORMAL: a hit used to cost a rollback-journal
                 # commit (an fsync) to bump last_accessed, serialized behind the
                 # process lock, so seventy-five cards on a page queued for
@@ -733,7 +850,7 @@ class ImageCache:
         if pending:
             self._flush_registrations()
         # a read on its own connection needs no process lock under wal
-        with self._connect() as conn:
+        with self._db() as conn:
             return conn.execute("SELECT * FROM image_cache WHERE key = ?", (key,)).fetchone()
 
     def _touch(self, key: str, now: float, last_accessed: Optional[float] = None) -> None:
@@ -760,29 +877,161 @@ class ImageCache:
             return
         try:
             with self._db_lock:
-                with self._connect() as conn:
+                with self._db() as conn:
                     conn.executemany(
                         "UPDATE image_cache SET last_accessed = ? WHERE key = ? AND last_accessed < ?",
                         [(ts, key, ts) for key, ts in pending.items()])
         except Exception as e:
             logger.debug("image cache touch flush failed (%d entries): %s", len(pending), e)
+            if _is_corruption(e):
+                self._rebuild_index(str(e))
 
     def _record_error(self, key: str, error: str, now: float, *, keep_status: bool = False) -> None:
         status_sql = "status" if keep_status else "'failed'"
+        try:
+            with self._db_lock:
+                with self._db() as conn:
+                    conn.execute(
+                        f"""
+                        UPDATE image_cache
+                        SET status = {status_sql},
+                            updated_at = ?,
+                            last_accessed = ?,
+                            expires_at = ?,
+                            last_error = ?
+                        WHERE key = ?
+                        """,
+                        (now, now, now + self.failed_ttl_seconds, error[:500], key),
+                    )
+        except sqlite3.Error as exc:
+            # bookkeeping. this runs inside the "serve the stale file" path,
+            # and raising here turned a stale hit into a 404 (the broken tiles
+            # in boulder's recently played rail while the index was corrupt).
+            logger.debug("image cache could not record an error for %s: %s", key, exc)
+            if _is_corruption(exc):
+                self._rebuild_index(str(exc))
+
+    # ── corruption recovery ──────────────────────────────────────────────────
+
+    REBUILD_COOLDOWN_SECONDS = 60.0
+
+    def _rebuild_index(self, reason: str) -> bool:
+        """quarantine a corrupt index and rebuild it from the files on disk.
+
+        the index is the only thing that broke; the images are fine, and
+        there can be gigabytes of them. re-indexing keeps every one of them
+        serving instead of re-downloading the lot, which is what an empty
+        index would mean. rows come back with no url: a page registers the
+        url again on its next render, and until then the file is served as
+        it is (see _recovered).
+
+        returns False when the damaged file could not be moved aside; the
+        cache then keeps limping (stale serves work, records don't) and tries
+        again after the cooldown, so a wedged file cannot have every request
+        doing rename work.
+        """
         with self._db_lock:
-            with self._connect() as conn:
-                conn.execute(
-                    f"""
-                    UPDATE image_cache
-                    SET status = {status_sql},
-                        updated_at = ?,
-                        last_accessed = ?,
-                        expires_at = ?,
-                        last_error = ?
-                    WHERE key = ?
+            now = time.time()
+            if now - self._rebuilt_at < self.REBUILD_COOLDOWN_SECONDS:
+                return False
+            self._rebuilt_at = now
+            logger.error("image cache index is corrupt (%s); moving it aside and "
+                         "rebuilding it from the files on disk", reason)
+            stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now))
+            # any handle still open on the index (a reader on another thread,
+            # a connection waiting on the collector) blocks the rename on
+            # windows. collect, then give in-flight readers a moment.
+            gc.collect()
+            for suffix in ("", "-wal", "-shm"):
+                damaged = Path(f"{self.db_path}{suffix}")
+                if not damaged.exists():
+                    continue
+                if not self._move_aside(damaged, Path(f"{self.db_path}.corrupt-{stamp}{suffix}")):
+                    return False
+            with self._pending_touches_lock:
+                self._pending_touches.clear()
+                self._pending_registrations.clear()
+                self._registrations.clear()
+            self._init_db()
+            count = self._reindex_files(now)
+            logger.warning("image cache index rebuilt: %d cached images re-indexed", count)
+            return True
+
+    MOVE_ASIDE_ATTEMPTS = 10
+    MOVE_ASIDE_WAIT_SECONDS = 0.2
+
+    def _move_aside(self, damaged: Path, target: Path) -> bool:
+        """rename the damaged file, retrying while another thread's handle
+        closes; delete it if it will not rename. False only when both fail."""
+        last_exc: Optional[BaseException] = None
+        for attempt in range(self.MOVE_ASIDE_ATTEMPTS):
+            try:
+                os.replace(damaged, target)
+                return True
+            except OSError as exc:
+                last_exc = exc
+            try:
+                damaged.unlink()
+                return True
+            except OSError as exc:
+                last_exc = exc
+            if attempt < self.MOVE_ASIDE_ATTEMPTS - 1:
+                time.sleep(self.MOVE_ASIDE_WAIT_SECONDS)
+                gc.collect()
+        logger.error("image cache could not move the corrupt index aside (%s); "
+                     "serving what it can until the next try", last_exc)
+        return False
+
+    def _reindex_files(self, now: float) -> int:
+        """one row per image file already on disk, url unknown.
+
+        a file that doesn't start like an image is dropped, not indexed:
+        boulder's cache had four zero-filled files (a lost write) and three
+        one-byte fakes (a test run). indexed, they would serve as broken
+        tiles until their ttl; nothing in them is worth keeping."""
+        rows = []
+        junk = 0
+        for path in self.cache_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            name = path.name
+            if name.endswith(".tmp") or ".sqlite3" in name or ".corrupt-" in name:
+                continue
+            key = path.stem
+            if not re.fullmatch(r"[a-f0-9]{64}", key):
+                continue
+            try:
+                size = path.stat().st_size
+                with open(path, "rb") as handle:
+                    head = handle.read(16)
+            except OSError:
+                continue
+            if size <= 0 or not _looks_like_image(head):
+                try:
+                    path.unlink()
+                    junk += 1
+                except OSError:
+                    pass
+                continue
+            mime_type = mimetypes.guess_type(name)[0] or "image/jpeg"
+            rows.append((key, "", "ok", now, now, now, now + self.ttl_seconds,
+                         size, mime_type, str(path), "", ""))
+        if junk:
+            logger.warning("image cache rebuild dropped %d files that were not images", junk)
+        if not rows:
+            return 0
+        with self._db_lock:
+            with self._db() as conn:
+                conn.executemany(
+                    """
+                    INSERT OR IGNORE INTO image_cache
+                        (key, original_url, status, created_at, updated_at, last_accessed,
+                         expires_at, size, mime_type, file_path, last_error, variant)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (now, now, now + self.failed_ttl_seconds, error[:500], key),
+                    rows,
                 )
+        return len(rows)
 
     def _lock_for_key(self, key: str) -> threading.RLock:
         """Per-image lock so concurrent requests fetch once.
@@ -811,7 +1060,13 @@ def get_image_cache() -> ImageCache:
     global _image_cache
     with _image_cache_lock:
         if _image_cache is None:
-            cache_dir = config_manager.get("image_cache.path", "storage/image_cache")
+            # the env override is the test suite's seam: without it a test
+            # that reaches any image endpoint writes into the developer's
+            # LIVE cache from a second process. from wsl that means a linux
+            # sqlite scribbling on a wal the windows server has open, which
+            # is how boulder's index got corrupted on sept 15 2026.
+            cache_dir = (os.environ.get("SOULSYNC_IMAGE_CACHE_DIR")
+                         or config_manager.get("image_cache.path", "storage/image_cache"))
             if not os.path.isabs(cache_dir):
                 cache_dir = str(config_manager.base_dir / cache_dir)
             _image_cache = ImageCache(
