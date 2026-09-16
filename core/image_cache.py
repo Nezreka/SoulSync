@@ -117,6 +117,13 @@ class ImageCache:
         self.db_path = self.cache_dir / "image_cache.sqlite3"
         self._db_lock = threading.RLock()
         self._registrations: dict[str, float] = {}
+        # last_accessed bumps waiting to be written, key -> time. a hit used to
+        # write its own timestamp (an fsync each, behind the process lock), so
+        # seventy-five cards on a page queued ~1 s apiece on the timestamp
+        # alone. they collect here and go down in one transaction.
+        self._pending_touches: dict[str, float] = {}
+        self._pending_touches_lock = threading.Lock()
+        self._pending_touches_since = 0.0
         self._key_locks: dict[str, threading.RLock] = {}
         self._key_locks_lock = threading.Lock()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -172,7 +179,7 @@ class ImageCache:
         if row["status"] == "ok" and row["file_path"]:
             path = Path(row["file_path"])
             if path.exists() and float(row["expires_at"] or 0) > now:
-                self._touch(key, now)
+                self._touch(key, now, row["last_accessed"])
                 return CachedImage(key, path, row["mime_type"] or "image/jpeg",
                                    int(row["size"] or 0), "hit")
         with self._lock_for_key(key):
@@ -190,7 +197,7 @@ class ImageCache:
             if row and row["status"] == "ok" and row["file_path"]:
                 path = Path(row["file_path"])
                 if path.exists():
-                    self._touch(key, now)
+                    self._touch(key, now, row["last_accessed"])
                     if float(row["expires_at"] or 0) > now:
                         return CachedImage(key, path, row["mime_type"] or "image/jpeg", int(row["size"] or 0), "hit")
 
@@ -216,6 +223,7 @@ class ImageCache:
 
     def stats(self) -> dict:
         """What the cache is holding, for the Settings panel."""
+        self._flush_touches()
         with self._db_lock:
             with self._connect() as conn:
                 row = conn.execute(
@@ -259,6 +267,7 @@ class ImageCache:
         mean), then least-recently-used entries until the total fits. Eviction
         is by ``last_accessed``, which the serve path already maintains, so the
         art someone actually browses is the art that survives."""
+        self._flush_touches()
         now = time.time() if now is None else now
         expired = evicted = 0
         with self._db_lock:
@@ -638,13 +647,25 @@ class ImageCache:
         return bool(parsed.hostname) or is_internal_image_host(url)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 10000")
         return conn
 
     def _init_db(self) -> None:
         with self._db_lock:
             with self._connect() as conn:
+                # wal + synchronous=NORMAL: a hit used to cost a rollback-journal
+                # commit (an fsync) to bump last_accessed, serialized behind the
+                # process lock, so seventy-five cards on a page queued for
+                # ~1 s each on nothing but the timestamp. wal lets reads run
+                # alongside a write and drops the per-commit fsync; the cache
+                # is rebuilt from disk if a crash ever loses a timestamp.
+                try:
+                    conn.execute("PRAGMA journal_mode = WAL")
+                    conn.execute("PRAGMA synchronous = NORMAL")
+                except sqlite3.Error as e:
+                    logger.debug("image cache wal setup skipped: %s", e)
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS image_cache (
@@ -670,15 +691,45 @@ class ImageCache:
                 if "variant" not in cols:
                     conn.execute("ALTER TABLE image_cache ADD COLUMN variant TEXT NOT NULL DEFAULT ''")
 
-    def _get_row(self, key: str) -> Optional[sqlite3.Row]:
-        with self._db_lock:
-            with self._connect() as conn:
-                return conn.execute("SELECT * FROM image_cache WHERE key = ?", (key,)).fetchone()
+    # pending touches are written after this long, or when this many collect
+    TOUCH_FLUSH_SECONDS = 5.0
+    TOUCH_FLUSH_MAX = 200
 
-    def _touch(self, key: str, now: float) -> None:
-        with self._db_lock:
-            with self._connect() as conn:
-                conn.execute("UPDATE image_cache SET last_accessed = ? WHERE key = ?", (now, key))
+    def _get_row(self, key: str) -> Optional[sqlite3.Row]:
+        # a read on its own connection needs no process lock under wal
+        with self._connect() as conn:
+            return conn.execute("SELECT * FROM image_cache WHERE key = ?", (key,)).fetchone()
+
+    def _touch(self, key: str, now: float, last_accessed: Optional[float] = None) -> None:
+        """record a hit; the write happens in _flush_touches, batched."""
+        flush = False
+        with self._pending_touches_lock:
+            if not self._pending_touches:
+                self._pending_touches_since = now
+            self._pending_touches[key] = now
+            if (len(self._pending_touches) >= self.TOUCH_FLUSH_MAX
+                    or now - self._pending_touches_since >= self.TOUCH_FLUSH_SECONDS):
+                flush = True
+        if flush:
+            self._flush_touches()
+
+    def _flush_touches(self) -> None:
+        """write every pending last_accessed in one transaction. called by the
+        hit that crosses the batch threshold, and by anything that is about to
+        read the timestamps (prune, stats), so eviction order is exact."""
+        with self._pending_touches_lock:
+            pending = self._pending_touches
+            self._pending_touches = {}
+        if not pending:
+            return
+        try:
+            with self._db_lock:
+                with self._connect() as conn:
+                    conn.executemany(
+                        "UPDATE image_cache SET last_accessed = ? WHERE key = ? AND last_accessed < ?",
+                        [(ts, key, ts) for key, ts in pending.items()])
+        except Exception as e:
+            logger.debug("image cache touch flush failed (%d entries): %s", len(pending), e)
 
     def _record_error(self, key: str, error: str, now: float, *, keep_status: bool = False) -> None:
         status_sql = "status" if keep_status else "'failed'"

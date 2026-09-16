@@ -181,3 +181,41 @@ def test_a_prune_failure_never_breaks_the_image_being_served(tmp_path, monkeypat
         assert served.path.exists()
     finally:
         mod._PRUNE_EVERY_N_STORES = original
+
+
+def test_hits_batch_their_timestamp_writes(tmp_path, monkeypatch):
+    """a hit records its access in memory and the writes go down together:
+    seventy-five cards on a page used to be seventy-five fsyncs behind one
+    lock, ~1 s apiece on nothing but a timestamp."""
+    import sqlite3
+    cache = _cache(tmp_path, max_cache_bytes=0)
+    _store(cache, 5)
+    writes = []
+    real_flush = cache._flush_touches
+
+    def counting_flush():
+        n = len(cache._pending_touches)
+        real_flush()
+        if n:
+            writes.append(n)
+
+    monkeypatch.setattr(cache, "_flush_touches", counting_flush)
+    for i in range(5):
+        cache.get_url(f"https://img.example.test/{i}.jpg")
+    assert writes == []                       # nothing written yet
+    assert len(cache._pending_touches) == 5
+    cache.prune()                             # anything reading timestamps flushes first
+    assert writes == [5]                      # one statement for all five
+    assert cache._pending_touches == {}
+    # and the batch threshold flushes on its own
+    monkeypatch.setattr(cache, "TOUCH_FLUSH_MAX", 2)
+    cache.get_url("https://img.example.test/0.jpg")
+    cache.get_url("https://img.example.test/1.jpg")
+    assert writes == [5, 2]
+
+
+def test_the_cache_db_runs_in_wal_mode(tmp_path):
+    import sqlite3
+    cache = _cache(tmp_path, max_cache_bytes=0)
+    c = sqlite3.connect(str(cache.db_path))
+    assert c.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
