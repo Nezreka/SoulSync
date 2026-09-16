@@ -314,7 +314,9 @@ function MatchRowView({
         <div className="amx-row-info">
           <div className="amx-row-head">
             <span className="amx-row-label">{row.label}</span>
-            <span className={`amx-pill ${row.state}`}>{busy ? 'Working…' : row.stateLabel}</span>
+            <span className={`amx-pill amx-s-${row.state}`}>
+              {busy ? 'Working…' : row.stateLabel}
+            </span>
           </div>
           <div className="amx-row-detail">
             {row.value ? (
@@ -340,7 +342,7 @@ function MatchRowView({
         <div className="amx-row-actions">
           <button
             type="button"
-            className={`amx-btn primary${editing ? ' active' : ''}`}
+            className={`amx-btn amx-primary${editing ? ' amx-active' : ''}`}
             disabled={disabled}
             onClick={onEdit}
           >
@@ -360,7 +362,7 @@ function MatchRowView({
           {row.state === 'matched' ? (
             <button
               type="button"
-              className="amx-btn danger"
+              className="amx-btn amx-danger"
               disabled={disabled}
               title="Forget this match"
               onClick={onClear}
@@ -444,7 +446,7 @@ function MatchSearch({
             if (e.key === 'Enter') void search(query);
           }}
         />
-        <button type="button" className="amx-btn primary" onClick={() => void search(query)}>
+        <button type="button" className="amx-btn amx-primary" onClick={() => void search(query)}>
           Search
         </button>
         <button type="button" className="amx-btn" onClick={onCancel}>
@@ -461,7 +463,7 @@ function MatchSearch({
             const current = row.value !== null && String(result.id) === row.value;
             return (
               <div
-                className={`amx-result${current ? ' current' : ''}`}
+                className={`amx-result${current ? ' amx-current' : ''}`}
                 key={`${result.provider || row.svc}:${result.id}`}
               >
                 <ResultImage src={result.image} />
@@ -480,7 +482,7 @@ function MatchSearch({
                 ) : (
                   <button
                     type="button"
-                    className="amx-btn primary"
+                    className="amx-btn amx-primary"
                     disabled={busy}
                     onClick={() => onPick(result)}
                   >
@@ -512,6 +514,6 @@ function ServiceLogo({ svc, label }: { svc: string; label: string }) {
 
 function ResultImage({ src }: { src?: string }) {
   const [broken, setBroken] = useState(false);
-  if (!src || broken) return <div className="amx-result-img placeholder">🎵</div>;
+  if (!src || broken) return <div className="amx-result-img amx-placeholder">🎵</div>;
   return <img className="amx-result-img" src={src} alt="" onError={() => setBroken(true)} />;
 }
