@@ -8526,6 +8526,90 @@ class MusicDatabase:
             logger.error(f"Error deleting stale tracks for {server_source}: {e}")
             return 0
 
+    # columns the server writes on every scan; everything else on a track row
+    # is enrichment or user state and travels with the file when its row is
+    # superseded
+    _TRACK_SERVER_COLUMNS = frozenset({
+        'id', 'album_id', 'artist_id', 'title', 'track_number', 'disc_number',
+        'duration', 'file_path', 'bitrate', 'file_size', 'server_source',
+        'title_norm', 'created_at', 'updated_at',
+    })
+
+    @staticmethod
+    def _track_file_key(row) -> tuple:
+        """same album, same disc, same file name, same length = the same file.
+        the path itself is not compared: a reorganize stores the local form
+        and the server reports its own, so they differ on any mapped setup."""
+        path = str(row['file_path'] or '')
+        name = path.replace('\\', '/').rsplit('/', 1)[-1].lower()
+        duration = row['duration'] or 0
+        return (row['album_id'], row['disc_number'] or 1, name, int(duration // 1000))
+
+    def absorb_superseded_tracks(self, album_ids, seen_track_ids, server_source: str) -> int:
+        """fold rows the server no longer lists into the live row for the same file.
+
+        after a move the server trashes the old item and mints a new one, so
+        the album carries two rows for one file: the old id (repointed by the
+        reorganize) and the new. the live row keeps its id, takes every
+        enrichment column the old row had that it lacks, inherits the old
+        row's play history, and the old row goes. only rows whose id this
+        scan did NOT see are absorbed, and only into a row it did, so two
+        items the server genuinely lists are never merged (#1257)."""
+        if not album_ids or not seen_track_ids:
+            return 0
+        absorbed = 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                columns = [c[1] for c in cursor.execute("PRAGMA table_info(tracks)").fetchall()]
+                carry = [c for c in columns if c not in self._TRACK_SERVER_COLUMNS]
+                album_list = list(album_ids)
+                for i in range(0, len(album_list), 400):
+                    batch = album_list[i:i + 400]
+                    placeholders = ','.join('?' * len(batch))
+                    rows = cursor.execute(
+                        f"""SELECT id, album_id, disc_number, file_path, duration FROM tracks
+                            WHERE album_id IN ({placeholders}) AND server_source = ?
+                              AND file_path IS NOT NULL AND file_path != ''""",
+                        [str(a) for a in batch] + [server_source]).fetchall()
+                    groups: Dict[tuple, list] = {}
+                    for row in rows:
+                        groups.setdefault(self._track_file_key(row), []).append(str(row['id']))
+                    for ids in groups.values():
+                        if len(ids) < 2:
+                            continue
+                        live = [t for t in ids if t in seen_track_ids]
+                        gone = [t for t in ids if t not in seen_track_ids]
+                        if not live or not gone:
+                            continue
+                        keeper = live[0]
+                        for old_id in gone:
+                            self._absorb_track_row(cursor, old_id, keeper, carry)
+                            absorbed += 1
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Superseded track pass failed for {server_source}: {e}")
+            return absorbed
+        if absorbed:
+            logger.info(f"Superseded track rows folded for {server_source}: {absorbed}")
+        return absorbed
+
+    def _absorb_track_row(self, cursor, old_id: str, keeper_id: str, carry: list) -> None:
+        """move what the old row knew onto the keeper, then drop the old row."""
+        if carry:
+            sets = ', '.join(
+                f"{c} = COALESCE({c}, (SELECT {c} FROM tracks WHERE id = ?))" for c in carry)
+            cursor.execute(f"UPDATE tracks SET {sets} WHERE id = ?",
+                           [old_id] * len(carry) + [keeper_id])
+        try:
+            cursor.execute("UPDATE listening_history SET db_track_id = ? WHERE db_track_id = ?",
+                           (keeper_id, old_id))
+        except Exception as e:
+            logger.debug("listening_history repoint skipped: %s", e)
+        cursor.execute("DELETE FROM track_credits WHERE track_id = ?", (old_id,))
+        cursor.execute("DELETE FROM tracks WHERE id = ?", (old_id,))
+        logger.debug(f"Track row {old_id} folded into {keeper_id}")
+
     def delete_removed_content(self, removed_artist_ids: set, removed_album_ids: set,
                                server_source: str):
         """Delete artists and albums that were removed from the media server.
