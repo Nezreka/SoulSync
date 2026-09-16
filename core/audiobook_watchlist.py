@@ -89,6 +89,13 @@ def scan_author(row: Dict[str, Any], db: Any = None, client: Any = None) -> Dict
     outcome: Dict[str, Any] = {"name": name, "found": 0, "wishlisted": 0, "error": ""}
     if not name:
         return outcome
+    # the row's own profile and role, on every write. defaulting both meant a
+    # second profile's follow was never marked scanned (so it was checked on
+    # every pass) and its new books were wishlisted to profile 1.
+    profile_id = int(row.get("profile_id") or 1)
+    role = str(row.get("role") or "author").strip().lower()
+    if role not in ("author", "narrator"):
+        role = "author"
 
     try:
         if client is None:
@@ -97,15 +104,18 @@ def scan_author(row: Dict[str, Any], db: Any = None, client: Any = None) -> Dict
             client = get_audiobook_client()
         # Newest first, so a short lookback still sees everything published
         # since the last scan.
-        books = client.get_by_author(name, limit=DEFAULT_LOOKBACK, sort="newest")
+        if role == "narrator":
+            books = client.get_by_narrator(name, limit=DEFAULT_LOOKBACK, sort="newest")
+        else:
+            books = client.get_by_author(name, limit=DEFAULT_LOOKBACK, sort="newest")
     except Exception as exc:                                # noqa: BLE001
         logger.warning("Could not check %s for new releases: %s", name, exc)
         outcome["error"] = str(exc)
-        database.mark_author_scanned(name, error=str(exc))
+        database.mark_author_scanned(name, error=str(exc), profile_id=profile_id, role=role)
         return outcome
 
     def is_known(asin: str) -> bool:
-        return bool(database.is_wishlisted(asin) or database.is_owned(asin))
+        return bool(database.is_wishlisted(asin, profile_id) or database.is_owned(asin))
 
     fresh = new_books_for(books, row.get("since_date"), is_known)
     outcome["found"] = len(fresh)
@@ -114,7 +124,7 @@ def scan_author(row: Dict[str, Any], db: Any = None, client: Any = None) -> Dict
     # are still counted and reported, so the card can say what turned up.
     if not row.get("auto_wishlist", 1):
         outcome["wishlisted"] = 0
-        database.mark_author_scanned(name, found=outcome["found"])
+        database.mark_author_scanned(name, found=outcome["found"], profile_id=profile_id, role=role)
         if outcome["found"]:
             logger.info("Followed author %s: %d new, not wishlisted (auto-wishlist off)",
                         name, outcome["found"])
@@ -129,12 +139,12 @@ def scan_author(row: Dict[str, Any], db: Any = None, client: Any = None) -> Dict
         narrator_mode = "exact"
 
     for payload in fresh:
-        if database.add_to_wishlist(payload, narrator_mode=narrator_mode):
+        if database.add_to_wishlist(payload, narrator_mode=narrator_mode, profile_id=profile_id):
             outcome["wishlisted"] += 1
             logger.info("Followed author %s: wishlisted %s (%s narrator)",
                         name, payload.get("title"), narrator_mode)
 
-    database.mark_author_scanned(name, found=outcome["wishlisted"])
+    database.mark_author_scanned(name, found=outcome["wishlisted"], profile_id=profile_id, role=role)
     return outcome
 
 

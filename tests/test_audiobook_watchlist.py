@@ -325,3 +325,62 @@ def test_updating_an_author_nobody_follows_changes_nothing(db):
 def test_updating_with_no_fields_changes_nothing(db):
     db.follow_author("Andy Weir")
     assert db.update_watchlist_author("Andy Weir") is False
+
+
+# ---------------------------------------------------------------------------
+# The scan honours the row it was handed: profile and role
+# ---------------------------------------------------------------------------
+
+class _RoleCatalogue(_Catalogue):
+    def __init__(self, books):
+        super().__init__(books)
+        self.narrator_calls = []
+
+    def get_by_narrator(self, name, limit=20, sort="newest", **kwargs):
+        self.narrator_calls.append({"name": name, "limit": limit, "sort": sort})
+        return self.books
+
+
+def _follow_row(db, profile_id):
+    return next(r for r in db.get_watchlist_due(profile_id=profile_id))
+
+
+def test_a_second_profiles_follow_wishlists_to_that_profile_and_is_marked_scanned(db):
+    db.follow_author("Brandon Sanderson", profile_id=2, since_date="2025-01-01")
+    row = _follow_row(db, 2)
+    out = scan_author(row, db=db, client=_Catalogue([_book()]))
+    assert out["wishlisted"] == 1
+    assert [r["asin"] for r in db.get_wishlist(2)] == ["B1"], "the book lands on profile 2's list"
+    assert db.get_wishlist(1) == []
+    # marked scanned on profile 2's row: it is not due again on the next pass
+    assert db.get_watchlist_due(profile_id=2) == []
+
+
+def test_a_book_profile_two_already_wants_is_not_queued_again(db):
+    db.follow_author("Brandon Sanderson", profile_id=2, since_date="2025-01-01")
+    db.add_to_wishlist(_book().to_dict(), profile_id=2)
+    row = _follow_row(db, 2)
+    out = scan_author(row, db=db, client=_Catalogue([_book()]))
+    assert out["found"] == 0 and out["wishlisted"] == 0
+    assert len(db.get_wishlist(2)) == 1
+
+
+def test_a_lookup_failure_is_recorded_on_the_right_row(db):
+    class _Broken:
+        def get_by_author(self, *a, **k):
+            raise RuntimeError("audible down")
+    db.follow_author("Brandon Sanderson", profile_id=2, since_date="2025-01-01")
+    out = scan_author(_follow_row(db, 2), db=db, client=_Broken())
+    assert out["error"] == "audible down"
+    assert db.get_watchlist_due(profile_id=2) == []           # scanned, with the error
+
+
+def test_a_followed_narrator_is_looked_up_as_a_narrator(db):
+    db.follow_author("Michael Kramer", profile_id=1, role="narrator", since_date="2025-01-01")
+    catalogue = _RoleCatalogue([_book()])
+    row = _follow_row(db, 1)
+    assert row["role"] == "narrator"
+    out = scan_author(row, db=db, client=catalogue)
+    assert catalogue.narrator_calls and not catalogue.calls
+    assert out["wishlisted"] == 1
+    assert db.get_watchlist_due(profile_id=1) == []
