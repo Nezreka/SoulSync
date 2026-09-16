@@ -66,6 +66,24 @@ describe('LibraryArtistCard image fallback', () => {
     renderCard({ id: 1, image_url: 'https://cdn/a.jpg' });
     expect(img()!.getAttribute('loading')).toBe('lazy');
   });
+
+  it('eases in once the bytes arrive instead of popping', () => {
+    // hidden until load, then the css transition carries opacity 0 -> 1
+    renderCard({ id: 1, image_url: 'https://cdn/a.jpg' });
+    expect(img()!.className).toBe('is-loading');
+    fireEvent.load(img()!);
+    expect(img()!.className).toBe('is-loaded');
+  });
+
+  it('fades again on the deezer retry', () => {
+    renderCard({ id: 1, image_url: 'https://cdn/rotted.jpg', deezer_id: 27 });
+    fireEvent.load(img()!);
+    expect(img()!.className).toBe('is-loaded');
+    fireEvent.error(img()!);
+    expect(img()!.className).toBe('is-loading');
+    fireEvent.load(img()!);
+    expect(img()!.className).toBe('is-loaded');
+  });
 });
 
 describe('LibraryArtistCard badges', () => {

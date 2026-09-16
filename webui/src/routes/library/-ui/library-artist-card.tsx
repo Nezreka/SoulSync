@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { thumb } from '@/platform/artwork-thumb';
 
@@ -94,6 +94,18 @@ function BadgeIcon({ badge }: { badge: ArtistBadge }) {
 function ArtistImage({ artist, hasImage }: { artist: LibraryArtist; hasImage: boolean }) {
   type Stage = 'primary' | 'deezer' | 'placeholder';
   const [stage, setStage] = useState<Stage>(hasImage ? 'primary' : 'placeholder');
+  // the picture eases in from the dark tile once its bytes have arrived,
+  // instead of popping. reset per stage so a deezer retry fades too.
+  const [loaded, setLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    setLoaded(false);
+    // a cached image can be complete before onLoad is wired; read it off the
+    // element so a paged-back card does not sit invisible
+    const el = imgRef.current;
+    if (el && el.complete && el.naturalWidth > 0) setLoaded(true);
+  }, [stage]);
 
   const onError = () => {
     // One retry only, and only when there is a Deezer id to retry with.
@@ -111,7 +123,16 @@ function ArtistImage({ artist, hasImage }: { artist: LibraryArtist; hasImage: bo
   // so each stage gets a clean load cycle. Not test-observable: jsdom never
   // fetches images, so the error events above are synthetic either way.
   return (
-    <img key={stage} src={thumb(src, 'grid')} alt={artist.name} loading="lazy" onError={onError} />
+    <img
+      key={stage}
+      ref={imgRef}
+      src={thumb(src, 'grid')}
+      alt={artist.name}
+      loading="lazy"
+      className={loaded ? 'is-loaded' : 'is-loading'}
+      onLoad={() => setLoaded(true)}
+      onError={onError}
+    />
   );
 }
 
