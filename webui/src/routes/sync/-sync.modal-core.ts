@@ -183,10 +183,33 @@ export function matchLineNumbers(
 export function buildDownloadTracks(results: RawDiscoveryResult[]): unknown[] {
   return results
     .filter(
-      (result) => result.spotify_data || (result.spotify_track && result.status_class === 'found'),
+      (result) =>
+        result.spotify_data ||
+        (result.spotify_track &&
+          (result.status_class === 'found' ||
+            result.status === 'found' ||
+            result.status === 'Found' ||
+            result.status === '✅ Found')),
     )
     .map((result) => {
-      if (result.spotify_data) return result.spotify_data;
+      if (result.spotify_data) {
+        const sp = result.spotify_data as Record<string, unknown>;
+        let hasMissing = false;
+        for (const k of ['source', 'provider', 'isrc', 'track_number', 'disc_number'] as const) {
+          if (sp[k] === undefined && (result as Record<string, unknown>)[k] !== undefined) {
+            hasMissing = true;
+            break;
+          }
+        }
+        if (!hasMissing) return result.spotify_data;
+        const out = { ...sp };
+        for (const k of ['source', 'provider', 'isrc', 'track_number', 'disc_number'] as const) {
+          if (out[k] === undefined && (result as Record<string, unknown>)[k] !== undefined) {
+            out[k] = (result as Record<string, unknown>)[k];
+          }
+        }
+        return out;
+      }
       const albumData = (result as { spotify_album?: unknown }).spotify_album || 'Unknown Album';
       const albumObject =
         typeof albumData === 'object' && albumData !== null
@@ -196,12 +219,18 @@ export function buildDownloadTracks(results: RawDiscoveryResult[]): unknown[] {
               album_type: 'album',
               images: [],
             };
-      return {
+      const resTrack: Record<string, unknown> = {
         id: (result as { spotify_id?: string }).spotify_id || 'unknown',
         name: result.spotify_track || 'Unknown Track',
         artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
         album: albumObject,
-        duration_ms: 0,
+        duration_ms: (result as { duration_ms?: number }).duration_ms ?? 0,
       };
+      for (const k of ['source', 'provider', 'isrc', 'track_number', 'disc_number']) {
+        if ((result as Record<string, unknown>)[k] !== undefined) {
+          resTrack[k] = (result as Record<string, unknown>)[k];
+        }
+      }
+      return resTrack;
     });
 }

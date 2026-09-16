@@ -597,6 +597,7 @@ def test_get_album_resolves_release_group_mbid_to_release():
     )
     assert album is not None
     assert album['id'] == 'rg-damn'  # Canonical ID stays the release-group MBID.
+    assert album['musicbrainz_release_id'] == 'rel-official'
     assert album['name'] == 'DAMN.'
     assert len(album['tracks']) == 1
     assert album['tracks'][0]['name'] == 'BLOOD.'
@@ -625,6 +626,7 @@ def test_get_album_falls_back_to_release_lookup_on_rg_miss():
     client._client.get_release.assert_called_once()
     assert album is not None
     assert album['id'] == 'rel-abc'  # Falls back to release MBID since rg lookup missed.
+    assert album['musicbrainz_release_id'] == 'rel-abc'
 
 
 # ---------------------------------------------------------------------------

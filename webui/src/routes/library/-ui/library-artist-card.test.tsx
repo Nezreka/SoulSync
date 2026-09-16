@@ -41,6 +41,19 @@ describe('LibraryArtistCard image fallback', () => {
     expect(placeholder()).not.toBeNull();
   });
 
+  it('starts at Deezer when there is no stored photo but a Deezer id (#1253)', () => {
+    // a jellyfin artist with no server art, matched by enrichment: the artist
+    // page shows deezer's photo, so the grid must too instead of a music note
+    renderCard({ id: 1, deezer_id: 27 });
+    expect(placeholder()).toBeNull();
+    expect(img()!.src).toBe('https://api.deezer.com/artist/27/image?size=big');
+
+    // and a dead deezer url still ends at the placeholder, without looping
+    fireEvent.error(img()!);
+    expect(img()).toBeNull();
+    expect(placeholder()).not.toBeNull();
+  });
+
   it('falls back through Deezer before giving up', () => {
     // The vanilla onerror hopped to Deezer's image API once; dropping that hop
     // would lose artwork for every artist whose stored url has rotted.
@@ -65,6 +78,24 @@ describe('LibraryArtistCard image fallback', () => {
   it('lazy-loads, so a 75-card page does not fetch 75 images at once', () => {
     renderCard({ id: 1, image_url: 'https://cdn/a.jpg' });
     expect(img()!.getAttribute('loading')).toBe('lazy');
+  });
+
+  it('eases in once the bytes arrive instead of popping', () => {
+    // hidden until load, then the css transition carries opacity 0 -> 1
+    renderCard({ id: 1, image_url: 'https://cdn/a.jpg' });
+    expect(img()!.className).toBe('is-loading');
+    fireEvent.load(img()!);
+    expect(img()!.className).toBe('is-loaded');
+  });
+
+  it('fades again on the deezer retry', () => {
+    renderCard({ id: 1, image_url: 'https://cdn/rotted.jpg', deezer_id: 27 });
+    fireEvent.load(img()!);
+    expect(img()!.className).toBe('is-loaded');
+    fireEvent.error(img()!);
+    expect(img()!.className).toBe('is-loading');
+    fireEvent.load(img()!);
+    expect(img()!.className).toBe('is-loaded');
   });
 });
 

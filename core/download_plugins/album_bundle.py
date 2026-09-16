@@ -373,6 +373,16 @@ def pick_best_album_release(candidates, quality_guess,
     if not candidates:
         return None
 
+    from core.downloads.size_limit import configured_limit, exceeds_size_limit, positive_number
+    cap = configured_limit()
+    duration = positive_number(expected_duration_seconds)
+    if cap and duration:
+        candidates = [c for c in candidates
+                      if not exceeds_size_limit(getattr(c, 'size', None), duration * 1000, cap)]
+        if not candidates:
+            logger.info("[Album Bundle] No release meets the %g MB/min size limit", cap)
+            return None
+
     # 0. Title-relevance gate. Only applied when we know the album name; with
     # no name we can't judge relevance, so we don't gate (old behavior).
     if album_name:

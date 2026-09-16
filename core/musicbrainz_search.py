@@ -1128,6 +1128,7 @@ class MusicBrainzSearchClient:
 
         return {
             'id': release_mbid,
+            'musicbrainz_release_id': release_mbid,
             'name': title,
             'artists': [{'name': a, 'id': ''} for a in (artists_raw or ['Unknown Artist'])],
             'release_date': release_date,

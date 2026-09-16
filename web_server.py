@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.1"
+_SOULSYNC_BASE_VERSION = "3.4.2"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -634,6 +634,7 @@ def _enforce_launch_pin():
 def _set_profile_context():
     """Set g.profile_id from session for every request"""
     g.request_start_monotonic = time.perf_counter()
+    g.request_start_cpu = time.thread_time()
     # Skip for profile management, static, and root routes
     path = request.path
     if (path.startswith('/api/profiles') or
@@ -688,12 +689,18 @@ def _log_slow_request(response):
         elapsed_ms = (time.perf_counter() - start) * 1000
         slow_threshold_ms = 1000.0
         if elapsed_ms >= slow_threshold_ms:
+            # cpu next to wall: a request that spent 2 s of wall on 30 ms of
+            # cpu was waiting (the gil, a lock, the disk), not working, and
+            # the fix is somewhere else entirely
+            cpu_start = getattr(g, 'request_start_cpu', None)
+            cpu_ms = (time.thread_time() - cpu_start) * 1000 if cpu_start is not None else -1
             logger.warning(
-                "Slow request: %s %s -> %s in %.1fms",
+                "Slow request: %s %s -> %s in %.1fms (cpu %.0fms)",
                 request.method,
                 request.full_path.rstrip('?'),
                 response.status_code,
                 elapsed_ms,
+                cpu_ms,
             )
     except Exception as e:
         logger.debug("slow request log failed: %s", e)
@@ -5583,9 +5590,13 @@ def enhanced_search_source(source_name):
         youtube_client = _search_orchestrator.resolve_youtube_videos_client(deps)
         if youtube_client is None:
             return jsonify({"videos": [], "available": False})
+        # the artist page's "show more" asks for a bigger pool; everyone else
+        # sends no limit and gets the default
+        max_results = _search_orchestrator.clamp_youtube_video_limit(data.get('limit'))
         try:
             return app.response_class(
-                _search_orchestrator.stream_youtube_videos(query, youtube_client, run_async),
+                _search_orchestrator.stream_youtube_videos(
+                    query, youtube_client, run_async, max_results=max_results),
                 mimetype='application/x-ndjson',
             )
         except Exception as e:
@@ -8024,25 +8035,55 @@ def library_completion_stream():
             try:
                 candidate_albums = db.get_candidate_albums_for_artist(artist_name, server_source=_active_server)
             except Exception as _cand_err:
-                print(f"[completion-stream] Failed to pre-fetch album candidates for '{artist_name}': {_cand_err}")
+                logger.info(f"[completion-stream] Failed to pre-fetch album candidates for '{artist_name}': {_cand_err}")
                 candidate_albums = None
             _t1 = time.perf_counter()
-            print(f"[completion-stream] Pre-fetched {len(candidate_albums) if candidate_albums is not None else 0} library albums for '{artist_name}' in {(_t1 - _t0) * 1000:.0f}ms")
+            logger.info(f"[completion-stream] Pre-fetched {len(candidate_albums) if candidate_albums is not None else 0} library albums for '{artist_name}' in {(_t1 - _t0) * 1000:.0f}ms")
 
             if candidate_albums:
                 _t2 = time.perf_counter()
                 try:
                     candidate_tracks = db.get_candidate_tracks_for_albums([a.id for a in candidate_albums])
                 except Exception as _tr_err:
-                    print(f"[completion-stream] Failed to pre-fetch track candidates for '{artist_name}': {_tr_err}")
+                    logger.info(f"[completion-stream] Failed to pre-fetch track candidates for '{artist_name}': {_tr_err}")
                     candidate_tracks = None
                 _t3 = time.perf_counter()
-                print(f"[completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
+                logger.info(f"[completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
+
+            completeness_cache = None
+            album_source_ids_cache = None
+            canonical_cache = {}
+            track_cache = {}
+            pin_tracks_cache = {}
+            api_counts_cache = {}
+            if candidate_albums and hasattr(db, 'get_album_api_track_counts'):
+                try:
+                    api_counts_cache = dict(db.get_album_api_track_counts([a.id for a in candidate_albums]))
+                except Exception as _c_err:
+                    logger.debug(f"[completion-stream] Failed pre-fetching api track counts: {_c_err}")
+            if candidate_albums and candidate_tracks and hasattr(db, 'build_candidate_completeness_cache'):
+                try:
+                    completeness_cache = db.build_candidate_completeness_cache(candidate_albums, candidate_tracks)
+                except Exception as _b_err:
+                    logger.info(f"[completion-stream] Failed building completeness cache: {_b_err}")
+            if candidate_albums and hasattr(db, 'get_album_source_ids'):
+                try:
+                    album_source_ids_cache = db.get_album_source_ids([a.id for a in candidate_albums])
+                except Exception as _s_err:
+                    logger.info(f"[completion-stream] Failed fetching album source IDs: {_s_err}")
 
             yield f"data: {json.dumps({'type': 'start', 'total_items': len(all_items)})}\n\n"
 
             _loop_start = time.perf_counter()
+            _loop_cpu_start = time.thread_time()
+            # per-item timing, so a slow page can be told apart from a slow
+            # item: the log names the slowest few and how many took a second.
+            # thread cpu time next to wall time tells work apart from waiting
+            # (the gil, a lock, the disk): a loop that spent 18 s of wall on
+            # 0.5 s of cpu was starved, not slow.
+            _item_times = []
             for _i, (category, item) in enumerate(all_items):
+                _item_start = time.perf_counter()
                 try:
                     # Map Library field names to helper field names.
                     # CRUCIAL: carry the card's YEAR through — the re-release
@@ -8054,7 +8095,7 @@ def library_completion_stream():
                     mapped = {
                         'id': item['id'],
                         'name': item['title'],
-                        'total_tracks': item.get('track_count', 0),
+                        'total_tracks': item.get('total_tracks') or item.get('track_count') or 0,
                         'album_type': item.get('album_type', 'album'),
                         'year': item.get('year'),
                         'release_date': item.get('release_date') or item.get('releaseDate'),
@@ -8068,9 +8109,30 @@ def library_completion_stream():
                                    or source_override)
 
                     if category == 'singles':
-                        result = check_single_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
+                        result = check_single_completion(
+                            db, mapped, artist_name,
+                            source_override=item_source,
+                            candidate_albums=candidate_albums,
+                            candidate_tracks=candidate_tracks,
+                            completeness_cache=completeness_cache,
+                            album_source_ids_cache=album_source_ids_cache,
+                            canonical_cache=canonical_cache,
+                            track_cache=track_cache,
+                            api_counts_cache=api_counts_cache,
+                        )
                     else:
-                        result = check_album_completion(db, mapped, artist_name, source_override=item_source, candidate_albums=candidate_albums)
+                        result = check_album_completion(
+                            db, mapped, artist_name,
+                            source_override=item_source,
+                            candidate_albums=candidate_albums,
+                            candidate_tracks=candidate_tracks,
+                            completeness_cache=completeness_cache,
+                            album_source_ids_cache=album_source_ids_cache,
+                            canonical_cache=canonical_cache,
+                            track_cache=track_cache,
+                            pin_tracks_cache=pin_tracks_cache,
+                            api_counts_cache=api_counts_cache,
+                        )
 
                     result['id'] = item['id']
                     result['category'] = category
@@ -8078,12 +8140,18 @@ def library_completion_stream():
                     yield f"data: {json.dumps(result)}\n\n"
                 except Exception as e:
                     yield f"data: {json.dumps({'type': 'completion', 'category': category, 'id': item['id'], 'status': 'error', 'owned_tracks': 0, 'expected_tracks': item.get('track_count', 0), 'completion_percentage': 0, 'confidence': 0.0, 'error': str(e)})}\n\n"
-
-                time.sleep(0.05)  # 50ms between items for visible streaming
+                finally:
+                    _item_times.append((time.perf_counter() - _item_start, category, str(item.get('title') or item.get('name') or item.get('id'))))
 
             _loop_elapsed = time.perf_counter() - _loop_start
-            _sleep_floor = 0.05 * len(all_items)
-            print(f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms (sleep floor: {_sleep_floor * 1000:.0f}ms)")
+            _loop_cpu = time.thread_time() - _loop_cpu_start
+            _slow = sorted(_item_times, reverse=True)[:3]
+            _over_1s = sum(1 for t, _c, _n in _item_times if t >= 1.0)
+            logger.info(
+                f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms wall / "
+                f"{_loop_cpu * 1000:.0f}ms cpu "
+                f"(total {(time.perf_counter() - _t0) * 1000:.0f}ms with pre-fetch; {_over_1s} items over 1s; slowest: "
+                + ", ".join(f"{n} [{c}] {t * 1000:.0f}ms" for t, c, n in _slow) + ")")
 
             yield f"data: {json.dumps({'type': 'complete', 'processed_count': len(all_items)})}\n\n"
 
@@ -16824,7 +16892,8 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                    return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
                 _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced"})
             return jsonify({"success": False, "error": "Old track not found"}), 404
@@ -17014,7 +17083,8 @@ def server_playlist_add_track(playlist_id):
             plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
             if plan['should_insert']:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
-                media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                    return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
@@ -17101,7 +17171,8 @@ def server_playlist_remove_track(playlist_id):
             if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
             return jsonify({"success": True, "message": "Track removed"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400

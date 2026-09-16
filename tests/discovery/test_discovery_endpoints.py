@@ -181,9 +181,9 @@ def test_cancel_sync_cancels_active_worker_and_reverts_state():
 
     assert code == 200
     assert body == {"success": True, "message": "Tidal sync cancelled"}
-    # sync marked cancelled, worker removed
+    # sync marked cancelled; retain the handle until the worker has finished
     assert infra['sync_states']['sp1'] == {"status": "cancelled"}
-    assert 'sp1' not in infra['active_sync_workers']
+    assert infra['active_sync_workers']['sp1'].cancelled
     # state reverted
     assert states['pl']['phase'] == 'discovered'
     assert states['pl']['sync_playlist_id'] is None

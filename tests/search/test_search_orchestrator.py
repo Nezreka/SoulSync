@@ -260,6 +260,7 @@ def test_short_query_skips_remote_search():
     assert result['spotify_artists'] == []
     assert result['spotify_albums'] == []
     assert result['spotify_tracks'] == []
+    assert result['spotify_playlists'] == []
     assert result['primary_source'] == 'spotify'
     assert result['alternate_sources'] == []
 
@@ -269,6 +270,21 @@ def test_short_query_with_explicit_source_uses_that_source_label():
     result = orchestrator.run_enhanced_search('aa', 'deezer', deps)
     assert result['primary_source'] == 'deezer'
     assert result['metadata_source'] == 'deezer'
+    assert result['spotify_playlists'] == []
+
+
+def test_single_source_deezer_includes_playlists():
+    deezer = _Client(name='deezer')
+    deezer.search_playlists = lambda q, limit=10: [
+        {'id': 'p1', 'title': 'Lofi Beats', 'creator': 'ChilledCow', 'nb_tracks': 40, 'image_url': 'http://img', 'link': 'http://link'}
+    ]
+    deps = _build_deps(get_deezer_client=lambda: deezer)
+    result = orchestrator.run_enhanced_search('lofi', 'deezer', deps)
+    assert result['source_available'] is True
+    assert len(result['spotify_playlists']) == 1
+    assert result['spotify_playlists'][0]['name'] == 'Lofi Beats'
+    assert result['spotify_playlists'][0]['creator'] == 'ChilledCow'
+    assert result['spotify_playlists'][0]['track_count'] == 40
 
 
 # ---------------------------------------------------------------------------
@@ -580,6 +596,49 @@ def test_stream_youtube_videos_yields_videos_chunk_and_done():
     assert len(out[0]['data']) == 2
     assert out[0]['data'][0]['video_id'] == 'vid1'
     assert out[-1]['type'] == 'done'
+
+
+def test_stream_youtube_videos_passes_the_limit_to_yt_dlp():
+    # the artist page's "show more" asks for a bigger pool. the ask has to
+    # reach search_videos, or the page refetches and gets the same 20 back.
+    seen = {}
+
+    class _CountingYT:
+        async def search_videos(self, q, max_results=20):
+            seen['max_results'] = max_results
+            return [_FakeYouTubeVideo(f'v{i}') for i in range(max_results)]
+
+    out = _drain(orchestrator.stream_youtube_videos('q', _CountingYT(), _sync_run_async, max_results=60))
+    assert seen['max_results'] == 60
+    assert len(out[0]['data']) == 60
+
+
+def test_stream_youtube_videos_default_limit_is_unchanged():
+    seen = {}
+
+    class _CountingYT:
+        async def search_videos(self, q, max_results=None):
+            seen['max_results'] = max_results
+            return []
+
+    _drain(orchestrator.stream_youtube_videos('q', _CountingYT(), _sync_run_async))
+    assert seen['max_results'] == orchestrator.YOUTUBE_VIDEO_LIMIT_DEFAULT == 20
+
+
+def test_clamp_youtube_video_limit():
+    clamp = orchestrator.clamp_youtube_video_limit
+    # missing or junk means the old default, so an old client is unchanged
+    assert clamp(None) == 20
+    assert clamp('') == 20
+    assert clamp('abc') == 20
+    # a real ask is honoured up to the ceiling; strings from json are fine
+    assert clamp(60) == 60
+    assert clamp('40') == 40
+    assert clamp(8) == 8
+    # nothing lets a client make yt-dlp page forever, or ask for nothing
+    assert clamp(500) == 60
+    assert clamp(0) == 1
+    assert clamp(-3) == 1
 
 
 def test_stream_youtube_videos_search_failure_yields_empty_videos():

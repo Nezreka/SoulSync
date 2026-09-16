@@ -117,6 +117,13 @@ class DatabaseUpdateWorker:
                 self.post_scan_hook(self)
             except Exception as e:
                 logger.warning(f"post-scan hook failed (non-fatal): {e}")
+        # the scan writes artists and albums without their normalized text;
+        # fill it now so the first ownership check after a scan is the fast one
+        try:
+            if self.database is not None and hasattr(self.database, 'ensure_norm_backfilled'):
+                self.database.ensure_norm_backfilled()
+        except Exception as e:
+            logger.warning(f"norm backfill after scan failed (non-fatal): {e}")
         self._emit_signal('finished', *args)
 
 
@@ -223,6 +230,7 @@ class DatabaseUpdateWorker:
                     # on the singleton client, and that pre-import view then
                     # poisoned the NEXT deep scan (#torrent-album-missing).
                     self._clear_media_cache("after incremental (no new content)")
+                    self._repair_navidrome_identities()
                     self._emit_finished(0, 0, 0, 0, 0)
                     return
                 logger.info(f"Incremental update: Found {len(artists_to_process)} artists to process")
@@ -263,6 +271,8 @@ class DatabaseUpdateWorker:
                 except Exception as e:
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
             
+            self._repair_navidrome_identities()
+
             # Detect and remove content deleted from the media server
             # Only run on full refreshes — fetching the entire catalog on every
             # incremental scan is too expensive (especially for Plex) and unnecessary
@@ -279,6 +289,14 @@ class DatabaseUpdateWorker:
                                        f"{r_albums} albums, {r_tracks} tracks removed")
                 except Exception as e:
                     logger.warning(f"Removal detection failed (non-fatal): {e}")
+
+            # #1253: artists the server has no photo for used to get a url that
+            # 404s, which also kept enrichment from ever filling a real one in.
+            # a full refresh rewrites every artist so it heals on its own; an
+            # incremental scan never revisits them, so sweep here. one
+            # lightweight call, jellyfin/emby only (the client decides).
+            if self.database:
+                self._clear_phantom_artist_thumbs()
 
             # Cleanup orphaned records after incremental updates (catches fixed matches)
             if not self.full_refresh and self.database:
@@ -329,6 +347,25 @@ class DatabaseUpdateWorker:
             logger.error(f"Database update failed: {str(e)}")
             self._emit_signal('error', f"Database update failed: {str(e)}")
     
+    def _repair_navidrome_identities(self):
+        if self.server_type != 'navidrome':
+            return True
+        if not self.database or self.should_stop:
+            return False
+        try:
+            # No inventory fetch unless same-path duplicates need investigation.
+            with self.database._get_connection() as conn:
+                duplicate = conn.execute("SELECT 1 FROM tracks WHERE server_source='navidrome' AND file_path IS NOT NULL AND file_path!='' GROUP BY file_path HAVING COUNT(*) > 1 LIMIT 1").fetchone()
+            if not duplicate:
+                return True
+            from core.library.navidrome_identity import read_inventory, repair_rekeyed_tracks
+            repaired = repair_rekeyed_tracks(self.database, read_inventory(self.media_client))
+            logger.info("Navidrome identity repair: %s obsolete same-path rows merged", repaired)
+            return True
+        except Exception as exc:
+            logger.warning("Navidrome identity repair skipped: %s", exc)
+            return False
+
     def run_deep_scan(self):
         """Deep library scan: fetch ALL content, insert only NEW tracks, remove STALE tracks.
         Never calls clear_server_data() — preserves all enrichment data."""
@@ -397,12 +434,17 @@ class DatabaseUpdateWorker:
             seen_track_ids = set()
             self._deep_scan_process_all_artists(artists, seen_track_ids)
 
+            identity_repair_ok = self._repair_navidrome_identities()
+
             # Phase 3: Stale track removal
             self._emit_signal('phase_changed', "Deep scan: Checking for stale tracks...")
             db_track_ids = self.database.get_all_track_ids_for_server(self.server_type)
             stale = db_track_ids - seen_track_ids
             stale_removed = 0
 
+            if stale and not identity_repair_ok:
+                logger.warning("Skipping stale removal: Navidrome identity repair could not complete")
+                stale = set()
             if stale:
                 # A fully-trusted scan may exceed the 50% threshold: the server
                 # answered (verified fetch), every artist processed cleanly, and
@@ -1130,6 +1172,23 @@ class DatabaseUpdateWorker:
             logger.debug(f"Error checking for metadata changes: {e}")
             return False  # Assume no changes if we can't check
     
+    def _clear_phantom_artist_thumbs(self):
+        """null the server-built photo url of every artist the server says has
+        no image. non-fatal, and a client that can't answer is left alone."""
+        getter = getattr(self.media_client, 'get_artist_ids_without_image', None)
+        if not callable(getter):
+            return
+        try:
+            without_image = getter()
+            if not without_image:
+                return
+            cleared = self.database.clear_phantom_artist_thumbs(without_image, self.server_type)
+            if cleared:
+                logger.info(f"Cleared {cleared} phantom artist photo urls "
+                            f"({self.server_type} has no image for them)")
+        except Exception as e:
+            logger.warning(f"Phantom artist photo sweep failed (non-fatal): {e}")
+
     def _detect_and_remove_stale_content(self):
         """Detect and remove content that was deleted from the media server.
 

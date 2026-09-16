@@ -323,8 +323,9 @@ def _jellyfin_activity(db=None) -> tuple:
         return [], None
     try:
         import requests
+        from core.jellyfin_client import jellyfin_auth_headers
         r = requests.get(cfg["base_url"].rstrip("/") + "/Sessions",
-                         headers={"X-Emby-Token": cfg["api_key"]}, timeout=_PLEX_TIMEOUT)
+                         headers=jellyfin_auth_headers(cfg["api_key"]), timeout=_PLEX_TIMEOUT)
         raw = r.json() if r.status_code == 200 else []
     except Exception:   # noqa: BLE001
         logger.debug("jellyfin /Sessions failed", exc_info=True)

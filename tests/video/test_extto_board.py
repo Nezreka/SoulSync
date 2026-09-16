@@ -364,6 +364,67 @@ def test_the_image_proxy_allows_extto_without_allowing_a_lookalike_domain():
     assert 'host == s or host.endswith("." + s)' in allow
 
 
+def test_extto_posters_are_cached_on_disk_so_subsequent_loads_are_instant(tmp_path, monkeypatch):
+    """When /api/video/img streams an ext.to poster, it writes it to image_cache
+    so subsequent hits load instantly from disk instead of re-fetching live."""
+    from flask import Flask
+    import api.video as videoapi
+    from core.image_cache import ImageCache
+
+    cache = ImageCache(tmp_path)
+    monkeypatch.setattr("core.image_cache.get_image_cache", lambda: cache)
+    monkeypatch.setattr("core.video.extto_search.clearance", lambda: ({"cf": "ok"}, "Chrome"))
+
+    class _Resp:
+        status_code = 200
+        headers = {"Content-Type": "image/jpeg"}
+        content = b"fake-extto-poster-bytes"
+
+    import requests
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: _Resp())
+
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+
+    url = "/api/video/img?u=https://ext.to/upload_files/poster.jpg"
+    # First request: fetches upstream and caches to disk (X-SoulSync-Image-Cache: miss)
+    r1 = client.get(url)
+    assert r1.status_code == 200
+    assert r1.data == b"fake-extto-poster-bytes"
+    assert r1.headers.get("X-SoulSync-Image-Cache") == "miss"
+
+    # Second request: served straight from disk cache (X-SoulSync-Image-Cache: hit)
+    r2 = client.get(url)
+    assert r2.status_code == 200
+    assert r2.data == b"fake-extto-poster-bytes"
+    assert r2.headers.get("X-SoulSync-Image-Cache") == "hit"
+
+
+def test_refresh_board_prewarms_matched_release_posters(monkeypatch):
+    """When refresh_board runs, it pre-warms posters into image_cache so
+    the user never waits on image downloads when opening the tab."""
+    db = _DB()
+    prewarmed = []
+
+    class _FakeCache:
+        def precache_url(self, url):
+            prewarmed.append(url)
+
+    monkeypatch.setattr("core.image_cache.get_image_cache", lambda: _FakeCache())
+    board = {
+        "configured": True, "source": "EXT.to", "total": 1,
+        "sections": {"movies": {"day": [{"title": "M1", "url": "https://ext.to/m-1/"}]}}
+    }
+    monkeypatch.setattr("core.video.extto_fresh.extto_fresh_releases", lambda **k: board)
+    monkeypatch.setattr("core.video.extto_detail.fetch_detail", lambda url, **k: {
+        "ok": True, "detail": {"title": "M1", "poster_url": "https://ext.to/poster.jpg"}
+    })
+    res = extto_board.refresh_board(db, flaresolverr="http://fs")
+    assert res["ok"]
+    assert "https://ext.to/poster.jpg" in prewarmed
+
+
 def test_a_parser_improvement_reaches_releases_that_were_already_matched(monkeypatch):
     """Matched releases are cached to make the hourly refresh cheap, which means an
     entry can outlive the parser that produced it. Teaching the parser to prefer the

@@ -3317,6 +3317,8 @@ async function loadSettingsData() {
         // Prefer a version (off = ''), lives under soulseek with the other match settings
         const _pvEl = document.getElementById('preferred-version');
         if (_pvEl) _pvEl.value = settings.soulseek?.preferred_version || '';
+        const _sizeCap = document.getElementById('music-max-mb-per-minute');
+        if (_sizeCap) _sizeCap.value = settings.download_source?.max_mb_per_minute ?? 0;
 
         // Populate Genre Whitelist
         const gwEnabled = settings.genre_whitelist?.enabled === true;
@@ -6111,6 +6113,10 @@ async function saveSettings(quiet = false) {
             max_concurrent: parseInt(document.getElementById('max-concurrent-downloads').value) || 3,
             // #1056 — streaming-source search timeout override; 0 = source defaults
             source_search_timeout: _cfgInt('source-search-timeout', 0),
+            max_mb_per_minute: (() => {
+                const value = _cfgFloat('music-max-mb-per-minute', 0);
+                return value === undefined ? undefined : Math.max(0, value);
+            })(),
             // Stalled-torrent knobs (rendered in the torrent client section).
             // UI is in MINUTES; stored in SECONDS. Blank/NaN → 10 min default;
             // 0 stays 0 (disabled).

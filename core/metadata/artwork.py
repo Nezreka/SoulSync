@@ -8,7 +8,7 @@ import re
 import time
 import urllib.request
 from ipaddress import ip_address
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from core.imports.context import get_import_context_album, get_import_context_artist
 from core.metadata.common import (
@@ -201,6 +201,13 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
                     return _browser_safe_image_url(fixed_url)
 
             elif active_server == 'navidrome':
+                parsed_cover = urlparse(thumb_url)
+                cover_id = parse_qs(parsed_cover.query).get('id', [''])[0]
+                if parsed_cover.path.rstrip('/').endswith('/getCoverArt') and cover_id:
+                    # Keep the cover identity, not a newly salted auth URL. The
+                    # existing proxy authenticates and caches when the image is
+                    # requested, outside library JSON serialization.
+                    return '/api/navidrome/cover/' + quote(cover_id, safe='')
                 navidrome_config = cfg.get_navidrome_config()
                 navidrome_base_url = navidrome_config.get('base_url', '')
                 navidrome_username = navidrome_config.get('username', '')
@@ -241,6 +248,37 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
         return _browser_safe_image_url(thumb_url)
 
 
+# deezer's "this artist has no picture": the picture hash is empty, or it is
+# d41d8cd9..., the md5 of an empty string. the url is well formed and starts
+# with https, so every "is there an image" check that looks for http let it
+# through, and breakbot and billie eilish sat on the watchlist with a mic icon
+# while their library rows had perfectly good plex thumbs.
+_DEEZER_EMPTY_HASH = 'd41d8cd98f00b204e9800998ecf8427e'
+
+
+def is_placeholder_image_url(url: str | None) -> bool:
+    """True for a url that is a real url but will never show a picture."""
+    if not url:
+        return False
+    value = str(url).strip().lower()
+    if not value or value == 'none':
+        return False
+    if 'dzcdn.net' in value or 'deezer.com' in value:
+        if '/images/artist//' in value or '/images/cover//' in value or '/images/playlist//' in value:
+            return True
+        if _DEEZER_EMPTY_HASH in value:
+            return True
+    return False
+
+
+def usable_image_url(url: str | None) -> bool:
+    """a non-empty url that is not a known placeholder."""
+    if not url:
+        return False
+    value = str(url).strip()
+    return bool(value) and value.lower() != 'none' and not is_placeholder_image_url(value)
+
+
 def is_image_proxy_url(url: str) -> bool:
     """Return True for SoulSync image proxy/cache URLs, absolute or relative."""
     if not url:
@@ -248,7 +286,8 @@ def is_image_proxy_url(url: str) -> bool:
 
     try:
         parsed = urlparse(url)
-        return parsed.path == '/api/image-proxy' or parsed.path.startswith('/api/image-cache/')
+        return (parsed.path == '/api/image-proxy' or parsed.path.startswith('/api/image-cache/')
+                or parsed.path.startswith('/api/navidrome/cover/'))
     except Exception:
         return False
 

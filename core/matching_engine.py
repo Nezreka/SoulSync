@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any, Tuple
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from functools import lru_cache
 from unidecode import unidecode
 from utils.logging_config import get_logger
 from core.settings import config_manager
@@ -36,6 +37,40 @@ class MatchResult:
     def is_match(self) -> bool:
         return self.plex_track is not None and self.confidence >= self.match_threshold
 
+_DIFFERENT_VERSION_KEYWORDS = [
+    'remix', 'mix', 'rmx',  # Remixes (different song)
+    'live', 'live at', 'live from',  # Live versions (different recording)
+    'acoustic', 'unplugged',  # Acoustic versions (different arrangement)
+    'slowed', 'reverb', 'sped up', 'speed up',  # TikTok edits (different)
+    'radio edit', 'radio version',  # Radio edits (different cut)
+    'single edit',  # Single edits (different cut)
+    'album edit',  # Album edits (different cut)
+    'instrumental', 'karaoke',  # Instrumental (different)
+    'extended', 'extended version',  # Extended (different length)
+    'demo', 'rough cut',  # Demos (different recording)
+]
+# (keyword, compiled word-bounded pattern), in list order — order matters for
+# the strip step, which is why this is a list and not a dict
+_VERSION_KEYWORD_PATTERNS = [
+    (kw, re.compile(r'\b' + re.escape(kw) + r'\b')) for kw in _DIFFERENT_VERSION_KEYWORDS
+]
+
+
+@lru_cache(maxsize=262144)
+def _similarity_score_cached_pair(str1: str, str2: str) -> float:
+    return _SIMILARITY_ENGINE._similarity_score_uncached(str1, str2)
+
+
+def _similarity_score_cached(engine, str1: str, str2: str) -> float:
+    global _SIMILARITY_ENGINE
+    if _SIMILARITY_ENGINE is None:
+        _SIMILARITY_ENGINE = engine
+    return _similarity_score_cached_pair(str1, str2)
+
+
+_SIMILARITY_ENGINE = None
+
+
 class MusicMatchingEngine:
     def __init__(self):
         # Conservative title patterns - only remove clear noise, preserve meaningful differences like remixes
@@ -63,6 +98,25 @@ class MusicMatchingEngine:
             # REMOVED: r',.*' - This can break legitimate artist names with commas
         ]
     
+        self.derivative_artist_keywords = [
+            'tribute', 'tribute band', 'cover', 'covers', 'cover band',
+            'karaoke', 'orchestra', 'orchestral', 'salute', 'parody',
+            'soundalike', 'instrumental', 'backing track', 'backing band'
+        ]
+    
+    def has_derivative_artist_mismatch(self, src_artist: str, cand_artist: str) -> bool:
+        """Detect if candidate artist contains derivative indicators (tribute, cover, etc.)
+        that are not present in the source artist."""
+        if not cand_artist:
+            return False
+        src_lower = src_artist.lower() if src_artist else ""
+        cand_lower = cand_artist.lower()
+        for kw in self.derivative_artist_keywords:
+            if re.search(r'\b' + re.escape(kw) + r'\b', cand_lower):
+                if not re.search(r'\b' + re.escape(kw) + r'\b', src_lower):
+                    return True
+        return False
+
     def normalize_string(self, text: str) -> str:
         """
         Normalizes string by handling common stylizations, converting to ASCII,
@@ -208,6 +262,12 @@ class MusicMatchingEngine:
         return self.normalize_string(cleaned)
     
     def similarity_score(self, str1: str, str2: str) -> float:
+        """cached front for _similarity_score_uncached: pure on its inputs, and
+        the pool matcher asks for the same pairs over and over (the search
+        title's raw and cleaned forms are often the same string)."""
+        return _similarity_score_cached(self, str1, str2)
+
+    def _similarity_score_uncached(self, str1: str, str2: str) -> float:
         """
         Calculates similarity score between two strings with STRICT version handling.
 
@@ -227,18 +287,7 @@ class MusicMatchingEngine:
         # Version vocabulary, shared by the prefix check and the divergent
         # check below.
         remaster_keywords = ['remaster', 'remastered']
-        different_version_keywords = [
-            'remix', 'mix', 'rmx',  # Remixes (different song)
-            'live', 'live at', 'live from',  # Live versions (different recording)
-            'acoustic', 'unplugged',  # Acoustic versions (different arrangement)
-            'slowed', 'reverb', 'sped up', 'speed up',  # TikTok edits (different)
-            'radio edit', 'radio version',  # Radio edits (different cut)
-            'single edit',  # Single edits (different cut)
-            'album edit',  # Album edits (different cut)
-            'instrumental', 'karaoke',  # Instrumental (different)
-            'extended', 'extended version',  # Extended (different length)
-            'demo', 'rough cut',  # Demos (different recording)
-        ]
+        different_version_keywords = _DIFFERENT_VERSION_KEYWORDS
 
         # STRICT VERSION CHECKING: Different versions should score LOW
         # This prevents "Song Title" from matching "Song Title (Remix)" during sync
@@ -282,18 +331,24 @@ class MusicMatchingEngine:
         # pair that survives to here with high base overlap is a genuinely
         # different cut. (Remasters are intentionally excluded — the prefix
         # branch gives them the lenient 0.75 so re-mastered cuts still match.)
+        # the per-keyword patterns are compiled once at import: building and
+        # escaping ~20 of them per comparison was most of the scorer's time in
+        # a pool match (PERF_REVIEW item 3). same keywords, same word-bounded
+        # search, same set semantics.
         def _versions_in(s: str) -> frozenset:
-            return frozenset(
-                kw for kw in different_version_keywords
-                if re.search(r'\b' + re.escape(kw) + r'\b', s))
+            return frozenset(kw for kw, rx in _VERSION_KEYWORD_PATTERNS if rx.search(s))
 
-        v1, v2 = _versions_in(str1), _versions_in(str2)
+        # nothing below applies under 0.5, so don't scan for versions unless it can matter
+        if standard_ratio >= 0.5:
+            v1, v2 = _versions_in(str1), _versions_in(str2)
+        else:
+            v1 = v2 = frozenset()
         if v1 and v2 and standard_ratio >= 0.5:
             # Strip the version words; what remains is base + distinguishing
             # descriptor (remixer / performance / year).
             def _strip_versions(s: str) -> str:
-                for kw in different_version_keywords:
-                    s = re.sub(r'\b' + re.escape(kw) + r'\b', ' ', s)
+                for _kw, rx in _VERSION_KEYWORD_PATTERNS:
+                    s = rx.sub(' ', s)
                 # A "(live)" vs "- live" difference is the SAME version formatted
                 # differently — the source often uses a dash where the metadata
                 # uses parentheses (lilbob5769). Normalise the wrapping punctuation
@@ -343,16 +398,25 @@ class MusicMatchingEngine:
             for raw_cand_artist in candidate_artists:
                 if not raw_cand_artist:
                     continue
+
+                # Check for derivative artist mismatch (e.g., "Queen Tribute" vs "Queen")
+                if self.has_derivative_artist_mismatch(src_artist, raw_cand_artist):
+                    score = 0.20
+                    if score > best_artist_score:
+                        best_artist_score = score
+                    continue
+
                 cand_artist_normalized = self.normalize_string(raw_cand_artist)
                 cand_artist_cleaned = self.clean_artist(raw_cand_artist)
-                # Check containment (e.g., "drake" in "drake 21 savage")
-                # Skip for very short names (≤2 chars) — "b" matches everything
-                if src_artist and len(src_artist) > 2 and src_artist in cand_artist_normalized:
+
+                # Exact match against whole candidate artist string
+                if src_artist and (src_artist == cand_artist_cleaned or src_artist == cand_artist_normalized):
                     best_artist_score = 1.0
                     break
-                elif src_artist and src_artist == cand_artist_normalized:
-                    best_artist_score = 1.0
-                    break
+
+                # Commas, slashes, ampersands and 'and' can belong to a band name.
+                # Separate credits arrive as artist list entries; clean_artist handles feat.
+                # Fuzzy similarity against full candidate artist
                 score = self.similarity_score(src_artist, cand_artist_cleaned)
                 if score > best_artist_score:
                     best_artist_score = score
@@ -360,11 +424,19 @@ class MusicMatchingEngine:
                 break
         artist_score = best_artist_score
 
+        # Check for duration mismatch if both durations are known (> 0)
+        has_durations = source_duration_ms > 0 and candidate_duration_ms > 0
+        diff_ms = abs(source_duration_ms - candidate_duration_ms) if has_durations else 0
+        max_duration = max(source_duration_ms, candidate_duration_ms) if has_durations else 1
+        diff_ratio = diff_ms / max_duration if has_durations else 0.0
+        significant_duration_mismatch = has_durations and diff_ms > 15000 and diff_ratio > 0.15
+
         # --- Priority 1: Core Title Match ---
         source_core_title = self.get_core_string(source_title)
         candidate_core_title = self.get_core_string(candidate_title)
 
-        if source_core_title and source_core_title == candidate_core_title:
+        # Core title fast path requires compatible duration (cannot be a preview clip or mismatched cut)
+        if source_core_title and source_core_title == candidate_core_title and not significant_duration_mismatch:
             if artist_score >= 0.75:
                 confidence = 0.90 + (artist_score * 0.09)
                 return confidence, "core_title_match"
@@ -377,6 +449,12 @@ class MusicMatchingEngine:
         duration_score = self.duration_similarity(source_duration_ms, candidate_duration_ms)
 
         confidence = (title_score * 0.60) + (artist_score * 0.30) + (duration_score * 0.10)
+
+        # Apply duration penalty when there is a significant duration mismatch (>15s and >15%)
+        if significant_duration_mismatch:
+            duration_penalty = min(0.35, max(0.15, diff_ratio * 0.35))
+            confidence = max(0.0, confidence - duration_penalty)
+
         return confidence, "standard_match"
 
     def calculate_match_confidence(self, spotify_track: SpotifyTrack, plex_track: TrackInfo) -> Tuple[float, str]:

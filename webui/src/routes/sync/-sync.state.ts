@@ -48,6 +48,7 @@ export interface SourcePlaylistState {
   downloadProcessId?: string;
   syncPlaylistId?: string;
   lastSyncProgress?: SyncProgressSnapshot;
+  syncError?: string;
   wingIt?: boolean;
   /**
    * The #815 Retry-Failed baseline. The vanilla stamps `_retryDiscovery` on
@@ -137,6 +138,7 @@ export function applySyncStarted(
   return {
     ...state,
     phase: 'syncing',
+    syncError: undefined,
     syncPlaylistId: response.sync_playlist_id || response.sync_id || state.syncPlaylistId,
   };
 }
@@ -162,15 +164,28 @@ export function applySyncStatus(
     return {
       ...state,
       phase: 'sync_complete',
+      syncError: undefined,
       convertedSpotifyPlaylistId:
         payload.converted_spotify_playlist_id || state.convertedSpotifyPlaylistId,
     };
   }
-  if (status === 'error' || status === 'cancelled') {
-    return { ...state, phase: 'discovered' };
+  if (status === 'error' || status === 'cancelled' || payload.error) {
+    const errorMsg =
+      payload.error ||
+      (status === 'cancelled' ? 'Sync cancelled' : 'Sync encountered an error');
+    return {
+      ...state,
+      phase: 'discovered',
+      syncError: errorMsg,
+    };
   }
   if (payload.progress) {
-    return { ...state, phase: 'syncing', lastSyncProgress: payload.progress };
+    return {
+      ...state,
+      phase: 'syncing',
+      lastSyncProgress: payload.progress,
+      syncError: undefined,
+    };
   }
   return state;
 }
@@ -205,6 +220,7 @@ export function resetAfterModalClose(state: SourcePlaylistState): SourcePlaylist
   return {
     ...state,
     phase: 'discovered',
+    syncError: undefined,
     downloadProcessId: undefined,
     syncPlaylistId: undefined,
     lastSyncProgress: undefined,
@@ -219,6 +235,13 @@ export interface FixedMatchTrack {
   album?: string | Record<string, unknown>;
   duration_ms?: number;
   image_url?: string | null;
+  source?: string;
+  provider?: string;
+  isrc?: string;
+  track_number?: number;
+  disc_number?: number;
+  release_date?: string;
+  [key: string]: unknown;
 }
 
 /**
@@ -254,6 +277,21 @@ export function applyFixedMatch(
     }
   }
 
+  const fixedData = {
+    id: track.id,
+    name: track.name,
+    artists: track.artists,
+    album: albumObject,
+    duration_ms: track.duration_ms,
+    image_url: imageUrl,
+    source: track.source || (previous.spotify_data as { source?: string } | undefined)?.source,
+    provider: track.provider || track.source,
+    isrc: track.isrc,
+    track_number: track.track_number,
+    disc_number: track.disc_number,
+    release_date: track.release_date,
+  };
+
   const rawResults = state.rawResults.slice();
   rawResults[trackIndex] = {
     ...previous,
@@ -261,17 +299,13 @@ export function applyFixedMatch(
     status_class: 'found',
     manual_match: true,
     wing_it_fallback: false,
+    confidence: 1,
     spotify_id: track.id,
     // LB rows display the raw result's duration (490-492).
     duration: formatDuration(track.duration_ms ?? 0),
-    spotify_data: {
-      id: track.id,
-      name: track.name,
-      artists: track.artists,
-      album: albumObject,
-      duration_ms: track.duration_ms,
-      image_url: imageUrl,
-    } as RawDiscoveryResult['spotify_data'],
+    spotify_data: fixedData as RawDiscoveryResult['spotify_data'],
+    match_data: fixedData,
+    matched_data: fixedData,
   };
 
   const spotifyMatches = wasNotFound ? (state.spotifyMatches || 0) + 1 : state.spotifyMatches;
@@ -306,6 +340,15 @@ export function applyUnmatched(
 ): SourcePlaylistState {
   const previous = state.rawResults[trackIndex];
   if (!previous) return state;
+  const wasFound =
+    previous.status === 'found' ||
+    previous.status === 'Found' ||
+    previous.status === '✅ Found' ||
+    previous.status_class === 'found' ||
+    Boolean(previous.spotify_data) ||
+    Boolean(previous.spotify_track);
+  const spotifyMatches = wasFound ? Math.max(0, (state.spotifyMatches || 0) - 1) : state.spotifyMatches;
+
   const rawResults = state.rawResults.slice();
   rawResults[trackIndex] = {
     ...previous,
@@ -315,9 +358,10 @@ export function applyUnmatched(
     spotify_artist: undefined,
     spotify_album: undefined,
     spotify_data: null,
-    // Knowing improvement: the vanilla leaves spotify_id stale here.
     spotify_id: undefined,
     matched_data: null,
+    match_data: null,
+    duration: '0:00',
     confidence: 0,
     wing_it_fallback: false,
     manual_match: false,
@@ -326,6 +370,7 @@ export function applyUnmatched(
     ...state,
     rawResults,
     rows: toDiscoveryRows(config.id, config.ux.foundVariant, rawResults),
+    spotifyMatches,
   };
 }
 

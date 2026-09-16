@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  albumArtAppliedMessage,
   applyArtRequest,
   releaseArtRequest,
   artistArtAppliedMessage,
@@ -183,5 +184,15 @@ describe('art pickers', () => {
     expect(
       artistArtAppliedMessage({ success: true, server_updated: true, disk_written: true }),
     ).toBe('Artist photo updated (also updated: server, artist.jpg)');
+  });
+
+  it('the album apply toast does the same for the poster and cover.jpg', () => {
+    expect(albumArtAppliedMessage({ success: true })).toBe('Cover art updated');
+    expect(albumArtAppliedMessage({ success: true, cover_written: true })).toBe(
+      'Cover art updated (also updated: cover.jpg)',
+    );
+    expect(
+      albumArtAppliedMessage({ success: true, server_updated: true, cover_written: true }),
+    ).toBe('Cover art updated (also updated: server, cover.jpg)');
   });
 });

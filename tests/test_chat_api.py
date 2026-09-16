@@ -713,3 +713,36 @@ def test_chat_recovers_on_next_poll_after_slskd_reconnects(chat_app):
     assert response.status_code == 200
     assert response.get_json()["can_send"] is True
     assert not client.sent_room and not client.sent_pm  # never auto-resend drafts
+
+
+def test_link_preview_requires_url(chat_app):
+    http, _ = chat_app
+    assert http.get("/api/chat/link-preview").status_code == 400
+    assert http.get("/api/chat/link-preview?url=").status_code == 400
+
+
+def test_link_preview_blocks_unsafe_urls(chat_app):
+    http, _ = chat_app
+    # SSRF guard: localhost / private IPs fail safe
+    assert http.get("/api/chat/link-preview?url=http://localhost:8008").status_code == 404
+    assert http.get("/api/chat/link-preview?url=http://127.0.0.1:5000").status_code == 404
+    assert http.get("/api/chat/link-preview?url=http://192.168.1.1").status_code == 404
+
+
+def test_link_preview_returns_metadata(chat_app, monkeypatch):
+    http, _ = chat_app
+    fake_data = {
+        "ok": True,
+        "url": "https://example.com/song",
+        "title": "Song Title",
+        "description": "Song description",
+        "image": "https://example.com/cover.jpg",
+        "site_name": "Example",
+        "domain": "example.com",
+        "theme_color": "#1db954",
+    }
+    monkeypatch.setattr(chat_api, "_fetch_link_preview", lambda url: fake_data)
+    res = http.get("/api/chat/link-preview?url=https://example.com/song")
+    assert res.status_code == 200
+    assert res.get_json() == fake_data
+

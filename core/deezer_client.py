@@ -4,6 +4,8 @@ import time
 from typing import Dict, List, Optional, Any
 from functools import wraps
 from dataclasses import dataclass
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 from utils.logging_config import get_logger
 from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
@@ -362,6 +364,21 @@ class DeezerClient:
 
     def __init__(self):
         self.session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            connect=3,
+            read=2,
+            backoff_factor=0.3,
+            status_forcelist=[500, 502, 503, 504],
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=20,
+            pool_maxsize=20,
+        )
+        self.session.mount('https://', adapter)
+        self.session.mount('http://', adapter)
         self.session.headers.update({
             'User-Agent': 'SoulSync/1.0',
             'Accept': 'application/json',
@@ -404,8 +421,8 @@ class DeezerClient:
         self._load_token()
 
     def _api_get(self, endpoint: str, params: dict = None, timeout: int = 15,
-                 use_token: bool = True) -> Optional[Dict[str, Any]]:
-        """Generic GET request to Deezer API with error handling.
+                 use_token: bool = True, max_retries: int = 2) -> Optional[Dict[str, Any]]:
+        """Generic GET request to Deezer API with error handling and retry.
         Includes OAuth access_token when available for user-level endpoints.
 
         use_token=False for the PUBLIC endpoints - charts, editorial, search.
@@ -414,36 +431,49 @@ class DeezerClient:
         outright. So a user with an expired Deezer link lost the browse rows
         that never needed their account in the first place.
         """
-        try:
-            url = f"{self.BASE_URL}/{endpoint.lstrip('/')}"
-            if params is None:
-                params = {}
-            # Include access token for authenticated requests
-            if use_token and self._access_token and 'access_token' not in params:
-                params['access_token'] = self._access_token
-            response = self.session.get(url, params=params, timeout=timeout)
+        url = f"{self.BASE_URL}/{endpoint.lstrip('/')}"
+        if params is None:
+            params = {}
+        # Include access token for authenticated requests
+        if use_token and self._access_token and 'access_token' not in params:
+            params['access_token'] = self._access_token
 
-            if response.status_code != 200:
-                logger.error(f"Deezer API returned status {response.status_code} for {endpoint}")
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.session.get(url, params=params, timeout=timeout)
+
+                if response.status_code != 200:
+                    logger.error(f"Deezer API returned status {response.status_code} for {endpoint}")
+                    return None
+
+                data = response.json()
+
+                if 'error' in data:
+                    error = data['error']
+                    error_type = error.get('type', 'Unknown')
+                    error_msg = error.get('message', 'Unknown error')
+                    if error_type == 'DataException':
+                        logger.debug(f"Deezer data not found: {endpoint}")
+                    else:
+                        logger.error(f"Deezer API error ({error_type}): {error_msg}")
+                    return None
+
+                return data
+
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                if attempt < max_retries:
+                    logger.warning(
+                        f"Deezer connection error on {endpoint} (attempt {attempt + 1}/{max_retries + 1}): {e}. Retrying with fresh connection..."
+                    )
+                    time.sleep(0.25 * (attempt + 1))
+                    continue
+                logger.error(f"Error in Deezer API request ({endpoint}): {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Error in Deezer API request ({endpoint}): {e}")
                 return None
 
-            data = response.json()
-
-            if 'error' in data:
-                error = data['error']
-                error_type = error.get('type', 'Unknown')
-                error_msg = error.get('message', 'Unknown error')
-                if error_type == 'DataException':
-                    logger.debug(f"Deezer data not found: {endpoint}")
-                else:
-                    logger.error(f"Deezer API error ({error_type}): {error_msg}")
-                return None
-
-            return data
-
-        except Exception as e:
-            logger.error(f"Error in Deezer API request ({endpoint}): {e}")
-            return None
+        return None
 
     # ==================== Metadata Source Methods (iTunesClient parity) ====================
     # These methods follow the same interface as iTunesClient so DeezerClient
@@ -710,6 +740,7 @@ class DeezerClient:
         out.sort(key=lambda g: (g['id'] != 0, g['name'].lower()))
         return out
 
+    @rate_limited
     def get_editorial_playlists(self, genre_id: int = 0, limit: int = 25) -> List[Dict[str, Any]]:
         """Deezer's curated playlists for one genre.
 
@@ -737,6 +768,7 @@ class DeezerClient:
         logger.info("Deezer editorial: %s playlists for genre %s", len(out), genre_id)
         return out
 
+    @rate_limited
     def search_playlists(self, query: str, limit: int = 25) -> List[Dict[str, Any]]:
         """Search Deezer playlists by name. Editorial and user playlists mixed.
 
@@ -1607,6 +1639,13 @@ class DeezerClient:
                     'name': t.get('title', ''),
                     'artists': [artist_name],
                     'album': t.get('album', {}).get('title', ''),
+                    'album_cover_url': (
+                        t.get('album', {}).get('cover_xl')
+                        or t.get('album', {}).get('cover_big')
+                        or t.get('album', {}).get('cover_medium')
+                        or t.get('album', {}).get('cover_small')
+                        or ''
+                    ),
                     'duration_ms': t.get('duration', 0) * 1000,
                     # REAL album position; the playlist index is a last resort only.
                     'track_number': track_positions.get(str(t.get('id'))) or i,

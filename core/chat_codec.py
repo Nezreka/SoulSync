@@ -303,3 +303,85 @@ def reply_of(payload) -> dict | None:
     if not u:
         return None
     return {"u": u, "x": x}
+
+
+def np_of(payload) -> dict | None:
+    """The validated Now Playing card metadata from an envelope ({'np': {...}}
+    or decoded dict with 'np'), or None.
+    Carries bounded metadata so receivers can render rich card + actions.
+    """
+    np = (payload or {}).get("np") if isinstance(payload, dict) else None
+    if not isinstance(np, dict):
+        return None
+    t = str(np.get("t") or "").strip()[:200]
+    a = str(np.get("a") or "").strip()[:160]
+    if not t or not a:
+        return None
+    out = {"t": t, "a": a}
+    al = str(np.get("al") or "").strip()[:160]
+    if al:
+        out["al"] = al
+    src = str(np.get("src") or "").strip()[:32]
+    if src:
+        out["src"] = src
+    tid = str(np.get("id") or "").strip()[:120]
+    if tid:
+        out["id"] = tid
+    img = str(np.get("img") or "").strip()[:1000]
+    if img and (img.startswith("https://") or img.startswith("http://") or img.startswith("/api/")):
+        out["img"] = img
+    try:
+        dur = int(np.get("dur") or 0)
+        if 0 < dur < 10**7:
+            out["dur"] = dur
+    except (TypeError, ValueError):
+        pass
+    try:
+        br = int(np.get("br") or 0)
+        if 0 < br < 20000:
+            out["br"] = br
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def want_of(payload) -> dict | None:
+    """The validated Wanted / ISO card metadata from an envelope ({'want': {...}}
+    or decoded dict with 'want'), or None.
+    """
+    w = (payload or {}).get("want") if isinstance(payload, dict) else None
+    if not isinstance(w, dict):
+        return None
+    t = str(w.get("t") or "").strip()[:200]
+    a = str(w.get("a") or "").strip()[:160]
+    if not t or not a:
+        return None
+    out = {"t": t, "a": a}
+    ty = str(w.get("ty") or "album").strip().lower()[:16]
+    if ty in ("track", "album", "ep", "single"):
+        out["ty"] = ty
+    else:
+        out["ty"] = "album"
+    al = str(w.get("al") or "").strip()[:160]
+    if al:
+        out["al"] = al
+    src = str(w.get("src") or "").strip()[:32]
+    if src:
+        out["src"] = src
+    wid = str(w.get("id") or "").strip()[:120]
+    if wid:
+        out["id"] = wid
+    img = str(w.get("img") or "").strip()[:1000]
+    if img and (img.startswith("https://") or img.startswith("http://") or img.startswith("/api/")):
+        out["img"] = img
+    y = str(w.get("y") or "").strip()[:10]
+    if y:
+        out["y"] = y
+    try:
+        dur = int(w.get("dur") or 0)
+        if 0 < dur < 10**7:
+            out["dur"] = dur
+    except (TypeError, ValueError):
+        pass
+    return out
+

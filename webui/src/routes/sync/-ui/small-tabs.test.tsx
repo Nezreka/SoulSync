@@ -123,7 +123,7 @@ describe('ListenBrainzSyncTab', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Weekly Jams')).toBeInTheDocument());
     expect(screen.getByText('25 tracks')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('My Playlists'));
+    fireEvent.click(screen.getByText('Playlists'));
     expect(
       screen.getByText("You haven't created any ListenBrainz playlists yet."),
     ).toBeInTheDocument();

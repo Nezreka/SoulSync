@@ -536,6 +536,7 @@ class ConfigManager:
                 "min_free_disk_gb": 5.0,
             },
             "download_source": {
+                "max_mb_per_minute": 0,  # Optional advertised music size limit; 0 = off
                 "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hifi", "hybrid", "torrent", "usenet"
                 "hybrid_primary": "soulseek",  # Legacy: primary source for hybrid mode
                 "hybrid_secondary": "youtube",  # Legacy: fallback source for hybrid mode

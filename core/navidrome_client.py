@@ -1,3 +1,4 @@
+from core.library.navidrome_identity import validated_playlist_write
 import requests
 import hashlib
 import secrets
@@ -457,7 +458,7 @@ class NavidromeClient(MediaServerClient):
     })
 
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None,
-                      as_user: Optional[tuple] = None) -> Optional[Dict[str, Any]]:
+                      as_user: Optional[tuple] = None, timeout=None) -> Optional[Dict[str, Any]]:
         """Make authenticated request to Navidrome Subsonic API.
         Uses POST for write operations (avoids URL length limits with large playlists).
 
@@ -483,9 +484,9 @@ class NavidromeClient(MediaServerClient):
             # Use POST for write operations to avoid URL length limits
             # (e.g., createPlaylist with 161 songId params would exceed GET URL limits)
             if endpoint in self._WRITE_ENDPOINTS:
-                response = requests.post(url, data=auth_params, timeout=30)
+                response = requests.post(url, data=auth_params, timeout=timeout if timeout is not None else 30)
             else:
-                response = requests.get(url, params=auth_params, timeout=60)
+                response = requests.get(url, params=auth_params, timeout=timeout if timeout is not None else 60)
             response.raise_for_status()
 
             data = response.json()
@@ -1271,6 +1272,7 @@ class NavidromeClient(MediaServerClient):
             logger.debug(f"Could not set Navidrome playlist poster for '{playlist_name}': {e}")
         return False
 
+    @validated_playlist_write
     def create_playlist(self, name: str, tracks, playlist_id: str = None) -> bool:
         """Create a new playlist or update existing one if playlist_id provided"""
         if not self.ensure_connection():
@@ -1421,6 +1423,7 @@ class NavidromeClient(MediaServerClient):
                 matches.append(playlist)
         return matches
 
+    @validated_playlist_write
     def append_to_playlist(self, playlist_name: str, tracks) -> bool:
         """Append tracks to an existing playlist (creates it if missing).
 
@@ -1495,6 +1498,7 @@ class NavidromeClient(MediaServerClient):
             logger.error(f"Error appending to Navidrome playlist '{playlist_name}': {e}")
             return False
 
+    @validated_playlist_write
     def reconcile_playlist(self, playlist_name: str, tracks) -> bool:
         """In-place reconcile (#792): add missing + remove gone via Subsonic
         updatePlaylist (songIdToAdd / songIndexToRemove), keeping the existing
@@ -1553,6 +1557,7 @@ class NavidromeClient(MediaServerClient):
             logger.error(f"Error reconciling Navidrome playlist '{playlist_name}': {e}")
             return False
 
+    @validated_playlist_write
     def update_playlist(self, playlist_name: str, tracks) -> bool:
         """Update an existing playlist or create it if it doesn't exist. Handles duplicates."""
         if not self.ensure_connection():

@@ -53,6 +53,7 @@ import type { AutoSyncWeeklyDraft } from './autosync-weekly';
 import {
   clearMirroredDiscovery,
   deleteMirroredPlaylist,
+  deleteMirroredPlaylists,
   fetchMirroredPlaylist,
   fetchMirroredPlaylists,
   fetchSourceDiscoveryStatus,
@@ -272,6 +273,26 @@ export function MirroredTab({
     setSources(new Set());
   }, []);
 
+  /**
+   * select mode (#1219): four tidal playlists shared a name, three got deleted
+   * upstream, and the only way to drop the stale mirrors was the card menu one
+   * card at a time. ids, not rows, so a refetch underneath the selection keeps
+   * it honest; ids whose cards are gone are dropped before anything acts.
+   */
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
+  const toggleSelected = useCallback((id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+  const exitSelecting = useCallback(() => {
+    setSelecting(false);
+    setSelected(new Set());
+  }, []);
+
   /** Each card's own sync interval — see -sync.card-schedule. */
   const cardSchedules = useCardSchedules();
 
@@ -481,6 +502,48 @@ export function MirroredTab({
       }
     },
     [load],
+  );
+
+  /** delete every selected mirror in one call, after one confirm. */
+  const onDeleteSelected = useCallback(
+    async (targets: MirroredPlaylistRow[]) => {
+      if (targets.length === 0) return;
+      const names = targets.map((r) => r.display_name || r.name || '');
+      const shown = names.slice(0, 6);
+      const rest = names.length - shown.length;
+      const list = shown.map((n) => `• ${n}`).join('\n') + (rest > 0 ? `\n…and ${rest} more` : '');
+      const ok = await window.showConfirmDialog?.({
+        title: `Delete ${targets.length} Playlist${targets.length === 1 ? '' : 's'}`,
+        message: `Delete ${targets.length} mirrored playlist${targets.length === 1 ? '' : 's'}?\n\n${list}`,
+        confirmText: 'Delete',
+        destructive: true,
+      });
+      if (!ok) return;
+      try {
+        const data = await deleteMirroredPlaylists(targets.map((r) => r.id));
+        if (!data.success) {
+          window.showToast?.(data.error || 'Failed to delete', 'error');
+          return;
+        }
+        const gone = data.deleted?.length ?? 0;
+        const missed = data.not_deleted?.length ?? 0;
+        window.showToast?.(
+          missed
+            ? `Deleted ${gone} mirror${gone === 1 ? '' : 's'}, ${missed} couldn’t be deleted`
+            : `Deleted ${gone} mirror${gone === 1 ? '' : 's'}`,
+          missed ? 'warning' : 'success',
+        );
+        for (const r of targets) vertical.dropState(mirroredHash(r.id));
+        exitSelecting();
+        await load();
+      } catch (err) {
+        window.showToast?.(
+          `Error: ${err instanceof Error ? err.message : 'unknown error'}`,
+          'error',
+        );
+      }
+    },
+    [load, vertical, exitSelecting],
   );
 
   /** editMirroredCustomName (auto-sync.js 2377-2404), prompt → input row. */
@@ -697,6 +760,10 @@ export function MirroredTab({
   // chips that vanished as you typed would move under the cursor.
   const sourceList = librarySources(allRows);
   const visibleRows = libraryVisibleRows(searchedRows, filter, sources, scheduledIds);
+  // the selection, as rows that still exist. a refetch can drop a card from
+  // under a selected id; the count and the delete both read this, never the set.
+  const selectedRows = selecting ? allRows.filter((r) => selected.has(r.id)) : [];
+  const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((r) => selected.has(r.id));
 
   return (
     <div>
@@ -743,6 +810,19 @@ export function MirroredTab({
             )}
           </div>
         )}
+        {/* select mode lives next to Update list because that is where you
+            look for "do something to the list". it is a toggle: Select opens
+            it, Done closes it and forgets the selection. */}
+        {allRows.length > 0 && (
+          <button
+            type="button"
+            className={`library-select-toggle${selecting ? ' active' : ''}`}
+            aria-pressed={selecting}
+            onClick={() => (selecting ? exitSelecting() : setSelecting(true))}
+          >
+            {selecting ? 'Done' : 'Select'}
+          </button>
+        )}
         <button
           type="button"
           className="refresh-button mirrored"
@@ -752,6 +832,46 @@ export function MirroredTab({
           Update list
         </button>
       </div>
+      {selecting && (
+        /* one bar for the whole selection. "all visible" is the search and
+           filter's result, so narrowing to a name and selecting all is the
+           whole fix for the duplicate-name case in one gesture. */
+        <div className="library-selection" role="toolbar" aria-label="Selected playlists">
+          <span className="library-selection-count">{selectedRows.length} selected</span>
+          <button
+            type="button"
+            className="library-source-clear"
+            disabled={visibleRows.length === 0}
+            onClick={() => {
+              setSelected((prev) => {
+                const next = new Set(prev);
+                if (allVisibleSelected) visibleRows.forEach((r) => next.delete(r.id));
+                else visibleRows.forEach((r) => next.add(r.id));
+                return next;
+              });
+            }}
+          >
+            {allVisibleSelected ? 'Clear visible' : `Select all visible (${visibleRows.length})`}
+          </button>
+          {selectedRows.length > 0 && (
+            <button
+              type="button"
+              className="library-source-clear"
+              onClick={() => setSelected(new Set())}
+            >
+              Clear
+            </button>
+          )}
+          <button
+            type="button"
+            className="library-selection-delete"
+            disabled={selectedRows.length === 0}
+            onClick={() => void onDeleteSelected(selectedRows)}
+          >
+            {selectedRows.length > 0 ? `Delete ${selectedRows.length}` : 'Delete'}
+          </button>
+        </div>
+      )}
       {rows !== null && rows.length > 0 && (
         <div className="library-filters">
           {/* State first: what a user came to find out is which playlists still
@@ -893,6 +1013,9 @@ export function MirroredTab({
                     ) : null
                   }
                   onOpen={() => onCardClick(row)}
+                  selecting={selecting}
+                  selected={selected.has(row.id)}
+                  onToggleSelect={() => toggleSelected(row.id)}
                   primary={
                     // The pipeline endpoint rejects file/beatport outright, and
                     // lastfm cannot be scheduled either — same guard the board

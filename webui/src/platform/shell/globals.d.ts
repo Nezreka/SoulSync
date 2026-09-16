@@ -472,6 +472,14 @@ declare global {
     startAudioPlayback?: () => void | Promise<void>;
     /** media-player.js — starts streaming a search result in the player. */
     startStream?: (searchResult: unknown) => void | Promise<void>;
+    /** media-player.js — plays a track directly from a search/preview context. */
+    playTrackDirectly?: (info: {
+      name: string;
+      artist: string;
+      album?: string;
+      image_url?: string;
+      source?: string;
+    }) => void;
     /** Repaints the search download bubbles from the vanilla bubble store into
      *  #enhanced-main-results-area (shared-helpers.js). The React search page
      *  calls it on mount because it recreates that container each visit. */

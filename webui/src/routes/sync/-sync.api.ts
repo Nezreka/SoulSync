@@ -546,6 +546,23 @@ export async function deleteMirroredPlaylist(
   return readJson(await fetch(`/api/mirrored-playlists/${playlistId}`, { method: 'DELETE' }));
 }
 
+/**
+ * POST /api/mirrored-playlists/batch-delete (#1219). one round trip for the
+ * lot, and the server says which ids it actually removed: a foreign or
+ * already-gone id comes back in not_deleted rather than as an error.
+ */
+export async function deleteMirroredPlaylists(
+  playlistIds: readonly number[],
+): Promise<{ success?: boolean; error?: string; deleted?: number[]; not_deleted?: number[] }> {
+  return readJson(
+    await fetch('/api/mirrored-playlists/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: playlistIds }),
+    }),
+  );
+}
+
 /** PATCH .../custom-name (editMirroredCustomName, auto-sync.js 2389). */
 export async function patchMirroredCustomName(
   playlistId: number | string,

@@ -1677,3 +1677,12 @@ def test_an_nzb_of_unknown_age_does_not_beat_a_known_old_one():
     )
 
     assert picked is known_old
+
+
+def test_music_size_limit_uses_album_duration_and_never_falls_back_to_oversized(monkeypatch):
+    from core.downloads import size_limit
+    monkeypatch.setattr(size_limit, 'configured_limit', lambda: 10)
+    huge = _Release('Artist Album FLAC', 800_000_000, seeders=100)
+    fits = _Release('Artist Album FLAC', 400_000_000, seeders=5)
+    assert pick_best_album_release([huge, fits], _flac_quality_guess, expected_duration_seconds=2700) is fits
+    assert pick_best_album_release([huge], _flac_quality_guess, expected_duration_seconds=2700) is None

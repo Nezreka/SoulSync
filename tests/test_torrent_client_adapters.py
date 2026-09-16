@@ -613,3 +613,180 @@ def test_no_category_reaches_the_adapter_as_none():
 
     asyncio.run(add_torrent_smart(_Adapter(), "magnet:?xt=urn:btih:abc"))
     assert seen["category"] is None
+
+
+# ---------------------------------------------------------------------------
+# Transmission URL normalization & error resilience
+# ---------------------------------------------------------------------------
+
+def test_normalize_transmission_url_handles_all_user_formats():
+    from core.torrent_clients.transmission import normalize_transmission_url
+
+    cases = [
+        ("http://host:9091", "http://host:9091/transmission/rpc"),
+        ("http://host:9091/", "http://host:9091/transmission/rpc"),
+        ("host:9091", "http://host:9091/transmission/rpc"),
+        ("http://host:9091/transmission", "http://host:9091/transmission/rpc"),
+        ("http://host:9091/transmission/", "http://host:9091/transmission/rpc"),
+        ("http://host:9091/transmission/web", "http://host:9091/transmission/rpc"),
+        ("http://host:9091/transmission/web/", "http://host:9091/transmission/rpc"),
+        ("http://host:9091/transmission/rpc", "http://host:9091/transmission/rpc"),
+        ("http://host:9091/transmission/rpc/", "http://host:9091/transmission/rpc"),
+        ("https://seedbox.lan/transmission", "https://seedbox.lan/transmission/rpc"),
+        ("https://seedbox.lan/transmission/web/", "https://seedbox.lan/transmission/rpc"),
+        ("http://host:9091/custom/rpc", "http://host:9091/custom/rpc"),
+        ("", ""),
+        (None, ""),
+    ]
+    for raw, expected in cases:
+        assert normalize_transmission_url(raw) == expected, f"Failed for raw={raw!r}"
+
+
+def test_transmission_rpc_handles_html_response_gracefully():
+    """When a wrong URL hits the web UI instead of the RPC endpoint, Transmission
+    answers with HTML. The adapter must catch the non-JSON body and return None
+    cleanly without raising a raw JSONDecodeError."""
+    adapter = _trans_with_config()
+    html_resp = _mock_response(200, text="<!DOCTYPE html><html><body>Web UI</body></html>")
+    with patch("core.torrent_clients.transmission.http_requests.post", return_value=html_resp):
+        assert adapter._rpc("session-get", {}) is None
+
+
+# ---------------------------------------------------------------------------
+# qBittorrent 5.0+ JSON response handling on /api/v2/torrents/add
+# ---------------------------------------------------------------------------
+
+def test_qbit_add_torrent_handles_qbittorrent_5_json_response():
+    """qBittorrent 5.0+ returns JSON on /api/v2/torrents/add with added_torrent_ids."""
+    adapter = _qbit_with_config()
+    adapter._all_hashes = MagicMock(return_value={"old1", "old2"})
+
+    json_body = (
+        '{"added_torrent_ids":["2c54add476a0a48e07b79a0282e058424c19aa7f"],'
+        '"failure_count":0,"pending_count":0,"success_count":1}'
+    )
+    resp = _mock_response(200, text=json_body, json_body={
+        "added_torrent_ids": ["2c54add476a0a48e07b79a0282e058424c19aa7f"],
+        "failure_count": 0,
+        "pending_count": 0,
+        "success_count": 1,
+    })
+    adapter._call = MagicMock(return_value=resp)
+
+    res = adapter._add_torrent_sync("magnet:?xt=urn:btih:2c54add476a0a48e07b79a0282e058424c19aa7f", "music", None)
+    assert res == "2c54add476a0a48e07b79a0282e058424c19aa7f"
+
+
+def test_qbit_add_torrent_handles_qbittorrent_5_json_success_without_ids():
+    """If qBittorrent 5.0+ reports success_count > 0 without IDs in list, use magnet hash."""
+    adapter = _qbit_with_config()
+    adapter._all_hashes = MagicMock(return_value={"old1"})
+
+    resp = _mock_response(200, text='{"added_torrent_ids":[],"failure_count":0,"success_count":1}', json_body={
+        "added_torrent_ids": [],
+        "failure_count": 0,
+        "success_count": 1,
+    })
+    adapter._call = MagicMock(return_value=resp)
+
+    magnet = "magnet:?xt=urn:btih:2c54add476a0a48e07b79a0282e058424c19aa7f"
+    res = adapter._add_torrent_sync(magnet, "music", None)
+    assert res == "2c54add476a0a48e07b79a0282e058424c19aa7f"
+
+
+def test_qbit_add_torrent_handles_qbittorrent_5_json_duplicate_adoption():
+    """If qBittorrent 5.0+ reports failure_count > 0 because the torrent already exists,
+    adopt the existing hash if it was already in before."""
+    adapter = _qbit_with_config()
+    existing_hash = "2c54add476a0a48e07b79a0282e058424c19aa7f"
+    adapter._all_hashes = MagicMock(return_value={existing_hash})
+
+    resp = _mock_response(200, text='{"added_torrent_ids":[],"failure_count":1,"success_count":0}', json_body={
+        "added_torrent_ids": [],
+        "failure_count": 1,
+        "success_count": 0,
+    })
+    adapter._call = MagicMock(return_value=resp)
+
+    magnet = f"magnet:?xt=urn:btih:{existing_hash}"
+    res = adapter._add_torrent_sync(magnet, "music", None)
+    assert res == existing_hash
+
+
+def test_qbit_add_torrent_handles_qbittorrent_5_json_failure_returns_none():
+    """If qBittorrent 5.0+ reports failure_count > 0 and the torrent is NOT already held, return None."""
+    adapter = _qbit_with_config()
+    adapter._all_hashes = MagicMock(return_value={"some_other_hash"})
+
+    resp = _mock_response(200, text='{"added_torrent_ids":[],"failure_count":1,"success_count":0}', json_body={
+        "added_torrent_ids": [],
+        "failure_count": 1,
+        "success_count": 0,
+    })
+    adapter._call = MagicMock(return_value=resp)
+
+    magnet = "magnet:?xt=urn:btih:2c54add476a0a48e07b79a0282e058424c19aa7f"
+    res = adapter._add_torrent_sync(magnet, "music", None)
+    assert res is None
+
+
+def test_qbit_add_torrent_file_handles_qbittorrent_5_json_response():
+    """qBittorrent 5.0+ file upload returning added_torrent_ids returns hash immediately."""
+    adapter = _qbit_with_config()
+    adapter._all_hashes = MagicMock(return_value=set())
+
+    resp = _mock_response(200, text='{"added_torrent_ids":["filehash123"],"success_count":1}', json_body={
+        "added_torrent_ids": ["filehash123"],
+        "success_count": 1,
+    })
+    adapter._call = MagicMock(return_value=resp)
+
+    res = adapter._add_torrent_file_sync(b"fake_torrent_bytes", "music", None)
+    assert res == "filehash123"
+
+
+# ---------------------------------------------------------------------------
+# qBittorrent 4.x backwards compatibility ('Ok.' / 'Fails.')
+# ---------------------------------------------------------------------------
+
+def test_qbit_add_torrent_handles_qbittorrent_4_ok_response():
+    """qBittorrent 4.x returns plaintext 'Ok.' on successful add."""
+    adapter = _qbit_with_config()
+    adapter._all_hashes = MagicMock(return_value=set())
+
+    resp = _mock_response(200, text="Ok.")
+    adapter._call = MagicMock(return_value=resp)
+
+    magnet = "magnet:?xt=urn:btih:2c54add476a0a48e07b79a0282e058424c19aa7f"
+    res = adapter._add_torrent_sync(magnet, "music", None)
+    assert res == "2c54add476a0a48e07b79a0282e058424c19aa7f"
+
+
+def test_qbit_add_torrent_handles_qbittorrent_4_fails_duplicate_adoption():
+    """qBittorrent 4.x returns plaintext 'Fails.' when torrent already exists in client;
+    must adopt existing hash."""
+    adapter = _qbit_with_config()
+    existing_hash = "2c54add476a0a48e07b79a0282e058424c19aa7f"
+    adapter._all_hashes = MagicMock(return_value={existing_hash})
+
+    resp = _mock_response(200, text="Fails.")
+    adapter._call = MagicMock(return_value=resp)
+
+    magnet = f"magnet:?xt=urn:btih:{existing_hash}"
+    res = adapter._add_torrent_sync(magnet, "music", None)
+    assert res == existing_hash
+
+
+def test_qbit_add_torrent_handles_qbittorrent_4_fails_not_held():
+    """qBittorrent 4.x returns plaintext 'Fails.' when rejected; must return None."""
+    adapter = _qbit_with_config()
+    adapter._all_hashes = MagicMock(return_value={"other_hash"})
+
+    resp = _mock_response(200, text="Fails.")
+    adapter._call = MagicMock(return_value=resp)
+
+    magnet = "magnet:?xt=urn:btih:2c54add476a0a48e07b79a0282e058424c19aa7f"
+    res = adapter._add_torrent_sync(magnet, "music", None)
+    assert res is None
+
+

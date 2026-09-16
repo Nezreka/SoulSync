@@ -4,6 +4,7 @@ on every file so they're consistent. Prevents media server album splits.
 """
 
 import os
+import re
 import threading
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
@@ -13,6 +14,7 @@ from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TALB, TPE2, TXXX
 from mutagen.mp4 import MP4, MP4FreeForm
 from mutagen.oggvorbis import OggVorbis
+from mutagen.oggopus import OggOpus
 
 from utils.logging_config import get_logger
 
@@ -351,25 +353,18 @@ def _match_files_to_tracklist(file_infos, release):
 
 def _write_tag_to_file(audio, tag_key, value):
     """Write a single custom tag to an audio file (Mutagen object)."""
-    if value is None:
+    from core.metadata.common import get_mutagen_symbols, get_config_manager
+    from core.metadata.source import SOURCE_TAG_CONFIG
+    from core.metadata.musicbrainz_tags import write_tag
+    cfg = get_config_manager()
+    if cfg.get('musicbrainz.embed_tags', True) is False:
         return
-    value = str(value)
-
-    try:
-        if isinstance(audio.tags, ID3):
-            desc = _ID3_TXXX_MAP.get(tag_key, tag_key)
-            # Remove existing TXXX with this desc
-            to_remove = [k for k in audio.tags if k.startswith('TXXX:') and desc in k]
-            for k in to_remove:
-                del audio.tags[k]
-            audio.tags.add(TXXX(encoding=3, desc=desc, text=[value]))
-        elif isinstance(audio, (FLAC, OggVorbis)):
-            audio[tag_key] = [value]
-        elif isinstance(audio, MP4):
-            key = _MP4_KEY_PREFIX + _ID3_TXXX_MAP.get(tag_key, tag_key)
-            audio[key] = [MP4FreeForm(value.encode('utf-8'))]
-    except Exception as e:
-        logger.debug(f"Failed to write {tag_key}: {e}")
+    setting = SOURCE_TAG_CONFIG.get(tag_key)
+    if setting and cfg.get(setting, True) is False:
+        return
+    symbols = get_mutagen_symbols()
+    if symbols and value is not None:
+        write_tag(audio, tag_key, value, symbols)
 
 
 def _write_standard_tag(audio, tag_name, value):
@@ -384,7 +379,7 @@ def _write_standard_tag(audio, tag_name, value):
             elif tag_name == 'albumartist':
                 audio.tags.delall('TPE2')
                 audio.tags.add(TPE2(encoding=3, text=[value]))
-        elif isinstance(audio, (FLAC, OggVorbis)):
+        elif isinstance(audio, (FLAC, OggVorbis, OggOpus)):
             audio[tag_name.upper()] = [value]
         elif isinstance(audio, MP4):
             tag_map = {'album': '\xa9alb', 'albumartist': 'aART'}
@@ -411,24 +406,26 @@ _AUDIO_EXTS = {'.flac', '.mp3', '.m4a', '.mp4', '.ogg', '.oga', '.opus', '.wav',
 
 def _read_tag_from_file(audio, tag_key):
     """Read a single custom album-level tag (mirror of _write_tag_to_file)."""
+    from core.metadata.source import ID3_TAG_MAP, VORBIS_TAG_MAP, MP4_TAG_MAP
     try:
         if isinstance(audio.tags, ID3):
-            desc = _ID3_TXXX_MAP.get(tag_key, tag_key)
-            for k in list(audio.tags.keys()):
-                if k.startswith('TXXX:') and desc in k:
-                    txt = getattr(audio.tags[k], 'text', None)
-                    return str(txt[0]) if txt else None
-            return None
-        elif isinstance(audio, (FLAC, OggVorbis)):
-            vals = audio.get(tag_key) or audio.get(tag_key.lower())
+            frame, desc = ID3_TAG_MAP.get(tag_key, ('TXXX', tag_key))
+            if frame != 'TXXX':
+                vals = audio.tags.getall(frame)
+                if vals and vals[0].text:
+                    return str(vals[0].text[0])
+            for name in (desc, _ID3_TXXX_MAP.get(tag_key, tag_key)):
+                vals = audio.tags.getall('TXXX:' + str(name))
+                if vals and vals[0].text:
+                    return str(vals[0].text[0])
+        elif isinstance(audio, (FLAC, OggVorbis, OggOpus)):
+            vals = audio.get(VORBIS_TAG_MAP.get(tag_key, tag_key)) or audio.get(tag_key)
             return str(vals[0]) if vals else None
         elif isinstance(audio, MP4):
-            key = _MP4_KEY_PREFIX + _ID3_TXXX_MAP.get(tag_key, tag_key)
+            key = _MP4_KEY_PREFIX + MP4_TAG_MAP.get(tag_key, tag_key)
             vals = audio.get(key)
-            if not vals:
-                return None
-            v = vals[0]
-            return bytes(v).decode('utf-8', 'ignore') if isinstance(v, (bytes, bytearray)) else str(v)
+            if vals:
+                return bytes(vals[0]).decode('utf-8', 'ignore')
     except Exception:
         return None
     return None
@@ -441,7 +438,7 @@ def _read_standard_tag(audio, tag_name):
             frame = 'TALB' if tag_name == 'album' else 'TPE2'
             vals = audio.tags.getall(frame)
             return str(vals[0].text[0]) if vals and vals[0].text else None
-        elif isinstance(audio, (FLAC, OggVorbis)):
+        elif isinstance(audio, (FLAC, OggVorbis, OggOpus)):
             vals = audio.get(tag_name.upper()) or audio.get(tag_name)
             return str(vals[0]) if vals else None
         elif isinstance(audio, MP4):
@@ -524,6 +521,76 @@ def _adopt_album_tags_from_siblings(file_infos):
     return adopted, album, artist
 
 
+def _fold_title(value) -> str:
+    """case, whitespace and punctuation folded; edition qualifiers kept."""
+    value = (value or '').casefold()
+    value = re.sub(r"[^\w\s]", ' ', value)
+    return ' '.join(value.split())
+
+
+def adopt_sibling_tags_for_loose_tracks(file_infos, file_lock_fn=None) -> Dict[str, Any]:
+    """a track that landed in an album folder that already holds tracks joins them.
+
+    the album batch path runs run_album_consistency, whose step 0 adopts the
+    album-level tags from the files already on disk. a single track (search,
+    wishlist, "download the missing one") never got there: it resolved its own
+    musicbrainz release, and a different release id from its siblings splits
+    the album on navidrome (achilles4). this is that step 0 for any batch
+    shape, gated so it can only ever join the album it is already in:
+
+    - siblings are the files NOT in file_infos; new files never vote for
+      each other
+    - the file's own album tag must agree with the folder's (case and
+      punctuation aside). a track filed into the wrong folder, or a folder
+      of loose singles, is left exactly as it was
+    - only album-level fields are written; title, artist, track number and
+      the siblings themselves are never touched
+    """
+    result = {'written': 0, 'gated': 0, 'no_siblings': 0, 'errors': 0, 'total_files': len(file_infos)}
+    by_folder: Dict[str, List[Dict[str, Any]]] = {}
+    for fi in file_infos:
+        path = fi.get('path')
+        if path and os.path.exists(path):
+            by_folder.setdefault(os.path.dirname(os.path.normpath(path)), []).append(fi)
+
+    for infos in by_folder.values():
+        adopted = _adopt_album_tags_from_siblings(infos)
+        if not adopted:
+            result['no_siblings'] += len(infos)
+            continue
+        adopt_tags, adopt_album, adopt_artist = adopted
+        for fi in infos:
+            path = fi['path']
+            try:
+                lock = file_lock_fn(path) if file_lock_fn else _DummyLock()
+                with lock:
+                    audio = MutagenFile(path, easy=False)
+                    if audio is None:
+                        result['errors'] += 1
+                        continue
+                    own_album = _read_standard_tag(audio, 'album')
+                    if own_album and adopt_album and _fold_title(own_album) != _fold_title(adopt_album):
+                        logger.info(f"[Album Consistency] Not adopting folder tags for {os.path.basename(path)}: "
+                                    f"its album is \"{own_album}\", the folder's is \"{adopt_album}\"")
+                        result['gated'] += 1
+                        continue
+                    for tag_key, value in adopt_tags.items():
+                        _write_tag_to_file(audio, tag_key, value)
+                    if adopt_album:
+                        _write_standard_tag(audio, 'album', adopt_album)
+                    if adopt_artist:
+                        _write_standard_tag(audio, 'albumartist', adopt_artist)
+                    _atomic_save(audio)
+                    result['written'] += 1
+            except Exception as e:
+                logger.error(f"Error adopting sibling tags for {path}: {e}")
+                result['errors'] += 1
+    if result['written']:
+        logger.info(f"[Album Consistency] {result['written']}/{len(file_infos)} loose track(s) joined the "
+                    f"album already on disk; existing tracks untouched")
+    return result
+
+
 def run_album_consistency(
     file_infos: List[Dict[str, Any]],
     album_name: str,
@@ -531,6 +598,7 @@ def run_album_consistency(
     mb_service: Any,
     total_discs: int = 1,
     file_lock_fn=None,
+    release_mbid=None,
 ) -> Dict[str, Any]:
     """
     Picard-style album consistency: pick ONE MusicBrainz release for the album,
@@ -543,6 +611,7 @@ def run_album_consistency(
         mb_service: MusicBrainzService instance
         total_discs: Number of discs in the album
         file_lock_fn: Optional function(path) -> context manager for thread-safe writes
+        release_mbid: Concrete user-selected edition; never reselected or replaced by siblings
 
     Returns:
         {success, release_mbid, matched_tracks, total_files, tags_written, error}
@@ -566,7 +635,8 @@ def run_album_consistency(
     # files, instead of imposing a freshly-picked MusicBrainz release that can
     # differ from what the siblings hold and actually SPLIT the album. Existing
     # files are never opened for writing here; only the new file_infos are tagged.
-    adopted = _adopt_album_tags_from_siblings(file_infos)
+    explicit_release = bool(release_mbid)
+    adopted = None if explicit_release else _adopt_album_tags_from_siblings(file_infos)
     if adopted:
         adopt_tags, adopt_album, adopt_artist = adopted
         written = 0
@@ -605,7 +675,14 @@ def run_album_consistency(
     # Step 1: Resolve the album's release — PINNED across runs (via the persistent
     # album MBID cache) so re-runs can't pick a different release and fracture the
     # album into multiple MUSICBRAINZ_ALBUMIDs.
-    release = _resolve_album_release(album_name, artist_name, len(file_infos), mb_service)
+    if release_mbid:
+        release = mb_service.mb_client.get_release(
+            release_mbid, includes=['release-groups', 'labels', 'media', 'artist-credits', 'recordings'])
+        if not release or release.get('id') != release_mbid:
+            result['error'] = 'Selected MusicBrainz release is unavailable; keeping existing tags'
+            return result
+    else:
+        release = _resolve_album_release(album_name, artist_name, len(file_infos), mb_service)
     if not release:
         result['error'] = f'No MusicBrainz release found for "{album_name}"'
         return result
@@ -615,6 +692,11 @@ def run_album_consistency(
 
     # Step 2: Match files to tracklist
     matched = _match_files_to_tracklist(file_infos, release)
+    if explicit_release:
+        from core.metadata.musicbrainz_tags import track_matches_title
+        titles = {fi['path']: fi.get('title') for fi in file_infos}
+        matched = {path: track for path, track in matched.items()
+                   if track_matches_title(titles.get(path), track)}
     result['matched_tracks'] = len(matched)
 
     if len(matched) < len(file_infos) * 0.5:
@@ -623,49 +705,9 @@ def run_album_consistency(
         return result
 
     # Step 3: Build album-level tags (same for all files)
-    album_tags = {}
-    album_tags['MUSICBRAINZ_RELEASE_ID'] = release_mbid
-
-    rg = release.get('release-group', {})
-    if rg.get('id'):
-        album_tags['MUSICBRAINZ_RELEASEGROUPID'] = rg['id']
-    if rg.get('primary-type'):
-        album_tags['RELEASETYPE'] = rg['primary-type']
-    if rg.get('first-release-date'):
-        album_tags['ORIGINALDATE'] = rg['first-release-date']
-
+    from core.metadata.musicbrainz_tags import release_tags
+    album_tags = release_tags(release)
     ac = release.get('artist-credit', [])
-    if ac and isinstance(ac[0], dict):
-        aa = ac[0].get('artist', {})
-        if aa.get('id'):
-            album_tags['MUSICBRAINZ_ALBUMARTISTID'] = aa['id']
-
-    if release.get('status'):
-        album_tags['RELEASESTATUS'] = release['status']
-    if release.get('country'):
-        album_tags['RELEASECOUNTRY'] = release['country']
-    if release.get('barcode'):
-        album_tags['BARCODE'] = release['barcode']
-
-    media_list = release.get('media', [])
-    if media_list:
-        fmt = media_list[0].get('format', '')
-        if fmt:
-            album_tags['MEDIA'] = fmt
-        album_tags['TOTALDISCS'] = str(len(media_list))
-
-    label_info = release.get('label-info', [])
-    if label_info and isinstance(label_info[0], dict):
-        cat = label_info[0].get('catalog-number', '')
-        if cat:
-            album_tags['CATALOGNUMBER'] = cat
-
-    text_rep = release.get('text-representation', {})
-    if isinstance(text_rep, dict) and text_rep.get('script'):
-        album_tags['SCRIPT'] = text_rep['script']
-
-    if release.get('asin'):
-        album_tags['ASIN'] = release['asin']
 
     # Album name and artist from the release (canonical MB values)
     release_album_name = release.get('title', album_name)
@@ -719,6 +761,9 @@ def run_album_consistency(
                 # Write per-track tag (release track ID) if matched
                 if mb_track and mb_track.get('id'):
                     _write_tag_to_file(audio, 'MUSICBRAINZ_RELEASETRACKID', mb_track['id'])
+                    recording_id = (mb_track.get('recording') or {}).get('id')
+                    if recording_id:
+                        _write_tag_to_file(audio, 'MUSICBRAINZ_RECORDING_ID', recording_id)
 
                 _atomic_save(audio)
                 tags_written += 1

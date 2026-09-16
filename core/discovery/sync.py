@@ -423,6 +423,9 @@ def run_sync_task(
             logger.error(f"   Progress: {progress.progress}% ({progress.matched_tracks}/{progress.total_tracks} matched, {progress.failed_tracks} failed)")
 
             with sync_lock:
+                current_status = sync_states.get(playlist_id, {}).get("status")
+                if current_status == "cancelled":
+                    return
                 sync_states[playlist_id] = {
                     "status": "syncing",
                     "playlist_name": playlist_name,
@@ -555,6 +558,11 @@ def run_sync_task(
             except Exception as _pre_err:
                 logger.debug(f"[PLAYLIST IMAGE] pre-sync existence check failed (assuming pre-existed): {_pre_err}")
 
+        with sync_lock:
+            if sync_states.get(playlist_id, {}).get("status") == "cancelled":
+                logger.info(f"Sync for {playlist_id} was cancelled before sync_playlist call")
+                return
+
         # Run the sync (this is a blocking call within this thread)
         result = deps.run_async(sync_service.sync_playlist(playlist, download_missing=False, profile_id=profile_id, sync_mode=sync_mode))
 
@@ -587,6 +595,10 @@ def run_sync_task(
             if unmatched_summary:
                 result_dict['unmatched_tracks'] = unmatched_summary
         with sync_lock:
+            current_status = sync_states.get(playlist_id, {}).get("status")
+            if current_status == "cancelled":
+                logger.info(f"Sync for {playlist_id} was cancelled - not setting finished")
+                return
             sync_states[playlist_id] = {
                 "status": "finished",
                 "playlist_name": playlist_name,
@@ -752,6 +764,10 @@ def run_sync_task(
         import traceback
         traceback.print_exc()
         with sync_lock:
+            current_status = sync_states.get(playlist_id, {}).get("status")
+            if current_status == "cancelled":
+                logger.info(f"Sync for {playlist_id} was cancelled - ignoring exception {e}")
+                return
             sync_states[playlist_id] = {
                 "status": "error",
                 "playlist_name": playlist_name,

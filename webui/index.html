@@ -104,6 +104,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='settings-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='discover-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='watchlist-premier.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='chat-overhaul.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
         :root {
             --accent-rgb: {{ initial_accent_rgb }};
@@ -418,7 +419,7 @@
                 </a>
                 <a class="nav-button" data-page="sync" href="/sync">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span>
-                    <span class="nav-text">Sync</span>
+                    <span class="nav-text">Playlists</span>
                 </a>
                 <a class="nav-button" data-page="podcasts" href="/podcasts">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg></span>
@@ -6155,7 +6156,12 @@
                                                 <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.album_artist_id" checked> Album Artist ID</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_track_id" checked> Release Track ID</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_type" checked> Release Type</label>
-                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.original_date" checked> Original Date</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_date" checked> Release Date</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.original_date" checked> Original Date / Year</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.artist_sort" checked> Artist Sort Order</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.album_artist_sort" checked> Album Artist Sort Order</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.artists" checked> Artists</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.label" checked> Record Label</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_status" checked> Release Status</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_country" checked> Release Country</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.barcode" checked> Barcode</label>
@@ -6392,6 +6398,16 @@
                                     rank higher and Clean/Censored/Radio-Edit files rank lower. Nothing is
                                     ever skipped &mdash; if only a clean version exists, it still downloads.
                                     Requires explicit content to be allowed.
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="music-max-mb-per-minute">Maximum music download size (MB/min)</label>
+                                    <input type="number" id="music-max-mb-per-minute" min="0" step="0.1" value="0"
+                                        onchange="if(typeof debouncedAutoSaveSettings==='function')debouncedAutoSaveSettings()">
+                                    <div class="help-text">0 disables the limit. At 10 MB/min, a 3:30 track may be up to 35 MB (1 MB = 1,000,000 bytes).
+                                        Oversized candidates are skipped before download. Uses the advertised duration, or the requested track length when unavailable.
+                                        Album releases use the album length. Sources without size or duration information cannot be checked.
+                                        This does not resize existing files or limit post-processing output.</div>
                                 </div>
 
                                 <div class="form-group">
@@ -7427,7 +7443,29 @@
                                      Rooms live in the guild rail, Discord-style — they are
                                      deliberately NOT listed again here. -->
                                 <div class="chat-side-list chat-chanlist" data-chat-channels></div>
-                                <div class="chat-side-label">Direct Messages</div>
+
+                                <!-- Discord-style Social & Lists Navigation -->
+                                <div class="chat-social-nav-group">
+                                    <button type="button" class="chat-social-nav-btn" data-chat-open-social="friends" title="Open Friends List">
+                                        <span class="chat-social-nav-icon">⭐</span>
+                                        <span class="chat-social-nav-text">Friends</span>
+                                        <span class="chat-social-nav-badge" data-chat-side-count-friends hidden>0</span>
+                                    </button>
+                                    <button type="button" class="chat-social-nav-btn" data-chat-open-social="blocked" title="Open Blocked Users">
+                                        <span class="chat-social-nav-icon">🚫</span>
+                                        <span class="chat-social-nav-text">Blocklist</span>
+                                        <span class="chat-social-nav-badge" data-chat-side-count-blocked hidden>0</span>
+                                    </button>
+                                    <button type="button" class="chat-social-nav-btn" data-chat-open-social="bookmarks" title="Open Bookmarked Peers">
+                                        <span class="chat-social-nav-icon">📚</span>
+                                        <span class="chat-social-nav-text">Bookmarks</span>
+                                        <span class="chat-social-nav-badge" data-chat-side-count-bookmarks hidden>0</span>
+                                    </button>
+                                </div>
+
+                                <div class="chat-side-label-row">
+                                    <div class="chat-side-label">Direct Messages</div>
+                                </div>
                                 <div class="chat-side-list" data-chat-convos></div>
                             </div>
                             <!-- bottom-left user panel (Discord's account strip) -->
@@ -7471,6 +7509,9 @@
                                     <div data-chat-user-card-body></div>
                                     <div class="chat-settings-actions">
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-close>Close</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-friend title="Toggle local friend status">⭐ Add Friend</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-block title="Hide all messages from this user (local block)">🚫 Block</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-bookmark title="Bookmark this peer">⭐ Bookmark</button>
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-ignore>Mute</button>
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-challenge title="Invite them to a private Arcade game">⚔ Challenge</button>
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-browse>Browse files</button>
@@ -7478,19 +7519,99 @@
                                     </div>
                                 </div>
                             </div>
-                            <!-- share browser: a peer's files, downloadable in place -->
-                            <div class="chat-settings-overlay" data-chat-browse-modal hidden>
-                                <div class="chat-settings-modal chat-browse-modal">
-                                    <h3 class="chat-settings-title" data-chat-browse-title>Files</h3>
-                                    <input class="chat-input" data-chat-browse-search type="text"
-                                           placeholder="Filter folders…" autocomplete="off">
-                                    <div class="chat-browse-body" data-chat-browse-body></div>
-                                    <div class="chat-settings-actions">
-                                        <button type="button" class="modal-button modal-button--secondary" data-chat-browse-back hidden>&larr; Folders</button>
-                                        <button type="button" class="modal-button modal-button--secondary" data-chat-browse-close>Close</button>
-                                        <button type="button" class="modal-button modal-button--primary" data-chat-browse-dl hidden>Download selected</button>
+                            <!-- slide-over peer hub & file explorer: backdrop + drawer (outperforming nicotine+/slskd) -->
+                            <div class="chat-peer-backdrop" data-chat-browse-backdrop hidden></div>
+                            <div class="chat-peer-drawer" data-chat-browse-modal hidden>
+                                <!-- Peer Hero Header -->
+                                <div class="chat-peer-hero">
+                                    <div class="chat-peer-hero-top">
+                                        <div class="chat-peer-identity">
+                                            <div class="chat-peer-av" data-chat-browse-av>👤</div>
+                                            <div class="chat-peer-name-wrap">
+                                                <div class="chat-peer-name" data-chat-browse-title>Peer Files</div>
+                                                <div class="chat-peer-presence" data-chat-browse-presence>
+                                                    <span class="chat-peer-presence-dot"></span>
+                                                    <span data-chat-browse-status-text>Soulseek Peer</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="chat-peer-hero-actions">
+                                            <button type="button" class="chat-peer-bm-btn" data-chat-peer-bookmark title="Bookmark this peer">⭐ Bookmark</button>
+                                            <button type="button" class="chat-peer-saved-btn" data-chat-browse-saved-peers title="Switch to bookmarked peer">📚 Bookmarks</button>
+                                            <button type="button" class="chat-peer-close" data-chat-browse-close title="Close (Esc)">&times;</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Telemetry & Soulseek connection stats -->
+                                    <div class="chat-peer-telemetry" data-chat-browse-telemetry>
+                                        <div class="chat-peer-stat-card">
+                                            <span class="chat-peer-stat-lbl">Upload Speed</span>
+                                            <span class="chat-peer-stat-val" data-chat-browse-speed>—</span>
+                                        </div>
+                                        <div class="chat-peer-stat-card">
+                                            <span class="chat-peer-stat-lbl">Queue Length</span>
+                                            <span class="chat-peer-stat-val" data-chat-browse-queue>—</span>
+                                        </div>
+                                        <div class="chat-peer-stat-card">
+                                            <span class="chat-peer-stat-lbl">Free Slots</span>
+                                            <span class="chat-peer-stat-val" data-chat-browse-slots>—</span>
+                                        </div>
+                                        <div class="chat-peer-stat-card">
+                                            <span class="chat-peer-stat-lbl">Shared Folders</span>
+                                            <span class="chat-peer-stat-val" data-chat-browse-folders-count>—</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Provenance & Quick Action Bar -->
+                                    <div class="chat-peer-quickbar">
+                                        <div class="chat-peer-history-pill" data-chat-browse-history hidden>
+                                            ⭐ <span data-chat-browse-history-text></span>
+                                        </div>
+                                        <div class="chat-peer-actions">
+                                            <button type="button" class="chat-peer-act-btn" data-chat-browse-friend title="Toggle local friend">⭐ Friend</button>
+                                            <button type="button" class="chat-peer-act-btn" data-chat-browse-block title="Block user messages">🚫 Block</button>
+                                            <button type="button" class="chat-peer-act-btn" data-chat-browse-msg>💬 Message</button>
+                                            <button type="button" class="chat-peer-act-btn" data-chat-browse-challenge title="Challenge to an Arcade game">⚔ Challenge</button>
+                                        </div>
                                     </div>
                                 </div>
+
+                                <!-- Filter & Tree Tools Bar -->
+                                <div class="chat-browse-filter-bar">
+                                    <div class="chat-browse-search-row">
+                                        <input class="chat-browse-filter-input" data-chat-browse-search type="text"
+                                               placeholder="Filter folders or search files…" autocomplete="off">
+                                        <div class="chat-browse-tree-tools">
+                                            <button type="button" class="chat-peer-act-btn" data-chat-browse-expand-all title="Expand all folders">Expand all</button>
+                                            <button type="button" class="chat-peer-act-btn" data-chat-browse-collapse-all title="Collapse all folders">Collapse all</button>
+                                        </div>
+                                    </div>
+                                    <div class="chat-browse-format-filters">
+                                        <span class="chat-fmt-filter-label">Format:</span>
+                                        <button type="button" class="chat-fmt-pill chat-fmt-pill--active" data-chat-browse-fmt="all">All</button>
+                                        <button type="button" class="chat-fmt-pill" data-chat-browse-fmt="flac">FLAC / Lossless</button>
+                                        <button type="button" class="chat-fmt-pill" data-chat-browse-fmt="320">MP3 320k</button>
+                                        <button type="button" class="chat-fmt-pill" data-chat-browse-fmt="vbr">VBR / Other</button>
+                                    </div>
+                                </div>
+
+                                <!-- Collapsible Folder Tree Content -->
+                                <div class="chat-browse-content" data-chat-browse-body></div>
+
+                                <!-- Floating Sticky Download Dock (Positioned above bottom floating notification buttons) -->
+                                <div class="chat-browse-dock" data-chat-browse-dock hidden>
+                                    <div class="chat-dock-info">
+                                        <span class="chat-dock-title"><span data-chat-dock-count>0</span> files selected</span>
+                                        <span class="chat-dock-meta" data-chat-dock-size>0 MB</span>
+                                    </div>
+                                    <div class="chat-dock-actions">
+                                        <button type="button" class="chat-dock-btn chat-dock-btn--clear" data-chat-dock-clear>Clear</button>
+                                        <button type="button" class="modal-button modal-button--primary chat-dock-btn chat-dock-btn--download" data-chat-browse-dl>Download Selected</button>
+                                    </div>
+                                </div>
+
+                                <!-- Ambient clearance shelf: frames floating notification/activity buttons below dock -->
+                                <div class="chat-peer-drawer-shelf" aria-hidden="true"></div>
                             </div>
                             <!-- room browser: every public Soulseek room, join from here -->
                             <div class="chat-settings-overlay" data-chat-rooms-modal hidden>
@@ -7502,6 +7623,95 @@
                                     <div class="chat-settings-actions">
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-rooms-close>Close</button>
                                     </div>
+                                </div>
+                            </div>
+                            <!-- Discord-style Slide-over Social & Lists Drawer (Friends, Blocklist, Bookmarks) -->
+                            <div class="chat-peer-backdrop chat-social-backdrop" data-chat-social-backdrop hidden></div>
+                            <div class="chat-peer-drawer chat-social-drawer" data-chat-social-drawer hidden>
+                                <!-- Drawer Hero / Header -->
+                                <div class="chat-social-hero">
+                                    <div class="chat-social-hero-top">
+                                        <div class="chat-social-identity">
+                                            <div class="chat-social-hero-icon">👥</div>
+                                            <div class="chat-social-title-wrap">
+                                                <div class="chat-social-title">Social &amp; Lists</div>
+                                                <div class="chat-social-subtitle">Local Friends, Blocklist &amp; Bookmarked Peers</div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-social-close title="Close (Esc)">&times;</button>
+                                    </div>
+
+                                    <!-- Discord-style Navigation Tabs -->
+                                    <div class="chat-social-nav-tabs">
+                                        <button type="button" class="chat-social-nav-tab chat-social-nav-tab--active" data-chat-social-tab="friends">
+                                            <span class="chat-social-tab-icon">⭐</span> Friends
+                                            <span class="chat-social-tab-pill" data-chat-count-friends>0</span>
+                                        </button>
+                                        <button type="button" class="chat-social-nav-tab" data-chat-social-tab="blocked">
+                                            <span class="chat-social-tab-icon">🚫</span> Blocked
+                                            <span class="chat-social-tab-pill" data-chat-count-blocked>0</span>
+                                        </button>
+                                        <button type="button" class="chat-social-nav-tab" data-chat-social-tab="bookmarks">
+                                            <span class="chat-social-tab-icon">📚</span> Bookmarks
+                                            <span class="chat-social-tab-pill" data-chat-count-bookmarks>0</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Add User Box (Discord-style add banner) -->
+                                <div class="chat-social-add-box">
+                                    <div class="chat-social-add-label" data-chat-social-add-label>ADD FRIEND</div>
+                                    <div class="chat-social-add-input-wrap">
+                                        <input class="chat-social-add-input" data-chat-social-input type="text"
+                                               placeholder="Enter a Soulseek username…" autocomplete="off" spellcheck="false">
+                                        <button type="button" class="chat-social-submit-btn" data-chat-social-add-btn>+ Add</button>
+                                    </div>
+                                </div>
+
+                                <!-- Filter toolbar -->
+                                <div class="chat-social-filter-bar">
+                                    <div class="chat-social-search-wrap">
+                                        <span class="chat-social-search-icon">🔍</span>
+                                        <input class="chat-social-filter-input" data-chat-social-filter type="text"
+                                               placeholder="Filter list…" autocomplete="off">
+                                    </div>
+                                    <span class="chat-social-total-count" data-chat-social-total>0 users</span>
+                                </div>
+
+                                <!-- Scrollable List -->
+                                <div class="chat-social-scroll-body" data-chat-social-list></div>
+                            </div>
+                            <!-- Discord-style Slide-over Wanted / ISO Search & Post Modal -->
+                            <div class="chat-peer-backdrop chat-want-backdrop" data-chat-want-backdrop hidden></div>
+                            <div class="chat-peer-drawer chat-want-drawer" data-chat-want-modal hidden>
+                                <div class="chat-want-hero">
+                                    <div class="chat-want-hero-top">
+                                        <div class="chat-want-identity">
+                                            <div class="chat-want-hero-icon">🔍</div>
+                                            <div class="chat-want-title-wrap">
+                                                <div class="chat-want-title">Post Wanted / ISO Card</div>
+                                                <div class="chat-want-subtitle">Search metadata &amp; post an In Search Of card to chat</div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-want-close title="Close (Esc)">&times;</button>
+                                    </div>
+                                    <div class="chat-want-search-bar">
+                                        <span class="chat-want-search-icon">🔍</span>
+                                        <input type="text" class="chat-want-search-input" data-chat-want-input placeholder="Search track, album, EP or artist…" autocomplete="off">
+                                        <button type="button" class="chat-want-search-clear" data-chat-want-clear hidden title="Clear">&times;</button>
+                                    </div>
+                                    <div class="chat-want-sources-bar">
+                                        <button type="button" class="chat-want-src-btn chat-want-src-btn--active" data-want-src="auto">All Sources</button>
+                                        <button type="button" class="chat-want-src-btn" data-want-src="spotify">Spotify</button>
+                                        <button type="button" class="chat-want-src-btn" data-want-src="deezer">Deezer</button>
+                                        <button type="button" class="chat-want-src-btn" data-want-src="itunes">Apple Music</button>
+                                        <button type="button" class="chat-want-src-btn" data-want-src="discogs">Discogs</button>
+                                        <button type="button" class="chat-want-src-btn" data-want-src="musicbrainz">MusicBrainz</button>
+                                    </div>
+                                </div>
+                                <div class="chat-want-body">
+                                    <div class="chat-want-status" data-chat-want-status>Type 2+ letters to search across metadata providers</div>
+                                    <div class="chat-want-results" data-chat-want-results></div>
                                 </div>
                             </div>
                             <!-- jukebox YouTube search: rich pop-in, search-page video-card look -->
@@ -7593,6 +7803,13 @@
                                 </div>
                             </div>
                             <div class="chat-scroll" data-chat-messages></div>
+                            <div class="chat-drop-overlay" data-chat-drop-overlay hidden>
+                                <div class="chat-drop-card">
+                                    <div class="chat-drop-icon">📤</div>
+                                    <div class="chat-drop-title">Drop file to share in chat</div>
+                                    <div class="chat-drop-sub">Audio, images, or files upload via filepost.dev</div>
+                                </div>
+                            </div>
                             <button class="chat-jump-pill" type="button" data-chat-jump hidden>New messages ↓</button>
                             <div class="chat-mention-pop" data-chat-mention-pop hidden></div>
                             <form class="chat-composer" data-chat-composer>
@@ -7660,6 +7877,10 @@
                                     <div class="chat-composer-row">
                                         <textarea class="chat-input chat-input--area chat-input--bare" data-chat-input maxlength="1000"
                                                   placeholder="Message…" autocomplete="off" rows="1"></textarea>
+                                        <button type="button" class="chat-tbtn chat-tbtn--side chat-tbtn--np" data-chat-np-btn title="Share what you're playing (/np)">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></button>
+                                        <button type="button" class="chat-tbtn chat-tbtn--side chat-tbtn--want" data-chat-want-btn title="In Search Of: Post a Wanted card (/want)">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><path d="M11 8v6M8 11h6"/></svg></button>
                                         <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-emoji-btn title="Emoji">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></button>
                                         <button type="button" class="chat-tbtn chat-tbtn--side" data-chat-attach-btn title="Share a file (filepost.dev)">

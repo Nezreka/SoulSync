@@ -297,7 +297,11 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
             SELECT lh.title, lh.artist, lh.album, lh.played_at, lh.duration_ms,
                    lh.server_source, al.thumb_url, t.artist_id
             FROM listening_history lh
-            LEFT JOIN tracks t ON t.id = lh.db_track_id
+            -- CAST or no index: tracks.id is TEXT and db_track_id is INTEGER,
+            -- and sqlite converts the COLUMN side of that comparison, so the
+            -- primary key can't be searched and every history row scanned the
+            -- whole tracks table (54 s per dashboard load on 300k tracks)
+            LEFT JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
             LEFT JOIN albums al ON al.id = t.album_id
             ORDER BY lh.played_at DESC
             LIMIT ?

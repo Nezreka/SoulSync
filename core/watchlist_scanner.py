@@ -20,6 +20,7 @@ from core.metadata_service import (
     get_primary_source,
     get_source_priority,
 )
+from core.metadata.artwork import usable_image_url
 from core.wishlist_service import get_wishlist_service
 from core.matching_engine import MusicMatchingEngine
 from utils.logging_config import get_logger
@@ -997,7 +998,9 @@ class WatchlistScanner:
                        deezer_artist_id, discogs_artist_id, musicbrainz_artist_id
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (image_url IS NULL OR image_url = '' OR image_url = 'None'
-                      OR image_url NOT LIKE 'http%')
+                      OR image_url NOT LIKE 'http%'
+                      OR image_url LIKE '%/images/artist//%'
+                      OR image_url LIKE '%d41d8cd98f00b204e9800998ecf8427e%')
             """, (profile_id,))
             imageless = cursor.fetchall()
 
@@ -1018,7 +1021,7 @@ class WatchlistScanner:
                     LIMIT 1
                 """, (name,))
                 cr = cursor.fetchone()
-                if cr:
+                if cr and usable_image_url(cr['image_url']):
                     img = cr['image_url']
 
                 # 2. Deezer direct URL (no API call needed)

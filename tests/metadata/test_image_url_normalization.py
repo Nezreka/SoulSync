@@ -71,3 +71,14 @@ def test_normalize_image_url_falls_back_to_proxy_when_cache_registration_fails(m
 
     url = "http://localhost:4533/cover.jpg"
     assert normalize_image_url(url) == f"/api/image-proxy?url={quote(url, safe='')}"
+
+
+def test_navidrome_cover_normalization_is_stable_and_does_not_register_images(monkeypatch):
+    from core.metadata import artwork
+    import core.image_cache as image_cache
+    from types import SimpleNamespace
+    monkeypatch.setattr(artwork, 'get_config_manager', lambda: SimpleNamespace(get_active_media_server=lambda: 'navidrome'))
+    monkeypatch.setattr(image_cache, 'cached_image_url', lambda _: pytest.fail('library serialization must not write image cache'))
+    for salt in ('old', 'new'):
+        assert artwork.normalize_image_url(f'http://navidrome:4533/rest/getCoverArt?id=al-123&s={salt}&t=secret') == '/api/navidrome/cover/al-123'
+    assert artwork.normalize_image_url('/api/navidrome/cover/al-123') == '/api/navidrome/cover/al-123'

@@ -142,6 +142,7 @@ def _short_query_response(db_artists: list[dict], requested_source: str, deps: S
         'spotify_artists': [],
         'spotify_albums': [],
         'spotify_tracks': [],
+        'spotify_playlists': [],
         'metadata_source': short_source,
         'primary_source': short_source,
         'alternate_sources': [],
@@ -184,6 +185,7 @@ def _single_source_response(
             'spotify_artists': [],
             'spotify_albums': [],
             'spotify_tracks': [],
+            'spotify_playlists': [],
             'metadata_source': requested_source,
             'primary_source': requested_source,
             'alternate_sources': [],
@@ -194,12 +196,13 @@ def _single_source_response(
         source_results = sources.search_source(query, client, requested_source, prefer_free=prefer_free)
     except Exception as e:
         logger.warning(f"Single-source search ({requested_source}) failed: {e}")
-        source_results = {'artists': [], 'albums': [], 'tracks': [], 'available': False}
+        source_results = {'artists': [], 'albums': [], 'tracks': [], 'playlists': [], 'available': False}
 
     logger.info(
         f"Enhanced search [source={requested_source}] results: "
         f"{len(db_artists)} DB, {len(source_results['artists'])} artists, "
-        f"{len(source_results['albums'])} albums, {len(source_results['tracks'])} tracks"
+        f"{len(source_results['albums'])} albums, {len(source_results['tracks'])} tracks, "
+        f"{len(source_results.get('playlists', []))} playlists"
     )
 
     return {
@@ -207,6 +210,7 @@ def _single_source_response(
         'spotify_artists': source_results['artists'],
         'spotify_albums': source_results['albums'],
         'spotify_tracks': source_results['tracks'],
+        'spotify_playlists': source_results.get('playlists', []),
         'metadata_source': requested_source,
         'primary_source': requested_source,
         'alternate_sources': [],
@@ -294,7 +298,8 @@ def _fan_out_response(query: str, db_artists: list[dict], deps: SearchDeps) -> d
         f"Enhanced search results ({primary_source}): {len(db_artists)} DB artists, "
         f"{len(primary_results['artists'])} artists, "
         f"{len(primary_results['albums'])} albums, "
-        f"{len(primary_results['tracks'])} tracks | "
+        f"{len(primary_results['tracks'])} tracks, "
+        f"{len(primary_results.get('playlists', []))} playlists | "
         f"Alt sources available: {alternate_sources}"
     )
 
@@ -303,6 +308,7 @@ def _fan_out_response(query: str, db_artists: list[dict], deps: SearchDeps) -> d
         'spotify_artists': primary_results['artists'],
         'spotify_albums': primary_results['albums'],
         'spotify_tracks': primary_results['tracks'],
+        'spotify_playlists': primary_results.get('playlists', []),
         'metadata_source': primary_source,
         'primary_source': primary_source,
         'alternate_sources': alternate_sources,
@@ -316,6 +322,7 @@ def empty_response() -> dict:
         'spotify_artists': [],
         'spotify_albums': [],
         'spotify_tracks': [],
+        'spotify_playlists': [],
         'sources': {},
         'primary_source': 'spotify',
         'metadata_source': 'spotify',
@@ -351,14 +358,37 @@ def resolve_youtube_videos_client(deps: SearchDeps):
     return deps.download_orchestrator.client('youtube')
 
 
-def stream_youtube_videos(query: str, youtube_client, run_async: Callable) -> Iterator[str]:
+# how many videos one yt-dlp search may ask for. the default is what the
+# search page has always fetched; the ceiling is the artist page's "show more"
+# path. above 60 yt-dlp pages through search results slowly enough that the
+# request stops feeling like a click.
+YOUTUBE_VIDEO_LIMIT_DEFAULT = 20
+YOUTUBE_VIDEO_LIMIT_MAX = 60
+
+
+def clamp_youtube_video_limit(value) -> int:
+    """the `limit` a client may send, pinned to [1, YOUTUBE_VIDEO_LIMIT_MAX].
+
+    anything that isn't a number (None, '', 'abc') means the default, so an
+    old client that never sends limit keeps its old result count.
+    """
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return YOUTUBE_VIDEO_LIMIT_DEFAULT
+    return max(1, min(YOUTUBE_VIDEO_LIMIT_MAX, limit))
+
+
+def stream_youtube_videos(query: str, youtube_client, run_async: Callable,
+                          max_results: int = YOUTUBE_VIDEO_LIMIT_DEFAULT) -> Iterator[str]:
     """yt-dlp video search generator — yields one videos chunk + done marker.
 
-    Caller is responsible for verifying youtube_client is not None.
+    Caller is responsible for verifying youtube_client is not None and for
+    clamping max_results (clamp_youtube_video_limit).
     """
     try:
         video_query = f"{query} official music video"
-        results = run_async(youtube_client.search_videos(video_query, max_results=20))
+        results = run_async(youtube_client.search_videos(video_query, max_results=max_results))
         videos = []
         for v in (results or []):
             videos.append({
@@ -389,11 +419,12 @@ def stream_metadata_source(source_name: str, query: str, client,
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
             executor.submit(sources.search_kind, client, query, 'artists', source_name, prefer_free): 'artists',
             executor.submit(sources.search_kind, client, query, 'albums', source_name, prefer_free): 'albums',
             executor.submit(sources.search_kind, client, query, 'tracks', source_name, prefer_free): 'tracks',
+            executor.submit(sources.search_kind, client, query, 'playlists', source_name, prefer_free): 'playlists',
         }
         for future in as_completed(futures):
             kind = futures[future]

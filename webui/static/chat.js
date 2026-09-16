@@ -153,9 +153,42 @@
         return m ? u.slice(0, -m[0].length) : u;
     }
 
+    function _classifyUrl(u) {
+        var raw = (u || '').replace(/&amp;/g, '&').toLowerCase();
+        if (raw.indexOf('youtube.com') > -1 || raw.indexOf('youtu.be') > -1) {
+            return { cls: 'chat-link--yt', brand: 'YouTube' };
+        }
+        if (raw.indexOf('spotify.com') > -1) {
+            return { cls: 'chat-link--spotify', brand: 'Spotify' };
+        }
+        if (raw.indexOf('soundcloud.com') > -1) {
+            return { cls: 'chat-link--sc', brand: 'SoundCloud' };
+        }
+        if (raw.indexOf('bandcamp.com') > -1) {
+            return { cls: 'chat-link--bc', brand: 'Bandcamp' };
+        }
+        if (raw.indexOf('deezer.com') > -1) {
+            return { cls: 'chat-link--dz', brand: 'Deezer' };
+        }
+        if (raw.indexOf('music.apple.com') > -1) {
+            return { cls: 'chat-link--apple', brand: 'Apple Music' };
+        }
+        if (raw.indexOf('github.com') > -1) {
+            return { cls: 'chat-link--github', brand: 'GitHub' };
+        }
+        if (raw.indexOf('wikipedia.org') > -1) {
+            return { cls: 'chat-link--wiki', brand: 'Wikipedia' };
+        }
+        if (raw.indexOf('reddit.com') > -1) {
+            return { cls: 'chat-link--reddit', brand: 'Reddit' };
+        }
+        return { cls: 'chat-link--web', brand: '' };
+    }
+
     function _linkHtml(u) {
         // u is already-escaped text (esc ran first) — safe in attr + label.
-        return '<a class="chat-link" href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>';
+        var info = _classifyUrl(u);
+        return '<a class="chat-link ' + info.cls + '" href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>';
     }
 
     // ── embeds (richchat P3): click-to-load, never auto-load ─────────────────
@@ -171,6 +204,27 @@
                 raw.match(/youtu\.be\/([A-Za-z0-9_-]{6,20})/) ||
                 raw.match(/youtube\.com\/shorts\/([A-Za-z0-9_-]{6,20})/);
         return m ? m[1] : null;
+    }
+
+    function _spotifyEmbedInfo(u) {
+        var raw = u.replace(/&amp;/g, '&');
+        var m = raw.match(/open\.spotify\.com\/(track|album|playlist|episode)\/([A-Za-z0-9]{15,30})/i);
+        return m ? { type: m[1].toLowerCase(), id: m[2] } : null;
+    }
+
+    function _deezerEmbedInfo(u) {
+        var raw = u.replace(/&amp;/g, '&');
+        var m = raw.match(/deezer\.com\/(?:[a-z]{2}\/)?(track|album|playlist)\/([0-9]{3,15})/i);
+        return m ? { type: m[1].toLowerCase(), id: m[2] } : null;
+    }
+
+    function _soundcloudEmbedInfo(u) {
+        var raw = u.replace(/&amp;/g, '&');
+        var m = raw.match(/^https?:\/\/(?:www\.)?soundcloud\.com\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_-]+)(?:[?#]|$)/i);
+        if (m && m[1] !== 'you' && m[1] !== 'discover' && m[1] !== 'stream' && m[1] !== 'search' && m[1] !== 'upload') {
+            return { user: m[1], track: m[2] };
+        }
+        return null;
     }
 
     // ── SoulSync deep links (richchat P4) ────────────────────────────────────
@@ -210,8 +264,25 @@
         var yt = _ytId(u);
         if (yt) {
             // id is regex-constrained to [A-Za-z0-9_-] — attribute-safe by shape
-            return html + ' <button type="button" class="chat-embed-chip" data-chat-embed-yt="' +
-                yt + '" title="Play here (YouTube)">▶ play</button>';
+            return html + ' <button type="button" class="chat-embed-chip chat-embed-chip--yt" data-chat-embed-yt="' +
+                yt + '" title="Play YouTube video inline in chat">▶ play</button>' +
+                ' <button type="button" class="chat-embed-action chat-embed-action--jbx" data-chat-jbx-add="' +
+                yt + '" title="Queue to Room Jukebox">🎵 jukebox</button>';
+        }
+        var sp = _spotifyEmbedInfo(u);
+        if (sp) {
+            return html + ' <button type="button" class="chat-embed-chip chat-embed-chip--sp" data-chat-embed-spotify="' +
+                sp.type + '/' + sp.id + '" title="Open Spotify player inline">🟢 spotify</button>';
+        }
+        var dz = _deezerEmbedInfo(u);
+        if (dz) {
+            return html + ' <button type="button" class="chat-embed-chip chat-embed-chip--dz" data-chat-embed-deezer="' +
+                dz.type + '/' + dz.id + '" title="Open Deezer player inline">💜 deezer</button>';
+        }
+        var sc = _soundcloudEmbedInfo(u);
+        if (sc) {
+            return html + ' <button type="button" class="chat-embed-chip chat-embed-chip--sc" data-chat-embed-sc="' +
+                encodeURIComponent(u) + '" title="Open SoundCloud player inline">☁ soundcloud</button>';
         }
         if (IMG_RE.test(u)) {
             return html + ' <button type="button" class="chat-embed-chip" data-chat-embed-img="' +
@@ -288,7 +359,8 @@
         s = _extract(s, /\[([^\]\n]{1,80})\]\((https?:\/\/[^\s)]+)\)/g, hold, function (m) {
             var mm = m.match(/^\[([^\]]+)\]\((.+)\)$/);
             var label = mm[1], url = mm[2];
-            return '<a class="chat-link" href="' + url + '" target="_blank" rel="noopener noreferrer">' +
+            var info = _classifyUrl(url);
+            return '<a class="chat-link ' + info.cls + '" href="' + url + '" target="_blank" rel="noopener noreferrer">' +
                 label + '</a><span class="chat-link-domain">(' + _hostOf(url) + ')</span>';
         });
         s = _extract(s, URL_RE, hold, function (m) {
@@ -449,7 +521,9 @@
         var acts = '<button type="button" class="chat-line-reply" title="Copy text" ' +
             'data-chat-copy="' + attr(showText) + '">⧉</button>';
         if (state.view === 'room' && state.canSend && !self) {
-            acts = '<button type="button" class="chat-line-reply" title="React" ' +
+            acts = '<button type="button" class="chat-line-reply" title="Browse ' + attr(m.username || '') + '’s files" ' +
+                'data-chat-browse-user="' + attr(m.username || '') + '">📁</button>' +
+                '<button type="button" class="chat-line-reply" title="React" ' +
                 'data-chat-react-user="' + attr(m.username || '') + '" ' +
                 'data-chat-react-text="' + attr(String(m.message || '')) + '">🙂+</button>' +   // FULL text — the react key is a hash of it
                 '<button type="button" class="chat-line-reply" title="Reply" ' +
@@ -494,11 +568,17 @@
                     (r.n > 1 ? ' <b>' + r.n + '</b>' : '') + '</span>';
             }).join('') + '</div>';
         }
-        var bodyHtml = (m.overlay && m.overlay.n)
-            ? _overlayCardHtml(m)
-            : (m.file && m.file.n)
-                ? _fileCardHtml(m)
-                : (m.rich ? renderRich(showText) : renderPlain(showText));
+        var npData = m.np || _extractNpFromText(m.message);
+        var wantData = m.want || _extractWantFromText(m.message);
+        var bodyHtml = (npData && npData.t)
+            ? _nowPlayingCardHtml(m, npData)
+            : (wantData && wantData.t)
+                ? _wantedCardHtml(m, wantData)
+                : (m.overlay && m.overlay.n)
+                    ? _overlayCardHtml(m)
+                    : (m.file && m.file.n)
+                        ? _fileCardHtml(m)
+                        : (m.rich ? renderRich(showText) : renderPlain(showText));
         // An edited message wears the marker; hovering it shows every prior
         // version, oldest first (the history is retained, not replaced).
         if (versions) {
@@ -814,6 +894,1010 @@
             });
     }
 
+    // ── Now Playing & Wanted / ISO Cards ────────────────────────────────────
+    function _extractNpFromText(text) {
+        if (!text || typeof text !== 'string') return null;
+        var m = text.match(/🎵\s*Now Playing:\s*([^\-]+?)\s*-\s*([^(]+?)(?:\s*\(([^)]+)\))?$/i);
+        if (!m) return null;
+        return { a: m[1].trim(), t: m[2].trim(), al: (m[3] || '').trim(), src: 'shared' };
+    }
+
+    function _extractWantFromText(text) {
+        if (!text || typeof text !== 'string') return null;
+        var m = text.match(/🔍\s*In Search Of:\s*(?:\[(ALBUM|TRACK|EP|SINGLE)\]\s*)?([^\-]+?)\s*-\s*([^(]+?)(?:\s*\(([^)]+)\))?$/i);
+        if (!m) return null;
+        var ty = (m[1] || 'album').toLowerCase();
+        return { a: m[2].trim(), t: m[3].trim(), y: (m[4] || '').trim(), ty: ty, src: 'shared' };
+    }
+
+    var _npArtCache = {};
+    var _npArtPending = {};
+
+    function _scheduleNpArtProbe(title, artist, isAlbum) {
+        if (!title && !artist) return;
+        var key = (artist || '').toLowerCase().trim() + '|||' + (title || '').toLowerCase().trim();
+        if (key in _npArtCache || _npArtPending[key]) return;
+        _npArtPending[key] = true;
+
+        var qStr = (artist && artist !== 'Unknown Artist' ? artist + ' ' : '') + (title && title !== 'Unknown Track' ? title : '');
+        qStr = qStr.trim();
+        if (!qStr) {
+            delete _npArtPending[key];
+            return;
+        }
+
+        fetch('/api/enhanced-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: qStr })
+        })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+            delete _npArtPending[key];
+            if (!data) return;
+            var trs = data.tracks || data.spotify_tracks || [];
+            var als = data.albums || data.spotify_albums || [];
+            var candidates = isAlbum ? als.concat(trs) : trs.concat(als);
+            var hit = candidates.find(function (c) {
+                return c && (c.image_url || (c.images && c.images[0] && (typeof c.images[0] === 'string' ? c.images[0] : c.images[0].url)));
+            }) || candidates[0];
+
+            if (hit) {
+                var imgUrl = hit.image_url || (hit.images && hit.images[0] && (typeof hit.images[0] === 'string' ? hit.images[0] : hit.images[0].url)) || '';
+                if (imgUrl) {
+                    _npArtCache[key] = imgUrl;
+                    _applyNpArtToDom(key, imgUrl, hit);
+                }
+            }
+        })
+        .catch(function () {
+            delete _npArtPending[key];
+        });
+    }
+
+    function _applyNpArtToDom(key, imgUrl, hit) {
+        document.querySelectorAll('.chat-np-card').forEach(function (card) {
+            var cTitle = (card.getAttribute('data-np-title') || '').toLowerCase().trim();
+            var cArtist = (card.getAttribute('data-np-artist') || '').toLowerCase().trim();
+            var cKey = cArtist + '|||' + cTitle;
+            if (cKey === key) {
+                card.setAttribute('data-np-img', imgUrl);
+                var ph = card.querySelector('.chat-np-thumb--ph');
+                if (ph) {
+                    var img = document.createElement('img');
+                    img.className = 'chat-np-thumb';
+                    img.src = imgUrl;
+                    img.alt = '';
+                    img.loading = 'lazy';
+                    ph.replaceWith(img);
+                }
+            }
+        });
+        document.querySelectorAll('.chat-wanted-card').forEach(function (card) {
+            var cTitle = (card.getAttribute('data-wanted-title') || '').toLowerCase().trim();
+            var cArtist = (card.getAttribute('data-wanted-artist') || '').toLowerCase().trim();
+            var cKey = cArtist + '|||' + cTitle;
+            if (cKey === key) {
+                card.setAttribute('data-wanted-img', imgUrl);
+                if (hit) {
+                    if (hit.id && !card.getAttribute('data-wanted-id')) card.setAttribute('data-wanted-id', hit.id);
+                    if (hit.source && (!card.getAttribute('data-wanted-src') || card.getAttribute('data-wanted-src') === 'shared')) {
+                        card.setAttribute('data-wanted-src', hit.source);
+                    }
+                    if (hit.album && !card.getAttribute('data-wanted-album')) card.setAttribute('data-wanted-album', hit.album);
+                }
+                var ph = card.querySelector('.chat-wanted-thumb--ph');
+                if (ph) {
+                    var img = document.createElement('img');
+                    img.className = 'chat-wanted-thumb';
+                    img.src = imgUrl;
+                    img.alt = '';
+                    img.loading = 'lazy';
+                    ph.replaceWith(img);
+                }
+            }
+        });
+    }
+
+    function _nowPlayingCardHtml(m, npOverride) {
+        var np = npOverride || m.np || _extractNpFromText(m.message);
+        if (!np) return m.rich ? renderRich(m.message) : renderPlain(m.message);
+        var t = esc(np.t || 'Unknown Track');
+        var a = esc(np.a || 'Unknown Artist');
+        var al = esc(np.al || '');
+        var src = esc((np.src || 'MUSIC').toUpperCase());
+        var br = np.br ? '<span class="chat-np-badge chat-np-badge--br">' + esc(np.br) + 'k</span>' : '';
+        var durBadge = '';
+        if (np.dur && Number(np.dur) > 0) {
+            var rawD = Number(np.dur);
+            var secTotal = Math.round(rawD > 1000 ? rawD / 1000 : rawD);
+            var dMin = Math.floor(secTotal / 60);
+            var dSec = Math.floor(secTotal % 60);
+            durBadge = '<span class="chat-np-badge chat-np-badge--dur">' + dMin + ':' + (dSec < 10 ? '0' : '') + dSec + '</span>';
+        }
+
+        var probeKey = (np.a || '').toLowerCase().trim() + '|||' + (np.t || '').toLowerCase().trim();
+        var resolvedImg = np.img || _npArtCache[probeKey] || '';
+        var img = (resolvedImg && (/^https?:\/\//.test(resolvedImg) || /^\/api\//.test(resolvedImg)))
+            ? '<img class="chat-np-thumb" src="' + attr(resolvedImg) + '" alt="" loading="lazy">'
+            : '<div class="chat-np-thumb chat-np-thumb--ph">🎵</div>';
+        if (!resolvedImg && (np.t || np.a)) {
+            _scheduleNpArtProbe(np.t, np.a);
+        }
+
+        return '<div class="chat-np-card" data-np-title="' + attr(np.t) + '" data-np-artist="' + attr(np.a) + '" data-np-album="' + attr(np.al || '') + '" data-np-id="' + attr(np.id || '') + '" data-np-src="' + attr(np.src || '') + '" data-np-dur="' + attr(np.dur || 0) + '" data-np-img="' + attr(resolvedImg || np.img || '') + '" data-np-type="track">' +
+            '<div class="chat-np-header">' +
+                '<span class="chat-np-tag"><span class="chat-np-eq"><i></i><i></i><i></i></span> NOW PLAYING</span>' +
+                '<span class="chat-np-src-pill">' + src + '</span>' +
+                br +
+                durBadge +
+            '</div>' +
+            '<div class="chat-np-body">' +
+                img +
+                '<div class="chat-np-meta">' +
+                    '<div class="chat-np-title" title="' + attr(np.t) + '">' + t + '</div>' +
+                    '<div class="chat-np-artist" title="' + attr(np.a) + '">' + a + '</div>' +
+                    (al ? '<div class="chat-np-album" title="' + attr(np.al) + '">' + al + '</div>' : '') +
+                '</div>' +
+            '</div>' +
+            '<div class="chat-np-actions">' +
+                '<button type="button" class="chat-card-btn chat-card-btn--primary" data-chat-card-stream title="Preview audio stream">▶ Preview</button>' +
+                '<button type="button" class="chat-card-btn chat-card-btn--accent" data-chat-card-dl title="Open Download Tracks modal">📥 Download</button>' +
+                '<button type="button" class="chat-card-btn chat-card-btn--wishlist" data-chat-card-wishlist title="Add to your Wishlist">➕ Wishlist</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-card-artist title="Go to ' + attr(np.a) + ' artist page">👤 Artist</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-card-search title="Search SoulSync for this release">🔍 Search</button>' +
+            '</div>' +
+        '</div>';
+    }
+
+    var _wantedPresenceCache = {};
+    var _wantedPresencePending = {};
+
+    function _scheduleWantedPresenceProbe(w) {
+        var key = (w.a || '').toLowerCase().trim() + '|||' + (w.t || '').toLowerCase().trim();
+        if (key in _wantedPresenceCache || _wantedPresencePending[key]) return;
+        _wantedPresencePending[key] = true;
+
+        var reqData = {
+            albums: (w.ty === 'album' || w.ty === 'ep') ? [{ title: w.t, artist: w.a }] : [],
+            tracks: (w.ty === 'track' || w.ty === 'single') ? [{ name: w.t, artist: w.a, album: w.al || '' }] : []
+        };
+        if (!reqData.albums.length && !reqData.tracks.length) {
+            reqData.albums = [{ title: w.t, artist: w.a }];
+        }
+
+        fetch('/api/enhanced-search/library-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqData)
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            delete _wantedPresencePending[key];
+            var owned = false;
+            if (data && data.albums && data.albums[0] === true) owned = true;
+            if (data && data.tracks && data.tracks[0] && data.tracks[0].in_library === true) owned = true;
+            _wantedPresenceCache[key] = owned;
+            document.querySelectorAll('[data-chat-wanted-probe="' + attr(key) + '"]').forEach(function (el) {
+                el.className = 'chat-wanted-badge ' + (owned ? 'chat-wanted-badge--owned' : 'chat-wanted-badge--miss');
+                el.textContent = owned ? '✓ In Your Library' : 'Not in library';
+                if (owned) {
+                    var card = el.closest('.chat-wanted-card');
+                    if (card) {
+                        var btn = card.querySelector('[data-chat-wanted-have]');
+                        if (btn) btn.classList.add('chat-card-btn--glow');
+                    }
+                }
+            });
+        })
+        .catch(function () { delete _wantedPresencePending[key]; });
+    }
+
+    function _wantedCardHtml(m, wantOverride) {
+        var w = wantOverride || m.want || _extractWantFromText(m.message);
+        if (!w) return m.rich ? renderRich(m.message) : renderPlain(m.message);
+        var t = esc(w.t || 'Unknown Title');
+        var a = esc(w.a || 'Unknown Artist');
+        var ty = esc((w.ty || 'album').toUpperCase());
+        var y = w.y ? esc(w.y) : '';
+        var src = esc(w.src || '');
+        var requester = m.username || 'user';
+        var isMe = (m.username === state.selfName || m.self === true || requester === 'you');
+
+        var cacheKey = (w.a || '').toLowerCase().trim() + '|||' + (w.t || '').toLowerCase().trim();
+        var inLib = _wantedPresenceCache[cacheKey];
+
+        var probeKey = (w.a || '').toLowerCase().trim() + '|||' + (w.t || '').toLowerCase().trim();
+        var resolvedImg = w.img || _npArtCache[probeKey] || '';
+        var img = (resolvedImg && (/^https?:\/\//.test(resolvedImg) || /^\/api\//.test(resolvedImg)))
+            ? '<img class="chat-wanted-thumb" src="' + attr(resolvedImg) + '" alt="" loading="lazy">'
+            : '<div class="chat-wanted-thumb chat-wanted-thumb--ph">💿</div>';
+        if (!resolvedImg && (w.t || w.a)) {
+            _scheduleNpArtProbe(w.t, w.a, (w.ty === 'album' || w.ty === 'ep'));
+        }
+
+        var statusChip = '';
+        if (inLib === true) {
+            statusChip = '<span class="chat-wanted-badge chat-wanted-badge--owned">✓ In Your Library</span>';
+        } else if (inLib === false) {
+            statusChip = '<span class="chat-wanted-badge chat-wanted-badge--miss">Not in library</span>';
+        } else {
+            statusChip = '<span class="chat-wanted-badge chat-wanted-badge--checking" data-chat-wanted-probe="' + attr(cacheKey) + '">Checking library…</span>';
+            _scheduleWantedPresenceProbe(w);
+        }
+
+        var haveBtn = '';
+        if (!isMe) {
+            haveBtn = '<button type="button" class="chat-card-btn chat-card-btn--success' + (inLib === true ? ' chat-card-btn--glow' : '') + '" ' +
+                'data-chat-wanted-have data-wanted-user="' + attr(requester) + '" data-wanted-title="' + attr(w.t) + '" data-wanted-artist="' + attr(w.a) + '" ' +
+                'title="Send @' + attr(requester) + ' a direct message saying you have this!">' +
+                '💬 I Have This! (Send PM)</button>';
+        }
+
+        return '<div class="chat-wanted-card" ' +
+            'data-wanted-title="' + attr(w.t) + '" ' +
+            'data-wanted-artist="' + attr(w.a) + '" ' +
+            'data-wanted-album="' + attr(w.al || '') + '" ' +
+            'data-wanted-type="' + attr(w.ty || 'album') + '" ' +
+            'data-wanted-id="' + attr(w.id || '') + '" ' +
+            'data-wanted-src="' + attr(w.src || '') + '" ' +
+            'data-wanted-img="' + attr(resolvedImg || w.img || '') + '" ' +
+            'data-wanted-year="' + attr(w.y || '') + '" ' +
+            'data-wanted-dur="' + attr(w.dur || 0) + '" ' +
+            'data-wanted-key="' + attr(cacheKey) + '">' +
+            '<div class="chat-wanted-header">' +
+                '<span class="chat-wanted-tag">🔍 IN SEARCH OF</span>' +
+                '<span class="chat-wanted-type-pill">' + ty + '</span>' +
+                (src ? '<span class="chat-wanted-src-pill">' + src.toUpperCase() + '</span>' : '') +
+                statusChip +
+            '</div>' +
+            '<div class="chat-wanted-body">' +
+                img +
+                '<div class="chat-wanted-meta">' +
+                    '<div class="chat-wanted-title" title="' + attr(w.t) + '">' + t + '</div>' +
+                    '<div class="chat-wanted-artist" title="' + attr(w.a) + '">' + a + (y ? ' <span class="chat-wanted-year">(' + y + ')</span>' : '') + '</div>' +
+                    '<div class="chat-wanted-req">Requested by <b>@' + esc(requester) + '</b></div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="chat-wanted-actions">' +
+                haveBtn +
+                '<button type="button" class="chat-card-btn chat-card-btn--accent" data-chat-card-dl title="Open Download Tracks modal">📥 Download</button>' +
+                '<button type="button" class="chat-card-btn chat-card-btn--wishlist" data-chat-wanted-wishlist title="Add to your Wishlist">➕ Wishlist</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-card-artist title="Go to ' + attr(w.a) + ' artist page">👤 Artist</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-card-search title="Search SoulSync for this release">🔍 Search</button>' +
+            '</div>' +
+        '</div>';
+    }
+
+    async function shareNowPlaying() {
+        if (state.view !== 'room' || _plainOn() || !state.canSend) {
+            if (typeof showToast === 'function') {
+                showToast('🎵 Now Playing cards can only be shared in SoulSync rooms.', 'warning');
+            }
+            return;
+        }
+        var cur = window.__ssCurrentTrack || (typeof window.getCurrentTrack === 'function' ? window.getCurrentTrack() : null) || state.localNowPlaying;
+        if (!cur || (!cur.title && !cur.name)) {
+            if (typeof showToast === 'function') {
+                showToast('🎵 Nothing is currently playing in SoulSync. Start a track first!', 'info');
+            }
+            return;
+        }
+        var t = String(cur.title || cur.name || 'Unknown Track').replace(/^[a-z0-9_-]+\|\|/i, '');
+        var a = String(cur.artist || 'Unknown Artist').replace(/^[a-z0-9_-]+\|\|/i, '');
+        var al = String(cur.album || '').replace(/^[a-z0-9_-]+\|\|/i, '');
+        var src = cur.source || (cur.is_library ? 'library' : 'stream');
+        var id = String(cur.id || '');
+        var img = String(cur.image_url || cur.album_cover_url || cur.thumb_url || '');
+        if (!img) {
+            var artEl = document.getElementById('sidebar-album-art') || document.getElementById('np-album-art');
+            if (artEl && artEl.src && !artEl.src.endsWith('/trans2.png') && !artEl.src.endsWith('/default-artwork.png')) {
+                img = artEl.src;
+            }
+        }
+        if (img && !/^https?:\/\//.test(img) && !/^\/api\//.test(img)) img = '';
+
+        var dur = 0;
+        if (cur.duration_ms && Number(cur.duration_ms) > 0) {
+            dur = Math.round(Number(cur.duration_ms));
+        } else if (cur.duration && Number(cur.duration) > 0) {
+            var rawD = Number(cur.duration);
+            dur = rawD > 1000 ? Math.round(rawD) : Math.round(rawD * 1000);
+        }
+        if (!dur) {
+            var apEl = document.getElementById('audio-player');
+            if (apEl && isFinite(apEl.duration) && apEl.duration > 0) {
+                dur = Math.round(apEl.duration * 1000);
+            }
+        }
+        var br = cur.bitrate || 0;
+
+        var probeKey = (a || '').toLowerCase().trim() + '|||' + (t || '').toLowerCase().trim();
+        if (!img && _npArtCache[probeKey]) {
+            img = _npArtCache[probeKey];
+        }
+
+        if (!img && (t || a)) {
+            try {
+                var searchQ = (a && a !== 'Unknown Artist' ? a + ' ' : '') + (t && t !== 'Unknown Track' ? t : '');
+                if (searchQ.trim()) {
+                    var searchRes = await fetch('/api/enhanced-search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: searchQ.trim() })
+                    }).then(function (r) { return r.ok ? r.json() : null; });
+                    if (searchRes) {
+                        var candTracks = searchRes.tracks || searchRes.spotify_tracks || [];
+                        var candAlbums = searchRes.albums || searchRes.spotify_albums || [];
+                        var best = candTracks[0] || candAlbums[0];
+                        if (best) {
+                            if (best.image_url) {
+                                img = best.image_url;
+                                _npArtCache[probeKey] = img;
+                            }
+                            if (!dur && best.duration_ms) dur = Math.round(best.duration_ms);
+                            if (!al && best.album) al = best.album;
+                            if (cur && typeof cur === 'object') {
+                                if (img && !cur.image_url) cur.image_url = img;
+                                if (dur && !cur.duration_ms) cur.duration_ms = dur;
+                                if (al && !cur.album) cur.album = al;
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('[Chat] Failed to probe art before sharing now playing:', err);
+            }
+        }
+
+        var fallbackText = '🎵 Now Playing: ' + a + ' - ' + t + (al ? ' (' + al + ')' : '');
+        var payload = {
+            message: fallbackText,
+            np: { t: t, a: a, al: al, src: src, id: id, img: img, dur: dur, br: br }
+        };
+        _tagRoomPayload(payload);
+        postJSON('/api/chat/room/message', payload).then(function (res) {
+            if (res.ok) {
+                refresh();
+                if (typeof showToast === 'function') showToast('🎵 Shared Now Playing to chat!', 'success');
+            } else if (typeof showToast === 'function') {
+                showToast(res.body && res.body.error || 'Failed to share Now Playing', 'error');
+            }
+        });
+    }
+
+    var _wantSearchTimer = null;
+    var _wantActiveSource = 'auto';
+
+    function openWantedModal(query) {
+        if (state.view !== 'room' || _plainOn() || !state.canSend) {
+            if (typeof showToast === 'function') {
+                showToast('🔍 Wanted cards can only be posted in SoulSync rooms.', 'warning');
+            }
+            return;
+        }
+        var modal = q('[data-chat-want-modal]');
+        var backdrop = q('[data-chat-want-backdrop]');
+        if (!modal) return;
+        modal.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+        requestAnimationFrame(function () {
+            modal.classList.add('visible');
+            if (backdrop) backdrop.classList.add('visible');
+        });
+        var inp = q('[data-chat-want-input]');
+        if (inp) {
+            if (query) inp.value = query;
+            setTimeout(function () { inp.focus(); }, 60);
+            if (query) searchWanted();
+        }
+    }
+
+    function closeWantedModal() {
+        var modal = q('[data-chat-want-modal]');
+        var backdrop = q('[data-chat-want-backdrop]');
+        if (modal) {
+            modal.classList.remove('visible');
+            setTimeout(function () { modal.hidden = true; }, 320);
+        }
+        if (backdrop) {
+            backdrop.classList.remove('visible');
+            setTimeout(function () { backdrop.hidden = true; }, 320);
+        }
+    }
+
+    function searchWanted() {
+        var inp = q('[data-chat-want-input]');
+        var resultsEl = q('[data-chat-want-results]');
+        var statusEl = q('[data-chat-want-status]');
+        var clearBtn = q('[data-chat-want-clear]');
+        if (!inp || !resultsEl) return;
+
+        var query = (inp.value || '').trim();
+        if (clearBtn) clearBtn.hidden = !query;
+
+        if (query.length < 2) {
+            resultsEl.innerHTML = '';
+            if (statusEl) {
+                statusEl.hidden = false;
+                statusEl.textContent = 'Type 2+ letters to search across metadata providers';
+            }
+            return;
+        }
+
+        if (statusEl) {
+            statusEl.hidden = false;
+            statusEl.textContent = 'Searching metadata providers…';
+        }
+
+        var fetchFn = (typeof enhancedSearchFetch === 'function')
+            ? enhancedSearchFetch
+            : function (q, opt) {
+                var b = { query: q };
+                if (opt && opt.source && opt.source !== 'auto') b.source = opt.source;
+                return fetch('/api/enhanced-search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(b)
+                }).then(function (r) { return r.json(); });
+            };
+
+        fetchFn(query, { source: _wantActiveSource })
+            .then(function (data) {
+                if (!data) {
+                    if (statusEl) statusEl.textContent = 'No results returned';
+                    return;
+                }
+                var items = [];
+                var primarySrc = data.metadata_source || data.primary_source || 'spotify';
+                var albums = data.albums || data.spotify_albums || data.results || [];
+                albums.slice(0, 15).forEach(function (al) {
+                    var albumImg = al.image_url ||
+                        (al.images && al.images[0] && (typeof al.images[0] === 'string' ? al.images[0] : al.images[0].url)) ||
+                        al.cover_xl || al.cover_big || al.cover_medium || '';
+                    items.push({
+                        name: al.name || al.title || '',
+                        artist: al.artist || (al.artists && al.artists[0] && al.artists[0].name) || '',
+                        type: al.album_type || 'album',
+                        year: al.release_date ? al.release_date.slice(0, 4) : (al.year || ''),
+                        source: al.source || primarySrc,
+                        id: String(al.id || ''),
+                        image_url: albumImg
+                    });
+                });
+                var tracks = data.tracks || data.spotify_tracks || [];
+                tracks.slice(0, 15).forEach(function (tr) {
+                    var trImg = tr.image_url ||
+                        (tr.images && tr.images[0] && (typeof tr.images[0] === 'string' ? tr.images[0] : tr.images[0].url)) ||
+                        (tr.album && tr.album.images && tr.album.images[0] && (typeof tr.album.images[0] === 'string' ? tr.album.images[0] : tr.album.images[0].url)) ||
+                        '';
+                    items.push({
+                        name: tr.name || tr.title || '',
+                        artist: tr.artist || (tr.artists && tr.artists[0] && tr.artists[0].name) || '',
+                        album: (typeof tr.album === 'string' ? tr.album : (tr.album && tr.album.name)) || '',
+                        type: 'track',
+                        year: tr.release_date ? tr.release_date.slice(0, 4) : '',
+                        source: tr.source || primarySrc,
+                        id: String(tr.id || ''),
+                        image_url: trImg,
+                        duration_ms: tr.duration_ms || 0
+                    });
+                });
+
+                if (!items.length) {
+                    if (statusEl) statusEl.textContent = 'No releases found for "' + query + '"';
+                    resultsEl.innerHTML = '';
+                    return;
+                }
+
+                if (statusEl) statusEl.hidden = true;
+                resultsEl.innerHTML = items.map(function (item, idx) {
+                    var thumb = item.image_url
+                        ? '<img class="chat-want-res-img" src="' + attr(item.image_url) + '" alt="" loading="lazy">'
+                        : '<div class="chat-want-res-img chat-want-res-img--ph">' + (item.type === 'track' ? '🎵' : '💿') + '</div>';
+                    return '<div class="chat-want-res-row">' +
+                        thumb +
+                        '<div class="chat-want-res-meta">' +
+                            '<div class="chat-want-res-name">' + esc(item.name) + '</div>' +
+                            '<div class="chat-want-res-sub">' + esc(item.artist) + (item.year ? ' · ' + esc(item.year) : '') + '</div>' +
+                            '<div class="chat-want-res-badges">' +
+                                '<span class="chat-want-res-pill">' + esc(item.type.toUpperCase()) + '</span>' +
+                                '<span class="chat-want-res-pill chat-want-res-pill--src">' + esc(item.source.toUpperCase()) + '</span>' +
+                            '</div>' +
+                        '</div>' +
+                        '<button type="button" class="chat-card-btn chat-card-btn--primary" data-chat-want-post-idx="' + idx + '">⭐ Post to Chat</button>' +
+                    '</div>';
+                }).join('');
+
+                resultsEl._items = items;
+            })
+            .catch(function (err) {
+                if (statusEl) statusEl.textContent = 'Search failed: ' + (err.message || err);
+            });
+    }
+
+    function postWantedCard(item) {
+        if (!item || !state.canSend || state.view !== 'room' || _plainOn()) return;
+        var t = item.name || item.title || 'Unknown Title';
+        var a = item.artist || (item.artists && item.artists[0] && item.artists[0].name) || 'Unknown Artist';
+        var ty = item.type || (item.album_type ? 'album' : 'track');
+        var al = item.album || '';
+        var src = item.source || 'spotify';
+        var id = String(item.id || '');
+        var img = item.image_url || '';
+        if (img && !/^https?:\/\//.test(img) && !/^\/api\//.test(img)) img = '';
+        var y = String(item.year || item.release_date || '').slice(0, 4);
+        var dur = item.duration_ms || 0;
+
+        // Cache art immediately so local rendering never flickers
+        var key = a.toLowerCase().trim() + '|||' + t.toLowerCase().trim();
+        if (img) _npArtCache[key] = img;
+
+        var fallbackText = '🔍 In Search Of: [' + ty.toUpperCase() + '] ' + a + ' - ' + t + (y ? ' (' + y + ')' : '');
+        var wantObj = { t: t, a: a, ty: ty, al: al, src: src, id: id, img: img, y: y };
+        if (dur) wantObj.dur = dur;
+
+        var payload = {
+            message: fallbackText,
+            want: wantObj
+        };
+        _tagRoomPayload(payload);
+        postJSON('/api/chat/room/message', payload).then(function (res) {
+            closeWantedModal();
+            if (res.ok) {
+                refresh();
+                if (typeof showToast === 'function') showToast('⭐ Posted Wanted card to chat!', 'success');
+            } else if (typeof showToast === 'function') {
+                showToast(res.body && res.body.error || 'Failed to post card', 'error');
+            }
+        });
+    }
+
+    async function _openDownloadForCard(artist, title, album, id, src, durationMs, imageUrl, cardType) {
+        if (typeof window.openDownloadMissingModalForArtistAlbum !== 'function') {
+            if (typeof showToast === 'function') showToast('Download missing modal unavailable', 'error');
+            return;
+        }
+
+        var albumName = album || title;
+        var isAlbum = (cardType === 'album' || cardType === 'ep');
+        durationMs = Number(durationMs) || 0;
+        if (durationMs > 0 && durationMs < 1000) {
+            durationMs = Math.round(durationMs * 1000);
+        }
+
+        // 1. Check active audio player if duration is missing
+        if (!durationMs) {
+            var cur = (typeof window.getCurrentTrack === 'function' && window.getCurrentTrack())
+                || window.__ssCurrentTrack
+                || (typeof currentTrack !== 'undefined' ? currentTrack : null);
+            if (cur && (cur.title === title || cur.name === title || !title)) {
+                if (cur.duration_ms) durationMs = Math.round(Number(cur.duration_ms));
+                else if (cur.duration) {
+                    var rd = Number(cur.duration);
+                    durationMs = rd > 1000 ? Math.round(rd) : Math.round(rd * 1000);
+                }
+                if (!imageUrl) imageUrl = cur.image_url || cur.album_cover_url || cur.thumb_url || '';
+            }
+            if (!durationMs) {
+                var ap = document.getElementById('audio-player');
+                if (ap && isFinite(ap.duration) && ap.duration > 0) {
+                    durationMs = Math.round(ap.duration * 1000);
+                }
+            }
+        }
+
+        // 2. If duration, image or id is still missing, query enhanced search
+        if ((!durationMs || !imageUrl || !id) && (artist || title)) {
+            try {
+                var searchQ = (artist ? artist + ' ' : '') + (title || '');
+                var searchRes = await fetch('/api/enhanced-search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: searchQ.trim() })
+                });
+                if (searchRes.ok) {
+                    var sData = await searchRes.json();
+                    var tracksList = sData.spotify_tracks || sData.tracks || [];
+                    var albumsList = sData.spotify_albums || sData.albums || [];
+                    if (isAlbum && albumsList.length > 0) {
+                        var matchAl = albumsList.find(function (al) {
+                            return al.name && title && al.name.toLowerCase() === title.toLowerCase();
+                        }) || albumsList[0];
+                        if (matchAl) {
+                            if (!imageUrl && matchAl.image_url) imageUrl = matchAl.image_url;
+                            if ((!albumName || albumName === title) && matchAl.name) albumName = matchAl.name;
+                            if (!id && matchAl.id) id = String(matchAl.id);
+                            if (!src && matchAl.source) src = matchAl.source;
+                        }
+                    } else if (tracksList.length > 0) {
+                        var match = tracksList.find(function (tr) {
+                            return tr.name && title && tr.name.toLowerCase() === title.toLowerCase();
+                        }) || tracksList[0];
+                        if (match) {
+                            if (!durationMs && match.duration_ms) durationMs = match.duration_ms;
+                            if (!imageUrl && match.image_url) imageUrl = match.image_url;
+                            if ((!albumName || albumName === title) && match.album) albumName = match.album;
+                            if (!id && match.id) id = String(match.id);
+                            if (!src && match.source) src = match.source;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.debug('Enhanced search lookup for download modal failed:', err);
+            }
+        }
+
+        var virtualId = (isAlbum ? 'album_' : 'np_') + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        var imagesArray = imageUrl ? [{ url: imageUrl }] : [];
+
+        var spotifyTracks = [{
+            id: id || virtualId,
+            name: title,
+            artist: artist,
+            artists: [{ name: artist, id: null }],
+            album: {
+                name: albumName,
+                id: id || null,
+                album_type: isAlbum ? (cardType || 'album') : 'single',
+                images: imagesArray,
+                total_tracks: 1
+            },
+            source: src || 'spotify',
+            duration_ms: durationMs || 0,
+            image_url: imageUrl || null,
+            total_tracks: 1
+        }];
+
+        var albumObj = {
+            id: id || null,
+            name: albumName,
+            album_type: isAlbum ? (cardType || 'album') : 'single',
+            images: imagesArray,
+            artists: [{ name: artist }]
+        };
+
+        var artistObj = {
+            id: null,
+            name: artist,
+            source: src || 'spotify'
+        };
+
+        // If it's an album and we have an ID and source, fetch the full album tracks
+        if (isAlbum && id && src && src !== 'shared') {
+            try {
+                var albRes = await fetch('/api/spotify/album/' + encodeURIComponent(id) + '?source=' + encodeURIComponent(src) + '&name=' + encodeURIComponent(albumName) + '&artist=' + encodeURIComponent(artist));
+                if (albRes.ok) {
+                    var albData = await albRes.json();
+                    if (albData && albData.tracks && albData.tracks.length > 0) {
+                        spotifyTracks = albData.tracks.map(function (tr, idx) {
+                            return {
+                                id: tr.id || (virtualId + '_' + idx),
+                                name: tr.name || tr.title || ('Track ' + (idx + 1)),
+                                artist: artist,
+                                artists: tr.artists || [{ name: artist, id: null }],
+                                album: albumObj,
+                                track_number: tr.track_number || (idx + 1),
+                                disc_number: tr.disc_number || 1,
+                                duration_ms: tr.duration_ms || 0,
+                                source: src,
+                                image_url: imageUrl || null
+                            };
+                        });
+                        albumObj.total_tracks = spotifyTracks.length;
+                        if (albData.images && albData.images.length) {
+                            albumObj.images = albData.images;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.debug('[Chat] Album tracks fetch for download failed:', err);
+            }
+        }
+
+        window.openDownloadMissingModalForArtistAlbum(
+            virtualId,
+            '[' + artist + '] ' + albumName,
+            spotifyTracks,
+            albumObj,
+            artistObj,
+            false
+        );
+    }
+
+    function _openArtistPage(artist, artist_id, src) {
+        if (artist_id && typeof navigateToArtistDetail === 'function') {
+            navigateToArtistDetail(artist_id, artist, src);
+            return;
+        }
+        if (typeof _navigateToArtistFromWishlist === 'function') {
+            _navigateToArtistFromWishlist(artist);
+            return;
+        }
+        _searchFromCard(artist, '');
+    }
+
+    function _searchFromCard(artist, title) {
+        var qstr = ((artist ? artist + ' ' : '') + (title || '')).trim();
+        if (typeof navigateToPage === 'function') {
+            navigateToPage('search');
+            setTimeout(function () {
+                // 'search-input' is a class, not an id; the react search bar is the only input
+                var inp = document.getElementById('enhanced-search-input');
+                if (inp) {
+                    inp.value = qstr;
+                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    inp.focus();
+                }
+            }, 300);
+        }
+    }
+
+    function _streamFromCard(title, artist, album) {
+        if (typeof showToast === 'function') showToast('🔍 Finding preview for "' + title + '"…', 'info');
+        fetch('/api/enhanced-search/stream-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_name: title,
+                artist_name: artist,
+                album_name: album || ''
+            })
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+            if (res && res.success && res.track) {
+                if (typeof startStream === 'function') {
+                    startStream(res.track);
+                } else if (typeof setTrackInfo === 'function') {
+                    setTrackInfo(res.track);
+                }
+                if (typeof showToast === 'function') showToast('▶ Playing preview for ' + title, 'success');
+            } else {
+                if (typeof showToast === 'function') showToast((res && res.error) || 'Could not find a stream preview for this track', 'warning');
+            }
+        })
+        .catch(function () {
+            if (typeof showToast === 'function') showToast('Failed to start stream preview', 'error');
+        });
+    }
+
+    function _onHaveWanted(username, title, artist) {
+        if (!username || username === 'you' || username === state.selfName) {
+            if (typeof showToast === 'function') showToast('This is your own wanted card!', 'info');
+            return;
+        }
+        openPm(username);
+        var input = q('[data-chat-input]');
+        if (input) {
+            input.value = 'Hey @' + username + '! I saw your request for "' + title + '" by ' + artist + ' — I have this in my library! Feel free to browse my shares or let me know if you want me to send it over.';
+            input.focus();
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (typeof showToast === 'function') {
+            showToast('Switched to PM with @' + username + ' — message ready to send!', 'success');
+        }
+    }
+
+    async function _addWantedToWishlist(w) {
+        if (!w || (!w.t && !w.a)) return;
+        var title = w.t || 'Unknown Title';
+        var artist = w.a || 'Unknown Artist';
+        var albumName = w.al || w.t || title;
+        var imgUrl = w.img || '';
+        var src = w.src || 'spotify';
+        if (src === 'shared') src = 'spotify';
+        var id = w.id || '';
+        var ty = (w.ty || 'album').toLowerCase();
+        var isAlbum = (ty === 'album' || ty === 'ep');
+
+        if (typeof showToast === 'function') {
+            showToast('Loading ' + (isAlbum ? 'album details' : 'track') + ' for wishlist…', 'info');
+        }
+
+        var fullAlbumData = null;
+        var tracks = [];
+
+        // 1. If it's an album and we have an ID and source, fetch the full album tracks directly
+        if (isAlbum && id && src) {
+            try {
+                var albRes = await fetch('/api/spotify/album/' + encodeURIComponent(id) + '?source=' + encodeURIComponent(src) + '&name=' + encodeURIComponent(albumName) + '&artist=' + encodeURIComponent(artist));
+                if (albRes.ok) {
+                    fullAlbumData = await albRes.json();
+                }
+            } catch (e) {
+                console.debug('[Chat] Direct album fetch failed:', e);
+            }
+        }
+
+        // 2. If we don't have full album data, or if id was missing, query enhanced-search
+        if ((isAlbum && (!fullAlbumData || !fullAlbumData.tracks || !fullAlbumData.tracks.length)) || !id || !imgUrl) {
+            try {
+                var searchQ = (artist !== 'Unknown Artist' ? artist + ' ' : '') + title;
+                var sr = await fetch('/api/enhanced-search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: searchQ.trim() })
+                }).then(function (r) { return r.ok ? r.json() : null; });
+                if (sr) {
+                    var als = sr.albums || sr.spotify_albums || [];
+                    var trs = sr.tracks || sr.spotify_tracks || [];
+                    if (isAlbum && als.length > 0) {
+                        var matchAl = als.find(function (a) {
+                            return a.name && title && a.name.toLowerCase() === title.toLowerCase();
+                        }) || als[0];
+                        if (matchAl) {
+                            if (!id) id = String(matchAl.id || '');
+                            if (!imgUrl && matchAl.image_url) imgUrl = matchAl.image_url;
+                            if (matchAl.source) src = matchAl.source;
+                            if (matchAl.name) albumName = matchAl.name;
+                            // Fetch full tracks using the resolved ID and source
+                            if (id) {
+                                var albRes2 = await fetch('/api/spotify/album/' + encodeURIComponent(id) + '?source=' + encodeURIComponent(src) + '&name=' + encodeURIComponent(albumName) + '&artist=' + encodeURIComponent(artist));
+                                if (albRes2.ok) {
+                                    fullAlbumData = await albRes2.json();
+                                }
+                            }
+                        }
+                    } else if (!isAlbum && trs.length > 0) {
+                        var matchTr = trs.find(function (t) {
+                            return t.name && title && t.name.toLowerCase() === title.toLowerCase();
+                        }) || trs[0];
+                        if (matchTr) {
+                            if (!id) id = String(matchTr.id || '');
+                            if (!imgUrl && matchTr.image_url) imgUrl = matchTr.image_url;
+                            if (matchTr.album) albumName = matchTr.album;
+                            if (matchTr.source) src = matchTr.source;
+                            if (matchTr.duration_ms) w.dur = matchTr.duration_ms;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.debug('[Chat] Enhanced-search fallback for wishlist failed:', e);
+            }
+        }
+
+        // 3. Build albumObj and tracks array with full context
+        var albumObj = {
+            id: id || null,
+            name: (fullAlbumData && fullAlbumData.name) || albumName,
+            album_type: ty,
+            image_url: (fullAlbumData && fullAlbumData.images && fullAlbumData.images[0] && fullAlbumData.images[0].url) || imgUrl,
+            images: (fullAlbumData && fullAlbumData.images && fullAlbumData.images.length)
+                ? fullAlbumData.images
+                : (imgUrl ? [{ url: imgUrl }] : []),
+            artists: (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists.length)
+                ? fullAlbumData.artists
+                : [{ name: artist }],
+            release_date: (fullAlbumData && fullAlbumData.release_date) || w.y || '',
+            total_tracks: (fullAlbumData && fullAlbumData.total_tracks) || 0,
+            source: src
+        };
+
+        var artistObj = {
+            id: (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists[0] && fullAlbumData.artists[0].id) || null,
+            name: artist,
+            image_url: '',
+            source: src
+        };
+
+        if (fullAlbumData && fullAlbumData.tracks && fullAlbumData.tracks.length > 0) {
+            tracks = fullAlbumData.tracks.map(function (tr, idx) {
+                return {
+                    id: tr.id || ('wanted_' + id + '_' + idx),
+                    name: tr.name || tr.title || ('Track ' + (idx + 1)),
+                    artist: artist,
+                    artists: (tr.artists && tr.artists.length) ? tr.artists : [{ name: artist }],
+                    album: albumObj,
+                    track_number: tr.track_number || (idx + 1),
+                    disc_number: tr.disc_number || 1,
+                    duration_ms: tr.duration_ms || 0,
+                    image_url: albumObj.image_url,
+                    source: src
+                };
+            });
+            albumObj.total_tracks = tracks.length;
+        } else {
+            tracks = [{
+                id: id || ('wanted_' + Date.now()),
+                name: title,
+                artist: artist,
+                artists: [{ name: artist }],
+                album: albumObj,
+                track_number: 1,
+                total_tracks: 1,
+                duration_ms: Number(w.dur) || 0,
+                image_url: imgUrl,
+                source: src
+            }];
+        }
+
+        // Use openAddToWishlistModal if available (the proper standard)
+        if (typeof window.openAddToWishlistModal === 'function') {
+            try {
+                window.openAddToWishlistModal(albumObj, artistObj, tracks, ty, null);
+                return;
+            } catch (err) {
+                console.error('[Chat] openAddToWishlistModal failed:', err);
+                if (typeof showToast === 'function') showToast('Could not open wishlist modal', 'error');
+            }
+            return;
+        }
+
+        // Fallback: direct API call
+        try {
+            var trackObj = tracks[0] || {
+                id: id || 'wanted_' + Date.now(),
+                name: title,
+                artist: artist,
+                artists: [{ name: artist }],
+                duration_ms: 0,
+                source: src
+            };
+            var res = await fetch('/api/add-album-to-wishlist', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track: trackObj,
+                    artist: { id: null, name: artist, source: src },
+                    album: { id: id || null, name: albumName, album_type: ty, images: imgUrl ? [{ url: imgUrl }] : [] },
+                    source_type: ty,
+                    source_context: { album_name: albumName, artist_name: artist, album_type: ty }
+                })
+            });
+            var result = await res.json();
+            if (result.success) {
+                if (typeof showToast === 'function') showToast('✅ Added "' + title + '" to Wishlist!', 'success');
+            } else {
+                if (typeof showToast === 'function') showToast(result.error || 'Failed to add to wishlist', 'error');
+            }
+        } catch (err) {
+            console.error('[Chat] Failed to add to wishlist:', err);
+            if (typeof showToast === 'function') showToast('Failed to add to wishlist', 'error');
+        }
+    }
+
+    function _bindChatDragAndDrop() {
+        var zone = q('.chat-main') || q('[data-chat-messages]');
+        var overlay = q('[data-chat-drop-overlay]');
+        if (!zone || !overlay) return;
+
+        var dragCounter = 0;
+        zone.addEventListener('dragenter', function (e) {
+            e.preventDefault();
+            dragCounter++;
+            overlay.hidden = false;
+        });
+        zone.addEventListener('dragover', function (e) {
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            overlay.hidden = false;
+        });
+        zone.addEventListener('dragleave', function (e) {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                overlay.hidden = true;
+            }
+        });
+        zone.addEventListener('drop', function (e) {
+            e.preventDefault();
+            dragCounter = 0;
+            overlay.hidden = true;
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+                var file = e.dataTransfer.files[0];
+                attachUploadFile(file);
+            }
+        });
+    }
+
+    // ── developer identification (SoulSync creator & lead dev) ─────────────
+    function isDev(name) {
+        if (!name) return false;
+        return String(name).toLowerCase() === 'boulderbadgedad';
+    }
+
     // Consecutive messages from the same sender (same app-ness, <5 min apart)
     // fold under one avatar + name header, with day separators between dates.
     function renderGroups(msgs) {
@@ -853,7 +1937,9 @@
                 '<button class="chat-msg-user" type="button" data-chat-user="' + attr(user) +
                     '" style="color:hsl(' + _hue(user) + ',65%,68%)" title="Message ' +
                     attr(user) + '">' + esc(user) + '</button>' +
-                (ext ? '<span class="chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '') +
+                (isDev(user) ? '<span class="chat-dev-badge" title="SoulSync Creator & Lead Developer"><span class="chat-dev-badge-check">✔</span> DEV</span>' : '') +
+                (!self && isFriend(user) ? '<span class="chat-friend-badge" title="Friend">⭐ Friend</span>' : '') +
+                (ext ? '<span class="chat-peer-badge chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '<span class="chat-peer-badge chat-peer-badge--soulsync">SoulSync</span>') +
                 '<span class="chat-msg-time">' + esc(fmtTime(m.timestamp)) + '</span>' +
                 '</div>' + _lineHtml(m) };
         }
@@ -900,6 +1986,18 @@
         var editFold = _applyEdits(msgs);
         _editsByKey = editFold.edits;
         var shown = editFold.list, hidden = 0, muted = 0;
+        // Suppress messages from locally blocked users (both in rooms and PMs)
+        var blk = blockedSet();
+        if (blk.length) {
+            shown = shown.filter(function (m) {
+                var u = String(m.username || m.user || '');
+                if (isBlocked(u) && !(m.self === true || m.direction === 'Out')) {
+                    muted++;
+                    return false;
+                }
+                return true;
+            });
+        }
         if (state.view === 'room') {
             var ign = ignoredSet();
             if (ign.length) {
@@ -953,6 +2051,7 @@
                 ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden — show</button>' : '') +
             (muted ? '<div class="chat-hidden-note">' + muted +
                 ' message' + (muted === 1 ? '' : 's') + ' from muted users hidden</div>' : '');
+        _unfurlPendingLinks(host);
         if (state.stickBottom) {
             host.scrollTop = host.scrollHeight;
             // deep-scrollback cleanup: once the reader is back at the bottom,
@@ -1012,6 +2111,165 @@
         renderUsersList();
     }
 
+    // ── social badges updater (sidebar buttons, drawer tabs, peer bookmarks button) ──
+    function _updateSocialBadges() {
+        var frCount = friendsSet().length;
+        var blCount = blockedSet().length;
+        var bmCount = peerBookmarksSet().length;
+
+        // Sidebar navigation badges
+        var sideFr = q('[data-chat-side-count-friends]');
+        if (sideFr) {
+            sideFr.textContent = frCount;
+            sideFr.hidden = (frCount === 0);
+        }
+        var sideBl = q('[data-chat-side-count-blocked]');
+        if (sideBl) {
+            sideBl.textContent = blCount;
+            sideBl.hidden = (blCount === 0);
+        }
+        var sideBm = q('[data-chat-side-count-bookmarks]');
+        if (sideBm) {
+            sideBm.textContent = bmCount;
+            sideBm.hidden = (bmCount === 0);
+        }
+
+        // Drawer tab pills
+        var dFr = q('[data-chat-count-friends]');
+        if (dFr) dFr.textContent = frCount;
+        var dBl = q('[data-chat-count-blocked]');
+        if (dBl) dBl.textContent = blCount;
+        var dBm = q('[data-chat-count-bookmarks]');
+        if (dBm) dBm.textContent = bmCount;
+
+        // Peer explorer drawer bookmarks button
+        var peerBmBtn = q('[data-chat-browse-saved-peers]');
+        if (peerBmBtn) {
+            peerBmBtn.textContent = '📚 Bookmarks (' + bmCount + ')';
+        }
+    }
+
+    // the bookmark handlers still call this by its old name; the count now
+    // lives with the rest of the social badges, so it's the same refresh
+    function _updateSavedPeersBtn() { _updateSocialBadges(); }
+
+    // ── friend list (local only — special shiny star & badge, no requesting) ──
+    function friendsSet() {
+        try { return JSON.parse(localStorage.getItem('chat_friends') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isFriend(name) {
+        if (!name) return false;
+        return friendsSet().some(function (f) { return String(f).toLowerCase() === String(name).toLowerCase(); });
+    }
+    function toggleFriend(name) {
+        if (!name) return false;
+        var list = friendsSet();
+        var idx = -1;
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i]).toLowerCase() === String(name).toLowerCase()) { idx = i; break; }
+        }
+        var isNow = false;
+        if (idx > -1) {
+            list.splice(idx, 1);
+        } else {
+            list.push(name);
+            isNow = true;
+        }
+        try { localStorage.setItem('chat_friends', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        state.lastStamp = null;
+        renderMessages(state.msgs);
+        renderUsersList();
+        _updateSocialBadges();
+        return isNow;
+    }
+
+    // ── block list (local only — completely suppresses chat messages by user) ──
+    function blockedSet() {
+        try { return JSON.parse(localStorage.getItem('chat_blocked') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isBlocked(name) {
+        if (!name) return false;
+        return blockedSet().some(function (b) { return String(b).toLowerCase() === String(name).toLowerCase(); });
+    }
+    function toggleBlocked(name) {
+        if (!name) return false;
+        var list = blockedSet();
+        var idx = -1;
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i]).toLowerCase() === String(name).toLowerCase()) { idx = i; break; }
+        }
+        var isNowBlocked = false;
+        if (idx > -1) {
+            list.splice(idx, 1);
+        } else {
+            list.push(name);
+            isNowBlocked = true;
+        }
+        try { localStorage.setItem('chat_blocked', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        state.lastStamp = null;
+        renderMessages(state.msgs);
+        renderUsersList();
+        _updateSocialBadges();
+        return isNowBlocked;
+    }
+
+    // ── peer bookmarks (local only — saved peers to browse or bookmark) ──
+    function peerBookmarksSet() {
+        try { return JSON.parse(localStorage.getItem('chat_peer_bookmarks') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isPeerBookmarked(name) {
+        if (!name) return false;
+        return peerBookmarksSet().some(function (p) { return String(p).toLowerCase() === String(name).toLowerCase(); });
+    }
+    function togglePeerBookmark(name) {
+        if (!name) return false;
+        var list = peerBookmarksSet();
+        var idx = -1;
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i]).toLowerCase() === String(name).toLowerCase()) { idx = i; break; }
+        }
+        var isNowBookmarked = false;
+        if (idx > -1) {
+            list.splice(idx, 1);
+        } else {
+            list.push(name);
+            isNowBookmarked = true;
+        }
+        try { localStorage.setItem('chat_peer_bookmarks', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        _updateSocialBadges();
+        return isNowBookmarked;
+    }
+
+    // ── direct message closed / hidden list (dismissed so they don't show in list) ──
+    function hiddenDmsSet() {
+        try { return JSON.parse(localStorage.getItem('chat_hidden_dms') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isDmHidden(name) {
+        if (!name) return false;
+        return hiddenDmsSet().some(function (h) { return String(h).toLowerCase() === String(name).toLowerCase(); });
+    }
+    function hideDm(name) {
+        if (!name) return;
+        var list = hiddenDmsSet();
+        var exists = list.some(function (h) { return String(h).toLowerCase() === String(name).toLowerCase(); });
+        if (!exists) {
+            list.push(name);
+            try { localStorage.setItem('chat_hidden_dms', JSON.stringify(list)); } catch (e) {}
+        }
+    }
+    function unhideDm(name) {
+        if (!name) return;
+        var list = hiddenDmsSet();
+        var filtered = list.filter(function (h) { return String(h).toLowerCase() !== String(name).toLowerCase(); });
+        if (filtered.length !== list.length) {
+            try { localStorage.setItem('chat_hidden_dms', JSON.stringify(filtered)); } catch (e) {}
+        }
+    }
+
     // Users who spoke through SoulSync (the envelope is the app signature) —
     // sourced from the loaded messages, so it's an approximation of "runs
     // SoulSync", not a directory.
@@ -1037,17 +2295,24 @@
         // Discord-style member row: avatar + presence dot, name, and an activity
         // subline (the jukebox listen state doubles as "playing a game").
         var ign = isIgnored(n);
+        var blk = isBlocked(n);
+        var fr = isFriend(n);
         var tuned = tunedMap && tunedMap[n];
         var np = npMap && npMap[n];
         return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
+            (blk ? ' chat-user--blocked' : '') + (fr ? ' chat-user--friend' : '') +
             '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) +
+            (fr ? ' (Friend)' : '') + (blk ? ' (Blocked)' : '') +
             (tuned ? ' — listening to the room jukebox' : '') + '">' +
             '<span class="chat-user-av">' +
                 _avatarHtml(n, avMap && avMap[n], 'chat-av--fill') +
                 '<span class="chat-user-dot' + (tuned ? ' chat-user-dot--tuned' : '') + '"></span>' +
             '</span>' +
             '<span class="chat-user-main">' +
-                '<span class="chat-user-name">' + esc(n) + '</span>' +
+                '<span class="chat-user-name">' + esc(n) +
+                    (isDev(n) ? '<span class="chat-dev-badge chat-dev-badge--inline" title="SoulSync Creator & Lead Developer"><span class="chat-dev-badge-check">✔</span> DEV</span>' : '') +
+                    (fr ? '<span class="chat-user-friend-star" title="Friend">⭐</span>' : '') +
+                '</span>' +
                 // the shared jukebox wins the line — it's what the room is doing
                 // together; a personal now-playing shows otherwise
                 (tuned
@@ -1057,7 +2322,7 @@
                             '">♪ ' + esc(np.t) + (np.a ? ' · ' + esc(np.a) : '') + '</span>'
                         : '')) +
             '</span>' +
-            (ign ? '<span class="chat-user-mute">muted</span>' : '') + '</button>';
+            (blk ? '<span class="chat-user-mute">blocked</span>' : (ign ? '<span class="chat-user-mute">muted</span>' : '')) + '</button>';
     }
 
     function renderUsers(users) {
@@ -1087,9 +2352,11 @@
         });
         if (f) names = names.filter(function (n) { return n.toLowerCase().indexOf(f) > -1; });
         var cls = _userClassification();
-        var self = [], apps = [], rest = [];
+        var devs = [], self = [], friends = [], apps = [], rest = [];
         names.forEach(function (n) {
-            if (state.selfName && n === state.selfName) self.push(n);
+            if (isDev(n)) devs.push(n);
+            else if (state.selfName && n === state.selfName) self.push(n);
+            else if (isFriend(n)) friends.push(n);
             // the flip: unknown (never spoke) = assumed SoulSync
             else if (cls[n] !== 'vanilla') apps.push(n);
             else rest.push(n);
@@ -1102,9 +2369,17 @@
         var avMap = _avatarMap();
         // Discord groups members by role with a "NAME — count" header.
         var html = '';
+        if (devs.length) {
+            html += '<div class="chat-users-label chat-users-label--sub" style="color:#a5b4fc;">🛠️ Developer &mdash; ' + devs.length + '</div>' +
+                devs.map(function (n) { return _userBtn(n, ' chat-user--dev', tunedMap, npMap, avMap); }).join('');
+        }
         if (self.length) {
             html += '<div class="chat-users-label chat-users-label--sub">You</div>' +
                 self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap, npMap, avMap); }).join('');
+        }
+        if (friends.length) {
+            html += '<div class="chat-users-label chat-users-label--sub" style="color:#fbbf24;">⭐ Friends &mdash; ' + friends.length + '</div>' +
+                friends.map(function (n) { return _userBtn(n, '', tunedMap, npMap, avMap); }).join('');
         }
         if (apps.length) {
             html += '<div class="chat-users-label chat-users-label--sub">SoulSync &mdash; ' + apps.length + '</div>' +
@@ -1117,7 +2392,7 @@
                 rest.length + '</div>' +
                 rest.map(function (n) { return _userBtn(n, '', tunedMap, npMap, avMap); }).join('');
         }
-        if (!self.length && !apps.length && !rest.length) {
+        if (!devs.length && !self.length && !friends.length && !apps.length && !rest.length) {
             html += '<div class="chat-side-none">No users match</div>';
         }
         listHost.innerHTML = html;
@@ -1131,14 +2406,28 @@
         // lists saying the same thing).
         var host = q('[data-chat-convos]');
         if (!host) return;
-        var list = (convos || []).map(function (c) {
+        var list = (convos || []).filter(function (c) {
             var name = c.username || c.name || '';
-            if (!name) return '';
+            if (!name) return false;
+            var unread = c.hasUnAcknowledgedMessages || c.unAcknowledgedMessageCount > 0;
+            if (unread) {
+                unhideDm(name);
+                return true;
+            }
+            if (state.view === 'pm' && state.pmUser === name) {
+                return true;
+            }
+            return !isDmHidden(name);
+        }).map(function (c) {
+            var name = c.username || c.name || '';
             var unread = c.hasUnAcknowledgedMessages || c.unAcknowledgedMessageCount > 0;
             var on = state.view === 'pm' && state.pmUser === name;
-            return '<button class="chat-side-item' + (on ? ' chat-side-item--on' : '') +
+            return '<div class="chat-side-convo' + (on ? ' chat-side-item--on' : '') + '">' +
+                '<button class="chat-side-item' + (on ? ' chat-side-item--on' : '') +
                 '" type="button" data-chat-open-pm="' + attr(name) + '">' + esc(name) +
-                (unread ? '<span class="chat-side-dot"></span>' : '') + '</button>';
+                (unread ? '<span class="chat-side-dot"></span>' : '') + '</button>' +
+                '<button class="chat-side-convo-close" type="button" data-chat-close-pm="' + attr(name) + '" title="Close conversation">×</button>' +
+            '</div>';
         }).join('');
         host.innerHTML = list || '<div class="chat-side-none">No conversations</div>';
         renderGuilds();
@@ -3279,7 +4568,9 @@
             (state.isAdmin
                 ? '<button class="chat-userpanel-btn" type="button" data-chat-settings-btn ' +
                     'title="Chat settings">⚙</button>'
-                : '');
+                : '') +
+            '<button class="chat-userpanel-btn" type="button" data-chat-open-social="friends" ' +
+                'title="Social & Lists (Friends, Blocklist, Bookmarks)">👥</button>';
     }
 
     function renderHead() {
@@ -3348,8 +4639,15 @@
               (state.ssOnly ? 'SoulSync only' : 'All messages') + '</button>' +
               (state.isAdmin ? '<button class="chat-cog-btn" type="button" data-chat-settings-btn ' +
                   'title="Chat settings">⚙</button>' : '')
-            : '<span class="chat-head-title">' + esc(state.pmUser || '') + '</span>' +
-              '<span class="chat-head-sub">private message</span>';
+            : '<span class="chat-head-title">' + esc(state.pmUser || '') +
+              (isDev(state.pmUser) ? ' <span class="chat-dev-badge" title="SoulSync Creator & Lead Developer"><span class="chat-dev-badge-check">✔</span> DEV</span>' : '') +
+              (isFriend(state.pmUser) ? ' <span class="chat-friend-badge" title="Friend">⭐ Friend</span>' : '') +
+              '</span>' +
+              '<span class="chat-head-sub">private message</span>' +
+              '<div class="chat-head-actions" style="margin-left:auto;display:flex;align-items:center;gap:8px;">' +
+              '<button type="button" class="chat-filter-btn" data-chat-browse-user="' + attr(state.pmUser || '') + '" title="Browse their files">📁 Browse Files</button>' +
+              '<button type="button" class="chat-head-close-pm" data-chat-head-close-pm title="Close this conversation">✕ Close Chat</button>' +
+              '</div>';
     }
 
     function renderComposer() {
@@ -3370,15 +4668,20 @@
             : 'Read-only — chat sending is admin-only on this server';
         // Formatting only exists inside the envelope — the toolbar is a ROOM
         // thing (PMs are plaintext for non-SoulSync readers + the ProveIt bots).
+        var isRoomCanSend = (state.view === 'room' && state.canSend);
         var bar = q('[data-chat-toolbar]');
-        if (bar) bar.hidden = !(state.view === 'room' && state.canSend);
+        if (bar) bar.hidden = !isRoomCanSend;
         // GIF = sending a CDN URL through the room pipeline — room-only. The
         // emoji button stays everywhere (plain unicode is fine in PMs).
         var gifBtn = q('[data-chat-gif-btn]');
-        if (gifBtn) gifBtn.hidden = !(state.view === 'room' && state.canSend);
+        if (gifBtn) gifBtn.hidden = !isRoomCanSend;
         // polls are a room thing (bus events mean nothing in a PM)
         var pollBtn = q('[data-chat-poll-btn]');
-        if (pollBtn) pollBtn.hidden = !(state.view === 'room' && state.canSend);
+        if (pollBtn) pollBtn.hidden = !isRoomCanSend;
+        var npBtn = q('[data-chat-np-btn]');
+        if (npBtn) npBtn.hidden = !isRoomCanSend;
+        var wantBtn = q('[data-chat-want-btn]');
+        if (wantBtn) wantBtn.hidden = !isRoomCanSend;
         if (state.view !== 'room') { toggleEmojiPicker(true); toggleGifPicker(true); togglePollPop(true); }
         // last, because plain mode overrides the placeholder and hides the
         // rich controls this function just showed
@@ -3525,12 +4828,31 @@
         if (!overlay) { openPm(name); return; }
         var body = q('[data-chat-user-card-body]');
         if (body) {
+            var isFr = isFriend(name);
             body.innerHTML = '<div class="chat-card-head">' + _avatar(name) +
-                '<span class="chat-card-name">' + esc(name) + '</span></div>' +
+                '<span class="chat-card-name">' + esc(name) + '</span>' +
+                (isDev(name) ? '<span class="chat-dev-badge chat-dev-badge--lg" style="margin-left:8px;" title="SoulSync Creator & Lead Developer"><span class="chat-dev-badge-check">✔</span> DEV</span>' : '') +
+                (isFr ? '<span class="chat-friend-badge" style="margin-left:8px;">⭐ Friend</span>' : '') +
+                '</div>' +
+                (isDev(name) ? '<div class="chat-card-sub" style="color:#a5b4fc;font-weight:700;font-size:12px;margin:2px 0 6px;">🛠️ SoulSync Creator &amp; Lead Developer</div>' : '') +
                 '<div class="chat-card-info">Loading…</div>';
         }
         overlay.hidden = false;
         overlay.setAttribute('data-chat-user-card-for', name);
+        var frBtn = overlay.querySelector('[data-chat-card-friend]');
+        if (frBtn) {
+            frBtn.hidden = state.selfName && name === state.selfName;
+            frBtn.textContent = isFriend(name) ? '⭐ Remove Friend' : '⭐ Add Friend';
+        }
+        var blkBtn = overlay.querySelector('[data-chat-card-block]');
+        if (blkBtn) {
+            blkBtn.hidden = state.selfName && name === state.selfName;
+            blkBtn.textContent = isBlocked(name) ? 'Unblock' : '🚫 Block';
+        }
+        var bmBtn = overlay.querySelector('[data-chat-card-bookmark]');
+        if (bmBtn) {
+            bmBtn.textContent = isPeerBookmarked(name) ? '★ Bookmarked' : '⭐ Bookmark';
+        }
         var ignBtn = overlay.querySelector('[data-chat-card-ignore]');
         if (ignBtn) {
             ignBtn.hidden = state.selfName && name === state.selfName;
@@ -3675,8 +4997,8 @@
         });
     }
 
-    // ── share browser: a peer's files, downloadable in place ─────────────────
-    var _browse = { user: null, dirs: [], dir: null, files: [] };
+    // ── slide-over peer hub & file explorer (better than nicotine+/slskd) ───────
+    var _browse = { user: null, dirs: [], dir: null, files: [], crumbs: [{ name: 'Shares', path: null }] };
 
     function _fmtSize(bytes) {
         if (!bytes) return '';
@@ -3690,128 +5012,476 @@
         return parts[parts.length - 1] || path;
     }
 
+    function _fileQualityBadge(fn) {
+        if (!fn) return '';
+        var lower = fn.toLowerCase();
+        if (lower.endsWith('.flac')) {
+            return '<span class="chat-audio-badge chat-audio-badge--flac">FLAC</span>';
+        }
+        if (lower.endsWith('.wav')) {
+            return '<span class="chat-audio-badge chat-audio-badge--wav">WAV</span>';
+        }
+        if (lower.endsWith('.mp3')) {
+            var match = lower.match(/(320|256|192|v0|v2)/i);
+            var label = match ? match[1].toUpperCase() : 'MP3';
+            return '<span class="chat-audio-badge chat-audio-badge--mp3">' + esc(label) + '</span>';
+        }
+        if (lower.endsWith('.m4a') || lower.endsWith('.aac')) {
+            return '<span class="chat-audio-badge chat-audio-badge--mp3">AAC</span>';
+        }
+        return '';
+    }
+
+    function _folderFormatBadge(dirName) {
+        if (!dirName) return '';
+        var s = String(dirName).toLowerCase();
+        // Hi-Res / 24-bit FLAC
+        if (/(24[\s\-]?bit|24\/96|24\/192|96khz|192khz|hi[\s\-]?res)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--flac">FLAC 24-bit</span>';
+        }
+        // Standard FLAC / Lossless / ALAC
+        if (/(flac|lossless|alac)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--flac">FLAC</span>';
+        }
+        // Vinyl rips
+        if (/(vinyl|lp[\s\-_]rip|vinylrip)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--vinyl">VINYL</span>';
+        }
+        // WAV
+        if (/(\bwav\b|\.wav)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--wav">WAV</span>';
+        }
+        // MP3 320k
+        if (/(320|320k|320kbps|cbr)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--320">320K</span>';
+        }
+        // V0 / V2 / VBR
+        if (/(v0|v2|vbr)/i.test(s)) {
+            return '<span class="chat-folder-badge chat-folder-badge--vbr">V0 VBR</span>';
+        }
+        return '';
+    }
+
+    function closeBrowse() {
+        var overlay = q('[data-chat-browse-modal]');
+        var backdrop = q('[data-chat-browse-backdrop]');
+        if (overlay) {
+            overlay.classList.remove('visible');
+            setTimeout(function () { overlay.hidden = true; }, 320);
+        }
+        if (backdrop) {
+            backdrop.classList.remove('visible');
+            setTimeout(function () { backdrop.hidden = true; }, 320);
+        }
+        if (window.location.hash && window.location.hash.indexOf('#browse') === 0) {
+            try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (e) {}
+        }
+    }
+
     function openBrowse(name) {
         if (!name) return;
         closeUserCard();
         var overlay = q('[data-chat-browse-modal]');
+        var backdrop = q('[data-chat-browse-backdrop]');
         if (!overlay) return;
-        _browse = { user: name, dirs: [], dir: null, files: [] };
+        _browse = {
+            user: name,
+            dirs: [],
+            cache: {},
+            expanded: {},
+            selected: {},
+            filter: '',
+            formatFilter: 'all'
+        };
         overlay.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+        requestAnimationFrame(function () {
+            overlay.classList.add('visible');
+            if (backdrop) backdrop.classList.add('visible');
+        });
+
+        // Set Hero identity
         var title = q('[data-chat-browse-title]');
-        if (title) title.textContent = name + '’s files';
+        if (title) {
+            title.innerHTML = esc(name) + (isDev(name) ? ' <span class="chat-dev-badge chat-dev-badge--inline" title="SoulSync Creator & Lead Developer"><span class="chat-dev-badge-check">✔</span> DEV</span>' : '');
+        }
+        var av = q('[data-chat-browse-av]');
+        if (av) av.textContent = (name[0] || '👤').toUpperCase();
+        var statusText = q('[data-chat-browse-status-text]');
+        if (statusText) statusText.textContent = isDev(name) ? 'SoulSync Creator & Lead Developer' : 'Connecting…';
+
+        // Setup format filter pills
+        var pBar = q('.chat-browse-format-filters');
+        if (pBar) {
+            pBar.querySelectorAll('.chat-fmt-pill').forEach(function (pill) {
+                pill.classList.toggle('chat-fmt-pill--active', pill.getAttribute('data-chat-browse-fmt') === 'all');
+            });
+        }
+
+        // Setup bookmark button & saved peers count
+        var bmBtn = q('[data-chat-peer-bookmark]');
+        if (bmBtn) {
+            var isBm = isPeerBookmarked(name);
+            bmBtn.textContent = isBm ? '★ Bookmarked' : '⭐ Bookmark';
+            bmBtn.classList.toggle('chat-peer-bm-btn--active', isBm);
+        }
+        _updateSavedPeersBtn();
+
+        // Setup friend and block quickbar buttons
+        var frBtn = q('[data-chat-browse-friend]');
+        if (frBtn) {
+            frBtn.textContent = isFriend(name) ? '⭐ Friend (Remove)' : '⭐ Friend';
+        }
+        var blkBtn = q('[data-chat-browse-block]');
+        if (blkBtn) {
+            blkBtn.textContent = isBlocked(name) ? 'Unblock' : '🚫 Block';
+        }
+
+        // Reset telemetry
+        var spd = q('[data-chat-browse-speed]');
+        if (spd) { spd.textContent = '—'; spd.className = 'chat-peer-stat-val'; }
+        var qEl = q('[data-chat-browse-queue]');
+        if (qEl) qEl.textContent = '—';
+        var slots = q('[data-chat-browse-slots]');
+        if (slots) { slots.textContent = '—'; slots.className = 'chat-peer-stat-val'; }
+        var fCount = q('[data-chat-browse-folders-count]');
+        if (fCount) fCount.textContent = '—';
+        var histPill = q('[data-chat-browse-history]');
+        if (histPill) histPill.hidden = true;
+
         var inp = q('[data-chat-browse-search]');
-        if (inp) { inp.value = ''; inp.placeholder = 'Filter folders…'; }
-        _browseChrome();
+        if (inp) { inp.value = ''; inp.placeholder = 'Filter folders or search files…'; }
+        _syncBrowseDock();
+
         var body = q('[data-chat-browse-body]');
-        if (body) body.innerHTML = '<div class="chat-gif-hint">Browsing ' + esc(name) + '’s shares…</div>';
+        if (body) body.innerHTML = '<div class="chat-gif-hint">Connecting to ' + esc(name) + '’s Soulseek node…</div>';
+
+        // Update hash for browser Back navigation
+        try { history.replaceState(null, '', '#browse/' + encodeURIComponent(name)); } catch (e) {}
+
+        // Fetch User Info / Telemetry in parallel
+        getJSON('/api/chat/user/' + encodeURIComponent(name)).then(function (res) {
+            if (_browse.user !== name) return;
+            var info = (res.ok && res.body.info) || {};
+            var status = (res.ok && res.body.status) || {};
+            var hist = (res.ok && res.body.history) || null;
+
+            if (statusText) {
+                var pres = status.presence || status.status ||
+                    (status.isOnline === true ? 'Online' : (status.isOnline === false ? 'Offline' : 'Soulseek Peer'));
+                statusText.textContent = String(pres);
+            }
+            if (spd) {
+                spd.textContent = info.uploadSpeed ? (_fmtBytes(info.uploadSpeed) + '/s') : (status.uploadSpeed ? _fmtBytes(status.uploadSpeed) + '/s' : 'Available');
+                spd.className = 'chat-peer-stat-val chat-peer-stat-val--good';
+            }
+            if (qEl) {
+                qEl.textContent = info.queueLength != null ? String(info.queueLength) : '0';
+            }
+            if (slots) {
+                slots.textContent = info.hasFreeUploadSlot ? 'Yes' : (info.uploadSlots ? String(info.uploadSlots) : 'Free');
+                if (info.hasFreeUploadSlot) slots.className = 'chat-peer-stat-val chat-peer-stat-val--good';
+            }
+            if (hist && hist.downloads > 0 && histPill) {
+                var ht = q('[data-chat-browse-history-text]');
+                if (ht) {
+                    ht.textContent = hist.downloads + ' downloads · ' +
+                        (hist.success_rate != null ? hist.success_rate + '% success · ' : '') +
+                        (hist.total_bytes > 0 ? _fmtBytes(hist.total_bytes) : '');
+                }
+                histPill.hidden = false;
+            }
+        });
+
+        // Fetch Shares
         getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares').then(function (res) {
             if (_browse.user !== name) return;
             if (!res.ok) {
                 if (body) {
                     body.innerHTML = '<div class="chat-gif-hint">' +
                         esc(res.body && res.body.error || 'Could not browse') + '</div>' +
-                        '<div class="chat-browse-retry-row">' +
+                        '<div class="chat-browse-retry-row" style="text-align:center;margin-top:16px;">' +
                         '<button type="button" class="modal-button modal-button--primary" ' +
                             'data-chat-browse-retry>Try again</button></div>';
                 }
                 return;
             }
             _browse.dirs = res.body.directories || [];
-            renderBrowseDirs('');
+            if (fCount) fCount.textContent = _browse.dirs.length + ' folders';
+            renderBrowseTree('');
         });
     }
 
-    function _browseChrome() {
-        var back = q('[data-chat-browse-back]');
-        var dl = q('[data-chat-browse-dl]');
-        var inp = q('[data-chat-browse-search]');
-        var inFiles = _browse.dir != null;
-        if (back) back.hidden = !inFiles;
-        if (dl) dl.hidden = !inFiles;
-        if (inp) inp.placeholder = inFiles ? 'Filter files…' : 'Filter folders…';
-    }
-
-    function renderBrowseDirs(filter) {
+    function renderBrowseTree(filter) {
         var body = q('[data-chat-browse-body]');
         if (!body) return;
-        _browse.dir = null; _browse.files = [];
-        _browseChrome();
-        var f = String(filter || '').toLowerCase();
+        _browse.filter = filter != null ? filter : (_browse.filter || '');
+        var f = String(_browse.filter).toLowerCase();
+        var fmt = _browse.formatFilter || 'all';
+
         var dirs = _browse.dirs.filter(function (d) {
-            return !f || d.name.toLowerCase().indexOf(f) > -1;
-        }).slice(0, 400);
+            if (fmt === 'flac') {
+                var s = d.name.toLowerCase();
+                var isFlac = /(flac|24bit|24-bit|lossless|alac|vinyl)/i.test(s);
+                var cached = _browse.cache[d.name];
+                if (!isFlac && cached) isFlac = cached.some(function (x) { return /\.flac$/i.test(x.filename); });
+                if (!isFlac) return false;
+            } else if (fmt === '320') {
+                var s = d.name.toLowerCase();
+                var is320 = /(320|320k|320kbps|cbr)/i.test(s);
+                var cached = _browse.cache[d.name];
+                if (!is320 && cached) is320 = cached.some(function (x) { return /320/i.test(x.filename); });
+                if (!is320) return false;
+            } else if (fmt === 'vbr') {
+                var s = d.name.toLowerCase();
+                var isVbr = /(v0|v2|vbr|mp3)/i.test(s) && !/(320|flac|lossless)/i.test(s);
+                var cached = _browse.cache[d.name];
+                if (!isVbr && cached) isVbr = cached.some(function (x) { return /\.(mp3|aac|m4a)$/i.test(x.filename) && !/320/i.test(x.filename); });
+                if (!isVbr) return false;
+            }
+            if (!f) return true;
+            if (d.name.toLowerCase().indexOf(f) > -1) return true;
+            var cached2 = _browse.cache[d.name];
+            if (cached2 && cached2.some(function (x) { return x.filename.toLowerCase().indexOf(f) > -1; })) return true;
+            return false;
+        }).slice(0, 500);
+
         if (!dirs.length) {
             body.innerHTML = '<div class="chat-gif-hint">' +
-                (_browse.dirs.length ? 'No folders match' : 'Nothing shared') + '</div>';
+                (_browse.dirs.length ? 'No folders match that filter' : 'Nothing shared') + '</div>';
+            _syncBrowseDock();
             return;
         }
+
         body.innerHTML = dirs.map(function (d) {
-            return '<button type="button" class="chat-browse-row" data-chat-browse-dir="' +
-                attr(d.name) + '" title="' + attr(d.name) + '">' +
-                '<span class="chat-browse-icon">📁</span>' +
-                '<span class="chat-browse-name">' + esc(_baseName(d.name)) + '</span>' +
-                '<span class="chat-browse-meta">' + d.file_count + ' file' +
-                    (d.file_count === 1 ? '' : 's') + '</span></button>';
+            var isExp = !!_browse.expanded[d.name];
+            var fmtBadge = _folderFormatBadge(d.name);
+            return '<div class="chat-folder-tree-item' + (isExp ? ' chat-folder-tree-item--open' : '') + '" data-chat-folder-item="' + attr(d.name) + '">' +
+                '<div class="chat-folder-header" data-chat-browse-toggle="' + attr(d.name) + '">' +
+                    '<button type="button" class="chat-folder-chevron' + (isExp ? ' chat-folder-chevron--expanded' : '') + '" ' +
+                            'data-chat-browse-toggle="' + attr(d.name) + '" title="' + (isExp ? 'Collapse' : 'Expand') + '">' +
+                        '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>' +
+                    '</button>' +
+                    '<span class="chat-folder-icon">' + (isExp ? '📂' : '📁') + '</span>' +
+                    '<div class="chat-folder-info" title="' + attr(d.name) + '">' +
+                        '<div class="chat-folder-title-row">' +
+                            '<span class="chat-folder-name">' + esc(_baseName(d.name)) + '</span>' +
+                            fmtBadge +
+                        '</div>' +
+                        '<span class="chat-folder-meta">' + d.file_count + ' file' + (d.file_count === 1 ? '' : 's') + '</span>' +
+                    '</div>' +
+                    '<div class="chat-folder-actions">' +
+                        '<button type="button" class="chat-folder-dl-btn" data-chat-browse-dl-folder="' + attr(d.name) + '" title="Download entire folder in 1 click">' +
+                            '⬇ Download Folder</button>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="chat-folder-children" data-chat-browse-children="' + attr(d.name) + '"' + (isExp ? '' : ' hidden') + '>' +
+                    (isExp ? _renderFolderChildrenHtml(d.name) : '') +
+                '</div>' +
+            '</div>';
         }).join('');
+
+        _syncBrowseDock();
     }
 
-    function openBrowseDir(dirName) {
+    function _renderFolderChildrenHtml(dirName) {
+        var files = _browse.cache[dirName];
+        if (!files) {
+            return '<div class="chat-folder-loading"><span class="chat-spinner-micro"></span> Loading files in ' + esc(_baseName(dirName)) + '…</div>';
+        }
+        var f = String(_browse.filter || '').toLowerCase();
+        var visibleFiles = files.filter(function (x) {
+            return !f || x.filename.toLowerCase().indexOf(f) > -1 || dirName.toLowerCase().indexOf(f) > -1;
+        });
+        if (!visibleFiles.length) {
+            return '<div class="chat-folder-empty">No matching files</div>';
+        }
+
+        var allChecked = visibleFiles.every(function (x) { return !!_browse.selected[x.filename]; });
+
+        var html = '<div class="chat-folder-subhead">' +
+            '<label class="chat-file-row chat-file-row--folder-all">' +
+                '<input type="checkbox" data-chat-browse-folder-all="' + attr(dirName) + '"' + (allChecked ? ' checked' : '') + '>' +
+                '<span class="chat-file-name" style="font-weight:700;">Select all in this folder (' + visibleFiles.length + ' tracks)</span>' +
+            '</label>' +
+        '</div>';
+
+        html += visibleFiles.map(function (x) {
+            var isSel = !!_browse.selected[x.filename];
+            var qBadge = _fileQualityBadge(x.filename);
+            return '<label class="chat-file-row' + (isSel ? ' chat-file-row--selected' : '') + '">' +
+                '<input type="checkbox" data-chat-browse-file="' + attr(x.filename) + '" data-chat-browse-size="' + (x.size || 0) + '" data-chat-browse-dir="' + attr(dirName) + '"' + (isSel ? ' checked' : '') + '>' +
+                '<span class="chat-file-icon">🎵</span>' +
+                '<span class="chat-file-name" title="' + attr(x.filename) + '">' + esc(_baseName(x.filename)) + '</span>' +
+                qBadge +
+                '<span class="chat-file-size">' + _fmtSize(x.size) + '</span>' +
+                '<button type="button" class="chat-file-quick-dl" data-chat-browse-dl-single="' + attr(x.filename) + '" data-chat-browse-size="' + (x.size || 0) + '" title="Download this track">⬇</button>' +
+            '</label>';
+        }).join('');
+
+        return html;
+    }
+
+    function _findBrowseFolderItem(dirName) {
+        if (!dirName) return null;
         var body = q('[data-chat-browse-body]');
-        if (!body) return;
-        _browse.dir = dirName;
-        _browseChrome();
-        body.innerHTML = '<div class="chat-gif-hint">Loading files…</div>';
+        if (!body) return null;
+        var items = body.querySelectorAll('.chat-folder-tree-item');
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].getAttribute('data-chat-folder-item') === dirName) {
+                return items[i];
+            }
+        }
+        return null;
+    }
+
+    function toggleBrowseFolder(dirName, itemEl) {
+        if (!dirName) return;
+        var willExpand = !_browse.expanded[dirName];
+        _browse.expanded[dirName] = willExpand;
+
+        var item = itemEl || _findBrowseFolderItem(dirName);
+        var childrenEl = item ? item.querySelector('.chat-folder-children') : null;
+        var chevron = item ? item.querySelector('.chat-folder-chevron') : null;
+        var icon = item ? item.querySelector('.chat-folder-icon') : null;
+
+        if (item) {
+            if (willExpand) item.classList.add('chat-folder-tree-item--open');
+            else item.classList.remove('chat-folder-tree-item--open');
+        }
+        if (chevron) {
+            if (willExpand) chevron.classList.add('chat-folder-chevron--expanded');
+            else chevron.classList.remove('chat-folder-chevron--expanded');
+            chevron.setAttribute('title', willExpand ? 'Collapse' : 'Expand');
+        }
+        if (icon) {
+            icon.textContent = willExpand ? '📂' : '📁';
+        }
+
+        if (childrenEl) {
+            childrenEl.hidden = !willExpand;
+            if (willExpand) {
+                if (_browse.cache[dirName]) {
+                    childrenEl.innerHTML = _renderFolderChildrenHtml(dirName);
+                    _syncBrowseDock();
+                } else {
+                    childrenEl.innerHTML = '<div class="chat-folder-loading"><span class="chat-spinner-micro"></span> Loading files in ' + esc(_baseName(dirName)) + '…</div>';
+                    var name = _browse.user;
+                    getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares/files?dir=' + encodeURIComponent(dirName)).then(function (res) {
+                        if (_browse.user !== name) return;
+                        var curItem = item || _findBrowseFolderItem(dirName);
+                        var curChildren = curItem ? curItem.querySelector('.chat-folder-children') : null;
+                        if (!curChildren) return;
+                        if (!res.ok) {
+                            curChildren.innerHTML = '<div class="chat-folder-empty">' + esc(res.body && res.body.error || 'Could not load folder') + '</div>';
+                            return;
+                        }
+                        _browse.cache[dirName] = res.body.files || [];
+                        curChildren.innerHTML = _renderFolderChildrenHtml(dirName);
+                        _syncBrowseDock();
+                    });
+                }
+            }
+        }
+    }
+
+    function expandAllBrowseFolders() {
+        var dirs = _browse.dirs || [];
+        dirs.forEach(function (d) {
+            _browse.expanded[d.name] = true;
+        });
+        renderBrowseTree(_browse.filter || '');
+        dirs.forEach(function (d) {
+            if (!_browse.cache[d.name]) {
+                var name = _browse.user;
+                getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares/files?dir=' + encodeURIComponent(d.name)).then(function (res) {
+                    if (_browse.user !== name || !_browse.expanded[d.name]) return;
+                    if (res.ok) {
+                        _browse.cache[d.name] = res.body.files || [];
+                        var item = _findBrowseFolderItem(d.name);
+                        var ch = item ? item.querySelector('.chat-folder-children') : null;
+                        if (ch) ch.innerHTML = _renderFolderChildrenHtml(d.name);
+                        _syncBrowseDock();
+                    }
+                });
+            }
+        });
+    }
+
+    function collapseAllBrowseFolders() {
+        _browse.expanded = {};
+        renderBrowseTree(_browse.filter || '');
+    }
+
+    function _syncBrowseDock() {
+        var dock = q('[data-chat-browse-dock]');
+        var countEl = q('[data-chat-dock-count]');
+        var sizeEl = q('[data-chat-dock-size]');
+        if (!dock) return;
+        var selected = _browse.selected || {};
+        var keys = Object.keys(selected);
+        var count = keys.length;
+        var totalBytes = 0;
+        keys.forEach(function (k) {
+            totalBytes += Number(selected[k].size) || 0;
+        });
+
+        if (count > 0) {
+            dock.hidden = false;
+            if (countEl) countEl.textContent = count;
+            if (sizeEl) sizeEl.textContent = _fmtSize(totalBytes);
+        } else {
+            dock.hidden = true;
+        }
+    }
+
+    function downloadFolder(dirName) {
+        if (!_browse.user || !dirName) return;
+        if (typeof showToast === 'function') showToast('Fetching files in ' + _baseName(dirName) + '…', 'info');
         var name = _browse.user;
         getJSON('/api/chat/user/' + encodeURIComponent(name) + '/shares/files?dir=' +
                 encodeURIComponent(dirName)).then(function (res) {
-            if (_browse.user !== name || _browse.dir !== dirName) return;
-            if (!res.ok) {
-                body.innerHTML = '<div class="chat-gif-hint">' +
-                    esc(res.body && res.body.error || 'Could not read that folder') + '</div>';
+            if (!res.ok || !res.body.files || !res.body.files.length) {
+                if (typeof showToast === 'function') showToast('Could not read files for that folder', 'error');
                 return;
             }
-            _browse.files = res.body.files || [];
-            renderBrowseFiles('');
+            _browse.cache[dirName] = res.body.files;
+            var files = res.body.files.map(function (x) {
+                return { filename: x.filename, size: x.size };
+            });
+            postJSON('/api/chat/user/' + encodeURIComponent(name) + '/download', { files: files }).then(function (dRes) {
+                if (!dRes.ok) {
+                    if (typeof showToast === 'function') showToast(dRes.body && dRes.body.error || 'Could not queue folder', 'error');
+                    return;
+                }
+                var n = dRes.body.queued || 0;
+                if (typeof showToast === 'function') {
+                    showToast('Queued ' + n + ' files from ' + _baseName(dirName) + ' — check Downloads', 'success');
+                }
+            });
         });
     }
 
-    function renderBrowseFiles(filter) {
-        var body = q('[data-chat-browse-body]');
-        if (!body) return;
-        var f = String(filter || '').toLowerCase();
-        var files = _browse.files.filter(function (x) {
-            return !f || x.filename.toLowerCase().indexOf(f) > -1;
-        }).slice(0, 500);
-        if (!files.length) {
-            body.innerHTML = '<div class="chat-gif-hint">No files here</div>';
-            return;
-        }
-        body.innerHTML =
-            '<label class="chat-browse-row chat-browse-row--all">' +
-                '<input type="checkbox" data-chat-browse-all checked>' +
-                '<span class="chat-browse-name">Select all (' + files.length + ')</span>' +
-            '</label>' +
-            files.map(function (x, i) {
-                return '<label class="chat-browse-row">' +
-                    '<input type="checkbox" data-chat-browse-file="' + i + '" checked>' +
-                    '<span class="chat-browse-name" title="' + attr(x.filename) + '">' +
-                        esc(_baseName(x.filename)) + '</span>' +
-                    '<span class="chat-browse-meta">' + _fmtSize(x.size) + '</span></label>';
-            }).join('');
-        body._files = files;
+    function downloadSingleTrack(filePath, size) {
+        if (!_browse.user || !filePath) return;
+        postJSON('/api/chat/user/' + encodeURIComponent(_browse.user) + '/download',
+                 { files: [{ filename: filePath, size: Number(size) || 0 }] }).then(function (res) {
+            if (!res.ok) {
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'Could not queue track', 'error');
+                }
+                return;
+            }
+            if (typeof showToast === 'function') {
+                showToast('Queued ' + _baseName(filePath) + ' — check Downloads', 'success');
+            }
+        });
     }
 
     function browseDownloadSelected() {
-        var body = q('[data-chat-browse-body]');
         var dl = q('[data-chat-browse-dl]');
-        if (!body || !body._files) return;
-        var picked = [];
-        body.querySelectorAll('[data-chat-browse-file]').forEach(function (cb) {
-            if (cb.checked) {
-                var x = body._files[Number(cb.getAttribute('data-chat-browse-file'))];
-                if (x) picked.push({ filename: x.filename, size: x.size });
-            }
-        });
+        var selected = _browse.selected || {};
+        var picked = Object.values(selected);
         if (!picked.length) {
             if (typeof showToast === 'function') showToast('Nothing selected', 'info');
             return;
@@ -3819,7 +5489,7 @@
         if (dl) { dl.disabled = true; dl.textContent = 'Queueing…'; }
         postJSON('/api/chat/user/' + encodeURIComponent(_browse.user) + '/download',
                  { files: picked }).then(function (res) {
-            if (dl) { dl.disabled = false; dl.textContent = 'Download selected'; }
+            if (dl) { dl.disabled = false; dl.textContent = 'Download Selected'; }
             if (!res.ok) {
                 if (typeof showToast === 'function') {
                     showToast(res.body && res.body.error || 'Could not queue downloads', 'error');
@@ -3831,6 +5501,17 @@
                 showToast('Queued ' + n + ' file' + (n === 1 ? '' : 's') + ' from ' +
                           _browse.user + ' — check Downloads', 'success');
             }
+            _browse.selected = {};
+            var body = q('[data-chat-browse-body]');
+            if (body) {
+                body.querySelectorAll('[data-chat-browse-file], [data-chat-browse-folder-all]').forEach(function (cb) {
+                    cb.checked = false;
+                });
+                body.querySelectorAll('.chat-file-row--selected').forEach(function (r) {
+                    r.classList.remove('chat-file-row--selected');
+                });
+            }
+            _syncBrowseDock();
         });
     }
 
@@ -3860,14 +5541,22 @@
 
     // ── slash commands (room only — power-user glue over existing features)
     var SLASH_COMMANDS = [
-        { c: '/play',  a: '<song or link>', d: 'queue it on the jukebox' },
-        { c: '/skip',  a: '', d: 'vote to skip the current track' },
-        { c: '/tune',  a: '', d: 'tune in or out of the jukebox' },
-        { c: '/topic', a: '<text>', d: 'set the room topic' },
-        { c: '/poll',  a: '<question>', d: 'start a room poll' },
-        { c: '/pin',   a: '', d: 'pin the latest message' },
-        { c: '/gif',   a: '<search>', d: 'find a GIF' },
-        { c: '/shrug', a: '[message]', d: 'appends \u00af\\_(\u30c4)_/\u00af' },
+        { c: '/np',        a: '', d: 'share what you are playing right now' },
+        { c: '/want',      a: '[query]', d: 'search & post an In Search Of (Wanted) card' },
+        { c: '/iso',       a: '[query]', d: 'alias for /want' },
+        { c: '/friends',   a: '', d: 'open your Friends list' },
+        { c: '/blocklist', a: '', d: 'open your Blocklist' },
+        { c: '/bookmarks', a: '', d: 'open your Bookmarked Peers' },
+        { c: '/browse',    a: '<user>', d: "browse a peer's shared files" },
+        { c: '/upload',    a: '', d: 'upload & share a file via filepost.dev' },
+        { c: '/play',      a: '<song or link>', d: 'queue it on the jukebox' },
+        { c: '/skip',      a: '', d: 'vote to skip the current track' },
+        { c: '/tune',      a: '', d: 'tune in or out of the jukebox' },
+        { c: '/topic',     a: '<text>', d: 'set the room topic' },
+        { c: '/poll',      a: '<question>', d: 'start a room poll' },
+        { c: '/pin',       a: '', d: 'pin the latest message' },
+        { c: '/gif',       a: '<search>', d: 'find a GIF' },
+        { c: '/shrug',     a: '[message]', d: 'appends \u00af\\_(\u30c4)_/\u00af' },
     ];
 
     function updateSlashPop(input) {
@@ -3881,7 +5570,12 @@
             if (pop.querySelector('[data-chat-slash-pick]')) { pop.hidden = true; pop.innerHTML = ''; }
             return;
         }
-        var hits = SLASH_COMMANDS.filter(function (sc) { return sc.c.indexOf(v) === 0; });
+        var hits = SLASH_COMMANDS.filter(function (sc) {
+            if (_plainOn() && (sc.c === '/np' || sc.c === '/want' || sc.c === '/iso' || sc.c === '/poll' || sc.c === '/upload' || sc.c === '/gif')) {
+                return false;
+            }
+            return sc.c.indexOf(v) === 0;
+        });
         if (!hits.length) { pop.hidden = true; return; }
         pop.innerHTML = hits.map(function (sc) {
             return '<button type="button" class="chat-mention-opt chat-slash-opt" ' +
@@ -3898,6 +5592,17 @@
         var pop = q('[data-chat-mention-pop]');
         if (pop) { pop.hidden = true; pop.innerHTML = ''; }
         if (!input || !cmd) return;
+        if (cmd === '/want' || cmd === '/iso') {
+            input.value = '';
+            if (state.view !== 'room' || _plainOn() || !state.canSend) {
+                if (typeof showToast === 'function') {
+                    showToast('🔍 Wanted cards can only be posted in SoulSync rooms.', 'warning');
+                }
+                return;
+            }
+            openWantedModal();
+            return;
+        }
         var meta = null;
         SLASH_COMMANDS.forEach(function (sc) { if (sc.c === cmd) meta = sc; });
         if (meta && !meta.a) {                     // no-arg commands run on click
@@ -3917,6 +5622,44 @@
         var toast = function (msg, kind) {
             if (typeof showToast === 'function') showToast(msg, kind || 'info');
         };
+        if (cmd === 'np') {
+            if (state.view !== 'room' || _plainOn() || !state.canSend) {
+                toast('🎵 Now Playing cards can only be shared in SoulSync rooms.', 'warning');
+                return true;
+            }
+            shareNowPlaying();
+            return true;
+        }
+        if (cmd === 'want' || cmd === 'iso') {
+            if (state.view !== 'room' || _plainOn() || !state.canSend) {
+                toast('🔍 Wanted cards can only be posted in SoulSync rooms.', 'warning');
+                return true;
+            }
+            openWantedModal(arg);
+            return true;
+        }
+        if (cmd === 'friends') {
+            openSocialModal('friends');
+            return true;
+        }
+        if (cmd === 'blocklist') {
+            openSocialModal('blocked');
+            return true;
+        }
+        if (cmd === 'bookmarks') {
+            openSocialModal('bookmarks');
+            return true;
+        }
+        if (cmd === 'browse') {
+            if (arg) openBrowse(arg);
+            else toast('Specify a username: /browse <user>');
+            return true;
+        }
+        if (cmd === 'upload') {
+            var fileInp = q('[data-chat-attach-file]');
+            if (fileInp) fileInp.click();
+            return true;
+        }
         if (cmd === 'shrug') {
             return (arg ? arg + ' ' : '') + '\u00af\\_(\u30c4)_/\u00af';
         }
@@ -4132,13 +5875,25 @@
         var hint = q('[data-chat-mode-hint]');
         var on = _plainOn() && state.canSend;
         if (hint) hint.hidden = !on;
-        if (!on) return;    // everything below is the exception, not the default
+        if (!on) {
+            if (state.view === 'room' && state.canSend) {
+                var bar = q('[data-chat-toolbar]');
+                if (bar) bar.hidden = false;
+                ['[data-chat-gif-btn]', '[data-chat-poll-btn]', '[data-chat-attach-btn]',
+                 '[data-chat-np-btn]', '[data-chat-want-btn]'].forEach(function (sel) {
+                    var el = q(sel);
+                    if (el) el.hidden = false;
+                });
+            }
+            return;
+        }
 
         // none of these survive without an envelope. leaving them live would
         // let someone attach a template the send is about to refuse.
         var bar = q('[data-chat-toolbar]');
         if (bar) bar.hidden = true;                 // markdown IS the envelope
-        ['[data-chat-gif-btn]', '[data-chat-poll-btn]', '[data-chat-attach-btn]'].forEach(function (sel) {
+        ['[data-chat-gif-btn]', '[data-chat-poll-btn]', '[data-chat-attach-btn]',
+         '[data-chat-np-btn]', '[data-chat-want-btn]'].forEach(function (sel) {
             var el = q(sel);
             if (el) el.hidden = true;
         });
@@ -4152,7 +5907,11 @@
         // plain text has no envelope, so there is nowhere to put an avatar, a
         // channel tag or a thread id. attaching them anyway would make the
         // server refuse a message the user had no way to know was tagged.
-        if (_plainOn()) { payload.plain = true; return payload; }
+        // Rich cards (np, want, overlay, file) are NEVER sent as plain text.
+        if (_plainOn()) {
+            payload.plain = true;
+            return payload;
+        }
         if (_myAvatar()) payload.avatar = _myAvatar();
         if (_chanRoom()) {
             payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;
@@ -4456,10 +6215,22 @@
 
     // username -> avatar id, from the hello beacons AND from anything they've
     // said (messages carry the id, so history alone is enough to paint faces).
+    // Discovered avatars are persisted to localStorage so silent peers who
+    // have spoken previously keep their faces across reloads.
     function _avatarMap() {
         var out = {};
+        try {
+            var cached = JSON.parse(localStorage.getItem('chat_avatar_cache') || '{}');
+            if (cached && typeof cached === 'object') {
+                Object.keys(cached).forEach(function (u) {
+                    var cid = _avatarId(cached[u]);
+                    if (cid) out[u] = cid;
+                });
+            }
+        } catch (e) { /* ignore parse errors */ }
         if (window.ChatProtocol && window.ChatProtocol.reduceAvatars) {
-            out = window.ChatProtocol.reduceAvatars(_roomEvents(), CHAT_AVATARS);
+            var reduced = window.ChatProtocol.reduceAvatars(_roomEvents(), CHAT_AVATARS);
+            Object.keys(reduced || {}).forEach(function (u) { out[u] = reduced[u]; });
         }
         (state.msgs || []).forEach(function (m) {
             var n = _avatarId(m && m.av);
@@ -4471,6 +6242,9 @@
         Object.keys(out).forEach(function (u) {
             if (!_avatarAllowed(out[u], u)) delete out[u];
         });
+        try {
+            localStorage.setItem('chat_avatar_cache', JSON.stringify(out));
+        } catch (e) { /* quota exceeded or private mode */ }
         return out;
     }
 
@@ -4740,6 +6514,7 @@
                 (msgs.length ? renderGroups(msgs)
                              : '<div class="chat-empty">Nothing in the archive matches.</div>');
             host.scrollTop = 0;
+            _unfurlPendingLinks(host);
         });
     }
 
@@ -4862,8 +6637,333 @@
         });
     }
 
-    // ── room browser (join any public Soulseek room) ─────────────────────────
+    // ── rich link unfurling & inline web preview ─────────────────────────────
+    var _linkPreviewCache = {};
+
+    function _unfurlCardHtml(p) {
+        var theme = p.theme_color || '#6366f1';
+        var domain = p.domain || '';
+        var site = p.site_name || domain || 'Website';
+        var title = p.title || p.url;
+        var desc = p.description ? String(p.description).slice(0, 260) : '';
+        var thumb = p.image || '';
+
+        return '<div class="chat-unfurl-card" data-unfurl-url="' + attr(p.url) + '" style="--unfurl-color:' + attr(theme) + '">' +
+            '<div class="chat-unfurl-bar"></div>' +
+            '<div class="chat-unfurl-main">' +
+                '<div class="chat-unfurl-head">' +
+                    '<span class="chat-unfurl-site">' +
+                        (domain ? '<img class="chat-unfurl-favicon" src="https://www.google.com/s2/favicons?domain=' + attr(domain) + '&sz=32" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') +
+                        '<span>' + esc(site) + '</span>' +
+                    '</span>' +
+                    '<div class="chat-unfurl-actions">' +
+                        '<button type="button" class="chat-unfurl-btn chat-unfurl-btn--preview" data-chat-preview-url="' + attr(p.url) + '" title="Open interactive inline preview">👁 Preview Inline</button>' +
+                        '<a href="' + attr(p.url) + '" target="_blank" rel="noopener noreferrer" class="chat-unfurl-btn" title="Open in browser">↗ Open</a>' +
+                        '<button type="button" class="chat-unfurl-btn chat-unfurl-btn--close" data-chat-unfurl-close title="Dismiss preview">✕</button>' +
+                    '</div>' +
+                '</div>' +
+                '<a href="' + attr(p.url) + '" target="_blank" rel="noopener noreferrer" class="chat-unfurl-title">' + esc(title) + '</a>' +
+                (desc ? '<div class="chat-unfurl-desc">' + esc(desc) + '</div>' : '') +
+                (thumb ? '<div class="chat-unfurl-thumb-wrap"><img class="chat-unfurl-thumb" src="' + attr(thumb) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="var w=this.closest(\'.chat-unfurl-thumb-wrap\'); if(w) w.remove();"></div>' : '') +
+            '</div>' +
+        '</div>';
+    }
+
+    function _attachUnfurlCard(line, p, container) {
+        if (!line || !p || !p.url) return;
+        if (line.querySelector('.chat-unfurl-card[data-unfurl-url="' + attr(p.url) + '"]')) return;
+        var div = document.createElement('div');
+        div.innerHTML = _unfurlCardHtml(p);
+        var card = div.firstElementChild;
+        if (card) {
+            line.appendChild(card);
+            if (state.stickBottom && container) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+    }
+
+    function _unfurlPendingLinks(container) {
+        if (!container) return;
+        var links = container.querySelectorAll('a.chat-link:not([data-unfurl-checked])');
+        if (!links.length) return;
+
+        links.forEach(function (link) {
+            link.setAttribute('data-unfurl-checked', '1');
+            var href = link.getAttribute('href') || '';
+            if (!href || href.charAt(0) === '/' || href.indexOf('javascript:') === 0) return;
+            if (IMG_RE.test(href)) return;
+            if (_ytId(href) || _spotifyEmbedInfo(href) || _deezerEmbedInfo(href) || _soundcloudEmbedInfo(href)) return;
+
+            var line = link.closest('.chat-line');
+            if (!line) return;
+
+            if (_linkPreviewCache[href]) {
+                var cached = _linkPreviewCache[href];
+                if (cached.ok && cached.preview && (cached.preview.title || cached.preview.description)) {
+                    _attachUnfurlCard(line, cached.preview, container);
+                }
+                return;
+            }
+
+            getJSON('/api/chat/link-preview?url=' + encodeURIComponent(href)).then(function (res) {
+                if (!res.ok || !res.body || !res.body.ok) {
+                    _linkPreviewCache[href] = { ok: false };
+                    return;
+                }
+                var p = res.body.preview || res.body;
+                if (!p || (!p.title && !p.description)) {
+                    _linkPreviewCache[href] = { ok: false };
+                    return;
+                }
+                _linkPreviewCache[href] = { ok: true, preview: p };
+                _attachUnfurlCard(line, p, container);
+            }).catch(function () {
+                _linkPreviewCache[href] = { ok: false };
+            });
+        });
+    }
+
+    function openWebPreviewModal(url) {
+        var modal = document.getElementById('chat-web-preview-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'chat-web-preview-modal';
+            modal.className = 'chat-web-modal-overlay';
+            modal.innerHTML =
+                '<div class="chat-web-modal-dialog">' +
+                    '<div class="chat-web-modal-header">' +
+                        '<div class="chat-web-modal-title">' +
+                            '<span class="chat-web-modal-lock">🔒</span>' +
+                            '<span class="chat-web-modal-url"></span>' +
+                        '</div>' +
+                        '<div class="chat-web-modal-actions">' +
+                            '<button type="button" class="chat-web-modal-btn" data-chat-web-modal-copy title="Copy Link">📋 Copy</button>' +
+                            '<a href="#" target="_blank" rel="noopener noreferrer" class="chat-web-modal-btn chat-web-modal-ext" title="Open in External Tab">↗ External</a>' +
+                            '<button type="button" class="chat-web-modal-btn chat-web-modal-close" title="Close Preview">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="chat-web-modal-body">' +
+                        '<iframe class="chat-web-modal-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerpolicy="no-referrer"></iframe>' +
+                    '</div>' +
+                '</div>';
+            document.body.appendChild(modal);
+
+            modal.querySelector('.chat-web-modal-close').addEventListener('click', function () {
+                closeWebPreviewModal();
+            });
+            modal.addEventListener('click', function (e) {
+                if (e.target === modal) closeWebPreviewModal();
+            });
+            modal.querySelector('[data-chat-web-modal-copy]').addEventListener('click', function () {
+                var currUrl = modal.getAttribute('data-url');
+                if (currUrl && navigator.clipboard) {
+                    navigator.clipboard.writeText(currUrl);
+                    _ovToast('Copied link to clipboard!', 'success');
+                }
+            });
+        }
+        modal.setAttribute('data-url', url);
+        var domain = '';
+        try { domain = new URL(url).hostname; } catch (e) { domain = url; }
+        modal.querySelector('.chat-web-modal-url').textContent = domain + ' (' + url.slice(0, 50) + (url.length > 50 ? '…' : '') + ')';
+        modal.querySelector('.chat-web-modal-ext').href = url;
+        var ifr = modal.querySelector('.chat-web-modal-iframe');
+        if (ifr) ifr.src = url;
+        modal.classList.add('chat-web-modal-overlay--open');
+    }
+
+    function closeWebPreviewModal() {
+        var modal = document.getElementById('chat-web-preview-modal');
+        if (modal) {
+            modal.classList.remove('chat-web-modal-overlay--open');
+            var ifr = modal.querySelector('.chat-web-modal-iframe');
+            if (ifr) ifr.src = 'about:blank';
+        }
+    }
     var _availRooms = null;
+
+    // ── Discord-style Social & Lists Drawer (Friends, Blocklist, Bookmarks) ──
+    var _socialTab = 'friends';
+    var _socialFilter = '';
+
+    function openSocialModal(tab) {
+        if (tab) _socialTab = tab;
+        closeUserCard();
+        var drawer = q('[data-chat-social-drawer]');
+        var backdrop = q('[data-chat-social-backdrop]');
+        if (!drawer) return;
+        drawer.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+        requestAnimationFrame(function () {
+            drawer.classList.add('visible');
+            if (backdrop) backdrop.classList.add('visible');
+        });
+        _socialFilter = '';
+        var fInp = drawer.querySelector('[data-chat-social-filter]');
+        if (fInp) fInp.value = '';
+        var aInp = drawer.querySelector('[data-chat-social-input]');
+        if (aInp) {
+            aInp.value = '';
+            aInp.focus();
+        }
+        renderSocialList();
+        _updateSocialBadges();
+    }
+
+    function closeSocialModal() {
+        var drawer = q('[data-chat-social-drawer]');
+        var backdrop = q('[data-chat-social-backdrop]');
+        if (drawer) {
+            drawer.classList.remove('visible');
+            setTimeout(function () { drawer.hidden = true; }, 320);
+        }
+        if (backdrop) {
+            backdrop.classList.remove('visible');
+            setTimeout(function () { backdrop.hidden = true; }, 320);
+        }
+    }
+
+    function renderSocialList() {
+        var drawer = q('[data-chat-social-drawer]');
+        if (!drawer || drawer.hidden) return;
+
+        var friends = friendsSet();
+        var blocked = blockedSet();
+        var bookmarks = peerBookmarksSet();
+
+        // Update tab navigation active state
+        drawer.querySelectorAll('[data-chat-social-tab]').forEach(function (tabEl) {
+            var tabId = tabEl.getAttribute('data-chat-social-tab');
+            tabEl.classList.toggle('chat-social-nav-tab--active', tabId === _socialTab);
+        });
+
+        // Update add banner label & placeholder
+        var addLabel = drawer.querySelector('[data-chat-social-add-label]');
+        var addInp = drawer.querySelector('[data-chat-social-input]');
+        if (_socialTab === 'friends') {
+            if (addLabel) addLabel.textContent = 'ADD FRIEND';
+            if (addInp) addInp.placeholder = 'Enter Soulseek username to add as friend…';
+        } else if (_socialTab === 'blocked') {
+            if (addLabel) addLabel.textContent = 'BLOCK USER';
+            if (addInp) addInp.placeholder = 'Enter Soulseek username to block…';
+        } else {
+            if (addLabel) addLabel.textContent = 'BOOKMARK PEER';
+            if (addInp) addInp.placeholder = 'Enter Soulseek username to bookmark…';
+        }
+
+        var listEl = drawer.querySelector('[data-chat-social-list]');
+        if (!listEl) return;
+
+        var items = [];
+        if (_socialTab === 'friends') items = friends;
+        else if (_socialTab === 'blocked') items = blocked;
+        else items = bookmarks;
+
+        var f = String(_socialFilter || '').trim().toLowerCase();
+        if (f) {
+            items = items.filter(function (u) { return String(u).toLowerCase().indexOf(f) > -1; });
+        }
+
+        var totalEl = drawer.querySelector('[data-chat-social-total]');
+        if (totalEl) {
+            var unit = _socialTab === 'friends' ? 'friend' : (_socialTab === 'blocked' ? 'blocked' : 'peer');
+            totalEl.textContent = items.length + ' ' + unit + (items.length === 1 ? '' : 's');
+        }
+
+        if (!items.length) {
+            var emptyIcon = _socialTab === 'friends' ? '⭐' : (_socialTab === 'blocked' ? '🚫' : '📚');
+            var emptyTitle = _socialTab === 'friends' ? 'No friends yet' : (_socialTab === 'blocked' ? 'No blocked users' : 'No saved peers yet');
+            var emptyDesc = _socialTab === 'friends'
+                ? 'Add friends using the input above or click ⭐ Add Friend on any user in chat!'
+                : (_socialTab === 'blocked'
+                    ? 'Blocked users have their room messages and private messages completely hidden.'
+                    : 'Click ⭐ Bookmark while exploring peer files or add their username above to save them.');
+            if (f) {
+                emptyTitle = 'No matches found';
+                emptyDesc = 'No ' + _socialTab + ' match "' + esc(f) + '"';
+            }
+            listEl.innerHTML = '<div class="chat-social-empty">' +
+                '<div style="font-size:32px;margin-bottom:8px;opacity:0.8;">' + emptyIcon + '</div>' +
+                '<div style="font-weight:700;font-size:15px;color:#fff;margin-bottom:4px;">' + emptyTitle + '</div>' +
+                '<div>' + emptyDesc + '</div>' +
+            '</div>';
+            return;
+        }
+
+        var avMap = _avatarMap();
+        var onlineUsers = state.users || [];
+        var onlineMap = {};
+        onlineUsers.forEach(function (u) { onlineMap[String(u).toLowerCase()] = true; });
+
+        listEl.innerHTML = items.map(function (u) {
+            var av = avMap && avMap[u];
+            var isOnline = !!onlineMap[String(u).toLowerCase()];
+
+            var subText = '';
+            if (_socialTab === 'friends') {
+                subText = isOnline ? '⭐ Friend • Online in room' : '⭐ Friend • Soulseek user';
+            } else if (_socialTab === 'blocked') {
+                subText = '🚫 Blocked • Chat & PMs suppressed';
+            } else {
+                subText = isOnline ? '📚 Saved Peer • Online in room' : '📚 Saved Peer';
+            }
+
+            var html = '<div class="chat-social-row">' +
+                '<div class="chat-social-row-av">' +
+                    '<span class="chat-user-av" style="width:36px;height:36px;font-size:13px;">' +
+                        _avatarHtml(u, av, 'chat-av--fill') +
+                        '<span class="chat-user-dot' + (isOnline ? ' chat-user-dot--tuned' : '') + '"></span>' +
+                    '</span>' +
+                '</div>' +
+                '<div class="chat-social-row-info">' +
+                    '<div class="chat-social-row-name" data-chat-user="' + attr(u) + '" title="View user card">' + esc(u) + '</div>' +
+                    '<div class="chat-social-row-sub">' + subText + '</div>' +
+                '</div>' +
+                '<div class="chat-social-row-actions">';
+
+            if (_socialTab === 'friends') {
+                html += '<button type="button" class="chat-social-action-btn" data-chat-browse-user="' + attr(u) + '" title="Browse their files">📁 Browse</button>' +
+                        '<button type="button" class="chat-social-action-btn" data-chat-open-pm="' + attr(u) + '" title="Send direct message">💬 Message</button>' +
+                        '<button type="button" class="chat-social-action-btn chat-social-action-btn--danger" data-chat-social-remove-friend="' + attr(u) + '" title="Remove from friends">✕ Remove</button>';
+            } else if (_socialTab === 'blocked') {
+                html += '<button type="button" class="chat-social-action-btn chat-social-action-btn--danger" data-chat-social-unblock="' + attr(u) + '" title="Unblock user">Unblock</button>';
+            } else {
+                html += '<button type="button" class="chat-social-action-btn" data-chat-browse-user="' + attr(u) + '" title="Browse their files">📁 Browse</button>' +
+                        '<button type="button" class="chat-social-action-btn" data-chat-open-pm="' + attr(u) + '" title="Send direct message">💬 Message</button>' +
+                        '<button type="button" class="chat-social-action-btn chat-social-action-btn--danger" data-chat-social-remove-bookmark="' + attr(u) + '" title="Remove bookmark">★ Remove</button>';
+            }
+            html += '</div></div>';
+            return html;
+        }).join('');
+    }
+
+    function addSocialUser() {
+        var drawer = q('[data-chat-social-drawer]');
+        if (!drawer) return;
+        var inp = drawer.querySelector('[data-chat-social-input]');
+        if (!inp) return;
+        var val = String(inp.value || '').trim();
+        if (!val) return;
+
+        if (_socialTab === 'friends') {
+            if (!isFriend(val)) toggleFriend(val);
+            if (typeof showToast === 'function') showToast('Added ' + val + ' to friends', 'success');
+        } else if (_socialTab === 'blocked') {
+            if (!isBlocked(val)) toggleBlocked(val);
+            if (typeof showToast === 'function') showToast('Blocked ' + val, 'info');
+        } else {
+            if (!isPeerBookmarked(val)) togglePeerBookmark(val);
+            if (typeof showToast === 'function') showToast('Bookmarked peer ' + val, 'success');
+        }
+        inp.value = '';
+        _updateSocialBadges();
+        renderSocialList();
+    }
+
+    function _openSavedPeersPicker() {
+        openSocialModal('bookmarks');
+    }
 
     function openRoomBrowser() {
         var overlay = q('[data-chat-rooms-modal]');
@@ -4962,6 +7062,7 @@
 
     function openPm(username) {
         if (!username) return;
+        unhideDm(username);
         state.view = 'pm'; state.pmUser = username; state.lastStamp = null; state.stickBottom = true;
         state.searchMode = false; state.renderedOk = false;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
@@ -4972,6 +7073,7 @@
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
         refresh();
+        if (state.convos) renderSide(state.convos);
     }
 
     function send() {
@@ -5044,6 +7146,7 @@
                 }]));
                 host.scrollTop = host.scrollHeight;
                 state.lastStamp = null;
+                _unfurlPendingLinks(host);
             }
             state.stickBottom = true;
             cancelReply();
@@ -5084,10 +7187,222 @@
             if (g) { sendGif(g.getAttribute('data-chat-gif-send')); return; }
             var t = e.target.closest('[data-chat-embed-yt]');
             if (t) {
-                t.outerHTML = '<span class="chat-embed-frame"><iframe src="https://www.youtube-nocookie.com/embed/' +
-                    t.getAttribute('data-chat-embed-yt') +
-                    '" allow="encrypted-media; picture-in-picture" allowfullscreen ' +
-                    'referrerpolicy="no-referrer" loading="lazy"></iframe></span>';
+                var vid = t.getAttribute('data-chat-embed-yt');
+                var jbxBtn = t.nextElementSibling && t.nextElementSibling.matches('[data-chat-jbx-add]') ? t.nextElementSibling : null;
+                if (jbxBtn) jbxBtn.remove();
+                t.outerHTML = '<div class="chat-embed-card chat-embed-card--yt" data-embed-yt="' + attr(vid) + '">' +
+                    '<div class="chat-embed-card-head">' +
+                        '<div class="chat-embed-card-brand">' +
+                            '<span class="chat-embed-dot chat-embed-dot--yt"></span>' +
+                            '<span class="chat-embed-brand-label">YouTube Video</span>' +
+                        '</div>' +
+                        '<div class="chat-embed-card-actions">' +
+                            '<button type="button" class="chat-embed-card-btn chat-embed-card-btn--jbx" data-chat-jbx-add="' + attr(vid) + '" title="Queue to Room Jukebox">🎵 Jukebox</button>' +
+                            '<a href="https://www.youtube.com/watch?v=' + encodeURIComponent(vid) + '" target="_blank" rel="noopener noreferrer" class="chat-embed-card-btn" title="Open on YouTube">↗ Watch</a>' +
+                            '<button type="button" class="chat-embed-card-btn chat-embed-card-btn--close" data-chat-embed-close title="Close Player">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="chat-embed-card-body">' +
+                        '<span class="chat-embed-frame"><iframe src="https://www.youtube-nocookie.com/embed/' +
+                        attr(vid) +
+                        '?autoplay=1&rel=0&playsinline=1" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen ' +
+                        'referrerpolicy="strict-origin-when-cross-origin" loading="lazy"></iframe></span>' +
+                    '</div>' +
+                '</div>';
+                return;
+            }
+            t = e.target.closest('[data-chat-jbx-add]');
+            if (t) {
+                var jvid = t.getAttribute('data-chat-jbx-add');
+                if (jvid) _jbxPick({ id: jvid, title: 'YouTube Video' });
+                return;
+            }
+            t = e.target.closest('[data-chat-embed-spotify]');
+            if (t) {
+                var spPath = t.getAttribute('data-chat-embed-spotify');
+                var isAlbum = spPath.indexOf('album') === 0 || spPath.indexOf('playlist') === 0;
+                var sph = isAlbum ? 352 : 152;
+                t.outerHTML = '<div class="chat-embed-card chat-embed-card--spotify">' +
+                    '<div class="chat-embed-card-head">' +
+                        '<div class="chat-embed-card-brand">' +
+                            '<span class="chat-embed-dot chat-embed-dot--sp"></span>' +
+                            '<span class="chat-embed-brand-label">Spotify Player</span>' +
+                        '</div>' +
+                        '<div class="chat-embed-card-actions">' +
+                            '<a href="https://open.spotify.com/' + attr(spPath) + '" target="_blank" rel="noopener noreferrer" class="chat-embed-card-btn" title="Open on Spotify">↗ Open</a>' +
+                            '<button type="button" class="chat-embed-card-btn chat-embed-card-btn--close" data-chat-embed-close title="Close Player">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="chat-embed-card-body">' +
+                        '<iframe class="chat-embed-spotify-frame" src="https://open.spotify.com/embed/' + attr(spPath) + '?utm_source=generator&theme=0" ' +
+                        'width="100%" height="' + sph + '" frameborder="0" allowfullscreen="" ' +
+                        'allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" ' +
+                        'loading="lazy" referrerpolicy="no-referrer"></iframe>' +
+                    '</div>' +
+                '</div>';
+                return;
+            }
+            t = e.target.closest('[data-chat-embed-deezer]');
+            if (t) {
+                var dzPath = t.getAttribute('data-chat-embed-deezer');
+                var isDzAlb = dzPath.indexOf('album') === 0 || dzPath.indexOf('playlist') === 0;
+                var dzh = isDzAlb ? 300 : 150;
+                t.outerHTML = '<div class="chat-embed-card chat-embed-card--deezer">' +
+                    '<div class="chat-embed-card-head">' +
+                        '<div class="chat-embed-card-brand">' +
+                            '<span class="chat-embed-dot chat-embed-dot--dz"></span>' +
+                            '<span class="chat-embed-brand-label">Deezer Player</span>' +
+                        '</div>' +
+                        '<div class="chat-embed-card-actions">' +
+                            '<a href="https://www.deezer.com/' + attr(dzPath) + '" target="_blank" rel="noopener noreferrer" class="chat-embed-card-btn" title="Open on Deezer">↗ Open</a>' +
+                            '<button type="button" class="chat-embed-card-btn chat-embed-card-btn--close" data-chat-embed-close title="Close Player">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="chat-embed-card-body">' +
+                        '<iframe class="chat-embed-deezer-frame" src="https://widget.deezer.com/widget/dark/' + attr(dzPath) + '" ' +
+                        'width="100%" height="' + dzh + '" frameborder="0" allowtransparency="true" ' +
+                        'allow="encrypted-media; clipboard-write" loading="lazy" referrerpolicy="no-referrer"></iframe>' +
+                    '</div>' +
+                '</div>';
+                return;
+            }
+            t = e.target.closest('[data-chat-embed-sc]');
+            if (t) {
+                var scRaw = decodeURIComponent(t.getAttribute('data-chat-embed-sc'));
+                t.outerHTML = '<div class="chat-embed-card chat-embed-card--sc">' +
+                    '<div class="chat-embed-card-head">' +
+                        '<div class="chat-embed-card-brand">' +
+                            '<span class="chat-embed-dot chat-embed-dot--sc"></span>' +
+                            '<span class="chat-embed-brand-label">SoundCloud Player</span>' +
+                        '</div>' +
+                        '<div class="chat-embed-card-actions">' +
+                            '<a href="' + attr(scRaw) + '" target="_blank" rel="noopener noreferrer" class="chat-embed-card-btn" title="Open on SoundCloud">↗ Open</a>' +
+                            '<button type="button" class="chat-embed-card-btn chat-embed-card-btn--close" data-chat-embed-close title="Close Player">✕</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="chat-embed-card-body">' +
+                        '<iframe class="chat-embed-sc-frame" width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" ' +
+                        'src="https://w.soundcloud.com/player/?url=' + encodeURIComponent(scRaw) + '&color=%23ff5500&auto_play=true&hide_related=true&show_comments=false&show_user=true&show_reposts=false&show_teaser=false" ' +
+                        'loading="lazy" referrerpolicy="no-referrer"></iframe>' +
+                    '</div>' +
+                '</div>';
+                return;
+            }
+            t = e.target.closest('[data-chat-embed-close]');
+            if (t) {
+                var card = t.closest('.chat-embed-card');
+                if (card) {
+                    var ytid = card.getAttribute('data-embed-yt');
+                    if (ytid) {
+                        card.outerHTML = '<button type="button" class="chat-embed-chip chat-embed-chip--yt" data-chat-embed-yt="' +
+                            attr(ytid) + '" title="Play YouTube video inline in chat">▶ play</button>' +
+                            ' <button type="button" class="chat-embed-action chat-embed-action--jbx" data-chat-jbx-add="' +
+                            attr(ytid) + '" title="Queue to Room Jukebox">🎵 jukebox</button>';
+                    } else {
+                        card.remove();
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-preview-url]');
+            if (t) {
+                var pUrl = t.getAttribute('data-chat-preview-url');
+                var uCard = t.closest('.chat-unfurl-card');
+                if (uCard) {
+                    var existingFrame = uCard.querySelector('.chat-inline-web-frame');
+                    if (existingFrame) {
+                        existingFrame.remove();
+                        t.classList.remove('chat-unfurl-btn--active');
+                        t.textContent = '👁 Preview Inline';
+                        return;
+                    }
+                    t.classList.add('chat-unfurl-btn--active');
+                    t.textContent = '✕ Close Preview';
+
+                    var pDomain = '';
+                    try { pDomain = new URL(pUrl).hostname; } catch (err) { pDomain = pUrl; }
+
+                    var frameContainer = document.createElement('div');
+                    frameContainer.className = 'chat-inline-web-frame';
+                    frameContainer.innerHTML =
+                        '<div class="chat-inline-web-toolbar">' +
+                            '<div class="chat-inline-web-ssl" title="Secure web preview"><span class="chat-inline-ssl-lock">🔒</span> ' + esc(pDomain) + '</div>' +
+                            '<div class="chat-inline-web-actions">' +
+                                '<button type="button" class="chat-inline-web-btn" data-chat-web-reload title="Reload frame">⟳</button>' +
+                                '<button type="button" class="chat-inline-web-btn" data-chat-web-expand="' + attr(pUrl) + '" title="Expand to slide-over modal">⛶</button>' +
+                                '<a href="' + attr(pUrl) + '" target="_blank" rel="noopener noreferrer" class="chat-inline-web-btn" title="Open in browser tab">↗</a>' +
+                                '<button type="button" class="chat-inline-web-btn chat-inline-web-btn--close" data-chat-web-close title="Close inline preview">✕</button>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="chat-inline-web-body">' +
+                            '<div class="chat-inline-web-loader">Loading preview…</div>' +
+                            '<iframe src="' + attr(pUrl) + '" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" ' +
+                                'loading="lazy" referrerpolicy="no-referrer"></iframe>' +
+                            '<div class="chat-inline-web-fallback" style="display:none;">' +
+                                '<span>If this site restricts inline frame viewing (X-Frame-Options), </span>' +
+                                '<a href="' + attr(pUrl) + '" target="_blank" rel="noopener noreferrer" class="chat-inline-fallback-btn">Open in New Tab ↗</a>' +
+                            '</div>' +
+                        '</div>';
+                    uCard.appendChild(frameContainer);
+
+                    var ifr = frameContainer.querySelector('iframe');
+                    var loader = frameContainer.querySelector('.chat-inline-web-loader');
+                    var fallback = frameContainer.querySelector('.chat-inline-web-fallback');
+
+                    var loadTimer = setTimeout(function () {
+                        if (loader) loader.style.display = 'none';
+                        if (fallback) fallback.style.display = 'flex';
+                    }, 4500);
+
+                    ifr.onload = function () {
+                        clearTimeout(loadTimer);
+                        if (loader) loader.style.display = 'none';
+                    };
+                    ifr.onerror = function () {
+                        clearTimeout(loadTimer);
+                        if (loader) loader.style.display = 'none';
+                        if (fallback) fallback.style.display = 'flex';
+                    };
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-web-close]');
+            if (t) {
+                var fr = t.closest('.chat-inline-web-frame');
+                if (fr) {
+                    var pc = fr.closest('.chat-unfurl-card');
+                    if (pc) {
+                        var pb = pc.querySelector('[data-chat-preview-url]');
+                        if (pb) {
+                            pb.classList.remove('chat-unfurl-btn--active');
+                            pb.textContent = '👁 Preview Inline';
+                        }
+                    }
+                    fr.remove();
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-web-reload]');
+            if (t) {
+                var rf = t.closest('.chat-inline-web-frame');
+                var rifr = rf && rf.querySelector('iframe');
+                if (rifr) {
+                    var osrc = rifr.src;
+                    rifr.src = '';
+                    rifr.src = osrc;
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-web-expand]');
+            if (t) {
+                var expUrl = t.getAttribute('data-chat-web-expand');
+                if (expUrl) openWebPreviewModal(expUrl);
+                return;
+            }
+            t = e.target.closest('[data-chat-unfurl-close]');
+            if (t) {
+                var uc = t.closest('.chat-unfurl-card');
+                if (uc) uc.remove();
                 return;
             }
             t = e.target.closest('[data-chat-embed-img]');
@@ -5381,7 +7696,7 @@
                 state.renderedCount = 0; hideJumpPill();   // a filter flip isn't 'new messages'
                 // the filter also picks the SEND format, so a half-built rich
                 // message cannot survive the flip to plain
-                if (_plainOn()) { cancelReply(); cancelEdit(); toggleAttachPanel(true); }
+                if (_plainOn()) { cancelReply(); cancelEdit(); toggleAttachPanel(true); closeWantedModal(); }
                 renderHead(); renderComposer(); refresh();
                 return;
             }
@@ -5546,6 +7861,121 @@
                 renderJukebox();
                 return;
             }
+            // ── Now Playing & Wanted action buttons ──
+            t = e.target.closest('[data-chat-np-btn]') || e.target.closest('[data-chat-np-quick]');
+            if (t) { shareNowPlaying(); return; }
+            t = e.target.closest('[data-chat-want-btn]');
+            if (t) { openWantedModal(); return; }
+            t = e.target.closest('[data-chat-want-close]');
+            if (t) { closeWantedModal(); return; }
+            var wantOv = e.target.closest('[data-chat-want-backdrop]');
+            if (wantOv) { closeWantedModal(); return; }
+            t = e.target.closest('[data-want-src]');
+            if (t) {
+                document.querySelectorAll('[data-want-src]').forEach(function (b) {
+                    b.classList.remove('chat-want-src-btn--active');
+                });
+                t.classList.add('chat-want-src-btn--active');
+                _wantActiveSource = t.getAttribute('data-want-src') || 'auto';
+                searchWanted();
+                return;
+            }
+            t = e.target.closest('[data-chat-want-clear]');
+            if (t) {
+                var wInp = q('[data-chat-want-input]');
+                if (wInp) { wInp.value = ''; wInp.focus(); }
+                searchWanted();
+                return;
+            }
+            t = e.target.closest('[data-chat-want-post-idx]');
+            if (t) {
+                var idx = parseInt(t.getAttribute('data-chat-want-post-idx'), 10);
+                var resEl = q('[data-chat-want-results]');
+                if (resEl && resEl._items && resEl._items[idx]) {
+                    postWantedCard(resEl._items[idx]);
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-stream]');
+            if (t) {
+                var c1 = t.closest('.chat-np-card');
+                if (c1) {
+                    _streamFromCard(
+                        c1.getAttribute('data-np-title') || '',
+                        c1.getAttribute('data-np-artist') || '',
+                        c1.getAttribute('data-np-album') || ''
+                    );
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-dl]');
+            if (t) {
+                var c2 = t.closest('.chat-np-card') || t.closest('.chat-wanted-card');
+                if (c2) {
+                    _openDownloadForCard(
+                        c2.getAttribute('data-np-artist') || c2.getAttribute('data-wanted-artist') || '',
+                        c2.getAttribute('data-np-title') || c2.getAttribute('data-wanted-title') || '',
+                        c2.getAttribute('data-np-album') || c2.getAttribute('data-wanted-album') || '',
+                        c2.getAttribute('data-np-id') || c2.getAttribute('data-wanted-id') || '',
+                        c2.getAttribute('data-np-src') || c2.getAttribute('data-wanted-src') || '',
+                        parseInt(c2.getAttribute('data-np-dur') || c2.getAttribute('data-wanted-dur') || '0', 10),
+                        c2.getAttribute('data-np-img') || c2.getAttribute('data-wanted-img') || '',
+                        c2.getAttribute('data-wanted-type') || (c2.classList.contains('chat-wanted-card') ? 'album' : 'single')
+                    );
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-artist]');
+            if (t) {
+                var c3 = t.closest('.chat-np-card') || t.closest('.chat-wanted-card');
+                if (c3) {
+                    _openArtistPage(
+                        c3.getAttribute('data-np-artist') || c3.getAttribute('data-wanted-artist') || '',
+                        c3.getAttribute('data-np-id') || c3.getAttribute('data-wanted-id') || '',
+                        c3.getAttribute('data-np-src') || c3.getAttribute('data-wanted-src') || ''
+                    );
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-search]');
+            if (t) {
+                var c4 = t.closest('.chat-np-card') || t.closest('.chat-wanted-card');
+                if (c4) {
+                    _searchFromCard(
+                        c4.getAttribute('data-np-artist') || c4.getAttribute('data-wanted-artist') || '',
+                        c4.getAttribute('data-np-title') || c4.getAttribute('data-wanted-title') || ''
+                    );
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-wanted-have]');
+            if (t) {
+                _onHaveWanted(
+                    t.getAttribute('data-wanted-user') || '',
+                    t.getAttribute('data-wanted-title') || '',
+                    t.getAttribute('data-wanted-artist') || ''
+                );
+                return;
+            }
+            t = e.target.closest('[data-chat-wanted-wishlist]') || e.target.closest('[data-chat-card-wishlist]');
+            if (t) {
+                var c5 = t.closest('.chat-wanted-card') || t.closest('.chat-np-card');
+                if (c5) {
+                    var isWanted = c5.classList.contains('chat-wanted-card');
+                    _addWantedToWishlist({
+                        t: c5.getAttribute(isWanted ? 'data-wanted-title' : 'data-np-title') || '',
+                        a: c5.getAttribute(isWanted ? 'data-wanted-artist' : 'data-np-artist') || '',
+                        al: c5.getAttribute(isWanted ? 'data-wanted-album' : 'data-np-album') || '',
+                        id: c5.getAttribute(isWanted ? 'data-wanted-id' : 'data-np-id') || '',
+                        src: c5.getAttribute(isWanted ? 'data-wanted-src' : 'data-np-src') || '',
+                        img: c5.getAttribute(isWanted ? 'data-wanted-img' : 'data-np-img') || '',
+                        ty: isWanted ? (c5.getAttribute('data-wanted-type') || 'album') : 'track',
+                        dur: c5.getAttribute(isWanted ? 'data-wanted-dur' : 'data-np-dur') || 0,
+                        y: c5.getAttribute(isWanted ? 'data-wanted-year' : 'data-np-year') || ''
+                    });
+                }
+                return;
+            }
             // ── movie night ──
             t = e.target.closest('[data-chat-watch-btn]');
             if (t) { _openWatchModal(); return; }
@@ -5662,6 +8092,30 @@
             if (t) { var rm = q('[data-chat-rooms-modal]'); if (rm) rm.hidden = true; return; }
             var rmo = e.target.closest('[data-chat-rooms-modal]');
             if (rmo && e.target === rmo) { rmo.hidden = true; return; }
+            t = e.target.closest('[data-chat-close-pm]');
+            if (t) {
+                var userToClose = t.getAttribute('data-chat-close-pm');
+                if (userToClose) {
+                    hideDm(userToClose);
+                    if (state.view === 'pm' && state.pmUser === userToClose) {
+                        openRoom(state.room || undefined);
+                    }
+                    if (state.convos) renderSide(state.convos);
+                    if (typeof showToast === 'function') showToast('Conversation closed', 'info');
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-head-close-pm]');
+            if (t) {
+                if (state.view === 'pm' && state.pmUser) {
+                    var uClosed = state.pmUser;
+                    hideDm(uClosed);
+                    openRoom(state.room || undefined);
+                    if (state.convos) renderSide(state.convos);
+                    if (typeof showToast === 'function') showToast('Conversation closed', 'info');
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-open-pm]');
             if (t) { openPm(t.getAttribute('data-chat-open-pm')); return; }
             t = e.target.closest('[data-chat-react-user]');
@@ -5684,6 +8138,46 @@
                 if (ov) openPm(ov.getAttribute('data-chat-user-card-for'));
                 return;
             }
+            t = e.target.closest('[data-chat-card-friend]');
+            if (t) {
+                var fCard = q('[data-chat-user-card]');
+                var uFor = fCard && fCard.getAttribute('data-chat-user-card-for');
+                if (uFor) {
+                    var isNowF = toggleFriend(uFor);
+                    t.textContent = isNowF ? '⭐ Remove Friend' : '⭐ Add Friend';
+                    if (typeof showToast === 'function') {
+                        showToast(isNowF ? 'Added ' + uFor + ' to friends' : 'Removed from friends', 'info');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-block]');
+            if (t) {
+                var bCard = q('[data-chat-user-card]');
+                var uToBlk = bCard && bCard.getAttribute('data-chat-user-card-for');
+                if (uToBlk) {
+                    var isNowBlk = toggleBlocked(uToBlk);
+                    t.textContent = isNowBlk ? 'Unblock' : '🚫 Block';
+                    if (typeof showToast === 'function') {
+                        showToast(isNowBlk ? 'Blocked ' + uToBlk : 'Unblocked ' + uToBlk, 'info');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-bookmark]');
+            if (t) {
+                var bmCard = q('[data-chat-user-card]');
+                var uToBm = bmCard && bmCard.getAttribute('data-chat-user-card-for');
+                if (uToBm) {
+                    var isNowBm = togglePeerBookmark(uToBm);
+                    t.textContent = isNowBm ? '★ Bookmarked' : '⭐ Bookmark';
+                    _updateSavedPeersBtn();
+                    if (typeof showToast === 'function') {
+                        showToast(isNowBm ? 'Bookmarked ' + uToBm : 'Bookmark removed', 'info');
+                    }
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-card-challenge-v]');
             if (t) {
                 var vOv = q('[data-chat-user-card]');
@@ -5703,37 +8197,191 @@
                 if (cOv) _arcChallengeRow(cOv);
                 return;
             }
+            t = e.target.closest('[data-chat-browse-user]');
+            if (t) {
+                openBrowse(t.getAttribute('data-chat-browse-user'));
+                return;
+            }
             t = e.target.closest('[data-chat-card-browse]');
             if (t) {
                 var bOv = q('[data-chat-user-card]');
                 openBrowse(bOv && bOv.getAttribute('data-chat-user-card-for'));
                 return;
             }
-            t = e.target.closest('[data-chat-browse-dir]');
-            if (t) { openBrowseDir(t.getAttribute('data-chat-browse-dir')); return; }
-            t = e.target.closest('[data-chat-browse-back]');
+            t = e.target.closest('[data-chat-peer-bookmark]');
             if (t) {
-                var bsIn = q('[data-chat-browse-search]');
-                if (bsIn) bsIn.value = '';
-                renderBrowseDirs('');
+                if (_browse.user) {
+                    var isBm2 = togglePeerBookmark(_browse.user);
+                    t.textContent = isBm2 ? '★ Bookmarked' : '⭐ Bookmark';
+                    t.classList.toggle('chat-peer-bm-btn--active', isBm2);
+                    _updateSavedPeersBtn();
+                    if (typeof showToast === 'function') {
+                        showToast(isBm2 ? 'Peer bookmarked' : 'Bookmark removed', 'info');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-open-social]');
+            if (t) {
+                var tabChoice = t.getAttribute('data-chat-open-social') || 'friends';
+                openSocialModal(tabChoice);
+                return;
+            }
+            t = e.target.closest('[data-chat-social-close]');
+            if (t) { closeSocialModal(); return; }
+            t = e.target.closest('[data-chat-social-backdrop]');
+            if (t) { closeSocialModal(); return; }
+            t = e.target.closest('[data-chat-social-tab]');
+            if (t) {
+                _socialTab = t.getAttribute('data-chat-social-tab') || 'friends';
+                renderSocialList();
+                return;
+            }
+            t = e.target.closest('[data-chat-social-add-btn]');
+            if (t) {
+                addSocialUser();
+                return;
+            }
+            t = e.target.closest('[data-chat-social-remove-friend]');
+            if (t) {
+                var rf = t.getAttribute('data-chat-social-remove-friend');
+                if (rf) {
+                    toggleFriend(rf);
+                    renderSocialList();
+                    if (typeof showToast === 'function') showToast('Removed ' + rf + ' from friends', 'info');
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-social-unblock]');
+            if (t) {
+                var ub = t.getAttribute('data-chat-social-unblock');
+                if (ub) {
+                    toggleBlocked(ub);
+                    renderSocialList();
+                    if (typeof showToast === 'function') showToast('Unblocked ' + ub, 'info');
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-social-remove-bookmark]');
+            if (t) {
+                var rb = t.getAttribute('data-chat-social-remove-bookmark');
+                if (rb) {
+                    togglePeerBookmark(rb);
+                    renderSocialList();
+                    if (typeof showToast === 'function') showToast('Removed bookmark for ' + rb, 'info');
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-saved-peers]');
+            if (t) {
+                _openSavedPeersPicker();
+                return;
+            }
+            t = e.target.closest('[data-chat-saved-peer-remove]');
+            if (t) {
+                var pRem = t.getAttribute('data-chat-saved-peer-remove');
+                if (pRem) {
+                    togglePeerBookmark(pRem);
+                    _updateSavedPeersBtn();
+                    var pRow = t.closest('.chat-room-row');
+                    if (pRow) pRow.remove();
+                    if (typeof showToast === 'function') showToast('Bookmark removed', 'info');
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-friend]');
+            if (t) {
+                if (_browse.user) {
+                    var isFrNow = toggleFriend(_browse.user);
+                    t.textContent = isFrNow ? '⭐ Friend (Remove)' : '⭐ Friend';
+                    if (typeof showToast === 'function') {
+                        showToast(isFrNow ? 'Added ' + _browse.user + ' to friends' : 'Removed from friends', 'info');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-block]');
+            if (t) {
+                if (_browse.user) {
+                    var isBlkNow = toggleBlocked(_browse.user);
+                    t.textContent = isBlkNow ? 'Unblock' : '🚫 Block';
+                    if (typeof showToast === 'function') {
+                        showToast(isBlkNow ? 'Blocked ' + _browse.user : 'Unblocked ' + _browse.user, 'info');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-fmt]');
+            if (t) {
+                var fmtChoice = t.getAttribute('data-chat-browse-fmt') || 'all';
+                _browse.formatFilter = fmtChoice;
+                var pBarEl = q('.chat-browse-format-filters');
+                if (pBarEl) {
+                    pBarEl.querySelectorAll('.chat-fmt-pill').forEach(function (pill) {
+                        pill.classList.toggle('chat-fmt-pill--active', pill === t);
+                    });
+                }
+                renderBrowseTree(_browse.filter);
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-dl-single]');
+            if (t) {
+                downloadSingleTrack(t.getAttribute('data-chat-browse-dl-single'), t.getAttribute('data-chat-browse-size'));
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-dl-folder]');
+            if (t) {
+                downloadFolder(t.getAttribute('data-chat-browse-dl-folder'));
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-toggle]');
+            if (t) {
+                var folderItem = t.closest('.chat-folder-tree-item');
+                var dir = t.getAttribute('data-chat-browse-toggle') || (folderItem && folderItem.getAttribute('data-chat-folder-item'));
+                toggleBrowseFolder(dir, folderItem);
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-expand-all]');
+            if (t) { expandAllBrowseFolders(); return; }
+            t = e.target.closest('[data-chat-browse-collapse-all]');
+            if (t) { collapseAllBrowseFolders(); return; }
+            t = e.target.closest('[data-chat-dock-clear]');
+            if (t) {
+                _browse.selected = {};
+                var bBody = q('[data-chat-browse-body]');
+                if (bBody) {
+                    bBody.querySelectorAll('[data-chat-browse-file], [data-chat-browse-folder-all]').forEach(function (cb) {
+                        cb.checked = false;
+                    });
+                    bBody.querySelectorAll('.chat-file-row--selected').forEach(function (r) {
+                        r.classList.remove('chat-file-row--selected');
+                    });
+                }
+                _syncBrowseDock();
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-msg]');
+            if (t) {
+                var peerName = _browse.user;
+                closeBrowse();
+                if (peerName) openPm(peerName);
+                return;
+            }
+            t = e.target.closest('[data-chat-browse-challenge]');
+            if (t) {
+                var peerName2 = _browse.user;
+                closeBrowse();
+                if (peerName2) openUserCard(peerName2);
                 return;
             }
             t = e.target.closest('[data-chat-browse-dl]');
             if (t) { browseDownloadSelected(); return; }
             t = e.target.closest('[data-chat-browse-close]');
-            if (t) { var bm = q('[data-chat-browse-modal]'); if (bm) bm.hidden = true; return; }
+            if (t) { closeBrowse(); return; }
+            t = e.target.closest('[data-chat-browse-backdrop]');
+            if (t) { closeBrowse(); return; }
             var bmo = e.target.closest('[data-chat-browse-modal]');
-            if (bmo && e.target === bmo) { bmo.hidden = true; return; }
-            t = e.target.closest('[data-chat-browse-all]');
-            if (t) {
-                var bBody = q('[data-chat-browse-body]');
-                if (bBody) {
-                    bBody.querySelectorAll('[data-chat-browse-file]').forEach(function (cb) {
-                        cb.checked = t.checked;
-                    });
-                }
-                return;
-            }
+            if (bmo && e.target === bmo) { closeBrowse(); return; }
             t = e.target.closest('[data-chat-card-ignore]');
             if (t) {
                 var cardOv = q('[data-chat-user-card]');
@@ -5759,18 +8407,102 @@
         if (watchSearchForm) watchSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _watchSearchSubmit(); });
         var watchSearchIn = q('[data-chat-watch-searchinput]');
         if (watchSearchIn) watchSearchIn.addEventListener('input', _watchQueueSearch);
+        var socFilterIn = q('[data-chat-social-filter]');
+        if (socFilterIn) {
+            socFilterIn.addEventListener('input', function (e) {
+                _socialFilter = e.target.value;
+                renderSocialList();
+            });
+        }
         // The trivia answer input is re-rendered with its card, so Enter is
         // caught by delegation on the page rather than a per-render listener.
         var chatPageEl = document.getElementById('chat-page');
         if (chatPageEl) {
             chatPageEl.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter' && e.target && e.target.matches &&
-                        e.target.matches('[data-chat-triv-guess]')) {
-                    e.preventDefault();
-                    _trivGuess();
+                if (e.key === 'Enter' && e.target && e.target.matches) {
+                    if (e.target.matches('[data-chat-triv-guess]')) {
+                        e.preventDefault();
+                        _trivGuess();
+                    } else if (e.target.matches('[data-chat-social-input]')) {
+                        e.preventDefault();
+                        addSocialUser();
+                    }
                 }
             });
         }
+
+        document.addEventListener('change', function (e) {
+            if (e.target && e.target.matches('[data-chat-browse-file]')) {
+                var fn = e.target.getAttribute('data-chat-browse-file');
+                var sz = Number(e.target.getAttribute('data-chat-browse-size')) || 0;
+                var row = e.target.closest('.chat-file-row');
+                if (e.target.checked) {
+                    _browse.selected[fn] = { size: sz };
+                    if (row) row.classList.add('chat-file-row--selected');
+                } else {
+                    delete _browse.selected[fn];
+                    if (row) row.classList.remove('chat-file-row--selected');
+                }
+                _syncBrowseDock();
+            } else if (e.target && e.target.matches('[data-chat-browse-folder-all]')) {
+                var dir = e.target.getAttribute('data-chat-browse-folder-all');
+                var files = _browse.cache[dir] || [];
+                var chk = e.target.checked;
+                var container = e.target.closest('.chat-folder-children');
+                files.forEach(function (x) {
+                    if (chk) {
+                        _browse.selected[x.filename] = { size: x.size || 0 };
+                    } else {
+                        delete _browse.selected[x.filename];
+                    }
+                });
+                if (container) {
+                    container.querySelectorAll('[data-chat-browse-file]').forEach(function (cb) {
+                        cb.checked = chk;
+                        var r = cb.closest('.chat-file-row');
+                        if (r) {
+                            if (chk) r.classList.add('chat-file-row--selected');
+                            else r.classList.remove('chat-file-row--selected');
+                        }
+                    });
+                }
+                _syncBrowseDock();
+            }
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                var bm = q('[data-chat-browse-modal]');
+                if (bm && !bm.hidden) { closeBrowse(); }
+                var socD = q('[data-chat-social-drawer]');
+                if (socD && !socD.hidden) { closeSocialModal(); }
+                var wantD = q('[data-chat-want-modal]');
+                if (wantD && !wantD.hidden) { closeWantedModal(); }
+            }
+        });
+
+        var wantInputEl = q('[data-chat-want-input]');
+        if (wantInputEl) {
+            wantInputEl.addEventListener('input', function () {
+                clearTimeout(_wantSearchTimer);
+                _wantSearchTimer = setTimeout(searchWanted, 350);
+            });
+            wantInputEl.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    clearTimeout(_wantSearchTimer);
+                    searchWanted();
+                }
+            });
+        }
+        _bindChatDragAndDrop();
+
+        window.addEventListener('popstate', function () {
+            var bm = q('[data-chat-browse-modal]');
+            if (bm && !bm.hidden && (!window.location.hash || window.location.hash.indexOf('#browse') !== 0)) {
+                closeBrowse();
+            }
+        });
 
         var inputEl = q('[data-chat-input]');
         if (inputEl) {
@@ -5853,9 +8585,60 @@
                 }
             }
             if (e.target && e.target.matches('[data-chat-browse-search]')) {
-                var v = e.target.value.trim();
-                if (_browse.dir != null) renderBrowseFiles(v);
-                else renderBrowseDirs(v);
+                renderBrowseTree(e.target.value.trim());
+            }
+        });
+
+        document.addEventListener('change', function (e) {
+            var cb = e.target.closest('[data-chat-browse-file]');
+            if (cb) {
+                var fn = cb.getAttribute('data-chat-browse-file');
+                var sz = Number(cb.getAttribute('data-chat-browse-size')) || 0;
+                var row = cb.closest('.chat-file-row');
+                if (cb.checked) {
+                    _browse.selected[fn] = { filename: fn, size: sz };
+                    if (row) row.classList.add('chat-file-row--selected');
+                } else {
+                    delete _browse.selected[fn];
+                    if (row) row.classList.remove('chat-file-row--selected');
+                }
+                var dir = cb.getAttribute('data-chat-browse-dir');
+                if (dir) {
+                    var folderAll = q('[data-chat-browse-folder-all="' + attr(dir) + '"]');
+                    if (folderAll) {
+                        var cached = _browse.cache[dir] || [];
+                        folderAll.checked = cached.length > 0 && cached.every(function (x) { return !!_browse.selected[x.filename]; });
+                    }
+                }
+                _syncBrowseDock();
+                return;
+            }
+
+            var fAll = e.target.closest('[data-chat-browse-folder-all]');
+            if (fAll) {
+                var dirName = fAll.getAttribute('data-chat-browse-folder-all');
+                var files = _browse.cache[dirName] || [];
+                var checked = fAll.checked;
+                files.forEach(function (x) {
+                    if (checked) {
+                        _browse.selected[x.filename] = { filename: x.filename, size: x.size };
+                    } else {
+                        delete _browse.selected[x.filename];
+                    }
+                });
+                var chEl = q('[data-chat-browse-children="' + attr(dirName) + '"]');
+                if (chEl) {
+                    chEl.querySelectorAll('[data-chat-browse-file]').forEach(function (c) {
+                        c.checked = checked;
+                        var r = c.closest('.chat-file-row');
+                        if (r) {
+                            if (checked) r.classList.add('chat-file-row--selected');
+                            else r.classList.remove('chat-file-row--selected');
+                        }
+                    });
+                }
+                _syncBrowseDock();
+                return;
             }
         });
 
@@ -5927,6 +8710,7 @@
 
     function open() {
         bind();
+        _updateSocialBadges();
         if (state.configured !== true) {
             getJSON('/api/chat/status').then(function (res) {
                 state.configured = !!(res.ok && res.body.configured);
@@ -6073,7 +8857,10 @@
     function _sendJoinBeacon() {
         // Announce capability ONCE per room per session — powers the
         // assume-SoulSync presence for users who haven't typed anything.
+        // Suppressed in Plain Mode (All Messages view) and when the user
+        // has no custom avatar to announce, stopping empty noise lines.
         if (!state.canSend || !state.room || state.beaconed[state.room]) return;
+        if (_plainOn() || !_myAvatar()) return;
         state.beaconed[state.room] = 1;
         // carry the avatar so we get a face before we've said anything
         sendProtocol('hello', _myAvatar() ? { av: _myAvatar() } : {}).then(function (r) {
@@ -6092,7 +8879,7 @@
     var _TYP_TTL = 25000;      // matches the ≤20s re-emit cadence + slack
 
     function _maybeSendTyping(input) {
-        if (state.view !== 'room' || !state.canSend) return;
+        if (state.view !== 'room' || !state.canSend || _plainOn()) return;
         if (!input || !(input.value || '').trim()) return;
         if ((input.value || '')[0] === '/') return;      // commands aren't messages
         if (Date.now() - state.lastTypSentAt < 20000) return;
@@ -7605,6 +10392,7 @@
                         _bsPlaceAt: _bsPlaceAt, _bsDraft: _bsDraft,
                         _slotPayout: function (r, s2) { return _slotPayout(r, s2); },
                         renderUserPanel: renderUserPanel, renderGuilds: renderGuilds,
+                        openWebPreviewModal: openWebPreviewModal, closeWebPreviewModal: closeWebPreviewModal,
                         _testSetSelf: function (n) { state.selfName = n; },
                         _testSetState: function (patch) {
                             Object.keys(patch || {}).forEach(function (k) { state[k] = patch[k]; });

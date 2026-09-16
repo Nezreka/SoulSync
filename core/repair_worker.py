@@ -4253,10 +4253,13 @@ class RepairWorker:
                 file_changed = False
                 for field, canonical in canonical_map.items():
                     current = _read_tag(audio, field)
-                    if current and current != canonical:
+                    # an empty tag is a mismatch too: navidrome keys on the
+                    # release id, so a file without one splits off exactly
+                    # like a file with the wrong one
+                    if (current or '') != canonical:
                         if _write_tag(audio, field, canonical):
                             file_changed = True
-                            changes.append(f'{field}: "{current}" → "{canonical}" in {os.path.basename(resolved)}')
+                            changes.append(f'{field}: "{current or "(missing)"}" → "{canonical}" in {os.path.basename(resolved)}')
 
                 if file_changed:
                     # Atomic + audio-integrity-verified save (#819/#1000): never
