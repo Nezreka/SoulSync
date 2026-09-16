@@ -305,6 +305,12 @@ class AutoImportWorker:
         self._stats = {'scanned': 0, 'auto_processed': 0, 'pending_review': 0, 'failed': 0}
         self._stats_lock = threading.Lock()
         self._last_scan_time = None
+        # what the last scan could not read, so "0 candidates" can say why.
+        # a staging folder the container user cannot open used to produce
+        # exactly the same log line as an empty one (truenas apps uid vs
+        # PUID). warned once per path, then quiet until it clears.
+        self._scan_problems: List[Dict[str, str]] = []
+        self._warned_scan_problems: set = set()
 
     # ── Per-candidate UI state helpers ──
 
@@ -479,6 +485,7 @@ class AutoImportWorker:
             'active_imports': active,
             'stats': stats_snapshot,
             'last_scan_time': self._last_scan_time,
+            'scan_problems': list(self._scan_problems),
         }
 
     def _interruptible_sleep(self, seconds: float) -> bool:
@@ -561,7 +568,12 @@ class AutoImportWorker:
             return
 
         candidates = self._enumerate_folders(staging)
-        logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
+        if self._scan_problems:
+            unreadable = '; '.join(f"{p['path']}: {p['error']}" for p in self._scan_problems[:3])
+            logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging} "
+                        f"(could not read: {unreadable})")
+        else:
+            logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
         if not candidates:
             return
 
@@ -766,8 +778,25 @@ class AutoImportWorker:
     def _enumerate_folders(self, staging: str) -> List[FolderCandidate]:
         """Find album folder and single file candidates in staging directory (recursive)."""
         candidates = []
+        self._scan_problems = []
         self._scan_directory(staging, candidates, staging_root=staging)
+        if not self._scan_problems:
+            self._warned_scan_problems.clear()
         return candidates
+
+    def _note_scan_problem(self, directory: str, error: OSError) -> None:
+        """A directory the scan could not list. Kept for the status endpoint
+        and logged at WARNING the first time each path fails."""
+        message = error.strerror or str(error)
+        self._scan_problems.append({'path': directory, 'error': message})
+        key = (directory, message)
+        if key in self._warned_scan_problems:
+            logger.debug(f"[Auto-Import] Still cannot read {directory}: {message}")
+            return
+        self._warned_scan_problems.add(key)
+        logger.warning(f"[Auto-Import] Cannot read {directory}: {message}. "
+                       f"Files in it will not be found. If this is a bind mount, check the "
+                       f"folder's owner against the container's PUID/PGID.")
 
     def _scan_directory(self, directory: str, candidates: List[FolderCandidate], staging_root: str = ''):
         """Recursively scan a directory for album folders and loose audio files.
@@ -794,7 +823,8 @@ class AutoImportWorker:
         """
         try:
             entries = sorted(os.listdir(directory))
-        except OSError:
+        except OSError as e:
+            self._note_scan_problem(directory, e)
             return
 
         loose_files = []
@@ -820,7 +850,8 @@ class AutoImportWorker:
                 disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
                               if os.path.isfile(os.path.join(sub_path, f))
                               and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
-            except OSError:
+            except OSError as e:
+                self._note_scan_problem(sub_path, e)
                 disc_files = []
             if disc_files:
                 disc_files_by_num[disc_num] = disc_files

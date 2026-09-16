@@ -144,6 +144,10 @@ def _validate_import_file(runtime: ImportRouteRuntime, raw_path: Any) -> tuple[O
 _STAGING_SCAN_LOCK = threading.Lock()
 _STAGING_SCAN_TTL = 6.0  # seconds — covers the page-open burst; re-scans after
 _staging_scan_cache: Dict[str, Any] = {"path": None, "ts": 0.0, "records": None}
+# Directories the last scan could not list, {path, error}. os.walk swallows
+# these by default, so an unreadable staging folder answered "0 files" with
+# nothing to say why (truenas apps uid vs the container's PUID).
+_staging_scan_problems: list = []
 # Bumped by invalidate_staging_scan_cache() so a background scan that finishes after an
 # import doesn't re-commit stale (pre-import) records (see the generation guard above).
 _staging_scan_generation: Dict[str, int] = {"value": 0}
@@ -279,13 +283,26 @@ def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str,
 
         # Pass 1 (fast): collect the audio-file list — no tag I/O — so we know the total.
         audio_files: list[tuple[str, str, Optional[str]]] = []
+        problems: list[Dict[str, str]] = []
+
+        def _unreadable(err: OSError) -> None:
+            problems.append({"path": err.filename or staging_path,
+                             "error": err.strerror or str(err)})
+
         if os.path.isdir(staging_path):
-            for root, _dirs, filenames in os.walk(staging_path):
+            for root, _dirs, filenames in os.walk(staging_path, onerror=_unreadable):
                 rel_dir = os.path.relpath(root, staging_path)
                 top_folder = rel_dir.split(os.sep)[0] if rel_dir != "." else None
                 for fname in filenames:
                     if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
                         audio_files.append((root, fname, top_folder))
+        # The root itself unreadable is not "no files", it is an error the
+        # page has to show: nothing under it can ever be imported.
+        if problems and not audio_files and os.path.normpath(problems[0]["path"]) == os.path.normpath(staging_path):
+            raise PermissionError(
+                f"Import folder is not readable: {problems[0]['error']} ({staging_path}). "
+                f"If it is a bind mount, the folder's owner must match the container's PUID/PGID."
+            )
         if progress is not None:
             progress["total"] = len(audio_files)
             progress["scanned"] = 0
@@ -311,6 +328,7 @@ def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str,
         # stale — return them to this caller but do NOT commit them as the shared cache.
         if _staging_scan_generation["value"] == start_generation:
             _staging_scan_cache.update({"path": staging_path, "ts": time.time(), "records": records})
+            _staging_scan_problems[:] = problems
         return records
 
 
@@ -320,6 +338,7 @@ def invalidate_staging_scan_cache() -> None:
     scan generation so an in-flight background scan won't re-commit pre-import records."""
     _staging_scan_generation["value"] += 1
     _staging_scan_cache.update({"path": None, "ts": 0.0, "records": None})
+    _staging_scan_problems.clear()
 
 
 def staging_files(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
@@ -348,7 +367,8 @@ def staging_files(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
         ]
 
         files.sort(key=lambda f: f["filename"].lower())
-        return {"success": True, "files": files, "staging_path": staging_path}, 200
+        return {"success": True, "files": files, "staging_path": staging_path,
+                "problems": list(_staging_scan_problems)}, 200
     except Exception as exc:
         runtime.logger.error("Error scanning staging files: %s", exc)
         return {"success": False, "error": str(exc)}, 500

@@ -247,7 +247,7 @@ describe('import route', () => {
 
     expect(await screen.findByTestId('import-page')).toBeInTheDocument();
     expect(await screen.findByText('Import Music')).toBeInTheDocument();
-    expect(await screen.findByText('Import folder: error')).toBeInTheDocument();
+    expect(await screen.findByText('Import folder: Import folder unavailable')).toBeInTheDocument();
   });
 
   it('shows scan progress while a large staging folder is still scanning (#947)', async () => {

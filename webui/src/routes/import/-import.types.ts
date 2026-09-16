@@ -31,6 +31,12 @@ export interface ImportScanProgress {
   total: number;
 }
 
+/** A folder the scan could not list: files under it are invisible, not absent. */
+export interface ImportStagingProblem {
+  path: string;
+  error: string;
+}
+
 export interface ImportStagingFilesPayload {
   success: boolean;
   files?: ImportStagingFile[];
@@ -38,6 +44,7 @@ export interface ImportStagingFilesPayload {
   error?: string;
   scanning?: boolean;
   progress?: ImportScanProgress;
+  problems?: ImportStagingProblem[];
 }
 
 export interface ImportStagingGroup {

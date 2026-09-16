@@ -3,10 +3,10 @@ import clsx from 'clsx';
 
 import { Button } from '@/components/form/form';
 import { PageHeader } from '@/components/page-header';
-import { Show } from '@/components/primitives';
+import { Notice, Show } from '@/components/primitives';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type { ImportQueueEntry } from '../-import.types';
+import type { ImportQueueEntry, ImportStagingProblem } from '../-import.types';
 
 import {
   getQueueProgressPercent,
@@ -15,13 +15,20 @@ import {
 } from '../-import.helpers';
 import { useImportQueueWorkflow } from '../-import.store';
 import styles from './import-page.module.css';
-import { fallbackImage, RefreshIcon, useImportStaging } from './import-shared';
+import { fallbackImage, getErrorMessage, RefreshIcon, useImportStaging } from './import-shared';
 
 export function ImportPage() {
   useReactPageShell('import');
 
-  const { refreshStaging, scanning, scanProgress, stagingFiles, stagingPath, stagingQuery } =
-    useImportStaging();
+  const {
+    refreshStaging,
+    scanning,
+    scanProgress,
+    stagingFiles,
+    stagingPath,
+    stagingProblems,
+    stagingQuery,
+  } = useImportStaging();
   const isRefreshing = stagingQuery.isRefetching;
   const lastRefreshedAt =
     stagingQuery.dataUpdatedAt > 0 ? formatShortTime(stagingQuery.dataUpdatedAt) : null;
@@ -40,6 +47,7 @@ export function ImportPage() {
           fileCountText={fileCountText}
           loading={stagingQuery.isLoading}
           stagingPath={stagingPath}
+          stagingProblems={stagingProblems}
           refreshing={isRefreshing}
           lastRefreshedAt={lastRefreshedAt}
           onRefresh={refreshStaging}
@@ -67,6 +75,7 @@ function ImportHeader({
   fileCountText,
   loading,
   stagingPath,
+  stagingProblems,
   refreshing,
   lastRefreshedAt,
   onRefresh,
@@ -75,6 +84,7 @@ function ImportHeader({
   fileCountText: string;
   loading: boolean;
   stagingPath: string;
+  stagingProblems: ImportStagingProblem[];
   refreshing: boolean;
   lastRefreshedAt: string | null;
   onRefresh: () => void;
@@ -99,7 +109,7 @@ function ImportHeader({
       />
       <div className={styles.importPageStagingBar} id="import-staging-bar">
         <span className={styles.importStagingPath} id="import-page-staging-path">
-          {error ? 'Import folder: error' : `Import: ${stagingPath}`}
+          {error ? `Import folder: ${getErrorMessage(error)}` : `Import: ${stagingPath}`}
         </span>
         <Show when={lastRefreshedAt != null}>
           <span className={styles.importStagingRefreshAt}>
@@ -110,6 +120,20 @@ function ImportHeader({
           {loading ? 'loading...' : fileCountText}
         </span>
       </div>
+      {/* Folders the scan could not open. Without this a permission problem on
+          a bind mount read as "0 files" and nothing else. */}
+      {stagingProblems.length > 0 ? (
+        <Notice tone="warning" role="alert">
+          {stagingProblems.length === 1 ? 'A folder' : `${stagingProblems.length} folders`} in the
+          import folder could not be read, so files inside will not appear:{' '}
+          {stagingProblems
+            .slice(0, 3)
+            .map((problem) => `${problem.path} (${problem.error})`)
+            .join('; ')}
+          {stagingProblems.length > 3 ? '; …' : ''}. If this is a bind mount, check the folder's
+          owner against the container's PUID/PGID.
+        </Notice>
+      ) : null}
     </>
   );
 }
