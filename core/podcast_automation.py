@@ -220,6 +220,7 @@ def scan_and_auto_download_podcasts(profile_id: Optional[int] = None) -> Dict[st
                             enclosure_url=enclosure_url,
                             guid=guid,
                             title=title,
+                            show_title=show.title or show_title,
                         ):
                             dl_payload = {
                                 "enclosure_url": enclosure_url,

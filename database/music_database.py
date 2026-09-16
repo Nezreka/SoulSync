@@ -14830,8 +14830,12 @@ class MusicDatabase:
         enclosure_url: Optional[str] = None,
         guid: Optional[str] = None,
         title: Optional[str] = None,
+        show_title: Optional[str] = None,
     ) -> bool:
-        """Check if an episode has already been downloaded (or pruned)."""
+        """Check if an episode has already been downloaded (or pruned).
+
+        ``show_title`` scopes the last-resort title match: without it an
+        "Episode 1" from any other show counted as this one."""
         feed_url = str(feed_url or "").strip()
         enc = str(enclosure_url or "").strip()
         g = str(guid or "").strip()
@@ -14840,22 +14844,27 @@ class MusicDatabase:
             return False
         try:
             with self._get_connection() as conn:
-                # 1. Check downloaded_podcast_episodes table
+                # 1. Check downloaded_podcast_episodes table. a row is written
+                # the moment an episode is QUEUED, before a byte arrives; only
+                # a row with a file (or one pruned after having a file) is a
+                # download. counting the placeholder meant a failed or
+                # cancelled auto-download was "done" forever and never retried.
+                landed = "(file_path IS NOT NULL AND file_path != '' OR pruned_at IS NOT NULL)"
                 if enc and g:
                     row = conn.execute(
                         "SELECT 1 FROM downloaded_podcast_episodes "
-                        "WHERE (feed_url = ? AND enclosure_url = ?) OR (guid = ?)",
+                        f"WHERE ((feed_url = ? AND enclosure_url = ?) OR (guid = ?)) AND {landed}",
                         (feed_url, enc, g),
                     ).fetchone()
                 elif enc:
                     row = conn.execute(
                         "SELECT 1 FROM downloaded_podcast_episodes "
-                        "WHERE feed_url = ? AND enclosure_url = ?",
+                        f"WHERE feed_url = ? AND enclosure_url = ? AND {landed}",
                         (feed_url, enc),
                     ).fetchone()
                 elif g:
                     row = conn.execute(
-                        "SELECT 1 FROM downloaded_podcast_episodes WHERE guid = ?",
+                        f"SELECT 1 FROM downloaded_podcast_episodes WHERE guid = ? AND {landed}",
                         (g,),
                     ).fetchone()
                 else:
@@ -14877,17 +14886,46 @@ class MusicDatabase:
                         return True
 
                 if t:
-                    row = conn.execute(
-                        "SELECT 1 FROM library_history WHERE event_type = 'podcast' "
-                        "AND title = ?",
-                        (t,),
-                    ).fetchone()
+                    show = str(show_title or "").strip()
+                    if show:
+                        row = conn.execute(
+                            "SELECT 1 FROM library_history WHERE event_type = 'podcast' "
+                            "AND title = ? AND album_name = ?",
+                            (t, show),
+                        ).fetchone()
+                    else:
+                        row = conn.execute(
+                            "SELECT 1 FROM library_history WHERE event_type = 'podcast' "
+                            "AND title = ?",
+                            (t,),
+                        ).fetchone()
                     if row:
                         return True
 
                 return False
         except Exception as e:
             logger.debug("is_podcast_episode_downloaded check failed: %s", e)
+            return False
+
+    def forget_podcast_episode_attempt(self, feed_url: str, enclosure_url: str) -> bool:
+        """Drop the placeholder a queued download wrote, when it did not land.
+
+        Only a row with no file and no prune stamp: a real download's record
+        is history and stays, whatever happens to a later attempt."""
+        if not feed_url or not enclosure_url:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cur = conn.execute(
+                    "DELETE FROM downloaded_podcast_episodes "
+                    "WHERE feed_url = ? AND enclosure_url = ? "
+                    "AND (file_path IS NULL OR file_path = '') AND pruned_at IS NULL",
+                    (str(feed_url).strip(), str(enclosure_url).strip()),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("forget_podcast_episode_attempt failed: %s", e)
             return False
 
     def get_downloaded_podcast_episodes(
