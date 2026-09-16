@@ -67,6 +67,22 @@ body {
     height: 100vh;
 }
 
+/* Native <select> menus (#1258). Every select on the page styles its closed
+   box white-on-dark, but the popup list is drawn by the browser in its own
+   scheme, and with no color-scheme set that scheme is light: white text
+   inherited from us on a white list the browser painted. Two halves because
+   the browsers split it: Chromium/Safari paint the popup from color-scheme,
+   Firefox paints it from the option rule. A dozen per-component "select
+   option" rules below were each one instance of this same bug. */
+select {
+    color-scheme: dark;
+}
+select option,
+select optgroup {
+    background-color: #1a1a1a;
+    color: #ffffff;
+}
+
 .hidden {
     display: none !important;
 }
