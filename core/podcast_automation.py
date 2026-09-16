@@ -266,6 +266,12 @@ def scan_and_auto_download_podcasts(profile_id: Optional[int] = None) -> Dict[st
                     )
 
                     for rec in downloaded_records:
+                        # a row without a file never landed (queued, then
+                        # failed or interrupted). pruning it would mark it
+                        # pruned, and pruned counts as downloaded, so the
+                        # episode would never be tried again.
+                        if not rec.get("file_path"):
+                            continue
                         dl_time_str = rec.get("downloaded_at")
                         rec_ts = None
                         if dl_time_str:
