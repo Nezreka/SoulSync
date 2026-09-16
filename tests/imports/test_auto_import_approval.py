@@ -141,3 +141,40 @@ def test_approval_does_not_bypass_pipeline_safety_rejection(tmp_path, monkeypatc
     assert [row['status'] for row in rows] == ['failed']
     assert 'integrity check failed' in rows[-1]['error_message']
     assert json.loads(rows[-1]['match_data'])['matches'][0]['import_status'] == 'failed'
+
+
+def test_retry_forgets_a_finished_row_so_the_scan_picks_it_up_again(tmp_path):
+    worker = _worker(tmp_path)
+    candidate = _candidate(tmp_path)
+    with worker.database._get_connection() as conn:
+        row_id = conn.execute(
+            "INSERT INTO auto_import_history (folder_name, folder_path, folder_hash, status) "
+            "VALUES (?, ?, ?, 'failed')", (candidate.name, candidate.path, candidate.folder_hash),
+        ).lastrowid
+    assert worker._is_already_processed(candidate) is True
+    assert worker.retry_item(row_id)['success'] is True
+    assert worker._is_already_processed(candidate) is False
+    # a second retry has nothing to forget
+    assert worker.retry_item(row_id)['success'] is False
+
+
+def test_retry_refuses_a_pending_review_row(tmp_path):
+    worker = _worker(tmp_path)
+    row_id = _seed_pending(worker, _candidate(tmp_path))
+    assert worker.retry_item(row_id)['success'] is False
+
+
+def test_resolve_marks_a_row_imported_by_hand(tmp_path):
+    worker = _worker(tmp_path)
+    candidate = _candidate(tmp_path)
+    with worker.database._get_connection() as conn:
+        row_id = conn.execute(
+            "INSERT INTO auto_import_history (folder_name, folder_path, folder_hash, status, error_message) "
+            "VALUES (?, ?, ?, 'needs_identification', 'could not')",
+            (candidate.name, candidate.path, candidate.folder_hash),
+        ).lastrowid
+    assert worker.resolve_item(row_id)['success'] is True
+    row = worker.get_results(limit=1)[0]
+    assert row['status'] == 'completed' and row['identification_method'] == 'manual'
+    assert row['error_message'] is None and row['processed_at']
+    assert worker.resolve_item(999)['success'] is False

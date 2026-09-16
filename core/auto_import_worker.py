@@ -2394,6 +2394,49 @@ class AutoImportWorker:
             if conn is not None:
                 conn.close()
 
+    def retry_item(self, item_id: int) -> Dict:
+        """Forget a finished row so the next scan picks the folder up again.
+
+        The dedup guard treats failed / needs-identification / rejected as
+        terminal, so without this a folder that failed once was never
+        looked at again unless the user changed its files."""
+        try:
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM auto_import_history WHERE id = ? AND status IN "
+                "('failed', 'needs_identification', 'rejected', 'partial')",
+                (item_id,),
+            )
+            deleted = cursor.rowcount
+            conn.commit()
+            conn.close()
+            if deleted != 1:
+                return {'success': False, 'error': 'Item not found or not in a retryable state'}
+            return {'success': True}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def resolve_item(self, item_id: int, method: str = 'manual') -> Dict:
+        """Mark a row imported by hand (the inbox matcher) so history shows
+        what happened instead of a stale "needs identification"."""
+        try:
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE auto_import_history SET status = 'completed', identification_method = ?, "
+                "error_message = NULL, processed_at = ? WHERE id = ?",
+                (method, datetime.now().isoformat(), item_id),
+            )
+            updated = cursor.rowcount
+            conn.commit()
+            conn.close()
+            if updated != 1:
+                return {'success': False, 'error': 'Item not found'}
+            return {'success': True}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
     def reject_item(self, item_id: int) -> Dict:
         """Reject/dismiss an auto-import item."""
         try:
