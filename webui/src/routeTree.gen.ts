@@ -36,6 +36,7 @@ import { Route as ImportSinglesRouteImport } from './routes/import/singles'
 import { Route as ImportAutoRouteImport } from './routes/import/auto'
 import { Route as ImportAlbumRouteImport } from './routes/import/album'
 import { Route as AudiobooksWishlistRouteImport } from './routes/audiobooks/wishlist'
+import { Route as AudiobooksLibraryRouteImport } from './routes/audiobooks/library'
 import { Route as AudiobooksAsinRouteImport } from './routes/audiobooks/$asin'
 import { Route as AudiobooksNarratorNameRouteImport } from './routes/audiobooks/narrator/$name'
 import { Route as AudiobooksAuthorNameRouteImport } from './routes/audiobooks/author/$name'
@@ -176,6 +177,11 @@ const AudiobooksWishlistRoute = AudiobooksWishlistRouteImport.update({
   path: '/wishlist',
   getParentRoute: () => AudiobooksRouteRoute,
 } as any)
+const AudiobooksLibraryRoute = AudiobooksLibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
+  getParentRoute: () => AudiobooksRouteRoute,
+} as any)
 const AudiobooksAsinRoute = AudiobooksAsinRouteImport.update({
   id: '/$asin',
   path: '/$asin',
@@ -217,6 +223,7 @@ export interface FileRoutesByFullPath {
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/audiobooks/$asin': typeof AudiobooksAsinRoute
+  '/audiobooks/library': typeof AudiobooksLibraryRoute
   '/audiobooks/wishlist': typeof AudiobooksWishlistRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -247,6 +254,7 @@ export interface FileRoutesByTo {
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/audiobooks/$asin': typeof AudiobooksAsinRoute
+  '/audiobooks/library': typeof AudiobooksLibraryRoute
   '/audiobooks/wishlist': typeof AudiobooksWishlistRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -281,6 +289,7 @@ export interface FileRoutesById {
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/audiobooks/$asin': typeof AudiobooksAsinRoute
+  '/audiobooks/library': typeof AudiobooksLibraryRoute
   '/audiobooks/wishlist': typeof AudiobooksWishlistRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -316,6 +325,7 @@ export interface FileRouteTypes {
     | '/wishlist'
     | '/$'
     | '/audiobooks/$asin'
+    | '/audiobooks/library'
     | '/audiobooks/wishlist'
     | '/import/album'
     | '/import/auto'
@@ -346,6 +356,7 @@ export interface FileRouteTypes {
     | '/wishlist'
     | '/$'
     | '/audiobooks/$asin'
+    | '/audiobooks/library'
     | '/audiobooks/wishlist'
     | '/import/album'
     | '/import/auto'
@@ -379,6 +390,7 @@ export interface FileRouteTypes {
     | '/wishlist'
     | '/$'
     | '/audiobooks/$asin'
+    | '/audiobooks/library'
     | '/audiobooks/wishlist'
     | '/import/album'
     | '/import/auto'
@@ -607,6 +619,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AudiobooksWishlistRouteImport
       parentRoute: typeof AudiobooksRouteRoute
     }
+    '/audiobooks/library': {
+      id: '/audiobooks/library'
+      path: '/library'
+      fullPath: '/audiobooks/library'
+      preLoaderRoute: typeof AudiobooksLibraryRouteImport
+      parentRoute: typeof AudiobooksRouteRoute
+    }
     '/audiobooks/$asin': {
       id: '/audiobooks/$asin'
       path: '/$asin'
@@ -640,6 +659,7 @@ declare module '@tanstack/react-router' {
 
 interface AudiobooksRouteRouteChildren {
   AudiobooksAsinRoute: typeof AudiobooksAsinRoute
+  AudiobooksLibraryRoute: typeof AudiobooksLibraryRoute
   AudiobooksWishlistRoute: typeof AudiobooksWishlistRoute
   AudiobooksIndexRoute: typeof AudiobooksIndexRoute
   AudiobooksAuthorNameRoute: typeof AudiobooksAuthorNameRoute
@@ -648,6 +668,7 @@ interface AudiobooksRouteRouteChildren {
 
 const AudiobooksRouteRouteChildren: AudiobooksRouteRouteChildren = {
   AudiobooksAsinRoute: AudiobooksAsinRoute,
+  AudiobooksLibraryRoute: AudiobooksLibraryRoute,
   AudiobooksWishlistRoute: AudiobooksWishlistRoute,
   AudiobooksIndexRoute: AudiobooksIndexRoute,
   AudiobooksAuthorNameRoute: AudiobooksAuthorNameRoute,
