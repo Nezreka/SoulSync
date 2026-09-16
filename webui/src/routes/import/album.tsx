@@ -1,15 +1,9 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
-import {
-  importStagingGroupsQueryOptions,
-  importStagingSuggestionsQueryOptions,
-} from './-import.api';
-import { AlbumImportTab } from './-ui/album-import-tab';
-
+// the old tab. bookmarks and the guided tour still point here; the inbox
+// replaced all three tabs with one list.
 export const Route = createFileRoute('/import/album')({
-  loader: async ({ context }) => {
-    void context.queryClient.prefetchQuery(importStagingGroupsQueryOptions());
-    void context.queryClient.prefetchQuery(importStagingSuggestionsQueryOptions());
+  beforeLoad: () => {
+    throw redirect({ to: '/import', replace: true });
   },
-  component: AlbumImportTab,
 });

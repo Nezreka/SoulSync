@@ -1639,69 +1639,70 @@ const HELPER_CONTENT = {
 
     // ─── IMPORT PAGE ────────────────────────────────────────────────
 
-    '.import-page-container': {
-        title: 'Import Music',
-        description: 'Import audio files from your import folder into your library. Match files to album metadata, tag them, and organize into your collection.',
+    '#import-page': {
+        title: 'Import',
+        description: 'Everything in your import folder, in one list, with what has happened to it. Album folders, loose-file groups and single files each get a row; the auto-import watcher and your own matching feed the same list.',
         docsId: 'import'
-    },
-    '.import-page-refresh-btn': {
-        title: 'Refresh',
-        description: 'Re-scan your import folder for new audio files. Use after dropping new files in.',
     },
     '#import-staging-bar': {
         title: 'Import Folder',
-        description: 'Shows your configured import folder path and the number of audio files found. Set the import path in Settings → Download Settings.',
+        description: 'Where the import folder is and what is in it, plus the auto-import switch and a countdown to its next scan. Set the path in Settings → Download Settings.',
         docsId: 'imp-setup'
     },
-    '#import-page-queue': {
-        title: 'Processing Queue',
-        description: 'Shows albums and singles currently being processed. Each job goes through matching, tagging, cover art embedding, and file organization.',
+    '#auto-import-enabled': {
+        title: 'Auto-import',
+        description: 'On, the watcher checks the folder on a timer, identifies each item from its tags, folder name or fingerprint, and imports anything above the confidence line by itself. Below it, the item waits for you in Needs attention.',
+        docsId: 'imp-auto'
     },
-    '#import-page-tab-album': {
-        title: 'Albums Tab',
-        description: 'Import complete albums. Search for an album, match import files to tracks, then process. Suggestions appear automatically from your import folder.',
+    '#auto-import-scan-now': {
+        title: 'Scan now',
+        description: 'Run the watcher\'s scan right away instead of waiting for the timer.',
+    },
+    '#import-page-settings': {
+        title: 'Auto-import settings',
+        description: 'The confidence line, how often the folder is checked, whether matches import without asking, and which quality profile they are checked against.',
+        docsId: 'imp-auto'
+    },
+    '#import-page-queue': {
+        title: 'Importing',
+        description: 'Imports you started from the matcher, with progress per track. The watcher\'s own imports show on their rows in the list instead.',
+    },
+    '#import-inbox-list': {
+        title: 'The list',
+        description: 'One row per item. The pill says its state: waiting, needs review, needs identifying, importing, imported, failed. The buttons are what you can do about it: approve a probable match, fix or identify it in the matcher, retry a failure, or dismiss it.',
+        tips: [
+            'Needs attention is the default filter: only what needs a person',
+            'Show files opens the per-file list with length, bitrate and size',
+            'Tick rows to approve or dismiss several at once'
+        ],
         docsId: 'imp-workflow'
     },
-    '#import-page-tab-singles': {
-        title: 'Singles Tab',
-        description: 'Import individual audio files as single tracks. Select files, and SoulSync identifies them using AcoustID fingerprinting or filename matching.',
-        docsId: 'imp-singles'
-    },
-    '#import-page-suggestions-grid': {
-        title: 'Suggestions',
-        description: 'Albums automatically detected from your import folder based on folder names and file metadata. Click a suggestion to start the matching process.',
-    },
-    '#import-page-album-search-input': {
-        title: 'Album Search',
-        description: 'Search your metadata source for an album to match against import files. Enter the album name or artist + album.',
-    },
-    '#import-page-album-match-section': {
-        title: 'Track Matching',
-        description: 'Match your import files to album tracks. Drag files from the unmatched pool onto tracks, or let auto-matching do it. Green = matched, red = unmatched.',
+    '#import-matcher': {
+        title: 'The matcher',
+        description: 'The release on the left, the tracklist on the right. Each track shows the file matched to it with its own length and bitrate; a length that differs from the release is flagged. Pick another candidate or search when the release is wrong.',
         tips: [
-            'Drag and drop files from the unmatched pool to track slots',
-            '"Re-match Automatically" re-runs the matching algorithm',
-            '"Back to Search" returns to the album search view'
+            'Drag a loose file onto a track, or tap the file then the track',
+            'The × takes a file off a track',
+            'Files without a track stay in the import folder'
         ],
         docsId: 'imp-matching'
     },
+    '#import-page-album-search-input': {
+        title: 'Release search',
+        description: 'Search your metadata sources for the right release when none of the candidates fit. Artist and album works best; pick a specific source to bypass the primary one.',
+    },
     '#import-page-unmatched-pool': {
-        title: 'Unmatched Files',
-        description: 'Audio files in your import folder that haven\'t been matched to an album track yet. Drag them onto the correct track slot above.',
+        title: 'Files without a track',
+        description: 'Files in this item that no track claimed. Drag them onto the right track above, or tap one and then the track.',
         docsId: 'imp-matching'
     },
     '#import-page-album-process-btn': {
-        title: 'Process Album',
-        description: 'Start processing the matched album. Tags files with metadata, embeds cover art, renames and organizes files into your library, then triggers a media server scan.',
-    },
-    '#import-page-singles-list': {
-        title: 'Singles List',
-        description: 'Individual audio files in your import folder. Select files and click "Process Selected" to identify and import them as single tracks.',
-        docsId: 'imp-singles'
+        title: 'Import',
+        description: 'Import the matched tracks: tag them, embed cover art, rename and move them into your library, then trigger a media server scan.',
     },
     '#import-page-singles-process-btn': {
-        title: 'Process Singles',
-        description: 'Identify and import selected singles. Uses AcoustID fingerprinting to match files to tracks, then tags and organizes them.',
+        title: 'Import',
+        description: 'Import this file as a single, tagged from the track you picked, or from its own tags if you picked none.',
     },
 
     // ─── SETTINGS PAGE ────────────────────────────────────────────────
@@ -2461,22 +2462,11 @@ const HELPER_TOURS = {
         icon: '📥',
         steps: [
             // Header
-            { page: 'import', selector: '#import-page', title: 'Import Music', description: 'Import audio files from your import folder into your organized library. Files are matched to album metadata, tagged, and moved to the correct location.' },
-            { page: 'import', selector: '#import-page-staging-path', title: 'Import Folder', description: 'Shows your configured import folder path and stats (file count, total size). This is where you drop audio files before importing — the refresh arrow re-scans it after you add files. Configure the path in Settings → Downloads.' },
-
-            // Queue
-            { page: 'import', selector: '#import-page-queue', title: 'Processing Queue', description: 'When you process albums or singles, jobs appear here with progress indicators. "Clear finished" removes completed jobs from the list.' },
-
-            // Tabs
-            { page: 'import', selector: '#import-page-tab-album', title: 'Albums vs Singles', description: 'Two modes: Albums tab matches full albums to metadata (cover art, track numbers, disc info). Singles tab processes individual files one at a time.' },
-
-            // Album workflow
-            { page: 'import', selector: '#import-page-suggestions', title: 'Album Suggestions', description: 'The importer analyzes your import files and suggests album matches based on embedded tags. Click a suggestion to start the matching process.' },
-            { page: 'import', selector: '#import-page-album-search-input', title: 'Album Search', description: 'If suggestions don\'t match, search manually. Type an album name, click Search, and select the correct result.' },
-            { page: 'import', selector: '#import-page-album-search-input', title: 'Track Matching', description: 'After selecting an album, you\'ll see a track matching table. Files are auto-matched to tracks by name/number. Drag unmatched files from the pool to the correct track slot, then click "Process Album".' },
-
-            // Singles workflow
-            { page: 'import', selector: '#import-page-tab-singles', title: 'Singles Import', description: 'The Singles tab lists all individual audio files. Select files with checkboxes (or "Select All"), then click "Process Selected" to tag and move them into your library. 🎉' },
+            { page: 'import', selector: '#import-page', title: 'Import', description: 'Everything in your import folder, in one list, with what has happened to it. Drop album folders or single files in and they show up here.' },
+            { page: 'import', selector: '#import-page-staging-path', title: 'Import Folder', description: 'Your configured import folder and what is in it. Refresh re-reads it after you add files. Configure the path in Settings → Downloads.' },
+            { page: 'import', selector: '#auto-import-enabled', title: 'Auto-import', description: 'On, the watcher identifies each item on a timer and imports anything it is sure about by itself. Anything it is not sure about waits for you in the list.' },
+            { page: 'import', selector: '#import-page-settings', title: 'Settings', description: 'The confidence line, the scan interval, whether matches import without asking, and the quality profile they are checked against.' },
+            { page: 'import', selector: '#import-inbox-list', title: 'The list', description: 'One row per item with its state and the actions it earns: approve a probable match, identify or fix it in the matcher, retry a failure, dismiss it. Show files opens the per-file detail. 🎉' },
         ]
     },
     'settings-tour': {

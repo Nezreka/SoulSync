@@ -60,6 +60,7 @@ def test_history_joins_by_hash_and_falls_back_to_path():
     assert r['status'] == 'needs_review' and r['history_id'] == 7
     assert r['name'] == 'Real Name' and r['artist'] == 'Real Artist' and r['image_url'] == 'a.jpg'
     assert r['confidence'] == 0.82
+    assert r['match']['source'] is None
     assert r['match']['matches'][0] == {'track_name': 'One', 'track_number': None,
                                         'file': '01.flac', 'file_path': '/Staging/X/01.flac',
                                         'confidence': 0.9}

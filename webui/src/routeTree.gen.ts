@@ -38,6 +38,7 @@ import { Route as ImportAlbumRouteImport } from './routes/import/album'
 import { Route as AudiobooksWishlistRouteImport } from './routes/audiobooks/wishlist'
 import { Route as AudiobooksLibraryRouteImport } from './routes/audiobooks/library'
 import { Route as AudiobooksAsinRouteImport } from './routes/audiobooks/$asin'
+import { Route as ImportMatchKeyRouteImport } from './routes/import/match.$key'
 import { Route as AudiobooksNarratorNameRouteImport } from './routes/audiobooks/narrator/$name'
 import { Route as AudiobooksAuthorNameRouteImport } from './routes/audiobooks/author/$name'
 import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail/$source/$id'
@@ -187,6 +188,11 @@ const AudiobooksAsinRoute = AudiobooksAsinRouteImport.update({
   path: '/$asin',
   getParentRoute: () => AudiobooksRouteRoute,
 } as any)
+const ImportMatchKeyRoute = ImportMatchKeyRouteImport.update({
+  id: '/match/$key',
+  path: '/match/$key',
+  getParentRoute: () => ImportRouteRoute,
+} as any)
 const AudiobooksNarratorNameRoute = AudiobooksNarratorNameRouteImport.update({
   id: '/narrator/$name',
   path: '/narrator/$name',
@@ -236,6 +242,7 @@ export interface FileRoutesByFullPath {
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
   '/audiobooks/author/$name': typeof AudiobooksAuthorNameRoute
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
+  '/import/match/$key': typeof ImportMatchKeyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -267,6 +274,7 @@ export interface FileRoutesByTo {
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
   '/audiobooks/author/$name': typeof AudiobooksAuthorNameRoute
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
+  '/import/match/$key': typeof ImportMatchKeyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -302,6 +310,7 @@ export interface FileRoutesById {
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
   '/audiobooks/author/$name': typeof AudiobooksAuthorNameRoute
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
+  '/import/match/$key': typeof ImportMatchKeyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -338,6 +347,7 @@ export interface FileRouteTypes {
     | '/artist-detail/$source/$id'
     | '/audiobooks/author/$name'
     | '/audiobooks/narrator/$name'
+    | '/import/match/$key'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -369,6 +379,7 @@ export interface FileRouteTypes {
     | '/artist-detail/$source/$id'
     | '/audiobooks/author/$name'
     | '/audiobooks/narrator/$name'
+    | '/import/match/$key'
   id:
     | '__root__'
     | '/'
@@ -403,6 +414,7 @@ export interface FileRouteTypes {
     | '/artist-detail/$source/$id'
     | '/audiobooks/author/$name'
     | '/audiobooks/narrator/$name'
+    | '/import/match/$key'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -633,6 +645,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AudiobooksAsinRouteImport
       parentRoute: typeof AudiobooksRouteRoute
     }
+    '/import/match/$key': {
+      id: '/import/match/$key'
+      path: '/match/$key'
+      fullPath: '/import/match/$key'
+      preLoaderRoute: typeof ImportMatchKeyRouteImport
+      parentRoute: typeof ImportRouteRoute
+    }
     '/audiobooks/narrator/$name': {
       id: '/audiobooks/narrator/$name'
       path: '/narrator/$name'
@@ -684,6 +703,7 @@ interface ImportRouteRouteChildren {
   ImportAutoRoute: typeof ImportAutoRoute
   ImportSinglesRoute: typeof ImportSinglesRoute
   ImportIndexRoute: typeof ImportIndexRoute
+  ImportMatchKeyRoute: typeof ImportMatchKeyRoute
 }
 
 const ImportRouteRouteChildren: ImportRouteRouteChildren = {
@@ -691,6 +711,7 @@ const ImportRouteRouteChildren: ImportRouteRouteChildren = {
   ImportAutoRoute: ImportAutoRoute,
   ImportSinglesRoute: ImportSinglesRoute,
   ImportIndexRoute: ImportIndexRoute,
+  ImportMatchKeyRoute: ImportMatchKeyRoute,
 }
 
 const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(

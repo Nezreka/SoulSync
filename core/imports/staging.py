@@ -658,6 +658,11 @@ def collect_staging_files(file_paths: Optional[Iterable[str]] = None) -> List[Di
                     "albumartist": meta.get("albumartist") or meta.get("artist") or "",
                     "track_number": meta.get("track_number", 1),
                     "disc_number": meta.get("disc_number", 1),
+                    # the matcher shows these beside the release track so a
+                    # length mismatch is visible before the import, not after
+                    "duration_ms": meta.get("duration_ms", 0),
+                    "bitrate": meta.get("bitrate", 0),
+                    "size": meta.get("size", 0),
                 }
             )
 

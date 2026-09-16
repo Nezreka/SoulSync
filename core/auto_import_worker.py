@@ -672,6 +672,9 @@ class AutoImportWorker:
                 self._bump_stat('failed')
                 return
 
+            # which source the tracklist came from rides along into history,
+            # so the inbox matcher can reopen the same release.
+            match_result.setdefault('source', identification.get('source'))
             confidence = match_result['confidence']
             status = 'matched'
 
@@ -2301,6 +2304,7 @@ class AutoImportWorker:
                 'total_tracks': match_data.get('total_tracks', 0),
                 'matched_count': match_data.get('matched_count', 0),
                 'coverage': match_data.get('coverage', 0),
+                'source': match_data.get('source'),
             }
             return json.dumps(serializable)
         except Exception:

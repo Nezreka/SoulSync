@@ -94,6 +94,7 @@ def _parse_match(raw: Any) -> Optional[Dict[str, Any]]:
         'matched_count': int(data.get('matched_count') or len([m for m in matches if m['file']])),
         'total_tracks': int(data.get('total_tracks') or 0),
         'matches': matches,
+        'source': data.get('source') or None,
     }
 
 

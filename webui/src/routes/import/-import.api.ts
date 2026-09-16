@@ -10,6 +10,7 @@ import type {
   ImportAutoImportResultsPayload,
   ImportAutoImportSettingsPayload,
   ImportAutoImportStatusPayload,
+  ImportInboxPayload,
   ImportProcessPayload,
   ImportSearchSourcesPayload,
   ImportStagingFilesPayload,
@@ -29,6 +30,10 @@ export const IMPORT_QUERY_KEY = ['import'] as const;
 // imported fine (#772). Give the import-process calls a generous bound so the
 // responses actually arrive and the bar advances. Scoped to import only.
 const IMPORT_REQUEST_TIMEOUT_MS = 300_000; // 5 min/track
+
+export async function fetchImportInbox(): Promise<ImportInboxPayload> {
+  return readJson<ImportInboxPayload>(apiClient.get('import/inbox'));
+}
 
 export async function fetchImportStagingFiles(): Promise<ImportStagingFilesPayload> {
   return readJson<ImportStagingFilesPayload>(apiClient.get('import/staging/files'));
@@ -163,6 +168,7 @@ export async function saveAutoImportSettings(input: {
   confidenceThreshold: number;
   scanInterval: number;
   qualityProfileId?: number | null;
+  autoProcess?: boolean;
 }): Promise<void> {
   await readJson<{ success: boolean; error?: string }>(
     apiClient.post('auto-import/settings', {
@@ -170,6 +176,7 @@ export async function saveAutoImportSettings(input: {
         confidence_threshold: input.confidenceThreshold,
         scan_interval: input.scanInterval,
         quality_profile_id: input.qualityProfileId ?? null,
+        ...(input.autoProcess === undefined ? {} : { auto_process: input.autoProcess }),
       },
     }),
   );
@@ -221,6 +228,20 @@ export async function rejectAutoImportResult(id: number): Promise<void> {
   }
 }
 
+export async function retryAutoImportResult(id: number): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post(`auto-import/retry/${id}`),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to retry');
+}
+
+export async function resolveAutoImportResult(id: number): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post(`auto-import/resolve/${id}`),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to record the import');
+}
+
 export async function approveAllAutoImportResults(): Promise<number> {
   const payload = await readJson<{ success: boolean; count?: number; error?: string }>(
     apiClient.post('auto-import/approve-all'),
@@ -243,6 +264,16 @@ export async function clearCompletedAutoImportResults(): Promise<number> {
 // 6s TTL is short, so an invalidated refetch genuinely re-scans); gcTime keeps the cache alive while
 // the user is on another page so coming back doesn't re-scan either.
 const STAGING_CACHE = { staleTime: 30 * 60_000, gcTime: 60 * 60_000 } as const;
+
+// The inbox polls: the worker moves items through identifying / importing on
+// its own clock, and the page has to follow it without a refresh button.
+export function importInboxQueryOptions() {
+  return queryOptions({
+    queryKey: [...IMPORT_QUERY_KEY, 'inbox'],
+    queryFn: fetchImportInbox,
+    staleTime: 4_000,
+  });
+}
 
 export function importStagingFilesQueryOptions() {
   return queryOptions({
@@ -310,6 +341,7 @@ export function invalidateImportQueries(queryClient: QueryClient) {
 
 export function invalidateImportStagingQueries(queryClient: QueryClient) {
   return Promise.all([
+    queryClient.invalidateQueries({ queryKey: [...IMPORT_QUERY_KEY, 'inbox'] }),
     queryClient.invalidateQueries({ queryKey: [...IMPORT_QUERY_KEY, 'staging-files'] }),
     queryClient.invalidateQueries({ queryKey: [...IMPORT_QUERY_KEY, 'staging-groups'] }),
     queryClient.invalidateQueries({ queryKey: [...IMPORT_QUERY_KEY, 'staging-suggestions'] }),
@@ -318,6 +350,7 @@ export function invalidateImportStagingQueries(queryClient: QueryClient) {
 
 export function invalidateAutoImportQueries(queryClient: QueryClient) {
   return Promise.all([
+    queryClient.invalidateQueries({ queryKey: [...IMPORT_QUERY_KEY, 'inbox'] }),
     queryClient.invalidateQueries({ queryKey: [...IMPORT_QUERY_KEY, 'auto-import-status'] }),
     queryClient.invalidateQueries({ queryKey: [...IMPORT_QUERY_KEY, 'auto-import-settings'] }),
     queryClient.invalidateQueries({ queryKey: [...IMPORT_QUERY_KEY, 'auto-import-results'] }),
