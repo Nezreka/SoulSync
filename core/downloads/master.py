@@ -74,34 +74,55 @@ def _similarity(left: Any, right: Any) -> float:
 
 
 def _album_title_similarity(expected: str, artist: str, year: str,
-                            album_title: str, album_path: str) -> float:
-    """Compare the folder's title, treating artist/year/type as separate evidence.
+                            album_title: str, album_path: str, *,
+                            coverage: float) -> float:
+    """Add bounded path evidence only to a complete, title-bearing folder.
 
-    Do not deduplicate arbitrary words: repetition can be part of a real title.
-    Only remove a leading artist and known release metadata from the leaf.
-    In particular, an eponymous artist prefix is not a second title match.
+    Do not strip apparent metadata from a candidate title: years, repeated
+    words and labels such as "LP" can all be part of real music names. A
+    self-titled artist occurrence alone is ambiguous, so require two in the
+    leaf.
     """
     baseline = max(_similarity(expected, album_title),
                    _similarity(expected, album_path))
-    leaf = str(album_path or '').replace('\\', '/').rstrip('/').split('/')[-1]
-    title = _norm_text(leaf).replace('-', ' ')
-    artist_key = _norm_text(artist).replace('-', ' ')
-    expected_key = _norm_text(expected).replace('-', ' ')
-    if artist_key and title.startswith(artist_key + ' '):
-        title = title[len(artist_key):].strip()
-    title = re.sub(r'(?<!\d)(?:19|20)\d{2}(?!\d)', ' ', title)
-    title = re.sub(r'\b(?:album|lp|ep|compilation)\b', ' ', title)
-    title = re.sub(r'\s+', ' ', title).strip()
-    title_score = max(baseline, _similarity(expected, title))
-    if title_score < 0.5:
-        return title_score
+    if coverage < 1.0:
+        return baseline
 
-    path_key = _norm_text(album_path).replace('-', ' ')
+    title_key = _norm_text(expected)
+    artist_key = _norm_text(artist)
+    year_key = _norm_text(year)
+    leaf = _norm_text(str(album_path or '').replace('\\', '/').rstrip('/').split('/')[-1])
+    path_key = _norm_text(album_path)
+    if not title_key:
+        return baseline
+
+    def spans(haystack: str, needle: str) -> list[tuple[int, int]]:
+        return [match.span() for match in re.finditer(
+            rf'(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])', haystack)]
+
+    title_hits = spans(leaf, title_key)
+    if len(title_hits) < (2 if title_key == artist_key else 1):
+        return baseline
+
+    # An artist/year substring inside the title itself is not corroboration.
+    leaf_start = path_key.rfind(leaf)
+    if leaf_start < 0:
+        return baseline
+    title_spans = [(leaf_start + start, leaf_start + end) for start, end in title_hits]
+
+    def separate_evidence(needle: str) -> bool:
+        return any(all(end <= title_start or start >= title_end
+                       for title_start, title_end in title_spans)
+                   for start, end in spans(path_key, needle))
+
+    # A matching substring is evidence, not an exact title. It needs an
+    # independent artist or year clue to clear the existing 0.65 title gate.
+    title_score = max(baseline, 0.62)
     bonus = 0.0
-    if artist_key and artist_key != expected_key and re.search(
-            rf'(?<!\w){re.escape(artist_key)}(?!\w)', path_key):
+    if artist_key and artist_key != title_key and separate_evidence(artist_key):
         bonus += 0.08
-    if year and re.search(rf'(?<!\d){re.escape(year)}(?!\d)', path_key):
+    if (len(year_key) == 4 and year_key.isdigit()
+            and year_key != title_key and separate_evidence(year_key)):
         bonus += 0.08
     return min(1.0, title_score + bonus)
 
@@ -237,12 +258,22 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
         str(getattr(album_result, attr, '') or '')
         for attr in ('album_title', 'album_path')
     )
+    candidate_tracks = list(filtered_tracks)
+    expected_tracks = [track for track in tracks_json if track.get('name')]
+    assignment = assign_album_tracks(expected_tracks, candidate_tracks, album=expected_album)
+    coverage_score = assignment.coverage
+    # A release's metadata can make a half-album look plausible. Only a
+    # folder with enough distinct, profile-eligible titles is a bundle pick;
+    # partial folders remain available through the per-track path.
+    if expected_tracks and coverage_score < 0.8:
+        return 0.0
     album_score = _album_title_similarity(
         expected_album,
         expected_artist,
         expected_year,
         str(getattr(album_result, 'album_title', '') or ''),
         str(getattr(album_result, 'album_path', '') or ''),
+        coverage=coverage_score,
     )
     artist_score = max(
         _similarity(expected_artist, getattr(album_result, 'artist', '')),
@@ -264,16 +295,6 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
             count_score = 0.0
     else:
         count_score = 0.4
-
-    candidate_tracks = list(filtered_tracks)
-    expected_tracks = [track for track in tracks_json if track.get('name')]
-    assignment = assign_album_tracks(expected_tracks, candidate_tracks, album=expected_album)
-    coverage_score = assignment.coverage
-    # A release's metadata can make a half-album look plausible. Only a
-    # folder with enough distinct, profile-eligible titles is a bundle pick;
-    # partial folders remain available through the per-track path.
-    if expected_tracks and coverage_score < 0.8:
-        return 0.0
 
     year_score = 0.5
     folder_year = str(getattr(album_result, 'year', '') or '')
