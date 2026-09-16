@@ -53608,25 +53608,31 @@ textarea.enhanced-meta-field-input {
 .enhanced-bitrate.low { color: #ff6b6b; }
 
 /* Bulk Actions Bar */
+/* a floating dock, not a bottom sheet: pinned at bottom:0 it sat under the
+   mini player and the activity/bell/help buttons (bottom:24px, #1255). 108px
+   clears the player (73px tall, measured) and the 48px buttons, the same
+   idea as the chat browse dock. */
 .enhanced-bulk-bar {
     position: fixed;
-    bottom: -80px;
-    left: var(--sidebar-w);
-    right: 0;
-    height: 60px;
+    bottom: -100px;
+    left: calc(var(--sidebar-w) + 24px);
+    right: 24px;
+    min-height: 60px;
     background: linear-gradient(135deg, rgba(30,30,30,0.98), rgba(20,20,20,0.98));
     backdrop-filter: blur(12px);
-    border-top: 1px solid rgba(var(--accent-rgb), 0.25);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    border-radius: 16px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 32px;
+    gap: 12px;
+    padding: 0 24px;
     z-index: 100;
     transition: bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
+    box-shadow: 0 12px 36px rgba(0,0,0,0.55), 0 0 24px rgba(var(--accent-rgb), 0.12);
 }
 .enhanced-bulk-bar.visible {
-    bottom: 0;
+    bottom: 108px;
 }
 .enhanced-bulk-bar-info {
     display: flex;
