@@ -417,7 +417,9 @@ def tick(db: Any = None) -> Dict[str, int]:
             forget(row["download_id"])
             summary["completed"] += 1
             if asin:
-                database.mark_wishlist_status(asin, STATUS_DONE)
+                # every profile's row: the library is shared, so the book is
+                # done for whoever wanted it, not only profile 1
+                database.mark_wishlist_status(asin, STATUS_DONE, profile_id=None)
                 database.add_to_library(
                     _book_for(row), imported_path or patch.get("save_path", ""),
                     download_id=row["download_id"], origin="soulsync",
@@ -438,7 +440,8 @@ def tick(db: Any = None) -> Dict[str, int]:
             _return_to_wishlist(database, row, str(patch.get("error") or ""))
             if asin:
                 database.mark_wishlist_status(
-                    asin, STATUS_FAILED, error=str(patch.get("error") or ""),
+                    asin, STATUS_FAILED, profile_id=None,
+                    error=str(patch.get("error") or ""),
                 )
     return summary
 
@@ -521,8 +524,9 @@ def _return_to_wishlist(database: Any, row: Dict[str, Any], error: str) -> None:
         logger.debug("Could not block the failed release: %s", exc)
 
     try:
-        if database.is_wishlisted(asin):
-            database.mark_wishlist_status(asin, STATUS_FAILED, error=error)
+        # whoever wanted it. checking profile 1 alone meant another profile's
+        # failed grab re-added the book to profile 1's list instead
+        if database.mark_wishlist_status(asin, STATUS_FAILED, profile_id=None, error=error):
             return
         book = _book_for(row)
         if book.get("title") and database.add_to_wishlist(book):

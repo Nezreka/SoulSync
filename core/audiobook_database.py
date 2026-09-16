@@ -554,7 +554,7 @@ class AudiobookDatabase:
         self,
         asin: str,
         status: str,
-        profile_id: int = 1,
+        profile_id: Optional[int] = 1,
         error: str = "",
         count_attempt: bool = False,
     ) -> bool:
@@ -563,27 +563,31 @@ class AudiobookDatabase:
         ``count_attempt`` is what drives the backoff, and it is deliberately
         separate from the status: a pass that finds nothing must increment it,
         while a user re-adding a book must not.
+
+        ``profile_id=None`` means every profile's row for this asin: the
+        download monitor knows the book, not who wanted it, and a book that
+        just imported is in the library for everyone.
         """
         if status not in _STATUSES:
             return False
+        scope = "" if profile_id is None else " AND profile_id = ?"
+        params_tail = [str(asin or "").strip()] + ([] if profile_id is None else [int(profile_id)])
         conn = self._connect()
         try:
             if count_attempt:
-                cursor = conn.execute("""
+                cursor = conn.execute(f"""
                     UPDATE audiobook_wishlist
                     SET status = ?, last_error = ?, last_attempt_at = ?,
                         status_changed_at = ?,
                         attempt_count = attempt_count + 1
-                    WHERE asin = ? AND profile_id = ?
-                """, (status, str(error or ""), _now(), _now(),
-                      str(asin or "").strip(), int(profile_id)))
+                    WHERE asin = ?{scope}
+                """, [status, str(error or ""), _now(), _now(), *params_tail])
             else:
-                cursor = conn.execute("""
+                cursor = conn.execute(f"""
                     UPDATE audiobook_wishlist
                     SET status = ?, last_error = ?, status_changed_at = ?
-                    WHERE asin = ? AND profile_id = ?
-                """, (status, str(error or ""), _now(),
-                      str(asin or "").strip(), int(profile_id)))
+                    WHERE asin = ?{scope}
+                """, [status, str(error or ""), _now(), *params_tail])
             conn.commit()
             return cursor.rowcount > 0
         except sqlite3.Error as exc:
@@ -611,6 +615,56 @@ class AudiobookDatabase:
         except sqlite3.Error as exc:
             logger.warning("Could not set the narrator mode for %s: %s", asin, exc)
             return False
+
+    def retry_wishlist_entry(self, asin: str, profile_id: int = 1) -> bool:
+        """Want it again, now.
+
+        The way back from "cancelled" (never retried on its own) and the way to
+        skip the backoff on "failed" without removing and re-adding the book,
+        which would also throw away the narrator choice. Attempts are kept:
+        the count is history, and the backoff is what is being waived.
+        """
+        conn = self._connect()
+        try:
+            cursor = conn.execute("""
+                UPDATE audiobook_wishlist
+                SET status = ?, last_error = '', last_attempt_at = 0, status_changed_at = ?
+                WHERE asin = ? AND profile_id = ? AND status IN (?, ?, ?)
+            """, (STATUS_WANTED, _now(), str(asin or "").strip(), int(profile_id),
+                  STATUS_FAILED, STATUS_CANCELLED, STATUS_GRABBED))
+            conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            logger.warning("Could not retry wishlist entry %s: %s", asin, exc)
+            return False
+
+    def mark_owned_wishlist_done(self) -> int:
+        """Every wanted row whose book is already in the library becomes done.
+
+        Ownership used to be checked only when a pass reached the row, so a
+        book copied in by hand showed "Looking" for as long as the backoff and
+        the batch size kept it out of the next few passes. Every profile: the
+        library is shared.
+        """
+        conn = self._connect()
+        try:
+            cursor = conn.execute("""
+                UPDATE audiobook_wishlist
+                SET status = ?, last_error = '', status_changed_at = ?
+                WHERE status != ?
+                  AND asin IN (
+                      SELECT catalog_asin FROM audiobook_library
+                      WHERE match_status IN ('identifier', 'automatic', 'confirmed')
+                  )
+            """, (STATUS_DONE, _now(), STATUS_DONE))
+            conn.commit()
+            if cursor.rowcount:
+                logger.info("%d wishlisted audiobook(s) are already in the library; marked done",
+                            cursor.rowcount)
+            return cursor.rowcount
+        except sqlite3.Error as exc:
+            logger.warning("Could not reconcile the wishlist with the library: %s", exc)
+            return 0
 
     def wishlist_counts(self, profile_id: int = 1) -> Dict[str, int]:
         conn = self._connect()
@@ -1205,6 +1259,10 @@ class AudiobookDatabase:
         return {
             "id": row["id"],
             "asin": row["asin"],
+            # the row's owner. every status write used to default to profile 1
+            # because callers had no way to know whose row they held: a second
+            # profile's book was searched and grabbed on every pass, forever.
+            "profile_id": (row["profile_id"] if "profile_id" in row.keys() else 1),
             "title": row["title"],
             "subtitle": row["subtitle"],
             "authors": _json_load(row["authors"]),
