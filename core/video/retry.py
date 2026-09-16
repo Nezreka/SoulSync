@@ -124,6 +124,10 @@ def plan_retry(row: dict, max_attempts: int = MAX_ATTEMPTS, blocked=frozenset(),
     blocked source-wide. Both compose with tried_files, not folded into it: tried is
     per-row ("this attempt sequence"), the blocklists are global + permanent — so a
     candidate STORED before the block still gets dropped here on retry."""
+    # Stored candidates and fallback queries belong exclusively to Soulseek.
+    # A client-managed grab must never silently switch transport.
+    if row.get("source") not in (None, "", "soulseek"):
+        return {"action": "fail", "reason": "client-managed download requires explicit retry"}
     if int(row.get("attempts") or 0) >= max_attempts:
         return {"action": "fail", "reason": "retry budget reached"}
     tried_files = set(_loads(row.get("tried_files"), []))

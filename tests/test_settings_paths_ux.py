@@ -50,3 +50,17 @@ def test_extra_libraries_section_stops_being_a_red_herring():
 def test_docs_and_wizard_tell_the_same_story():
     assert "Additional Music Libraries" in _DOCS
     assert "Music Library Folder" in _WIZ and "Download Folder" in _WIZ
+
+
+def test_podcasts_folder_field_present():
+    assert "Podcasts Folder (output):" in _INDEX
+    assert 'id="podcasts-path"' in _INDEX
+    assert "togglePathLock('podcasts', this)" in _INDEX
+
+
+def test_podcast_path_template_field_present():
+    assert "Podcast Path Template:" in _INDEX
+    assert 'id="template-podcast-path"' in _INDEX
+    assert 'placeholder="$show/Season $season/$title"' in _INDEX
+
+

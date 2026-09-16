@@ -81,6 +81,16 @@ describe('the search route', () => {
     expect(document.getElementById('enhanced-search-input')).not.toBeNull();
   });
 
+  it('shows explore and browse categories when search is idle', async () => {
+    await renderRoute('/search');
+    await settled();
+
+    const explore = document.getElementById('enh-explore-section');
+    expect(explore).not.toBeNull();
+    expect(screen.getByText('Explore & browse')).toBeInTheDocument();
+    expect(screen.getByText('Top Trending')).toBeInTheDocument();
+  });
+
   it('renders #enhanced-main-results-area, where download bubbles land', async () => {
     // showSearchDownloadBubbles renders into this id and silently returns
     // without it, so every download started from search would draw nowhere.
@@ -389,14 +399,21 @@ describe('where a result card points', () => {
     });
   }
 
-  it('links a library artist to /artist-detail/library/<id> and a found one to its source', async () => {
+  it('sends an owned artist to its Library V2 page and a found one into discovery', async () => {
     // The href IS the feature. The first version guessed `/artist-detail/<id>`,
     // which matches no route and resolves to nothing — clicking an artist did
     // nothing at all, and no test noticed.
+    //
+    // Both halves land on /library now rather than on the legacy artist route.
+    // Search already holds every value Library V2 needs, so it links to the
+    // real destination instead of bouncing through the redirect; `releases`,
+    // `releaseView` and `header` are what make an arrival from search show the
+    // full discography as cards under the rich header (ldp-05) instead of the
+    // in-library defaults.
     server.use(
       http.post('/api/enhanced-search', () =>
         HttpResponse.json({
-          db_artists: [{ id: 7, name: 'Owned Artist' }],
+          db_artists: [{ id: 7, name: 'Owned Artist', library_v2_id: 7 }],
           spotify_artists: [{ id: 'sp1', name: 'Found Artist', source: 'spotify' }],
         }),
       ),
@@ -412,13 +429,39 @@ describe('where a result card points', () => {
     // Twice on screen — the spotlight and the card — both linking home.
     const owned = await screen.findAllByText('Owned Artist', undefined, { timeout: 3000 });
     for (const el of owned) {
-      expect(el.closest('a')?.getAttribute('href')).toBe('/artist-detail/library/7');
+      expect(el.closest('a')?.getAttribute('href')).toBe(
+        '/library?artist=7&releases=all&releaseView=cards&header=rich',
+      );
     }
 
     const found = screen.getByText('Found Artist');
     expect(found.closest('a')?.getAttribute('href')).toBe(
-      '/artist-detail/spotify/sp1?name=Found%20Artist',
+      '/library?discover=spotify%3Asp1&discoverName=Found%20Artist' +
+        '&releases=all&releaseView=cards&header=rich',
     );
+  });
+
+  it('falls back to the redirect route when an owned card has no catalogue id', async () => {
+    // _build_db_artists always sets library_v2_id, so this is the shape that
+    // should not happen — but inventing a v2 id would 404 the page, and the
+    // legacy route still resolves it, so the fallback has to stay reachable.
+    server.use(
+      http.post('/api/enhanced-search', () =>
+        HttpResponse.json({ db_artists: [{ id: 42, name: 'Idless Artist' }] }),
+      ),
+      http.post('/api/labels/search', () => HttpResponse.json({ labels: [] })),
+      http.post('/api/enhanced-search/library-check', () => HttpResponse.json({})),
+      http.get('/api/artist/:id/image', () => HttpResponse.json({ success: false })),
+    );
+
+    renderRoute('/search');
+    await settled();
+    type('idless');
+
+    const cards = await screen.findAllByText('Idless Artist', undefined, { timeout: 3000 });
+    for (const el of cards) {
+      expect(el.closest('a')?.getAttribute('href')).toBe('/artist-detail/library/42');
+    }
   });
 
   it('links a label to /label-detail/<id>', async () => {

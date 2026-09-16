@@ -41,7 +41,7 @@ const HELPER_CONTENT = {
         docsId: 'dashboard'
     },
     '.nav-button[data-page="sync"]': {
-        title: 'Playlist Sync',
+        title: 'Playlists',
         description: 'Mirror playlists from Spotify, YouTube, Tidal, Deezer, ListenBrainz, and Beatport. SoulSync matches each track to your download sources and downloads what\'s missing from your library.',
         tips: [
             'Select playlists from the left panel to begin syncing',
@@ -1712,9 +1712,14 @@ const HELPER_CONTENT = {
         description: 'Configure credentials for metadata sources (Spotify, Tidal, Last.fm, etc.) and media server connections (Plex, Jellyfin, Navidrome).',
         docsId: 'set-services'
     },
+    '.stg-tab[data-tab="sources"]': {
+        title: 'Sources',
+        description: 'Every download source in one place - Soulseek, YouTube, Tidal, Qobuz, Deezer and the rest, plus the indexer, torrent and usenet clients the video side shares. Click a tile to configure it, whether or not it is in a download chain.',
+        docsId: 'set-download'
+    },
     '.stg-tab[data-tab="downloads"]': {
         title: 'Downloads',
-        description: 'Configure download sources, paths, quality profiles, and hybrid mode priority order.',
+        description: 'Build the download chain - the order sources are tried in - plus paths and quality profiles.',
         docsId: 'set-download'
     },
     '.stg-tab[data-tab="library"]': {
@@ -2480,7 +2485,7 @@ const HELPER_TOURS = {
         icon: '⚙️',
         steps: [
             // Tab bar
-            { page: 'settings', selector: '.stg-tabbar', title: 'Settings Tabs', description: 'Settings are organized into 5 tabs: Connections (API keys, server setup), Downloads (sources, paths, quality), Library (file organization, post-processing), Appearance (theme, colors), and Advanced.' },
+            { page: 'settings', selector: '.stg-tabbar', title: 'Settings Tabs', description: 'Settings are organized into 6 tabs: Connections (API keys, server setup), Sources (every download source, configured in one place), Downloads (the download chain, paths, quality), Library (file organization, post-processing), Appearance (theme, colors), and Advanced.' },
 
             // Connections
             { page: 'settings', selector: '.stg-tab[data-tab="connections"]', title: 'Connections Tab', description: 'This is where you connect all your services. API keys for Spotify, Tidal, Last.fm, Genius, AcoustID, and your metadata source preference. Plus your media server (Plex, Jellyfin, or Navidrome).' },
@@ -2488,6 +2493,7 @@ const HELPER_TOURS = {
             { page: 'settings', selector: '.server-toggle-container', title: 'Media Server', description: 'Toggle on your media server — Plex, Jellyfin, or Navidrome. Enter the server URL and token/API key. This is where your music library lives and where downloads get synced to.' },
 
             // Downloads
+            { page: 'settings', selector: '.stg-tab[data-tab="sources"]', title: 'Sources Tab', description: 'Every download source lives here, each as a tile you click to configure. A tile lights up when it is part of a download chain, and shows a red or amber ring when it is configured but not connecting. The indexer, torrent and usenet clients appear here too, since music and video both download through them.' },
             { page: 'settings', selector: '.stg-tab[data-tab="downloads"]', title: 'Downloads Tab', description: 'Configure where music comes from and where it goes. Set your download source (Soulseek, YouTube, Tidal, Qobuz, HiFi, Deezer, or Hybrid mode), download paths, and quality preferences.' },
             { page: 'settings', selector: '.stg-tab[data-tab="downloads"]', title: 'Quality Profiles', description: 'Quality profiles control what files are acceptable — format (FLAC, MP3, etc.), minimum bitrate, bit depth preference, and peer speed requirements. The waterfall filter tries your preferred format first, then falls back.' },
 
@@ -3461,24 +3467,21 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
-    // Convention: keep only the CURRENT release here, plus a single brief
-    // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.3.3': [
-        { date: 'September 2026 \u00b7 3.3.3' },
-        { title: 'Chat reaches people outside your install', desc: 'messages go both ways with people who are not running soulsync, and the history sticks around. overlay templates can be shared straight into a room, picked from a modal.', page: 'chat' },
-        { title: 'Release parsing reads the evidence first', desc: 'actual bitrate, sample rate and codec, falling back to the uploader title the way lidarr does. a repack wins the tie as the corrected copy. built on #1224 from nick2000713.' },
-        { title: 'Quality survives the source pipeline', desc: 'a complete album can no longer fall back to a worse copy than one already found, and lossless preview clips are caught on import.' },
-        { title: 'Self-hosted MusicBrainz', desc: 'point soulsync at your own musicbrainz server, in settings under Connections.', page: 'settings' },
-        { title: 'Concerts on the artist page', desc: 'upcoming dates and real setlists, via ticketmaster.' },
-        { title: 'Discover play buttons play', desc: 'mix cards and track rows both play, and playback is confirmed by the player before it is reported, so you know when audio actually started.', page: 'discover' },
-        { title: 'A mix starts in about a second', desc: 'it resolves against your library in one query instead of one per track.', page: 'discover' },
-        { title: 'Discover works by keyboard and touch', desc: 'hero controls sit in their own row on both pages, cards and dialogs are real controls, and the taste dial is a real slider.', page: 'discover' },
-        { title: 'Steadier video browsing', desc: 'browsing keeps the newest results, a failed request says so instead of showing an empty shelf, and Not Interested removes every copy of a title with an Undo.', page: 'video-discover' },
-        { title: 'The video dashboard shows what is downloading', desc: 'with posters. continue watching reads your real resume position, and torrent grabs track properly with a reason when one is refused.', page: 'video-dashboard' },
-        { title: 'Tools split into Tools and Operations', desc: 'artist views are named Discography and Your library, and "cleanup recommended" says what it means.', page: 'tools' },
-        { title: 'ntfy and Gotify', desc: 'real notification actions now.' },
-        { title: 'An error page you can report', desc: 'shows the actual error with a copy button, so a bug report has something in it.' },
-        { title: 'Earlier versions', desc: '3.3.2 gave the video side search receipts, rebuilt the downloads page and closed three ways to lose files. 3.3.1 made daily mixes and stations real. 3.3.0 rebuilt discover and imported your listening history.' },
+    // Keep the current release and one brief Earlier versions summary.
+    '3.4.2': [
+        { date: 'September 2026 \u00b7 3.4.2' },
+        {"title": "Now Playing and Wanted cards in chat", "desc": "share what you are playing with /np, or ask for a release with /want and /iso. cards carry artwork and actions, check your library, and offer a one-click PM to whoever has it.", "page": "chat"},
+        {"title": "Richer chat", "desc": "inline players and preview cards for links, a friends, block list and bookmarks drawer, a folder-tree peer explorer with one-click downloads, and drag-and-drop uploads.", "page": "chat"},
+        {"title": "Search upgraded", "desc": "an explore hub on the idle page, a hero result, a sticky jump bar with counts, hover play on cards, and Deezer playlist search with preview art.", "page": "search"},
+        {"title": "Discovery correctness", "desc": "duration mismatches and tribute, karaoke and preview copies are rejected, manual matches survive a re-discovery, and cancelling a sync actually stops the work.", "page": "sync"},
+        {"title": "Batch delete mirrored playlists", "desc": "Select on the Mirrored tab, pick the cards or search a name and Select all visible, and delete them in one confirm.", "page": "sync"},
+        {"title": "Sync keeps your playlists", "desc": "a sync that finds no library matches no longer empties the server playlist, and artist agreement is enforced so a long shared title cannot override an artist mismatch.", "page": "sync"},
+        {"title": "Ownership that survives tag differences", "desc": "library checks fold accents, punctuation and multi-artist strings, and discography completion skips upstream calls for releases you do not own.", "page": "library"},
+        {"title": "MusicBrainz release kept through import", "desc": "the release you picked is used for import and completion, every track of an album gets the same release id, and tags are written the way Picard writes them.", "page": "downloads"},
+        {"title": "Music size limit", "desc": "an optional cap on megabytes per minute of audio, applied before a download is chosen.", "page": "settings"},
+        {"title": "Client and server fixes", "desc": "qBittorrent 5.0+ add responses are parsed, Transmission web UI URLs normalize to the RPC endpoint, stale Navidrome playlist ids are no longer reused (#1248), and Jellyfin 12 accepts every video-side call (#1250).", "page": "settings"},
+        {"title": "Matching fixes", "desc": "band names with commas, slashes or ampersands are no longer split into separate artists, releases with unknown track counts are not assumed to be singles, and the Download Missing Tracks modal from a chat card shows real artists, durations and art.", "page": "sync"},
+        {"title": "Earlier versions", "desc": "3.4.1 cut waiting on downloads and imports, refreshed Discover, Watchlist and Settings, and improved audiobook libraries. 3.4.0 introduced podcasts and audiobooks."},
     ],
 };
 
@@ -3509,7 +3512,65 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.3.3: chat beyond your install, smarter release parsing",
+    "title": "3.4.2: chat that shares music, sharper search and sync you can trust",
+    "description": "This update rebuilds chat around shareable music cards, upgrades search, tightens playlist discovery and sync correctness, and fixes reported Jellyfin, Navidrome and torrent client problems.",
+    "features": [
+        "Now Playing and Wanted cards in chat: /np shares what you are playing with artwork, bitrate and direct actions; /want and /iso search Spotify, Deezer, Apple Music, Discogs and MusicBrainz, check your library, and offer a one-click PM to whoever has it. Vanilla Soulseek clients see plain text.",
+        "Richer chat: inline players and preview cards for links, YouTube embeds, a friends, block list and bookmarks drawer, DM conversations you can close, a folder-tree peer explorer with one-click downloads, format filter pills and drag-and-drop uploads.",
+        "Search upgraded: an explore hub on the idle page, a hero result, a sticky jump bar with counts, hover play on album and playlist cards, and Deezer playlist search with cover art in the preview.",
+        "Discovery correctness: duration mismatches and tribute, karaoke and preview copies are rejected, manual matches and provider metadata survive a re-discovery, cancelling a sync stops the background work, and resetting a mirrored playlist clears both caches.",
+        "Batch delete mirrored playlists (#1219): Select on the Mirrored tab, pick the cards or search a name and Select all visible, and delete them in one confirm.",
+        "Sync keeps your playlists: a sync that finds no library matches no longer empties the server playlist, the missing tracks still go to the wishlist, and artist agreement is enforced in the second matching pass.",
+        "Ownership that survives tag differences: library checks fold accents, punctuation and multi-artist strings, the completeness cache keeps full artist identities, and discography completion skips upstream calls for releases you do not own.",
+        "MusicBrainz release kept through import: the release you picked is used for import and completion, every track of an album gets the same release id across restarts, and tags are written with Picard's native frames and multi-value fields.",
+        "Music size limit: an optional cap on megabytes per minute of audio, applied as a candidate filter before a download is chosen. Unknown sizes and durations stay eligible.",
+        "Client and server fixes: qBittorrent 5.0+ add responses are parsed with 4.x still supported, Transmission web UI URLs normalize to the RPC endpoint, stale Navidrome playlist ids are no longer reused and failed updates are not reported as successful (#1248).",
+        "Jellyfin 12 on the video side (#1250): the modern auth header fix only reached the music client, so every video-side call was rejected while the same key worked for music. The connection test, user picker, library refresh, poster and collection calls and server activity now send the same header pair.",
+        "Watchlist is responsive on mobile with a bottom sheet drawer.",
+        "Matching fixes: band names with commas, slashes, ampersands or 'and' are no longer split into separate artists, a release with an unknown track count uses release ownership instead of being assumed a single, unmatch works on every source, and a release-group is never treated as an edition.",
+        "Chat fixes: the Download Missing Tracks modal from a card shows real artists, durations and art, wanted cards resolve the full album tracklist before wishlist or download, rich cards are never sent as plain text, and plain-mode chat no longer sends typing noise."
+    ]
+},
+    {
+    "title": "Earlier in 3.4.1: less waiting, clearer pages and stronger audiobook libraries",
+    "description": "This update addresses slow processing and navigation, refreshes Discover, Watchlist and Settings, and improves existing audiobook libraries and download tracking.",
+    "features": [
+        "Less waiting on downloads and imports: lyrics requests have real network timeouts, manual imports run as background jobs, and file recovery no longer holds up download status updates.",
+        "More responsive browsing: repeated artwork registration is cached, metadata searches have bounded waits and worker capacity, and offline Plex connections are cached instead of retried on every poll.",
+        "Discover, Watchlist and Settings refreshed: new layouts, clearer controls and responsive forms, with shared music and video folder and organization settings.",
+        "Deezer editorial playlists: browse editorial playlists across all 28 genres, search playlists, and see what happens as a playlist is handed off to sync.",
+        "Existing audiobook libraries: scan books already on disk, browse the rebuilt library, and review catalogue edition matches using metadata and download provenance.",
+        "Audiobook download reliability: live progress follows the download client, cancellation persists, Soulseek transfers are matched correctly, and wishlist rows move on from sent to downloads.",
+        "Watchlist progress and cancellation: source matching appears on the page and automation card, and a long artist can be cancelled while matching.",
+        "Connection and import fixes: correct a Last.fm username, import SoundCloud downloads, preserve the selected Deezer track, and keep unsent chat drafts when Soulseek is disconnected.",
+        "Podcast protections: podcast fetches are guarded and watchlist automation respects profile ownership.",
+        "Video libraries across drives: configure additional video library paths and load shared Library settings from either media side."
+    ]
+},
+    {
+        title: "Earlier in 3.4.0: podcasts and audiobooks, and a settings page you can read",
+        description: "two new sides to the app. podcasts with itunes search, rss and OPML, and audiobooks built on audible's catalogue with their own database and source chain. the settings page was rebuilt around tiles, and ten reported bugs are fixed.",
+        features: [
+            "podcasts, a whole new section: itunes search or paste an rss url straight into the search bar, with custom, patreon and private feeds supported. browse, show detail with the full episode tracklist, and a player",
+            "OPML 2.0 import and export, so you can bring your subscriptions over from whatever you were using, with a live checklist preview before anything subscribes",
+            "the podcast watchlist auto-downloads new episodes with retention settings so a daily show does not eat your disk, library paths and organization templates are yours, downloads get rich metadata and media-server sidecars, and there is a static mp4 conversion option for servers that only really do video. podcast downloads are isolated from the music worker pool, so a feed with 400 episodes cannot starve your albums",
+            "audiobooks on audible's catalogue: search by keyword, title, author or narrator (narrator search is the one nothing else can answer), series in reading order, genre charts, ratings and sample audio, with browse, detail, author and narrator pages",
+            "audiobook acquisition through prowlarr category 3030, the shared torrent and usenet clients and soulseek, with releases explained and filtered before a download is spent and results streaming in as they arrive",
+            "audiobooks are isolated from music by construction rather than convention: their own database, their own source chain (five of music's sources are streaming services with no audiobooks in them), and a test that reads the real imports and routes of every module and fails if one reaches music state",
+            "the rest of the audiobook side: quality profile, blocklist where a failed download blocks the release it came from, library scan, recycle bin, author watchlist and post-processing. the wishlist drains through the shared automation engine, so it can be paused, rescheduled or run by hand",
+            "settings: 22 services lived in two API Configuration groups as nested accordions, so finding out whether last.fm was even configured meant opening them one at a time. they are tiles now, each one saying whether it is configured without being opened. the forms themselves are not rebuilt, the tile moves the real panel into a modal and puts it back",
+            "every download source is on one Sources tab behind the tile it belongs to. the torrent client, the usenet client and prowlarr came over from Downloads, and yt-dlp came over from Advanced, three tabs away from the youtube source it exists to serve. the download chain replaced the source dropdown and is one editor shared by music, video and audiobooks",
+            "Library and Quality were merged the same way. the Quality tab had two cards both called Quality, the music profile and the video ladder, and the pair could never appear on screen together because the tab hid the music half on the video side",
+            "youtube cookies: the probe behind the Test button was hardcoded to return true, so the dot was green no matter what and the whole cookie diagnosis was unreachable from the button people press. with a real probe, browser cookie mode reports when it cannot work on your setup, names app-bound encryption where that is the cause, and points at Paste cookies.txt",
+            "reverse proxy url base paths, so soulsync can live at /soulsync instead of needing its own hostname",
+            "podcasts and audiobooks are under the profile system now, and the download permission reads from the session instead of the caller's own header, which had let a restricted profile authorise itself by omitting it",
+            "discover: stations and Because You Listen To rebuilt, shelves no longer repeating the same album under near-identical headings, mix durations and download metadata preserved, and a station that fails says so",
+            "ten reported fixes: #1226, #1227, #1228, #1229, #1230, #1231, #1232, #1233, #1234 and #1235. the last one lost about 1,815 albums on a single reorganize run: the bulk queue lived only in process memory, a worker recycle took every queued album with it, and the job still logged complete",
+        ],
+        usage_note: "podcasts and audiobooks are new pages in the sidebar and need nothing configured to browse. downloading audiobooks needs prowlarr plus a torrent or usenet client, the same ones the video side uses. the reverse proxy base path is an environment setting.",
+    },
+    {
+        title: "Earlier in 3.3.3: chat beyond your install, smarter release parsing",
         description: "chat reaches people who are not running soulsync, release parsing reads the actual audio instead of the filename, musicbrainz can be your own server, and discover got a correctness pass.",
         features: [
             "chat works both ways with people outside your install and keeps the history, and overlay templates can be shared straight into a room",

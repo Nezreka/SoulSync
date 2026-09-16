@@ -68,6 +68,9 @@ const KNOWN_IDS = new Set<string>([
  * component SOURCE and cannot tell a prop from an attribute.
  */
 const NEW_IDS = [
+  // Deezer's editors publish curated playlists and the public api serves them
+  // with no key. A shelf the vanilla never had, so its section anchor is new.
+  'deezer-editorial',
   'build-a-playlist',
   'lastfm-radio',
   'listenbrainz',
@@ -88,6 +91,17 @@ const NEW_IDS = [
   // appear in the stylesheet.
   'adv-wave-label',
   'adv-wave-help',
+  // the station preview dialog (sep 5). the vanilla had no such surface at
+  // all - a station was one click that started endless radio - so every id
+  // here is new by construction. they mirror the mix modal's, which is
+  // deliberate: the poller and the selection bar read by id.
+  'station-modal-overlay',
+  'station-modal-selbar',
+  'station-modal-tracks',
+  'station-select-all',
+  'station-sel-count',
+  'station-dl-selected',
+  'station-sync-selected',
 ];
 
 /**
@@ -130,6 +144,9 @@ const NEW_CLASSES: string[] = [
   // base with no rule of its own; it leaves this list the moment the scan can
   // see the rule that now exists.
   'discovery-zone-section--map-tools',
+  // NOTE: the Deezer editorial shelf adds no entry here on purpose. Its chips
+  // and its progress bar are styled in style.css, which makes them KNOWN
+  // rather than new, and the shelf reuses the page's own card classes.
 ];
 
 function componentFiles(): string[] {

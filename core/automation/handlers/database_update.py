@@ -116,6 +116,7 @@ def _run_with_progress(
             'status': 'running', 'phase': initial_phase,
             'progress': 0, 'current_item': '', 'processed': 0, 'total': 0,
             'error_message': '',
+            'last_progress_at': time.time(),
         })
     deps.db_update_executor.submit(task, *task_args)
 

@@ -504,35 +504,48 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         if allow_duplicates and batch_is_album:
             logger.info("[Duplicates] Allow duplicate tracks enabled — only checking ownership within target album")
 
-        # PREFLIGHT: Pre-populate MusicBrainz release cache for album downloads.
-        # This ensures ALL tracks in the album use the same release MBID during
-        # per-track post-processing, preventing Navidrome album splits.
-        if batch_is_album and batch_album_context and batch_artist_context:
-            try:
-                album_name_pf = batch_album_context.get('name', '')
-                artist_name_pf = batch_artist_context.get('name', '')
-                if album_name_pf and artist_name_pf:
-                    mb_svc = deps.mb_worker.mb_service if deps.mb_worker else None
-                    if mb_svc:
-                        from core.album_consistency import _find_best_release
-                        release = _find_best_release(album_name_pf, artist_name_pf, len(tracks_json), mb_svc)
-                        if release and release.get('id'):
-                            release_mbid = release['id']
-                            _artist_key = artist_name_pf.lower().strip()
-                            _rc_key_norm = (deps.normalize_album_cache_key(album_name_pf), _artist_key)
-                            _rc_key_exact = (album_name_pf.lower().strip(), _artist_key)
-                            with deps.mb_release_cache_lock:
-                                deps.mb_release_cache[_rc_key_norm] = release_mbid
-                                deps.mb_release_cache[_rc_key_exact] = release_mbid
-                            # Also cache the full release detail for tag extraction
-                            with deps.mb_release_detail_cache_lock:
-                                deps.mb_release_detail_cache[release_mbid] = release
-                            logger.info(f"[Preflight] Pre-cached MB release for '{album_name_pf}': "
-                                  f"'{release.get('title', '')}' ({release_mbid[:8]}...)")
-                        else:
-                            logger.warning(f"[Preflight] No MB release found for '{album_name_pf}' — per-track lookup will be used")
-            except Exception as pf_err:
-                logger.error(f"[Preflight] MB release preflight failed: {pf_err}")
+        # PREFLIGHT, run later: pin ONE MusicBrainz release for the album so every
+        # downloaded track is tagged with the same release MBID (no navidrome
+        # album splits). it used to run HERE, before a single track had been
+        # checked: a search plus up to eight full release fetches against a
+        # 1 req/s service that has been answering 503 with retries. ten to
+        # thirty seconds of nothing on the modal before the first owned /
+        # missing mark, on an album you may already own outright. it only
+        # matters for tagging files that get downloaded, so it runs once the
+        # analysis has found something to download.
+        def _preflight_musicbrainz_release():
+            if batch_is_album and batch_album_context and batch_artist_context:
+                try:
+                    album_name_pf = batch_album_context.get('name', '')
+                    artist_name_pf = batch_artist_context.get('name', '')
+                    if album_name_pf and artist_name_pf:
+                        mb_svc = deps.mb_worker.mb_service if deps.mb_worker else None
+                        if mb_svc:
+                            from core.album_consistency import _find_best_release
+                            from core.metadata.musicbrainz_tags import selected_release_id
+                            selected = selected_release_id(batch_album_context)
+                            release = (mb_svc.mb_client.get_release(
+                                selected, includes=['release-groups', 'labels', 'media', 'artist-credits', 'recordings'])
+                                if selected else _find_best_release(album_name_pf, artist_name_pf, len(tracks_json), mb_svc))
+                            if release and release.get('id'):
+                                release_mbid = release['id']
+                                _artist_key = artist_name_pf.lower().strip()
+                                _rc_key_norm = (deps.normalize_album_cache_key(album_name_pf), _artist_key)
+                                _rc_key_exact = (album_name_pf.lower().strip(), _artist_key)
+                                if not selected:
+                                    with deps.mb_release_cache_lock:
+                                        deps.mb_release_cache[_rc_key_norm] = release_mbid
+                                        deps.mb_release_cache[_rc_key_exact] = release_mbid
+                                # Also cache the full release detail for tag extraction
+                                with deps.mb_release_detail_cache_lock:
+                                    deps.mb_release_detail_cache[release_mbid] = release
+                                logger.info(f"[Preflight] Pre-cached MB release for '{album_name_pf}': "
+                                      f"'{release.get('title', '')}' ({release_mbid[:8]}...)")
+                            else:
+                                logger.warning(f"[Preflight] No MB release found for '{album_name_pf}' — per-track lookup will be used")
+                except Exception as pf_err:
+                    logger.error(f"[Preflight] MB release preflight failed: {pf_err}")
+
 
         # ALBUM FAST PATH: If this is an album download, try to find the album in the DB first
         # and match tracks within it — faster and more accurate than N global searches
@@ -802,6 +815,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 download_batches[batch_id]['analysis_results'] = analysis_results
 
         # PHASE 2: TRANSITION TO DOWNLOAD (if necessary)
+        if missing_tracks and batch_is_album and batch_album_context and batch_artist_context:
+            _preflight_musicbrainz_release()
         if not missing_tracks:
             logger.warning(f"Analysis for batch {batch_id} complete. No missing tracks.")
 

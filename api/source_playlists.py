@@ -1646,10 +1646,12 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
         if not mirrored_tracks:
             return
 
-        # Build lookup maps: source_track_id → db_id AND position → db_id
+        # Build lookup maps: source_track_id → db_id AND position → db_id, plus db_id -> track dict
         source_id_to_db_id = {}
         position_to_db_id = {}
+        db_id_to_track = {}
         for mt in mirrored_tracks:
+            db_id_to_track[mt['id']] = mt
             sid = mt.get('source_track_id', '')
             if sid:
                 source_id_to_db_id[str(sid)] = mt['id']
@@ -1662,11 +1664,16 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
             if result.get('status') not in ('found', 'Found', 'Wing It'):
                 continue
 
-            match_data = result.get('match_data') or result.get('spotify_data')
+            # Prioritize manual-match payload if flag is present, otherwise unified match_data / spotify_data
+            is_manual = bool(result.get('manual_match'))
+            if is_manual:
+                match_data = result.get('spotify_data') or result.get('match_data') or result.get('matched_data')
+            else:
+                match_data = result.get('match_data') or result.get('spotify_data') or result.get('matched_data')
             if not match_data:
                 continue
 
-            confidence = result.get('confidence', 0.85)
+            confidence = 1.0 if is_manual else result.get('confidence', 0.85)
 
             # Try to find the mirrored track DB ID
             db_track_id = None
@@ -1686,13 +1693,38 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
             if not db_track_id:
                 continue
 
+            # Check existing mirrored track extra_data: never let an automatic worker
+            # overwrite an existing manual fix or an explicit user unmatch.
+            existing_track = db_id_to_track.get(db_track_id, {})
+            existing_extra = existing_track.get('extra_data', {})
+            if isinstance(existing_extra, str):
+                try:
+                    import json
+                    existing_extra = json.loads(existing_extra)
+                except Exception:
+                    existing_extra = {}
+            if isinstance(existing_extra, dict):
+                if existing_extra.get('unmatched_by_user') and not is_manual:
+                    continue
+                if existing_extra.get('manual_match') and not is_manual:
+                    continue
+
+            provider = (
+                match_data.get('source')
+                or match_data.get('provider')
+                or result.get('provider')
+                or discovery_source
+            )
             extra_data = {
                 'discovered': True,
-                'provider': discovery_source,
+                'provider': provider,
                 'confidence': confidence,
                 'matched_data': match_data,
+                'manual_match': is_manual,
+                'wing_it_fallback': False if is_manual else bool(result.get('wing_it_fallback')),
+                'unmatched_by_user': False,
             }
-            if result.get('wing_it_fallback'):
+            if not is_manual and result.get('wing_it_fallback'):
                 extra_data['wing_it_fallback'] = True
                 extra_data['provider'] = 'wing_it_fallback'
             db.update_mirrored_track_extra_data(db_track_id, extra_data)
@@ -1855,6 +1887,7 @@ def _cancel_source_sync(states, key, label, not_found_message):
         states, key, label=label, not_found_message=not_found_message,
         sync_lock=sync_lock, sync_states=sync_states,
         active_sync_workers=active_sync_workers,
+        sync_service=sync_service,
     )
     return jsonify(body), code
 
@@ -2350,6 +2383,70 @@ def get_deezer_arl_playlist_tracks(playlist_id):
         return jsonify(playlist)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/discover/deezer/editorial', methods=['GET'])
+def get_deezer_editorial_playlists():
+    """Deezer's own curated playlists, for a Discover shelf.
+
+    The browse half of a pipeline that already exists. Everything after picking
+    a card - loading the playlist, matching its tracks, syncing the result - is
+    /api/deezer/playlist/<id> and the /api/deezer/discovery/* family, unchanged.
+    The only thing missing was a way to FIND a playlist without pasting a url,
+    which is what ListenBrainz's created-for shelf does for its own source.
+
+    No auth. These endpoints are public, so the shelf works for everyone, not
+    only for users who have linked a Deezer account.
+
+    ?genre= a genre id from /api/discover/deezer/genres (0, the everything
+    chart, is the default and is deliberately small - the per-genre charts are
+    where the content is).
+    ?q= searches playlists by name instead, editorial and user mixed.
+    """
+    try:
+        client = _get_deezer_client()
+        if client is None:
+            return jsonify({"success": True, "playlists": [], "count": 0,
+                            "error": "Deezer client unavailable"})
+
+        query = (request.args.get('q') or '').strip()
+        try:
+            limit = int(request.args.get('limit') or 25)
+        except (TypeError, ValueError):
+            limit = 25
+
+        if query:
+            playlists = client.search_playlists(query, limit=limit)
+            scope = {'kind': 'search', 'query': query}
+        else:
+            genre_id = request.args.get('genre') or 0
+            playlists = client.get_editorial_playlists(genre_id, limit=limit)
+            scope = {'kind': 'genre', 'genre': str(genre_id)}
+
+        return jsonify({
+            "success": True,
+            "playlists": playlists,
+            "count": len(playlists),
+            "scope": scope,
+            "source": "deezer",
+        })
+    except Exception as e:
+        logger.error(f"Error getting Deezer editorial playlists: {e}")
+        # a browse row that fails is an empty row, not a broken page
+        return jsonify({"success": True, "playlists": [], "count": 0, "error": str(e)})
+
+
+@bp.route('/api/discover/deezer/genres', methods=['GET'])
+def get_deezer_editorial_genres():
+    """The genre chips the editorial shelf offers."""
+    try:
+        client = _get_deezer_client()
+        if client is None:
+            return jsonify({"success": True, "genres": []})
+        return jsonify({"success": True, "genres": client.get_editorial_genres()})
+    except Exception as e:
+        logger.error(f"Error getting Deezer editorial genres: {e}")
+        return jsonify({"success": True, "genres": []})
 
 
 @bp.route('/api/deezer/playlist/<playlist_id>', methods=['GET'])
@@ -3871,37 +3968,53 @@ def cancel_itunes_link_sync(url_hash):
     return _cancel_source_sync(itunes_link_discovery_states, url_hash, "iTunes Link", "iTunes Link not found")
 
 
+@bp.route('/api/youtube/discovery/unmatch', methods=['POST'])
+@bp.route('/api/tidal/discovery/unmatch', methods=['POST'])
+@bp.route('/api/deezer/discovery/unmatch', methods=['POST'])
+@bp.route('/api/spotify-public/discovery/unmatch', methods=['POST'])
 @bp.route('/api/itunes-link/discovery/unmatch', methods=['POST'])
 @bp.route('/api/beatport/discovery/unmatch', methods=['POST'])
 @bp.route('/api/listenbrainz/discovery/unmatch', methods=['POST'])
+@bp.route('/api/qobuz/discovery/unmatch', methods=['POST'])
 def unmatch_discovery_track():
     """Remove a discovery match — sets track back to Not Found"""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         identifier = data.get('identifier')
         track_index = data.get('track_index')
 
         if not identifier or track_index is None:
             return jsonify({'success': False, 'error': 'Missing required fields'}), 400
 
-        # Find the state dict for this discovery
-        state = (youtube_playlist_states.get(identifier)
-                 or tidal_discovery_states.get(identifier)
-                 or deezer_discovery_states.get(identifier)
-                 or spotify_public_discovery_states.get(identifier)
-                 or itunes_link_discovery_states.get(identifier)
-                 or beatport_chart_states.get(identifier)
-                 or listenbrainz_playlist_states.get(identifier))
+        # Map request path to the platform's dedicated state dictionary
+        path = request.path or ''
+        state = None
+        if '/youtube/' in path:
+            state = youtube_playlist_states.get(identifier)
+        elif '/tidal/' in path:
+            state = tidal_discovery_states.get(identifier)
+        elif '/deezer/' in path:
+            state = deezer_discovery_states.get(identifier)
+        elif '/spotify-public/' in path:
+            state = spotify_public_discovery_states.get(identifier)
+        elif '/itunes-link/' in path:
+            state = itunes_link_discovery_states.get(identifier)
+        elif '/beatport/' in path:
+            state = beatport_chart_states.get(identifier)
+        elif '/listenbrainz/' in path:
+            state = listenbrainz_playlist_states.get(identifier)
+        elif '/qobuz/' in path:
+            state = qobuz_discovery_states.get(identifier)
 
         if not state:
             return jsonify({'success': False, 'error': 'Discovery state not found'}), 404
 
         results = state.get('discovery_results', [])
-        if track_index >= len(results):
+        if not isinstance(track_index, int) or isinstance(track_index, bool) or track_index < 0 or track_index >= len(results):
             return jsonify({'success': False, 'error': 'Invalid track index'}), 400
 
         result = results[track_index]
-        old_status = result.get('status_class')
+        old_status = result.get('status_class') or result.get('status')
 
         # Clear the match
         result['status'] = 'Not Found'
@@ -3909,31 +4022,39 @@ def unmatch_discovery_track():
         result['spotify_track'] = ''
         result['spotify_artist'] = ''
         result['spotify_album'] = ''
+        result['spotify_id'] = ''
         result['spotify_data'] = None
         result['matched_data'] = None
         result['match_data'] = None
         result['confidence'] = 0
+        result['duration'] = '0:00'
         result['wing_it_fallback'] = False
         result['manual_match'] = False
 
         # Update match count
-        if old_status in ('found', 'wing-it'):
+        if old_status in ('found', 'Found', 'wing-it', 'Wing It'):
             state['spotify_matches'] = max(0, state.get('spotify_matches', 0) - 1)
-        if old_status == 'wing-it':
+        if old_status in ('wing-it', 'Wing It'):
             state['wing_it_count'] = max(0, state.get('wing_it_count', 0) - 1)
 
         # If mirrored playlist, also clear in DB
-        if identifier.startswith('mirrored_'):
+        if str(identifier).startswith('mirrored_'):
             try:
                 db = get_database()
-                tracks = state.get('tracks', [])
-                if track_index < len(tracks):
-                    db_track_id = tracks[track_index].get('db_track_id')
+                tracks = state.get('tracks') or (state.get('playlist') or {}).get('tracks') or []
+                if 0 <= track_index < len(tracks):
+                    t = tracks[track_index]
+                    db_track_id = t.get('db_track_id') if isinstance(t, dict) else getattr(t, 'db_track_id', None)
+                    if not db_track_id and isinstance(t, dict):
+                        db_track_id = t.get('id')
                     if db_track_id:
                         db.update_mirrored_track_extra_data(db_track_id, {
                             'discovered': False,
                             'discovery_attempted': True,
                             'provider': '',
+                            'manual_match': False,
+                            'matched_data': None,
+                            'wing_it_fallback': False,
                             'unmatched_by_user': True,
                         })
             except Exception as e:
@@ -4148,10 +4269,6 @@ def get_youtube_discovery_status(url_hash):
     return _get_source_discovery_status(youtube_playlist_states, url_hash, "YouTube playlist not found", "YouTube")
 
 
-@bp.route('/api/youtube/discovery/unmatch', methods=['POST'])
-@bp.route('/api/tidal/discovery/unmatch', methods=['POST'])
-@bp.route('/api/deezer/discovery/unmatch', methods=['POST'])
-@bp.route('/api/spotify-public/discovery/unmatch', methods=['POST'])
 @bp.route('/api/youtube/discovery/update_match', methods=['POST'])
 def update_youtube_discovery_match():
     """Update a YouTube discovery result with manually selected Spotify track"""
@@ -4363,7 +4480,7 @@ def _build_fix_modal_spotify_data(spotify_track):
             album_obj['image_url'] = image_url
             album_obj['images'] = [{'url': image_url}]
 
-    return {
+    data = {
         'id': spotify_track.get('id', ''),
         'name': spotify_track.get('name', ''),
         'artists': spotify_track.get('artists', []),
@@ -4371,6 +4488,10 @@ def _build_fix_modal_spotify_data(spotify_track):
         'duration_ms': spotify_track.get('duration_ms', 0),
         'image_url': image_url,
     }
+    for k in ('source', 'provider', 'isrc', 'track_number', 'disc_number', 'release_date'):
+        if spotify_track.get(k) is not None:
+            data[k] = spotify_track[k]
+    return data
 
 
 # YouTube discovery worker logic lives in core/discovery/youtube.py.
@@ -4570,6 +4691,38 @@ def get_youtube_playlist_state(url_hash):
 def reset_youtube_playlist(url_hash):
     """Reset YouTube playlist to fresh phase (clear discovery/sync data)"""
     try:
+        # If it's a mirrored playlist, clear persisted DB discovery cache
+        if url_hash.startswith('mirrored_'):
+            try:
+                playlist_id = int(url_hash.split('_', 1)[1])
+                database = get_database()
+                tracks = database.get_mirrored_playlist_tracks(playlist_id)
+                if tracks:
+                    try:
+                        with database._get_connection() as conn:
+                            cursor = conn.cursor()
+                            for t in tracks:
+                                extra = t.get('extra_data')
+                                if isinstance(extra, str):
+                                    try:
+                                        extra = json.loads(extra)
+                                    except Exception:
+                                        extra = None
+                                if extra and extra.get('manual_match'):
+                                    continue
+                                cache_key = _get_discovery_cache_key(t.get('track_name', ''), t.get('artist_name', ''))
+                                cursor.execute(
+                                    "DELETE FROM discovery_match_cache WHERE normalized_title = ? AND normalized_artist = ?",
+                                    (cache_key[0], cache_key[1])
+                                )
+                            conn.commit()
+                    except Exception as c_err:
+                        logger.warning(f"Error clearing discovery match cache for {url_hash}: {c_err}")
+                database.clear_mirrored_playlist_discovery(playlist_id, preserve_manual_matches=True)
+                logger.info(f"Cleared mirrored playlist discovery in DB for {url_hash}")
+            except Exception as m_err:
+                logger.warning(f"Failed to clear mirrored playlist discovery in DB for {url_hash}: {m_err}")
+
         if url_hash not in youtube_playlist_states:
             # Idempotent: live state gone (restart/eviction) — already "fresh".
             # 404 here permanently wedges a mirrored playlist whose state vanished
@@ -4594,7 +4747,16 @@ def reset_youtube_playlist(url_hash):
         state['discovery_future'] = None
         state['last_accessed'] = time.time()
 
-        logger.info(f"Reset YouTube playlist to fresh phase: {state['playlist']['name']}")
+        # Clean track in-memory discovery state (preserve manual matches)
+        if 'playlist' in state and isinstance(state['playlist'], dict) and 'tracks' in state['playlist']:
+            for track in state['playlist']['tracks']:
+                extra = track.get('extra_data')
+                if not (isinstance(extra, dict) and extra.get('manual_match')):
+                    track.pop('extra_data', None)
+                track.pop('skip_discovery', None)
+
+        playlist_name = state.get('playlist', {}).get('name', url_hash)
+        logger.info(f"Reset YouTube playlist to fresh phase: {playlist_name}")
         return jsonify({"success": True, "message": "Playlist reset to fresh state"})
 
     except Exception as e:

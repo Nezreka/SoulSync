@@ -15,7 +15,7 @@ import { defineConfig } from 'vite';
  * static/dist, so order matters.
  */
 export default defineConfig({
-  base: '/static/dist/',
+  base: './',
   root: import.meta.dirname,
   resolve: {
     alias: [

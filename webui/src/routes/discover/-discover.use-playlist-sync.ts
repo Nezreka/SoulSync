@@ -56,6 +56,18 @@ export interface PlaylistSyncController {
   syncingKeys: string[];
   /** Convert + seed + start + poll. Returns the early-out toast, if any. */
   startMixSync: (mix: DiscoverMix, tracks: unknown[] | undefined) => SyncToast | null;
+  /**
+   * Seed + start + poll for a caller that owns its own identity and copy —
+   * the station preview, whose key is station + snapshot revision. Tracks must
+   * already be in the sync shape.
+   */
+  startSync: (opts: {
+    virtualId: string;
+    name: string;
+    statusBase: string;
+    doneToast: string;
+    tracks: unknown[];
+  }) => SyncToast | null;
 }
 
 /** decade_1980 → { year: 1980 }, or null for every other mix. */
@@ -112,6 +124,43 @@ export function usePlaylistSync(onToast: (toast: SyncToast) => void): PlaylistSy
       })();
     }, SYNC_POLL_MS);
   }, []);
+
+  /**
+   * The generic half: seed a virtual playlist, start it, poll it.
+   *
+   * `startMixSync` is this plus the mix-specific naming. The station preview
+   * calls it directly, because a station's operation identity (station +
+   * snapshot revision) is its own and must not borrow a playlist type's key.
+   */
+  const startSync = useCallback(
+    (opts: {
+      virtualId: string;
+      name: string;
+      statusBase: string;
+      doneToast: string;
+      tracks: unknown[];
+    }): SyncToast | null => {
+      if (!opts.tracks.length) {
+        return { message: `No tracks available for ${opts.name}`, level: 'warning' };
+      }
+      void window.startDiscoverVirtualSync?.(opts.virtualId, opts.name, opts.tracks);
+      // Visible immediately, before the first poll answers (2768).
+      setProgress((prev) => ({
+        ...prev,
+        [opts.statusBase]: {
+          total: 0,
+          matched: 0,
+          failed: 0,
+          processed: 0,
+          pending: 0,
+          percentage: 0,
+        },
+      }));
+      poll(opts.statusBase, opts.virtualId, opts.doneToast);
+      return null;
+    },
+    [poll],
+  );
 
   const startMixSync = useCallback(
     (mix: DiscoverMix, tracks: unknown[] | undefined): SyncToast | null => {
@@ -184,5 +233,6 @@ export function usePlaylistSync(onToast: (toast: SyncToast) => void): PlaylistSy
     progressFor: (statusBase) => progress[statusBase],
     syncingKeys: Object.keys(progress),
     startMixSync,
+    startSync,
   };
 }

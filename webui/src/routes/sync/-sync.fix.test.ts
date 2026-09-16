@@ -144,15 +144,16 @@ describe('the endpoint ladders', () => {
     expect(fixApiPlatform('qobuz')).toBe('qobuz');
   });
 
-  it('unmatchApiBase: NO qobuz arm — it falls to /api/youtube (live bug #7, 656-662)', () => {
+  it('unmatchApiBase: maps each source including qobuz', () => {
     expect(unmatchApiBase('tidal')).toBe('/api/tidal');
+    expect(unmatchApiBase('deezer')).toBe('/api/deezer');
     expect(unmatchApiBase('spotify_public')).toBe('/api/spotify-public');
+    expect(unmatchApiBase('itunes_link')).toBe('/api/itunes-link');
+    expect(unmatchApiBase('beatport')).toBe('/api/beatport');
     expect(unmatchApiBase('listenbrainz')).toBe('/api/listenbrainz');
-    expect(unmatchApiBase('qobuz')).toBe('/api/youtube');
+    expect(unmatchApiBase('qobuz')).toBe('/api/qobuz');
     expect(unmatchApiBase('mirrored')).toBe('/api/youtube');
     expect(unmatchApiBase('youtube')).toBe('/api/youtube');
-    // The vanilla ladder really has no qobuz arm.
-    expect(WISHLIST_TOOLS).not.toContain("platform === 'qobuz'");
   });
 });
 

@@ -91,6 +91,33 @@ def _normalize_for_finding(text: str) -> str:
     return ' '.join(text.split()).strip()
 
 
+def _encoded_display_name(api_filename: str) -> Optional[str]:
+    """The display name out of an ``id||...||name`` dispatch key, else None.
+
+    These are NOT filesystem paths. A source encodes what its worker needs to
+    start the download, and the finder only wants the human-readable tail so it
+    can match the file that landed on disk.
+
+    Most sources encode two parts, ``id||name``. SoundCloud encodes THREE,
+    ``id||url||name``, because its worker needs the permalink to download at all
+    (core/soundcloud_client.py splits with maxsplit=2). Reading everything after
+    the FIRST separator therefore made the search target
+    ``https://soundcloud.com/...||SSIO - Alles oder Nix``, and nothing on disk is
+    called that - so the file was never found, never imported and never tagged.
+    The download looked finished and the file just sat in the completed folder
+    (#1239).
+
+    The three-part shape is recognised by its url rather than by counting, so a
+    title that happens to contain ``||`` keeps reading exactly as it did before.
+    """
+    if not api_filename or '||' not in api_filename:
+        return None
+    parts = api_filename.split('||')
+    if len(parts) > 2 and parts[1].startswith(('http://', 'https://')):
+        return parts[-1]
+    return api_filename.split('||', 1)[1]
+
+
 def _extract_basename(api_filename: str) -> str:
     """Cross-platform rightmost-separator split for a real remote PATH.
 
@@ -100,9 +127,9 @@ def _extract_basename(api_filename: str) -> str:
     must NOT be split on (issue #835)."""
     if not api_filename:
         return ""
-    if '||' in api_filename:
-        _id, title = api_filename.split('||', 1)
-        return title
+    encoded = _encoded_display_name(api_filename)
+    if encoded is not None:
+        return encoded
     last_slash = max(api_filename.rfind('/'), api_filename.rfind('\\'))
     return api_filename[last_slash + 1:] if last_slash != -1 else api_filename
 
@@ -254,9 +281,7 @@ def find_completed_audio_file(
     # truncated the search target to ``T:T`` and the real file was never found,
     # quarantining valid downloads (issue #835). Real remote paths (Soulseek)
     # still get basename + dir-component extraction.
-    encoded_title = None
-    if api_filename and '||' in api_filename:
-        _id, encoded_title = api_filename.split('||', 1)
+    encoded_title = _encoded_display_name(api_filename)
     if encoded_title is not None:
         target_basename = encoded_title
         api_dirs = []

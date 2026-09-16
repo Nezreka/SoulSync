@@ -132,6 +132,10 @@ function _stripSourceIdPrefix(value) {
 
 function setTrackInfo(track) {
     currentTrack = track;
+    window.__ssCurrentTrack = track;
+    if (typeof window.getCurrentTrack !== 'function') {
+        window.getCurrentTrack = function () { return currentTrack; };
+    }
     npPlayLogged = false;   // new track — allow one play-log once it's heard a bit
     // Chat now-playing (opt-in, chat.js owns the gate + throttle). Never let a
     // chat problem break playback.
@@ -246,6 +250,7 @@ function checkAndEnableScrolling(element, text) {
 function clearTrack() {
     // Clear track state
     currentTrack = null;
+    window.__ssCurrentTrack = null;
     isPlaying = false;
     try {
         if (typeof window.__ssNowPlaying === 'function') window.__ssNowPlaying(null);
@@ -2711,11 +2716,34 @@ async function playQueueItem(index, options = {}) {
     return { status: track.is_library ? 'played' : 'unsupported' };
 }
 
+function npFocusQueueAction(index, action) {
+    const list = document.getElementById('np-queue-list');
+    const row = list?.querySelectorAll('.np-queue-item')[index];
+    const button = row?.querySelector(`[data-queue-action="${action}"]`);
+    if (button && !button.disabled) button.focus();
+    else if (row) row.querySelector('[data-queue-action="play"]')?.focus();
+    else if (list) { list.tabIndex = -1; list.focus(); }
+}
+
+function npAnnounceQueue(message) {
+    let note = document.getElementById('np-queue-announcement');
+    if (!note) {
+        note = document.createElement('div'); note.id = 'np-queue-announcement';
+        note.className = 'np-queue-announcement'; note.setAttribute('role', 'status');
+        document.getElementById('np-queue-list')?.after(note);
+    }
+    note.textContent = message;
+}
+
 function renderNpQueue() {
     const listEl = document.getElementById('np-queue-list');
     const emptyEl = document.getElementById('np-queue-empty');
     const countEl = document.getElementById('np-queue-count');
     if (!listEl) return;
+    listEl.setAttribute('role', 'list');
+    const focused = listEl.contains(document.activeElement) ? document.activeElement : null;
+    const focusedIndex = focused?.closest('.np-queue-item')?.dataset.qindex;
+    const focusedAction = focused?.dataset.queueAction;
 
     if (countEl) countEl.textContent = npQueue.length > 0 ? `(${npQueue.length})` : '';
 
@@ -2731,7 +2759,8 @@ function renderNpQueue() {
     npQueue.forEach((track, i) => {
         const item = document.createElement('div');
         item.className = 'np-queue-item' + (i === npQueueIndex ? ' active' : '');
-        item.onclick = () => playQueueItem(i);
+        item.setAttribute('role', 'listitem');
+        item.setAttribute('aria-label', `${i + 1} of ${npQueue.length}`);
 
         // Drag-to-reorder
         item.draggable = true;
@@ -2753,14 +2782,18 @@ function renderNpQueue() {
         }
         item.appendChild(art);
 
-        const info = document.createElement('div');
-        info.className = 'np-queue-item-info';
+        const info = document.createElement('button');
+        info.type = 'button';
+        info.className = 'np-queue-item-info np-queue-item-play';
+        info.dataset.queueAction = 'play';
+        info.setAttribute('aria-label', `Play ${track.title || 'Unknown track'} by ${track.artist || 'Unknown artist'}`);
+        info.onclick = () => void playQueueItem(i);
 
-        const title = document.createElement('div');
+        const title = document.createElement('span');
         title.className = 'np-queue-item-title';
         title.textContent = track.title || 'Unknown Track';
 
-        const artist = document.createElement('div');
+        const artist = document.createElement('span');
         artist.className = 'np-queue-item-artist';
         artist.textContent = track.artist || 'Unknown Artist';
 
@@ -2770,40 +2803,67 @@ function renderNpQueue() {
 
         // Missing rows expose acquisition progress; ready rows keep the normal
         // equalizer/duration affordance.
+        const meta = document.createElement('div');
+        meta.className = 'np-queue-item-meta';
         const queueStatus = npQueueStatusLabel(track);
         if (!track.file_path || (track.playback_status && track.playback_status !== 'ready')) {
             const status = document.createElement('span');
             status.className = `np-queue-item-status ${track.playback_status || 'missing'}`;
             status.textContent = queueStatus || 'Missing';
             if (track.playback_error) status.title = track.playback_error;
-            item.appendChild(status);
+            meta.appendChild(status);
         } else if (i === npQueueIndex) {
             const eq = document.createElement('div');
             eq.className = 'np-queue-item-eq';
             eq.innerHTML = '<i></i><i></i><i></i>';
-            item.appendChild(eq);
+            meta.appendChild(eq);
         } else if (track.duration) {
             const dur = document.createElement('span');
             dur.className = 'np-queue-item-duration';
             dur.textContent = formatTime(track.duration);
-            item.appendChild(dur);
+            meta.appendChild(dur);
+        }
+
+        item.appendChild(meta);
+        const actions = document.createElement('div');
+        actions.className = 'np-queue-item-actions';
+        for (const [direction, target, symbol] of [['earlier', i - 1, '↑'], ['later', i + 1, '↓']]) {
+            const move = document.createElement('button');
+            move.type = 'button'; move.className = 'np-queue-item-move';
+            move.dataset.queueAction = direction;
+            move.textContent = symbol;
+            move.setAttribute('aria-label', `Move ${track.title || 'track'} ${direction}`);
+            move.disabled = target < 0 || target >= npQueue.length;
+            move.onclick = () => {
+                npReorderQueue(i, target);
+                npFocusQueueAction(target, direction);
+                npAnnounceQueue(`${track.title || 'Track'} moved to position ${target + 1} of ${npQueue.length}`);
+            };
+            actions.appendChild(move);
         }
 
         const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
         removeBtn.className = 'np-queue-item-remove';
+        removeBtn.dataset.queueAction = 'remove';
+        removeBtn.setAttribute('aria-label', `Remove ${track.title || 'track'} from queue`);
         removeBtn.innerHTML = '&#10005;';
         removeBtn.title = 'Remove from queue';
         removeBtn.onclick = (e) => {
             e.stopPropagation();
             removeFromQueue(i);
+            npFocusQueueAction(Math.min(i, npQueue.length - 1), 'remove');
+            npAnnounceQueue(`${track.title || 'Track'} removed from queue`);
         };
-        item.appendChild(removeBtn);
+        actions.appendChild(removeBtn);
+        item.appendChild(actions);
 
         listEl.appendChild(item);
     });
 
     npUpdateUpNext();
     npPersistQueue();
+    if (focusedAction && focusedIndex !== undefined) npFocusQueueAction(Number(focusedIndex), focusedAction);
 }
 
 // ── Queue persistence across page reloads (localStorage) ──

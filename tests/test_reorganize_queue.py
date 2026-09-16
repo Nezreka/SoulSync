@@ -464,16 +464,151 @@ def test_cancel_and_run_are_mutually_exclusive(queue):
     assert not leaked, f"Runner ran for cancelled items: {leaked}"
 
 
-def test_no_runner_marks_item_failed(queue):
-    """If the worker pulls an item but no runner has been set, the item
-    must be marked failed (not silently dropped). In practice
-    web_server.py wires the runner at module load before any request
-    can land, so this is a defensive-failure path more than a real
-    one — but the failure mode must be loud."""
+def test_no_runner_holds_the_item_instead_of_failing_it(queue, caplog):
+    """REVERSED. This used to assert the item was marked FAILED, on the stated
+    premise that "web_server.py wires the runner at module load before any
+    request can land, so this is a defensive path more than a real one".
+
+    That premise stopped being true with #1235. get_queue() now restores the
+    backlog left by a dead process and starts the worker, and web_server calls
+    set_runner() immediately AFTER that - so there is a real window where albums
+    exist and no runner does. Failing them there would destroy the very backlog
+    the restore just rescued, which is the bug, not the fix.
+
+    The original concern still stands though: it must not be silent. So the
+    worker holds the item and says so once."""
+    import logging
     queue.set_runner(None)
-    qid = _enqueue(queue, album_id='alb-orphan')['queue_id']
-    assert _wait_for(lambda: any(r['queue_id'] == qid for r in queue.snapshot()['recent']))
+    with caplog.at_level(logging.WARNING):
+        qid = _enqueue(queue, album_id='alb-orphan')['queue_id']
+        assert _wait_for(lambda: any('no runner is configured' in r.message.lower()
+                                     for r in caplog.records))
     snap = queue.snapshot()
-    failed = next(i for i in snap['recent'] if i['queue_id'] == qid)
-    assert failed['status'] == 'failed'
-    assert 'runner' in (failed['error'] or '').lower()
+    assert snap['totals']['queued'] == 1, "the album was not held"
+    assert not any(i['queue_id'] == qid for i in snap['recent']), "it was finished off"
+
+    # and it runs the moment a runner turns up
+    queue.set_runner(_make_runner([]))
+    assert _wait_for(lambda: queue.snapshot()['totals']['done'] == 1)
+
+
+# --- durability (#1235) ----------------------------------------------------
+#
+# A gunicorn worker recycle used to take the whole backlog with it: ~1,815
+# queued albums on one run, ~1,900 on the next, silently, while the job still
+# reported success and the library sat half-converted.
+
+
+class _FakeStore:
+    """In-memory stand-in with the same four methods as the real store."""
+
+    def __init__(self, rows=None):
+        self.rows = dict(rows or {})
+        self.saves = 0
+        self.deletes = 0
+
+    def save(self, snap):
+        self.rows[snap['queue_id']] = dict(snap)
+        self.saves += 1
+
+    def delete(self, queue_id):
+        self.rows.pop(queue_id, None)
+        self.deletes += 1
+
+    def delete_queued(self):
+        n = [k for k, v in self.rows.items() if v.get('status') == 'queued']
+        for k in n:
+            del self.rows[k]
+        return len(n)
+
+    def load_pending(self):
+        return [dict(v) for v in self.rows.values()
+                if v.get('status') in ('queued', 'running')]
+
+
+def test_a_queued_album_survives_the_process_that_queued_it():
+    """The whole bug. Enqueue, kill the process, and the work must still be
+    there for the next one to pick up."""
+    store = _FakeStore()
+    q1 = ReorganizeQueue(store=store)
+    q1.set_runner(_make_runner([], block_event=threading.Event()))  # never finishes
+    for i in range(3):
+        _enqueue(q1, album_id=f'alb-{i}')
+    assert _wait_for(lambda: q1.snapshot()['active'] is not None)
+    q1.stop()                                  # the SIGKILL stand-in
+
+    # a fresh process, same database
+    q2 = ReorganizeQueue(store=store)
+    try:
+        assert q2.restore() == 3, "the backlog did not survive"
+        snap = q2.snapshot()
+        # the one that was mid-flight comes back as work to do, not lost and not
+        # stuck 'running' forever. nothing may have started: q2 has no runner
+        # yet, which is exactly the startup gap web_server leaves open.
+        assert snap['active'] is None, "claimed an album before a runner existed"
+        assert snap['totals']['queued'] == 3
+        assert {i['album_id'] for i in snap['queued']} == {'alb-0', 'alb-1', 'alb-2'}
+    finally:
+        q2.stop()
+
+
+def test_finishing_an_album_drops_its_row():
+    """Only the BACKLOG is persisted. If finished items stayed, the table would
+    grow forever and a restart would re-run work that was already done."""
+    store = _FakeStore()
+    q = ReorganizeQueue(store=store)
+    try:
+        q.set_runner(_make_runner([]))
+        _enqueue(q, album_id='alb-done')
+        assert _wait_for(lambda: q.snapshot()['totals']['done'] == 1)
+        assert store.rows == {}, "a finished album is still in the backlog"
+        assert store.load_pending() == []
+    finally:
+        q.stop()
+
+
+def test_restore_does_not_duplicate_what_is_already_queued():
+    """restore() must be safe to call when the queue is not empty - otherwise a
+    second call double-processes every album in the backlog."""
+    store = _FakeStore()
+    q = ReorganizeQueue(store=store)
+    try:
+        q.set_runner(_make_runner([], block_event=threading.Event()))
+        _enqueue(q, album_id='alb-1')
+        assert _wait_for(lambda: q.snapshot()['active'] is not None)
+        assert q.restore() == 0
+        total = len(q.snapshot()['queued']) + (1 if q.snapshot()['active'] else 0)
+        assert total == 1
+    finally:
+        q.stop()
+
+
+def test_a_store_that_throws_cannot_break_the_queue():
+    """Bookkeeping must never be able to stop an actual reorganize. Losing a row
+    costs one album its resumability; an exception here would cost the run."""
+    class Broken(_FakeStore):
+        def save(self, snap):
+            raise RuntimeError("database is on fire")
+
+    q = ReorganizeQueue(store=Broken())
+    try:
+        q.set_runner(_make_runner([]))
+        r = _enqueue(q, album_id='alb-1')
+        assert r['queued'] is True
+        assert _wait_for(lambda: q.snapshot()['totals']['done'] == 1), "the run died with the store"
+    finally:
+        q.stop()
+
+
+def test_without_a_store_nothing_is_persisted():
+    """The default. Every pre-existing test builds the queue bare, and they must
+    not start writing to the real library database."""
+    q = ReorganizeQueue()
+    try:
+        assert q.restore() == 0
+        q.set_runner(_make_runner([]))
+        _enqueue(q, album_id='alb-1')
+        assert _wait_for(lambda: q.snapshot()['totals']['done'] == 1)
+    finally:
+        q.stop()
+

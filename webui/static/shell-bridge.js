@@ -113,7 +113,7 @@ function activateLegacyPath(pathname) {
 
 function syncActivePageFromLocation() {
     const router = getWebRouter();
-    const targetPage = router?.resolvePageId?.(window.location.pathname) || _getPageFromPath(window.location.pathname);
+    const targetPage = router?.resolvePageId?.((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname)) || _getPageFromPath((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname));
     if (!targetPage) return;
 
     if (!isPageAllowed(targetPage)) {
@@ -274,7 +274,8 @@ function _handleShellLinkClick(event) {
     const href = anchor.getAttribute('href');
     if (!href || href === '#' || href.startsWith('javascript:')) return;
 
-    const pathname = anchor.pathname || new URL(anchor.href, window.location.href).pathname;
+    const rawPath = anchor.pathname || new URL(anchor.href, window.location.href).pathname;
+    const pathname = window.SoulSyncURL?.strip(rawPath) ?? rawPath;
     const navPageId = anchor.matches('.nav-button[data-page]') ? anchor.getAttribute('data-page') : null;
     if (navPageId) {
         event.preventDefault();

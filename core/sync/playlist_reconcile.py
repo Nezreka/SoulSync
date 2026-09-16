@@ -236,11 +236,21 @@ def reconcile_playlist(
         src_key = f"{canon_artist} {norm_title(canon_title)}".strip().lower()
         best_score = 0.0
         best_j = -1
+        artist_agreements = {}
         for j, sm in enumerate(server_matchers):
             if j in used_server_indices:
                 continue
             sm.set_seq1(src_key)
             if sm.real_quick_ratio() < _FUZZY_THRESHOLD or sm.quick_ratio() < _FUZZY_THRESHOLD:
+                continue
+            # A long shared title must not overwhelm the artist disagreement
+            # that rejected this pair in pass 1. Reuse comparisons for repeated
+            # artists, after the cheap title-score bounds have rejected misses.
+            server_artist = server_tracks[j].get('artist', '')
+            if server_artist not in artist_agreements:
+                artist_agreements[server_artist] = _artists_agree(canon_artist, server_artist)
+            if not (artist_agreements[server_artist]
+                    or _durations_agree(src_entry.get('duration_ms'), server_tracks[j].get('duration'))):
                 continue
             score = sm.ratio()
             if score > best_score and score >= _FUZZY_THRESHOLD:

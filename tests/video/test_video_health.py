@@ -498,3 +498,12 @@ def test_a_disabled_list_does_not_count(db, monkeypatch):
         [{"id": 1, "name": "Off", "source": "tmdb_list", "ref": "1", "enabled": False}]))
     _automation(monkeypatch, {"enabled": 0})
     assert _il(collect(db)) is None
+
+
+def test_missing_additional_mount_is_reported(db, tmp_path):
+    import json
+    missing = str(tmp_path / "missing-extra-drive")
+    db.set_setting("tv_additional_paths", json.dumps([missing]))
+    check = next(c for c in collect(db)["checks"] if c["id"] == "tv_additional_paths_0")
+    assert check["status"] == "error"
+    assert missing in check["detail"]

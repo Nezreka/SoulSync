@@ -45,6 +45,35 @@ class WishlistService:
             source_context: Additional context (playlist name, album info, etc.)
         """
         try:
+            # Reject podcasts from music wishlist
+            _is_pod = False
+            if source_type == "podcast":
+                _is_pod = True
+            elif isinstance(track_info, dict) and (
+                track_info.get("download_source") == "Podcast"
+                or track_info.get("origin") == "podcast"
+                or track_info.get("batch_id") == "podcasts"
+                or track_info.get("playlist_id") == "podcasts"
+            ):
+                _is_pod = True
+            elif isinstance(source_context, dict) and (
+                source_context.get("source_page") == "Podcasts"
+                or source_context.get("playlist_id") == "podcasts"
+            ):
+                _is_pod = True
+            elif isinstance(source_context, str) and (
+                '"source_page": "Podcasts"' in source_context
+                or '"playlist_id": "podcasts"' in source_context
+            ):
+                _is_pod = True
+
+            if _is_pod:
+                logger.info(
+                    "Skipping wishlist addition for podcast item: %s",
+                    track_info.get("track_name") if isinstance(track_info, dict) else "",
+                )
+                return False
+
             # Extract track data from the modal structure.
             track_data = extract_wishlist_track_from_modal_info(track_info)
             if not track_data:

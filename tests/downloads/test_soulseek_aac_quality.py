@@ -97,3 +97,14 @@ def test_aac_beats_mp3_when_listed_higher():
     mp3, aac = _cand('mp3', 5, bitrate=320), _cand('aac', 5)
     out = _filter([mp3, aac], _q(aac=True))
     assert out[0].quality == 'aac'    # aac target (1.5) ranked above mp3 (2)
+
+
+def test_size_limit_is_not_bypassed_by_quality_fallback(monkeypatch):
+    from core.downloads import size_limit
+    monkeypatch.setattr(size_limit, 'configured_limit', lambda: 10)
+    large = _cand('flac', 180)
+    large.duration = 210_000
+    small = _cand('mp3', 5)
+    small.duration = 210_000
+    assert _filter([large, small], _q(fallback=True)) == [small]
+    assert _filter([large], _q(fallback=True)) == []

@@ -43,6 +43,10 @@ describe('the section order', () => {
       'cache-genre-explorer',
       'lastfm-radio',
       'listenbrainz',
+      // NEW since the port, not drift: Deezer's editors publish curated
+      // playlists and the public api serves them free. It sits with the other
+      // source-backed playlist rows because that is what it is.
+      'deezer-editorial',
       'build-a-playlist',
     ]);
   });
@@ -201,5 +205,22 @@ describe('isSectionVisible', () => {
     for (const id of ['lastfm-radio', 'listenbrainz', 'build-a-playlist'] as const) {
       expect(isSectionVisible(id, false, true)).toBe(false);
     }
+  });
+});
+
+describe('the Deezer editorial shelf stays in the layout', () => {
+  // It renders its own loading and empty states. A HIDE policy made the whole
+  // section null until rows arrived, so the loading row was unreachable and a
+  // slow or unreachable Deezer left no trace of the shelf at all.
+  it('is visible before its fetch has returned anything', () => {
+    expect(isSectionVisible('deezer-editorial', false, false)).toBe(true);
+  });
+
+  it('is still visible when the fetch came back empty', () => {
+    expect(isSectionVisible('deezer-editorial', false, true)).toBe(true);
+  });
+
+  it('is not governed by an empty policy', () => {
+    expect(SECTION_EMPTY_POLICY['deezer-editorial']).toBeUndefined();
   });
 });

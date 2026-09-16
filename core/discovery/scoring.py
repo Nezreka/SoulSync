@@ -7,6 +7,7 @@ let the bodies resolve their original names without modification.
 in web_server.py and referenced by name throughout the bodies.
 """
 import logging
+import re
 
 from core.metadata.cache import get_metadata_cache
 from core.metadata.registry import get_primary_source, get_spotify_client
@@ -79,16 +80,36 @@ def _discovery_score_candidates(source_title, source_artist, source_duration_ms,
             result_name = result.name if hasattr(result, 'name') else ''
             result_duration = result.duration_ms if hasattr(result, 'duration_ms') else 0
 
+            # Duration floor — reject extreme duration discrepancies (>15s and >40% difference)
+            if source_duration_ms > 0 and result_duration > 0:
+                diff_ms = abs(source_duration_ms - result_duration)
+                diff_ratio = diff_ms / max(source_duration_ms, result_duration)
+                if diff_ms > 15000 and diff_ratio > 0.40:
+                    continue
+
             # Artist floor — both must match, not just the weighted score
             best_artist_sim = 0.0
             for cand_artist in result_artists:
                 if not cand_artist:
                     continue
+
+                # Check for derivative artist mismatch (e.g., "Queen Tribute" vs "Queen")
+                if hasattr(matching_engine, "has_derivative_artist_mismatch") and matching_engine.has_derivative_artist_mismatch(source_artist, cand_artist):
+                    sim = 0.20
+                    if sim > best_artist_sim:
+                        best_artist_sim = sim
+                    continue
+
                 cand_cleaned = matching_engine.clean_artist(cand_artist)
                 cand_normalized = matching_engine.normalize_string(cand_artist)
-                if source_artist_cleaned and source_artist_cleaned in cand_normalized:
+
+                # Exact match against whole candidate artist string
+                if source_artist_cleaned and (source_artist_cleaned == cand_cleaned or source_artist_cleaned == cand_normalized):
                     best_artist_sim = 1.0
                     break
+
+                # Commas, slashes, ampersands and 'and' can belong to a band name.
+                # Separate credits arrive as artist list entries; clean_artist handles feat.
                 sim = matching_engine.similarity_score(source_artist_cleaned, cand_cleaned)
                 if sim > best_artist_sim:
                     best_artist_sim = sim

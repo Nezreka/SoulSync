@@ -618,8 +618,27 @@ def _read(path):
 
 
 def test_settings_js_round_trips_the_preference():
+    """This used to assert the payload read
+
+        document.getElementById('preferred-version')?.value || ''
+
+    which is the settings-wipe pattern, not a safe read. When the element is not
+    on the page - a different tab, a section that has not rendered - that
+    expression yields '' and the save writes an EMPTY STRING over a real stored
+    value. That is not hypothetical: it is how this page silently blanked live
+    Prowlarr, torrent-client and usenet-client URLs.
+
+    _cfgStr returns undefined for a missing element instead, and JSON.stringify
+    drops undefined-valued keys, so an absent field says nothing about itself
+    rather than claiming to be empty.
+
+    The test was pinning the bug. It pins the fix now.
+    """
     settings_js = _read('webui/static/settings.js')
-    assert "preferred_version: document.getElementById('preferred-version')?.value || ''" in settings_js
+    assert "preferred_version: _cfgStr('preferred-version')" in settings_js
+    assert "preferred_version: document.getElementById" not in settings_js, (
+        "back to reading the element directly - an absent field will wipe the stored value"
+    )
     assert "settings.soulseek?.preferred_version || ''" in settings_js
 
 

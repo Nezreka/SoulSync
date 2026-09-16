@@ -294,3 +294,67 @@ def test_auth_from_config_exception_is_anonymous(monkeypatch):
     monkeypatch.setattr("core.settings.config_manager.get", _boom)
     from core.youtube_cookies import ytmusic_auth_from_config
     assert ytmusic_auth_from_config() is None
+
+
+# ---------------------------------------------------------------------------
+# A configured cookie file that is not there (#1233)
+# ---------------------------------------------------------------------------
+
+from core.youtube_cookies import cookie_setup_problem  # noqa: E402
+
+
+def test_paste_mode_with_a_missing_file_is_reported():
+    """Found on Boulder's own install: Settings said 'Paste cookies.txt' and
+    the file it pointed at did not exist, so every YouTube request had been
+    going out signed-out with nothing saying so."""
+    problem = cookie_setup_problem("custom", "/config/youtube_cookies.txt",
+                                   cookiefile_exists=False)
+    assert problem
+    assert "signed-out" in problem
+    assert "/config/youtube_cookies.txt" in problem
+
+
+def test_the_docker_cause_is_named():
+    # The path is in the database (a volume), the file is in the config folder
+    # (often not one). An image pull takes one and leaves the other.
+    problem = cookie_setup_problem("custom", "/config/c.txt", cookiefile_exists=False)
+    assert "Docker" in problem
+    assert "volume" in problem
+
+
+def test_paste_mode_with_no_file_ever_saved_is_reported():
+    problem = cookie_setup_problem("custom", "", cookiefile_exists=False)
+    assert problem and "no file was ever saved" in problem
+
+
+def test_a_present_file_is_not_a_problem():
+    assert cookie_setup_problem("custom", "/config/c.txt", cookiefile_exists=True) is None
+
+
+def test_browser_mode_is_never_this_problem():
+    # cookiesfrombrowser has no file of ours to lose.
+    assert cookie_setup_problem("firefox", "", cookiefile_exists=False) is None
+    assert cookie_setup_problem("chrome", "/stale.txt", cookiefile_exists=False) is None
+
+
+def test_anonymous_is_not_a_problem_either():
+    # No cookies configured is a choice, not a fault.
+    assert cookie_setup_problem("", "", cookiefile_exists=False) is None
+    assert cookie_setup_problem(None, "", cookiefile_exists=False) is None
+
+
+def test_the_builder_still_refuses_the_missing_file():
+    # The problem message is additional to the safe behaviour, not instead of it.
+    from core.youtube_cookies import build_youtube_cookie_opts
+    assert build_youtube_cookie_opts("custom", "/gone.txt", cookiefile_exists=False) == {}
+
+
+def test_the_connection_test_asks_before_it_probes():
+    """Probing first would return a bot gate and send the user to fix cookies
+    that were never being sent."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "core/connection_test.py").read_text(
+        encoding="utf-8", errors="ignore")
+    branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
+    assert "cookie_setup_problem" in branch
+    assert branch.index("cookie_setup_problem") < branch.index("check_connection()")

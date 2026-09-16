@@ -13,13 +13,14 @@ import { useEffect, useRef, useState } from 'react';
  * (`sectionId.includes('albums')`). That is passed explicitly instead — a
  * renamed section silently changing card type is a trap, not a feature.
  */
-export type CompactItemKind = 'artist' | 'label' | 'album' | 'track';
+export type CompactItemKind = 'artist' | 'label' | 'album' | 'track' | 'playlist';
 
 const IMAGE_CLASS: Record<CompactItemKind, string> = {
   artist: 'artist-image',
   label: 'artist-image',
   album: 'album-cover',
   track: 'track-cover',
+  playlist: 'album-cover',
 };
 
 const PLACEHOLDER_CLASS: Record<CompactItemKind, string> = {
@@ -27,6 +28,7 @@ const PLACEHOLDER_CLASS: Record<CompactItemKind, string> = {
   label: 'artist-placeholder',
   album: 'album-placeholder',
   track: 'track-placeholder',
+  playlist: 'album-placeholder',
 };
 
 /** Labels piggyback the artist card's styling, hence both classes. */
@@ -35,6 +37,7 @@ const CARD_CLASS: Record<CompactItemKind, string> = {
   label: 'enh-compact-item label-card artist-card',
   album: 'enh-compact-item album-card',
   track: 'enh-compact-item track-item',
+  playlist: 'enh-compact-item album-card playlist-card',
 };
 
 export interface CompactItemProps {
@@ -133,6 +136,11 @@ export function CompactItem({
           {placeholder}
         </div>
       )}
+      {(kind === 'album' || kind === 'playlist') && (
+        <span className="enh-card-floating-play" aria-hidden="true">
+          ▶
+        </span>
+      )}
       <div className="enh-item-info">
         <div className="enh-item-name">{name}</div>
         <div className="enh-item-meta">{meta}</div>
@@ -229,6 +237,7 @@ export const LIST_CLASS: Record<CompactItemKind, string> = {
   label: 'enh-artists-grid',
   album: 'enh-albums-grid',
   track: 'enh-tracks-list',
+  playlist: 'enh-albums-grid',
 };
 
 /**

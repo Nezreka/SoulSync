@@ -207,11 +207,37 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
                         log_line=f"{len(watchlist_artists)} artists ({profile_label})",
                         log_type='info',
                     )
+                elif event_type == 'matching_sources':
+                    # The phase BEFORE any artist is scanned: every artist is
+                    # matched against every other metadata provider, one lookup
+                    # each. For a few hundred artists that is the longest part of
+                    # the run, and the card used to sit on 'Loading watchlist' at
+                    # 5% for all of it, which reads as a hang (#1240).
+                    done = payload.get('artists_done', 0)
+                    artists_total = max(1, payload.get('artists_total', 1))
+                    src_no = payload.get('source_number', 1)
+                    src_total = max(1, payload.get('source_total', 1))
+                    # the whole matching phase occupies the 5-10% band, so the
+                    # artist loop still owns 10-95 and nothing goes backwards
+                    within = (done / artists_total) / src_total
+                    pct = 5 + (((src_no - 1) / src_total) + within) * 5
+                    deps.update_automation_progress(
+                        automation_id,
+                        progress=pct,
+                        phase=(f"Matching to {payload.get('source', '')} "
+                               f"({done}/{artists_total} artists)"),
+                        processed=done,
+                        total=artists_total,
+                    )
                 elif event_type == 'artist_started':
                     total = max(1, payload.get('total_artists', len(watchlist_artists)))
                     idx = payload.get('artist_index', 1)
                     artist_name = payload.get('artist_name', '')
-                    pct = 5 + ((idx - 1) / total) * 90
+                    # 10-95, because 5-10 now belongs to the source-matching
+                    # phase that runs before this loop. Leaving this at 5 would
+                    # send the bar BACKWARDS from 10% to 5% the moment the first
+                    # artist started.
+                    pct = 10 + ((idx - 1) / total) * 85
                     deps.update_automation_progress(
                         automation_id,
                         progress=pct,

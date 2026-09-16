@@ -148,9 +148,9 @@ export function canSelectSource(source: string, enabledExperimental: ReadonlySet
   return !EXPERIMENTAL_SOURCES.has(source) || enabledExperimental.has(source);
 }
 
-/** Empty slice — every consumer reads five arrays, so none of them may be absent. */
+/** Empty slice — every consumer reads six arrays, so none of them may be absent. */
 export function emptySourceResults(): SourceResults {
-  return { db_artists: [], artists: [], albums: [], tracks: [], videos: [] };
+  return { db_artists: [], artists: [], albums: [], tracks: [], playlists: [], videos: [] };
 }
 
 /**
@@ -177,6 +177,7 @@ export function sourceResultsFromResponse(data: EnhancedSearchResponse): SourceR
     artists: data.spotify_artists ?? [],
     albums: data.spotify_albums ?? [],
     tracks: data.spotify_tracks ?? [],
+    playlists: data.spotify_playlists ?? [],
     videos: [],
   };
 }
@@ -417,6 +418,7 @@ export function hasAnyResults(results: SourceResults): boolean {
     results.artists.length > 0 ||
     results.albums.length > 0 ||
     results.tracks.length > 0 ||
+    results.playlists.length > 0 ||
     results.videos.length > 0
   );
 }

@@ -99,8 +99,8 @@ class NamingConformanceJob(VideoRepairJob):
         result = JobResult()
         settings = organization.load(context.db)
         base_dirs = video_base_dirs(context.db)
-        roots = {"movie": str(context.db.get_setting("movies_path") or "").strip(),
-                 "episode": str(context.db.get_setting("tv_path") or "").strip()}
+        from core.video.library_roots import library_roots, containing_root
+        roots = {kind: library_roots(context.db, kind) for kind in ("movie", "episode")}
         rows = context.db.repair_library_files() or []
         context.report(total=len(rows), phase="checking names")
         valid = []
@@ -108,14 +108,18 @@ class NamingConformanceJob(VideoRepairJob):
             context.check_stop()
             result.scanned += 1
             context.report(processed=i, current_item=r.get("title"))
-            root = roots.get(r["scope"])
-            if not root:
+            configured_roots = roots.get(r["scope"])
+            if not configured_roots:
                 result.skipped += 1          # that library has no configured folder
                 continue
             real = resolve_video_file_path(r.get("relative_path"), base_dirs,
                                            size_bytes=r.get("size_bytes"))
             if not real:
                 result.skipped += 1          # can't locate locally — never guess
+                continue
+            root = containing_root(real, configured_roots)
+            if not root:
+                result.skipped += 1
                 continue
             ext = os.path.splitext(real)[1]
             expected = organization.render_path(r["scope"], root, _fields_of(r),

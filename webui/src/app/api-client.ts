@@ -1,14 +1,15 @@
+import { appURL } from '@/platform/url-base';
 import type { ResponsePromise } from 'ky';
 
 import ky, { HTTPError } from 'ky';
 
 const apiBaseUrl =
   typeof globalThis.location === 'object'
-    ? new URL('/api/', globalThis.location.origin).toString()
+    ? new URL(appURL('/api/'), globalThis.location.origin).toString()
     : 'http://localhost/api/';
 const shellBaseUrl =
   typeof globalThis.location === 'object'
-    ? new URL('/', globalThis.location.origin).toString()
+    ? new URL(appURL('/'), globalThis.location.origin).toString()
     : 'http://localhost/';
 
 export const apiClient = ky.create({

@@ -245,3 +245,71 @@ def test_registering_a_url_again_never_shortens_a_real_cached_image(tmp_path):
 def _now(cache):
     import time
     return time.time()
+def test_hits_batch_their_timestamp_writes(tmp_path, monkeypatch):
+    """a hit records its access in memory and the writes go down together:
+    seventy-five cards on a page used to be seventy-five fsyncs behind one
+    lock, ~1 s apiece on nothing but a timestamp."""
+    import sqlite3
+    cache = _cache(tmp_path, max_cache_bytes=0)
+    _store(cache, 5)
+    writes = []
+    real_flush = cache._flush_touches
+
+    def counting_flush():
+        n = len(cache._pending_touches)
+        real_flush()
+        if n:
+            writes.append(n)
+
+    monkeypatch.setattr(cache, "_flush_touches", counting_flush)
+    for i in range(5):
+        cache.get_url(f"https://img.example.test/{i}.jpg")
+    assert writes == []                       # nothing written yet
+    assert len(cache._pending_touches) == 5
+    cache.prune()                             # anything reading timestamps flushes first
+    assert writes == [5]                      # one statement for all five
+    assert cache._pending_touches == {}
+    # and the batch threshold flushes on its own
+    monkeypatch.setattr(cache, "TOUCH_FLUSH_MAX", 2)
+    cache.get_url("https://img.example.test/0.jpg")
+    cache.get_url("https://img.example.test/1.jpg")
+    assert writes == [5, 2]
+
+
+def test_the_cache_db_runs_in_wal_mode(tmp_path):
+    import sqlite3
+    cache = _cache(tmp_path, max_cache_bytes=0)
+    c = sqlite3.connect(str(cache.db_path))
+    assert c.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+
+
+def test_registrations_batch_and_a_serve_finds_a_pending_one(tmp_path, monkeypatch):
+    """the library page registers seventy-five urls before it can answer; they
+    used to be seventy-five transactions behind the lock. now one, and a
+    browser that asks for one of them first still gets it."""
+    import sqlite3
+    cache = _cache(tmp_path, max_cache_bytes=0)
+    flushes = []
+    real = cache._flush_registrations
+
+    def counting():
+        n = len(cache._pending_registrations)
+        real()
+        if n:
+            flushes.append(n)
+
+    monkeypatch.setattr(cache, "_flush_registrations", counting)
+    urls = [cache.cache_url_for(f"https://img.example.test/reg{i}.jpg") for i in range(10)]
+    assert all(u.startswith("/api/image-cache/") for u in urls)
+    assert flushes == []
+    c = sqlite3.connect(str(cache.db_path))
+    assert c.execute("SELECT COUNT(*) FROM image_cache WHERE original_url LIKE '%reg%'").fetchone()[0] == 0
+    # a serve of one pending key writes the batch first, then finds its row
+    key = urls[3].rsplit("/", 1)[1]
+    row = cache._get_row(key)
+    assert row is not None and row["original_url"] == "https://img.example.test/reg3.jpg"
+    assert flushes == [10]
+    assert c.execute("SELECT COUNT(*) FROM image_cache WHERE original_url LIKE '%reg%'").fetchone()[0] == 10
+    # a repeat registration within the minute is coalesced, no pending entry
+    cache.cache_url_for("https://img.example.test/reg3.jpg")
+    assert cache._pending_registrations == {}

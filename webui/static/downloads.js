@@ -1,3 +1,32 @@
+// Shared lifecycle for every download-missing modal, including re-opened active jobs.
+function installDownloadModalScrollLock() {
+    const selector = '.download-missing-modal';
+    const sync = () => {
+        const open = [...document.querySelectorAll(selector)].some(modal =>
+            !modal.hidden && getComputedStyle(modal).display !== 'none');
+        document.documentElement.classList.toggle('download-modal-open', open);
+    };
+    const containsModal = node => node.nodeType === 1 &&
+        (node.matches(selector) || node.querySelector(selector));
+    const observer = new MutationObserver(records => {
+        if (records.some(record => record.type === 'attributes'
+            ? record.target.matches(selector)
+            : [...record.addedNodes, ...record.removedNodes].some(containsModal))) sync();
+    });
+    observer.observe(document.body, {childList: true, subtree: true, attributes: true,
+                                    attributeFilter: ['style', 'class', 'hidden']});
+    sync();
+    return () => {
+        observer.disconnect();
+        document.documentElement.classList.remove('download-modal-open');
+    };
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', installDownloadModalScrollLock, {once: true});
+} else {
+    installDownloadModalScrollLock();
+}
+
 // WING IT — Download without metadata discovery
 // ==================================================================================
 
@@ -426,8 +455,12 @@ async function _wingItFromModal(urlHash) {
     wingItDownload(tracks, name, source);
 }
 
-async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks, artist = null, album = null) {
-    showLoadingOverlay('Loading YouTube playlist...');
+// `sourceLabel` is the explicit answer to "who made this playlist". the name of
+// this function is a fossil - it serves every virtual playlist on the page - and
+// the prefix sniffing below is a guess that DEFAULTS to YouTube. callers that know
+// (a SoulSync station, a generated mix) pass the label and stop the guessing.
+async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks, artist = null, album = null, sourceLabel = null) {
+    showLoadingOverlay('Loading playlist...');
     // Check if a process is already active for this virtual playlist
     if (activeDownloadProcesses[virtualPlaylistId]) {
         console.log(`Modal for ${virtualPlaylistId} already exists. Showing it.`);
@@ -478,7 +511,9 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     };
 
     // Generate hero section with dynamic source detection
-    const source = virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
+    const source = sourceLabel ? sourceLabel :
+        /^(daily_mix_|release_radar|discovery_weekly|popular_picks|hidden_gems|listening_mix|discovery_shuffle|station_)/.test(virtualPlaylistId) ? 'SoulSync' :
+        virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
         virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
             virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
                 virtualPlaylistId.startsWith('spotify_public_') ? 'Spotify' :
@@ -6512,7 +6547,16 @@ async function _gsLibraryCheck() {
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
-    return div.innerHTML;
+    // textContent/innerHTML escapes & < > but NOT a double quote, because a
+    // text node does not need one. Almost every caller interpolates the
+    // result into a double-quoted ATTRIBUTE, where a raw quote closes the
+    // attribute early: a track called 'Crazy (12" mix)' reached MusicBrainz
+    // as 'Crazy (12' with everything after it dropped (#1230).
+    //
+    // Safe in both places: the output is always inserted via innerHTML, so
+    // &quot; renders as a plain quote in text and parses correctly in an
+    // attribute.
+    return div.innerHTML.replace(/"/g, '&quot;');
 }
 
 /**

@@ -1013,9 +1013,14 @@ def get_album_art_options(album_id):
 
 def _derive_album_folder(db, album_id):
     """The album's folder on disk, from the first resolvable track path (Docker-safe). None if no
-    track file can be located (e.g. paths aren't mapped in this container)."""
+    track file can be located (e.g. paths aren't mapped in this container).
+
+    the id stays a string: jellyfin and navidrome album ids are text, and the
+    old ``int(album_id)`` raised for every one of them, was swallowed, and
+    quietly meant cover.jpg was never written for those servers (#1069 again,
+    album edition)."""
     try:
-        tracks = db.get_tracks_by_album(int(album_id))
+        tracks = db.get_tracks_by_album(str(album_id))
     except Exception:
         return None
     for tr in (tracks or []):
@@ -1028,13 +1033,22 @@ def _derive_album_folder(db, album_id):
     return None
 
 
-def _overwrite_cover_jpg(url, folder):
-    """Download ``url`` and OVERWRITE cover.jpg in ``folder`` (the picker is *replacing* art, so the
-    existing-file guard in download_cover_art doesn't apply). Returns True on success."""
+def _download_art(url):
+    """the chosen image's bytes, or None when the download fails. best-effort on
+    purpose: hotlink-protected art still renders in the browser."""
     import urllib.request  # not bound at module level (only urllib.parse is); matches the local-import pattern used elsewhere
-    req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0", "Accept": "image/*"})
-    with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
-        data = resp.read()
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0", "Accept": "image/*"})
+        with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
+            return resp.read() or None
+    except Exception as exc:
+        logger.warning("[set-art] image download failed: %s", exc)
+        return None
+
+
+def _write_cover_jpg(data, folder):
+    """OVERWRITE cover.jpg in ``folder`` (the picker is *replacing* art, so the existing-file guard
+    in download_cover_art doesn't apply). Returns True on success."""
     if not data:
         return False
     with open(os.path.join(folder, "cover.jpg"), "wb") as handle:
@@ -1042,28 +1056,111 @@ def _overwrite_cover_jpg(url, folder):
     return True
 
 
+def _album_server_id(album_id, server_source):
+    """The active server's own id for a catalogue album, or None.
+
+    Upstream can pass the row id straight to the client, because there the
+    album row IS the server's item ("the row id IS the rating key"). Here the
+    row is a lib2 album and the server's id is held beside it in
+    lib2_media_server_mappings, with server_source/server_id on the row as the
+    compatibility projection — the same two places get_all_album_ids_for_server
+    reads. Without this the poster push looked up a lib2 integer on the server,
+    found nothing, and reported server_updated: false forever.
+    """
+    if not server_source:
+        return None
+    try:
+        db = get_database()
+        with db._get_connection() as conn:
+            row = conn.execute(
+                "SELECT COALESCE("
+                "  (SELECT m.server_id FROM lib2_media_server_mappings m"
+                "    WHERE m.entity_type='album' AND m.entity_id=a.id"
+                "      AND m.server_source=? LIMIT 1),"
+                "  CASE WHEN a.server_source=? THEN a.server_id END)"
+                " FROM lib2_albums a WHERE a.id=?",
+                (str(server_source), str(server_source), album_id)).fetchone()
+        return str(row[0]) if row and row[0] else None
+    except Exception as exc:
+        logger.debug("[set-art] server id lookup failed for album %s: %s", album_id, exc)
+        return None
+
+
+def _server_album(client, album_id, server_source=None):
+    """the media server's own album object for a library row, or None.
+
+    jellyfin: the item id. plex: the rating key. navidrome's poster update is a
+    documented no-op, so nothing is fetched for it.
+    """
+    if client is None:
+        return None
+    server_id = _album_server_id(album_id, server_source)
+    if not server_id:
+        return None
+    try:
+        if hasattr(client, 'get_album_by_id'):                      # Jellyfin / Navidrome
+            return client.get_album_by_id(server_id)
+        server = getattr(client, 'server', None)                    # Plex
+        if server is not None and hasattr(server, 'fetchItem'):
+            return server.fetchItem(f'/library/metadata/{server_id}')
+    except Exception as exc:
+        logger.debug("[set-art] server album lookup failed for %s: %s", album_id, exc)
+    return None
+
+
+def _push_album_poster(album_id, image_bytes):
+    """upload the chosen cover to the active media server, like the artist
+    path does. False when there is nothing to push to or the push fails."""
+    if not image_bytes or not media_server_engine:
+        return False
+    try:
+        active = config_manager.get_active_media_server()
+        client = media_server_engine.client(active)
+        if not client or not hasattr(client, 'update_album_poster'):
+            return False
+        server_album = _server_album(client, album_id, active)
+        if server_album is None:
+            return False
+        return bool(client.update_album_poster(server_album, image_bytes))
+    except Exception as exc:
+        logger.warning("[set-art] server poster update failed for album %s: %s", album_id, exc)
+        return False
+
+
 @bp.route('/api/album/<album_id>/art', methods=['POST'])
 def set_album_art(album_id):
-    """Apply a cover chosen in the picker: set the album's DB art URL and overwrite cover.jpg in the
-    album folder. This also sets ``albums.art_locked``, which is what makes the choice stick — the
-    old "non-empty thumb_url pins it" reasoning only held against enrichment workers, and a library
-    sync happily wrote the server's cover back over it. Body: ``{"url": "<image url>"}``."""
+    """Apply a cover chosen in the picker, the same three places the artist twin writes to:
+
+    1. the album's DB art URL, LOCKED — ``albums.art_locked`` is what makes the choice stick. the
+       old "non-empty thumb_url pins it" reasoning only held against enrichment workers, and a
+       library sync happily wrote the server's cover back over it;
+    2. the active media server's poster (plex/jellyfin have apis; navidrome's is a no-op and
+       reads cover.jpg instead);
+    3. cover.jpg in the album folder.
+
+    2 and 3 are best-effort and reported back so the UI can say what happened. a pasted url that
+    turns out to be an html page aborts before anything is pinned. Body: ``{"url": "<image url>"}``."""
     try:
         data = request.get_json(silent=True) or {}
         url = (data.get('url') or '').strip()
         if not url:
             return jsonify({"error": "url is required"}), 400
 
+        image_bytes = _download_art(url)
+        if image_bytes is not None and not _looks_like_image(image_bytes):
+            return jsonify({"error": "That URL doesn't point to an image"}), 400
+
         db = get_database()
         if not db.set_album_thumb_url(album_id, url):
             return jsonify({"error": "Album not found"}), 404
 
-        # Invalidate the cached options for this album's art so a re-open reflects the change.
+        server_updated = _push_album_poster(album_id, image_bytes)
+
         cover_written = False
         folder = _derive_album_folder(db, album_id)
         if folder:
             try:
-                cover_written = _overwrite_cover_jpg(url, folder)
+                cover_written = _write_cover_jpg(image_bytes, folder)
                 logger.info("[set-art] album %s cover.jpg -> %s", album_id, folder)
             except Exception as exc:
                 logger.warning("[set-art] cover.jpg write failed for album %s: %s", album_id, exc)
@@ -1071,7 +1168,7 @@ def set_album_art(album_id):
             logger.info("[set-art] no on-disk folder for album %s — DB art updated only", album_id)
 
         return jsonify({"success": True, "album_id": album_id, "thumb_url": url,
-                        "cover_written": cover_written})
+                        "server_updated": server_updated, "cover_written": cover_written})
     except Exception as e:
         logger.error("[set-art] failed for album %s: %s", album_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -1974,9 +2071,6 @@ def check_artist_discography_completion_stream(artist_id):
                 source_override=source_override,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
-                if event.get('type') in ('album_completion', 'single_completion'):
-                    # Small delay to make the streaming effect visible
-                    time.sleep(0.1)  # 100ms delay between items
         except Exception as e:
             logger.error(f"Error in streaming completion check: {e}")
             import traceback

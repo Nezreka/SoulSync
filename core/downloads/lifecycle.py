@@ -399,6 +399,30 @@ class LifecycleDeps:
 
 
 # ---------------------------------------------------------------------------
+# is_music_batch helper
+# ---------------------------------------------------------------------------
+
+def is_music_batch(batch_id: str, batch: Optional[dict] = None) -> bool:
+    """Determine if a batch belongs to the music download pipeline.
+
+    Batches that manage their own lifecycle (such as podcast downloads)
+    must not be picked up by music download workers, batch healers,
+    or the music wishlist failure processor.
+    """
+    if batch_id == "podcasts":
+        return False
+    if batch is None:
+        batch = download_batches.get(batch_id, {})
+    if not isinstance(batch, dict):
+        return True
+    if batch.get("is_music") is False or batch.get("managed_externally") is True:
+        return False
+    if batch.get("source_page") == "Podcasts" or batch.get("batch_type") == "podcast":
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # start_next_batch_of_downloads
 # ---------------------------------------------------------------------------
 
@@ -419,6 +443,10 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
                 return
 
             batch = download_batches[batch_id]
+            if not is_music_batch(batch_id, batch):
+                logger.info(f"[Batch Manager] Skipping worker dispatch for non-music batch {batch_id}")
+                return
+
             max_concurrent = batch['max_concurrent']
             queue = batch['queue']
             queue_index = batch['queue_index']
@@ -459,7 +487,9 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
             while active_count < max_concurrent and queue_index < len(queue):
                 if global_max is not None:
                     total_active = sum(
-                        b.get('active_count', 0) for b in download_batches.values()
+                        b.get('active_count', 0)
+                        for bid, b in download_batches.items()
+                        if is_music_batch(bid, b)
                     )
                     if total_active >= global_max:
                         logger.info(
@@ -567,6 +597,8 @@ def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
             for other_id, other in download_batches.items():
                 if other_id == finished_batch_id:
                     continue
+                if not is_music_batch(other_id, other):
+                    continue
                 if other.get('phase') in ('complete', 'error', 'cancelled', 'failed'):
                     continue
                 if other.get('queue_index', 0) < len(other.get('queue', [])):
@@ -591,13 +623,41 @@ def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
     for other_id in waiting:
         if global_max is not None:
             with tasks_lock:
-                total_active = sum(b.get('active_count', 0) for b in download_batches.values())
+                total_active = sum(
+                    b.get('active_count', 0)
+                    for bid, b in download_batches.items()
+                    if is_music_batch(bid, b)
+                )
             if total_active >= global_max:
                 break
         try:
             start_next_batch_of_downloads(other_id, deps)
         except Exception as wake_error:  # noqa: BLE001
             logger.error(f"[Batch Manager] Error waking batch {other_id}: {wake_error}")
+
+
+def _adopt_loose_tracks(cons_files, tag: str, album_context=None) -> None:
+    """the non-album-batch half of the consistency pass. file i/o only, no
+    network, non-fatal: a failure here must never hold up batch completion.
+
+    a pinned edition wins, same as the album path: the per-track tagger
+    already wrote the release the user chose, and the siblings may predate
+    the pin. adopting from them would undo the choice."""
+    try:
+        from core.album_consistency import adopt_sibling_tags_for_loose_tracks
+        from core.metadata.common import get_file_lock
+        from core.metadata.musicbrainz_tags import selected_release_id
+        if selected_release_id(album_context):
+            logger.info(f"{tag} Loose track(s) keep the pinned release; not adopting folder tags")
+            return
+        outcome = adopt_sibling_tags_for_loose_tracks(cons_files, file_lock_fn=get_file_lock)
+        if outcome.get('written'):
+            logger.info(f"{tag} {outcome['written']}/{outcome['total_files']} loose track(s) "
+                        f"adopted the album tags already on disk")
+        elif outcome.get('gated'):
+            logger.info(f"{tag} {outcome['gated']} loose track(s) left alone: album tag differs from the folder's")
+    except Exception as cons_err:
+        logger.error(f"{tag} Loose-track adoption failed (non-fatal): {cons_err}")
 
 
 def on_download_completed(batch_id: str, task_id: str, success: bool, deps: LifecycleDeps) -> None:
@@ -939,6 +999,7 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                             _cons_mb_svc = deps.mb_worker.mb_service if deps.mb_worker else None
                             if _cons_mb_svc and deps.config_manager.get('musicbrainz.embed_tags', True):
                                 from core.album_consistency import run_album_consistency
+                                from core.metadata.musicbrainz_tags import selected_release_id
                                 from core.metadata.common import get_file_lock
                                 _cons_result = run_album_consistency(
                                     file_infos=_cons_files,
@@ -946,6 +1007,7 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                                     artist_name=_cons_artist_name,
                                     mb_service=_cons_mb_svc,
                                     total_discs=_cons_album.get('total_discs', 1),
+                                    release_mbid=selected_release_id(_cons_album),
                                     file_lock_fn=get_file_lock,
                                 )
                                 if _cons_result.get('success'):
@@ -955,17 +1017,26 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                                     logger.error(f"[Album Consistency] Skipped: {_cons_result['error']}")
                         except Exception as cons_err:
                             logger.error(f"[Album Consistency] Failed (non-fatal): {cons_err}")
+                elif _cons_files:
+                    # not an album batch (a search pick, a wishlist track, the one
+                    # missing song): the file still has to join whatever album is
+                    # already in its folder, or navidrome shows two albums
+                    _adopt_loose_tracks(_cons_files, "[Album Consistency]", batch.get('album_context'))
 
                 # Mark that wishlist processing is starting (prevents premature cleanup)
-                batch['wishlist_processing_started'] = True
+                if is_music_batch(batch_id, batch):
+                    batch['wishlist_processing_started'] = True
 
-                # Process wishlist outside of the lock to prevent threading issues
-                if is_auto_batch:
-                    # For auto-initiated batches, handle completion and schedule next cycle
-                    deps.submit_failed_to_wishlist_with_auto_completion(batch_id)
+                    # Process wishlist outside of the lock to prevent threading issues
+                    if is_auto_batch:
+                        # For auto-initiated batches, handle completion and schedule next cycle
+                        deps.submit_failed_to_wishlist_with_auto_completion(batch_id)
+                    else:
+                        # For manual batches, use standard wishlist processing
+                        deps.submit_failed_to_wishlist(batch_id)
                 else:
-                    # For manual batches, use standard wishlist processing
-                    deps.submit_failed_to_wishlist(batch_id)
+                    logger.info(f"[Batch Manager] Skipping wishlist processing for non-music batch {batch_id}")
+                    batch['wishlist_processing_complete'] = True
             else:
                 logger.warning(f"[Batch Manager] Batch {batch_id} already marked complete - skipping duplicate processing")
 
@@ -1155,6 +1226,7 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                             _cons_mb_svc = deps.mb_worker.mb_service if deps.mb_worker else None
                             if _cons_mb_svc and deps.config_manager.get('musicbrainz.embed_tags', True):
                                 from core.album_consistency import run_album_consistency
+                                from core.metadata.musicbrainz_tags import selected_release_id
                                 from core.metadata.common import get_file_lock
                                 _cons_result = run_album_consistency(
                                     file_infos=_cons_files,
@@ -1162,6 +1234,7 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                                     artist_name=_cons_artist_name,
                                     mb_service=_cons_mb_svc,
                                     total_discs=_cons_album.get('total_discs', 1),
+                                    release_mbid=selected_release_id(_cons_album),
                                     file_lock_fn=get_file_lock,
                                 )
                                 if _cons_result.get('success'):
@@ -1171,6 +1244,8 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                                     logger.error(f"[Album Consistency V2] Skipped: {_cons_result['error']}")
                         except Exception as cons_err:
                             logger.error(f"[Album Consistency V2] Failed (non-fatal): {cons_err}")
+                elif _cons_files:
+                    _adopt_loose_tracks(_cons_files, "[Album Consistency V2]", batch.get('album_context'))
 
         # Process wishlist outside of the lock to prevent threading issues
         if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
@@ -1178,12 +1253,16 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
             # to match original v2 behavior. The non-v2 path (on_download_completed)
             # uses the async submit_* deps; v2 calls directly because v2 itself runs
             # from a context where blocking is acceptable.
-            if is_auto_batch:
-                logger.info("[Completion Check V2] Processing auto-initiated batch completion")
-                deps.process_failed_to_wishlist_with_auto_completion(batch_id)
+            if is_music_batch(batch_id, batch):
+                if is_auto_batch:
+                    logger.info("[Completion Check V2] Processing auto-initiated batch completion")
+                    deps.process_failed_to_wishlist_with_auto_completion(batch_id)
+                else:
+                    logger.info("[Completion Check V2] Processing regular batch completion")
+                    deps.process_failed_to_wishlist(batch_id)
             else:
-                logger.info("[Completion Check V2] Processing regular batch completion")
-                deps.process_failed_to_wishlist(batch_id)
+                logger.info(f"[Completion Check V2] Skipping wishlist processing for non-music batch {batch_id}")
+                batch['wishlist_processing_complete'] = True
 
             return True  # Batch was completed
         else:

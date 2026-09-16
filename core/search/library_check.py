@@ -13,12 +13,23 @@ completes.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from core.wishlist.presence import load_wishlist_keys as _load_wishlist_keys_shared
 from core.wishlist.presence import presence_key as _presence_key
 
 logger = logging.getLogger(__name__)
+
+# Only explicit featured-artist credits are safe to split without artist IDs.
+# Commas and ampersands also occur inside indivisible band names.
+_ARTIST_SPLIT_RE = re.compile(r'\s+\b(?:feat|ft|featuring)\b\.?\s*', re.IGNORECASE)
+
+
+def _first_artist(name: str) -> str:
+    """Return the primary credit when an explicit featured artist is present."""
+    parts = _ARTIST_SPLIT_RE.split(name or '')
+    return parts[0].strip() if parts else (name or '').strip()
 
 
 # Ownership is asked of Library v2 (docs §50.4.4.14). Three things the port had
@@ -107,8 +118,18 @@ _OWNED_TRACKS_SQL = f"""
 
 
 def _primary_artist(raw: str) -> str:
-    """A search result credits every artist; ownership is keyed on the first."""
-    return str(raw or '').split(',')[0]
+    """The credit an ownership key is built from.
+
+    It used to be ``raw.split(',')[0]`` -- a search result credits every artist,
+    so key it on the first. That claims ownership on evidence that is not there:
+    a result credited "Pink Floyd, Roger Waters" became "Pink Floyd" and matched
+    a Pink Floyd release we own, and "Earth, Wind & Fire" matched a library
+    "Earth" (upstream dfaff5a0a / 3684689b1). The catalogue side already emits
+    every credit it holds as its own key (INT-03 below), so the query side does
+    not need to guess one -- only the explicit featured-artist form is split
+    off, by _first_artist, where the credit says so in words.
+    """
+    return str(raw or '').strip()
 
 
 def _resolve_plex_thumb(thumb: str, plex_base: str, plex_token: str) -> str:
@@ -156,11 +177,22 @@ def check_library_presence(
     - `tracks` returns one dict per input row. Matched rows get the full
       track metadata + resolved thumb URL; unmatched rows get
       `{in_library: False, in_wishlist: bool}`.
+
+    Ownership is read in one pass per call: two queries build the owned-album
+    and owned-track key sets, and every result row is then a dict lookup.
+
+    Upstream's 72749f414 replaced its own version of this with a per-artist
+    lookup cached by artist id, because its `tracks`/`albums` read really was
+    the whole library per search. That shape needs `artists.name_key` and an
+    `artists` table, both of which this branch replaced; the lib2 read here is
+    bounded by owned files rather than by catalogue rows, and the credit
+    fan-out above (INT-03) is what makes a single pass answer correctly for
+    compilations. What was taken from upstream is the featured-artist fallback
+    on the query side.
     """
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
-
         cursor.execute(_OWNED_ALBUMS_SQL)
         owned_albums = {_presence_key(r[0], r[1]) for r in cursor.fetchall()}
 
@@ -187,18 +219,35 @@ def check_library_presence(
 
         wishlist_keys = _load_wishlist_keys(cursor, profile_id)
 
+        # --- Match albums ----------------------------------------------------
         album_results: list[bool] = []
         for a in albums:
-            key = _presence_key(a.get('name', ''), _primary_artist(a.get('artist', '')))
-            album_results.append(key in owned_albums)
+            q_artist = _primary_artist(a.get('artist', ''))
+            # The full credit first, then the credit with an explicit featured
+            # artist dropped: upstream dfaff5a0a found that a result credited
+            # "A feat. B" never matched a catalogue row filed under "A".
+            keys_to_try = {_presence_key(a.get('name', ''), q_artist)}
+            first_q = _first_artist(q_artist)
+            if first_q and first_q != q_artist:
+                keys_to_try.add(_presence_key(a.get('name', ''), first_q))
+            album_results.append(bool(keys_to_try & owned_albums))
 
         plex_base, plex_token = _resolve_plex_credentials(plex_client, config_manager)
 
+        # --- Match tracks ----------------------------------------------------
         track_results: list[dict] = []
         for t in tracks:
-            key = _presence_key(t.get('name', ''), _primary_artist(t.get('artist', '')))
-            in_wishlist = key in wishlist_keys
-            match = owned_tracks.get(key)
+            t_artist = _primary_artist(t.get('artist', ''))
+            keys_to_try = [_presence_key(t.get('name', ''), t_artist)]
+            first_t = _first_artist(t_artist)
+            if first_t and first_t != t_artist:
+                keys_to_try.append(_presence_key(t.get('name', ''), first_t))
+            in_wishlist = any(k in wishlist_keys for k in keys_to_try)
+            match = None
+            for k in keys_to_try:
+                match = owned_tracks.get(k)
+                if match:
+                    break
             if match:
                 thumb = match.get('album_thumb_url') or ''
                 match['album_thumb_url'] = _resolve_plex_thumb(thumb, plex_base, plex_token)

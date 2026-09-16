@@ -133,7 +133,9 @@ def review_queue_summary():
         from database.music_database import MusicDatabase
 
         quarantined = count_quarantine_entries(_get_quarantine_dir())
-        unverified = MusicDatabase().count_library_history_unverified()
+        # what the Downloads page shows, so the badge and the list agree
+        unverified = MusicDatabase().count_library_history_unverified(
+            exclude_download_sources=('acoustid_scan',))
         return jsonify({
             "success": True,
             "quarantine": quarantined,

@@ -43,16 +43,23 @@ export function fetchEnhancedSearch(
  * cumulative list. A partial trailing line is held back until its newline
  * arrives — splitting mid-object and JSON.parsing the fragment is the obvious
  * way to break this.
+ *
+ * `limit` is how many videos yt-dlp is asked for; the server clamps it and
+ * falls back to its default when it is omitted, so the search page keeps
+ * sending nothing.
  */
 export async function streamVideoSearch(
   query: string,
   onChunk: (videos: SearchVideo[]) => void,
   signal?: AbortSignal,
+  options: { limit?: number } = {},
 ): Promise<SearchVideo[]> {
+  const body: { query: string; limit?: number } = { query };
+  if (Number.isFinite(options.limit)) body.limit = options.limit;
   const response = await fetch('/api/enhanced-search/source/youtube_videos', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify(body),
     signal,
   });
   if (!response.ok || !response.body) return [];

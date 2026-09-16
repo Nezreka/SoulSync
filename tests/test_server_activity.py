@@ -229,6 +229,77 @@ def test_get_history_no_server(monkeypatch):
     assert get_history()["ok"] is False
 
 
+def test_plex_server_negative_cache_prevents_repeated_connect_attempts(monkeypatch):
+    import core.server_activity as sa
+    sa.invalidate_plex_server_cache()
+
+    monkeypatch.setattr(sa, "_plex_config", lambda db=None: {"base_url": "http://192.0.2.1:32400", "token": "abcdef123456"})
+    connect_attempts = 0
+
+    def fake_plex_init(*args, **kwargs):
+        nonlocal connect_attempts
+        connect_attempts += 1
+        raise ConnectionError("Host unreachable")
+
+    import plexapi.server
+    monkeypatch.setattr(plexapi.server, "PlexServer", fake_plex_init)
+
+    # First attempt: connection fails, recorded in cache
+    res1 = sa._plex_server()
+    assert res1 is None
+    assert connect_attempts == 1
+
+    # Second attempt within 60s: hits negative cache immediately without calling PlexServer
+    res2 = sa._plex_server()
+    assert res2 is None
+    assert connect_attempts == 1
+
+    # Third attempt after 60s TTL expires: reconnects
+    original_at = sa._server_cache["at"]
+    sa._server_cache["at"] = original_at - 61.0
+    res3 = sa._plex_server()
+    assert res3 is None
+    assert connect_attempts == 2
+
+    # Credential change bypasses negative cache immediately
+    monkeypatch.setattr(sa, "_plex_config", lambda db=None: {"base_url": "http://192.0.2.2:32400", "token": "abcdef123456"})
+    res4 = sa._plex_server()
+    assert res4 is None
+    assert connect_attempts == 3
+
+    # Cleanup
+    sa.invalidate_plex_server_cache()
+
+
+def test_get_activity_sessions_failure_marks_server_unreachable(monkeypatch):
+    import core.server_activity as sa
+    sa.invalidate_plex_server_cache()
+
+    class _FailingPlex:
+        def sessions(self):
+            raise ConnectionError("Plex crashed")
+
+    monkeypatch.setattr(sa, "_plex_config", lambda db=None: {"base_url": "http://192.0.2.1:32400", "token": "abcdef123456"})
+
+    import plexapi.server
+    monkeypatch.setattr(plexapi.server, "PlexServer", lambda *a, **kw: _FailingPlex())
+
+    # Initial connect succeeds
+    srv = sa._plex_server()
+    assert srv is not None
+
+    # Calling get_activity encounters sessions() failure
+    act = sa.get_activity()
+    assert act["ok"] is False
+    assert act["reason"] == "unreachable"
+
+    # Subsequent _plex_server call should now return None immediately from cache
+    assert sa._plex_server() is None
+
+    # Cleanup
+    sa.invalidate_plex_server_cache()
+
+
 # ── stream termination ───────────────────────────────────────────────────────
 def test_stop_session_calls_stop_with_message(monkeypatch):
     import core.server_activity as sa

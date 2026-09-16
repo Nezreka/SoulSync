@@ -25,7 +25,9 @@ contract is shared.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait
+import threading
+import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
@@ -33,6 +35,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from utils.logging_config import get_logger
 
 logger = get_logger('metadata.multi_source_search')
+
+# Cap multi-source search to prevent slow or offline external metadata APIs
+# from monopolizing web-server worker threads.
+DEFAULT_SEARCH_TIMEOUT_SECONDS = 12.0
+# Timed-out calls can still be inside a provider. Reuse a bounded pool across
+# requests, and bound queued work too; never allocate another pool per timeout.
+_search_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="MetadataSearch")
+_search_slots = threading.BoundedSemaphore(24)
 
 
 @dataclass
@@ -118,7 +128,7 @@ def _build_source_query(source_name: str, query: TrackQuery, clean_title: str) -
 
 
 def _search_one_source(source_name: str, client: Any,
-                       query: TrackQuery, clean_title: str
+                       query: TrackQuery, clean_title: str, deadline: Optional[float] = None
                        ) -> Tuple[str, List[dict], List[Any]]:
     """Run one source's search with three-tier query fallback.
 
@@ -139,10 +149,12 @@ def _search_one_source(source_name: str, client: Any,
         title_q = clean_title
 
         logger.info(f"[MultiSourceSearch] Searching {source_name} for: {primary_q}")
+        if deadline is not None and time.monotonic() >= deadline:
+            return source_name, [], []
         track_objs = client.search_tracks(primary_q, limit=10)
-        if not track_objs and primary_q != plain_q:
+        if not track_objs and primary_q != plain_q and (deadline is None or time.monotonic() < deadline):
             track_objs = client.search_tracks(plain_q, limit=10)
-        if not track_objs and clean_title != plain_q:
+        if not track_objs and clean_title != plain_q and (deadline is None or time.monotonic() < deadline):
             track_objs = client.search_tracks(title_q, limit=10)
         logger.info(f"[MultiSourceSearch] {source_name} returned {len(track_objs)} results")
 
@@ -183,7 +195,8 @@ def _search_one_source(source_name: str, client: Any,
 def search_all_sources(query: TrackQuery,
                        sources: List[Tuple[str, Any]],
                        clean_title: Optional[str] = None,
-                       max_workers: int = 3) -> MultiSourceResult:
+                       max_workers: int = 3,
+                       timeout_seconds: Optional[float] = DEFAULT_SEARCH_TIMEOUT_SECONDS) -> MultiSourceResult:
     """Run a parallel metadata search across every source in ``sources``.
 
     Args:
@@ -197,10 +210,14 @@ def search_all_sources(query: TrackQuery,
         clean_title: Optional pre-cleaned track title (e.g. with
             "(Remastered)" / "(Single Version)" suffixes stripped).
             Defaults to ``query.title`` if not supplied.
-        max_workers: ThreadPoolExecutor pool size. Default 3 matches
+        max_workers: Per-request concurrency in the shared bounded pool. Default 3 matches
             the redownload endpoint's pre-extraction default — bumping
             higher rate-limits on slower sources without speeding up
             the slowest source's response.
+        timeout_seconds: Maximum seconds to wait for all sources before
+            returning completed results (default 12.0s). Prevents slow or
+            failing external metadata providers from holding the HTTP
+            worker indefinitely.
 
     Returns:
         MultiSourceResult with per-source results + cross-source best match.
@@ -213,15 +230,56 @@ def search_all_sources(query: TrackQuery,
 
     metadata_results: Dict[str, List[dict]] = {}
     raw_tracks: Dict[str, List[Any]] = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {
-            pool.submit(_search_one_source, name, client, query, clean_title): name
-            for name, client in sources
-        }
-        for future in as_completed(futures):
-            source_name, results, raws = future.result()
-            metadata_results[source_name] = results
-            raw_tracks[source_name] = raws
+    if max_workers < 1:
+        raise ValueError('max_workers must be positive')
+    deadline = None if timeout_seconds is None else time.monotonic() + max(0, timeout_seconds)
+    remaining_sources = iter(sources)
+    futures = {}
+    try:
+        exhausted = False
+        while True:
+            while not exhausted and len(futures) < max_workers:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                try:
+                    name, client = next(remaining_sources)
+                except StopIteration:
+                    exhausted = True
+                    break
+                if not _search_slots.acquire(blocking=False):
+                    continue  # Saturated by slow requests; do not grow a queue.
+                try:
+                    future = _search_pool.submit(_search_one_source, name, client, query, clean_title, deadline)
+                except Exception:
+                    _search_slots.release()
+                    raise
+                future.add_done_callback(lambda _f: _search_slots.release())
+                futures[future] = name
+            if not futures:
+                break
+            remaining = None if deadline is None else max(0, deadline - time.monotonic())
+            done, _ = wait(futures, timeout=remaining, return_when=FIRST_COMPLETED)
+            if not done:
+                break
+            for future in done:
+                futures.pop(future)
+                source_name, results, raws = future.result()
+                metadata_results[source_name] = results
+                raw_tracks[source_name] = raws
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+    finally:
+        for future in futures:
+            future.cancel()  # Running providers retain their slot until they finish.
+    omitted = [name for name, _ in sources if name not in metadata_results]
+    if omitted:
+        logger.warning("[MultiSourceSearch] Deadline or capacity reached; omitted sources: %s", omitted)
+
+    # Ensure all requested sources exist in result dicts, even if timed out
+    for name, _ in sources:
+        if name not in metadata_results:
+            metadata_results[name] = []
+            raw_tracks[name] = []
 
     best_match: Optional[dict] = None
     for source, results in metadata_results.items():

@@ -107,7 +107,7 @@ FINDING_TYPE_META = {
     'acoustid_mismatch':        {'label': 'AcoustID Mismatch', 'verb': 'Re-tag'},
     'quality_upgrade':          {'label': 'Quality Upgrades', 'verb': 'Upgrade'},
     'missing_discography_track':{'label': 'Missing Discography', 'verb': 'Add to Wishlist'},
-    'library_retag':            {'label': 'Library Retag', 'verb': 'Apply Tags'},
+    'library_retag':            {'label': 'Library Re-tag', 'verb': 'Apply Tags'},
     'short_preview_track':      {'label': 'Preview Clips', 'verb': 'Re-download'},
     'corrupt_audio':            {'label': 'Corrupt Audio', 'verb': 'Re-download'},
     'canonical_version':        {'label': 'Canonical Version', 'verb': 'Pin Version'},
@@ -1207,7 +1207,15 @@ class RepairWorker:
             should_stop=lambda: self.should_stop or self._cancel_current_job.is_set(),
             stop_event=self._stop_event,
             is_paused=(lambda: False) if forced else (lambda: not self.enabled),
-            update_progress=self._update_progress,
+            # update_progress feeds the Tools page; report_progress feeds
+            # the notification centre's card. They were two separate calls a
+            # job had to remember to make BOTH of, and three jobs only ever
+            # made the first — so Library Re-tag showed a live count on one
+            # screen and a bar frozen at 0% on the other (#1231). Reporting
+            # one now feeds the other, so a job cannot tell them different
+            # stories and a new job gets a working bar for free.
+            update_progress=lambda scanned, total: self._update_progress(
+                scanned, total, report=_report_progress),
             report_progress=_report_progress,
             report_change=_report_change,
         )
@@ -1376,14 +1384,26 @@ class RepairWorker:
                             f" (scope: {scope})" if scope else "")
         return True
 
-    def _update_progress(self, scanned: int, total: int):
-        """Callback for jobs to report progress."""
+    def _update_progress(self, scanned: int, total: int, report=None):
+        """Callback for jobs to report progress.
+
+        ``report`` is the same job's rich callback. Forwarding here means a job
+        that calls update_progress in its loop gets the notification card moving
+        too, without having to remember a second call — which is exactly what
+        three jobs forgot (#1231).
+        """
         percent = round(scanned / total * 100) if total > 0 else 0
         self._current_progress = {
             'scanned': scanned,
             'total': total,
             'percent': percent,
         }
+        if report is not None:
+            try:
+                report(scanned=scanned, total=total)
+            except Exception as e:
+                # Progress reporting must never be able to fail a job.
+                logger.debug("progress forward failed: %s", e)
 
     # ------------------------------------------------------------------
     # Findings
@@ -4567,10 +4587,13 @@ class RepairWorker:
                 file_changed = False
                 for field, canonical in canonical_map.items():
                     current = _read_tag(audio, field)
-                    if current and current != canonical:
+                    # an empty tag is a mismatch too: navidrome keys on the
+                    # release id, so a file without one splits off exactly
+                    # like a file with the wrong one
+                    if (current or '') != canonical:
                         if _write_tag(audio, field, canonical):
                             file_changed = True
-                            changes.append(f'{field}: "{current}" → "{canonical}" in {os.path.basename(resolved)}')
+                            changes.append(f'{field}: "{current or "(missing)"}" → "{canonical}" in {os.path.basename(resolved)}')
 
                 if file_changed:
                     # Atomic + audio-integrity-verified save (#819/#1000): never

@@ -3039,8 +3039,10 @@ async function loadLibraryHistory() {
         // Update tab counts
         const dlCount = document.getElementById('history-download-count');
         const imCount = document.getElementById('history-import-count');
+        const pcCount = document.getElementById('history-podcast-count');
         if (dlCount) dlCount.textContent = data.stats?.downloads || 0;
         if (imCount) imCount.textContent = data.stats?.imports || 0;
+        if (pcCount) pcCount.textContent = data.stats?.podcasts || 0;
 
         // Source breakdown bar (downloads tab only)
         const sourceBar = document.getElementById('history-source-bar');
@@ -3048,7 +3050,7 @@ async function loadLibraryHistory() {
             const sc = data.stats?.source_counts || {};
             const srcEntries = Object.entries(sc).sort((a, b) => b[1] - a[1]);
             if (srcEntries.length > 0 && tab === 'download') {
-                const _srcColors = { Soulseek: '#4caf50', Tidal: '#000', YouTube: '#ff0000', Qobuz: '#4285f4', HiFi: '#00bcd4', Deezer: '#a238ff', Lidarr: '#5dade2', Amazon: '#ff9900', SoundCloud: '#ff7700', Torrent: '#5dade2', Usenet: '#a78bfa', Staging: '#888', 'Auto-Import': '#888' };
+                const _srcColors = { Soulseek: '#4caf50', Tidal: '#000', YouTube: '#ff0000', Qobuz: '#4285f4', HiFi: '#00bcd4', Deezer: '#a238ff', Lidarr: '#5dade2', Amazon: '#ff9900', SoundCloud: '#ff7700', Torrent: '#5dade2', Usenet: '#a78bfa', Staging: '#888', 'Auto-Import': '#888', Podcast: '#c084fc' };
                 sourceBar.innerHTML = srcEntries.map(([src, cnt]) =>
                     `<span class="history-source-chip" style="border-color:${_srcColors[src] || '#888'};color:${_srcColors[src] || '#888'}">${src}: ${cnt}</span>`
                 ).join('');
@@ -3059,10 +3061,12 @@ async function loadLibraryHistory() {
         }
 
         if (!data.entries || data.entries.length === 0) {
-            const emptyIcon = tab === 'download' ? '📥' : '📚';
+            const emptyIcon = tab === 'download' ? '📥' : (tab === 'podcast' ? '🎙️' : '📚');
             const emptyText = tab === 'download'
                 ? 'No downloads recorded yet. Completed downloads will appear here.'
-                : 'No server imports recorded yet. New tracks from library scans will appear here.';
+                : (tab === 'podcast'
+                    ? 'No podcast downloads recorded yet. Downloaded episodes will appear here.'
+                    : 'No server imports recorded yet. New tracks from library scans will appear here.');
             list.innerHTML = `<div class="library-history-empty">${emptyIcon}<br><br>${emptyText}</div>`;
             return;
         }
@@ -3081,10 +3085,11 @@ async function loadLibraryHistory() {
 
 function renderHistoryEntry(entry) {
     // Server import thumb_urls are relative paths (e.g. /library/metadata/...) — use placeholder
+    const placeholderIcon = entry.event_type === 'download' ? '📥' : (entry.event_type === 'podcast' ? '🎙️' : '📚');
     const hasValidThumb = entry.thumb_url && (entry.thumb_url.startsWith('http://') || entry.thumb_url.startsWith('https://'));
     const thumb = hasValidThumb
-        ? `<img src="${escapeHtml(entry.thumb_url)}" class="library-history-thumb" loading="lazy" onerror="this.outerHTML='<div class=\\'library-history-thumb-placeholder\\'>${entry.event_type === 'download' ? '📥' : '📚'}</div>'">`
-        : `<div class="library-history-thumb-placeholder">${entry.event_type === 'download' ? '📥' : '📚'}</div>`;
+        ? `<img src="${escapeHtml(entry.thumb_url)}" class="library-history-thumb" loading="lazy" onerror="this.outerHTML='<div class=\\'library-history-thumb-placeholder\\'>${placeholderIcon}</div>'">`
+        : `<div class="library-history-thumb-placeholder">${placeholderIcon}</div>`;
 
     let badge = '';
     if (entry.event_type === 'download') {
@@ -3095,6 +3100,11 @@ function renderHistoryEntry(entry) {
             const cls = String(p || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
             return `<span class="library-history-badge download source-${escapeHtml(cls)}">${escapeHtml(p)}</span>`;
         }).join('');
+    } else if (entry.event_type === 'podcast') {
+        badge = `<span class="library-history-badge podcast">Podcast</span>`;
+        if (entry.quality) {
+            badge += ` <span class="library-history-badge download">${escapeHtml(entry.quality)}</span>`;
+        }
     } else if (entry.event_type === 'import' && entry.server_source) {
         const sourceName = { plex: 'Plex', jellyfin: 'Jellyfin', navidrome: 'Navidrome' }[entry.server_source] || entry.server_source;
         badge = `<span class="library-history-badge import">${escapeHtml(sourceName)}</span>`;
@@ -3135,6 +3145,20 @@ function renderHistoryEntry(entry) {
             if (entry.source_filename) fileParts.push(`<span class="lh-prov-label">File:</span> ${escapeHtml(entry.source_filename)}`);
             if (entry.source_track_id) fileParts.push(`<span class="lh-prov-label">${entry.source_filename ? '' : 'Source '}ID:</span> ${escapeHtml(entry.source_track_id)}`);
             lines.push(fileParts.join(` <span class="lh-prov-dim">·</span> `));
+        }
+        if (lines.length > 0) {
+            sourceDetail = `<div class="library-history-entry-source">${lines.join('<br>')}</div>`;
+        }
+    } else if (entry.event_type === 'podcast') {
+        const lines = [];
+        if (entry.title) {
+            lines.push(`<span class="lh-prov-label">Episode:</span> ${escapeHtml(entry.title)}`);
+        }
+        if (entry.artist_name || entry.album_name) {
+            lines.push(`<span class="lh-prov-label">Podcast:</span> ${escapeHtml(entry.artist_name || entry.album_name)}`);
+        }
+        if (entry.source_filename || entry.file_path) {
+            lines.push(`<span class="lh-prov-label">File:</span> ${escapeHtml(entry.source_filename || entry.file_path)}`);
         }
         if (lines.length > 0) {
             sourceDetail = `<div class="library-history-entry-source">${lines.join('<br>')}</div>`;

@@ -210,7 +210,7 @@ class ReleaseRejected(Exception):
 async def add_torrent_smart(
     adapter: "TorrentClientAdapter",
     url_or_magnet: str,
-    category: str = "soulsync",
+    category: Optional[str] = None,
     save_path: Optional[str] = None,
     fallback_magnet: Optional[str] = None,
     verify_files=None,

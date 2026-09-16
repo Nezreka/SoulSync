@@ -511,6 +511,15 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_albums ADD COLUMN canonical_resolved_at TIMESTAMP"),
     ("lib2_albums", "canonical_locked",
      "ALTER TABLE lib2_albums ADD COLUMN canonical_locked INTEGER"),
+    # The pinned release's track count, remembered after the first successful
+    # fetch (upstream 6bb73996d). A release's tracklist does not change, so the
+    # artist page's completion check reads it from here instead of resolving the
+    # pin against the metadata source on every visit -- with musicbrainz
+    # answering 503 that was 2 s + 4 s of retries per album on the request
+    # thread. set_album_canonical clears it on a re-pin, and a failed fetch is
+    # never remembered, so the next check tries again exactly as before.
+    ("lib2_albums", "canonical_track_count",
+     "ALTER TABLE lib2_albums ADD COLUMN canonical_track_count INTEGER"),
     # Deep-dive A7/C4: pipeline-result detail (AcoustID message, quality-gate
     # fallback) that the autolink import-callback now persists per file.
     ("lib2_track_files", "pipeline_result_json",

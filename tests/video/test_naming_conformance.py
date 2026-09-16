@@ -142,3 +142,16 @@ def test_surfaces_are_wired():
     assert "naming_mismatch: 'Rename'" in _REPAIR_JS
     assert "renamed: 'Renamed'" in _REPAIR_JS
     assert "function namingDetailHTML" in _REPAIR_JS
+
+
+def test_renaming_an_extra_library_keeps_the_file_on_its_drive(db, worker, tmp_path):
+    import json
+    root = tmp_path / "Movies2"
+    db.set_setting("movies_additional_paths", json.dumps([str(root)]))
+    _, old = _seed_movie_file(db, tmp_path, title="Ronin", year=1998, rel="Movies2/old.mkv")
+    worker._run_job("naming_conformance", forced=True)
+    finding = _pending(db)[0]
+    destination = Path(finding["details"]["expected_path"])
+    assert destination.is_relative_to(root)
+    assert worker.fix_finding(finding["id"])["success"]
+    assert destination.exists() and not old.exists()

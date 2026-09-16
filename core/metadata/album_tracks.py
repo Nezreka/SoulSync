@@ -318,7 +318,7 @@ def _build_album_info_typed(album_data: Dict[str, Any], album_id: str,
             if isinstance(first, dict):
                 ctx['image_url'] = first.get('url') or ctx.get('image_url')
 
-    for key in ('format', 'country', 'status', 'label', 'disambiguation', 'release_group_id'):
+    for key in ('format', 'country', 'status', 'label', 'disambiguation', 'release_group_id', 'musicbrainz_release_id'):
         value = album_data.get(key)
         if value:
             ctx[key] = value
@@ -404,7 +404,7 @@ def _build_album_info_legacy(album_data: Any, album_id: str,
         ),
         'total_tracks': _extract_lookup_value(album_data, 'total_tracks', 'track_count', default=0) or 0,
     }
-    for key in ('format', 'country', 'status', 'label', 'disambiguation', 'release_group_id'):
+    for key in ('format', 'country', 'status', 'label', 'disambiguation', 'release_group_id', 'musicbrainz_release_id'):
         value = _extract_lookup_value(album_data, key, default='')
         if value:
             album_info[key] = value

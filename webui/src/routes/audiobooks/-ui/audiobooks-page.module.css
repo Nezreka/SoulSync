@@ -1,0 +1,3078 @@
+/* Audiobooks — browse, search and detail.
+   Square covers, generous type, one accent. Audiobook art is square, unlike the
+   posters on the video side, so every cover slot here is 1:1 and the layout is
+   built around that instead of fighting it. */
+
+.audiobooksContainer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px 32px 100px;
+  box-sizing: border-box;
+  color: #ffffff;
+  position: relative;
+  font-family: inherit;
+  transition: padding-top 0.25s ease;
+}
+
+.audiobooksContainerWithPlayer {
+  padding-top: 104px;
+}
+
+.audiobooksContainer > * {
+  flex-shrink: 0;
+}
+
+.browsePage,
+.detailPage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  /* Flex items default to min-width:auto, which refuses to shrink below their
+     content — an overflowing strip then widens the column and runs off the page
+     instead of scrolling inside it. */
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* ── Shared bits ────────────────────────────────────────────────────────── */
+
+.coverFallback {
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.28), rgba(255, 255, 255, 0.04));
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+/* Shown ABOVE results that have already arrived, so the list stays readable
+   while the slower sources are still answering. The full-height loader is only
+   for an empty list. */
+.searchStrip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.66);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.emptyAction {
+  margin-top: 4px;
+  height: 38px;
+  padding: 0 20px;
+  border-radius: 11px;
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.18);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 620;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.emptyAction:hover:not(:disabled) {
+  background: rgba(var(--accent-rgb), 0.3);
+}
+
+.emptyAction:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.modalMessageLink {
+  margin-left: 10px;
+  color: rgba(var(--accent-rgb), 1);
+  font-weight: 620;
+  text-decoration: none;
+}
+
+.modalMessageLink:hover {
+  text-decoration: underline;
+}
+
+.emptyState {
+  padding: 56px 24px;
+  text-align: center;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.emptyState h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.emptyState p {
+  margin: 0 auto;
+  max-width: 460px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* ── Player bar ─────────────────────────────────────────────────────────── */
+
+.playerBar {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  width: min(880px, calc(100% - 64px));
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: rgba(18, 18, 22, 0.86);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+  animation: fadeUp 0.22s ease both;
+}
+
+.playerCover {
+  width: 46px;
+  height: 46px;
+  border-radius: 9px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.playerToggle,
+.playerClose {
+  display: grid;
+  place-items: center;
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.playerToggle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(var(--accent-rgb), 0.92);
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.playerToggle:hover {
+  transform: scale(1.06);
+}
+.playerToggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+.playerClose {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.playerClose:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+.playerClose svg {
+  width: 15px;
+  height: 15px;
+}
+
+.playerMeta {
+  min-width: 0;
+  flex: 0 1 260px;
+}
+
+.playerTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.playerLabel {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(var(--accent-rgb), 0.2);
+  color: rgba(var(--accent-rgb), 1);
+  flex-shrink: 0;
+}
+
+.playerTitle {
+  font-size: 13.5px;
+  font-weight: 620;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.playerSub {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.playerScrubWrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+.playerTime {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.45);
+  flex-shrink: 0;
+}
+
+.playerScrub {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+}
+
+.playerScrub::after {
+  /* Widen the hit area without making the bar itself thick. */
+  content: '';
+  position: absolute;
+  inset: -8px 0;
+}
+
+.playerScrubFill {
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(var(--accent-rgb), 1);
+}
+
+.playerError {
+  font-size: 11.5px;
+  color: #ff9b9b;
+  white-space: nowrap;
+}
+
+/* ── Search ─────────────────────────────────────────────────────────────── */
+
+.searchBar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.searchInputWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 420px;
+  padding: 0 8px 0 16px;
+  height: 48px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.searchBarFocused .searchInputWrap {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.13);
+}
+
+.searchIcon {
+  width: 18px;
+  height: 18px;
+  color: rgba(255, 255, 255, 0.4);
+  flex-shrink: 0;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 14.5px;
+  font-family: inherit;
+}
+
+.searchInput::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.searchClear {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+}
+
+.searchClear:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+.searchClear svg {
+  width: 13px;
+  height: 13px;
+}
+
+.searchSubmit {
+  height: 34px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(var(--accent-rgb), 0.95);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 640;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+
+.searchSubmit:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.searchSubmit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.searchModes {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.searchMode {
+  padding: 8px 15px;
+  border: none;
+  border-radius: 9px;
+  background: none;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12.5px;
+  font-weight: 580;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.searchMode:hover {
+  color: #fff;
+}
+
+.searchModeActive {
+  background: rgba(var(--accent-rgb), 0.9);
+  color: #fff;
+}
+
+.browseTopRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.browseTopRow > *:first-child {
+  flex: 1 1 480px;
+  min-width: 0;
+}
+
+.wishlistLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 48px;
+  padding: 0 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.wishlistLink:hover {
+  background: rgba(var(--accent-rgb), 0.16);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  color: #ffffff;
+}
+
+.wishlistLink svg {
+  width: 17px;
+  height: 17px;
+}
+
+.wishlistLinkCount {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.95);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Genre nav ──────────────────────────────────────────────────────────── */
+
+.genreNavWrap {
+  position: relative;
+  min-width: 0;
+  /* Bleed out to the page edge and pad back in by the same amount: the pills
+     still line up with the search bar above them, and the arrows live in the
+     container's own 32px gutter instead of sitting on top of the first and last
+     pill. */
+  margin-inline: -32px;
+  padding-inline: 32px;
+}
+
+/* Fade whichever edge still has pills behind it, so the strip reads as
+   scrollable rather than as a row that got clipped.
+
+   This masks the CONTENT rather than laying a coloured gradient over it. The
+   page shell is semi-transparent over the body gradient, so any solid fade
+   colour would read as a patch sitting on top of the page. */
+.fadeRight .genreNav {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 26px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 26px), transparent);
+}
+
+.fadeLeft .genreNav {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 26px);
+  mask-image: linear-gradient(90deg, transparent, #000 26px);
+}
+
+.fadeLeft.fadeRight .genreNav {
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent,
+    #000 26px,
+    #000 calc(100% - 26px),
+    transparent
+  );
+  mask-image: linear-gradient(90deg, transparent, #000 26px, #000 calc(100% - 26px), transparent);
+}
+
+.genreNav {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 4px;
+  min-width: 0;
+  max-width: 100%;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+}
+
+.genreNav::-webkit-scrollbar {
+  display: none;
+}
+
+.genreArrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(24, 24, 28, 0.92);
+  backdrop-filter: blur(10px);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.genreArrow[hidden] {
+  display: none;
+}
+.genreArrow:hover {
+  background: rgba(40, 40, 46, 0.96);
+}
+.genreArrow svg {
+  width: 15px;
+  height: 15px;
+}
+.genreArrowLeft {
+  left: 0;
+}
+.genreArrowRight {
+  right: 0;
+}
+
+.genrePill {
+  flex-shrink: 0;
+  padding: 8px 15px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12.5px;
+  font-weight: 540;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.genrePill:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+}
+
+.genrePillActive {
+  background: rgba(var(--accent-rgb), 0.95);
+  border-color: transparent;
+  color: #fff;
+}
+
+.genreHeading {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+/* ── Hero ───────────────────────────────────────────────────────────────── */
+
+.hero {
+  position: relative;
+  border-radius: 22px;
+  overflow: hidden;
+  min-height: 360px;
+  display: flex;
+  align-items: center;
+  animation: fadeUp 0.3s ease both;
+}
+
+.heroBackdrop {
+  position: absolute;
+  inset: -60px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(48px) saturate(150%);
+  transform: scale(1.15);
+  opacity: 0.7;
+}
+
+.heroScrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(10, 10, 14, 0.94) 0%,
+      rgba(10, 10, 14, 0.7) 55%,
+      rgba(10, 10, 14, 0.5) 100%
+    ),
+    linear-gradient(0deg, rgba(10, 10, 14, 0.8), transparent 60%);
+}
+
+.heroInner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 34px;
+  padding: 38px 42px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.heroCover {
+  width: 250px;
+  height: 250px;
+  border-radius: 18px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 32px 68px rgba(0, 0, 0, 0.66);
+  transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.hero:hover .heroCover {
+  transform: translateY(-4px);
+}
+
+.heroText {
+  min-width: 0;
+  max-width: 640px;
+}
+
+.heroEyebrow {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(var(--accent-rgb), 1);
+  margin-bottom: 10px;
+}
+
+.heroTitle {
+  margin: 0;
+  font-size: 46px;
+  line-height: 1.05;
+  font-weight: 780;
+  letter-spacing: -0.032em;
+}
+
+.heroSubtitle {
+  margin: 8px 0 0;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.heroCredits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 14px;
+  font-size: 13.5px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.heroNarrator {
+  color: rgba(var(--accent-rgb), 0.95);
+}
+
+.heroFacts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.heroRating {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.heroFact {
+  padding: 3px 10px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.heroSummary {
+  margin: 16px 0 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.72);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.heroActions {
+  display: flex;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.heroPrimary,
+.heroSecondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 22px;
+  border: none;
+  border-radius: 11px;
+  font-size: 13.5px;
+  font-weight: 640;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.heroPrimary {
+  background: rgba(var(--accent-rgb), 0.95);
+  color: #fff;
+}
+
+.heroPrimary svg {
+  width: 18px;
+  height: 18px;
+}
+.heroPrimary:hover {
+  transform: translateY(-1px);
+}
+
+.heroSecondary {
+  background: rgba(255, 255, 255, 0.11);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.heroSecondary:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.heroSkeleton {
+  height: 360px;
+  border-radius: 22px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.09),
+    rgba(255, 255, 255, 0.04)
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* ── Rails ──────────────────────────────────────────────────────────────── */
+
+.rail,
+.seriesStrip,
+.resultsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.railHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.railTitle {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 680;
+  letter-spacing: -0.012em;
+}
+
+.railSubtitle {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.48);
+}
+
+.railControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.railSeeAll {
+  border: none;
+  background: none;
+  color: rgba(var(--accent-rgb), 1);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 6px 4px;
+}
+
+.railSeeAll:hover {
+  text-decoration: underline;
+}
+
+.railArrow {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.railArrow:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.13);
+}
+.railArrow:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.railArrow svg {
+  width: 15px;
+  height: 15px;
+}
+
+.railTrack {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  padding-bottom: 6px;
+  min-width: 0;
+  max-width: 100%;
+  scrollbar-width: none;
+}
+
+.railTrack::-webkit-scrollbar {
+  display: none;
+}
+
+.railItem {
+  flex: 0 0 186px;
+  scroll-snap-align: start;
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  gap: 26px 18px;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: fadeUp 0.25s ease both;
+}
+
+.cardCoverLink {
+  position: relative;
+  display: block;
+  border-radius: 13px;
+  overflow: hidden;
+  aspect-ratio: 1 / 1;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.card:hover .cardCoverLink {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.55);
+}
+
+.cardActive .cardCoverLink {
+  box-shadow:
+    0 0 0 2px rgba(var(--accent-rgb), 0.9),
+    0 18px 38px rgba(0, 0, 0, 0.55);
+}
+
+.cardCover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Bottom-left is the one free corner on a cover: the sequence pill owns top
+   left, the wishlist heart and sample button own top right, the runtime owns
+   bottom right. */
+.cardOwned {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 6px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 680;
+  letter-spacing: 0.01em;
+  color: #08130c;
+  background: rgba(74, 222, 128, 0.94);
+  backdrop-filter: blur(6px);
+}
+
+.cardRuntime {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(6px);
+}
+
+.cardPlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    background 0.16s ease;
+}
+
+.card:hover .cardPlay,
+.cardPlay:focus-visible,
+.cardPlayActive {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.cardPlayActive {
+  background: rgba(var(--accent-rgb), 0.95);
+}
+.cardPlay svg {
+  width: 17px;
+  height: 17px;
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cardTitle {
+  font-size: 13.5px;
+  font-weight: 620;
+  line-height: 1.32;
+  color: #fff;
+  text-decoration: none;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cardTitle:hover {
+  color: rgba(var(--accent-rgb), 1);
+}
+
+.cardAuthor {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardNarrator {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.38);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardFooter {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.cardSeries {
+  font-size: 11px;
+  color: rgba(var(--accent-rgb), 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardSkeleton {
+  aspect-ratio: 1 / 1;
+  border-radius: 13px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.09),
+    rgba(255, 255, 255, 0.04)
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* ── Works (person pages) ───────────────────────────────────────────────── */
+
+.works {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  min-width: 0;
+}
+
+.worksHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.worksTitle {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+}
+
+.worksCount {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* The table of contents for a career. With a dozen shelves below, this is the
+   only place the whole shape of it is visible at once. */
+.worksJump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: -18px;
+}
+
+.worksJumpPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  font-weight: 560;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.worksJumpPill:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.worksJumpPillActive {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: #ffffff;
+}
+
+.worksJumpCount {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.38);
+}
+
+/* The position stamped on the cover. This is what makes a row of covers a
+   reading order instead of a pile. */
+.cardSequence {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #ffffff;
+  background: rgba(var(--accent-rgb), 0.95);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+
+/* ── Ratings ────────────────────────────────────────────────────────────── */
+
+.stars {
+  display: inline-flex;
+  gap: 1px;
+  vertical-align: middle;
+}
+
+.star {
+  position: relative;
+  width: var(--star-size, 14px);
+  height: var(--star-size, 14px);
+  display: inline-block;
+}
+
+.star svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.starTrack {
+  fill: rgba(255, 255, 255, 0.2);
+}
+.starOn {
+  fill: #f5b301;
+}
+
+.starFill {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.starFill svg {
+  width: var(--star-size, 14px);
+  height: var(--star-size, 14px);
+}
+
+.ratingInline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.ratingValue {
+  font-weight: 640;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+
+.ratingCount {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.ratingBreakdown {
+  display: flex;
+  gap: 38px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 26px;
+  padding: 22px 26px;
+  border-radius: 18px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.07) 0%,
+    rgba(255, 255, 255, 0.025) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top-color: rgba(255, 255, 255, 0.14);
+}
+
+.ratingSummary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 120px;
+}
+
+.ratingBig {
+  font-size: 46px;
+  font-weight: 760;
+  line-height: 1;
+  letter-spacing: -0.038em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ratingTotal {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.ratingBars {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ratingBarRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ratingBarLabel {
+  width: 10px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.ratingBarTrack {
+  flex: 1;
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.ratingBarFill {
+  height: 100%;
+  border-radius: 4px;
+  background: #f5b301;
+}
+
+.ratingBarPct {
+  width: 34px;
+  text-align: right;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Search results ─────────────────────────────────────────────────────── */
+
+.resultsHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.resultsQuery {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.sourceNote {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 5px 11px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.backBtn {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 16px 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.backBtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  transform: translateX(-2px);
+}
+
+.backBtn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ── Detail ─────────────────────────────────────────────────────────────── */
+
+.detailBackdrop {
+  position: absolute;
+  top: -24px;
+  left: -32px;
+  right: -32px;
+  height: 520px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(60px) saturate(150%);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.detailScrim {
+  position: absolute;
+  top: -24px;
+  left: -32px;
+  right: -32px;
+  height: 520px;
+  background: linear-gradient(180deg, rgba(10, 10, 14, 0.55), rgba(10, 10, 14, 0.98));
+  pointer-events: none;
+}
+
+.detailTop {
+  position: relative;
+  display: flex;
+  gap: 38px;
+  align-items: flex-start;
+  padding-top: 8px;
+  animation: fadeUp 0.28s ease both;
+}
+
+.detailCoverWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex-shrink: 0;
+  width: 300px;
+}
+
+.detailCover {
+  width: 300px;
+  height: 300px;
+  border-radius: 20px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 34px 76px rgba(0, 0, 0, 0.7);
+}
+
+.detailPlay {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 46px;
+  border: none;
+  border-radius: 12px;
+  background: rgba(var(--accent-rgb), 0.95);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 640;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.detailPlay:hover {
+  transform: translateY(-1px);
+}
+.detailPlay svg {
+  width: 19px;
+  height: 19px;
+}
+
+.detailInfo {
+  min-width: 0;
+  flex: 1;
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+  color: rgba(var(--accent-rgb), 0.95);
+  margin-bottom: 12px;
+}
+
+.breadcrumbSep {
+  margin-right: 6px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.detailOwned {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 5px 12px 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: rgb(134, 239, 172);
+  background: rgba(74, 222, 128, 0.14);
+  border: 1px solid rgba(74, 222, 128, 0.32);
+}
+
+.detailTitle {
+  margin: 0;
+  font-size: 44px;
+  line-height: 1.06;
+  font-weight: 780;
+  letter-spacing: -0.032em;
+}
+
+.detailSubtitle {
+  margin: 8px 0 0;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.detailSeriesLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 14px 0 0;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.13);
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.detailSeriesLine strong {
+  color: rgba(var(--accent-rgb), 1);
+  font-weight: 640;
+}
+
+.detailCredits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 18px;
+}
+
+.creditRow {
+  display: flex;
+  gap: 10px;
+  font-size: 13.5px;
+  flex-wrap: wrap;
+}
+
+.creditLabel {
+  width: 92px;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 660;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.32);
+  padding-top: 2px;
+}
+
+.creditNames {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+}
+
+.detailFacts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 18px;
+  margin-top: 22px;
+}
+
+.fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.fact + .fact::before {
+  content: '';
+  width: 1px;
+  height: 13px;
+  margin-right: 18px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.factLabel {
+  font-size: 10px;
+  font-weight: 660;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.34);
+  order: 2;
+}
+
+.factValue {
+  font-size: 15px;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  color: #ffffff;
+  order: 1;
+}
+
+.detailSummary {
+  margin-top: 22px;
+  max-width: 780px;
+}
+
+.detailSummary p {
+  margin: 0 0 12px;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.summaryToggle {
+  border: none;
+  background: none;
+  padding: 0;
+  color: rgba(var(--accent-rgb), 1);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.summaryToggle:hover {
+  text-decoration: underline;
+}
+
+.detailSkeleton {
+  height: 420px;
+  border-radius: 22px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.09),
+    rgba(255, 255, 255, 0.04)
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* ── People row (search results) ────────────────────────────────────────── */
+
+.peopleSection {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.peopleRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 14px;
+}
+
+/* A person is not shaped like a book. Books are square covers in a grid; a
+   person is a wide plate carrying their own art as an out-of-focus wash, so the
+   two never read as the same kind of thing. */
+.personTile {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: 132px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  overflow: hidden;
+  isolation: isolate;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-top-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.04);
+  transition:
+    transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1),
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.personTile:hover {
+  transform: translateY(-4px);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.personTileWash {
+  position: absolute;
+  inset: -30%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(30px) saturate(180%);
+  transform: scale(1.05);
+  opacity: 0.85;
+  z-index: -2;
+  transition: transform 0.5s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.personTile:hover .personTileWash {
+  transform: scale(1.14);
+}
+
+.personTileScrim {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    0deg,
+    rgba(8, 8, 12, 0.95) 12%,
+    rgba(8, 8, 12, 0.6) 58%,
+    rgba(8, 8, 12, 0.35) 100%
+  );
+}
+
+/* Their real covers, small and squared off in the top corner — enough to say
+   "this is whose work" without competing with the name. */
+.personTileSpines {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  display: flex;
+}
+
+.personTileSpine {
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  transform: rotate(calc(var(--spine) * 6deg));
+  transition: transform 0.28s ease;
+}
+
+.personTileSpine + .personTileSpine {
+  margin-left: -16px;
+}
+
+.personTile:hover .personTileSpine {
+  transform: rotate(calc(var(--spine) * 6deg)) translateY(-2px);
+}
+
+/* The expand-on-hover half of the standard watch badge is scoped to
+   .library-artist-card over in style.css. The tile re-states it for itself
+   rather than widening that selector, so nothing on the library page moves. */
+.personTile:hover :global(.watch-card-icon) {
+  width: auto !important;
+  padding: 3px 7px !important;
+}
+
+.personTile:hover :global(.watch-icon-label) {
+  opacity: 1;
+  max-width: 60px;
+  margin-left: 2px;
+}
+
+.personTileBody {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  width: 100%;
+}
+
+.personTileRole {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(var(--accent-rgb), 1);
+}
+
+.personTileName {
+  font-size: 19px;
+  font-weight: 720;
+  line-height: 1.15;
+  letter-spacing: -0.022em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personTileFacts {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ── Person pages ───────────────────────────────────────────────────────── */
+
+.personPage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.personHeader {
+  position: relative;
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top-color: rgba(255, 255, 255, 0.14);
+  animation: fadeUp 0.3s ease both;
+}
+
+/* The person's best cover, blurred out to a wash. Gives every page its own
+   colour without inventing art that does not exist. */
+.personBackdrop {
+  position: absolute;
+  inset: -80px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(60px) saturate(170%);
+  transform: scale(1.2);
+  opacity: 0.65;
+}
+
+.personScrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      100deg,
+      rgba(10, 10, 14, 0.93) 0%,
+      rgba(10, 10, 14, 0.74) 52%,
+      rgba(10, 10, 14, 0.58) 100%
+    ),
+    linear-gradient(0deg, rgba(10, 10, 14, 0.6), transparent 70%);
+}
+
+.personHeaderInner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  padding: 34px 38px;
+}
+
+.personFan {
+  position: relative;
+  width: 214px;
+  height: 156px;
+  flex-shrink: 0;
+}
+
+.personFanCover {
+  position: absolute;
+  top: 8px;
+  left: 43px;
+  width: 128px;
+  height: 128px;
+  border-radius: 16px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.62);
+  transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* Best-rated in front, the next two fanned out behind it. */
+.personFanCover:nth-child(1) {
+  z-index: 3;
+}
+
+.personFanCover:nth-child(2) {
+  z-index: 2;
+  transform: rotate(10deg) translateX(30px) scale(0.93);
+  opacity: 0.82;
+}
+
+.personFanCover:nth-child(3) {
+  z-index: 1;
+  transform: rotate(-10deg) translateX(-30px) scale(0.93);
+  opacity: 0.72;
+}
+
+.personHeader:hover .personFanCover:nth-child(2) {
+  transform: rotate(13deg) translateX(42px) scale(0.93);
+}
+
+.personHeader:hover .personFanCover:nth-child(3) {
+  transform: rotate(-13deg) translateX(-42px) scale(0.93);
+}
+
+.personMeta {
+  min-width: 0;
+  flex: 1;
+}
+
+.personRole {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(var(--accent-rgb), 1);
+  margin-bottom: 10px;
+}
+
+.personName {
+  margin: 0;
+  font-size: 46px;
+  line-height: 1.05;
+  font-weight: 780;
+  letter-spacing: -0.032em;
+}
+
+.personFacts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 18px;
+  margin-top: 18px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.personFact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.personFact strong {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+}
+
+/* Hairline between facts rather than another row of pills — the header already
+   has enough rounded shapes in it. */
+.personFact + .personFact::before {
+  content: '';
+  width: 1px;
+  height: 13px;
+  margin-right: 18px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.personGenreLine {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.personCollaborators {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.personCollabLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.32);
+}
+
+.personCollabList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.personCollabLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 12.5px;
+  font-weight: 560;
+  text-decoration: none;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.personCollabLink:hover {
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  color: #ffffff;
+}
+
+.personCollabCount {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.personLink {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.personLink:hover {
+  color: rgba(var(--accent-rgb), 1);
+  border-bottom-color: rgba(var(--accent-rgb), 0.5);
+}
+
+.personMore {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Series strip ───────────────────────────────────────────────────────── */
+
+.seriesTrack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 8px;
+}
+
+.seriesItem {
+  min-width: 0;
+}
+
+.seriesLink {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid transparent;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.seriesLink:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.seriesLinkCurrent {
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+.seriesBadge {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 11.5px;
+  font-weight: 660;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.seriesLinkCurrent .seriesBadge {
+  background: rgba(var(--accent-rgb), 0.9);
+  color: #fff;
+}
+
+.seriesCover {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.seriesMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.seriesTitleText {
+  font-size: 13px;
+  font-weight: 580;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.seriesRuntime {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.seriesCurrentTag {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 660;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(var(--accent-rgb), 1);
+}
+
+/* ── Wishlist button ────────────────────────────────────────────────────── */
+
+.wishlistIcon {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.card:hover .wishlistIcon,
+.wishlistIcon:focus-visible,
+.wishlistIconOn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Once it is on the wishlist the heart stays lit whether or not the card is
+   hovered — it is state, not a hover affordance. */
+.wishlistIconOn {
+  background: rgba(var(--accent-rgb), 0.95);
+}
+
+.wishlistIcon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.wishlistIcon:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wishlistFull {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: 46px;
+  padding: 0 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 620;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.wishlistFull:hover {
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.wishlistFullOn {
+  background: rgba(var(--accent-rgb), 0.18);
+  border-color: rgba(var(--accent-rgb), 0.55);
+}
+
+.wishlistFull svg {
+  width: 18px;
+  height: 18px;
+}
+
+.wishlistFull:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ── Wishlist page ──────────────────────────────────────────────────────── */
+
+.wishlistHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 26px;
+  flex-wrap: wrap;
+}
+
+.wishlistHeadings {
+  min-width: 0;
+  max-width: 720px;
+}
+
+.wishlistBlurb {
+  margin: 14px 0 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.wishlistActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.wishlistLastRun {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.wishlistRows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wishlistRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px 12px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top-color: rgba(255, 255, 255, 0.13);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.025) 100%
+  );
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.wishlistRow:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-2px);
+}
+
+.wishlistCoverLink {
+  flex-shrink: 0;
+  display: block;
+}
+
+.wishlistCover {
+  width: 62px;
+  height: 62px;
+  border-radius: 11px;
+  object-fit: cover;
+  display: block;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45);
+}
+
+.wishlistMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.wishlistTitle {
+  font-size: 14.5px;
+  font-weight: 640;
+  color: #ffffff;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wishlistTitle:hover {
+  color: rgba(var(--accent-rgb), 1);
+}
+
+.wishlistAuthors {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wishlistSeries {
+  font-size: 11.5px;
+  color: rgba(var(--accent-rgb), 0.85);
+}
+
+.wishlistTrail {
+  margin-top: 3px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.34);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wishlistStatus {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+}
+
+.wishlistStatusActive {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: #ffffff;
+}
+
+.wishlistStatusDone {
+  border-color: rgba(80, 200, 130, 0.45);
+  background: rgba(80, 200, 130, 0.15);
+  color: #9ff0c2;
+}
+
+.wishlistRowActions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.wishlistAction {
+  padding: 7px 13px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  font-weight: 560;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.wishlistAction:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.downloadRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.downloadTrack {
+  margin-top: 8px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.downloadFill {
+  height: 100%;
+  border-radius: 3px;
+  background: rgba(var(--accent-rgb), 1);
+  transition: width 0.4s ease;
+}
+
+/* ── Releases modal ─────────────────────────────────────────────────────── */
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6, 6, 10, 0.72);
+  backdrop-filter: blur(6px);
+  animation: fadeUp 0.16s ease both;
+}
+
+.modal {
+  width: min(860px, 100%);
+  max-height: min(80vh, 760px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(255, 255, 255, 0.18);
+  background: rgba(20, 20, 25, 0.98);
+  box-shadow: 0 40px 90px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.modalEyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(var(--accent-rgb), 1);
+  margin-bottom: 6px;
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.modalClose {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+}
+
+.modalClose:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.modalClose svg {
+  width: 15px;
+  height: 15px;
+}
+
+.modalMessage {
+  margin: 0;
+  padding: 11px 24px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(var(--accent-rgb), 0.14);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.modalBody {
+  overflow-y: auto;
+  padding: 16px 24px 24px;
+}
+
+.modalLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 52px 0;
+  font-size: 13.5px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: rgba(var(--accent-rgb), 1);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.releaseList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.releaseRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 15px;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.04);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.releaseRow:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* The first row is the one the ranking chose; everything below it is an
+   alternative the listener may prefer. */
+.releaseRow:first-child {
+  border-color: rgba(var(--accent-rgb), 0.4);
+  background: rgba(var(--accent-rgb), 0.09);
+}
+
+.releaseMain {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.releaseTitle {
+  font-size: 13px;
+  font-weight: 580;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.releaseTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.releaseTag {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 10.5px;
+  font-weight: 560;
+  color: rgba(255, 255, 255, 0.62);
+  white-space: nowrap;
+}
+
+.releaseTagFormat {
+  background: rgba(var(--accent-rgb), 0.22);
+  color: #ffffff;
+}
+
+.releaseTagWarn {
+  background: rgba(240, 170, 70, 0.2);
+  color: #ffd79a;
+}
+
+/* The arithmetic behind the ordering, so an odd ranking can be read rather
+   than trusted. */
+.releaseReasons {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* "What's inside" — a name and a size cannot tell one m4b apart from 87 mp3s
+   plus somebody's discography, so the pack opens in place. */
+.contentsToggle {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 3px 0;
+  border: none;
+  background: none;
+  color: rgba(var(--accent-rgb), 0.95);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.contentsToggle:hover {
+  text-decoration: underline;
+}
+
+.contents {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.contentsNote {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.contentsSummary {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+/* Capped and scrollable: a 90-chapter book must not push the Download button
+   off the screen. */
+.contentsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 210px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contentsFile {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 0;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* Anything that is not audio is dimmed, so a pack padded with scans and PDFs
+   reads as padded at a glance. */
+.contentsFile[data-extra='true'] {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.contentsFileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contentsFileSize {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+/* The implied-bitrate chip. Colour carries the verdict so a row can be judged
+   without reading the tooltip: dim for too little, plain for fine, warm for
+   suspiciously large. */
+.qualityTag {
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+.quality_thin {
+  background: rgba(248, 113, 113, 0.16);
+  border-color: rgba(248, 113, 113, 0.36);
+  color: rgb(252, 165, 165);
+}
+
+.quality_standard,
+.quality_good {
+  background: rgba(74, 222, 128, 0.14);
+  border-color: rgba(74, 222, 128, 0.32);
+  color: rgb(134, 239, 172);
+}
+
+.quality_generous {
+  background: rgba(250, 204, 21, 0.13);
+  border-color: rgba(250, 204, 21, 0.3);
+  color: rgb(253, 224, 71);
+}
+
+.quality_oversized {
+  background: rgba(251, 146, 60, 0.15);
+  border-color: rgba(251, 146, 60, 0.34);
+  color: rgb(253, 186, 116);
+}
+
+/* Says out loud what the sort order already means. The ranking has an opinion
+   and was keeping it to itself. */
+.bestMatch {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgb(253, 224, 71);
+  background: rgba(250, 204, 21, 0.14);
+  border: 1px solid rgba(250, 204, 21, 0.34);
+  cursor: help;
+}
+
+/* The one partial-release warning that can be given before downloading. */
+.shortWarning {
+  display: block;
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgb(252, 165, 165);
+}
+
+/* Live state for a release grabbed from this modal, in place of its Download
+   button. A book can sit held for days for a good reason, and pointing at
+   another page instead of saying so is how "stuck" gets reported. */
+.rowStatus {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+  max-width: 210px;
+  text-align: right;
+}
+
+.rowStatusLabel {
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.status_completed {
+  color: rgb(134, 239, 172);
+}
+
+.status_staged {
+  color: rgb(253, 224, 71);
+}
+
+.status_failed,
+.status_cancelled {
+  color: rgb(252, 165, 165);
+}
+
+.rowStatusPct {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.rowStatusWhy {
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.releaseRowActions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.blockBtn {
+  padding: 3px 0;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.blockBtn:hover:not(:disabled) {
+  color: rgb(252, 165, 165);
+}
+
+.blockBtn:disabled {
+  color: rgba(252, 165, 165, 0.7);
+  cursor: default;
+}
+
+.blocklistNote {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.blocklistClear {
+  margin-top: 16px;
+  height: 36px;
+  padding: 0 18px;
+  border-radius: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.32);
+  background: rgba(248, 113, 113, 0.12);
+  color: rgb(252, 165, 165);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.blocklistClear:hover {
+  background: rgba(248, 113, 113, 0.2);
+}
+
+.librarySize {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.libraryFilter {
+  width: 100%;
+  height: 38px;
+  margin-bottom: 14px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.28);
+  color: #ffffff;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.libraryFilter::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.libraryDelete {
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.1);
+  color: rgb(252, 165, 165);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.libraryDelete:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.2);
+}
+
+.libraryDelete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.reviewPills {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px 14px;
+}
+
+.reviewPill {
+  padding: 7px 15px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12.5px;
+  font-weight: 620;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.reviewPill:hover {
+  color: #ffffff;
+}
+
+.reviewPillActive {
+  background: rgba(var(--accent-rgb), 0.18);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  color: #ffffff;
+}
+
+.reviewRowActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.releaseGrab {
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 9px;
+  background: rgba(var(--accent-rgb), 0.95);
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 620;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.releaseGrab:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.releaseGrab:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .detailTop {
+    gap: 26px;
+  }
+  .detailCoverWrap,
+  .detailCover {
+    width: 230px;
+  }
+  .detailCover {
+    height: 230px;
+  }
+  .detailTitle {
+    font-size: 30px;
+  }
+}
+
+@media (max-width: 860px) {
+  .audiobooksContainer {
+    padding: 18px 18px 90px;
+  }
+  .heroInner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 22px;
+    padding: 26px;
+  }
+  .heroCover {
+    width: 170px;
+    height: 170px;
+  }
+  .heroTitle {
+    font-size: 28px;
+  }
+  .hero {
+    min-height: 0;
+  }
+  .detailTop {
+    flex-direction: column;
+  }
+  .detailCoverWrap {
+    width: 100%;
+    max-width: 260px;
+  }
+  .detailCover {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+  }
+  .detailBackdrop,
+  .detailScrim {
+    left: -18px;
+    right: -18px;
+  }
+  .playerBar {
+    width: calc(100% - 36px);
+  }
+  .playerScrubWrap {
+    display: none;
+  }
+  .genreNavWrap {
+    margin-inline: -18px;
+    padding-inline: 18px;
+  }
+  /* No gutter left to hold an arrow at this width, and these screens have touch
+     scrolling anyway. */
+  .genreArrow {
+    display: none;
+  }
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 20px 14px;
+  }
+  .railItem {
+    flex: 0 0 148px;
+  }
+  .seriesTrack {
+    grid-template-columns: 1fr;
+  }
+  .wishlistRow {
+    flex-wrap: wrap;
+  }
+  .wishlistRowActions {
+    width: 100%;
+  }
+  .releaseRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .modal {
+    max-height: 88vh;
+  }
+  .personHeaderInner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 22px;
+    padding: 22px;
+  }
+  .personFan {
+    width: 168px;
+    height: 122px;
+  }
+  .personFanCover {
+    width: 100px;
+    height: 100px;
+    left: 34px;
+  }
+  .personName {
+    font-size: 30px;
+  }
+  .peopleRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .hero,
+  .detailTop,
+  .playerBar {
+    animation: none;
+  }
+  .cardSkeleton,
+  .heroSkeleton,
+  .detailSkeleton {
+    animation: none;
+  }
+  .card:hover .cardCoverLink {
+    transform: none;
+  }
+}

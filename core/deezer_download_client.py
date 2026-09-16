@@ -744,6 +744,19 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                     title=title,
                     album=album,
                     track_number=item.get('track_position'),
+                    # the ids of the exact track the user is choosing.
+                    # enrichment used to text-search deezer afterwards to
+                    # work out which deezer track this was - a track we had
+                    # just downloaded from deezer BY id. a remix suffix or a
+                    # differently credited artist made that fuzzy match miss,
+                    # and then no deezer id was embedded at all. tidal and
+                    # hifi already carry theirs through this way.
+                    _source_metadata={
+                        'source': 'deezer',
+                        'track_id': track_id,
+                        'artist_id': str(item.get('artist', {}).get('id') or '') or None,
+                        'album_id': str(item.get('album', {}).get('id') or '') or None,
+                    },
                 )
                 # Stamp CD-quality FLAC (16/44.1) so lossless ranks correctly.
                 tr.set_quality(quality_from_deezer(requested_quality))

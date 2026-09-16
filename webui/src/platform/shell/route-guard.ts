@@ -1,3 +1,4 @@
+import { appURL } from '@/platform/url-base';
 import { redirect } from '@tanstack/react-router';
 
 import type { ShellBridge, ShellPageId } from './bridge';
@@ -23,5 +24,5 @@ export function guardPageAccess(bridge: ShellBridge, pageId: ShellPageId): void 
   const home = getProfileHomePath(bridge);
   if (home === getShellRouteByPageId(pageId)?.path) return;
 
-  throw redirect({ href: home, replace: true });
+  throw redirect({ href: appURL(home), replace: true });
 }

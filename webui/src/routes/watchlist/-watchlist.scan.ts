@@ -15,6 +15,15 @@ export interface WatchlistScanFrame extends WatchlistScanStatusResponse {
   current_phase?: string | null;
   current_artist_index?: number | null;
   total_artists?: number | null;
+  /** Source-matching phase: every artist is looked up on every other
+   *  metadata provider before the artist loop starts. For a few hundred
+   *  artists that is the longest part of a scan, and the artist counter has
+   *  not begun, so these are the only numbers that move during it (#1240). */
+  matching_source?: string | null;
+  matching_source_number?: number | null;
+  matching_source_total?: number | null;
+  matching_artists_done?: number | null;
+  matching_artists_total?: number | null;
   tracks_found_this_scan?: number | null;
   tracks_added_this_scan?: number | null;
   recent_wishlist_additions?: {
@@ -50,16 +59,48 @@ export function prettyScanPhase(phase: string | null | undefined): string {
     scanning_labels: 'Scanning record labels…',
     populating_discovery_pool: 'Populating discovery…',
     updating_listenbrainz: 'Updating ListenBrainz…',
+    matching_sources: 'Matching artists to sources…',
   };
   return map[phase] || phase.replace(/_/g, ' ');
 }
 
 /** Just the fields the progress helpers read, so callers (and tests) do not
  *  have to build a whole frame. */
-export type ScanProgressFields = Pick<WatchlistScanFrame, 'current_artist_index' | 'total_artists'>;
+export type ScanProgressFields = Pick<
+  WatchlistScanFrame,
+  | 'current_artist_index'
+  | 'total_artists'
+  | 'current_phase'
+  | 'matching_source'
+  | 'matching_artists_done'
+  | 'matching_artists_total'
+>;
+
+/** True while the scan is matching artists to sources, before the artist loop. */
+function isMatchingSources(frame: ScanProgressFields): boolean {
+  return frame.current_phase === 'matching_sources';
+}
+
+/** The matching phase owns the first tenth of the bar; artists own the rest.
+ *  Splitting it this way is what stops the bar jumping BACKWARDS when the
+ *  artist loop finally starts at index 1. */
+const MATCHING_BAND = 10;
 
 /** "3 / 40 artists", or '' when the total is not known yet. */
 export function scanProgressText(frame: ScanProgressFields): string {
+  // During source matching the artist counter has not started. Reporting it
+  // would read '0 / 379 artists' for the whole phase, which is exactly what
+  // made a working scan look like a hung one.
+  if (isMatchingSources(frame)) {
+    const matched = frame.matching_artists_total || 0;
+    if (matched) {
+      const done = Math.min(frame.matching_artists_done || 0, matched);
+      const source = frame.matching_source;
+      return source
+        ? `Matching ${done} / ${matched} artists to ${source}`
+        : `Matching ${done} / ${matched} artists`;
+    }
+  }
   const total = frame.total_artists || 0;
   if (!total) return '';
   const index = Math.min((frame.current_artist_index || 0) + 1, total);
@@ -68,10 +109,16 @@ export function scanProgressText(frame: ScanProgressFields): string {
 
 /** Progress bar width as a percentage. 0 when the total is unknown. */
 export function scanProgressPercent(frame: ScanProgressFields): number {
+  if (isMatchingSources(frame)) {
+    const matched = frame.matching_artists_total || 0;
+    if (!matched) return 0;
+    const done = Math.min(frame.matching_artists_done || 0, matched);
+    return Math.round((MATCHING_BAND * done) / matched);
+  }
   const total = frame.total_artists || 0;
   if (!total) return 0;
   const index = Math.min((frame.current_artist_index || 0) + 1, total);
-  return Math.round((100 * index) / total);
+  return MATCHING_BAND + Math.round(((100 - MATCHING_BAND) * index) / total);
 }
 
 /**

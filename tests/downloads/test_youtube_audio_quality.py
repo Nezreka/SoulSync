@@ -1836,8 +1836,12 @@ def test_settings_ui_has_no_preferred_youtube_audio_control():
     assert 'id="youtube-transcode" checked' in index
     assert 'id="youtube-transcode-options" style="display: none;"' not in index
     assert "settings.youtube?.transcode !== false" in settings
-    assert "transcode_codec: document.getElementById('youtube-transcode-codec')?.value || 'mp3'" in settings
-    assert "transcode_bitrate: document.getElementById('youtube-transcode-bitrate')?.value || '320'" in settings
+    # The accessor changed shape: `el?.value || 'mp3'` wrote 'mp3' over the
+    # stored setting whenever the element was missing, so the payload now reads
+    # through _cfgStr, which omits the key entirely in that case. The defaults
+    # this test is really about are unchanged.
+    assert "transcode_codec: _cfgStr('youtube-transcode-codec', { fallback: 'mp3' })" in settings
+    assert "transcode_bitrate: _cfgStr('youtube-transcode-bitrate', { fallback: '320' })" in settings
 
 
 def test_user_facing_youtube_quality_copy_is_not_internal():
@@ -2134,7 +2138,13 @@ def test_download_sync_third_retry_uses_muxed_best(tmp_path, monkeypatch):
     assert len(seen) == 3
     assert 'opus' in seen[0]
     assert 'opus' in seen[1]  # retry 2 still prefers opus; keeps cookies
-    assert seen[2] == 'best'
+    # Was 'best'. That meant "take anything" when muxed streams were normal;
+    # YouTube has all but stopped serving them, so it is now the NARROWEST
+    # selector available and fails with "Requested format is not available".
+    # Measured on a real video with a current yt-dlp: 'best' failed,
+    # 'bestaudio/best' downloaded. Same last-ditch intent, a selector that
+    # still matches something.
+    assert seen[2] == 'bestaudio/best'
     assert cookie_keys[0] == (True, False)
     assert cookie_keys[1] == (True, False)
     assert cookie_keys[2] == (False, False)  # last ditch: expired cookies must not poison 'best'

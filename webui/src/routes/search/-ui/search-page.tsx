@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { BasicAlbum, BasicTrack } from '../-basic.types';
-import type { SearchAlbum, SearchArtist, SearchLabel, SearchTrack } from '../-search.types';
+import type { SearchAlbum, SearchArtist, SearchLabel, SearchPlaylist, SearchTrack } from '../-search.types';
 import type { LibraryCheckTrack } from '../-search.types';
+import { PlaylistPreviewModal } from './playlist-preview-modal';
 
 import {
   downloadAlbum,
@@ -47,6 +48,17 @@ import { SearchBar } from './search-bar';
 import { SearchResults } from './search-results';
 import { SourceRow } from './source-row';
 
+const EXPLORE_CATEGORIES = [
+  { id: 'trending', label: 'Top Trending', icon: '🔥', query: 'Trending', gradient: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)' },
+  { id: 'new_releases', label: 'New Releases', icon: '✨', query: 'New Releases', gradient: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' },
+  { id: 'electronic', label: 'Electronic & Dance', icon: '🎧', query: 'Electronic', gradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)' },
+  { id: 'rock', label: 'Rock & Alternative', icon: '🎸', query: 'Rock', gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' },
+  { id: 'hiphop', label: 'Hip-Hop & Rap', icon: '🎤', query: 'Hip Hop', gradient: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)' },
+  { id: 'chill', label: 'Lo-Fi & Chill', icon: '☕', query: 'Chill', gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' },
+  { id: 'jazz', label: 'Jazz & Soul', icon: '🎷', query: 'Jazz', gradient: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)' },
+  { id: 'soundtracks', label: 'Soundtracks & Score', icon: '🎬', query: 'Soundtrack', gradient: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' },
+];
+
 /** Which of the dropdown's three bodies is showing. */
 type DropdownView = 'hidden' | 'loading' | 'empty' | 'results';
 
@@ -72,6 +84,7 @@ export function SearchPage() {
   const [labels, setLabels] = useState<SearchLabel[]>([]);
   const [idLookupPending, setIdLookupPending] = useState(false);
   const [recents, setRecents] = useState<string[]>(loadRecentSearches);
+  const [previewPlaylist, setPreviewPlaylist] = useState<SearchPlaylist | null>(null);
 
   const basic = useBasicSearchController();
   const basicSearchRef = useRef(basic.search);
@@ -204,6 +217,7 @@ export function SearchPage() {
       results.artists.length +
       results.albums.length +
       results.tracks.length +
+      results.playlists.length +
       results.videos.length >
     0;
   useEffect(() => {
@@ -320,36 +334,77 @@ export function SearchPage() {
             onIdSubmit={() => void runIdLookup(idValue)}
           />
 
-          {/* Recent searches — the idle surface. Shown only when nothing else
-              is: no open results, no soulseek panel, nothing typed. */}
-          {!open && !soulseekActive && !query.trim() && recents.length > 0 ? (
-            <div className="enh-recent" id="enh-recent-searches">
-              <div className="enh-section-header">
-                <h4 className="enh-section-title">Recent searches</h4>
-              </div>
-              <div className="enh-recent-chips">
-                {recents.map((entry) => (
-                  <span key={entry} className="enh-recent-chip">
+          {/* Recent searches & Explore categories — the idle surface. Shown only when
+              nothing else is: no open results, no soulseek panel, nothing typed. */}
+          {!open && !soulseekActive && !query.trim() ? (
+            <div className="enh-idle-hub">
+              {recents.length > 0 ? (
+                <div className="enh-recent" id="enh-recent-searches">
+                  <div className="enh-section-header">
+                    <h4 className="enh-section-title">Recent searches</h4>
                     <button
                       type="button"
-                      className="enh-recent-chip-label"
+                      className="enh-recent-clear-btn"
+                      title="Clear recent searches"
                       onClick={() => {
-                        setQuery(entry);
-                        runSearch(entry);
+                        try {
+                          window.localStorage.removeItem('soulsyncRecentSearches');
+                        } catch {}
+                        setRecents([]);
                       }}
                     >
-                      {entry}
+                      Clear all
                     </button>
+                  </div>
+                  <div className="enh-recent-chips">
+                    {recents.map((entry) => (
+                      <span key={entry} className="enh-recent-chip">
+                        <button
+                          type="button"
+                          className="enh-recent-chip-label"
+                          onClick={() => {
+                            setQuery(entry);
+                            runSearch(entry);
+                          }}
+                        >
+                          <span className="enh-recent-chip-icon" aria-hidden="true">🕒</span>
+                          {entry}
+                        </button>
+                        <button
+                          type="button"
+                          className="enh-recent-chip-x"
+                          title="Remove from recent searches"
+                          onClick={() => setRecents(removeRecentSearch(entry))}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="enh-explore-section" id="enh-explore-section">
+                <div className="enh-section-header">
+                  <h4 className="enh-section-title">Explore &amp; browse</h4>
+                </div>
+                <div className="enh-explore-grid">
+                  {EXPLORE_CATEGORIES.map((cat) => (
                     <button
+                      key={cat.id}
                       type="button"
-                      className="enh-recent-chip-x"
-                      title="Remove from recent searches"
-                      onClick={() => setRecents(removeRecentSearch(entry))}
+                      className="enh-explore-card"
+                      style={{ background: cat.gradient }}
+                      onClick={() => {
+                        setQuery(cat.query);
+                        runSearch(cat.query);
+                      }}
                     >
-                      ✕
+                      <span className="enh-explore-label">{cat.label}</span>
+                      <span className="enh-explore-icon" aria-hidden="true">{cat.icon}</span>
                     </button>
-                  </span>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
           ) : null}
@@ -390,6 +445,7 @@ export function SearchPage() {
                     ? 'Resolving link…'
                     : `Searching ${sourceLabel(state.activeSource)} and your library...`}
                 </p>
+                <span className="enh-loading-subtext">Fetching matches, artwork and metadata</span>
               </div>
 
               <div
@@ -398,6 +454,12 @@ export function SearchPage() {
               >
                 <div className="empty-icon">🔍</div>
                 <p>No results found</p>
+                <p className="enh-empty-subtitle">
+                  {query.trim() ? `No matches found for "${query.trim()}".` : 'No results found.'}
+                </p>
+                <div className="enh-empty-tips">
+                  <span>💡 Tip: Check spelling, try broader keywords, or switch metadata sources above.</span>
+                </div>
               </div>
 
               <div
@@ -417,6 +479,7 @@ export function SearchPage() {
                     albums={splitAlbums(results.albums).albums.length}
                     singles={splitAlbums(results.albums).singlesAndEps.length}
                     tracks={results.tracks.length}
+                    playlists={results.playlists.length}
                     labels={labels.length}
                   />
                 ) : null}
@@ -427,6 +490,7 @@ export function SearchPage() {
                   artists={results.artists}
                   albums={results.albums}
                   tracks={results.tracks}
+                  playlists={results.playlists}
                   labels={labels}
                   videos={results.videos}
                   videoProgress={videoProgress}
@@ -438,6 +502,7 @@ export function SearchPage() {
                     void openSearchAlbum(album, state.activeSource)
                   }
                   onTrackClick={(track: SearchTrack) => void openSearchTrack(track)}
+                  onPlaylistClick={(playlist: SearchPlaylist) => setPreviewPlaylist(playlist)}
                   onTrackPlay={(track: SearchTrack, row: LibraryCheckTrack | undefined) => {
                     if (row) playOwnedTrack(row);
                     else void streamSearchTrack(track);
@@ -468,6 +533,13 @@ export function SearchPage() {
           </div>
         </div>
       </div>
+
+      {previewPlaylist && (
+        <PlaylistPreviewModal
+          playlist={previewPlaylist}
+          onClose={() => setPreviewPlaylist(null)}
+        />
+      )}
     </div>
   );
 }
@@ -479,37 +551,55 @@ function JumpChips({
   albums,
   singles,
   tracks,
+  playlists = 0,
   labels,
 }: {
   artists: number;
   albums: number;
   singles: number;
   tracks: number;
+  playlists?: number;
   labels: number;
 }) {
+  const [activeChip, setActiveChip] = useState<string>('all');
   const chips: [string, number, string][] = [
     ['Artists', artists, 'enh-spotify-artists-section'],
     ['Albums', albums, 'enh-albums-section'],
     ['Singles & EPs', singles, 'enh-singles-section'],
     ['Tracks', tracks, 'enh-tracks-section'],
+    ['Playlists', playlists, 'enh-playlists-section'],
     ['Labels', labels, 'enh-labels-section'],
   ];
   const visible = chips.filter(([, count]) => count > 0);
   if (visible.length < 2) return null;
   return (
     <div className="enh-jump-chips" id="enh-jump-chips">
-      {visible.map(([label, , sectionId]) => (
+      <button
+        type="button"
+        className={`enh-jump-chip${activeChip === 'all' ? ' enh-jump-chip--active' : ''}`}
+        onClick={() => {
+          setActiveChip('all');
+          document
+            .getElementById('enhanced-results-container')
+            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }}
+      >
+        All
+      </button>
+      {visible.map(([label, count, sectionId]) => (
         <button
           key={sectionId}
           type="button"
-          className="enh-jump-chip"
-          onClick={() =>
+          className={`enh-jump-chip${activeChip === sectionId ? ' enh-jump-chip--active' : ''}`}
+          onClick={() => {
+            setActiveChip(sectionId);
             document
               .getElementById(sectionId)
-              ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-          }
+              ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
         >
-          {label}
+          <span>{label}</span>
+          <span className="enh-jump-chip-count">{count}</span>
         </button>
       ))}
     </div>

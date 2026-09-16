@@ -184,7 +184,7 @@
         if (!panel) return;
         if (_tab === 'metadata') panel.innerHTML = panelMetadata();
         else if (_tab === 'server') panel.innerHTML = panelServer();
-        else { panel.innerHTML = panelDownload(); wireHybridDrag(); }
+        else { panel.innerHTML = panelDownload(); }
     }
 
     function panelMetadata() {
@@ -213,60 +213,27 @@
     }
 
     function panelDownload() {
+        // The chain editor moved to Settings -> Downloads, where music, video
+        // and audiobooks are all edited by one widget. Three implementations of
+        // the same {mode, hybrid_order} had drifted into three different looks
+        // and behaviours; this one is now a read-only summary plus a way in.
         var d = _data.download || {};
         var mode = d.mode || 'soulseek';
-        var hybrid = mode === 'hybrid';
-        var toggle = '<div class="ss-seg">' +
-            '<button class="ss-seg-btn' + (!hybrid ? ' active' : '') + '" onclick="_vssMode(\'single\')">Single source</button>' +
-            '<button class="ss-seg-btn' + (hybrid ? ' active' : '') + '" onclick="_vssMode(\'hybrid\')">Hybrid</button></div>';
-        if (!hybrid) {
-            var cards = '<div class="ss-grid">' + SOURCES.map(function (src) {
-                var info = DL_INFO[src];
-                return card(info.name, info.logo, info.emoji, mode === src, false, "_vssSetSource('" + src + "')");
-            }).join('') + '</div>';
-            return toggle + cards;
-        }
-        var order = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : SOURCES.slice();
+        var order = (mode === 'hybrid' && d.hybrid_order && d.hybrid_order.length)
+            ? d.hybrid_order : [mode];
         var rows = order.map(function (src, i) {
-            var info = DL_INFO[src] || { name: src, emoji: '⬇️', logo: null };
-            return '<div class="ss-hybrid-item" draggable="true" data-src="' + src + '">' +
+            var info = DL_INFO[src] || { name: src, emoji: '\u2b07\ufe0f', logo: null };
+            return '<div class="ss-hybrid-item" data-src="' + src + '">' +
                 '<span class="ss-hybrid-rank">' + (i + 1) + '</span>' +
                 media('ss-hybrid-logo', info.logo, info.emoji) +
                 '<span class="ss-hybrid-name">' + esc(info.name) + '</span></div>';
         }).join('');
-        return toggle +
-            '<div class="ss-hint">Drag to set priority &mdash; the first source that has the file wins.</div>' +
+        return '<div class="ss-hint">' +
+            (order.length > 1
+                ? 'Hybrid \u2014 each source is tried in order, the first that has the file wins.'
+                : 'Single source.') +
+            ' Change it in <strong>Settings \u2192 Downloads</strong>, on the Video tab.</div>' +
             '<div class="ss-hybrid-list" id="vss-hybrid-list">' + rows + '</div>';
-    }
-
-    // Drag-to-reorder the hybrid chain (mirrors the music modal's wiring).
-    function wireHybridDrag() {
-        var list = document.getElementById('vss-hybrid-list');
-        if (!list) return;
-        list.querySelectorAll('.ss-hybrid-item').forEach(function (item) {
-            item.addEventListener('dragstart', function (e) {
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', item.dataset.src);
-                item.classList.add('dragging');
-            });
-            item.addEventListener('dragend', function () { item.classList.remove('dragging'); });
-            item.addEventListener('dragover', function (e) { e.preventDefault(); });
-            item.addEventListener('drop', function (e) {
-                e.preventDefault();
-                var dragged = e.dataTransfer.getData('text/plain');
-                if (dragged && dragged !== item.dataset.src) reorder(dragged, item.dataset.src);
-            });
-        });
-    }
-    function reorder(draggedId, targetId) {
-        var order = ((_data.download || {}).hybrid_order || []).slice();
-        if (!order.length) order = SOURCES.slice();
-        var from = order.indexOf(draggedId);
-        if (from < 0) return;
-        order.splice(from, 1);
-        var to = order.indexOf(targetId);
-        order.splice(to < 0 ? order.length : to, 0, draggedId);
-        saveDownload({ download_mode: 'hybrid', hybrid_order: order }).then(load);
     }
 
     // ── actions ──────────────────────────────────────────────────────────────────
@@ -296,23 +263,8 @@
             else toast((res && res.error) || 'Could not switch server', true);
         }).catch(function () { toast('Could not switch server', true); });
     };
-    window._vssSetSource = function (src) {
-        if (!guardAdmin()) return;
-        saveDownload({ download_mode: src }).then(function () {
-            toast('Download source set to ' + (SRC_LABEL[src] || src)); load();
-        }).catch(function () { toast('Could not save', true); });
-    };
-    window._vssMode = function (m) {
-        if (!guardAdmin()) return;
-        if (m === 'hybrid') {
-            var order = ((_data.download || {}).hybrid_order || []).slice();
-            if (!order.length) order = SOURCES.slice();
-            saveDownload({ download_mode: 'hybrid', hybrid_order: order }).then(load);
-        } else {
-            var first = ((_data.download || {}).hybrid_order || [])[0] || 'soulseek';
-            saveDownload({ download_mode: first }).then(load);
-        }
-    };
+    // _vssSetSource / _vssMode went with the editor they served. Changing the
+    // chain happens on Settings -> Downloads now, for all three media types.
 
     window.openVideoServiceSwitchModal = function (tab) {
         if (!guardAdmin()) return;

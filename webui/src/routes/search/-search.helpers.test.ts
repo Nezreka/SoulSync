@@ -17,6 +17,7 @@ import {
   formatViewCount,
   hasAnyResults,
   inLibraryArtistPath,
+  libraryV2DiscoveryArtistPath,
   isIdLookupQuery,
   labelDetailPath,
   labelMetaLine,
@@ -392,6 +393,43 @@ describe('detail paths', () => {
     // different depending on whether v2 had mapped it.
     expect(inLibraryArtistPath({ id: 42, library_v2_id: 7 })).toBe(
       '/library?artist=7&releases=all&releaseView=cards&header=rich',
+    );
+  });
+
+  /**
+   * The other half of the same decision: a result the library does NOT have
+   * opens Library V2's discovery view directly. It used to point at
+   * `/artist-detail/<source>/<id>` and lean on that route redirecting a second
+   * time — which still works, and is what a bookmark hits, but search holds
+   * every value V2 needs and should link to the real destination.
+   */
+  it('sends a provider artist straight into Library V2 discovery', () => {
+    expect(libraryV2DiscoveryArtistPath('sp1', 'spotify', 'Found Artist')).toBe(
+      '/library?discover=spotify%3Asp1&discoverName=Found%20Artist' +
+        '&releases=all&releaseView=cards&header=rich',
+    );
+  });
+
+  it('carries no name when there is none, and never an empty one', () => {
+    // The name is a fallback identity for sources with no id lookup; an empty
+    // one is not an identity and must not become `discoverName=`.
+    expect(libraryV2DiscoveryArtistPath('sp1', 'spotify')).toBe(
+      '/library?discover=spotify%3Asp1&releases=all&releaseView=cards&header=rich',
+    );
+    expect(libraryV2DiscoveryArtistPath('sp1', 'spotify', '')).toBe(
+      '/library?discover=spotify%3Asp1&releases=all&releaseView=cards&header=rich',
+    );
+  });
+
+  it('lowercases the source and encodes the pair, so the route can split it', () => {
+    // `discover` is parsed as `<source>:<id>`; an unencoded colon or slash in
+    // either half would split it somewhere else entirely.
+    expect(libraryV2DiscoveryArtistPath('a/b', 'Deezer')).toBe(
+      '/library?discover=deezer%3Aa%2Fb&releases=all&releaseView=cards&header=rich',
+    );
+    expect(libraryV2DiscoveryArtistPath(311, 'bandcamp', 'AC/DC')).toBe(
+      '/library?discover=bandcamp%3A311&discoverName=AC%2FDC' +
+        '&releases=all&releaseView=cards&header=rich',
     );
   });
 

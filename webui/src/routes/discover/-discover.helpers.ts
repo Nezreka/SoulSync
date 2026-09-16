@@ -93,11 +93,17 @@ export function normalizeTrack(track: DiscoverTrackLike): NormalizedTrack {
   const album = td.album as { name?: string; images?: { url?: string }[] } | undefined;
 
   return {
-    name: (td.name as string) || (td.track_name as string) || track.track_name || 'Unknown Track',
+    name:
+      (td.name as string) ||
+      (td.track_name as string) ||
+      (td.title as string) ||
+      track.track_name ||
+      'Unknown Track',
     artist:
       (a0 && ((a0 as { name?: string }).name || (a0 as unknown as string))) ||
       (td.artist_name as string) ||
       track.artist_name ||
+      (typeof td.artist === 'string' ? td.artist : '') ||
       'Unknown Artist',
     album: (album && album.name) || (td.album_name as string) || track.album_name || '',
     cover:
@@ -119,13 +125,18 @@ export function discoverTrackToSpotifyShape(track: DiscoverTrackLike): Record<st
   const s: Record<string, unknown> = track.track_data_json
     ? { ...track.track_data_json }
     : {
-        id: track.spotify_track_id,
-        name: track.track_name || track.name,
-        artists: [{ name: track.artist_name }],
-        album: {
-          name: track.album_name || '',
-          images: track.album_cover_url ? [{ url: track.album_cover_url }] : [],
-        },
+        id: track.spotify_track_id || track.id,
+        name: track.track_name || track.name || track.title,
+        artists: Array.isArray(track.artists)
+          ? track.artists
+          : [{ name: track.artist_name || track.artist }],
+        album:
+          track.album && typeof track.album === 'object'
+            ? track.album
+            : {
+                name: track.album_name || '',
+                images: track.album_cover_url ? [{ url: track.album_cover_url }] : [],
+              },
         duration_ms: track.duration_ms || 0,
       };
 

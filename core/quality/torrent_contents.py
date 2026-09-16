@@ -67,6 +67,56 @@ def _text(raw: Any) -> str:
     return str(raw or '')
 
 
+def torrent_file_entries(payload: Optional[bytes]) -> Optional[List[Tuple[str, int]]]:
+    """Every file inside a .torrent as ``(name, size_bytes)``, or None.
+
+    Same decoder and the same contract as ``torrent_file_names`` below — it
+    never raises, and None means "could not read it", not "rejected". Sizes are
+    the addition: a list of names answers "is this the right book", but only
+    the sizes answer "is chapter 12 a real chapter or a 2KB placeholder".
+    """
+    if not payload or not isinstance(payload, (bytes, bytearray)):
+        return None
+    if len(payload) > MAX_TORRENT_BYTES:
+        logger.debug("torrent payload too large to inspect (%d bytes)", len(payload))
+        return None
+
+    try:
+        meta, _ = _decode(bytes(payload), 0)
+    except Exception as e:
+        logger.debug("could not decode .torrent: %s", e)
+        return None
+
+    if not isinstance(meta, dict):
+        return None
+    info = meta.get(b'info')
+    if not isinstance(info, dict):
+        return None
+
+    files = info.get(b'files')
+    if isinstance(files, list):
+        entries: List[Tuple[str, int]] = []
+        for entry in files:
+            if not isinstance(entry, dict):
+                continue
+            segments = entry.get(b'path') or entry.get(b'path.utf-8')
+            if not isinstance(segments, list) or not segments:
+                continue
+            size = entry.get(b'length')
+            entries.append((
+                '/'.join(_text(s) for s in segments),
+                int(size) if isinstance(size, int) else 0,
+            ))
+        return entries
+
+    # Single-file torrent: the whole thing is one file.
+    name = info.get(b'name')
+    if name:
+        length = info.get(b'length')
+        return [(_text(name), int(length) if isinstance(length, int) else 0)]
+    return []
+
+
 def torrent_file_names(payload: Optional[bytes]) -> Optional[List[str]]:
     """Every file name inside a .torrent, or None when it cannot be read.
 

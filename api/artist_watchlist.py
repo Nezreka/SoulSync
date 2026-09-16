@@ -142,9 +142,25 @@ def get_watchlist_artists():
         database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
         watchlist_artists = database.get_watchlist_artists(profile_id=get_current_profile_id())
 
+        # an artist whose source had no picture (deezer's empty-hash urls, or
+        # nothing stored yet) usually has one on the media server already.
+        # resolved here, not stored: the library thumb is the server's to
+        # change, and a scan may still find a proper source image later.
+        from core.metadata.artwork import normalize_image_url, usable_image_url
+        missing = [a.artist_name for a in watchlist_artists if not usable_image_url(a.image_url)]
+        library_thumbs = database.get_library_artist_thumbs_by_name(missing) if missing else {}
+
         # Convert to JSON serializable format (images are cached from watchlist scans)
         artists_data = []
         for artist in watchlist_artists:
+            image_url = artist.image_url if usable_image_url(artist.image_url) else None
+            if not image_url:
+                thumb = library_thumbs.get(str(artist.artist_name or '').strip().lower())
+                if thumb:
+                    try:
+                        image_url = normalize_image_url(thumb)
+                    except Exception as e:
+                        logger.debug("watchlist library thumb fallback failed for %s: %s", artist.artist_name, e)
             artists_data.append({
                 "id": artist.id,
                 "spotify_artist_id": artist.spotify_artist_id,
@@ -153,7 +169,7 @@ def get_watchlist_artists():
                 "last_scan_timestamp": artist.last_scan_timestamp.isoformat() if artist.last_scan_timestamp else None,
                 "created_at": artist.created_at.isoformat() if artist.created_at else None,
                 "updated_at": artist.updated_at.isoformat() if artist.updated_at else None,
-                "image_url": artist.image_url,  # Cached during watchlist scans
+                "image_url": image_url,  # cached during watchlist scans, or the library thumb
                 "itunes_artist_id": artist.itunes_artist_id,  # For iTunes-only artists
                 "deezer_artist_id": getattr(artist, 'deezer_artist_id', None),
                 "discogs_artist_id": getattr(artist, 'discogs_artist_id', None),

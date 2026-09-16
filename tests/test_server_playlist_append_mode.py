@@ -274,7 +274,7 @@ class TestNavidromeAppendToPlaylist:
         with patch.object(client, 'ensure_connection', return_value=True), \
              patch.object(client, 'get_playlists_by_name', return_value=[]), \
              patch.object(client, 'create_playlist', return_value=True) as mock_create:
-            result = client.append_to_playlist("Test", [SimpleNamespace(id='song-1')])
+            result = NavidromeClient.append_to_playlist.__wrapped__(client, "Test", [SimpleNamespace(id='song-1')])
         assert result is True
         mock_create.assert_called_once()
 
@@ -302,7 +302,7 @@ class TestNavidromeAppendToPlaylist:
              patch.object(client, 'get_playlists_by_name', return_value=existing_playlists), \
              patch.object(client, 'get_playlist_tracks', return_value=existing_tracks), \
              patch.object(client, '_make_request', side_effect=fake_make_request):
-            result = client.append_to_playlist("Test", incoming)
+            result = NavidromeClient.append_to_playlist.__wrapped__(client, "Test", incoming)
 
         assert result is True
         assert captured['endpoint'] == 'updatePlaylist'
@@ -318,7 +318,7 @@ class TestNavidromeAppendToPlaylist:
              patch.object(client, 'get_playlists_by_name', return_value=existing_playlists), \
              patch.object(client, 'get_playlist_tracks', return_value=existing_tracks), \
              patch.object(client, '_make_request') as mock_req:
-            result = client.append_to_playlist("Test", [SimpleNamespace(id='100')])
+            result = NavidromeClient.append_to_playlist.__wrapped__(client, "Test", [SimpleNamespace(id='100')])
         assert result is True
         mock_req.assert_not_called()
 
@@ -330,7 +330,7 @@ class TestNavidromeAppendToPlaylist:
              patch.object(client, 'get_playlist_tracks', return_value=[]), \
              patch.object(client, '_make_request', return_value=None):
             # _make_request returns None when Subsonic returns 'failed' status
-            result = client.append_to_playlist("Test", [SimpleNamespace(id='new-1')])
+            result = NavidromeClient.append_to_playlist.__wrapped__(client, "Test", [SimpleNamespace(id='new-1')])
         assert result is False
 
 

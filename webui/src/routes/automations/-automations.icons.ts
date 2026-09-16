@@ -6,6 +6,10 @@
  * variation selectors (the U+FE0F suffixes below).
  */
 export const AUTOMATION_ICONS: Record<string, string> = {
+  audiobook_process_wishlist: '\uD83D\uDCDA',
+  audiobook_scan_watchlist: '\u270D\uFE0F',
+  audiobook_scan_library: '\uD83C\uDFA7',
+  audiobook_purge_recycle: '\uD83D\uDDD1\uFE0F',
   schedule: '⏱️',
   daily_time: '🕰️',
   weekly_time: '📅',
@@ -17,6 +21,7 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   playlist_changed: '✏️',
   process_wishlist: '📋',
   scan_watchlist: '👁️',
+  scan_watchlist_podcasts: '🎙️',
   scan_library: '🔄',
   refresh_mirrored: '📂',
   sync_playlist: '🔁',

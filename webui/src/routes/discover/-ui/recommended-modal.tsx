@@ -158,14 +158,32 @@ function ModalCard({
       <button
         type="button"
         className={
-          watching ? 'recommended-card-watchlist-btn watching' : 'recommended-card-watchlist-btn'
+          watching
+            ? 'recommended-card-watchlist-btn ya-watchlist-btn watching active'
+            : 'recommended-card-watchlist-btn ya-watchlist-btn'
         }
         data-artist-id={id}
         data-artist-name={name}
+        title={watching ? 'On watchlist' : 'Add to watchlist'}
+        aria-label={watching ? 'On watchlist' : 'Add to watchlist'}
         disabled={!clickable || watching}
-        onClick={() => onAddToWatchlist(id, name)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAddToWatchlist(id, name);
+        }}
       >
-        {watching ? REC_WATCH_ON_LABEL : REC_WATCH_ADD_LABEL}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill={watching ? 'currentColor' : 'none'}
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+        <span className="sr-only">{watching ? REC_WATCH_ON_LABEL : REC_WATCH_ADD_LABEL}</span>
       </button>
       <a
         className="recommended-card-link"

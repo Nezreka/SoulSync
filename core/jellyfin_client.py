@@ -29,6 +29,25 @@ def _as_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _primary_image_url(item_id: Optional[str], item: Dict[str, Any]) -> Optional[str]:
+    """the item's primary image url, or None when jellyfin says it has none.
+
+    jellyfin lists an item's images in ImageTags; an artist without a photo
+    has no 'Primary' entry, and /Items/<id>/Images/Primary answers 404 for
+    it. storing that url anyway (#1253) gave the artist a "photo" that never
+    loads, and every enrichment worker only backfills a photo into an EMPTY
+    thumb_url, so the phantom kept the real one out for good. an item whose
+    dto carries no ImageTags at all (an older server, a lean request) keeps
+    the old behaviour: we can't tell, so we don't guess.
+    """
+    if not item_id:
+        return None
+    tags = item.get('ImageTags')
+    if isinstance(tags, dict) and not tags.get('Primary'):
+        return None
+    return f"/Items/{item_id}/Images/Primary"
+
+
 class JellyfinArtist:
     """Wrapper class to mimic Plex artist object interface"""
     def __init__(self, jellyfin_data: Dict[str, Any], client: 'JellyfinClient'):
@@ -59,12 +78,8 @@ class JellyfinArtist:
             return None
 
     def _get_artist_image_url(self) -> Optional[str]:
-        """Generate Jellyfin artist image URL"""
-        if not self.ratingKey:
-            return None
-
-        # Jellyfin primary image URL format
-        return f"/Items/{self.ratingKey}/Images/Primary"
+        """Generate Jellyfin artist image URL, or None when the artist has no image."""
+        return _primary_image_url(self.ratingKey, self._data)
     
     def albums(self) -> List['JellyfinAlbum']:
         """Get all albums for this artist"""
@@ -88,9 +103,7 @@ class JellyfinAlbum:
 
     def _get_album_image_url(self) -> Optional[str]:
         """Jellyfin/Emby album primary image URL (same shape as the artist one)."""
-        if not self.ratingKey:
-            return None
-        return f"/Items/{self.ratingKey}/Images/Primary"
+        return _primary_image_url(self.ratingKey, self._data)
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         if not date_str:
@@ -163,6 +176,24 @@ from core.media_server.contract import MediaServerClient
 
 
 class JellyfinClient(MediaServerClient):
+    # Sent alongside X-Emby-Token on every request.
+    #
+    # X-Emby-Token is the Emby-compatibility header Jellyfin has accepted
+    # for years and newer servers no longer honour (#1232: Jellyfin 12
+    # refuses every request, so the connection test reports nothing more
+    # useful than "check your URL and API key").
+    #
+    # BOTH are sent rather than swapping: a server that wants the old one
+    # ignores an extra Authorization header, and a server that wants the new
+    # one ignores the old. That keeps every 10.x install working untouched.
+    CLIENT_NAME = "SoulSync"
+    DEVICE_NAME = "SoulSync"
+    DEVICE_ID = "soulsync"
+
+    def _auth_header(self) -> str:
+        """The modern Authorization value Jellyfin expects."""
+        return jellyfin_auth_headers(self.api_key)["Authorization"]
+
     def __init__(self):
         self.base_url: Optional[str] = None
         self.api_key: Optional[str] = None
@@ -170,6 +201,9 @@ class JellyfinClient(MediaServerClient):
         self.music_library_id: Optional[str] = None
         self._connection_attempted = False
         self._is_connecting = False
+        # Why the last request failed, in the server's own words, so the
+        # connection test can say something better than "check your URL".
+        self.last_error: str = ""
         
         # Performance optimization: comprehensive caches
         self._album_cache = {}
@@ -487,7 +521,7 @@ class JellyfinClient(MediaServerClient):
 
         url = f"{self.base_url}{endpoint}"
         headers = {
-            'X-Emby-Token': self.api_key,
+            'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
             'Content-Type': 'application/json'
         }
 
@@ -506,7 +540,21 @@ class JellyfinClient(MediaServerClient):
             response = requests.get(url, headers=headers, params=params, timeout=timeout)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            # Keep the status and the server's own words. "Check your URL and
+            # API key" is the same message for a 401, a 404 and a 502, which
+            # is why a Jellyfin 12 rejection looked like a typo (#1232).
+            status = getattr(e.response, 'status_code', '?')
+            detail = ''
+            try:
+                detail = (e.response.text or '')[:200].strip()
+            except Exception:  # noqa: BLE001 - diagnostics must not throw
+                detail = ''
+            self.last_error = f"HTTP {status} from {endpoint}" + (f": {detail}" if detail else "")
+            logger.error(f"Jellyfin API request failed: {self.last_error}")
+            return None
         except requests.exceptions.RequestException as e:
+            self.last_error = f"{type(e).__name__}: {e}"
             logger.error(f"Jellyfin API request failed: {e}")
             return None
         except json.JSONDecodeError as e:
@@ -745,6 +793,36 @@ class JellyfinClient(MediaServerClient):
         except Exception as e:
             logger.error(f"Error getting artist IDs from Jellyfin: {e}")
             return set()
+
+    def get_artist_ids_without_image(self) -> Optional[set]:
+        """ids of album artists the server has no primary image for, or None
+        when the answer can't be trusted (not connected, request failed).
+
+        the phantom-url sweep (#1253) runs on this after every scan. one
+        request, the same lightweight AlbumArtists call removal detection
+        makes; ImageTags rides along in the dto by default.
+        """
+        if not self.ensure_connection() or not self.music_library_id:
+            return None
+        try:
+            params = {
+                'ParentId': self.music_library_id,
+                'Recursive': True,
+                'Fields': '',
+                'EnableTotalRecordCount': False
+            }
+            response = self._make_request('/Artists/AlbumArtists', params)
+            if not response:
+                return None
+            without = set()
+            for item in response.get('Items', []):
+                item_id = item.get('Id')
+                if item_id and _primary_image_url(item_id, item) is None:
+                    without.add(item_id)
+            return without
+        except Exception as e:
+            logger.error(f"Error getting artist image tags from Jellyfin: {e}")
+            return None
 
     def get_all_album_ids(self) -> set:
         """Get all album IDs from Jellyfin (lightweight, paginated, for removal detection).
@@ -1307,7 +1385,7 @@ class JellyfinClient(MediaServerClient):
         try:
             import requests
             url = f"{self.base_url}/Items/{playlist_id}"
-            response = requests.delete(url, headers={'X-Emby-Token': self.api_key}, timeout=10)
+            response = requests.delete(url, headers={'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()}, timeout=10)
             if response.status_code in [200, 204]:
                 logger.info(f"Deleted Jellyfin playlist {playlist_id}")
                 return True
@@ -1359,7 +1437,7 @@ class JellyfinClient(MediaServerClient):
             import requests
             url = f"{self.base_url}/Playlists"
             headers = {
-                'X-Emby-Token': self.api_key,
+                'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
                 'Content-Type': 'application/json'
             }
             data = {
@@ -1423,7 +1501,7 @@ class JellyfinClient(MediaServerClient):
             # Step 1: Create empty playlist
             url = f"{self.base_url}/Playlists"
             headers = {
-                'X-Emby-Token': self.api_key,
+                'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
                 'Content-Type': 'application/json'
             }
             # Don't include 'Ids' field for empty playlist - Emby doesn't handle empty arrays
@@ -1477,7 +1555,7 @@ class JellyfinClient(MediaServerClient):
                     'UserId': self.user_id
                 }
 
-                add_response = requests.post(add_url, params=add_params, headers={'X-Emby-Token': self.api_key}, timeout=30)
+                add_response = requests.post(add_url, params=add_params, headers={'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()}, timeout=30)
 
                 if add_response.status_code not in [200, 204]:
                     logger.error(f"Failed to add batch {batch_num} to playlist '{name}': HTTP {add_response.status_code}")
@@ -1521,7 +1599,7 @@ class JellyfinClient(MediaServerClient):
                 if target_playlist:
                     import requests
                     url = f"{self.base_url}/Items/{target_playlist.id}"
-                    headers = {'X-Emby-Token': self.api_key}
+                    headers = {'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()}
                     
                     response = requests.delete(url, headers=headers, timeout=10)
                     if response.status_code in [200, 204]:
@@ -1605,7 +1683,7 @@ class JellyfinClient(MediaServerClient):
                 upload_url = f"{self.base_url}/Items/{playlist_id}/Images/Primary"
                 upload_resp = _req.post(
                     upload_url,
-                    headers={'X-Emby-Token': self.api_key, 'Content-Type': content_type},
+                    headers={'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(), 'Content-Type': content_type},
                     data=img_resp.content,
                     timeout=15
                 )
@@ -1690,7 +1768,7 @@ class JellyfinClient(MediaServerClient):
                 add_params = {'Ids': ','.join(batch), 'UserId': self.user_id}
                 resp = requests.post(
                     add_url, params=add_params,
-                    headers={'X-Emby-Token': self.api_key}, timeout=30,
+                    headers={'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()}, timeout=30,
                 )
                 if resp.status_code in (200, 204):
                     total_added += len(batch)
@@ -1747,7 +1825,7 @@ class JellyfinClient(MediaServerClient):
                     desired_ids.append(tid)
 
             plan = plan_playlist_reconcile(current_ids, desired_ids)
-            hdr = {'X-Emby-Token': self.api_key}
+            hdr = {'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()}
 
             if plan['add']:
                 for i in range(0, len(plan['add']), 100):
@@ -1838,7 +1916,7 @@ class JellyfinClient(MediaServerClient):
                 return False
 
             old_eids = [eid for _tid, eid in entries if eid]
-            hdr = {'X-Emby-Token': self.api_key}
+            hdr = {'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()}
 
             # 1) Append the desired ids in order (new entries; existing copies stay
             #    for now — Jellyfin playlists allow duplicates).
@@ -1897,7 +1975,7 @@ class JellyfinClient(MediaServerClient):
                 import requests
                 url = f"{self.base_url}/Items/{existing_playlist.id}"
                 headers = {
-                    'X-Emby-Token': self.api_key
+                    'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()
                 }
                 
                 response = requests.delete(url, headers=headers, timeout=10)
@@ -1944,7 +2022,7 @@ class JellyfinClient(MediaServerClient):
             import requests
             url = f"{self.base_url}/Items/{target_library_id}/Refresh"
             headers = {
-                'X-Emby-Token': self.api_key,
+                'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
                 'Content-Type': 'application/json'
             }
             params = {
@@ -2024,7 +2102,7 @@ class JellyfinClient(MediaServerClient):
             url = f"{self.base_url}/Items/{artist_id}/Images/Primary/0"
 
             headers = {
-                'X-Emby-Token': self.api_key,
+                'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
                 'Content-Type': 'image/jpeg'
             }
 
@@ -2055,7 +2133,7 @@ class JellyfinClient(MediaServerClient):
             
             url = f"{self.base_url}/Items/{album_id}/Images/Primary"
             headers = {
-                'X-Emby-Token': self.api_key
+                'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()
             }
             
             # Try multiple approaches to find what works with Jellyfin
@@ -2073,7 +2151,7 @@ class JellyfinClient(MediaServerClient):
             # Method 2: Try with raw data and proper content-type
             try:
                 headers_raw = {
-                    'X-Emby-Token': self.api_key,
+                    'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
                     'Content-Type': 'image/jpeg'
                 }
                 response = requests.post(url, data=image_data, headers=headers_raw, timeout=30)
@@ -2157,3 +2235,22 @@ class JellyfinClient(MediaServerClient):
         except Exception as e:
             logger.error(f"Error setting metadata-only mode: {e}")
             return False
+
+
+def jellyfin_auth_headers(api_key) -> dict:
+    """both auth headers jellyfin accepts, for code that talks to the server with
+    bare requests instead of a JellyfinClient (video side, server activity).
+    the #1232 fix only reached the client; every hand-rolled header dict still
+    sent x-emby-token alone and jellyfin 12 answered 401 (#1250). always build
+    headers here so a new call site can't miss one."""
+    token = api_key or ""
+    return {
+        "X-Emby-Token": token,
+        "Authorization": (
+            f'MediaBrowser Client="{JellyfinClient.CLIENT_NAME}", '
+            f'Device="{JellyfinClient.DEVICE_NAME}", '
+            f'DeviceId="{JellyfinClient.DEVICE_ID}", '
+            f'Version="1.0.0", '
+            f'Token="{token}"'
+        ),
+    }

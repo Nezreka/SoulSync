@@ -1,0 +1,232 @@
+{
+  "seed_labels": [
+    {
+      "key": "bylt_artist_0",
+      "value": "Katy Perry"
+    },
+    {
+      "key": "bylt_artist_1",
+      "value": "Ariana Grande"
+    },
+    {
+      "key": "bylt_artist_2",
+      "value": "Ariana Grande"
+    }
+  ],
+  "snapshots": [
+    {
+      "playlist_type": "because_you_listen_to_2",
+      "profile_id": 1,
+      "curated_date": "2026-08-29 03:43:52",
+      "stored_count": 1,
+      "current_matches": [
+        {
+          "source": "deezer",
+          "track_name": "Perfect Girl (EDM Remake)",
+          "artist_name": "Scorpixter",
+          "album_name": "Perfect Girl (EDM Remake)",
+          "added_date": "2026-08-29 03:39:17"
+        }
+      ]
+    },
+    {
+      "playlist_type": "because_you_listen_to_0",
+      "profile_id": 1,
+      "curated_date": "2026-09-05 08:54:12",
+      "stored_count": 10,
+      "current_matches": [
+        {
+          "source": "deezer",
+          "track_name": "Nine One One (Poolside Remix)",
+          "artist_name": "Drama",
+          "album_name": "Nine One One (Poolside Remix)",
+          "added_date": "2026-09-03 07:20:50"
+        },
+        {
+          "source": "deezer",
+          "track_name": "If By Chance (slowed + reverb)",
+          "artist_name": "Ruth B.",
+          "album_name": "If By Chance (slowed + reverb)",
+          "added_date": "2026-09-05 08:49:27"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Millicent",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:34"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Aperture Apparel",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:35"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Baked",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:36"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Etik",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:37"
+        },
+        {
+          "source": "deezer",
+          "track_name": "German Piano",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:38"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Redux",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:38"
+        },
+        {
+          "source": "deezer",
+          "track_name": "String Theory",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:39"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Pervelon",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:39"
+        }
+      ]
+    },
+    {
+      "playlist_type": "because_you_listen_to_1",
+      "profile_id": 1,
+      "curated_date": "2026-09-05 08:54:12",
+      "stored_count": 10,
+      "current_matches": [
+        {
+          "source": "deezer",
+          "track_name": "Nine One One (Poolside Remix)",
+          "artist_name": "Drama",
+          "album_name": "Nine One One (Poolside Remix)",
+          "added_date": "2026-09-03 07:20:50"
+        },
+        {
+          "source": "deezer",
+          "track_name": "If By Chance (slowed + reverb)",
+          "artist_name": "Ruth B.",
+          "album_name": "If By Chance (slowed + reverb)",
+          "added_date": "2026-09-05 08:49:27"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Ohmu",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:35"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Aperture Apparel",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:35"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Baked",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:36"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Etik",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:37"
+        },
+        {
+          "source": "deezer",
+          "track_name": "German Piano",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:38"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Redux",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:38"
+        },
+        {
+          "source": "deezer",
+          "track_name": "String Theory",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:39"
+        },
+        {
+          "source": "deezer",
+          "track_name": "Pervelon",
+          "artist_name": "Halogen",
+          "album_name": "Baked",
+          "added_date": "2026-09-05 08:49:39"
+        }
+      ]
+    }
+  ],
+  "seed_identity_audit": [],
+  "genre_facts": [
+    {
+      "name": "Ariana Grande",
+      "genres": "[\"Holiday\", \"Pop\"]"
+    },
+    {
+      "name": "Drama",
+      "genres": "[\"Pop\", \"Alternativo\"]"
+    },
+    {
+      "name": "Ruth B.",
+      "genres": "[\"Pop\", \"Singer & Songwriter\"]"
+    },
+    {
+      "name": "Halogen",
+      "genres": "[\"Indie Rock\", \"Pop\"]"
+    },
+    {
+      "name": "Katy Perry",
+      "genres": "[\"Electronic\", \"Pop\"]"
+    }
+  ],
+  "overlaps": [
+    {
+      "a": 0,
+      "b": 1,
+      "shared": 9,
+      "jaccard": 0.8181818181818182
+    },
+    {
+      "a": 0,
+      "b": 2,
+      "shared": 0,
+      "jaccard": 0.0
+    },
+    {
+      "a": 1,
+      "b": 2,
+      "shared": 0,
+      "jaccard": 0.0
+    }
+  ]
+}

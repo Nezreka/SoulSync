@@ -69,27 +69,49 @@ def _read_tag(audio, tag_name):
     return None
 
 
+MISSING = '(missing)'
+
+_CHECK_FIELDS = (
+    ('check_album_name', 'album', 'album_tag'),
+    ('check_album_artist', 'albumartist', 'albumartist_tag'),
+    ('check_mb_release_id', 'musicbrainz_albumid', 'mbid_tag'),
+)
+
+
 def _detect_inconsistencies(tag_data, check_album, check_artist, check_mbid):
-    """Majority-vote inconsistency detection over per-file tag snapshots."""
+    """Majority-vote inconsistency detection over per-file tag snapshots.
+
+    A track MISSING a tag the others carry is a variant, not a pass. Upstream
+    d97a9b3d6 found the hole: navidrome keys an album on album + album artist
+    + musicbrainz release id, so one file without the id splits the album
+    exactly like one carrying the wrong id, and the version that only compared
+    tracks which HAD a value reported that album consistent. A field nobody
+    has is still left alone - there is nothing to normalize to.
+    """
+    enabled = {
+        'check_album_name': check_album,
+        'check_album_artist': check_artist,
+        'check_mb_release_id': check_mbid,
+    }
     inconsistencies = []
-    checks = (
-        ('album', 'album_tag', check_album),
-        ('albumartist', 'albumartist_tag', check_artist),
-        ('musicbrainz_albumid', 'mbid_tag', check_mbid),
-    )
-    for field, key, enabled in checks:
-        if not enabled:
+    for setting_key, field, tag_key in _CHECK_FIELDS:
+        if not enabled.get(setting_key, True):
             continue
-        values = [t[key] for t in tag_data if t[key]]
-        if values and len(set(values)) > 1:
-            majority = Counter(values).most_common(1)[0][0]
-            outliers = [t for t in tag_data if t[key] and t[key] != majority]
-            inconsistencies.append({
-                'field': field,
-                'canonical': majority,
-                'variants': list(set(values)),
-                'outlier_count': len(outliers),
-            })
+        present = [t[tag_key] for t in tag_data if t.get(tag_key)]
+        if not present:
+            continue
+        values = [t.get(tag_key) or MISSING for t in tag_data]
+        if len(set(values)) <= 1:
+            continue
+        # majority among the tracks that HAVE a value; a missing tag never wins
+        majority = Counter(present).most_common(1)[0][0]
+        outliers = [t for t in tag_data if (t.get(tag_key) or MISSING) != majority]
+        inconsistencies.append({
+            'field': field,
+            'canonical': majority,
+            'variants': sorted(set(values), key=lambda v: (v == MISSING, v)),
+            'outlier_count': len(outliers),
+        })
     return inconsistencies
 
 

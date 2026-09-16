@@ -372,6 +372,13 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
                    lh.server_source, al.image_url,
                    COALESCE(ar.canonical_artist_id, ar.id)
             FROM listening_history lh
+            -- Upstream's 50cd0aa4e added CAST(lh.db_track_id AS TEXT) here: its
+            -- tracks.id is TEXT (plex rating keys) against an INTEGER history
+            -- column, so sqlite gave the column numeric affinity and every
+            -- history row scanned the whole table (54 s per dashboard load).
+            -- The lib2 join cannot hit that: lib2_tracks.id and
+            -- listening_history.lib2_track_id are both INTEGER, and
+            -- idx_listening_lib2_track covers the history side. No CAST.
             LEFT JOIN lib2_tracks t ON t.id = lh.lib2_track_id
             LEFT JOIN lib2_albums al ON al.id = t.album_id
             LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id

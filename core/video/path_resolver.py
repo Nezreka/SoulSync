@@ -23,15 +23,12 @@ _PROBE_DEPTH = 4
 
 def video_base_dirs(db) -> list:
     """The local folders video files can live under, per the user's settings:
-    the movie/TV library roots + the transfer folder. Missing/blank skipped."""
-    dirs = []
-    for key in ("movies_path", "tv_path", "transfer_path"):
-        try:
-            v = db.get_setting(key)
-        except Exception:   # noqa: BLE001 - a settings hiccup just narrows the search
-            v = None
-        if v:
-            dirs.append(str(v))
+    primary and additional library roots + the transfer folder. Blanks skipped."""
+    from core.video.library_roots import library_roots
+    dirs = library_roots(db)
+    transfer = db.get_setting("transfer_path")
+    if transfer and transfer not in dirs:
+        dirs.append(str(transfer))
     return dirs
 
 
@@ -66,11 +63,12 @@ def resolve_video_file_path(stored_path, base_dirs, *, size_bytes=None,
         except Exception:   # noqa: BLE001 - unreadable size → can't prove identity
             return False
 
-    for base in (base_dirs or []):
-        base = str(base or "").rstrip("/\\")
-        if not base:
-            continue
-        for k in range(min(_PROBE_DEPTH, len(parts)), 0, -1):
+    # Prefer specific folder matches across ALL drives before a bare filename.
+    for k in range(min(_PROBE_DEPTH, len(parts)), 0, -1):
+        for base in (base_dirs or []):
+            base = str(base or "").rstrip("/\\")
+            if not base:
+                continue
             cand = os.path.join(base, *parts[-k:])
             if exists(cand) and _same_file(cand):
                 return cand

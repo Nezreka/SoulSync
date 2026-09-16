@@ -335,3 +335,209 @@ These are the parts of the batch that cannot be closed from here:
 3. **Screen reader pass (§11.4).**
 4. **Does it look right.** The after-shots are in
    `webui/test-results/discover-batch1/`; the judgement is Boulder's.
+
+---
+
+## Follow-up — Daily Mix duration and download metadata (2026-09-05)
+
+- **Status:** complete for the reported data corruption; broader visual recomposition remains in its planned batches.
+- **Problem reproduced:** owned Daily Mix tracks showed durations such as `6128:45`; the selected-download dialog lost native `artists[]` values and attributed generated mixes to YouTube. The database's `tracks.duration` column is milliseconds, but `_owned_tracks_for` multiplied it by 1,000. The download converter rebuilt native rows using only pool-style `artist_name` and `album_name`, discarding the native arrays/objects.
+- **Behavior implemented:** preserve database milliseconds; preserve native artist arrays, album/artwork and track ID through selection conversion; accept bare title/artist fallback rows; label generated Made for You downloads as SoulSync. The same track's displayed duration and artist now agree across the mix and download dialog.
+- **Persisted data:** Daily Mix payload version increased from 2 to 3. `get_or_build_daily_mixes` rebuilds an old stored payload on the next request instead of serving corrupted durations until its TTL expires. No database duration values were rewritten and no duration-size heuristic was introduced.
+- **Files changed:** `core/personalized/daily_mixes.py`; `webui/src/routes/discover/-discover.helpers.ts`; `webui/static/downloads.js`; regression tests in `tests/personalized/test_daily_mixes.py`, `-discover.helpers.differential.test.ts`, and `-discover.selection-metadata.test.tsx`.
+- **Validation:** 317 tests across the five focused frontend suites passed; 19 backend tests across Daily Mix generation and playable resolution passed; changed TypeScript files passed lint/type checking with zero warnings/errors; production UI and shell build succeeded.
+- **Failure/edge cases:** old stored payload version rebuild; native object artists and string artists; conversion repeated without losing metadata; pool-shaped rows retain prior behavior; selected track order and milliseconds preserved. The regression fixture checks `367725 ms → 6:07`, not `6128:45`.
+- **Live UI verification:** opened Daily Mix 1, selected all 40 rows, opened the real download modal. Aether shows `Virtual Mage / 3:26`; Seagulls `A.L.I.S.O.N / 3:21`; Warp Drive `Tonebox / 6:43`; header `by SoulSync`. Inspected the settled screenshot. No download analysis, acquisition, or wishlist submission was started.
+- **Evidence:** [corrected dialog](discover-fixes-evidence/download-selection-desktop.jpg), [rendered metadata and playback measurements](discover-fixes-evidence/metadata-and-playback.json).
+- **Remaining limitations:** this fixes data integrity, not the dialog's broader visual redesign or keyboard/mobile redesign. Already-open dialogs hold their prior payload: refresh Discover and reopen the mix to pick up the regenerated data.
+
+### Playback measurement follow-up
+
+The six original review fixes were incorporated in `afcd91a6f`. A subsequent live measurement used the actual running application and an already-owned track:
+
+| Stage | Observed result |
+|---|---|
+| Resolve a 40-track Daily Mix | 5,529 ms; 32 matched |
+| First already-resolved local playback | `playing` event at 185 ms; bridge returned `played` at 298 ms |
+| Second local playback | `playing` event at 74 ms; bridge returned at 75 ms |
+| Third local playback | `playing` event at 79 ms; bridge returned at 80 ms |
+
+All three attempts had `paused: false` and `readyState: 4`. The audio element was muted for verification and stopped afterward. This verifies browser playback acknowledgment, **not physical audibility**. The 40-track resolution sample is still above the original desired local-action latency; do not describe the full click-to-listening path as under two seconds. The historical approximately 60-second report has not been comprehensively benchmarked across library sizes and missing-track acquisition. These measurements distinguish resolution from audio startup instead of treating a toast as audio onset.
+
+---
+
+## Recommended Stations and Because You Listen To (2026-09-05)
+
+Implements [DISCOVER_STATIONS_AND_BYLT_ISSUES.md](DISCOVER_STATIONS_AND_BYLT_ISSUES.md)
+— B01–B06 and S01–S04, in the sequence §5 sets out.
+
+**Status:** every P1 and P2 in that handoff is implemented and covered by
+tests. NOT live-smoked on Boulder's install: the evidence sample below is
+fixture-derived, and the visual/keyboard passes named under "Remaining
+limitations" are still open.
+
+### Problem reproduced
+
+The audit's own numbers, rebuilt as a fixture: two seed artists that are
+played but **not watchlisted**, a twelve-track album freshly added to the
+discovery pool, and a stale ordinal slot from an earlier run. Against the old
+code that fixture reproduces the report exactly — both shelves fill with the
+same album, they overlap almost completely, and the third ordinal slot
+survives with one track under a repeated heading.
+
+### Behavior implemented
+
+**B01 — seed identity.** Similarity edges are matched as `(provider, id)`
+PAIRS. `similar_artists` gained a `source_provider` column, written by
+`update_similar_artists` from the id that actually identified the artist
+during the scan. Seeds resolve through the **library catalogue**
+(`get_artist_identity_rows`), with the watchlist as an additional source
+rather than a prerequisite — that watchlist-only lookup is why neither
+reported seed could resolve an edge. Legacy rows (no provider recorded) are
+usable only when their bare id is claimed by exactly one artist; anything
+ambiguous is counted and left unused rather than guessed at by numeric
+equality. `get_similar_artist_edges` returns the RAW rows: the previous code
+fed the grouped `get_top_similar_artists`, which takes `MAX(source_artist_id)`
+per similar-artist name and destroys every edge but one.
+
+**B02 — selection.** `core/discovery/bylt.py` is a pure module: candidates are
+collected per RELATIONSHIP with an explicit per-related-artist budget, scored
+(direct relationships occupy [1.0, 2.0], genre fallback [0.0, 1.0), so a
+direct edge can never lose to a tag), then capped at 2 per artist and 1 per
+canonical album. Genre evidence is weighted by inverse document frequency, so
+"Pop" across half the catalogue scores near zero. Nothing is padded: short
+supply produces a short shelf with a `presentation` flag and a diagnostics
+record of how many candidates survived each filter.
+
+**B03 — one generation.** The three ordinal rows and three GLOBAL heading keys
+are replaced by ONE versioned, profile-scoped record
+(`core/discovery/bylt_store.py`), written in a single store call. Sections are
+keyed by seed identity, never by position. A successful empty generation
+stores an explicit empty state; a FAILED run stores a failure marker and
+leaves the last good generation in place. Legacy rows are read once, labelled
+legacy, and retired per profile — the global `bylt_artist_*` keys are left
+alone, because clearing them would take another profile's headings with them.
+`get_top_artists` now accepts a `profile_id` and filters when the history can
+be attributed; today it cannot (`listening_history` has no profile column), so
+the payload declares `history_scope: "shared"` and the shelf says so when the
+install has more than one profile.
+
+**B04 — hydration.** The generation carries complete display and action
+metadata, so nothing is re-resolved at read time. The legacy path hydrates by
+EXACT id (`get_discovery_pool_tracks_by_ids`) with no recency window. Every
+section reports `requested` / `resolved` / `unavailable` plus reasons, and an
+unsupported source says so. Endpoint failures return HTTP 500 with
+`success: false` — the old handler answered `{"success": true, "sections":
+[]}` from its except block, which cached a lie for half an hour.
+
+**B05 — cache.** The server key carries the active source and the stored
+generation id; the client key carries the profile, with a finite 15-minute
+stale time in place of `Number.POSITIVE_INFINITY`. Curation invalidates the
+shelf cache directly. Expired entries are pruned rather than accumulating.
+
+**B06 — presentation.** The shelf is a LIST, not ten album-sized tiles: title,
+artist, album, duration and a truthful per-row reason, with `In library` on
+owned tracks. Every action is a real `<button>` with an accessible name (Play,
+Download, Album, plus shelf-level Play/Download); the row itself is inert, so
+a click is never ambiguous. Missing tracks are stated. A shelf below the
+quality bar never reaches the client at all, and the renderer still has an
+honest module for one if it does.
+
+**S01/S02 — the finite station.** `POST /api/discover/stations/<id>/snapshot`
+returns up to 40 library tracks for the seed, stored per profile with a
+revision, so the selection cannot move under an open dialog; `refresh=1` cuts
+a new revision on purpose. It is side-effect free with respect to playback.
+The preview dialog reuses the mix modal's compact list and selection bar, and
+its download/sync identity is `station_<artist>_r<revision>` — never a Daily
+Mix key — so a retry addresses the same operation. Availability is CHECKED per
+row rather than inferred from a file path, and the copy says
+"Sync these 40", not "sync endless radio".
+`openDownloadMissingModalForYouTube` takes an explicit `sourceLabel`, so a
+SoulSync station is no longer labelled YouTube by prefix sniffing.
+
+**S03 — truthful companions.** "With X and Y" is claimed only for artists the
+library can actually play; the rest are offered as "Related artists".
+
+**S04 — observable controls.** The row is a react-query with profile-scoped
+keys and real loading / empty / failed / loaded states (a failed fetch used to
+collapse to `[]`, which rendered exactly like an empty library). Each card has
+separate **View station** and **Play radio** buttons, a per-card pending state
+and a per-card error. `startArtistRadioById` now resolves `false` when nothing
+started, so success is no longer inferred from the call returning.
+
+### Files and contract changes
+
+- New: `core/discovery/bylt.py`, `bylt_store.py`, `bylt_view.py`;
+  `webui/src/routes/discover/-discover.stations.ts`, `-discover.use-station.ts`,
+  `-discover.profile-scope.ts`, `-ui/station-modal.tsx`.
+- Changed: `core/discovery/stations.py`, `core/watchlist_scanner.py`,
+  `database/music_database.py`, `api/discover_routes.py`,
+  `-discover.bylt.ts`, `-discover.use-playlist-sync.ts`, `-ui/bylt-sections.tsx`,
+  `-ui/stations-row.tsx`, `-ui/discover-page.tsx`,
+  `webui/static/{downloads.js,stats-automations.js,style.css}`,
+  `webui/src/platform/shell/globals.d.ts`.
+- Schema: `similar_artists.source_provider TEXT` (migration; legacy rows stay
+  NULL on purpose). New profile-scoped curated keys:
+  `because_you_listen_to_generation`, `because_you_listen_to_error`,
+  `station_snapshot_<artist_id>`.
+- API: `/api/discover/because-you-listen-to` gains generation identity, status,
+  reasons, counts, per-track identity and library state, and returns 500 on
+  failure. New `POST /api/discover/stations/<artist_id>/snapshot`.
+  `/api/discover/stations` gains `related` and `playable_tracks`.
+
+### Validation
+
+- `python -m pytest tests/discovery tests/radio tests/personalized` — 556
+  passed (before the last two test additions; see the full run below).
+- `npx vitest run src/routes/discover src/test` — 3094 tests, and the
+  artefact-parity, export-coverage and duplicate-id gates all pass with the new
+  ids claimed explicitly.
+- Negative check on eight guards (break it, watch the test fail, put it back):
+  provider ambiguity, the album cap, the insufficient-shelf filter, cross-shelf
+  overlap, the endpoint's 500, snapshot stability, companion verification, and
+  the legacy unavailable count. All eight fail when broken.
+
+### Failure and accessibility behavior
+
+Failure: generator failure keeps the last good generation and flags it stale;
+endpoint failure is a 500, not a cached empty; a station with no playable
+tracks explains itself; a missing browser bridge produces a visible error
+rather than a dead button; a radio selection that REFUSES is logged rather than
+looking like a small library.
+
+Accessibility: named buttons for every action, no clickable rows, no nested
+buttons, `aria-busy` on pending controls, `role="alert"` on per-item errors,
+the dialog carries `role="dialog"`/`aria-modal` with Escape, focus trap and
+focus restore, and the CSS reflows rows and stacks the station controls under
+720px with a 36px minimum touch target and a reduced-motion block.
+
+### Remaining limitations
+
+- **Not live-smoked.** The evidence below is fixture-derived. Nothing here has
+  been run against Boulder's real library, and relevance quality across several
+  real listening profiles is explicitly still unevaluated — passing the
+  diversity gates does not prove the picks are good.
+- **200% zoom and narrow-screen layout are CSS, not tests.** The rules are
+  there; nobody has looked at them in a browser.
+- **Screen-reader pass** not done.
+- **Listening history is still shared** across profiles. The scope is now
+  declared rather than implied, but attributing history per profile is a
+  schema change this does not make.
+- The stations row still has no keyboard-reachable menu affordance beyond its
+  two buttons; a third action would need one.
+
+### Evidence
+
+[after-fix-sample.json](discover-stations-bylt-evidence/after-fix-sample.json)
+— generation identity, per-section reason provenance and counts, distinct
+artist/album counts, per-artist and per-album maxima, pairwise shelf overlap
+(0 recordings, Jaccard 0.0 where the audit measured 9 shared and ~0.82), the
+edge verdict tally including the ambiguous legacy edge that was correctly
+refused, and the station snapshot's counts, stability and action list.
+
+### Follow-up review fixes — 2026-09-05
+
+- BYLT now initially shows four tracks per shelf, with an accessible View all / Show less toggle. A 1120px maximum width keeps controls nearer the track details; bulk actions continue to address the whole shelf. This changes presentation only. Existing legacy selections still need the next watchlist curation to build a new BYLT generation.
+- Station radio-selection failures now return a partial preview with an explicit refresh instruction. Available rows remain visible/actionable; failed selections are not persisted as successful small libraries. Snapshot schema 3 invalidates older cached previews that could contain this failure. Exceptions and explicit backend refusals are covered.
+- Play radio now awaits its bridge through the card, disables repeat activation while starting, displays Starting text and shows retryable errors beside the card. The radio action still starts artist radio; Play selected still plays the finite preview selection.
+- Validation: targeted backend station tests passed (17); targeted frontend tests passed (53), including partial-result rendering, expansion and radio retries. No watchlist scan, acquisition or playback was started for this change. Browser visual verification remains outstanding.

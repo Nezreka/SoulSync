@@ -3547,7 +3547,7 @@
             var poster = q('[data-vd-poster]');
             if (poster) { poster.onload = function () { applyAccent(poster); }; poster.src = '/api/video/poster/' + data.kind + '/' + libId + '?' + cb; }
             var bg = q('[data-vd-backdrop]');
-            if (bg && !data.has_backdrop) bg.style.backgroundImage = "url('/api/video/poster/" + data.kind + '/' + libId + '?' + cb + "')";
+            if (bg && !data.has_backdrop) bg.style.backgroundImage = "url('" + (window.SoulSyncURL?.resolve('/api/video/poster/') || '/api/video/poster/') + data.kind + '/' + libId + '?' + cb + "')";
         });
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') { closeTrailer(); closeLightbox(); closeCastModal(); }

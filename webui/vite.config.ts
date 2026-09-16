@@ -3,14 +3,14 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { defineConfig } from 'vite';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     tanstackRouter({
       target: 'react',
     }),
     react(),
   ],
-  base: '/static/dist/',
+  base: command === 'serve' ? '/static/dist/' : './',
   root: import.meta.dirname,
   resolve: {
     alias: [
@@ -28,4 +28,4 @@ export default defineConfig({
       input: [path.resolve(import.meta.dirname, 'src/app/main.tsx')],
     },
   },
-});
+}));

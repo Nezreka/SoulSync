@@ -85,19 +85,55 @@ export async function matchImportAlbum(input: {
   );
 }
 
+type ImportJobResponse = {
+  job_id?: string;
+  state?: 'queued' | 'running' | 'complete';
+  result?: ImportProcessPayload;
+  status?: number;
+};
+
+async function runImportJob(path: string, json: unknown): Promise<ImportProcessPayload> {
+  // getRandomValues also works on plain HTTP LAN installs, where randomUUID
+  // is unavailable. Retain the old timeout for servers predating async imports.
+  const key = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  const accepted = await readJson<ImportJobResponse & ImportProcessPayload>(
+    apiClient.post(path, {
+      json,
+      headers: { Prefer: 'respond-async', 'Idempotency-Key': key },
+      timeout: IMPORT_REQUEST_TIMEOUT_MS,
+    }),
+  );
+  // Supports an older server during an upgrade.
+  if (!accepted.job_id) return accepted;
+  let failures = 0;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    let job: ImportJobResponse;
+    try {
+      job = await readJson<ImportJobResponse>(apiClient.get(`import/jobs/${accepted.job_id}`));
+      failures = 0;
+    } catch (error) {
+      failures += 1;
+      if (failures >= 3 || (error instanceof Error && error.name === 'HTTPError')) throw error;
+      continue;
+    }
+    if (job.state === 'complete') {
+      if (!job.result) throw new Error('Import job returned no result');
+      if (!job.result.success || (job.status ?? 200) >= 400) {
+        throw new Error(job.result.error || 'Import processing failed');
+      }
+      return job.result;
+    }
+  }
+}
+
 export async function processImportAlbumTrack(input: {
   album: ImportAlbum;
   match: ImportAlbumMatch;
 }): Promise<ImportProcessPayload> {
-  return readJson<ImportProcessPayload>(
-    apiClient.post('import/album/process', {
-      json: {
-        album: input.album,
-        matches: [input.match],
-      },
-      timeout: IMPORT_REQUEST_TIMEOUT_MS,
-    }),
-  );
+  return runImportJob('import/album/process', { album: input.album, matches: [input.match] });
 }
 
 export async function searchImportTracks(query: string): Promise<ImportTrackSearchPayload> {
@@ -112,14 +148,7 @@ export async function searchImportTracks(query: string): Promise<ImportTrackSear
 }
 
 export async function processImportSingleFile(file: unknown): Promise<ImportProcessPayload> {
-  return readJson<ImportProcessPayload>(
-    apiClient.post('import/singles/process', {
-      json: {
-        files: [file],
-      },
-      timeout: IMPORT_REQUEST_TIMEOUT_MS,
-    }),
-  );
+  return runImportJob('import/singles/process', { files: [file] });
 }
 
 export async function fetchAutoImportStatus(): Promise<ImportAutoImportStatusPayload> {

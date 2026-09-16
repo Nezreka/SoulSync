@@ -76,6 +76,10 @@ def _search(db, title, artist='', limit=15):
     stub = types.SimpleNamespace(
         _normalize_for_comparison=normalize_for_comparison,
         _fuzzy_terms=MusicDatabase._fuzzy_terms,
+        # the norm columns are unfilled here, so the query falls back to the
+        # COALESCE(norm_text(...)) form exactly as a not-yet-backfilled library
+        _norm_ready=lambda cursor: False,
+        _norm_expr=lambda ready, table, raw, norm: MusicDatabase._norm_expr(None, ready, table, raw, norm),
     )
     rows = MusicDatabase._search_tracks_fuzzy_rows(
         stub, db.cursor(), title, artist, limit, None)
@@ -213,6 +217,10 @@ def test_a_comma_in_a_band_name_does_not_bury_it():
     stub = types.SimpleNamespace(
         _normalize_for_comparison=normalize_for_comparison,
         _fuzzy_terms=MusicDatabase._fuzzy_terms,
+        # the norm columns are unfilled here, so the query falls back to the
+        # COALESCE(norm_text(...)) form exactly as a not-yet-backfilled library
+        _norm_ready=lambda cursor: False,
+        _norm_expr=lambda ready, table, raw, norm: MusicDatabase._norm_expr(None, ready, table, raw, norm),
     )
     rows = MusicDatabase._search_tracks_fuzzy_rows(
         stub, db.cursor(), '', "Crosby, Stills & Nash", 15, None)

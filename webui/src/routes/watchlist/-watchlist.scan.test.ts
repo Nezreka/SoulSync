@@ -38,7 +38,12 @@ describe('scanProgressText / scanProgressPercent', () => {
   it('counts from one, not zero', () => {
     // current_artist_index is 0-based; the first artist reads "1 / 40".
     expect(scanProgressText({ current_artist_index: 0, total_artists: 40 })).toBe('1 / 40 artists');
-    expect(scanProgressPercent({ current_artist_index: 0, total_artists: 40 })).toBe(3);
+    // 12, not 3: the artist loop now occupies 10-100 because the source-matching
+    // phase that runs before it owns the first ten. Without that split the bar
+    // jumped BACKWARDS - matching finishing at 10%, then artist 1 restarting at
+    // 3% - which looks more broken than starting slightly high. A scan with
+    // nothing to match skips the phase entirely and simply opens at 10.
+    expect(scanProgressPercent({ current_artist_index: 0, total_artists: 40 })).toBe(12);
   });
 
   it('never exceeds the total', () => {
@@ -114,5 +119,56 @@ describe('scanCompletionMessage', () => {
     expect(scanCompletionMessage({})).toBe(
       'Scan completed: 0/0 artists scanned, no new tracks found',
     );
+  });
+});
+
+describe('the source-matching phase', () => {
+  // Every artist is looked up on every other metadata provider BEFORE the
+  // artist loop starts. For a few hundred artists that is the longest part of a
+  // scan, and nothing about the artist counter moves during it — so the page
+  // read "0 / 379 artists" the whole time and the scan looked hung (#1240).
+  const matching = (done: number, total = 379, source = 'deezer') => ({
+    current_phase: 'matching_sources',
+    matching_source: source,
+    matching_artists_done: done,
+    matching_artists_total: total,
+    current_artist_index: 0,
+    total_artists: 379,
+  });
+
+  it('counts the artists being matched, not the ones being scanned', () => {
+    expect(scanProgressText(matching(120))).toBe('Matching 120 / 379 artists to deezer');
+  });
+
+  it('does not fall back to the frozen artist counter', () => {
+    expect(scanProgressText(matching(120))).not.toContain('1 / 379 artists');
+  });
+
+  it('names the phase readably', () => {
+    expect(prettyScanPhase('matching_sources')).toBe('Matching artists to sources…');
+  });
+
+  it('drops the source when it is not known yet', () => {
+    expect(scanProgressText(matching(5, 379, ''))).toBe('Matching 5 / 379 artists');
+  });
+
+  it('moves the bar while matching', () => {
+    expect(scanProgressPercent(matching(0))).toBe(0);
+    expect(scanProgressPercent(matching(379))).toBe(10);
+  });
+
+  it('never sends the bar backwards when the artist loop starts', () => {
+    // matching finishes at 10; artist 1 of 379 must not restart below it
+    const matchingDone = scanProgressPercent(matching(379));
+    const firstArtist = scanProgressPercent({ current_artist_index: 0, total_artists: 379 });
+    expect(firstArtist).toBeGreaterThanOrEqual(matchingDone);
+  });
+
+  it('still reaches 100 on the last artist', () => {
+    expect(scanProgressPercent({ current_artist_index: 378, total_artists: 379 })).toBe(100);
+  });
+
+  it('leaves a normal scan frame alone', () => {
+    expect(scanProgressText({ current_artist_index: 2, total_artists: 40 })).toBe('3 / 40 artists');
   });
 });

@@ -173,7 +173,7 @@ function RowActions({
   onUnmatchTrack?: (row: DiscoveryRow) => void;
 }) {
   const action = discoveryRowAction(row);
-  if (action === 'none' || !onFixTrack) return <>-</>;
+  if (action === 'none' || !onFixTrack) return <span>-</span>;
   if (action === 'rematch') {
     return (
       <>
@@ -311,16 +311,16 @@ function FooterActions(props: DiscoveryModalProps) {
   if (state.phase === 'fresh') {
     return (
       <>
-        <button type="button" className="modal-btn modal-btn-primary" onClick={onStartDiscovery}>
+        <button key="start-discovery-btn" type="button" className="modal-btn modal-btn-primary" onClick={onStartDiscovery}>
           🔍 Start Discovery
         </button>
-        <WingItButton config={config} state={state} onClose={onClose} />
+        <WingItButton key="wing-it-btn" config={config} state={state} onClose={onClose} />
       </>
     );
   }
 
   if (state.phase === 'discovering') {
-    return <div className="modal-info">🔍 Discovering {metadataSourceLabel()} matches...</div>;
+    return <div key="discovering-info" className="modal-info">🔍 Discovering {metadataSourceLabel()} matches...</div>;
   }
 
   if (state.phase === 'syncing') {
@@ -328,10 +328,10 @@ function FooterActions(props: DiscoveryModalProps) {
     const percent = syncPercent(config.sync.percentFormula, progress);
     return (
       <>
-        <button type="button" className="modal-btn modal-btn-danger" onClick={onCancelSync}>
+        <button key="cancel-sync-btn" type="button" className="modal-btn modal-btn-danger" onClick={onCancelSync}>
           ❌ Cancel Sync
         </button>
-        <div className="playlist-modal-sync-status" style={{ display: 'flex' }}>
+        <div key="sync-status" className="playlist-modal-sync-status" style={{ display: 'flex' }}>
           <span className="sync-stat total-tracks">♪ {progress?.total_tracks ?? 0}</span>
           <span className="sync-separator">/</span>
           <span className="sync-stat matched-tracks">✓ {progress?.matched_tracks ?? 0}</span>
@@ -349,7 +349,7 @@ function FooterActions(props: DiscoveryModalProps) {
   // makes those unrepresentable.
   if (!hasResults) {
     return (
-      <div className="modal-info">
+      <div key="no-results-info" className="modal-info">
         ⚠️ No discovery results available. Try starting discovery again.
       </div>
     );
@@ -362,13 +362,14 @@ function FooterActions(props: DiscoveryModalProps) {
   return (
     <>
       {hasMatches && !standalone && (
-        <button type="button" className="modal-btn modal-btn-primary" onClick={onStartSync}>
+        <button key="sync-playlist-btn" type="button" className="modal-btn modal-btn-primary" onClick={onStartSync}>
           🔄 Sync This Playlist
         </button>
       )}
       {(hasMatches || hasConverted) &&
         (standalone && config.id === 'spotify_public' ? (
           <button
+            key="download-folder-btn"
             type="button"
             className="modal-btn modal-btn-primary soulsync-standalone-action"
             onClick={() => onDownloadMissing({ forcePlaylistFolder: true })}
@@ -377,6 +378,7 @@ function FooterActions(props: DiscoveryModalProps) {
           </button>
         ) : (
           <button
+            key="download-missing-btn"
             type="button"
             className="modal-btn modal-btn-primary"
             onClick={() => onDownloadMissing()}
@@ -385,16 +387,16 @@ function FooterActions(props: DiscoveryModalProps) {
           </button>
         ))}
       {config.id === 'mirrored' && failedCount > 0 && onRetryFailed && (
-        <button type="button" className="modal-btn modal-btn-secondary" onClick={onRetryFailed}>
+        <button key="retry-failed-btn" type="button" className="modal-btn modal-btn-secondary" onClick={onRetryFailed}>
           🔄 Retry Failed ({failedCount})
         </button>
       )}
       {config.api.reset && onRediscover && (
-        <button type="button" className="modal-btn modal-btn-secondary" onClick={onRediscover}>
+        <button key="rediscover-btn" type="button" className="modal-btn modal-btn-secondary" onClick={onRediscover}>
           🔄 Rediscover
         </button>
       )}
-      <WingItButton config={config} state={state} onClose={onClose} />
+      <WingItButton key="wing-it-btn" config={config} state={state} onClose={onClose} />
     </>
   );
 }
@@ -416,7 +418,7 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
 
   return (
     <div className="modal-overlay" id={`sync-discovery-modal-${fakeHash}`}>
-      <div className="youtube-discovery-modal">
+      <div className="youtube-discovery-modal" data-source={config.id}>
         <div className="modal-header">
           <h2>{modalTitle(config.id, fakeHash)}</h2>
           <div className="modal-subtitle">
@@ -435,6 +437,12 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
         </div>
 
         <div className="modal-body">
+          {Boolean(state.syncError) && (
+            <div className="discovery-error-banner" role="alert">
+              <span className="discovery-error-icon">⚠️</span>
+              <span className="discovery-error-text">{state.syncError}</span>
+            </div>
+          )}
           <div className="progress-section">
             <div className="progress-label">🔍 {metadataLabel} Discovery Progress</div>
             <div className="progress-bar-container">
@@ -498,7 +506,7 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
                 {pending.map((row) => (
                   <tr
                     key={`pending-${row.index}`}
-                    id={`sync-discovery-row-${fakeHash}-${row.index}`}
+                    id={`sync-discovery-row-pending-${fakeHash}-${row.index}`}
                   >
                     <td className="yt-track">{row.track}</td>
                     <td className="yt-artist">{row.artist}</td>

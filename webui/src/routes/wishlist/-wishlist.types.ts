@@ -22,6 +22,12 @@ export const wishlistSearchSchema = z.object({
     .default('')
     .catch(''),
   failing: z.boolean().default(false).catch(false),
+  /**
+   * Which media type's wishlist is showing. Music is the default and the only
+   * value the page had before audiobooks arrived, so an existing bookmark or a
+   * link with no `media` lands exactly where it always did.
+   */
+  media: z.enum(['music', 'audiobooks']).default('music').catch('music'),
 });
 
 export type WishlistSearch = z.infer<typeof wishlistSearchSchema>;

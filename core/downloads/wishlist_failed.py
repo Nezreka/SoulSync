@@ -59,7 +59,11 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                 logger.warning(f"[Wishlist Processing] Batch {batch_id} not found")
                 return {'tracks_added': 0, 'errors': 0}
 
-        batch = download_batches[batch_id]
+            batch = download_batches[batch_id]
+            from core.downloads.lifecycle import is_music_batch
+            if not is_music_batch(batch_id, batch):
+                logger.info(f"[Wishlist Processing] Skipping non-music batch {batch_id}")
+                return {'tracks_added': 0, 'errors': 0}
 
         # Wing It mode used to skip wishlist entirely here. Now the per-track
         # is_stub_id()/should_wishlist_stub() gate below decides: a searchable

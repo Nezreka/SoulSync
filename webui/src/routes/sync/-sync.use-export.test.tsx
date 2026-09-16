@@ -162,7 +162,7 @@ describe('useExportJobs — polling', () => {
     expect(calls.length).toBe(settled);
   });
 
-  it('a failed tick paints nothing and retries at 2s instead of 1s', async () => {
+  it('a failed tick reports reconnecting and retries at 2s instead of 1s', async () => {
     let fail = true;
     responder = (url) => {
       if (!url.includes('/export/status/')) return { success: true, job_id: 'j9' };
@@ -173,8 +173,7 @@ describe('useExportJobs — polling', () => {
     await act(async () => {
       fireEvent.click(screen.getByText('go'));
     });
-    // The failed tick left the pre-poll status in place.
-    expect(text()).toBe('Starting export…');
+    expect(text()).toBe('Reconnecting to export status...');
     const afterFirst = calls.length;
 
     await act(async () => {
@@ -257,4 +256,54 @@ describe('useExportJobs — the auto-hide timer and teardown', () => {
     });
     expect(calls.length).toBe(before);
   });
+});
+
+it('an old completion timer cannot erase a newer job', async () => {
+  let phase = 'error';
+  responder = (url) =>
+    url.includes('/export/status/')
+      ? { job: { phase, error: 'Old failure' } }
+      : { success: true, job_id: 'j9' };
+  render(<Harness />);
+  await act(async () => {
+    fireEvent.click(screen.getByText('go'));
+  });
+  phase = 'pushing';
+  await act(async () => {
+    fireEvent.click(screen.getByText('go'));
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10000);
+  });
+  expect(text()).toBe('Pushing to ListenBrainz…');
+});
+
+it('a late response cannot restore a superseded job', async () => {
+  let finishOld!: (value: Response) => void;
+  let starts = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (!url.includes('/export/status/'))
+        return Promise.resolve(
+          new Response(JSON.stringify({ success: true, job_id: `j${++starts}` })),
+        );
+      if (url.endsWith('/j1'))
+        return new Promise((resolve) => {
+          finishOld = resolve;
+        });
+      return Promise.resolve(new Response(JSON.stringify({ job: { phase: 'pushing' } })));
+    }),
+  );
+  render(<Harness />);
+  await act(async () => {
+    fireEvent.click(screen.getByText('go'));
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByText('go'));
+  });
+  await act(async () => {
+    finishOld(new Response(JSON.stringify({ job: { phase: 'error', error: 'stale error' } })));
+  });
+  expect(text()).toBe('Pushing to ListenBrainz…');
 });

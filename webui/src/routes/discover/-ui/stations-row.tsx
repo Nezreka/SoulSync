@@ -1,49 +1,58 @@
 /**
- * Recommended Stations — the user's heaviest recent artists as one-click
- * radio. Click a card and the player starts THAT artist's library tracks
- * immediately through the existing startArtistRadioById seam; the radio
- * refill keeps it going by similarity. Spotify's row, minus the internet.
+ * Recommended Stations — the user's heaviest recent artists.
+ *
+ * The first version was one clickable card with one meaning: start endless
+ * radio. There was no way to see what a station contained, and nothing to hand
+ * to download or sync. It also collapsed every fetch failure to an empty array,
+ * so a broken backend rendered exactly like an empty library.
+ *
+ * Each card now carries TWO named controls:
+ *
+ *   - **View station** opens a finite preview (up to forty library tracks) with
+ *     selection, download and sync. It never starts, pauses or requeues audio.
+ *   - **Play radio** is the existing non-stop behaviour, unchanged.
+ *
+ * The card itself is no longer a button, so neither action is reached by
+ * accident, and nothing is nested inside anything clickable.
  */
 
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 
-export interface Station {
-  artist_id: string | number;
-  name: string;
-  image_url: string;
-  with: string[];
+import type { Station } from '../-discover.stations';
+
+import { stationSubtitle } from '../-discover.stations';
+
+export type { Station } from '../-discover.stations';
+export { fetchStations, stationSubtitle } from '../-discover.stations';
+
+export interface StationsRowProps {
+  stations: Station[] | null;
+  /** true while the first fetch is in flight. */
+  loading?: boolean;
+  /** A failed fetch is a failure, not an empty row. */
+  error?: string | null;
+  onRetry?: () => void;
+  onView: (station: Station) => void;
+  onPlayRadio: (station: Station) => void | Promise<void>;
+  /** The station whose preview or radio is still resolving. */
+  pendingId?: string | null;
+  /** Per-card failures, keyed by artist id. */
+  cardErrors?: Record<string, string>;
 }
 
-export async function fetchStations(): Promise<Station[]> {
-  try {
-    const response = await fetch('/api/discover/stations');
-    const data = (await response.json()) as { success?: boolean; stations?: Station[] };
-    return data?.success && Array.isArray(data.stations) ? data.stations : [];
-  } catch {
-    return [];
-  }
-}
-
-export function stationSubtitle(station: Station): string {
-  if (!station.with.length) return 'Artist radio from your library';
-  return `With ${station.with.join(', ')} and more`;
-}
-
-export function StationsRow() {
-  const [stations, setStations] = useState<Station[] | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    void fetchStations().then((rows) => {
-      if (live) setStations(rows);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  // no listening history yet -> no row at all (the page's empty-section rule)
-  if (stations !== null && stations.length === 0) return null;
+export function StationsRow({
+  stations,
+  loading = false,
+  error = null,
+  onRetry,
+  onView,
+  onPlayRadio,
+  pendingId = null,
+  cardErrors = {},
+}: StationsRowProps) {
+  // no listening history yet -> no row at all (the page's empty-section rule).
+  // a FAILURE is different and keeps the row, so the user can retry.
+  if (!loading && !error && stations !== null && stations.length === 0) return null;
 
   return (
     <div className="discovery-zone-section" id="recommended-stations-section">
@@ -51,40 +60,115 @@ export function StationsRow() {
         <div>
           <div className="discover-stations-title">Recommended Stations</div>
           <div className="discover-stations-sub">
-            Non-stop radio from the artists you play most — starts instantly from your library.
+            From the artists you play most. View a station for a finite list you can download or
+            sync, or start non-stop radio from your library.
           </div>
         </div>
       </div>
+
+      {error ? (
+        <div className="discover-stations-error" role="alert">
+          <span>{error}</span>
+          {onRetry ? (
+            <button type="button" className="btn btn--sm btn--secondary" onClick={onRetry}>
+              Try again
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="discover-stations-row">
         {(stations ?? []).map((station) => (
-          <button
+          <StationCard
             key={String(station.artist_id)}
-            type="button"
-            className="discover-station-card"
-            title={`Play ${station.name} radio`}
-            onClick={() =>
-              void window.startArtistRadioById?.(String(station.artist_id), station.name)
-            }
-          >
-            <span className="discover-station-badge">RADIO</span>
-            <span
-              className="discover-station-art"
-              style={
-                station.image_url ? { backgroundImage: `url(${station.image_url})` } : undefined
-              }
-            >
-              {!station.image_url ? '🎵' : ''}
-            </span>
-            <span className="discover-station-name">{station.name}</span>
-            <span className="discover-station-with">{stationSubtitle(station)}</span>
-          </button>
+            station={station}
+            pending={pendingId === String(station.artist_id)}
+            error={cardErrors[String(station.artist_id)]}
+            onView={onView}
+            onPlayRadio={onPlayRadio}
+          />
         ))}
-        {stations === null
+        {loading && !stations
           ? [1, 2, 3, 4].map((i) => (
               <div key={i} className="discover-station-card discover-station-card--loading" />
             ))
           : null}
       </div>
+    </div>
+  );
+}
+
+function StationCard({
+  station,
+  pending,
+  error,
+  onView,
+  onPlayRadio,
+}: {
+  station: Station;
+  pending?: boolean;
+  error?: string;
+  onView: (station: Station) => void;
+  onPlayRadio: (station: Station) => void | Promise<void>;
+}) {
+  const startingRef = useRef(false);
+  const [starting, setStarting] = useState(false);
+  const [radioError, setRadioError] = useState<string | null>(null);
+  const startRadio = async () => {
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setStarting(true);
+    setRadioError(null);
+    try {
+      await onPlayRadio(station);
+    } catch (err) {
+      setRadioError(err instanceof Error ? err.message : 'Could not start radio. Try again.');
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
+  };
+  return (
+    <div className="discover-station-card">
+      <span className="discover-station-badge">RADIO</span>
+      <span
+        className="discover-station-art"
+        style={station.image_url ? { backgroundImage: `url(${station.image_url})` } : undefined}
+      >
+        {!station.image_url ? '🎵' : ''}
+      </span>
+      <span className="discover-station-name" title={station.name}>
+        {station.name}
+      </span>
+      <span className="discover-station-with">{stationSubtitle(station)}</span>
+      <div className="discover-station-actions">
+        <button
+          type="button"
+          className="btn btn--sm btn--secondary"
+          aria-label={`View the ${station.name} station`}
+          disabled={pending}
+          aria-busy={pending || undefined}
+          onClick={() => onView(station)}
+        >
+          {pending ? 'Opening…' : 'View station'}
+        </button>
+        <button
+          type="button"
+          className="btn btn--sm btn--primary"
+          aria-label={`Play ${station.name} radio`}
+          disabled={starting}
+          aria-busy={starting || undefined}
+          onClick={() => void startRadio()}
+        >
+          {starting ? 'Starting...' : '▶ Play radio'}
+        </button>
+      </div>
+      {/* failure reported next to the control that failed, not in a page toast */}
+      {radioError || error ? (
+        <span className="discover-station-error" role="alert">
+          {radioError || error}
+        </span>
+      ) : null}
     </div>
   );
 }
