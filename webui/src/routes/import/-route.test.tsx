@@ -333,6 +333,24 @@ describe('import route', () => {
     expect(screen.getByRole('tab', { name: /History/ })).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('history can be cleared, and only from the history filter', async () => {
+    let cleared = 0;
+    server.use(
+      http.post('/api/auto-import/clear-completed', () => {
+        cleared += 1;
+        return HttpResponse.json({ success: true, count: 1 });
+      }),
+    );
+    renderImportRoute(['/import?filter=history']);
+    expect(await screen.findByText('Old Album')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear history' }));
+    await waitFor(() => expect(cleared).toBe(1));
+    expect(window.showConfirmDialog).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Needs attention/ }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Clear history' })).toBeNull());
+  });
+
   it('approve posts to the history row and re-reads the inbox', async () => {
     let approved: string[] = [];
     server.use(

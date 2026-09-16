@@ -12,6 +12,7 @@ import type { ImportInboxFilter, ImportInboxItem, ImportInboxPayload } from '../
 import {
   approveAutoImportResult,
   autoImportSettingsQueryOptions,
+  clearCompletedAutoImportResults,
   importInboxQueryOptions,
   invalidateAutoImportQueries,
   invalidateImportStagingQueries,
@@ -116,6 +117,23 @@ export function Inbox({
     },
     onError,
   });
+  const clearHistory = useMutation({
+    mutationFn: async () => {
+      const ok = await confirmAction({
+        title: 'Clear history',
+        message:
+          'Forget every imported, failed and dismissed record? Items still in the import folder are kept.',
+        confirmText: 'Clear',
+      });
+      return ok ? await clearCompletedAutoImportResults() : null;
+    },
+    onSuccess: (n) => {
+      if (n === null) return;
+      window.showToast?.(`Cleared ${n} ${n === 1 ? 'record' : 'records'}`, 'success');
+      refreshAll();
+    },
+    onError,
+  });
   const retry = useMutation({
     mutationFn: retryAutoImportResult,
     onSuccess: () => {
@@ -177,6 +195,17 @@ export function Inbox({
           </FilterPill>
         </div>
         <div className={styles.toolbarSpacer} />
+        {filter === 'history' && counts.history > 0 ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            id="auto-import-clear-completed"
+            disabled={clearHistory.isPending}
+            onClick={() => clearHistory.mutate()}
+          >
+            Clear history
+          </Button>
+        ) : null}
         {selectable.length > 1 ? (
           <div className={styles.toolbarActions}>
             {selected.size > 0 ? (
