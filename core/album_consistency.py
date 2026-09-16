@@ -4,6 +4,7 @@ on every file so they're consistent. Prevents media server album splits.
 """
 
 import os
+import re
 import threading
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
@@ -518,6 +519,76 @@ def _adopt_album_tags_from_siblings(file_infos):
     if not adopted and not album:
         return None
     return adopted, album, artist
+
+
+def _fold_title(value) -> str:
+    """case, whitespace and punctuation folded; edition qualifiers kept."""
+    value = (value or '').casefold()
+    value = re.sub(r"[^\w\s]", ' ', value)
+    return ' '.join(value.split())
+
+
+def adopt_sibling_tags_for_loose_tracks(file_infos, file_lock_fn=None) -> Dict[str, Any]:
+    """a track that landed in an album folder that already holds tracks joins them.
+
+    the album batch path runs run_album_consistency, whose step 0 adopts the
+    album-level tags from the files already on disk. a single track (search,
+    wishlist, "download the missing one") never got there: it resolved its own
+    musicbrainz release, and a different release id from its siblings splits
+    the album on navidrome (achilles4). this is that step 0 for any batch
+    shape, gated so it can only ever join the album it is already in:
+
+    - siblings are the files NOT in file_infos; new files never vote for
+      each other
+    - the file's own album tag must agree with the folder's (case and
+      punctuation aside). a track filed into the wrong folder, or a folder
+      of loose singles, is left exactly as it was
+    - only album-level fields are written; title, artist, track number and
+      the siblings themselves are never touched
+    """
+    result = {'written': 0, 'gated': 0, 'no_siblings': 0, 'errors': 0, 'total_files': len(file_infos)}
+    by_folder: Dict[str, List[Dict[str, Any]]] = {}
+    for fi in file_infos:
+        path = fi.get('path')
+        if path and os.path.exists(path):
+            by_folder.setdefault(os.path.dirname(os.path.normpath(path)), []).append(fi)
+
+    for infos in by_folder.values():
+        adopted = _adopt_album_tags_from_siblings(infos)
+        if not adopted:
+            result['no_siblings'] += len(infos)
+            continue
+        adopt_tags, adopt_album, adopt_artist = adopted
+        for fi in infos:
+            path = fi['path']
+            try:
+                lock = file_lock_fn(path) if file_lock_fn else _DummyLock()
+                with lock:
+                    audio = MutagenFile(path, easy=False)
+                    if audio is None:
+                        result['errors'] += 1
+                        continue
+                    own_album = _read_standard_tag(audio, 'album')
+                    if own_album and adopt_album and _fold_title(own_album) != _fold_title(adopt_album):
+                        logger.info(f"[Album Consistency] Not adopting folder tags for {os.path.basename(path)}: "
+                                    f"its album is \"{own_album}\", the folder's is \"{adopt_album}\"")
+                        result['gated'] += 1
+                        continue
+                    for tag_key, value in adopt_tags.items():
+                        _write_tag_to_file(audio, tag_key, value)
+                    if adopt_album:
+                        _write_standard_tag(audio, 'album', adopt_album)
+                    if adopt_artist:
+                        _write_standard_tag(audio, 'albumartist', adopt_artist)
+                    _atomic_save(audio)
+                    result['written'] += 1
+            except Exception as e:
+                logger.error(f"Error adopting sibling tags for {path}: {e}")
+                result['errors'] += 1
+    if result['written']:
+        logger.info(f"[Album Consistency] {result['written']}/{len(file_infos)} loose track(s) joined the "
+                    f"album already on disk; existing tracks untouched")
+    return result
 
 
 def run_album_consistency(

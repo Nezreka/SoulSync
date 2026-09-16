@@ -8,6 +8,7 @@ normalizing all tracks to the canonical (majority) value.
 
 import json
 import os
+import re
 from collections import Counter
 
 from mutagen import File as MutagenFile
@@ -114,6 +115,57 @@ def _write_tag(audio, tag_name, value):
     return False
 
 
+MISSING = '(missing)'
+
+_CHECK_FIELDS = (
+    ('check_album_name', 'album', 'album_tag'),
+    ('check_album_artist', 'albumartist', 'albumartist_tag'),
+    ('check_mb_release_id', 'musicbrainz_albumid', 'mbid_tag'),
+)
+
+
+def split_group_key(artist_name, album_title):
+    """the key two server-split rows of one album share.
+
+    case, whitespace and punctuation are folded; edition qualifiers are NOT.
+    "Album (Deluxe)" and "Album" are different releases and must stay apart,
+    or the fix would stamp one release id across two real albums."""
+    def fold(value):
+        value = (value or '').casefold()
+        value = re.sub(r"[^\w\s]", ' ', value)
+        return ' '.join(value.split())
+    return fold(artist_name), fold(album_title)
+
+
+def find_inconsistencies(tag_data, settings):
+    """the fields whose values disagree across tag_data, majority first.
+
+    a track missing a tag the others carry is a variant, not a pass: navidrome
+    keys an album on album + album artist + musicbrainz release id, so one
+    file without the id splits exactly like one with the wrong id. a field
+    nobody has is left alone (nothing to normalize to)."""
+    inconsistencies = []
+    for setting_key, field, tag_key in _CHECK_FIELDS:
+        if not settings.get(setting_key, True):
+            continue
+        present = [t[tag_key] for t in tag_data if t.get(tag_key)]
+        if not present:
+            continue
+        values = [t[tag_key] or MISSING for t in tag_data]
+        if len(set(values)) <= 1:
+            continue
+        # majority among the tracks that HAVE a value; a missing tag never wins
+        majority = Counter(present).most_common(1)[0][0]
+        outliers = [t for t in tag_data if (t.get(tag_key) or MISSING) != majority]
+        inconsistencies.append({
+            'field': field,
+            'canonical': majority,
+            'variants': sorted(set(values), key=lambda v: (v == MISSING, v)),
+            'outlier_count': len(outliers),
+        })
+    return inconsistencies
+
+
 @register_job
 class AlbumTagConsistencyJob(RepairJob):
     job_id = 'album_tag_consistency'
@@ -125,6 +177,10 @@ class AlbumTagConsistencyJob(RepairJob):
         'tracks that belong to the same album.\n\n'
         'These inconsistencies cause media servers like Navidrome to split one album '
         'into multiple entries (e.g. "Simulation Theory" and "Simulation Theory (Super Deluxe)").\n\n'
+        'Albums your server has ALREADY split are checked too: rows that share an artist and '
+        'title are treated as one album and their tracks compared together, so two "Album X" '
+        'entries with one track each still get caught. A track missing a tag the others carry '
+        '(often the MusicBrainz release id) counts as a mismatch, since servers key on it.\n\n'
         'The fix normalizes all tracks in the album to the most common (majority) value, '
         'then writes the corrected tags to the actual audio files.\n\n'
         'Settings:\n'
@@ -271,30 +327,7 @@ class AlbumTagConsistencyJob(RepairJob):
                 if len(tracks) < 2:
                     continue
 
-                # Read tags from each file
-                tag_data = []
-                for track in tracks:
-                    file_path = track['file_path']
-                    # Resolve path
-                    resolved = self._resolve_path(file_path, context)
-                    if not resolved or not os.path.exists(resolved):
-                        continue
-
-                    try:
-                        audio = MutagenFile(resolved, easy=False)
-                        if audio is None:
-                            continue
-                        tag_data.append({
-                            'track_id': track['id'],
-                            'track_title': track['title'],
-                            'file_path': file_path,
-                            'resolved_path': resolved,
-                            'album_tag': _read_tag(audio, 'album'),
-                            'albumartist_tag': _read_tag(audio, 'albumartist'),
-                            'mbid_tag': _read_tag(audio, 'musicbrainz_albumid'),
-                        })
-                    except Exception:
-                        continue
+                tag_data = self._read_track_tags(tracks, context)
 
                 if len(tag_data) < 2:
                     # Eligible on paper (2+ tracks with paths) but the files
@@ -302,44 +335,7 @@ class AlbumTagConsistencyJob(RepairJob):
                     unreadable_albums += 1
                     continue
 
-                # Check for inconsistencies
-                inconsistencies = []
-
-                if check_album:
-                    album_values = [t['album_tag'] for t in tag_data if t['album_tag']]
-                    if album_values and len(set(album_values)) > 1:
-                        majority = Counter(album_values).most_common(1)[0][0]
-                        outliers = [t for t in tag_data if t['album_tag'] and t['album_tag'] != majority]
-                        inconsistencies.append({
-                            'field': 'album',
-                            'canonical': majority,
-                            'variants': list(set(album_values)),
-                            'outlier_count': len(outliers),
-                        })
-
-                if check_artist:
-                    artist_values = [t['albumartist_tag'] for t in tag_data if t['albumartist_tag']]
-                    if artist_values and len(set(artist_values)) > 1:
-                        majority = Counter(artist_values).most_common(1)[0][0]
-                        outliers = [t for t in tag_data if t['albumartist_tag'] and t['albumartist_tag'] != majority]
-                        inconsistencies.append({
-                            'field': 'albumartist',
-                            'canonical': majority,
-                            'variants': list(set(artist_values)),
-                            'outlier_count': len(outliers),
-                        })
-
-                if check_mbid:
-                    mbid_values = [t['mbid_tag'] for t in tag_data if t['mbid_tag']]
-                    if mbid_values and len(set(mbid_values)) > 1:
-                        majority = Counter(mbid_values).most_common(1)[0][0]
-                        outliers = [t for t in tag_data if t['mbid_tag'] and t['mbid_tag'] != majority]
-                        inconsistencies.append({
-                            'field': 'musicbrainz_albumid',
-                            'canonical': majority,
-                            'variants': list(set(mbid_values)),
-                            'outlier_count': len(outliers),
-                        })
+                inconsistencies = find_inconsistencies(tag_data, settings)
 
                 if inconsistencies:
                     fields_affected = ', '.join(i['field'] for i in inconsistencies)
@@ -381,6 +377,19 @@ class AlbumTagConsistencyJob(RepairJob):
                             log_type='warning'
                         )
 
+            # albums the server has already split: they reach us as two or
+            # more album rows with the same artist and title, each too small
+            # for the loop above. achilles4: two tracks from one album, two
+            # albums in navidrome, "the SoulSync tools have not picked up on
+            # these discrepancies" — this is the pass that picks them up.
+            if not context.check_stop():
+                split_findings = self._scan_split_groups(cursor, context, settings, result)
+                if split_findings and context.report_progress:
+                    context.report_progress(
+                        log_line=f'{split_findings} album(s) your server has split across several entries',
+                        log_type='warning',
+                    )
+
             if unreadable_albums and context.report_progress:
                 context.report_progress(
                     log_line=(
@@ -399,6 +408,120 @@ class AlbumTagConsistencyJob(RepairJob):
             result.errors += 1
 
         return result
+
+    def _read_track_tags(self, tracks, context):
+        """one dict per track whose file could be read from here."""
+        tag_data = []
+        for track in tracks:
+            file_path = track['file_path']
+            resolved = self._resolve_path(file_path, context)
+            if not resolved or not os.path.exists(resolved):
+                continue
+            try:
+                audio = MutagenFile(resolved, easy=False)
+                if audio is None:
+                    continue
+                tag_data.append({
+                    'track_id': track['id'],
+                    'track_title': track['title'],
+                    'file_path': file_path,
+                    'resolved_path': resolved,
+                    'album_tag': _read_tag(audio, 'album'),
+                    'albumartist_tag': _read_tag(audio, 'albumartist'),
+                    'mbid_tag': _read_tag(audio, 'musicbrainz_albumid'),
+                })
+            except Exception:
+                continue
+        return tag_data
+
+    def _scan_split_groups(self, cursor, context, settings, result) -> int:
+        """album rows that share an artist and title, compared as one album.
+
+        returns the number of findings created. one finding per group,
+        keyed on the smallest album id so a re-run dedups against it."""
+        cursor.execute("""
+            SELECT al.id, al.title, ar.name AS artist_name
+            FROM albums al
+            JOIN artists ar ON ar.id = al.artist_id
+            WHERE EXISTS (
+                SELECT 1 FROM tracks t
+                WHERE t.album_id = al.id AND t.file_path IS NOT NULL AND t.file_path != ''
+            )
+        """)
+        groups = {}
+        for row in cursor.fetchall():
+            key = split_group_key(row['artist_name'], row['title'])
+            if not key[0] or not key[1]:
+                continue
+            groups.setdefault(key, []).append(row)
+        split = {key: rows for key, rows in groups.items() if len(rows) >= 2}
+        if not split:
+            return 0
+
+        created = 0
+        for rows in split.values():
+            if context.check_stop():
+                break
+            album_ids = sorted(str(r['id']) for r in rows)
+            placeholders = ','.join('?' * len(album_ids))
+            cursor.execute(f"""
+                SELECT id, title, file_path, album_id FROM tracks
+                WHERE album_id IN ({placeholders}) AND file_path IS NOT NULL AND file_path != ''
+            """, album_ids)
+            tracks = cursor.fetchall()
+            tag_data = self._read_track_tags(tracks, context)
+            if len(tag_data) < 2:
+                continue
+            result.scanned += 1
+            inconsistencies = find_inconsistencies(tag_data, settings)
+            if not inconsistencies:
+                continue
+
+            album_title = rows[0]['title']
+            artist_name = rows[0]['artist_name']
+            fields_affected = ', '.join(i['field'] for i in inconsistencies)
+            total_outliers = sum(i['outlier_count'] for i in inconsistencies)
+            desc_parts = []
+            for inc in inconsistencies:
+                variants_str = ' vs '.join(f'"{v}"' for v in inc['variants'][:3])
+                desc_parts.append(f"{inc['field']}: {variants_str}")
+
+            inserted = context.create_finding(
+                job_id=self.job_id,
+                finding_type='album_tag_inconsistency',
+                severity='warning',
+                entity_type='album',
+                entity_id=album_ids[0],
+                file_path=None,
+                title=f'Split on your server: {album_title} by {artist_name}',
+                description=(
+                    f'Your server shows this album as {len(rows)} entries. '
+                    f'{total_outliers} track(s) have mismatched {fields_affected}. '
+                    + '; '.join(desc_parts)
+                ),
+                details={
+                    'album_id': album_ids[0],
+                    'album_ids': album_ids,
+                    'album_title': album_title,
+                    'artist_name': artist_name,
+                    'server_split': True,
+                    'inconsistencies': inconsistencies,
+                    'track_count': len(tag_data),
+                    'tracks': [{'id': t['track_id'], 'title': t['track_title'],
+                                'file_path': t['file_path']} for t in tag_data],
+                },
+            )
+            if inserted:
+                result.findings_created += 1
+                created += 1
+            else:
+                result.findings_skipped_dedup += 1
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'Split: {album_title} ({len(rows)} entries) — {fields_affected}',
+                    log_type='warning',
+                )
+        return created
 
     def _resolve_path(self, file_path, context):
         """Resolve a DB file path to an actual filesystem path."""
