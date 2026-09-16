@@ -157,3 +157,25 @@ def test_lifecycle_runs_it_where_the_album_pass_does_not(tmp_path):
     loose_calls = src.count('_adopt_loose_tracks(_cons_files,')
     assert album_gates == 2
     assert loose_calls == 2
+
+
+def test_a_pinned_edition_is_never_overwritten_by_the_folder(tmp_path, monkeypatch):
+    # the user picked a release for this album; the per-track tagger wrote it.
+    # older siblings may predate the pin. adopting from them would undo it.
+    from core.downloads import lifecycle
+    calls = []
+    monkeypatch.setattr('core.album_consistency.adopt_sibling_tags_for_loose_tracks',
+                        lambda files, file_lock_fn=None: calls.append(files) or {'written': 0})
+    lifecycle._adopt_loose_tracks([{'path': 'x.flac'}], '[t]',
+                                  album_context={'musicbrainz_release_id': REL_A})
+    assert calls == []
+    lifecycle._adopt_loose_tracks([{'path': 'x.flac'}], '[t]', album_context={'name': 'Rebuild'})
+    assert len(calls) == 1
+    lifecycle._adopt_loose_tracks([{'path': 'x.flac'}], '[t]', album_context=None)
+    assert len(calls) == 2
+
+
+def test_lifecycle_passes_the_album_context_to_the_loose_pass():
+    src = Path('core/downloads/lifecycle.py').read_text(encoding='utf-8')
+    assert src.count("_adopt_loose_tracks(_cons_files, \"[Album Consistency]\", batch.get('album_context'))") == 1
+    assert src.count("_adopt_loose_tracks(_cons_files, \"[Album Consistency V2]\", batch.get('album_context'))") == 1

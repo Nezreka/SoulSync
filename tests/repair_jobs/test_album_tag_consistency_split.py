@@ -175,3 +175,69 @@ def test_a_missing_id_on_the_second_download_is_caught_and_the_fix_fills_it(tmp_
     assert FLAC(str(f2))['musicbrainz_albumid'] == [MBID_A]
     assert FLAC(str(f1))['musicbrainz_albumid'] == [MBID_A]
     assert '(missing)' in outcome['message']
+
+
+# ── two albums with one title are not one album ──────────────────────────────
+
+RG_BLUE = 'aaaaaaaa-0000-0000-0000-aaaaaaaaaaaa'
+RG_GREEN = 'bbbbbbbb-0000-0000-0000-bbbbbbbbbbbb'
+
+
+def test_self_titled_albums_with_different_release_groups_are_not_merged(tmp_path):
+    # weezer: "Weezer" (1994) and "Weezer" (2001). each row internally
+    # consistent, different release groups. merging would stamp one id on both
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    blue = [tmp_path / f'blue{i}.flac' for i in (1, 2)]
+    green = [tmp_path / f'green{i}.flac' for i in (1, 2)]
+    for f in blue:
+        _make_flac(f, {'album': 'Weezer', 'albumartist': 'Weezer', 'musicbrainz_albumid': MBID_A,
+                       'musicbrainz_releasegroupid': RG_BLUE, 'date': '1994-05-10'})
+    for f in green:
+        _make_flac(f, {'album': 'Weezer', 'albumartist': 'Weezer', 'musicbrainz_albumid': MBID_B,
+                       'musicbrainz_releasegroupid': RG_GREEN, 'date': '2001-05-15'})
+    _add_album(db, 'AL_BLUE', 'AR1', 'Weezer', 'Weezer', [('T1', str(blue[0])), ('T2', str(blue[1]))])
+    _add_album(db, 'AL_GREEN', 'AR1', 'Weezer', 'Weezer', [('T3', str(green[0])), ('T4', str(green[1]))])
+
+    _, progress, findings = _run_scan(db, tmp_path)
+
+    assert findings == []
+    assert any('look like different albums' in c.get('log_line', '') for c in progress)
+
+
+def test_different_years_alone_keep_them_apart(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    f1, f2 = tmp_path / 't1.flac', tmp_path / 't2.flac'
+    _make_flac(f1, {'album': 'Weezer', 'albumartist': 'Weezer', 'musicbrainz_albumid': MBID_A, 'date': '1994'})
+    _make_flac(f2, {'album': 'Weezer', 'albumartist': 'Weezer', 'musicbrainz_albumid': MBID_B, 'date': '2001'})
+    _add_album(db, 'AL1', 'AR1', 'Weezer', 'Weezer', [('T1', str(f1))])
+    _add_album(db, 'AL2', 'AR1', 'Weezer', 'Weezer', [('T2', str(f2))])
+    _, _, findings = _run_scan(db, tmp_path)
+    assert findings == []
+
+
+def test_a_side_without_identity_tags_cannot_object(tmp_path):
+    # the genuine split: the second download resolved another release of the
+    # SAME release group, or carries no group/date at all. still one album.
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    f1, f2 = tmp_path / 't1.flac', tmp_path / 't2.flac'
+    _make_flac(f1, {'album': 'Rebuild', 'albumartist': 'Achilles', 'musicbrainz_albumid': MBID_A,
+                    'musicbrainz_releasegroupid': RG_BLUE, 'date': '2019'})
+    _make_flac(f2, {'album': 'Rebuild', 'albumartist': 'Achilles', 'musicbrainz_albumid': MBID_B,
+                    'musicbrainz_releasegroupid': RG_BLUE})
+    _add_album(db, 'AL1', 'AR1', 'Achilles', 'Rebuild', [('T1', str(f1))])
+    _add_album(db, 'AL2', 'AR1', 'Achilles', 'Rebuild', [('T2', str(f2))])
+    _, _, findings = _run_scan(db, tmp_path)
+    assert len(findings) == 1
+    assert findings[0]['details']['server_split'] is True
+
+
+def test_rows_look_like_one_album_helper():
+    from core.repair_jobs.album_tag_consistency import rows_look_like_one_album
+    a = [{'rg_tag': RG_BLUE, 'date_tag': '1994-05-10'}]
+    b = [{'rg_tag': RG_GREEN, 'date_tag': '1994-05-10'}]
+    c = [{'rg_tag': None, 'date_tag': None}]
+    d = [{'rg_tag': RG_BLUE, 'date_tag': '2001'}]
+    assert not rows_look_like_one_album([a, b])          # groups differ
+    assert not rows_look_like_one_album([a, d])          # years differ
+    assert rows_look_like_one_album([a, c])              # nothing to object with
+    assert rows_look_like_one_album([a, a])

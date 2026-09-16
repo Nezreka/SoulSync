@@ -45,6 +45,14 @@ def _read_tag(audio, tag_name):
                     if key.startswith('TXXX:') and 'MusicBrainz Album Id' in key:
                         return str(audio.tags[key])
                 return None
+            elif tag_name == 'musicbrainz_releasegroupid':
+                for key in audio.tags:
+                    if key.startswith('TXXX:') and 'MusicBrainz Release Group Id' in key:
+                        return str(audio.tags[key])
+                return None
+            elif tag_name == 'date':
+                frame = audio.tags.get('TDRC')
+                return str(frame) if frame else None
         elif isinstance(audio, (FLAC, OggVorbis)):
             vals = audio.get(tag_name.upper(), [])
             return vals[0] if vals else None
@@ -63,6 +71,14 @@ def _read_tag(audio, tag_name):
                 if vals:
                     return vals[0].decode('utf-8') if isinstance(vals[0], bytes) else str(vals[0])
                 return None
+            if tag_name == 'musicbrainz_releasegroupid':
+                vals = audio.get('----:com.apple.iTunes:MusicBrainz Release Group Id', [])
+                if vals:
+                    return vals[0].decode('utf-8') if isinstance(vals[0], bytes) else str(vals[0])
+                return None
+            if tag_name == 'date':
+                vals = audio.get('\xa9day', [])
+                return str(vals[0]) if vals else None
     except Exception as e:
         logger.debug("read tag value failed: %s", e)
     return None
@@ -135,6 +151,35 @@ def split_group_key(artist_name, album_title):
         value = re.sub(r"[^\w\s]", ' ', value)
         return ' '.join(value.split())
     return fold(artist_name), fold(album_title)
+
+
+def _year(value):
+    value = (value or '').strip()
+    return value[:4] if len(value) >= 4 and value[:4].isdigit() else None
+
+
+def rows_look_like_one_album(rows_tag_data):
+    """False when the rows that share a title are different albums.
+
+    weezer has several albums called "Weezer". grouping by title alone would
+    merge them and the fix would stamp one release id across all of them,
+    which is worse than the split it set out to mend. two rows are the same
+    album only if nothing they carry says otherwise: a release-group id on
+    each side that differs, or a year on each side that differs, means two
+    albums. a side with no id or no year can't object."""
+    groups, years = [], []
+    for tag_data in rows_tag_data:
+        rg = [t.get('rg_tag') for t in tag_data if t.get('rg_tag')]
+        yr = [_year(t.get('date_tag')) for t in tag_data if _year(t.get('date_tag'))]
+        if rg:
+            groups.append(Counter(rg).most_common(1)[0][0])
+        if yr:
+            years.append(Counter(yr).most_common(1)[0][0])
+    if len(set(groups)) > 1:
+        return False
+    if len(set(years)) > 1:
+        return False
+    return True
 
 
 def find_inconsistencies(tag_data, settings):
@@ -429,6 +474,10 @@ class AlbumTagConsistencyJob(RepairJob):
                     'album_tag': _read_tag(audio, 'album'),
                     'albumartist_tag': _read_tag(audio, 'albumartist'),
                     'mbid_tag': _read_tag(audio, 'musicbrainz_albumid'),
+                    # read for the same-album check only; never written
+                    'rg_tag': _read_tag(audio, 'musicbrainz_releasegroupid'),
+                    'date_tag': _read_tag(audio, 'date'),
+                    'album_row': track['album_id'] if 'album_id' in track.keys() else None,
                 })
             except Exception:
                 continue
@@ -473,6 +522,17 @@ class AlbumTagConsistencyJob(RepairJob):
             if len(tag_data) < 2:
                 continue
             result.scanned += 1
+            per_row = {}
+            for t in tag_data:
+                per_row.setdefault(t.get('album_row'), []).append(t)
+            if not rows_look_like_one_album(list(per_row.values())):
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'Not merged: {rows[0]["title"]} by {rows[0]["artist_name"]} — '
+                                 f'{len(rows)} entries with the same title look like different albums',
+                        log_type='info',
+                    )
+                continue
             inconsistencies = find_inconsistencies(tag_data, settings)
             if not inconsistencies:
                 continue
