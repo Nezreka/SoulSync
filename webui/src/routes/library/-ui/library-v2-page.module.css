@@ -1207,6 +1207,63 @@ button.featureTag:disabled {
   font-size: 12px;
 }
 
+/* Two compact cards keep the artist overview useful on a phone. A single
+   square cover consumed almost the entire viewport and hid the fact that this
+   is a browseable collection. Names still truncate within their own card. */
+@media (max-width: 520px) {
+  .cardGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .artistCard {
+    min-width: 0;
+    padding: 8px;
+    border-radius: 12px;
+  }
+
+  .artistCardLink {
+    gap: 7px;
+  }
+
+  .artistName {
+    font-size: 13px;
+  }
+
+  .artistMeta {
+    gap: 4px;
+    font-size: 10px;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .artistCard > .cardMonitor {
+    top: 13px;
+    left: 13px;
+  }
+
+  .artistCard > .cardMonitor button {
+    width: 28px;
+    height: 28px;
+  }
+
+  .artistCard .mediaServerBadges {
+    top: 13px;
+    right: 13px;
+  }
+
+  .page :global(.discography-sections .album-card-name) {
+    display: -webkit-box;
+    min-height: 2.4em;
+    overflow: hidden;
+    line-height: 1.2;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}
+
 .missingBadge {
   background: rgba(245, 158, 11, 0.2);
   color: rgb(245, 158, 11);
@@ -1563,6 +1620,58 @@ button.statusWarn:disabled {
 .releasesHint {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.4);
+}
+
+/* The shared legacy filter styling was sized for the old full-width page.
+   Inside Library V2 it wrapped Sources onto a wasteful third toolbar line at
+   common laptop widths. Keep every control visible while tightening only this
+   page's copy of the bar. */
+.page :global(.discography-filters) {
+  gap: 8px;
+  padding: 8px 0 14px;
+}
+
+.page :global(.discography-filters .filter-group) {
+  gap: 4px;
+}
+
+.page :global(.discography-filters .filter-label) {
+  margin-right: 2px;
+}
+
+.page :global(.discography-filters .filter-divider) {
+  height: 22px;
+  margin: 0 1px;
+}
+
+.page :global(.discography-filters .discography-filter-btn) {
+  padding: 4px 10px;
+}
+
+@media (max-width: 700px) {
+  .releasesBar {
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .releasesHint {
+    flex-basis: 100%;
+    line-height: 1.4;
+  }
+
+  .page :global(.discography-filters) {
+    align-items: flex-start;
+    gap: 8px 12px;
+    padding-bottom: 12px;
+  }
+
+  .page :global(.discography-filters .filter-group) {
+    flex-wrap: wrap;
+  }
+
+  .page :global(.discography-filters .filter-divider) {
+    display: none;
+  }
 }
 
 /* --- section bulk-monitor button --- */
@@ -2122,6 +2231,14 @@ button.statusWarn:disabled {
   margin-top: 12px;
   color: rgba(255, 255, 255, 0.75);
   font-size: 13px;
+}
+
+.fileRemovalDialog {
+  width: min(960px, calc(100vw - 36px));
+  max-height: calc(100dvh - 36px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
 }
 
 .fileRemovalSummary {

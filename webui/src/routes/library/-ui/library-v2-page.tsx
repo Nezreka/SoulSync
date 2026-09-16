@@ -4128,7 +4128,7 @@ export function UnifiedFileRemovalDialog({
   const subject = title || physical?.title || `${fileIds?.length ?? 0} selected files`;
 
   return (
-    <ModalShell title={heading} wide onClose={onCancel}>
+    <ModalShell title={heading} className={styles.fileRemovalDialog} onClose={onCancel}>
       <p>
         Choose what should happen to <strong>{subject}</strong>. Monitoring and Wanted state are
         recalculated after the file records change.
@@ -4535,6 +4535,12 @@ function ArtistIndexView() {
 
   const artists = artistsQuery.data?.artists ?? [];
   const pagination = artistsQuery.data?.pagination;
+  const hasActiveArtistFilters = Boolean(search.q.trim()) || search.monitored !== 'all';
+  const hasNoArtistResults =
+    !artistsQuery.isLoading &&
+    !artistsQuery.isError &&
+    artists.length === 0 &&
+    (hasActiveArtistFilters || (pagination?.total_count ?? 0) > 0);
   // iss29-C03: a FAILED fetch is not an empty library. `retry: 1` means that
   // after the retry `isLoading` is false and `data` undefined, which used to
   // render "Your library is empty — Import library" to a user with 900 artists
@@ -4561,13 +4567,19 @@ function ArtistIndexView() {
         <div>
           <h1 className={styles.title}>Library</h1>
           <p className={styles.subtitle}>
-            {pagination ? `${pagination.total_count} artists` : 'Experimental library manager'}
+            {pagination
+              ? `${pagination.total_count} ${hasActiveArtistFilters ? 'matches' : 'artists'}`
+              : 'Experimental library manager'}
           </p>
         </div>
         <div className={styles.headerActions}>
           <GlobalAutomaticSearchButton />
           <MonitorAllUnmonitoredButton />
-          <ImportButton hasArtists={artists.length > 0} />
+          <ImportButton
+            hasArtists={
+              artists.length > 0 || hasActiveArtistFilters || (pagination?.total_count ?? 0) > 0
+            }
+          />
         </div>
       </header>
 
@@ -4662,6 +4674,32 @@ function ArtistIndexView() {
         </div>
       ) : isEmpty ? (
         <LibraryEmptyState />
+      ) : hasNoArtistResults ? (
+        <div className={styles.emptyState}>
+          <h2>No artists match this view</h2>
+          <p>
+            {hasActiveArtistFilters
+              ? 'Try a different name or reset the monitoring filter.'
+              : 'There are no artists on this page.'}
+          </p>
+          <button
+            type="button"
+            className={styles.btnGhost}
+            onClick={() => {
+              artistFilter.onChange('');
+              void navigate({
+                search: (previous) => ({
+                  ...previous,
+                  q: '',
+                  monitored: 'all' as const,
+                  page: 1,
+                }),
+              });
+            }}
+          >
+            {hasActiveArtistFilters ? 'Reset filters' : 'Back to first page'}
+          </button>
+        </div>
       ) : search.view === 'table' ? (
         <ArtistTable
           artists={artists}

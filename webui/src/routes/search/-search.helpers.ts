@@ -348,6 +348,28 @@ export function artistDetailPath(
 }
 
 /**
+ * Open a provider artist directly in Library V2's discovery view.
+ *
+ * Search used to point at `/artist-detail/<source>/<id>` and relied on that
+ * legacy-compatible route to redirect a second time. Keeping the redirect is
+ * useful for old bookmarks and non-React callers, but search already has every
+ * value Library V2 needs and should link to its actual destination.
+ */
+export function libraryV2DiscoveryArtistPath(
+  artistId: string | number,
+  source: string,
+  name?: string | null,
+): string {
+  const normalized = source.trim().toLowerCase();
+  const discoveryId = `${normalized}:${String(artistId)}`;
+  return (
+    `/library?discover=${encodeURIComponent(discoveryId)}` +
+    (name ? `&discoverName=${encodeURIComponent(name)}` : '') +
+    '&releases=all&releaseView=cards&header=rich'
+  );
+}
+
+/**
  * Where an "In Your Library" artist card points.
  *
  * The library is Library v2 now, and so is the bucket: `_build_db_artists`

@@ -24,11 +24,11 @@ import {
 } from '../-search.actions';
 import { fetchLabels, lookupById } from '../-search.api';
 import {
-  artistDetailPath,
   fallbackBannerText,
   inLibraryArtistPath,
   isIdLookupQuery,
   labelDetailPath,
+  libraryV2DiscoveryArtistPath,
   loadRecentSearches,
   removeRecentSearch,
   saveRecentSearch,
@@ -272,17 +272,13 @@ export function SearchPage() {
 
   const served = state.fallbacks[state.activeSource];
 
-  /**
-   * A library artist opens in Library v2 when v2 knows it, and otherwise
-   * resolves under 'library'; a found one resolves under the source it came
-   * from, with its name in tow. Both artist-detail forms need the source
-   * SEGMENT — the route is /artist-detail/$source/$id and a two-segment path
-   * resolves to nothing.
-   */
+  /** Library matches and provider discoveries both open in their intended
+   * Library V2 presentation. The old artist-detail route remains a fallback
+   * only when a local result unexpectedly lacks its V2 catalogue id. */
   const onArtistHref = (artist: SearchArtist, inLibrary: boolean) =>
     inLibrary
       ? inLibraryArtistPath(artist)
-      : artistDetailPath(artist.id ?? '', state.activeSource, artist.name);
+      : libraryV2DiscoveryArtistPath(artist.id ?? '', state.activeSource, artist.name);
 
   const onLabelHref = (label: SearchLabel) => labelDetailPath(label.id ?? '', label.name);
 

@@ -18,6 +18,16 @@
 - The track action opens Metadata directly. Metadata, Quality, Tags, Lyrics, Info and History were each checked at desktop width. The six tabs wrap into two rows on mobile. Manage Tracks places a short version legend beside the filter on wide screens.
 - Photo selection, metadata editing, file management, export and reassignment use consistent dialog framing. Narrow-window fixes include collapsed Retag cells, hidden Wanted search buttons, clipped reassignment search controls and oversized path-copy spacing.
 
+## Continuation after the checkpoint
+
+- The 390 px Artist card view now keeps two compact cards per row. It shows several artists per screen while retaining the same bookmark treatment and colored owned/total fraction. The Artist table remains the denser alternative.
+- Artist searches and monitoring filters with zero matches now show an explicit no-results state and a Reset filters action. A filtered result count of zero no longer exposes the misleading Import library action.
+- The All Releases filter bar uses smaller page-scoped gaps and controls, so Show, Include, Status and Sources remain on one line at a 1,440 px viewport. On narrow screens they wrap without horizontal scrolling.
+- Long release names use a two-line clamp in the mobile Discover grid, making similarly named editions distinguishable without increasing the square cards.
+- The Manage Tracks removal confirmation is content-sized at up to 960 px instead of inheriting the full tool-workspace height. Impact counts, path review, both removal modes, the blocking reason and final action remain visible together.
+- Retag, Rename / Organize and expanded History were rechecked at 390 px. Manual-tag ownership, current/proposed paths and history reasons remain visible with zero page-level horizontal overflow.
+- Provider artists from Search now link directly to Library V2 discovery. The link carries the artist source, id and name together with All Releases, card view and the rich header, so an artist outside the catalogue no longer visits the legacy `/artist-detail` route before reaching the intended view. The old route remains as a fallback for saved links and other callers.
+
 File-action naming and grouping were informed by [Lidarr’s artist details toolbar](https://github.com/Lidarr/Lidarr/blob/develop/frontend/src/Artist/Details/ArtistDetails.js).
 
 ## Visual evidence
@@ -39,6 +49,8 @@ Browser screenshots cover desktop (including 2,280 px), 760 px and 390 px widths
 | Shared workspace checkpoint | [Interactive Search](screenshots/uniform-interactive-search.png), [Retag](screenshots/uniform-preview-retag.png), [Rename / Organize](screenshots/uniform-preview-rename-organize.png), [Manage Tracks](screenshots/uniform-manage-tracks.png), [History](screenshots/uniform-history-expanded.png) |
 | Album editor checkpoint | [Quality](screenshots/uniform-album-edit-quality.png), [Metadata](screenshots/uniform-album-edit-metadata.png) |
 | Track editor checkpoint | [Metadata](screenshots/uniform-track-edit-metadata.png), [Quality](screenshots/uniform-track-edit-quality.png), [Tags](screenshots/uniform-track-edit-tags.png), [Lyrics](screenshots/uniform-track-edit-lyrics.png), [Info](screenshots/uniform-track-edit-info.png), [History](screenshots/uniform-track-edit-history.png), [390 px Metadata](screenshots/uniform-track-edit-metadata-mobile.png) |
+| Continuation pass | [Artist cards 390 px](screenshots/continue-artists-cards-fixed-390.png), [filtered empty state](screenshots/continue-artists-empty-fixed-390.png), [All Releases filters](screenshots/continue-all-releases-filters-fixed.png), [long release names](screenshots/continue-long-release-mobile-fixed.png), [compact removal confirmation](screenshots/continue-manage-tracks-confirm-fixed.png), [Retag 390 px](screenshots/continue-retag-390.png), [expanded History 390 px](screenshots/continue-history-expanded-390.png) |
+| Search to Library V2 | [External artist, rich discovery view](screenshots/search-provider-direct-library-v2.jpg) |
 
 Earlier `before-*` and `after-*` captures document the iterations. Live data and provider results can change between captures. The `uniform-*` captures are the authoritative images for this checkpoint's dialog dimensions.
 
@@ -55,11 +67,13 @@ Earlier `before-*` and `after-*` captures document the iterations. Live data and
 - Older acoustic-check events did not store the historical verdict. Their UI labels the available value as current file status; historical results are not invented.
 - Browser checks opened previews and searched sources. No retag write, rename apply, reassignment, deletion or media download was submitted.
 - At a 2,279 × 1,280 viewport, Interactive Search, Retag, Rename / Organize, Manage Tracks, History and both editors each measured 1,780 × 1,050 px at x=249.5/y=115. Track editor content measured zero horizontal overflow at desktop, 760 px and 390 px.
+- The continuation pass used browser rendering and geometry checks only; no test suite and no Retag, rename, delete, import or monitoring write was run.
+- The Search routing follow-up was checked from a real provider result to the final Library V2 URL and rich discovery screen. No artist was bookmarked or otherwise added during the check.
 
 ## Next UI pass
 
 - Continue the Library audit from this checkpoint instead of reopening the settled dialog-width, monitoring-bookmark and album-count decisions.
-- Recheck content density inside intentionally sparse tabs such as Album Quality and Track Info with more varied real data.
-- Review the artist list/card empty, loading and error states, plus very long artist/release names at all breakpoints.
-- Review bulk-selection and confirmation flows in Manage Tracks, Retag and Rename / Organize without changing the default manual-edit protection.
+- Recheck intentionally sparse tabs such as Album Quality and Track Info when artists with more varied profile data are available.
+- Exercise loading and server-error transitions with controlled responses; the real-data empty and no-match states are covered.
+- Continue through destructive confirmation variants using previews only, especially safe on-disk files where the permanent-delete acknowledgement becomes available.
 - Keep horizontal scrolling out of Library tables and dialog content; remeasure the affected container after every responsive change.
