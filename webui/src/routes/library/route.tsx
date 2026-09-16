@@ -22,6 +22,8 @@ export const Route = createFileRoute('/library')({
     page: search.page,
     monitored: search.monitored,
     album: search.album,
+    discover: search.discover,
+    discoverAlbum: search.discoverAlbum,
     section: search.section,
     wantedKind: search.wantedKind,
   }),
@@ -37,7 +39,7 @@ export const Route = createFileRoute('/library')({
       );
     } else if (deps.album) {
       void context.queryClient.prefetchQuery(libraryV2AlbumQueryOptions(deps.album));
-    } else {
+    } else if (!deps.discover && !deps.discoverAlbum) {
       void context.queryClient.prefetchQuery(libraryV2ArtistsQueryOptions(deps));
     }
   },

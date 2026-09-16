@@ -37,6 +37,22 @@ def _make_context_key(username, filename):
     return f"{username}::{filename}"
 
 
+def _rollup(progress_pct=0, **buckets):
+    """The album roll-up a caller should see for the given bucket counts.
+
+    Spelled out rather than compared loosely, because the whole point of the
+    per-bucket shape is that a queued track never reports itself as
+    downloading — an assertion that only checked ``active`` would not catch
+    the regression it exists to prevent.
+    """
+    return {
+        "active": sum(buckets.values()),
+        "progress_pct": progress_pct,
+        "queued": 0, "searching": 0, "downloading": 0, "processing": 0,
+        **buckets,
+    }
+
+
 def _deps(live_transfers=None):
     live_transfers = live_transfers or {}
     return {
@@ -59,7 +75,7 @@ class TestGetQueueStatus:
 
         assert result == {
             "tracks": {10: {"status": "downloading", "progress_pct": 42}},
-            "albums": {5: 1},
+            "albums": {5: _rollup(progress_pct=42, downloading=1)},
         }
 
     @pytest.mark.parametrize("raw_status,bucket", [
@@ -146,7 +162,7 @@ class TestGetQueueStatus:
 
         assert result == {
             "tracks": {20: {"status": "queued", "progress_pct": 0}},
-            "albums": {6: 1},
+            "albums": {6: _rollup(queued=1)},
         }
 
     def test_manual_grab_with_inprogress_transfer_reports_downloading(self):
@@ -204,7 +220,7 @@ class TestGetQueueStatus:
         result = get_queue_status([20], **_deps())
 
         assert result["tracks"][20]["status"] == "processing"
-        assert result["albums"] == {6: 1}  # not double-counted
+        assert result["albums"] == {6: _rollup(progress_pct=95, processing=1)}  # not double-counted
 
     @pytest.mark.parametrize("terminal_status", [
         "completed", "failed", "cancelled", "not_found", "skipped", "already_owned",
@@ -236,7 +252,47 @@ class TestGetQueueStatus:
 
         result = get_queue_status([10, 11], **_deps())
 
-        assert result["albums"] == {5: 2}
+        assert result["albums"] == {5: _rollup(downloading=1, searching=1)}
+
+    def test_queued_tracks_are_not_reported_as_downloading(self):
+        """The regression the per-bucket roll-up exists to prevent: three
+        tracks waiting behind a busy client used to render as "3
+        downloading" because the roll-up was a bare active count."""
+        for i, track_id in enumerate((10, 11, 12)):
+            download_tasks[f"t{i}"] = {
+                "status": "queued",
+                "track_info": {"source_info": {
+                    "lib2_track_id": track_id, "lib2_album_id": 5,
+                }},
+            }
+
+        result = get_queue_status([10, 11, 12], **_deps())
+
+        assert result["albums"][5] == _rollup(queued=3)
+        assert result["albums"][5]["downloading"] == 0
+
+    def test_album_progress_averages_over_every_active_track(self):
+        """One file at 60% and three still queued is not a 60%-done album."""
+        download_tasks["t1"] = {
+            "status": "downloading",
+            "username": "alice",
+            "filename": "song.flac",
+            "track_info": {"source_info": {"lib2_track_id": 10, "lib2_album_id": 5}},
+        }
+        for i, track_id in enumerate((11, 12, 13)):
+            download_tasks[f"q{i}"] = {
+                "status": "queued",
+                "track_info": {"source_info": {
+                    "lib2_track_id": track_id, "lib2_album_id": 5,
+                }},
+            }
+        live = {_make_context_key("alice", "song.flac"): {"percentComplete": 60}}
+
+        result = get_queue_status([10, 11, 12, 13], **_deps(live))
+
+        # (60 + 0 + 0 + 0) / 4 active tracks.
+        assert result["albums"][5] == _rollup(
+            progress_pct=15, downloading=1, queued=3)
 
     def test_empty_track_ids_short_circuits(self):
         assert get_queue_status([], **_deps()) == {"tracks": {}, "albums": {}}
@@ -258,7 +314,7 @@ class TestGetQueueStatus:
 
         assert result == {
             "tracks": {10: {"status": "downloading", "progress_pct": 42}},
-            "albums": {5: 1},
+            "albums": {5: _rollup(progress_pct=42, downloading=1)},
         }
 
     @pytest.mark.parametrize("malformed_track_id", ["", "not-a-number", None])
@@ -382,7 +438,7 @@ class TestQueueStatusEndpoint:
         assert response.status_code == 200
         body = response.get_json()
         assert body["tracks"] == {str(ids["track"]): {"status": "downloading", "progress_pct": 0}}
-        assert body["albums"] == {str(ids["album"]): 1}
+        assert body["albums"] == {str(ids["album"]): _rollup(downloading=1)}
 
     def test_active_download_surfaces_on_artist_scope(self, api):
         client, ids = api

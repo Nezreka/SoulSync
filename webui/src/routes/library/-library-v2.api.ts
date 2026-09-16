@@ -550,6 +550,28 @@ export interface ProviderArtistDetail {
   discography: { albums?: ProviderRelease[]; eps?: ProviderRelease[]; singles?: ProviderRelease[] };
 }
 
+export interface ProviderAlbumTrack {
+  id?: string;
+  name?: string;
+  title?: string;
+  track_number?: number;
+  disc_number?: number;
+  duration_ms?: number;
+  artists?: Array<{ id?: string; name?: string }>;
+}
+
+export interface ProviderAlbumDetail {
+  id?: string;
+  name?: string;
+  title?: string;
+  album_type?: string;
+  release_date?: string | null;
+  total_tracks?: number;
+  images?: Array<{ url?: string }>;
+  artists?: Array<{ id?: string; name?: string }>;
+  tracks?: ProviderAlbumTrack[];
+}
+
 /** The artist page for someone who isn't in the catalogue. Reuses the endpoint
  *  the legacy page already used — nothing new had to be built server-side. */
 export async function fetchProviderArtistDetail(input: {
@@ -571,6 +593,28 @@ export async function fetchProviderArtistDetail(input: {
   return { artist: payload.artist, discography: payload.discography ?? {} };
 }
 
+/** Provider-only release detail. Merely opening it must remain side-effect free. */
+export async function fetchProviderAlbumDetail(input: {
+  source: string;
+  providerId: string;
+  name: string;
+  artistName: string;
+}): Promise<ProviderAlbumDetail> {
+  const params = new URLSearchParams({ name: input.name, artist: input.artistName });
+  if (input.source !== 'spotify') params.set('source', input.source);
+  if (input.source === 'bandcamp' && /^https?:\/\//.test(input.providerId)) {
+    params.set('bandcamp_url', input.providerId);
+  }
+  const payload = await readJson<ProviderAlbumDetail & { success?: boolean; error?: string }>(
+    apiClient.get(`spotify/album/${encodeURIComponent(input.providerId)}`, {
+      searchParams: params,
+      timeout: 60_000,
+    }),
+  );
+  if (payload.success === false) throw new Error(payload.error || 'Could not load this release');
+  return payload;
+}
+
 /** Read-only: the catalogue id for a provider artist, or `null` when there is
  *  none yet. Opening a search result must not create anything (§28.6 q1). */
 export async function resolveLibraryV2DiscoveryArtist(input: {
@@ -587,25 +631,61 @@ export async function resolveLibraryV2DiscoveryArtist(input: {
   return payload.artist_id;
 }
 
-/** The first write: turn the provider artist into a real catalogue row so the
- *  normal Library V2 artist page (and monitoring) can take over. */
-export async function materializeLibraryV2DiscoveryArtist(input: {
+/** One explicit intent: create the provider artist and monitor it atomically. */
+export async function monitorLibraryV2DiscoveryArtist(input: {
   source: string;
   providerId: string;
   name: string;
 }): Promise<number> {
   const payload = await readJson<{ success: boolean; artist_id: number; error?: string }>(
     apiClient.post('library/v2/discovery/artist', {
-      json: { source: input.source, provider_id: input.providerId, name: input.name },
+      json: { source: input.source, provider_id: input.providerId, name: input.name, monitored: true },
     }),
   );
-  if (!payload.success) throw new Error(payload.error || 'Could not add this artist');
+  if (!payload.success) throw new Error(payload.error || 'Could not monitor this artist');
   return payload.artist_id;
 }
 
-/** ldp-06: which of these top-track titles the catalogue already has, and
- *  whether they are wanted. The bookmark tick has to survive a reload — it
- *  is a fact about the library, not about this component's lifetime. */
+/** Create and monitor exactly one provider release; browsing never calls this. */
+export async function monitorLibraryV2DiscoveryAlbum(input: {
+  source: string;
+  artistSource: string;
+  artistProviderId: string;
+  artistName: string;
+  albumProviderId: string;
+  albumName: string;
+  albumType?: string;
+  releaseDate?: string | null;
+  imageUrl?: string | null;
+  trackCount?: number | null;
+}): Promise<{ artistId: number; albumId: number }> {
+  const payload = await readJson<{
+    success: boolean;
+    artist_id: number;
+    album_id: number;
+    error?: string;
+  }>(
+    apiClient.post('library/v2/discovery/album', {
+      json: {
+        source: input.source,
+        artist_source: input.artistSource,
+        artist_provider_id: input.artistProviderId,
+        artist_name: input.artistName,
+        album_provider_id: input.albumProviderId,
+        album_name: input.albumName,
+        album_type: input.albumType || 'album',
+        release_date: input.releaseDate ?? null,
+        image_url: input.imageUrl ?? null,
+        track_count: input.trackCount ?? null,
+      },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Could not monitor this release');
+  return { artistId: payload.artist_id, albumId: payload.album_id };
+}
+
+/** ldp-06: which of these top-track titles the catalogue already has, and whether they are wanted.
+ *  The bookmark tick must survive a reload — it is a fact about the library, not this component. */
 export async function fetchLibraryV2DiscoveryTrackStatus(input: {
   source: string;
   artistName: string;
@@ -623,27 +703,35 @@ export async function fetchLibraryV2DiscoveryTrackStatus(input: {
   return payload.statuses ?? {};
 }
 
-/** ldp-06: give a provider Top Track its catalogue rows so the normal
- *  Bookmark (`setLibraryV2Monitored('tracks', …)`) has something to act on. */
-export async function materializeLibraryV2DiscoveryTrack(input: {
+/** Atomically materialize and monitor one provider track. */
+export async function monitorLibraryV2DiscoveryTrack(input: {
   source: string;
+  artistSource?: string;
   artistName: string;
   artistProviderId?: string | null;
   trackTitle: string;
   trackProviderId?: string | null;
+  trackNumber?: number | null;
+  discNumber?: number | null;
   albumTitle?: string | null;
   albumProviderId?: string | null;
+  albumType?: string | null;
 }): Promise<number> {
   const payload = await readJson<{ success: boolean; track_id: number; error?: string }>(
     apiClient.post('library/v2/discovery/track', {
       json: {
         source: input.source,
+        artist_source: input.artistSource ?? input.source,
         artist_name: input.artistName,
         artist_provider_id: input.artistProviderId ?? null,
         track_title: input.trackTitle,
         track_provider_id: input.trackProviderId ?? null,
+        track_number: input.trackNumber ?? null,
+        disc_number: input.discNumber ?? null,
         album_title: input.albumTitle ?? null,
         album_provider_id: input.albumProviderId ?? null,
+        album_type: input.albumType ?? 'album',
+        monitored: true,
       },
     }),
   );

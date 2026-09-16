@@ -37,6 +37,10 @@ _TASK_STATUS_BUCKET = {
     "post_processing": "processing",
 }
 
+# Every bucket an album roll-up reports, so the key set is stable whether or
+# not a given album currently has a track in that state.
+_ALBUM_BUCKETS = ("queued", "searching", "downloading", "processing")
+
 
 def _safe_int(value: Any) -> Optional[int]:
     """``int(value)`` that returns ``None`` instead of raising.
@@ -80,20 +84,26 @@ def get_queue_status(
     """Live queue status for the given lib2 track ids.
 
     Returns ``{"tracks": {track_id: {"status", "progress_pct"}}, "albums":
-    {album_id: active_track_count}}`` — both keys always present, possibly
-    empty. The album roll-up comes from the same in-memory scan (no extra
-    DB query) since both tracking structures already carry the album id
-    alongside the track id.
+    {album_id: {"active", <bucket counts>, "progress_pct"}}}`` — both keys
+    always present, possibly empty. The album roll-up comes from the same
+    in-memory scan (no extra DB query) since both tracking structures
+    already carry the album id alongside the track id.
+
+    The roll-up used to be a bare active-track count, which the album row
+    rendered as "N downloading". Three tracks merely *queued* behind a busy
+    slskd therefore claimed to be downloading, and a stalled album was
+    indistinguishable from a moving one. Keeping the per-bucket counts here
+    costs nothing (the scan already knows each track's bucket) and lets the
+    row name the state it is actually in.
     """
     wanted = {int(t) for t in track_ids}
     tracks: Dict[int, Dict[str, Any]] = {}
-    albums: Dict[int, int] = {}
-    # A correlated manual grab can temporarily exist in BOTH runtime maps.
-    # Once its precise batch task reaches a terminal state, that terminal
-    # observation must suppress any leaked/stale matched context. Otherwise
-    # the context fallback below resurrects a completed/failed track as
-    # permanently ``queued`` (the exact state users see after a successful
-    # manual grab or a failed Automatic Search).
+    albums: Dict[int, Dict[str, Any]] = {}
+    progress_totals: Dict[int, int] = {}
+    # A correlated manual grab can temporarily exist in BOTH runtime maps. Once its precise batch task
+    # reaches a terminal state, that terminal observation must suppress any leaked/stale matched
+    # context. Otherwise the context fallback below resurrects a completed/failed track as permanently
+    # ``queued`` (the exact state users see after a successful manual grab or a failed Automatic Search).
     terminal_track_ids: set[int] = set()
     if not wanted:
         return {"tracks": {}, "albums": {}}
@@ -111,18 +121,32 @@ def get_queue_status(
     def _record(track_id: int, album_id: Any, status: str, progress_pct: int) -> None:
         tracks[track_id] = {"status": status, "progress_pct": progress_pct}
         safe_album_id = _safe_int(album_id)
-        if safe_album_id is not None:
-            albums[safe_album_id] = albums.get(safe_album_id, 0) + 1
+        if safe_album_id is None:
+            return
+        rollup = albums.get(safe_album_id)
+        if rollup is None:
+            rollup = albums[safe_album_id] = {
+                "active": 0, "progress_pct": 0,
+                **{bucket: 0 for bucket in _ALBUM_BUCKETS},
+            }
+        rollup["active"] += 1
+        rollup[status] = rollup.get(status, 0) + 1
+        # Mean over every active track, not only the downloading ones: an album with one file at 90%
+        # and three still queued is not 90% done, and a bar that says so would be the one lie the row
+        # must not tell. Summed and divided once at the end — rounding an incremental mean per track
+        # drifts: 60/0/0/0 walks 60→30→20→15 only by luck, and 40/30/0/0 lands on 18, not 17.
+        progress_totals[safe_album_id] = (
+            progress_totals.get(safe_album_id, 0) + progress_pct
+        )
 
     with tasks_lock:
         tasks_snapshot = list(download_tasks.values())
     for task in tasks_snapshot:
         track_info = task.get("track_info") or {}
         source_info = track_info.get("source_info") or {}
-        # Bridge-dispatched downloads (Torrent/Usenet bundle-match, manual
-        # grab — core.acquisition.main_pipeline_bridge) carry the Library-v2
-        # identity as a top-level "lib2_entity" dict, not "source_info"
-        # (review A7). Fall back to it so those downloads get a badge too.
+        # Bridge-dispatched downloads (Torrent/Usenet bundle-match, manual grab —
+        # core.acquisition.main_pipeline_bridge) carry the Library-v2 identity as a top-level
+        # "lib2_entity" dict, not "source_info" (review A7). Fall back to it so those get a badge too.
         lib2_entity = track_info.get("lib2_entity") or {}
         raw_track_id = source_info.get("lib2_track_id")
         raw_album_id = source_info.get("lib2_album_id")
@@ -179,5 +203,9 @@ def get_queue_status(
                 progress_pct = 95
 
         _record(track_id, lib2_entity.get("album_id"), bucket, progress_pct)
+
+    for album_id, rollup in albums.items():
+        rollup["progress_pct"] = round(
+            progress_totals.get(album_id, 0) / rollup["active"])
 
     return {"tracks": tracks, "albums": albums}

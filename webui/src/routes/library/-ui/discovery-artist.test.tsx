@@ -26,11 +26,15 @@ const DISCOVERY_URL =
 describe('Library V2 discovery mode', () => {
   let resolveResponse: number | null;
   let materializeCalls: unknown[];
+  let monitoredAlbums: unknown[];
+  let monitoredTracks: unknown[];
 
   beforeEach(() => {
     window.SoulSyncWebShellBridge = createShellBridge();
     resolveResponse = null;
     materializeCalls = [];
+    monitoredAlbums = [];
+    monitoredTracks = [];
     server.use(
       http.get('/api/library/v2/enabled', () =>
         HttpResponse.json({ success: true, enabled: true, can_write: true }),
@@ -44,6 +48,14 @@ describe('Library V2 discovery mode', () => {
       http.post('/api/library/v2/discovery/artist', async ({ request }) => {
         materializeCalls.push(await request.json());
         return HttpResponse.json({ success: true, artist_id: 55 });
+      }),
+      http.post('/api/library/v2/discovery/album', async ({ request }) => {
+        monitoredAlbums.push(await request.json());
+        return HttpResponse.json({ success: true, artist_id: 55, album_id: 77 });
+      }),
+      http.post('/api/library/v2/discovery/track', async ({ request }) => {
+        monitoredTracks.push(await request.json());
+        return HttpResponse.json({ success: true, artist_id: 55, album_id: 77, track_id: 88 });
       }),
       http.get('/api/artist-detail/:id', () =>
         HttpResponse.json({
@@ -68,6 +80,17 @@ describe('Library V2 discovery mode', () => {
             eps: [],
             singles: [],
           },
+        }),
+      ),
+      http.get('/api/spotify/album/:id', () =>
+        HttpResponse.json({
+          id: 'a1',
+          name: 'Music Has the Right to Children',
+          album_type: 'album',
+          release_date: '1998-04-20',
+          total_tracks: 1,
+          images: [{ url: 'https://cdn.test/album.jpg' }],
+          tracks: [{ id: 't1', name: 'Roygbiv', track_number: 1, duration_ms: 148000 }],
         }),
       ),
       http.get('/api/artist/:id/top-tracks', () =>
@@ -150,47 +173,86 @@ describe('Library V2 discovery mode', () => {
     expect(await screen.findByTitle('Bookmarked — this track is now wanted')).toBeInTheDocument();
   });
 
-  it('bookmarking the artist materializes it, monitors it, and continues on the real page', async () => {
-    const monitorWrites: unknown[] = [];
-    server.use(
-      http.post('/api/library/v2/artists/55/monitor', async ({ request }) => {
-        monitorWrites.push(await request.json());
-        return HttpResponse.json({ success: true });
-      }),
-    );
+  it('monitoring the artist materializes and monitors it in one explicit action', async () => {
     const { router } = renderDiscovery(DISCOVERY_URL);
     await screen.findByRole('heading', { name: 'Boards of Canada' });
 
-    fireEvent.click(screen.getByRole('button', { name: /Bookmark artist/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Monitor artist/ }));
 
     await waitFor(() => expect(materializeCalls).toHaveLength(1));
     expect(materializeCalls[0]).toMatchObject({
       source: 'spotify',
       provider_id: 'sp-1',
       name: 'Boards of Canada',
+      monitored: true,
     });
-    // ldp-06: Bookmark states intent — it must go through the proven monitor
-    // path, not just leave an unmonitored catalogue row behind.
-    await waitFor(() => expect(monitorWrites).toEqual([{ monitored: true }]));
     await waitFor(() => expect(router.state.location.search).toMatchObject({ artist: 55 }));
   });
 
-  it('opening a release adopts the artist WITHOUT monitoring them', async () => {
-    let monitorWrites = 0;
-    server.use(
-      http.post('/api/library/v2/artists/55/monitor', () => {
-        monitorWrites += 1;
-        return HttpResponse.json({ success: true });
-      }),
-    );
+  it('opens a provider release without materializing the artist', async () => {
     const { router } = renderDiscovery(DISCOVERY_URL);
     const card = await screen.findByText('Music Has the Right to Children');
 
     fireEvent.click(card);
 
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ artist: 55 }));
-    expect(materializeCalls).toHaveLength(1);
-    expect(monitorWrites).toBe(0);
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        discover: 'spotify:sp-1',
+        discoverAlbum: 'spotify:a1',
+      }),
+    );
+    expect(
+      await screen.findByRole('heading', { name: 'Music Has the Right to Children' }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Boards of Canada/ }));
+    expect(await screen.findByRole('heading', { name: 'Boards of Canada' })).toBeInTheDocument();
+    expect(materializeCalls).toHaveLength(0);
+    expect(monitoredAlbums).toHaveLength(0);
+  });
+
+  it('monitors an album directly from its discovery card', async () => {
+    renderDiscovery(DISCOVERY_URL);
+    await screen.findByText('Music Has the Right to Children');
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Start monitoring' })[0]!);
+
+    await waitFor(() => expect(monitoredAlbums).toHaveLength(1));
+    expect(monitoredAlbums[0]).toMatchObject({
+      source: 'spotify',
+      artist_source: 'spotify',
+      artist_provider_id: 'sp-1',
+      album_provider_id: 'a1',
+      album_name: 'Music Has the Right to Children',
+    });
+    expect(materializeCalls).toHaveLength(0);
+  });
+
+  it('monitors one track directly from the provider album preview', async () => {
+    server.use(
+      http.get('/api/library/v2/discovery/track-status', () =>
+        HttpResponse.json({ success: true, statuses: {} }),
+      ),
+    );
+    renderDiscovery(DISCOVERY_URL);
+    fireEvent.click(await screen.findByText('Music Has the Right to Children'));
+    await screen.findByRole('heading', { name: 'Music Has the Right to Children' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Monitor Roygbiv' }));
+
+    await waitFor(() => expect(monitoredTracks).toHaveLength(1));
+    expect(monitoredTracks[0]).toMatchObject({
+      source: 'spotify',
+      artist_source: 'spotify',
+      artist_provider_id: 'sp-1',
+      album_provider_id: 'a1',
+      track_provider_id: 't1',
+      track_title: 'Roygbiv',
+      track_number: 1,
+      monitored: true,
+    });
+    expect(await screen.findByRole('button', { name: 'Roygbiv is monitored' })).toBeDisabled();
+    expect(materializeCalls).toHaveLength(0);
+    expect(monitoredAlbums).toHaveLength(0);
   });
 
   it('hands an artist that already exists straight to the catalogue page', async () => {
