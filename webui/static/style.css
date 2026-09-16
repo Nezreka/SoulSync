@@ -56702,6 +56702,8 @@ tr.tag-diff-same {
     max-height: 85vh;
     display: flex;
     flex-direction: column;
+    /* the list scrolls inside; header and footer stay put (#1254) */
+    overflow: hidden;
 }
 
 .batch-tag-preview-modal .enhanced-bulk-modal-footer {
@@ -56710,8 +56712,25 @@ tr.tag-diff-same {
 
 .batch-tag-preview-body {
     overflow-y: auto;
-    max-height: 55vh;
+    /* flex-sized against the modal's 85vh, not a fixed slice of the viewport:
+       a fixed 55vh plus the header, summary and footer overshot on short
+       screens, and the buttons sat below the fold (#1254) */
+    flex: 1 1 auto;
+    min-height: 0;
     padding: 8px 16px 16px !important;
+}
+
+.tag-preview-modal {
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.tag-preview-body {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .batch-tag-summary {

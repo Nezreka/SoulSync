@@ -75,7 +75,7 @@ export function TagPreviewModal({ trackId, onClose }: { trackId: unknown; onClos
             ×
           </button>
         </div>
-        <div id="tag-preview-body">
+        <div id="tag-preview-body" className="tag-preview-body">
           {!preview ? (
             <div className="tag-preview-loading">Loading tag comparison...</div>
           ) : preview.error ? (

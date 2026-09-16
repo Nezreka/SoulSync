@@ -93,7 +93,9 @@ export function BatchTagPreviewModal({
           ) : null}
         </div>
 
-        <div id="batch-tag-preview-body">
+        {/* the class is what scrolls; the id alone left the list growing past
+            the viewport with the buttons underneath it (#1254) */}
+        <div id="batch-tag-preview-body" className="batch-tag-preview-body">
           {!preview ? (
             <div className="tag-preview-loading">Loading tag previews...</div>
           ) : preview.error ? (
