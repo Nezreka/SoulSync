@@ -53,8 +53,13 @@ def client(tmp_path):
     with patch.object(video_v1, "require_api_key", lambda f: f):
         video_v1.register_routes(v1)
     app.register_blueprint(v1)
-    with app.test_client() as c:
-        yield c
+    try:
+        with app.test_client() as c:
+            yield c
+    finally:
+        # the tmp db must not leak past this test: the isolation guard
+        # checks get_video_db() still points at the session's own path
+        videoapi._video_db = None
 
 
 def test_wishlist_round_trip(client):
