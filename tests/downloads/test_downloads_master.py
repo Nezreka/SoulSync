@@ -802,6 +802,13 @@ def test_soulseek_album_title_similarity_can_use_path_metadata():
     assert _album_title_similarity('Album', 'Artist', '2020', '', 'Artist/Album/2020') == 1.0
 
 
+def test_soulseek_album_title_similarity_repeated_spans_preserve_length_ratio():
+    from core.downloads.master import _album_title_similarity
+
+    assert _album_title_similarity('Album', 'Artist', '2020',
+                                   'Album Artist 2020 Album', '') == 5 / 11
+
+
 def test_soulseek_album_title_similarity_requires_whole_words_and_distinct_spans():
     from core.downloads.master import _album_title_similarity, _similarity
 
