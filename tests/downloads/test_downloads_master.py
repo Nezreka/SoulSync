@@ -775,92 +775,50 @@ def test_soulseek_album_score_rejects_partial_folder_despite_good_metadata():
     ) == 0.0
 
 
-def test_soulseek_album_title_accepts_eponymous_folder_with_release_metadata():
-    from core.downloads.master import _album_title_similarity, _score_album_folder
+def test_soulseek_album_title_similarity_keeps_existing_baseline():
+    from core.downloads.master import _album_title_similarity, _similarity
 
-    path = 'music/GUNSHIP (synthwave)/GUNSHIP - Album - 2015 - GUNSHIP'
-    assert _album_title_similarity('GUNSHIP', 'Gunship', '2015',
-                                   'GUNSHIP - Album - 2015 - GUNSHIP', path,
-                                   coverage=1.0) >= 0.65
-    expected = [{'name': f'Track {number}', 'track_number': number}
-                for number in range(1, 14)]
-    tracks = [_slsk_track(f'Track {number}', number, folder=path)
-              for number in range(1, 14)]
-    album = _album_result('jerb', path, 'GUNSHIP - Album - 2015 - GUNSHIP',
-                          tracks, artist='GUNSHIP', year='2015')
-    assert _score_album_folder(
-        album, {'name': 'GUNSHIP', 'total_tracks': 13, 'release_date': '2015-01-01'},
-        {'name': 'Gunship'}, expected, tracks,
-    ) >= 0.62
+    assert _album_title_similarity('', 'Artist', '2020', 'Album', 'Artist/Album') == 0.0
+    assert _album_title_similarity('Album', 'Artist', '2020', 'Album', '') == 1.0
+    assert _album_title_similarity('Album', 'Artist', '2020', 'Other', 'Other') == _similarity('Album', 'Other')
 
 
-def test_soulseek_album_title_keeps_distinct_artist_and_year_evidence():
-    from core.downloads.master import _album_title_similarity
-
-    plain = _album_title_similarity('Mezzanine', 'Massive Attack', '1998',
-                                    'Mezzanine [LP] Bonus', 'Mezzanine [LP] Bonus',
-                                    coverage=1.0)
-    corroborated = _album_title_similarity(
-        'Mezzanine', 'Massive Attack', '1998', 'Massive Attack - Mezzanine [LP] Bonus (1998)',
-        'music/Massive Attack/Massive Attack - Mezzanine [LP] Bonus (1998)',
-        coverage=1.0)
-    assert corroborated > plain
-
-
-def test_soulseek_album_title_does_not_confuse_artist_with_another_album():
-    from core.downloads.master import _album_title_similarity
-
-    assert _album_title_similarity(
-        'GUNSHIP', 'Gunship', '2015', 'Gunship - Dark All Day',
-        'music/Gunship/Gunship - Dark All Day (2018)', coverage=1.0) < 0.65
-
-
-def test_soulseek_album_path_evidence_requires_complete_track_coverage():
-    from core.downloads.master import _album_title_similarity
-
-    path = 'music/GUNSHIP/GUNSHIP - Album - 2015 - GUNSHIP'
-    assert _album_title_similarity(
-        'GUNSHIP', 'Gunship', '2015', 'GUNSHIP - Album - 2015 - GUNSHIP',
-        path, coverage=0.92) < 0.65
-
-
-def test_soulseek_album_path_evidence_preserves_hyphenated_and_metadata_titles():
-    from core.downloads.master import _album_title_similarity
-
-    assert _album_title_similarity(
-        'A-B', 'Artist', '1999', 'Artist - A-B [LP] (1999)',
-        'music/Artist/Artist - A-B [LP] (1999)', coverage=1.0) >= 0.65
-    assert _album_title_similarity(
-        '1999', 'Artist', '1999', 'Artist - 1999',
-        'music/Artist/Artist - 1999', coverage=1.0) >= 0.65
-    assert _album_title_similarity(
-        'The Album', 'Artist', '1999', 'The Album',
-        'music/Artist/The Album', coverage=1.0) == 1.0
-
-
-def test_soulseek_album_path_does_not_recount_title_words_as_metadata():
-    from core.downloads.master import _album_title_similarity
-
-    assert _album_title_similarity(
-        'Summer 1999', 'Artist', '1999', 'Summer 1999 Bonus',
-        'music/Summer 1999 Bonus', coverage=1.0) < 0.65
-    assert _album_title_similarity(
-        'The LP', 'LP', '', 'The LP Bonus',
-        'music/The LP Bonus', coverage=1.0) < 0.65
-
-
-@pytest.mark.parametrize(('album', 'artist', 'year', 'folder'), [
-    ('Bad Company', 'Bad Company', '1974', 'Bad Company - [LP] - 1974 - Bad Company'),
-    ('Rumours', 'Fleetwood Mac', '1977', 'Fleetwood Mac - Rumours [LP] (1977)'),
-    ('The Album', 'Artist', '1999', 'The Album'),
+@pytest.mark.parametrize(('artist', 'year', 'text'), [
+    ('Artist', '', 'Artist Album'),
+    ('', '2020', 'Album 2020'),
+    ('Artist', '2020', 'Artist Album 2020'),
+    ('Artist', '2020', 'Artist A-B 2020'),
 ])
-def test_soulseek_album_title_handles_structured_names_generally(
-        album, artist, year, folder):
+def test_soulseek_album_title_similarity_removes_distinct_metadata(artist, year, text):
     from core.downloads.master import _album_title_similarity
 
-    assert _album_title_similarity(
-        album, artist, year, folder, f'music/{artist}/{folder}',
-        coverage=1.0) >= 0.65
+    album = 'A-B' if 'A-B' in text else 'Album'
+    assert _album_title_similarity(album, artist, year, text, '') == 1.0
+
+
+def test_soulseek_album_title_similarity_can_use_path_metadata():
+    from core.downloads.master import _album_title_similarity
+
+    assert _album_title_similarity('Album', 'Artist', '2020', '', 'Artist/Album/2020') == 1.0
+
+
+def test_soulseek_album_title_similarity_requires_whole_words_and_distinct_spans():
+    from core.downloads.master import _album_title_similarity, _similarity
+
+    assert _album_title_similarity('Album', 'One', '', 'Someone Album', '') == _similarity('Album', 'Someone Album')
+    assert _album_title_similarity('Album', '', '2020', 'Album 20205', '') == _similarity('Album', 'Album 20205')
+    assert _album_title_similarity('One', 'One', '', 'One Bonus', '') == _similarity('One', 'One Bonus')
+    assert _album_title_similarity('One', 'One', '', 'One One', '') == 1.0
+    assert _album_title_similarity('Summer 1999', '', '1999', 'Summer 1999 Bonus', '') == _similarity(
+        'Summer 1999', 'Summer 1999 Bonus')
+
+
+def test_soulseek_album_title_similarity_does_not_guess_release_labels():
+    from core.downloads.master import _album_title_similarity, _similarity
+
+    title = 'GUNSHIP - Album - 2015 - GUNSHIP'
+    score = _album_title_similarity('GUNSHIP', 'Gunship', '2015', title, '')
+    assert _similarity('GUNSHIP', title) < score < 0.65
 
 
 def test_soulseek_eponymous_album_search_uses_year_instead_of_duplicate_name():

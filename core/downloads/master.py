@@ -74,57 +74,55 @@ def _similarity(left: Any, right: Any) -> float:
 
 
 def _album_title_similarity(expected: str, artist: str, year: str,
-                            album_title: str, album_path: str, *,
-                            coverage: float) -> float:
-    """Add bounded path evidence only to a complete, title-bearing folder.
+                            album_title: str, album_path: str) -> float:
+    """Compare unchanged text, then try omitting distinct artist/year spans."""
+    album = _norm_text(expected)
+    if not album:
+        return 0.0
+    artist = _norm_text(artist)
+    year = _norm_text(year)
+    if len(year) != 4 or not year.isdigit():
+        year = ''
 
-    Do not strip apparent metadata from a candidate title: years, repeated
-    words and labels such as "LP" can all be part of real music names. A
-    self-titled artist occurrence alone is ambiguous, so require two in the
-    leaf.
-    """
-    baseline = max(_similarity(expected, album_title),
-                   _similarity(expected, album_path))
-    if coverage < 1.0:
-        return baseline
-
-    title_key = _norm_text(expected)
-    artist_key = _norm_text(artist)
-    year_key = _norm_text(year)
-    leaf = _norm_text(str(album_path or '').replace('\\', '/').rstrip('/').split('/')[-1])
-    path_key = _norm_text(album_path)
-    if not title_key:
-        return baseline
-
-    def spans(haystack: str, needle: str) -> list[tuple[int, int]]:
+    def spans(text: str, word: str, *, whole_word: bool = True) -> list[tuple[int, int]]:
+        if not word:
+            return []
+        pattern = re.escape(word)
+        if whole_word:
+            pattern = rf'(?<![a-z0-9]){pattern}(?![a-z0-9])'
         return [match.span() for match in re.finditer(
-            rf'(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])', haystack)]
+            pattern, text)]
 
-    title_hits = spans(leaf, title_key)
-    if len(title_hits) < (2 if title_key == artist_key else 1):
-        return baseline
-
-    # An artist/year substring inside the title itself is not corroboration.
-    leaf_start = path_key.rfind(leaf)
-    if leaf_start < 0:
-        return baseline
-    title_spans = [(leaf_start + start, leaf_start + end) for start, end in title_hits]
-
-    def separate_evidence(needle: str) -> bool:
-        return any(all(end <= title_start or start >= title_end
-                       for title_start, title_end in title_spans)
-                   for start, end in spans(path_key, needle))
-
-    # A matching substring is evidence, not an exact title. It needs an
-    # independent artist or year clue to clear the existing 0.65 title gate.
-    title_score = max(baseline, 0.62)
-    bonus = 0.0
-    if artist_key and artist_key != title_key and separate_evidence(artist_key):
-        bonus += 0.08
-    if (len(year_key) == 4 and year_key.isdigit()
-            and year_key != title_key and separate_evidence(year_key)):
-        bonus += 0.08
-    return min(1.0, title_score + bonus)
+    best = 0.0
+    for value in (album_title, album_path):
+        text = _norm_text(value)
+        best = max(best, _similarity(album, text))
+        if best == 1.0:
+            return best
+        artist_options = [None, *spans(text, artist)]
+        year_options = [None, *spans(text, year)]
+        for album_span in spans(text, album, whole_word=False):
+            for artist_span in artist_options:
+                for year_span in year_options:
+                    removed = [span for span in (artist_span, year_span) if span]
+                    if not removed or any(
+                            start < album_span[1] and album_span[0] < end
+                            for start, end in removed):
+                        continue
+                    removed.sort()
+                    if len(removed) == 2 and removed[0][1] > removed[1][0]:
+                        continue
+                    cursor = 0
+                    pieces = []
+                    for start, end in removed:
+                        pieces.append(text[cursor:start])
+                        cursor = end
+                    pieces.append(text[cursor:])
+                    candidate = ''.join(pieces)
+                    best = max(best, _similarity(album, candidate))
+                    if best == 1.0:
+                        return best
+    return best
 
 
 def _album_search_queries(artist: str, album: str, year: str) -> list[str]:
@@ -273,7 +271,6 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
         expected_year,
         str(getattr(album_result, 'album_title', '') or ''),
         str(getattr(album_result, 'album_path', '') or ''),
-        coverage=coverage_score,
     )
     artist_score = max(
         _similarity(expected_artist, getattr(album_result, 'artist', '')),
