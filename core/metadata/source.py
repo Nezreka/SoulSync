@@ -285,7 +285,7 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             mb_service.mb_client.get_recording,
             pp["recording_mbid"],
             includes=["isrcs", "genres", "artist-credits"],
-        )
+        ) or {}   # a 503 comes back None; the release step below reads off this
         if details:
             isrcs = details.get("isrcs", [])
             if isrcs:
@@ -402,10 +402,10 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
         # Recording details must correspond to the final release recording,
         # not the earlier name-search result (which can be a different version).
         if pp["recording_mbid"]:
-            final_recording = details if searched_recording == pp["recording_mbid"] else _call_source_lookup(
+            final_recording = (details if searched_recording == pp["recording_mbid"] else _call_source_lookup(
                 "MusicBrainz selected recording", mb_service.mb_client.get_recording,
                 pp["recording_mbid"], includes=["isrcs", "genres", "artist-credits"],
-            ) or {}
+            )) or {}
             pp["isrc"] = (final_recording.get("isrcs") or [None])[0]
             pp["mb_isrcs"] = final_recording.get("isrcs") or []
             pp["mb_genres"] = [g["name"] for g in sorted(final_recording.get("genres", []), key=lambda g: g.get("count", 0), reverse=True)]
