@@ -30,7 +30,6 @@ from utils.logging_config import get_logger
 import re
 import time
 import uuid
-from bisect import bisect_left
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Callable, Optional
@@ -76,7 +75,7 @@ def _similarity(left: Any, right: Any) -> float:
 
 def _album_title_similarity(expected: str, artist: str, year: str,
                             album_title: str, album_path: str) -> float:
-    """Compare unchanged text, then try omitting distinct artist/year spans."""
+    """Compare unchanged text, then omit metadata outside one album span."""
     album = _norm_text(expected)
     if not album:
         return 0.0
@@ -100,35 +99,26 @@ def _album_title_similarity(expected: str, artist: str, year: str,
         best = max(best, _similarity(album, text))
         if best == 1.0:
             return best
-        album_spans = spans(text, album, whole_word=False)
+        album_spans = spans(text, album) or spans(text, album, whole_word=False)
         if not album_spans:
             continue
-        album_starts = [start for start, _ in album_spans]
-        artist_options = [None, *spans(text, artist)]
-        year_options = [None, *spans(text, year)]
-        for artist_span in artist_options:
-            for year_span in year_options:
-                removed = sorted(span for span in (artist_span, year_span) if span)
-                if not removed or len(removed) == 2 and removed[0][1] > removed[1][0]:
-                    continue
-                boundaries = [0, *(point for span in removed for point in span), len(text)]
-                kept = [(start, end) for start, end in zip(boundaries[::2], boundaries[1::2], strict=True)
-                        if start < end]
-                if not any(
-                        (index := bisect_left(album_starts, start)) < len(album_spans)
-                        and album_spans[index][1] <= end
-                        for start, end in kept):
-                    continue
-                # _similarity uses the length ratio when the album remains intact.
-                # Account for spaces collapsed or trimmed by _norm_text.
-                length = sum(end - start for start, end in kept)
-                length -= sum(text[left_end - 1] == text[right_start] == ' '
-                              for (_, left_end), (right_start, _) in zip(kept, kept[1:], strict=False))
-                length -= text[kept[0][0]] == ' '
-                length -= text[kept[-1][1] - 1] == ' '
-                best = max(best, len(album) / length)
-                if best == 1.0:
-                    return best
+        album_start, album_end = album_spans[0]
+        removed = sorted(
+            (start, end) for start, end in (*spans(text, artist), *spans(text, year))
+            if end <= album_start or start >= album_end
+        )
+        if not removed:
+            continue
+        pieces = []
+        cursor = 0
+        for start, end in removed:
+            if start > cursor:
+                pieces.append(text[cursor:start])
+            cursor = max(cursor, end)
+        pieces.append(text[cursor:])
+        best = max(best, _similarity(album, ''.join(pieces)))
+        if best == 1.0:
+            return best
     return best
 
 

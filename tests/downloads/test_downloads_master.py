@@ -809,6 +809,18 @@ def test_soulseek_album_title_similarity_repeated_spans_preserve_length_ratio():
                                    'Album Artist 2020 Album', '') == 5 / 11
 
 
+@pytest.mark.parametrize(('artist', 'year', 'text'), [
+    ('Artist', '', 'Artist Artist Album'),
+    ('', '2020', '2020 Album 2020'),
+    ('Summer 2020', '2020', 'Summer 2020 Album'),
+    ('AlbumArtist', '', 'AlbumArtist Album'),
+])
+def test_soulseek_album_title_similarity_removes_all_distinct_metadata(artist, year, text):
+    from core.downloads.master import _album_title_similarity
+
+    assert _album_title_similarity('Album', artist, year, text, '') == 1.0
+
+
 def test_soulseek_album_title_similarity_requires_whole_words_and_distinct_spans():
     from core.downloads.master import _album_title_similarity, _similarity
 
