@@ -42,7 +42,8 @@ def monitor(monkeypatch):
         dm.config_manager,
         'get',
         lambda key, default=None: (
-            500 if key == 'soulseek.min_observed_download_speed_kbps' else default
+            500 if key == 'soulseek.min_observed_download_speed_kbps' else
+            True if key == 'soulseek.observed_speed_fallback_enabled' else default
         ),
     )
     return dm.WebUIDownloadMonitor()
@@ -114,7 +115,8 @@ def test_zero_threshold_disables_observed_speed_retry(monitor, monkeypatch):
         dm.config_manager,
         'get',
         lambda key, default=None: (
-            0 if key == 'soulseek.min_observed_download_speed_kbps' else default
+            0 if key == 'soulseek.min_observed_download_speed_kbps' else
+            True if key == 'soulseek.observed_speed_fallback_enabled' else default
         ),
     )
     task = _task()
@@ -125,6 +127,20 @@ def test_zero_threshold_disables_observed_speed_retry(monitor, monkeypatch):
         assert handled is False
         assert ops == []
 
+    assert '_observed_speed_tracker' not in task
+
+
+def test_fallback_disabled_by_default(monitor, monkeypatch):
+    monkeypatch.setattr(
+        dm.config_manager, 'get',
+        lambda key, default=None: (
+            250 if key == 'soulseek.min_observed_download_speed_kbps' else default
+        ),
+    )
+    task = _task()
+
+    for now in (0, 30, 60, 90):
+        assert _observe(monitor, task, now, now * 100_000) == (False, [])
     assert '_observed_speed_tracker' not in task
 
 
@@ -175,7 +191,9 @@ def test_setting_is_wired_through_defaults_and_web_ui():
     settings_js = (root / 'webui/static/settings.js').read_text()
     index_html = (root / 'webui/index.html').read_text()
 
-    assert '"min_observed_download_speed_kbps": 500' in settings_py
-    assert 'settings.soulseek?.min_observed_download_speed_kbps ?? 500' in settings_js
-    assert "min_observed_download_speed_kbps: _cfgInt('soulseek-min-observed-download-speed', 500)" in settings_js
+    assert '"observed_speed_fallback_enabled": False' in settings_py
+    assert '"min_observed_download_speed_kbps": 250' in settings_py
+    assert 'settings.soulseek?.min_observed_download_speed_kbps ?? 250' in settings_js
+    assert "min_observed_download_speed_kbps: _cfgInt('soulseek-min-observed-download-speed', 250)" in settings_js
+    assert 'id="soulseek-observed-speed-fallback-enabled"' in index_html
     assert 'id="soulseek-min-observed-download-speed"' in index_html

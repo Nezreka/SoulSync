@@ -14,12 +14,18 @@ const expression = source.match(/min_observed_download_speed_kbps: (_cfgInt\([^\
 const load = source.match(
   /document\.getElementById\('soulseek-min-observed-download-speed'\)\.value = [^;]+;/,
 )?.[0];
+const enabledExpression = source.match(
+  /observed_speed_fallback_enabled: (document\.getElementById\('soulseek-observed-speed-fallback-enabled'\)\.checked),/,
+)?.[1];
+const enabledLoad = source.match(
+  /document\.getElementById\('soulseek-observed-speed-fallback-enabled'\)\.checked = [^;]+;/,
+)?.[0];
 
 afterEach(() => {
   document.body.innerHTML = '';
 });
 
-it.each(['0', '500', '1200'])('loads and saves the observed-speed minimum %s', (value) => {
+it.each(['0', '250', '1200'])('loads and saves the observed-speed minimum %s', (value) => {
   const input = markup.match(
     /<input type="number" id="soulseek-min-observed-download-speed"[\s\S]*?>/,
   )?.[0];
@@ -36,6 +42,22 @@ it.each(['0', '500', '1200'])('loads and saves the observed-speed minimum %s', (
     (document.getElementById('soulseek-min-observed-download-speed') as HTMLInputElement).value,
   ).toBe(value);
   expect(new Function('document', `${helper}; return ${expression}`)(document)).toBe(Number(value));
+});
+
+it.each([true, false])('loads and saves observed-speed enabled=%s', (enabled) => {
+  const input = markup.match(
+    /<input type="checkbox" id="soulseek-observed-speed-fallback-enabled"[^>]*>/,
+  )?.[0];
+  expect(input).toBeTruthy();
+  expect(enabledExpression).toBeTruthy();
+  expect(enabledLoad).toBeTruthy();
+  document.body.innerHTML = input!;
+
+  new Function('document', 'settings', enabledLoad!)(document, {
+    soulseek: { observed_speed_fallback_enabled: enabled },
+  });
+
+  expect(new Function('document', `return ${enabledExpression}`)(document)).toBe(enabled);
 });
 
 it('omits the setting when the field is absent instead of overwriting it', () => {

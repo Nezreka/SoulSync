@@ -523,8 +523,9 @@ class ConfigManager:
                 "transfer_path": "./Transfer",
                 "max_peer_queue": 0,
                 # Measured transfer speed, not the peer's advertised upload
-                # speed. 0 disables automatic slow-candidate fallback.
-                "min_observed_download_speed_kbps": 500,
+                # speed. Opt in explicitly; 0 also disables fallback.
+                "observed_speed_fallback_enabled": False,
+                "min_observed_download_speed_kbps": 250,
                 "download_timeout": 600,
                 # Reddit report (YeloMelo95, Bell Canada): the existing
                 # 35-per-220s sliding-window cap allows all 35 searches in

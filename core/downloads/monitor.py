@@ -1155,12 +1155,13 @@ class WebUIDownloadMonitor:
         """
         try:
             minimum_kbps = float(config_manager.get(
-                'soulseek.min_observed_download_speed_kbps', 500) or 0)
+                'soulseek.min_observed_download_speed_kbps', 250) or 0)
         except (TypeError, ValueError):
-            minimum_kbps = 500.0
+            minimum_kbps = 250.0
 
         is_active = 'InProgress' in str(state_str or '')
-        if (minimum_kbps <= 0 or not is_active
+        if (not config_manager.get('soulseek.observed_speed_fallback_enabled', False)
+                or minimum_kbps <= 0 or not is_active
                 or _resolve_download_source(task.get('username')) != 'soulseek'
                 or task.get('_user_manual_pick') or task.get('_observed_speed_exempt')):
             task.pop('_observed_speed_tracker', None)

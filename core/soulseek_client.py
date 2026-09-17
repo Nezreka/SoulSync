@@ -2028,9 +2028,11 @@ class SoulseekClient(DownloadSourcePlugin):
         speed_tracker = ObservedSpeedTracker()
         try:
             minimum_bps = max(0.0, float(config_manager.get(
-                'soulseek.min_observed_download_speed_kbps', 500) or 0) * 1000)
+                'soulseek.min_observed_download_speed_kbps', 250) or 0) * 1000)
         except (TypeError, ValueError):
-            minimum_bps = 500_000.0
+            minimum_bps = 250_000.0
+        if not config_manager.get('soulseek.observed_speed_fallback_enabled', False):
+            minimum_bps = 0.0
 
         def finish(reason):
             if return_detail:
