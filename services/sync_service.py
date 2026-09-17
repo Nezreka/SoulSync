@@ -55,6 +55,41 @@ def _dedupe_by_rating_key(tracks: list) -> list:
     return out
 
 
+def _fold_matches_by_rating_key(matched: list) -> tuple:
+    """Same rule as _dedupe_by_rating_key, run over MatchResults so the sync
+    can SAY which source entries collapsed. Returns (kept_match_results,
+    folds) where folds is [(dropped_match_result, keeper_match_result)].
+
+    nanomite's 1582 Deezer favourites synced as a 1288-track Navidrome playlist
+    and nothing on screen or in the log said where the other 294 went: the
+    dedupe count was logged, the pairs were not, and the review listed every
+    one of them as found. A fold is either a favourite he owns once in several
+    editions (fine) or the matcher landing two different songs on one file
+    (not fine) - the pairs are the only way to tell which."""
+    first_by_key: dict = {}
+    kept = []
+    folds = []
+    for mr in matched:
+        t = mr.plex_track
+        key = getattr(t, 'ratingKey', None) if t is not None else None
+        if key is None:
+            continue
+        keeper = first_by_key.get(key)
+        if keeper is None:
+            first_by_key[key] = mr
+            kept.append(mr)
+        else:
+            folds.append((mr, keeper))
+    return kept, folds
+
+
+def _source_label(spotify_track) -> str:
+    artists = getattr(spotify_track, 'artists', None) or []
+    artist = _artist_name(artists[0]) if artists else ''
+    title = getattr(spotify_track, 'name', '') or ''
+    return f"{artist} - {title}" if artist else title
+
+
 def reresolve_manual_match_live_plex(cache_db, media_client, m, *, profile_id,
                                      source_track_id, server_source):
     """Re-resolve a manual match whose stored Plex ratingKey went stale.
@@ -161,6 +196,9 @@ class SyncResult:
     errors: List[str]
     wishlist_added_count: int = 0
     match_details: list = None  # Per-track match data for sync history
+    # source entries that resolved to a library track already on the playlist
+    # (synced_tracks + duplicate_tracks == matched_tracks)
+    duplicate_tracks: int = 0
 
     @property
     def success_rate(self) -> float:
@@ -179,6 +217,7 @@ class SyncProgress:
     total_tracks: int = 0
     matched_tracks: int = 0
     failed_tracks: int = 0
+    duplicate_tracks: int = 0
 
 class PlaylistSyncService:
     def __init__(self, spotify_client: SpotifyClient, download_orchestrator: DownloadOrchestrator, media_server_engine=None):
@@ -316,7 +355,8 @@ class PlaylistSyncService:
         return bool(getattr(self, '_cancelled', False))
     
     def _update_progress(self, playlist_name: str, step: str, track: str, progress: float, total_steps: int, current_step: int, 
-                        total_tracks: int = 0, matched_tracks: int = 0, failed_tracks: int = 0):
+                        total_tracks: int = 0, matched_tracks: int = 0, failed_tracks: int = 0,
+                        duplicate_tracks: int = 0):
         # Send progress update to the specific playlist's callback
         callback = self.progress_callbacks.get(playlist_name)
         if callback:
@@ -328,7 +368,8 @@ class PlaylistSyncService:
                 current_step_number=current_step,
                 total_tracks=total_tracks,
                 matched_tracks=matched_tracks,
-                failed_tracks=failed_tracks
+                failed_tracks=failed_tracks,
+                duplicate_tracks=duplicate_tracks,
             ))
     
     def _reconcile_or_replace(self, client, playlist_name: str, tracks) -> bool:
@@ -477,6 +518,7 @@ class PlaylistSyncService:
             # wishlist for missing files. Previously we fell through to Plex here,
             # showed "Creating/updating Plex playlist", playlist write failed, and
             # failed_tracks was computed as total - 0 synced (= entire playlist).
+            folds = []
             if server_type == 'soulsync':
                 self._update_progress(
                     playlist.name,
@@ -530,6 +572,18 @@ class PlaylistSyncService:
                 # and pushing dupes made every sync re-add the same track (#905). The
                 # dispatch below sends THIS deduped list, never the raw `valid_tracks`.
                 plex_tracks = _dedupe_by_rating_key(valid_tracks)
+                _kept, folds = _fold_matches_by_rating_key(
+                    [r for r in matched_tracks if r.plex_track is not None and hasattr(r.plex_track, 'ratingKey')])
+                for dropped, keeper in folds:
+                    # one line per fold, INFO: this is the evidence a "my playlist
+                    # is 300 tracks short" report needs, and it costs nothing
+                    lib = dropped.plex_track
+                    logger.info(
+                        "[Sync fold] '%s' -> library #%s '%s' by '%s' (already on the playlist via '%s', confidence %.2f)",
+                        _source_label(dropped.spotify_track), getattr(lib, 'ratingKey', '?'),
+                        getattr(lib, 'title', ''), getattr(lib, 'artist', '') or '',
+                        _source_label(keeper.spotify_track), dropped.confidence,
+                    )
                 if len(plex_tracks) < len(valid_tracks):
                     logger.info(
                         f"Deduplicated {len(valid_tracks) - len(plex_tracks)} duplicate ratingKeys "
@@ -568,7 +622,8 @@ class PlaylistSyncService:
             self._update_progress(playlist.name, "Sync completed", "", 100, 5, 5,
                                 total_tracks=total_tracks,
                                 matched_tracks=len(matched_tracks),
-                                failed_tracks=failed_tracks)
+                                failed_tracks=failed_tracks,
+                                duplicate_tracks=len(folds))
 
             # Auto-add unmatched tracks to wishlist (skip in Wing It mode or if cancelled)
             if self._is_cancelled(playlist.name):
@@ -654,6 +709,7 @@ class PlaylistSyncService:
 
             # Build per-track match details for sync history
             _match_details = []
+            _fold_keepers = {id(dropped): keeper for dropped, keeper in folds}
             for i, mr in enumerate(match_results):
                 t = mr.spotify_track
                 artists = t.artists if hasattr(t, 'artists') and t.artists else []
@@ -692,6 +748,11 @@ class PlaylistSyncService:
                         'artist_name': getattr(mr.plex_track, 'artist', ''),
                         'album_title': getattr(mr.plex_track, 'album', ''),
                     }
+                keeper = _fold_keepers.get(id(mr))
+                if keeper is not None:
+                    # found, but not on the playlist as its own entry: the file
+                    # it matched is already there under this other source track
+                    detail['folded_into'] = _source_label(keeper.spotify_track)
                 _match_details.append(detail)
 
             result = SyncResult(
@@ -704,7 +765,8 @@ class PlaylistSyncService:
                 sync_time=datetime.now(),
                 errors=errors,
                 wishlist_added_count=wishlist_added_count,
-                match_details=_match_details
+                match_details=_match_details,
+                duplicate_tracks=len(folds),
             )
 
             logger.info(f"Sync completed: {result.success_rate:.1f}% success rate")
@@ -796,6 +858,8 @@ class PlaylistSyncService:
                                 self.ratingKey = db_t.id
                                 self.title = db_t.title
                                 self.id = db_t.id
+                                self.artist = getattr(db_t, 'artist_name', '') or ''
+                                self.album = getattr(db_t, 'album_title', '') or ''
                         return DbTrackFromCache(dbt)
                     try:
                         at = media_client.server.fetchItem(int(server_track_id))
@@ -919,6 +983,10 @@ class PlaylistSyncService:
                                         self.ratingKey = db_track.id
                                         self.title = db_track.title
                                         self.id = db_track.id
+                                        # the review reads .artist/.album (plex names);
+                                        # blanks here left every db match half-described
+                                        self.artist = getattr(db_track, 'artist_name', '') or ''
+                                        self.album = getattr(db_track, 'album_title', '') or ''
 
                                 actual_track = DbTrackFromDB(db_track)
                                 logger.debug(

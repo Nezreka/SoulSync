@@ -280,6 +280,23 @@ describe('reading one poll of the sync status', () => {
     expect(p.step).toBe('Sync complete — 9/10 matched, 9 synced');
   });
 
+  it('says where the matched-but-not-synced entries went', () => {
+    // nanomite: 1581 matched, 1288 synced, and nothing said the other 293
+    // had resolved to files already on the playlist
+    const p = syncHistoryProgress({
+      status: 'finished',
+      progress: {
+        matched_tracks: 1581,
+        total_tracks: 1582,
+        synced_tracks: 1288,
+        duplicate_tracks: 293,
+      },
+    });
+    expect(p.step).toBe(
+      'Sync complete — 1581/1582 matched, 1288 synced, 293 already on the playlist under another entry',
+    );
+  });
+
   it('reads a finished run whose numbers arrived under `result`', () => {
     const p = syncHistoryProgress({ status: 'finished', result: { matched_tracks: 4 } });
     expect(p.matched).toBe(4);
