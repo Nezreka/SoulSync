@@ -402,6 +402,29 @@ def test_scan_order_fallback_not_used_for_plain_download(tmp_path, monkeypatch):
     assert library_calls[0]["track_number"] == 1
 
 
+def test_unknown_compilation_track_number_does_not_claim_first_position(tmp_path, monkeypatch):
+    source_path = tmp_path / "Omricon.mp3"
+    source_path.write_bytes(b"audio")
+    library_calls = _wire_post_process_common(
+        monkeypatch, tmp_path, tmp_path / "Omricon.mp3",
+        track_number=0, is_album_download=True,
+    )
+    import core.imports.track_number as track_number_module
+    monkeypatch.setattr(track_number_module, "track_number_from_directory_order", lambda path: None)
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                    web_scan_manager=None, repair_worker=None)
+    context = {
+        "album": {"name": "Magnatron 2.0", "album_type": "compilation"},
+        "track_info": {"name": "Omricon"},
+        "original_search_result": {"title": "Omricon"},
+        "is_album_download": True,
+    }
+
+    import_pipeline.post_process_matched_download("ctx-1", context, str(source_path), runtime)
+
+    assert library_calls[0]["track_number"] == 0
+
+
 # ---------------------------------------------------------------------------
 # The duration reference a deliberately-preferred version is measured against
 # ---------------------------------------------------------------------------

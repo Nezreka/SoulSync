@@ -291,20 +291,20 @@ def test_transfer_file_matching_expected_stem_different_ext_is_enhanced(monkeypa
 
 
 def test_transfer_file_of_another_track_is_never_tagged(monkeypatch):
-    """THE jadux incident: this task's context says '01 - 0bpm.flac' but the
-    finder handed back a different track's imported file ('01 - Bimo.flac').
-    Writing would stamp 0bpm's metadata into Bimo's file — must refuse."""
-    _transfer_task_with_context('0bpm', track_number=1)
+    """A fuzzy match to another track must not be tagged or completed."""
+    _transfer_task_with_context('Jaw Breaker', track_number=233)
     monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
+    monkeypatch.setattr(pp.time, 'sleep', lambda seconds: None)
     enhanced = []
     deps, rec = _build_deps(
-        find_completed_file=lambda *a, **kw: ('/transfer/01 - Bimo.flac', 'transfer'),
+        find_completed_file=lambda *a, **kw: ('/transfer/04 - Jawbreaker.flac', 'transfer'),
         enhance_file_metadata=lambda *a, **kw: enhanced.append(a) or True,
     )
     pp.run_post_processing_worker('t1', 'b1', deps)
     assert enhanced == []                                   # no tag write
     assert not any(c[0] == 'wipe' for c in rec.calls)       # no wipe either
-    assert ('on_complete', ('b1', 't1', True), {}) in rec.calls
+    assert ('on_complete', ('b1', 't1', False), {}) in rec.calls
+    assert download_tasks['t1']['status'] == 'failed'
 
 
 def test_ambiguous_fuzzy_context_is_refused(monkeypatch):

@@ -466,6 +466,16 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             elif not expected_final_filename:
                 logger.warning("[Post-Processing] Strategy 2 SKIPPED: No expected final filename available")
 
+            if (found_file and file_location == 'transfer' and expected_final_filename
+                    and not _found_file_matches_expected(found_file, expected_final_filename)):
+                logger.warning(
+                    "[Post-Processing] Transfer file '%s' does not match expected '%s' "
+                    "— ignoring fuzzy match",
+                    os.path.basename(found_file), expected_final_filename,
+                )
+                found_file = None
+                file_location = None
+
             if found_file:
                 logger.warning(f"[Post-Processing] FILE FOUND after {retry_count + 1} attempts in {file_location}: {found_file}")
                 break

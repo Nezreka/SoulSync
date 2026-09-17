@@ -54,6 +54,28 @@ def test_single_album_groups_all_tracks_together():
     assert len(g.tracks) == 3
 
 
+def test_compilation_uses_album_artist_not_first_track_artist():
+    tracks = [
+        _wt('Star Fighter', 'Wice', 'comp1', 'Magnatron 2.0', album_type='compilation'),
+        _wt('Omricon', 'Woob', 'comp1', 'Magnatron 2.0', album_type='compilation'),
+    ]
+    for ordered in (tracks, list(reversed(tracks))):
+        group = group_wishlist_tracks_by_album(ordered).album_groups[0]
+        assert group.artist_context['name'] == 'Various Artists'
+        assert group.tracks == ordered
+
+
+def test_compilation_prefers_declared_album_artist():
+    tracks = [
+        _wt('A', 'Singer A', 'comp1', 'Shared Album', album_type='compilation',
+            artists=[{'name': 'Album Curator'}]),
+        _wt('B', 'Singer B', 'comp1', 'Shared Album', album_type='compilation',
+            artists=[{'name': 'Album Curator'}]),
+    ]
+    group = group_wishlist_tracks_by_album(tracks).album_groups[0]
+    assert group.artist_context['name'] == 'Album Curator'
+
+
 def test_multiple_albums_emit_separate_groups():
     """Two tracks in alb1 promotes that album to a group at the default
     threshold of 2; alb2's one solo track falls to residual."""

@@ -26,6 +26,7 @@ from core.imports.context import (
     extract_artist_name,
     get_import_clean_artist,
     get_import_clean_title,
+    get_import_context_album,
     get_import_context_artist,
     get_import_has_clean_metadata,
     get_import_original_search,
@@ -1104,6 +1105,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     "onto track 1)", scan_order,
                 )
                 track_number = scan_order
+            elif (album_info.get('is_album') and
+                  get_import_context_album(context).get('album_type') in ('compilation', 'compile')):
+                logger.warning("No reliable compilation track number; preserving unknown position")
+                track_number = 0
             else:
                 logger.error(f"Invalid track number ({track_number}), defaulting to 1")
                 track_number = 1
