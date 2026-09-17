@@ -118,8 +118,8 @@ def register_routes(bp):
     def sync_playlist(playlist_id):
         """Trigger playlist sync/download.
 
-        This delegates to the internal sync endpoint by forwarding the request.
-        Body: {"playlist_name": "...", "tracks": [...]}
+        Runs the app's own sync start in-process.
+        Body: {"playlist_name": "...", "tracks": [...], "sync_mode"?: "replace"|"append"}
         """
         body = request.get_json(silent=True) or {}
         playlist_name = body.get("playlist_name")
@@ -129,24 +129,21 @@ def register_routes(bp):
             return api_error("BAD_REQUEST", "Missing 'playlist_name' or 'tracks' in body.", 400)
 
         try:
-            from web_server import sync_states
-            if playlist_id in sync_states and sync_states[playlist_id].get("phase") not in ("complete", "error", None):
-                return api_error("CONFLICT", "Sync already in progress for this playlist.", 409)
-        except ImportError:
-            pass
+            from api.source_playlists import start_playlist_sync_from_payload
 
-        try:
-            # Forward to the internal sync endpoint
-            import requests as http_requests
-            internal_url = "http://127.0.0.1:8008/api/sync/start"
-            resp = http_requests.post(internal_url, json={
+            result = start_playlist_sync_from_payload({
                 "playlist_id": playlist_id,
                 "playlist_name": playlist_name,
                 "tracks": tracks,
-            }, timeout=10)
-            data = resp.json()
-            if data.get("success"):
-                return api_success({"message": "Playlist sync started.", "playlist_id": playlist_id})
-            return api_error("SYNC_FAILED", data.get("error", "Sync failed to start."), 500)
+                "image_url": body.get("image_url", ""),
+                "sync_mode": body.get("sync_mode"),
+            })
+            response, status = result if isinstance(result, tuple) else (result, 200)
+            data = response.get_json(silent=True) or {}
+            if status == 409:
+                return api_error("CONFLICT", "Sync already in progress for this playlist.", 409)
+            if status != 200 or not data.get("success"):
+                return api_error("SYNC_FAILED", data.get("error", "Sync failed to start."), status if status != 200 else 500)
+            return api_success({"message": "Playlist sync started.", "playlist_id": playlist_id})
         except Exception as e:
             return api_error("PLAYLIST_ERROR", str(e), 500)

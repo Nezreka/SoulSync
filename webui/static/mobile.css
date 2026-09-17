@@ -2470,8 +2470,13 @@
         grid-template-columns: 1fr 1fr;
     }
     .enhanced-bulk-bar {
-        left: 0;
-        padding: 0 16px;
+        left: 10px;
+        right: 10px;
+        padding: 8px 16px;
+    }
+    /* above the full-width mobile player (bottom:62px, 110px tall) */
+    .enhanced-bulk-bar.visible {
+        bottom: 184px;
     }
     .enhanced-bulk-modal {
         width: calc(100vw - 32px);

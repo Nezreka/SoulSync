@@ -74,9 +74,7 @@ describe('the simple actions', () => {
     // No longer a window bridge: the bar mounts BatchTagPreviewModal itself.
     renderBar();
     fireEvent.click(document.querySelector('.tag-write') as HTMLElement);
-    expect(document.getElementById('batch-tag-preview-title')?.textContent).toBe(
-      'Write Tags — 2 Tracks',
-    );
+    expect(document.getElementById('batch-tag-preview-title')?.textContent).toBe('2 tracks');
     await waitFor(() =>
       expect(requests.some((r) => r.url === '/api/library/tracks/tag-preview-batch')).toBe(true),
     );

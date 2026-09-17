@@ -36,7 +36,7 @@ def register_routes(bp):
             hydrabase = ctx.get("hydrabase_client")
             if source == "auto" and hydrabase:
                 try:
-                    from web_server import _is_hydrabase_active
+                    from api.hydrabase_routes import _is_hydrabase_active
                     if _is_hydrabase_active():
                         hydra_results = hydrabase.search_tracks(query, limit=limit)
                         if hydra_results:

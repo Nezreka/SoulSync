@@ -31,6 +31,14 @@ _COMPLETE_STATES = {"seeding", "completed", "complete", "succeeded", "finished"}
 
 DEFAULT_POLL_SECONDS = 20.0
 
+# consecutive ticks a job may be unknown to a REACHABLE client before the
+# book is failed and handed back to the wishlist. the video monitor's rule
+# (_GIVE_UP_AFTER). without it a torrent deleted from the client sat on
+# "waiting for client" forever, and the wishlist row behind it stayed
+# "grabbed" forever because a live-looking download blocked the reset.
+GIVE_UP_AFTER_MISSES = 8
+_misses: Dict[str, int] = {}
+
 
 def normalize_state(status: Any) -> str:
     """Collapse a client's own vocabulary into downloading / completed / failed.
@@ -221,6 +229,28 @@ def _get_status(source: str, ref: str) -> Any:
         return None
 
 
+def _client_reachable(source: str) -> bool:
+    """whether the client carrying `source` jobs can be asked at all.
+
+    a job the client does not know is a different thing from a client that
+    is down: the first will never come back, the second will. only the
+    first should count towards giving up."""
+    try:
+        if source == "soulseek":
+            from core.audiobook_soulseek import _shared_client
+            return _shared_client() is not None
+        if source == "torrent":
+            from core.torrent_clients import get_active_adapter
+        else:
+            from core.usenet_clients import get_active_adapter
+        adapter = get_active_adapter()
+        if adapter is None:
+            return False
+        return bool(_run(adapter.check_connection()))
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 def _resolve_path(reported: Any) -> Any:
     """Map the client's reported save path onto a path this process can read.
 
@@ -405,6 +435,22 @@ def tick(db: Any = None) -> Dict[str, int]:
             speed=speed,
         )
 
+        if patch.get("status") == "unavailable":
+            # unknown to the client. counted only when the client is there to
+            # ask, so a client that is down keeps every book waiting instead
+            # of failing them all.
+            if _client_reachable(str(row.get("source") or "")):
+                misses = _misses.get(row["download_id"], 0) + 1
+                _misses[row["download_id"]] = misses
+                if misses >= GIVE_UP_AFTER_MISSES:
+                    _misses.pop(row["download_id"], None)
+                    patch = {
+                        "status": "failed",
+                        "error": "The download client no longer has this job; the book goes back to the wishlist",
+                    }
+                    database.update_download(row["download_id"], **patch)
+        else:
+            _misses.pop(row["download_id"], None)
         if patch.get("status") in ("downloading", "queued", "paused", "unavailable"):
             mark_status(row["download_id"], "downloading" if patch["status"] == "downloading" else "queued",
                         error=patch.get("error") or ("Paused in download client" if patch["status"] == "paused" else ""))
@@ -417,7 +463,9 @@ def tick(db: Any = None) -> Dict[str, int]:
             forget(row["download_id"])
             summary["completed"] += 1
             if asin:
-                database.mark_wishlist_status(asin, STATUS_DONE)
+                # every profile's row: the library is shared, so the book is
+                # done for whoever wanted it, not only profile 1
+                database.mark_wishlist_status(asin, STATUS_DONE, profile_id=None)
                 database.add_to_library(
                     _book_for(row), imported_path or patch.get("save_path", ""),
                     download_id=row["download_id"], origin="soulsync",
@@ -438,7 +486,8 @@ def tick(db: Any = None) -> Dict[str, int]:
             _return_to_wishlist(database, row, str(patch.get("error") or ""))
             if asin:
                 database.mark_wishlist_status(
-                    asin, STATUS_FAILED, error=str(patch.get("error") or ""),
+                    asin, STATUS_FAILED, profile_id=None,
+                    error=str(patch.get("error") or ""),
                 )
     return summary
 
@@ -521,8 +570,9 @@ def _return_to_wishlist(database: Any, row: Dict[str, Any], error: str) -> None:
         logger.debug("Could not block the failed release: %s", exc)
 
     try:
-        if database.is_wishlisted(asin):
-            database.mark_wishlist_status(asin, STATUS_FAILED, error=error)
+        # whoever wanted it. checking profile 1 alone meant another profile's
+        # failed grab re-added the book to profile 1's list instead
+        if database.mark_wishlist_status(asin, STATUS_FAILED, profile_id=None, error=error):
             return
         book = _book_for(row)
         if book.get("title") and database.add_to_wishlist(book):

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { EnhancedView } from './enhanced-view';
@@ -236,5 +236,109 @@ describe('expanding an album', () => {
     render(<EnhancedView isAdmin={false} onReload={vi.fn()} data={DATA} status={READY} />);
     fireEvent.click(document.getElementById('enhanced-album-row-1') as HTMLElement);
     expect(document.getElementById('enhanced-tracks-panel-2')?.className).not.toContain('visible');
+  });
+});
+
+describe('the canonical tracklist on expand', () => {
+  // The step the React port dropped: nothing fetched the source tracklist, so
+  // no album ever grew a missing row and "I Have This" was unreachable.
+  const ONE_OF_TWO = {
+    albums: [
+      {
+        id: 7,
+        title: 'Two Tracker',
+        record_type: 'single',
+        deezer_id: 'dz7',
+        tracks: [{ id: 71, title: 'Side A', track_number: 1, file_path: 'a.flac' }],
+      },
+    ],
+    artist: { id: 3, name: 'Someone' },
+  };
+  const TRACKLIST = {
+    success: true,
+    source: 'deezer',
+    tracks: [
+      { id: 't1', name: 'Side A', track_number: 1 },
+      { id: 't2', name: 'Side B', track_number: 2 },
+    ],
+  };
+  const jsonResponse = (body: unknown) =>
+    Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+  // The panel fires other requests on expand (the reorganize queue snapshot);
+  // only the tracklist one is under test, so the stub answers the rest blank.
+  const stubFetch = () => {
+    const tracklist = vi.fn(() => jsonResponse(TRACKLIST));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) =>
+        String(input).includes('/tracks?') ? tracklist() : jsonResponse({ success: true }),
+      ),
+    );
+    return tracklist;
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('fetches the tracklist once the album opens and renders the gap as a missing row', async () => {
+    const tracklist = stubFetch();
+    render(<EnhancedView isAdmin onReload={vi.fn()} data={ONE_OF_TWO} status={READY} />);
+    expect(tracklist).not.toHaveBeenCalled();
+
+    fireEvent.click(document.getElementById('enhanced-album-row-7') as HTMLElement);
+    const fetchSpy = fetch as unknown as ReturnType<typeof vi.fn>;
+    const call = fetchSpy.mock.calls.find((c) => String(c[0]).includes('/tracks?'));
+    const url = new URL(String(call?.[0]), 'http://x');
+    expect(url.pathname).toBe('/api/album/dz7/tracks');
+    expect(url.searchParams.get('source')).toBe('deezer');
+    expect(url.searchParams.get('artist')).toBe('Someone');
+
+    const missing = await waitFor(() => {
+      const row = document.querySelector('.enhanced-missing-track-row');
+      expect(row).not.toBeNull();
+      return row as HTMLElement;
+    });
+    expect(missing.textContent).toContain('Side B');
+    expect(missing.querySelector('.enhanced-missing-manage-btn')).not.toBeNull();
+    // The owned track is matched, not doubled.
+    expect(document.querySelectorAll('.enhanced-missing-track-row')).toHaveLength(1);
+    expect(tracklist).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the diff again when a fresh record arrives', async () => {
+    // An import hands back a refetched album with no diff on it; the row that
+    // was just filled has to drop out, so the fresh record is diffed anew.
+    const tracklist = stubFetch();
+    const { rerender } = render(
+      <EnhancedView isAdmin onReload={vi.fn()} data={ONE_OF_TWO} status={READY} />,
+    );
+    fireEvent.click(document.getElementById('enhanced-album-row-7') as HTMLElement);
+    await waitFor(() =>
+      expect(document.querySelector('.enhanced-missing-track-row')).not.toBeNull(),
+    );
+
+    const filled = {
+      ...ONE_OF_TWO,
+      albums: [
+        {
+          ...ONE_OF_TWO.albums[0],
+          tracks: [
+            ...ONE_OF_TWO.albums[0].tracks,
+            { id: 72, title: 'Side B', track_number: 2, file_path: 'b.flac' },
+          ],
+        },
+      ],
+    };
+    rerender(<EnhancedView isAdmin onReload={vi.fn()} data={filled} status={READY} />);
+    await waitFor(() => expect(tracklist).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(document.querySelector('.enhanced-missing-track-row')).toBeNull());
+  });
+
+  it('does not fetch for an album with no source id', () => {
+    const tracklist = stubFetch();
+    render(<EnhancedView isAdmin onReload={vi.fn()} data={DATA} status={READY} />);
+    fireEvent.click(document.getElementById('enhanced-album-row-1') as HTMLElement);
+    expect(tracklist).not.toHaveBeenCalled();
   });
 });

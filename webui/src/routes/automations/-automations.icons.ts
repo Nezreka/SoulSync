@@ -46,6 +46,7 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   watchlist_artist_added: '👤',
   watchlist_artist_removed: '👤',
   import_completed: '📥',
+  import_needs_attention: '📥',
   mirrored_playlist_created: '📂',
   quality_scan_completed: '📊',
   duplicate_scan_completed: '🗂️',

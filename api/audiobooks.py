@@ -596,6 +596,18 @@ def create_audiobooks_blueprint() -> Blueprint:
         choice must not reset the book's retry backoff.
         """
         body = request.get_json(silent=True) or {}
+
+        # "look again": the way back from cancelled (never retried on its
+        # own) and past the backoff on failed, keeping the narrator choice.
+        if str(body.get("status") or "").strip().lower() == "wanted":
+            changed = get_audiobook_db().retry_wishlist_entry(asin, _profile())
+            if not changed:
+                return jsonify({
+                    "success": False,
+                    "error": f"{asin} is not on the wishlist, or is not in a state that can be retried",
+                }), 404
+            return jsonify({"success": True, "status": "wanted"})
+
         narrator_mode = str(body.get("narrator_mode") or "").strip().lower()
         if narrator_mode not in ("exact", "any"):
             return jsonify({
@@ -1144,7 +1156,7 @@ def create_audiobooks_blueprint() -> Blueprint:
             from core.audiobook_database import STATUS_GRABBED
             # Only moves a row that already exists — grabbing something that was
             # never wishlisted must not silently add it.
-            db.mark_wishlist_status(asin, STATUS_GRABBED)
+            db.mark_wishlist_status(asin, STATUS_GRABBED, profile_id=_profile())
 
         # Something is now downloading, so start watching for it to finish even
         # if the monitor was asleep at boot.

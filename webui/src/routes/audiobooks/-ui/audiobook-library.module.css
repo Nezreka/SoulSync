@@ -11,6 +11,16 @@
   box-shadow: 0 32px 100px #0009;
   font-family: inherit;
 }
+/* the same panel as a page: full width, tall enough to scroll the grid
+   inside the page instead of a dialog box, no dialog chrome */
+.embedded {
+  width: 100%;
+  height: calc(100dvh - 140px);
+  min-height: 560px;
+  border-radius: 20px;
+  box-shadow: none;
+}
+
 .modal button,
 .modal input,
 .modal select {

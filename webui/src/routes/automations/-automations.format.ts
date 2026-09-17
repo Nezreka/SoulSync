@@ -239,6 +239,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   watchlist_artist_added: 'Artist Watched',
   watchlist_artist_removed: 'Artist Unwatched',
   import_completed: 'Import Complete',
+  import_needs_attention: 'Import Needs Attention',
   mirrored_playlist_created: 'Playlist Mirrored',
   quality_scan_completed: 'Quality Scan Done',
   duplicate_scan_completed: 'Duplicate Scan Done',

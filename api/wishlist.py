@@ -147,16 +147,28 @@ def register_routes(bp):
     @bp.route("/wishlist/process", methods=["POST"])
     @require_api_key
     def process_wishlist():
-        """Trigger wishlist download processing."""
-        try:
-            from web_server import is_wishlist_actually_processing
-            if is_wishlist_actually_processing():
-                return api_error("CONFLICT", "Wishlist processing is already running.", 409)
+        """Trigger wishlist download processing.
 
-            from web_server import start_wishlist_missing_downloads
-            start_wishlist_missing_downloads()
+        Goes through the same helper the app's own /api/wishlist/process
+        uses. It used to import two names from web_server; the decomposition
+        moved them and every call answered 501 (#1259, Wavio).
+        """
+        try:
+            from api import wishlist_routes as internal
+            from core.wishlist.routes import process_wishlist_api
+
+            if internal._process_wishlist_automatically is None:
+                return api_error("NOT_AVAILABLE", "Wishlist processing is not wired up yet.", 503)
+
+            runtime = internal._build_wishlist_route_runtime()
+            payload, status = process_wishlist_api(
+                runtime,
+                start_processing=lambda: internal._process_wishlist_automatically(),
+            )
+            if status == 409:
+                return api_error("CONFLICT", "Wishlist processing is already running.", 409)
+            if status != 200:
+                return api_error("WISHLIST_ERROR", payload.get("error", "Could not start processing."), status)
             return api_success({"message": "Wishlist processing started."})
-        except ImportError:
-            return api_error("NOT_AVAILABLE", "Wishlist processing function not available.", 501)
         except Exception as e:
             return api_error("WISHLIST_ERROR", str(e), 500)

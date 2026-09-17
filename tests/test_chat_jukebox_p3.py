@@ -100,16 +100,57 @@ def test_free_text_goes_through_search_seam(jbx_app):
     ]
     body = http.post("/api/chat/jukebox/resolve",
                      json={"q": "daft punk around the world"}).get_json()
-    assert state["search_calls"] == [("daft punk around the world", 5)]
+    # a wider ask than the five shown: search_videos drops anything under
+    # 30 s or over 15 min, and five-in meant one or two out
+    assert state["search_calls"] == [("daft punk around the world", chat_api._JUKEBOX_SEARCH_POOL)]
     assert body["results"] == [{"id": "aaaaaaaaaaa", "title": "Around the World",
                                 "channel": "Daft Punk", "duration": 429, "views": 0}]
 
 
-def test_unresolvable_video_404s(jbx_app):
+def test_a_link_still_plays_when_oembed_refuses(jbx_app):
+    # oembed answers 401 for a video whose owner disallows embedding and 404
+    # for a private one. the id plays either way: a failed lookup is "no
+    # title yet", not "no link". links used to die here.
     http, state = jbx_app
     state["oembed_fail"] = True
-    r = http.post("/api/chat/jukebox/resolve", json={"q": "dQw4w9WgXcQ"})
-    assert r.status_code == 404
+    r = http.post("/api/chat/jukebox/resolve", json={"q": "https://youtu.be/dQw4w9WgXcQ?si=abc"})
+    assert r.status_code == 200
+    assert r.get_json()["results"] == [{"id": "dQw4w9WgXcQ", "title": "dQw4w9WgXcQ", "channel": ""}]
+    assert state["search_calls"] == []
+
+
+def _v(vid, title, channel="Some Channel", views=0, duration=200):
+    return SimpleNamespace(video_id=vid, title=title, channel=channel,
+                           view_count=views, duration=duration)
+
+
+def test_search_ranks_the_song_above_the_reaction(jbx_app):
+    http, state = jbx_app
+    state["search_results"] = [
+        _v("r1111111111", "Daft Punk - Around the World REACTION!!", "ReactGuy", views=9_000_000),
+        _v("k1111111111", "Around the World (Karaoke Version)", "KaraokeCo", views=5_000_000),
+        _v("c1111111111", "around the world - daft punk (cover)", "Bedroom Covers", views=100_000),
+        _v("o1111111111", "Daft Punk - Around the World (Official Video)", "Daft Punk", views=300_000_000),
+        _v("t1111111111", "Around the World", "Daft Punk - Topic", views=20_000_000),
+        _v("l1111111111", "Around the World (Live 2007)", "fan uploads", views=2_000_000),
+        _v("x1111111111", "Around the World", "Random Reupload", views=50_000),
+    ]
+    body = http.post("/api/chat/jukebox/resolve", json={"q": "around the world"}).get_json()
+    ids = [r["id"] for r in body["results"]]
+    assert set(ids[:2]) == {"o1111111111", "t1111111111"}, "official and Topic first, either order"
+    assert len(ids) == 5
+    assert "r1111111111" not in ids and "k1111111111" not in ids, "reaction and karaoke fall off the end"
+
+
+def test_ranking_keeps_youtubes_order_on_ties():
+    found = [_v("a1111111111", "Song"), _v("b1111111111", "Song"), _v("c1111111111", "Song")]
+    assert [v.video_id for v in chat_api.rank_jukebox_results(found)] == \
+        ["a1111111111", "b1111111111", "c1111111111"]
+
+
+def test_ranking_drops_bad_ids():
+    found = [_v("not a vid!!", "x"), _v("a1111111111", "Song")]
+    assert [v.video_id for v in chat_api.rank_jukebox_results(found)] == ["a1111111111"]
 
 
 def test_resolve_respects_the_send_gate(jbx_app):

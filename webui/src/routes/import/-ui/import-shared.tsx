@@ -1,57 +1,43 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { HTTPError } from 'ky';
-import { useEffect } from 'react';
+import { useState } from 'react';
 
-import type { ImportQueueJob, ImportStagingFile } from '../-import.types';
+import type { ImportQueueJob } from '../-import.types';
 
 import {
-  importStagingFilesQueryOptions,
   invalidateImportStagingQueries,
   processImportAlbumTrack,
   processImportSingleFile,
+  resolveAutoImportResult,
 } from '../-import.api';
 import { getTrackDisplayInfo, IMPORT_PLACEHOLDER_IMAGE } from '../-import.helpers';
 import { useImportQueueWorkflow, useImportWorkflowStore } from '../-import.store';
 
-const EMPTY_STAGING_FILES: ImportStagingFile[] = [];
-
-export function useImportStaging() {
+/** The header's Refresh: drop finished jobs and re-read the import folder. */
+export function useInboxRefresh() {
   const queryClient = useQueryClient();
   const clearFinishedJobs = useImportWorkflowStore((state) => state.clearFinishedJobs);
-  const stagingQuery = useQuery({
-    ...importStagingFilesQueryOptions(),
-  });
-
-  // A large staging folder (whole-library migration, #947) is scanned in the background; the
-  // endpoints return `scanning: true` until it's done. While scanning, poll so the page fills
-  // in automatically once the scan completes. Invalidate ALL staging queries (files, groups,
-  // suggestions) — not just files — so the album tab's separate groups query refetches too,
-  // otherwise it would stay stuck on its initial {scanning} response. A plain setInterval (NOT
-  // react-query's refetchInterval) that only runs while scanning leaves normal/error states
-  // untouched; only currently-mounted queries actually refetch.
-  const scanning = stagingQuery.data?.scanning === true;
-  useEffect(() => {
-    if (!scanning) return undefined;
-    const id = window.setInterval(() => {
-      void invalidateImportStagingQueries(queryClient);
-    }, 1500);
-    return () => window.clearInterval(id);
-  }, [scanning, queryClient]);
-
+  const [refreshing, setRefreshing] = useState(false);
   return {
-    refreshStaging: async () => {
-      clearFinishedJobs();
-      await invalidateImportStagingQueries(queryClient);
+    refreshing,
+    refresh: async () => {
+      setRefreshing(true);
+      try {
+        clearFinishedJobs();
+        await invalidateImportStagingQueries(queryClient);
+      } finally {
+        setRefreshing(false);
+      }
     },
-    // Keep the empty fallback stable so staging-driven effects do not loop while loading.
-    stagingFiles: stagingQuery.data?.files ?? EMPTY_STAGING_FILES,
-    stagingPath: stagingQuery.data?.staging_path || 'Not configured',
-    scanning,
-    scanProgress: stagingQuery.data?.progress ?? null,
-    stagingQuery,
   };
 }
 
+/**
+ * Runs a matcher job: one request per track, progress into the store, and
+ * the inbox re-read when it is done. A job that came from an inbox item
+ * with a history row records itself against that row, so history says
+ * "imported by hand" instead of a stale "needs identification".
+ */
 export function useImportQueueActions() {
   const queryClient = useQueryClient();
   const { enqueueQueueJob, updateQueueEntry } = useImportQueueWorkflow();
@@ -67,7 +53,7 @@ export function useImportQueueActions() {
           : job.items[index].title || job.items[index].filename || `File ${index + 1}`;
 
       updateQueueEntry(entryId, {
-        sublabel: `Processing ${index + 1}/${job.items.length}: ${itemName}`,
+        sublabel: `Importing ${index + 1}/${job.items.length}: ${itemName}`,
         processed,
         errors: [...errors],
       });
@@ -107,8 +93,20 @@ export function useImportQueueActions() {
       });
     }
 
+    if (processed > 0 && job.historyId != null) {
+      try {
+        await resolveAutoImportResult(job.historyId);
+      } catch {
+        // history bookkeeping only; the files are already in the library
+      }
+    }
+
     updateQueueEntry(entryId, {
       status: errors.length > 0 && processed === 0 ? 'error' : 'done',
+      sublabel:
+        errors.length > 0 && processed === 0
+          ? 'Nothing imported'
+          : `${processed} of ${job.items.length} imported`,
       processed,
       errors,
     });
@@ -131,6 +129,42 @@ export function RefreshIcon() {
   );
 }
 
+export function GearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+    </svg>
+  );
+}
+
+export function FolderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  );
+}
+
+export function DiscIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="2.5" />
+    </svg>
+  );
+}
+
+export function NoteIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M9 18V6l10-2v12" />
+      <circle cx="6.5" cy="18" r="2.5" />
+      <circle cx="16.5" cy="16" r="2.5" />
+    </svg>
+  );
+}
+
 export function fallbackImage(event: { currentTarget: HTMLImageElement }) {
   if (event.currentTarget.src.endsWith(IMPORT_PLACEHOLDER_IMAGE)) return;
   event.currentTarget.src = IMPORT_PLACEHOLDER_IMAGE;
@@ -148,4 +182,19 @@ export function isMediaServerNotConnectedError(error: unknown): boolean {
     typeof data === 'object' &&
     (data as { error_code?: unknown }).error_code === 'media_server_not_connected',
   );
+}
+
+export async function confirmAction({
+  title,
+  message,
+  confirmText,
+}: {
+  title: string;
+  message: string;
+  confirmText: string;
+}): Promise<boolean> {
+  if (window.showConfirmDialog) {
+    return await window.showConfirmDialog({ title, message, confirmText });
+  }
+  return true;
 }

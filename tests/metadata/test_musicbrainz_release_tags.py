@@ -230,3 +230,29 @@ def test_selected_release_recovers_after_transient_lookup_failure(runtime):
     _, second = process(runtime)
     assert "MUSICBRAINZ_RELEASETRACKID" not in first["id_tags"]
     assert second["id_tags"]["MUSICBRAINZ_RELEASETRACKID"] == "chosen-track"
+
+
+def test_recording_details_outage_keeps_release_tags(monkeypatch):
+    # boulder's log, sept 16: musicbrainz 503'd on the recording details call,
+    # get_recording came back None, and the release step read .get off it.
+    # the whole embed aborted, so the track landed with no id tags at all.
+    monkeypatch.setattr(ms, "mb_release_cache", {})
+    monkeypatch.setattr(ms, "mb_release_detail_cache", {})
+    monkeypatch.setattr("core.metadata.album_mbid_cache.lookup", lambda *a, **kw: None)
+    monkeypatch.setattr("core.metadata.album_mbid_cache.record", lambda *a, **kw: None)
+    client = SimpleNamespace(get_release=Mock(side_effect=lambda rid, **kw: release(rid)),
+                             get_recording=Mock(return_value=None),
+                             get_artist=Mock(return_value=None))
+    service = SimpleNamespace(mb_client=client,
+                              match_recording=Mock(return_value={"mbid": "chosen-recording"}),
+                              match_release=Mock(return_value={"mbid": "chosen"}),
+                              match_artist=Mock(return_value={"mbid": "artist"}))
+    runtime = SimpleNamespace(mb_worker=SimpleNamespace(mb_service=service))
+    metadata = {"title": "Hung Up", "album": "Confessions", "artist": "Madonna", "track_number": 1, "disc_number": 1}
+    state = ms._blank_post_process_state()
+    ms._process_musicbrainz_source(state, metadata, Config(), runtime, "Hung Up", "Madonna")
+    assert state["id_tags"]["MUSICBRAINZ_RELEASE_ID"] == "chosen"
+    assert state["id_tags"]["MUSICBRAINZ_RECORDING_ID"] == "chosen-recording"
+    assert state["id_tags"]["MUSICBRAINZ_RELEASETRACKID"] == "chosen-track"
+    assert state["isrc"] is None
+    assert state["mb_isrcs"] == []

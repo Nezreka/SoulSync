@@ -247,9 +247,13 @@ def _read(rel):
 
 
 def test_the_library_is_reachable_from_the_audiobooks_page():
+    # a link to its own page now, not a modal: the library has a url that
+    # can be linked, reloaded and sent
     page = _read("webui/src/routes/audiobooks/-ui/audiobooks-page.tsx")
-    assert "AudiobookLibraryModal" in page
-    assert "setShowLibrary" in page
+    assert 'to="/audiobooks/library"' in page
+    route = _read("webui/src/routes/audiobooks/library.tsx")
+    assert "createFileRoute('/audiobooks/library')" in route
+    assert "AudiobookLibraryPanel" in route
 
 
 def test_deleting_a_book_says_it_is_recoverable():

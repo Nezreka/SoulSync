@@ -1,1840 +1,1375 @@
-.importPageContainer {
-  max-width: 1200px;
+/* the import page: a header strip, one inbox, one matcher. tokens follow
+   the rest of the react pages (rgba white surfaces on the dark ground,
+   accent from --accent-rgb / --accent-light-rgb). */
+
+.page {
+  max-width: 1240px;
   margin: 0 auto;
-  padding: 24px 32px;
-}
-
-.importPageStagingBar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.importOptionsRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 22px;
-  padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.importOption {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.importStagingPath {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.importStagingStats {
-  color: rgb(var(--accent-light-rgb));
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.importStagingRefreshAt {
-  white-space: nowrap;
-  color: rgba(255, 255, 255, 0.4);
-}
-
-/* Tab Bar */
-.importPageTabBar {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  padding-bottom: 0;
-}
-
-.importPageTab {
-  padding: 10px 24px;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 14px;
-  font-weight: 500;
-  text-decoration: none;
-  cursor: pointer;
-  transition: all 0.2s;
-  margin-bottom: -1px;
-}
-
-.importPageTab:hover {
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.importPageTab.active {
-  color: rgb(var(--accent-light-rgb));
-  border-bottom-color: rgb(var(--accent-light-rgb));
-}
-
-.importPageTabContent {
-  display: none;
-}
-
-.importPageTabContent.active {
-  display: block;
-}
-
-.hidden {
-  display: none;
-}
-
-/* Section labels */
-.importPageSectionLabel {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-bottom: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 500;
-}
-
-/* Search bar */
-.importPageSearchBar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-
-.importPageSearchInput {
-  flex: 1;
-  padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  color: #fff;
-  font-size: 14px;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.importPageSearchInput:focus {
-  border-color: rgba(var(--accent-light-rgb), 0.5);
-}
-
-/* Album grid */
-.importPageAlbumGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.importPageAlbumCard {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-align: center;
-  color: inherit;
-  font: inherit;
-}
-
-.importPageAutoGroups .importPageAlbumGrid {
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 10px;
-}
-
-.importPageAutoGroupCard {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  text-align: left;
-}
-
-.importPageAutoGroupCount {
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
-  background: rgba(var(--accent-rgb, 29, 185, 84), 0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 1.2em;
-}
-
-.importPageAutoGroupInfo {
-  min-width: 0;
-}
-
-.importPageAlbumCard:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(var(--accent-light-rgb), 0.3);
-  transform: translateY(-2px);
-}
-
-.importPageAlbumCard img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: 8px;
-  margin-bottom: 8px;
-}
-
-.importPageAlbumCardTitle {
-  font-size: 13px;
-  font-weight: 600;
-  color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 2px;
-}
-
-.importPageAlbumCardArtist {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.importPageAlbumCardMeta {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
-  margin-top: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.importPageAlbumCardDetail {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.36);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.importPageAlbumCardSource {
-  font-size: 10px;
-  color: rgba(255, 200, 100, 0.75);
-  margin-top: 2px;
-  font-style: italic;
-}
-
-/* Album hero (selected album) */
-.importPageAlbumHero {
-  display: flex;
-  gap: 20px;
-  padding: 20px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  margin-bottom: 20px;
-  align-items: center;
-}
-
-.importPageAlbumHero img {
-  width: 120px;
-  height: 120px;
-  border-radius: 10px;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.importPageAlbumHeroInfo {
-  flex: 1;
-  min-width: 0;
-}
-
-.importPageAlbumHeroTitle {
-  font-size: 22px;
-  font-weight: 700;
-  color: #fff;
-  margin-bottom: 4px;
-}
-
-.importPageAlbumHeroArtist {
-  font-size: 15px;
-  color: rgba(255, 255, 255, 0.6);
-  margin-bottom: 4px;
-}
-
-.importPageAlbumHeroMeta {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.35);
-}
-
-/* Match header */
-.importPageMatchHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.importPageMatchHeader h3 {
-  font-size: 16px;
-  font-weight: 600;
-  color: #fff;
-  margin: 0;
-}
-
-.importPageMatchActions {
-  display: flex;
-  gap: 8px;
-}
-
-/* Match list */
-.importPageMatchList {
+  padding: 24px 32px 48px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 16px;
+  gap: 16px;
 }
 
-.importPageMatchRow {
-  display: grid;
-  grid-template-columns: 36px 1fr 1fr 36px;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  min-height: 44px;
-  transition: all 0.2s;
-}
+/* ── header strip ─────────────────────────────────────────────── */
 
-.importPageMatchRow.dragOver {
-  background: rgba(var(--accent-light-rgb), 0.08);
-  border-color: rgba(var(--accent-light-rgb), 0.4);
-  box-shadow: 0 0 12px rgba(var(--accent-light-rgb), 0.15);
-}
-
-.importPageMatchRow.matched {
-  border-color: rgba(var(--accent-light-rgb), 0.2);
-}
-
-.importPageMatchNum {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.3);
-  text-align: center;
-  font-weight: 500;
-}
-
-.importPageMatchTrack {
-  font-size: 13px;
-  color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.importPageMatchFile {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+.strip {
   display: flex;
   align-items: center;
-  gap: 6px;
-  overflow: hidden;
-}
-
-.importPageMatchFile.hasFile {
-  color: rgb(var(--accent-light-rgb));
-}
-
-.importPageMatchFileName {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.importPageMatchConfidence {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(var(--accent-light-rgb), 0.15);
-  color: rgb(var(--accent-light-rgb));
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.importPageMatchConfidence.low {
-  background: rgba(255, 165, 0, 0.15);
-  color: #ffa500;
-}
-
-.importPageMatchDropZone {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.25);
-  font-style: italic;
-}
-
-/* Unmatched file pool */
-.importPageUnmatchedPool {
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px dashed rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  margin-bottom: 16px;
-}
-
-.importPagePoolLabel {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-bottom: 10px;
-  font-weight: 500;
-}
-
-.importPagePoolChips {
-  display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px 18px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.55);
 }
 
-.importPageFileChip {
+.stripPath {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 20px;
-  font-size: 12px;
-  color: #ccc;
-  cursor: grab;
-  transition: all 0.2s;
-  user-select: none;
-}
-
-.importPageFileChip:active {
-  cursor: grabbing;
-}
-
-.importPageFileChip:hover {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(var(--accent-light-rgb), 0.3);
-  color: #fff;
-}
-
-.importPageFileChip.selected {
-  background: rgba(var(--accent-light-rgb), 0.15);
-  border-color: rgba(var(--accent-light-rgb), 0.4);
-  color: rgb(var(--accent-light-rgb));
-}
-
-.importPagePoolEmpty {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.2);
-  font-style: italic;
-}
-
-/* Match footer */
-.importPageMatchFooter {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.importPageMatchStats {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-/* Singles */
-.importPageSinglesHeader {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  margin-bottom: 16px;
-}
-
-.importPageSinglesActions {
-  display: flex;
   gap: 8px;
-  align-items: center;
-}
-
-.importPageSinglesList {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.importPageSingleItem {
-  display: grid;
-  grid-template-columns: 32px 1fr auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  transition: all 0.2s;
-}
-
-.importPageSingleItem.matched {
-  border-color: rgba(var(--accent-light-rgb), 0.2);
-}
-
-.importPageSingleCheckboxWrap {
-  grid-column: 1;
-  position: relative;
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.importPageSingleInfo {
-  grid-column: 2;
   min-width: 0;
-}
-
-.importPageSingleFilename {
-  font-size: 13px;
-  color: #fff;
-  white-space: nowrap;
+  flex: 1 1 260px;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.importPageSingleMeta {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
-  margin-top: 2px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.importPageSingleMatchedInfo {
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  color: rgb(var(--accent-light-rgb));
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
-.importPageSingleMatchedChange {
-  background: transparent;
-  border: 0;
-  padding: 0;
+.stripPath svg {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
   color: rgba(255, 255, 255, 0.4);
-  cursor: pointer;
-  font-size: 11px;
-  text-decoration: underline;
 }
 
-.importPageSingleMatchedChange:hover {
-  color: #fff;
+.stripStat {
+  white-space: nowrap;
 }
 
-.importPageSingleActions {
-  grid-column: 3;
-  justify-self: end;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  flex-shrink: 0;
+.stripStat strong {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 600;
 }
 
-/* Inline search panel for singles */
-.importPageSingleSearchPanel {
-  grid-column: 1 / -1;
-  padding: 12px 0 4px 44px;
-}
-
-.importPageSingleSearchBar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.importPageSingleSearchInput {
-  flex: 1;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  color: #fff;
-  font-size: 13px;
-  outline: none;
-}
-
-.importPageSingleSearchInput:focus {
-  border-color: rgba(var(--accent-light-rgb), 0.4);
-}
-
-.importPageSingleSearchResults {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.importPageSingleResultItem {
-  display: flex;
+.stripWorker {
+  display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-  color: inherit;
-  font: inherit;
-  text-align: left;
+  margin-left: auto;
 }
 
-.importPageSingleResultItem:hover {
-  background: rgba(var(--accent-light-rgb), 0.08);
-  border-color: rgba(var(--accent-light-rgb), 0.25);
-}
-
-.importPageSingleResultImg {
-  width: 36px;
-  height: 36px;
-  border-radius: 4px;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.importPageSingleResultInfo {
-  flex: 1;
-  min-width: 0;
-}
-
-.importPageSingleResultName {
-  font-size: 13px;
-  color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.importPageSingleResultDetail {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-}
-
-.importPageSingleResultSelect {
-  padding: 4px 12px;
-  background: rgba(var(--accent-light-rgb), 0.15);
-  border: 1px solid rgba(var(--accent-light-rgb), 0.3);
-  border-radius: 6px;
-  color: rgb(var(--accent-light-rgb));
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.importPageSingleResultSelect:hover {
-  background: rgba(var(--accent-light-rgb), 0.25);
-}
-
-/* Empty state */
-.importPageEmptyState {
-  text-align: center;
-  padding: 60px 20px;
-  color: rgba(255, 255, 255, 0.3);
-  font-size: 14px;
-}
-
-/* Suggestions */
-.importPageSuggestions {
-  margin-bottom: 24px;
-}
-
-/* Processing Queue */
-.importPageQueue {
-  margin-bottom: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  overflow: hidden;
-}
-
-.importPageQueueHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.importPageQueueTitle {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.importPageQueueList {
-  display: flex;
-  flex-direction: column;
-}
-
-.importPageQueueItem {
-  display: grid;
-  grid-template-columns: 44px 1fr auto;
-  gap: 12px;
-  align-items: center;
-  padding: 10px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.importPageQueueItem:last-child {
-  border-bottom: none;
-}
-
-.importPageQueueArt {
-  width: 44px;
-  height: 44px;
-  border-radius: 6px;
-  object-fit: cover;
-}
-
-.importPageQueueArtEmpty {
-  background: rgba(255, 255, 255, 0.06);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  color: rgba(255, 255, 255, 0.3);
-}
-
-.importPageFlexSpacer {
-  flex: 1;
-}
-
-.importPageQueueInfo {
-  min-width: 0;
-}
-
-.importPageQueueName {
-  font-size: 13px;
-  font-weight: 600;
-  color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.importPageQueueDetail {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: 2px;
-}
-
-/* Per-file rejection reasons (quarantine / integrity / match failures) so the
-   "why" shows in the window, not just in the log (#804). */
-.importPageQueueErrors {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.importPageQueueErrors li {
-  font-size: 11px;
-  line-height: 1.35;
-  color: #ff6b6b;
-  background: rgba(255, 107, 107, 0.08);
-  border-left: 2px solid rgba(255, 107, 107, 0.5);
-  padding: 2px 6px;
-  border-radius: 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.importPageQueueErrors li:has(a) {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-}
-
-.importPageQueueErrors a {
-  color: #ff9b9b;
-  font-weight: 600;
-  text-decoration: underline;
-  white-space: nowrap;
-}
-
-.importPageQueueProgress {
-  width: 120px;
-  flex-shrink: 0;
-}
-
-.importPageQueueBar {
-  height: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 2px;
-  overflow: hidden;
-  margin-bottom: 4px;
-}
-
-.importPageQueueFill {
-  height: 100%;
-  background: rgb(var(--accent-light-rgb));
-  border-radius: 2px;
-  width: 0%;
-  transition: width 0.3s ease;
-}
-
-.importPageQueueFill.error {
-  background: #ef4444;
-}
-
-.importPageQueueStatus {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
-  text-align: right;
-}
-
-.importPageQueueStatus.done {
-  color: rgb(var(--accent-light-rgb));
-}
-
-.importPageQueueStatus.error {
-  color: #ef4444;
-}
-
-@media (max-width: 768px) {
-  .importPageFileChip,
-  .importPageMatchRow {
-    cursor: pointer;
-  }
-
-  .importPageContainer {
-    padding: 16px;
-  }
-
-  .importPageTitle {
-    font-size: 22px;
-  }
-
-  .importPageAlbumGrid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 10px;
-  }
-
-  .importPageAlbumHero {
-    flex-direction: column;
-    text-align: center;
-  }
-
-  .importPageAlbumHero img {
-    width: 100px;
-    height: 100px;
-  }
-
-  .importPageMatchRow {
-    grid-template-columns: 28px minmax(0, 1fr) auto;
-    grid-template-areas:
-      'num track track'
-      'num file unmatch';
-    gap: 6px 8px;
-    align-items: center;
-  }
-
-  .importPageMatchNum {
-    grid-area: num;
-  }
-
-  .importPageMatchTrack {
-    grid-area: track;
-  }
-
-  .importPageMatchFile {
-    grid-area: file;
-    min-width: 0;
-  }
-
-  .importPageSinglesHeader {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .importPageSinglesActions {
-    width: 100%;
-    flex-wrap: wrap;
-  }
-
-  .importPageSingleItem {
-    grid-template-columns: 28px minmax(0, 1fr) auto;
-    grid-template-areas:
-      'checkbox info actions'
-      'search search search';
-    align-items: start;
-    gap: 8px;
-  }
-
-  .importPageSingleCheckboxWrap {
-    grid-area: checkbox;
-  }
-
-  .importPageSingleInfo {
-    grid-area: info;
-  }
-
-  .importPageSingleActions {
-    grid-area: actions;
-    justify-self: end;
-    align-self: start;
-  }
-
-  .importPageSingleSearchPanel {
-    grid-area: search;
-  }
-
-  .importPageSingleSearchPanel {
-    padding-left: 0;
-  }
-
-  .importPageStagingBar {
-    flex-direction: column;
-    gap: 4px;
-    align-items: flex-start;
-  }
-}
-.autoImportControls {
-  padding: 12px 0 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  margin-bottom: 16px;
-}
-
-.autoImportToggleRow {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.autoImportToggleLabel {
-  display: flex;
+.stripWorkerLabel {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
 }
 
-.autoImportSettingsRow {
+.stripCountdown {
+  color: rgba(255, 255, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* the pulse when the worker is scanning or importing */
+.liveDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--accent-light-rgb));
+  box-shadow: 0 0 0 0 rgba(var(--accent-light-rgb), 0.6);
+  animation: livePulse 1.6s ease-out infinite;
+}
+
+@keyframes livePulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--accent-light-rgb), 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(var(--accent-light-rgb), 0);
+  }
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.iconButton:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.iconButton svg {
+  width: 15px;
+  height: 15px;
+}
+
+.iconButton[aria-busy='true'] svg {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── toolbar: filter pills + bulk actions ─────────────────────── */
+
+.toolbar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-top: 10px;
   flex-wrap: wrap;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  gap: 10px;
 }
 
-.autoImportSetting {
-  display: flex;
+.pills {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.pill {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
-.autoImportConfidenceValue {
-  display: inline-block;
-  flex: 0 0 5ch;
-  width: 5ch;
+.pill:hover {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.pill.active {
+  color: #fff;
+  background: rgba(var(--accent-rgb), 0.22);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.35);
+}
+
+.pillCount {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  line-height: 18px;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-.autoImportEmpty {
-  text-align: center;
-  padding: 40px 20px;
-  color: rgba(255, 255, 255, 0.3);
-  font-size: 13px;
+
+.pill.active .pillCount {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
 }
 
-/* Result cards */
-.autoImportCard {
+.pillCount.warn {
+  background: rgba(255, 176, 32, 0.22);
+  color: #ffd27a;
+}
+
+.toolbarSpacer {
+  flex: 1;
+}
+
+.toolbarActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selectionNote {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ── the inbox list ───────────────────────────────────────────── */
+
+.list {
   display: flex;
   flex-direction: column;
-  padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  margin-bottom: 8px;
-  transition: all 0.2s;
+  gap: 8px;
 }
 
-.autoImportCardTop {
-  display: flex;
-  gap: 14px;
+.row {
+  display: grid;
+  grid-template-columns: 28px 56px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'check art body side'
+    'detail detail detail detail';
+  column-gap: 14px;
   align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
-.autoImportCard:hover {
-  background: rgba(255, 255, 255, 0.04);
+.row:hover {
+  border-color: rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.045);
 }
 
-.autoImportCompleted {
-  border-left: 3px solid #4ade80;
-}
-.autoImportReview {
-  border-left: 3px solid #fbbf24;
-}
-.autoImportFailed {
-  border-left: 3px solid #f87171;
-}
-.autoImportProcessing {
-  border-left: 3px solid #60a5fa;
+.row.selected {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
-.autoImportCardArt {
+.row.history {
+  opacity: 0.72;
+}
+
+.rowCheck {
+  grid-area: check;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rowCheck.empty {
+  visibility: hidden;
+}
+
+.rowArt {
+  grid-area: art;
   width: 56px;
   height: 56px;
   border-radius: 8px;
   object-fit: cover;
-  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.autoImportCardArtFallback {
+.rowArtEmpty {
+  grid-area: art;
   width: 56px;
   height: 56px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
-  opacity: 0.3;
-  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.3);
 }
 
-.autoImportCardCenter {
-  flex: 1;
+.rowArtEmpty svg {
+  width: 22px;
+  height: 22px;
+}
+
+.rowBody {
+  grid-area: body;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rowTitleLine {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
 }
 
-.autoImportCardAlbum {
-  font-size: 14px;
+.rowTitle {
+  font-size: 14.5px;
   font-weight: 600;
   color: #fff;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.autoImportCardArtist {
+.rowArtist {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.45);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.autoImportCardFolder {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.25);
-  margin-top: 2px;
+.rowMeta code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.4);
 }
 
-.autoImportMatchInfo {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.35);
-  margin-top: 2px;
+.rowError {
+  font-size: 12px;
+  color: #ff8a8a;
 }
 
-.autoImportCardError {
-  font-size: 10px;
-  color: #f87171;
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.autoImportCardRight {
+.rowSide {
+  grid-area: side;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
-  flex-shrink: 0;
-  min-width: 80px;
+  gap: 8px;
+  min-width: 190px;
 }
 
-.autoImportConfidenceBar {
-  width: 60px;
+.rowSideTop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.status[data-tone='neutral'] {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+}
+.status[data-tone='info'] {
+  background: rgba(88, 166, 255, 0.16);
+  color: #9ccbff;
+}
+.status[data-tone='success'] {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: rgb(var(--accent-light-rgb));
+}
+.status[data-tone='warning'] {
+  background: rgba(255, 176, 32, 0.18);
+  color: #ffd27a;
+}
+.status[data-tone='danger'] {
+  background: rgba(255, 92, 92, 0.16);
+  color: #ff9a9a;
+}
+
+.confidence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.confidenceBar {
+  width: 72px;
   height: 4px;
-  background: rgba(255, 255, 255, 0.06);
   border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
 
-.autoImportConfidenceFill {
+.confidenceFill {
   height: 100%;
   border-radius: 2px;
 }
-.autoImportConfHigh {
-  background: #4ade80;
+
+.confidenceFill[data-tone='high'] {
+  background: rgb(var(--accent-light-rgb));
 }
-.autoImportConfMedium {
-  background: #fbbf24;
+.confidenceFill[data-tone='medium'] {
+  background: #ffb020;
 }
-.autoImportConfLow {
-  background: #f87171;
+.confidenceFill[data-tone='low'] {
+  background: #ff5c5c;
 }
 
-.autoImportConfidenceText {
-  font-size: 10px;
+.rowActions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.progress {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: rgb(var(--accent-light-rgb));
+  transition: width 0.4s ease;
+}
+
+.progressFill.indeterminate {
+  width: 40%;
+  animation: slide 1.4s ease-in-out infinite;
+}
+
+@keyframes slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+/* the expandable per-file detail under a row */
+.rowDetail {
+  grid-area: detail;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.expandButton {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.45);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.expandButton:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.fileTable {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  font-size: 12.5px;
+}
+
+.fileNum {
+  color: rgba(255, 255, 255, 0.35);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.fileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.fileName small {
+  margin-left: 8px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.fileFacts {
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+}
+
+.emptyTitle {
+  font-size: 15px;
   font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 6px;
+}
+
+.emptyPath {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* ── matcher ──────────────────────────────────────────────────── */
+
+.matcher {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.matcherBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.matcherBack:hover {
+  color: #fff;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.paneTitle {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.hero {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.heroArt {
+  width: 96px;
+  height: 96px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
+  flex: 0 0 auto;
+}
+
+.heroInfo {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.heroTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.25;
+}
+
+.heroArtist {
+  font-size: 13.5px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.heroMeta {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.5;
+}
+
+.sourceBadge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.candidate {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.candidate:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.candidate.active {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.candidateArt {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.candidateBody {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.candidateTitle {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidateMeta {
+  display: block;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchRow {
+  display: flex;
+  gap: 8px;
+}
+
+.searchRow > :first-child {
+  flex: 1;
+}
+
+.searchHint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.fingerprintRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* the track table */
+.tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trackHead,
+.track {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1.1fr) 48px minmax(0, 1.4fr) 88px 28px;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 9px;
+}
+
+.trackHead {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.track {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.track.matched {
+  border-color: rgba(var(--accent-rgb), 0.18);
+}
+
+.track.mismatch {
+  border-color: rgba(255, 176, 32, 0.35);
+}
+
+.track.dropTarget {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.track.canReceive {
+  cursor: pointer;
+}
+
+.trackNum {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.trackName {
+  min-width: 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trackLen {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
+.trackFile {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.trackFileName {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trackFileFacts {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trackFileFacts .warn {
+  color: #ffd27a;
+}
+
+.trackSlot {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
+}
+
+.trackConf {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.trackConf .confidenceBar {
+  width: 44px;
+}
+
+.unassign {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.unassign:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.pool {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.poolTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.poolHint {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.85);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: grab;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.chip:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.chip.selected {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: rgba(var(--accent-rgb), 0.14);
+}
+
+.chip small {
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+}
+
+.chip span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matcherFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.footerNote {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.footerNote strong {
+  color: #fff;
+}
+
+.centered {
+  padding: 32px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+}
+
+/* single mode: track candidates */
+.trackResult {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.trackResult:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.trackResult.active {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+/* ── settings drawer ──────────────────────────────────────────── */
+
+.settingsGrid {
+  display: grid;
+  gap: 16px;
+}
+
+.settingRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.settingLabel {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.settingHelp {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.45;
+}
+
+.settingControl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settingValue {
+  min-width: 42px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+}
+
+/* ── processing (client jobs) ─────────────────────────────────── */
+
+.jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.job {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 160px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12.5px;
+}
+
+.jobArt {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.jobBody {
+  min-width: 0;
+}
+
+.jobTitle {
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobDetail {
+  color: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobErrors {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  color: #ff9a9a;
+  font-size: 12px;
+}
+
+.jobErrors li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobErrors a {
+  color: rgb(var(--accent-light-rgb));
+}
+
+.jobSide {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-end;
+}
+
+.jobStatus {
+  font-size: 11.5px;
   color: rgba(255, 255, 255, 0.5);
 }
 
-/* Live progress */
-.autoImportProgress {
-  margin-top: 8px;
-  padding: 8px 12px;
-  background: rgba(var(--accent-rgb), 0.04);
-  border: 1px solid rgba(var(--accent-rgb), 0.1);
-  border-radius: 8px;
+.jobStatus.done {
+  color: rgb(var(--accent-light-rgb));
+}
+.jobStatus.error {
+  color: #ff9a9a;
 }
 
-.autoImportProgressText {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
-  margin-bottom: 4px;
-}
-
-.autoImportProgressBar {
-  height: 3px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.autoImportProgressFill {
-  height: 100%;
-  background: rgba(var(--accent-rgb), 0.6);
-  border-radius: 2px;
-  width: 100%;
-  animation: adlPulse 1.5s ease-in-out infinite;
-}
-
-/* Filter pills */
-.autoImportFilters {
-  padding: 6px 0;
-  margin-bottom: 8px;
-}
-
-.autoImportCardMeta {
+.jobsHead {
   display: flex;
-  gap: 8px;
   align-items: center;
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
-  margin-top: 3px;
+  justify-content: space-between;
 }
 
-.autoImportMethodBadge {
-  background: rgba(255, 255, 255, 0.06);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.45);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
+/* ── upload ───────────────────────────────────────────────────── */
 
-.autoImportCardFolderPath {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.15);
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.03);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Expandable track list */
-.autoImportTrackList {
-  display: none;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.autoImportTrackList.expanded {
-  display: block;
-}
-
-.autoImportTrackListHeader {
-  display: grid;
-  grid-template-columns: 1fr 1fr 50px;
-  gap: 8px;
-  font-size: 9px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.3);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding-bottom: 4px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-}
-
-.autoImportTrackRow {
-  display: grid;
-  grid-template-columns: 1fr 1fr 50px;
-  gap: 8px;
-  padding: 3px 0;
-  font-size: 11px;
-}
-
-.autoImportTrackName {
-  color: rgba(255, 255, 255, 0.7);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.autoImportTrackFile {
-  color: rgba(255, 255, 255, 0.3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.autoImportTrackConf {
-  text-align: right;
-  font-weight: 600;
-  font-size: 10px;
-}
-
-.autoImportTrackConf.autoImportConfHigh {
-  color: #4ade80;
-}
-.autoImportTrackConf.autoImportConfMedium {
-  color: #fbbf24;
-}
-.autoImportTrackConf.autoImportConfLow {
-  color: #f87171;
-}
-
-.autoImportStatusBadge {
-  font-size: 9px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 6px;
-  white-space: nowrap;
-}
-.autoImportBadgeCompleted {
-  background: rgba(74, 222, 128, 0.1);
-  color: #4ade80;
-}
-.autoImportBadgeReview {
-  background: rgba(251, 191, 36, 0.1);
-  color: #fbbf24;
-}
-.autoImportBadgeFailed {
-  background: rgba(248, 113, 113, 0.1);
-  color: #f87171;
-}
-.autoImportBadgeNeutral {
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.4);
-}
-.autoImportBadgeProcessing {
-  background: rgba(96, 165, 250, 0.12);
-  color: #60a5fa;
-  animation: auto-import-badge-pulse 1.6s ease-in-out infinite;
-}
-@keyframes auto-import-badge-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.55;
-  }
-}
-
-.autoImportTrackRowActive {
-  background: rgba(96, 165, 250, 0.08);
-  border-left: 2px solid #60a5fa;
-  padding-left: 6px;
-  margin-left: -8px;
-  border-radius: 3px;
-}
-.autoImportTrackRowActive .autoImportTrackName {
-  color: #60a5fa;
-  font-weight: 600;
-}
-.autoImportTrackRowDone .autoImportTrackName,
-.autoImportTrackRowDone .autoImportTrackFile {
-  opacity: 0.4;
-}
-
-.autoImportActions {
+.dropzone {
+  position: relative;
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 14px;
+}
+
+.dropzoneOver {
+  outline: 2px dashed rgba(var(--accent-rgb), 0.7);
+  outline-offset: 6px;
+}
+
+.dropOverlay {
+  position: absolute;
+  inset: -6px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 16px;
+  background: rgba(8, 8, 8, 0.82);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.dropOverlayText {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.dropOverlayHint {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.uploadBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.uploadHint {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.uploadList {
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-  margin-top: 4px;
+  padding: 0 4px;
 }
 
-@media (max-width: 768px) {
-  .autoImportCard {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .autoImportCardRight {
-    flex-direction: row;
-    width: 100%;
-    justify-content: space-between;
-  }
+.uploadRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 120px 110px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
 }
 
-/* Mobile import layout:
-   keep the page feeling like the legacy shell on phones by stacking
-   high-friction controls and letting cards breathe vertically. */
-@media (max-width: 768px) {
-  .importPageContainer {
-    padding: 16px 16px 20px;
+.uploadRow[data-status='error'],
+.uploadRow[data-status='skipped'] {
+  color: #ff9a9a;
+}
+
+.uploadName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}
+
+.uploadSize {
+  text-align: right;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.uploadStatus {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.progressFailed {
+  background: #ff5c5c;
+}
+
+/* ── the pre-import preview in the matcher ────────────────────── */
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.previewHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.previewRows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.previewRow {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 12px;
+}
+
+.previewDest {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewDest .warn {
+  color: #ffd27a;
+}
+
+.previewDiff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.previewDiff del {
+  color: rgba(255, 138, 138, 0.8);
+  text-decoration: line-through;
+}
+
+.previewDiff ins {
+  color: rgb(var(--accent-light-rgb));
+  text-decoration: none;
+}
+
+.previewDiff b {
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 600;
+}
+
+.inLibrary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(88, 166, 255, 0.16);
+  color: #9ccbff;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.kbdHint {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.kbdHint kbd {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.row.focused {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.18);
+}
+
+/* ── responsive ───────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .page {
+    padding: 16px 16px 40px;
   }
 
-  .importPageHeader {
-    margin-bottom: 16px;
-  }
-
-  .importPageTitleRow {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .importPageTitle {
-    gap: 10px;
-    font-size: 22px;
-  }
-
-  .importPageTitle > img {
-    width: 24px;
-    height: 24px;
-  }
-
-  .importPageTitleRow > button,
-  .importPageSearchBar > button,
-  .importPageMatchActions > button,
-  .importPageMatchFooter > button,
-  .importPageQueueHeader > button,
-  .importPageSinglesActions > button,
-  .autoImportToggleRow > button {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .importPageStagingBar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-    padding: 10px 12px;
-  }
-
-  .importStagingPath {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-    word-break: break-word;
-  }
-
-  .importStagingStats,
-  .importStagingRefreshAt {
-    white-space: normal;
-  }
-
-  .importPageTabBar {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-
-  .importPageTabBar::-webkit-scrollbar {
-    display: none;
-  }
-
-  .importPageTab {
-    padding: 8px 14px;
-    white-space: nowrap;
-  }
-
-  .importPageSearchBar {
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  #import-page-album-search-input {
-    width: auto;
-    min-width: 0;
-    flex: 1 1 0;
-  }
-
-  #import-page-album-clear-btn {
-    flex: 0 0 auto;
-    min-height: 36px;
-  }
-
-  #import-page-album-clear-btn + button {
-    flex: 1 0 100%;
-    width: 100%;
-  }
-
-  .importPageAlbumGrid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 10px;
-    margin-bottom: 18px;
-  }
-
-  .importPageAutoGroups .importPageAlbumGrid {
+  .matcher {
     grid-template-columns: 1fr;
   }
 
-  .importPageAlbumCard {
-    padding: 10px;
-  }
-
-  .importPageAlbumCard img {
-    margin-bottom: 6px;
-  }
-
-  .importPageAlbumCardTitle {
-    font-size: 12px;
-  }
-
-  .importPageAlbumCardArtist {
-    font-size: 10px;
-  }
-
-  .importPageAutoGroupCard {
-    gap: 10px;
-  }
-
-  .importPageAlbumHero {
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 14px;
-    padding: 16px;
-  }
-
-  .importPageAlbumHero img {
-    width: 96px;
-    height: 96px;
-  }
-
-  .importPageAlbumHeroTitle {
-    font-size: 20px;
-  }
-
-  .importPageAlbumHeroArtist {
-    font-size: 14px;
-  }
-
-  .importPageAlbumHeroInfo {
-    width: 100%;
-  }
-
-  .importPageMatchHeader {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .importPageMatchHeader h3 {
-    font-size: 15px;
-  }
-
-  .importPageMatchActions {
-    flex-direction: column;
-  }
-
-  .importPageMatchRow {
-    grid-template-columns: 28px minmax(0, 1fr) auto;
+  .row {
+    grid-template-columns: 28px 48px minmax(0, 1fr);
     grid-template-areas:
-      'num track track'
-      'num file unmatch';
-    gap: 6px 8px;
-    align-items: center;
-    padding: 10px 12px;
+      'check art body'
+      'check art side'
+      'detail detail detail';
+    row-gap: 8px;
+    align-items: start;
   }
 
-  .importPageMatchNum {
+  .rowSide {
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  .trackHead {
+    display: none;
+  }
+
+  .track {
+    grid-template-columns: 28px minmax(0, 1fr) 28px;
+    grid-template-areas:
+      'num name un'
+      'num file un'
+      'num conf un';
+  }
+
+  .trackNum {
     grid-area: num;
   }
-
-  .importPageMatchTrack {
-    grid-area: track;
-    white-space: normal;
-  }
-
-  .importPageMatchFile {
-    grid-area: file;
-    min-width: 0;
-    flex-wrap: wrap;
-    row-gap: 4px;
-  }
-
-  .importPageMatchRow > :last-child {
-    grid-area: unmatch;
-    justify-self: end;
-  }
-
-  .importPageUnmatchedPool {
-    padding: 12px;
-  }
-
-  .importPagePoolChips {
-    gap: 6px;
-  }
-
-  .importPageMatchFooter {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .importPageMatchStats {
-    text-align: center;
-  }
-
-  .importPageSinglesHeader {
-    align-items: stretch;
-  }
-
-  .importPageSinglesActions {
-    flex-direction: column;
-    width: 100%;
-  }
-
-  .importPageSingleItem {
-    grid-template-columns: 28px minmax(0, 1fr) auto;
-    grid-template-areas:
-      'checkbox info actions'
-      'search search search';
-    align-items: start;
-    gap: 8px;
-    padding: 10px 12px;
-  }
-
-  .importPageSingleCheckboxWrap {
-    margin-top: 0;
-  }
-
-  .importPageSingleActions {
-    grid-area: actions;
-    justify-self: end;
-    align-self: start;
-  }
-
-  .importPageSingleSearchPanel {
-    grid-area: search;
-    padding-left: 0;
-  }
-
-  .importPageSingleSearchBar {
-    flex-direction: column;
-  }
-
-  .importPageSingleSearchResults {
-    max-height: 260px;
-  }
-
-  .importPageSingleResultItem {
-    gap: 12px;
-    padding: 12px;
-  }
-
-  .importPageQueueHeader {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .importPageQueueItem {
-    grid-template-columns: 40px minmax(0, 1fr);
-    grid-template-areas:
-      'art info'
-      'art progress';
-    gap: 8px 10px;
-    align-items: start;
-    padding: 10px 12px;
-  }
-
-  .importPageQueueArt {
-    grid-area: art;
-  }
-
-  .importPageQueueInfo {
-    grid-area: info;
-  }
-
-  .importPageQueueProgress {
-    grid-area: progress;
-    width: 100%;
-  }
-
-  .importPageQueueStatus {
-    text-align: left;
-  }
-
-  .autoImportControls {
-    padding: 8px 0 12px;
-  }
-
-  .autoImportToggleRow {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .autoImportSettingsRow {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .autoImportSetting {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .autoImportConfidenceValue {
-    flex: 0 0 auto;
-  }
-
-  .autoImportFilters {
-    gap: 6px;
-    margin-bottom: 10px;
-  }
-
-  .autoImportFilters .importPageFlexSpacer {
-    display: none;
-  }
-
-  .autoImportFilters > button {
-    flex: 1 1 calc(50% - 6px);
-    min-width: 0;
-  }
-
-  .autoImportCard {
-    padding: 12px;
-  }
-
-  .autoImportCardTop {
-    display: grid;
-    grid-template-columns: 56px minmax(0, 1fr);
-    grid-template-areas:
-      'art body'
-      'right right';
-    align-items: start;
-    gap: 10px 12px;
-  }
-
-  .autoImportCardLeft {
-    grid-area: art;
-  }
-
-  .autoImportCardCenter {
-    grid-area: body;
-    width: auto;
-  }
-
-  .autoImportCardAlbum,
-  .autoImportCardArtist,
-  .autoImportCardError,
-  .autoImportCardFolderPath {
-    white-space: normal;
-  }
-
-  .autoImportCardRight {
-    grid-area: right;
-    width: 100%;
-    min-width: 0;
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: flex-start;
-    gap: 8px;
-  }
-
-  .autoImportStatusBadge {
-    align-self: flex-start;
-  }
-
-  .autoImportConfidenceBar {
-    width: 100%;
-  }
-
-  .autoImportConfidenceText {
-    align-self: flex-start;
-  }
-
-  .autoImportActions {
-    width: 100%;
-    flex-direction: column;
-  }
-
-  .autoImportActions > button {
-    width: 100%;
-  }
-
-  .autoImportCardMeta {
-    flex-wrap: wrap;
-    row-gap: 4px;
-  }
-
-  .autoImportCardFolderPath {
-    line-height: 1.35;
-  }
-
-  .autoImportTrackListHeader {
-    display: none;
-  }
-
-  .autoImportTrackList.expanded {
-    padding-top: 6px;
-  }
-
-  .autoImportTrackRow {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      'name conf'
-      'file conf';
-    gap: 2px 8px;
-    padding: 6px 0;
-  }
-
-  .autoImportTrackName {
+  .trackName {
     grid-area: name;
-    white-space: normal;
   }
-
-  .autoImportTrackFile {
+  .trackLen {
+    display: none;
+  }
+  .trackFile {
     grid-area: file;
-    white-space: normal;
   }
-
-  .autoImportTrackConf {
+  .trackConf {
     grid-area: conf;
-    align-self: center;
   }
-}
-
-@media (max-width: 480px) {
-  .importPageContainer {
-    padding: 12px 12px 16px;
+  .unassign {
+    grid-area: un;
   }
 
-  .importPageTitle {
-    font-size: 20px;
+  .job {
+    grid-template-columns: 40px minmax(0, 1fr);
   }
 
-  .importPageTitleRow > button,
-  .importPageMatchActions > button,
-  .importPageMatchFooter > button,
-  .importPageQueueHeader > button,
-  .importPageSinglesActions > button,
-  .autoImportToggleRow > button,
-  .autoImportFilters > button {
-    width: 100%;
+  .uploadRow {
+    grid-template-columns: minmax(0, 1fr) 80px;
   }
 
-  #import-page-album-clear-btn + button {
-    width: 100%;
+  .uploadSize,
+  .uploadRow .progress {
+    display: none;
   }
 
-  .autoImportFilters > button {
-    flex: 1 1 100%;
-  }
-
-  .importPageAlbumGrid {
-    gap: 8px;
-  }
-
-  .importPageAlbumHero {
-    padding: 14px;
-  }
-
-  .importPageAlbumHero img {
-    width: 88px;
-    height: 88px;
-  }
-
-  .importPageMatchRow,
-  .importPageSingleItem,
-  .importPageQueueItem {
-    padding: 10px;
-  }
-
-  .importPageSingleSearchResults {
-    max-height: 220px;
-  }
-
-  .importPageSingleResultItem {
-    gap: 10px;
-    padding: 10px;
-  }
-
-  .importPageSingleResultImg {
-    width: 40px;
-    height: 40px;
-  }
-
-  .importPageSingleResultName {
-    font-size: 13px;
-    white-space: normal;
-  }
-
-  .importPageSingleResultDetail {
-    font-size: 11px;
-    white-space: normal;
-  }
-
-  .importPageSingleResultSelect {
-    padding: 4px 10px;
-    font-size: 11px;
-  }
-
-  .autoImportCard {
-    padding: 10px;
-  }
-
-  .autoImportCardTop {
-    grid-template-columns: 48px minmax(0, 1fr);
-    gap: 8px 10px;
-  }
-
-  .autoImportCardArt,
-  .autoImportCardArtFallback {
-    width: 48px;
-    height: 48px;
-  }
-
-  .autoImportConfidenceBar {
-    width: 100%;
+  .jobSide {
+    grid-column: 1 / -1;
+    align-items: stretch;
   }
 }

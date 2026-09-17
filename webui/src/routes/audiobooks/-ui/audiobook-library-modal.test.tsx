@@ -162,3 +162,24 @@ describe('audiobook library', () => {
     await screen.findByRole('heading', { name: 'A Local Book' });
   });
 });
+
+describe('the library as a page', () => {
+  it('embedded, it has no dialog chrome and its links do not try to close anything', async () => {
+    const { AudiobookLibraryPanel } = await import('./audiobook-library-modal');
+    render(<AudiobookLibraryPanel embedded />);
+    await screen.findByRole('heading', { name: 'A Local Book' });
+    expect(screen.queryByRole('button', { name: 'Close library' })).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // the scan controls are all still there
+    expect(screen.getByRole('button', { name: 'Scan folder' })).toBeInTheDocument();
+    expect(screen.getByText('Schedule & history ↗')).toBeInTheDocument();
+  });
+
+  it('as a modal, the close control is back', async () => {
+    const onClose = vi.fn();
+    render(<AudiobookLibraryModal onClose={onClose} />);
+    await screen.findByRole('heading', { name: 'A Local Book' });
+    fireEvent.click(screen.getByRole('button', { name: 'Close library' }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+});

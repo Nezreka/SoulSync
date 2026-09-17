@@ -57,6 +57,12 @@ class DatabaseUpdateWorker:
         self._touched_artist_ids = set()
         self._touched_album_ids = set()
 
+        # Every server track id this run actually saw, whatever the scan
+        # type. The superseded-row pass at the end folds a row the server no
+        # longer lists into the live row for the same file (#1257).
+        self._seen_track_ids = set()
+        self._trashed_skipped = 0
+
         # Optional callback(worker) run as the FINAL scan phase, immediately
         # before the 'finished' signal — so the auto-reconcile is inside the
         # scan's running window (automations/UI treat it as a normal phase and
@@ -93,6 +99,45 @@ class DatabaseUpdateWorker:
         # Database instance
         self.database: Optional[MusicDatabase] = None
     
+    @staticmethod
+    def _is_trashed(item) -> bool:
+        """plex keeps a moved or deleted file's item around, marked
+        ``deletedAt``, until the trash is emptied. plexapi does not surface
+        the attribute, so read it off the raw element. a trashed item is not
+        library content: writing it re-creates the row a reorganize just
+        repointed, and that is where the doubled albums come from (#1257)."""
+        if getattr(item, 'deletedAt', None):
+            return True
+        data = getattr(item, '_data', None)
+        attrib = getattr(data, 'attrib', None)
+        return bool(attrib and attrib.get('deletedAt'))
+
+    def _absorb_superseded_tracks(self):
+        """fold rows this run did not see into the live row for the same file.
+
+        a reorganize repoints a row at the new path; the server then trashes
+        that item and mints a new one for the same file, so the next scan
+        inserts a second row and the album lists every track twice. only the
+        deep scan removed the old row, and its 50% safety skipped exactly the
+        libraries that had this the worst. runs after every scan, over the
+        albums this run touched, and never touches a row the server still
+        lists."""
+        # getattr: tests build workers through __new__ without the run state
+        touched = getattr(self, '_touched_album_ids', None)
+        seen = getattr(self, '_seen_track_ids', None)
+        if not self.database or not touched or not seen:
+            return 0
+        try:
+            absorbed = self.database.absorb_superseded_tracks(touched, seen, self.server_type)
+        except Exception as e:
+            logger.warning(f"Superseded track pass failed (non-fatal): {e}")
+            return 0
+        if absorbed:
+            logger.info(f"Folded {absorbed} superseded track rows into their live rows")
+        if getattr(self, '_trashed_skipped', 0):
+            logger.info(f"Skipped {self._trashed_skipped} trashed {self.server_type} items")
+        return absorbed
+
     def _emit_signal(self, signal_name: str, *args):
         """Emit a signal through the callback registry."""
         for callback in self.callbacks.get(signal_name, []):
@@ -273,6 +318,8 @@ class DatabaseUpdateWorker:
             
             self._repair_navidrome_identities()
 
+            self._absorb_superseded_tracks()
+
             # Detect and remove content deleted from the media server
             # Only run on full refreshes — fetching the entire catalog on every
             # incremental scan is too expensive (especially for Plex) and unnecessary
@@ -435,6 +482,11 @@ class DatabaseUpdateWorker:
             self._deep_scan_process_all_artists(artists, seen_track_ids)
 
             identity_repair_ok = self._repair_navidrome_identities()
+
+            # superseded rows go first: they are certain, and they must not
+            # count toward the 50% safety below (a reorganized library is
+            # nearly half superseded rows, which is what kept tripping it)
+            self._absorb_superseded_tracks()
 
             # Phase 3: Stale track removal
             self._emit_signal('phase_changed', "Deep scan: Checking for stale tracks...")
@@ -1084,8 +1136,12 @@ class DatabaseUpdateWorker:
                                     for track in album_tracks:
                                         if self.should_stop:
                                             break
-                                            
+                                        if self._is_trashed(track):
+                                            self._trashed_skipped += 1
+                                            continue
+
                                         try:
+                                            self._seen_track_ids.add(str(track.ratingKey))
                                             track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
                                             if track_success:
                                                 total_processed_tracks += 1
@@ -1621,12 +1677,16 @@ class DatabaseUpdateWorker:
                                 for track in tracks:
                                     if self.should_stop:
                                         break
+                                    if self._is_trashed(track):
+                                        self._trashed_skipped += 1
+                                        continue
                                     track_batch.append((track, album_id, artist_id))
 
                                 # Process track batch
                                 for track, alb_id, art_id in track_batch:
                                     try:
                                         track_id_str = str(track.ratingKey)
+                                        self._seen_track_ids.add(track_id_str)
 
                                         # Deep scan: collect all server track IDs
                                         if seen_track_ids is not None:

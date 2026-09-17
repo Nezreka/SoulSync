@@ -362,6 +362,26 @@ export async function removeFromWishlist(asin: string): Promise<boolean> {
  * not rewrite a choice already made, and changing the choice must not reset the
  * book's retry backoff.
  */
+/**
+ * want it again, now. the way back from cancelled (never retried on its own)
+ * and past the backoff on "not found yet", without removing and re-adding the
+ * book, which would also throw away the narrator choice.
+ */
+export async function retryWishlistEntry(asin: string): Promise<boolean> {
+  if (!asin) return false;
+  try {
+    const data = await readJson<MutationResponse>(
+      audiobookClient.patch(`audiobooks/wishlist/${encodeURIComponent(asin)}`, {
+        json: { status: 'wanted' },
+      }),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error(`Failed to retry the wishlist entry ${asin}:`, err);
+    return false;
+  }
+}
+
 export async function setNarratorMode(
   asin: string,
   narratorMode: AudiobookNarratorMode,

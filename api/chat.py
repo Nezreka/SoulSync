@@ -18,6 +18,7 @@ when actually needed.
 """
 
 import ipaddress
+import math as _math
 import re as _re
 import time
 from urllib.parse import urljoin, urlparse
@@ -47,6 +48,7 @@ def _avatar_allowed(av: int, username: str) -> bool:
         return True
     return str(username or "").strip().casefold() == owner
 _INGEST_AT: dict = {}      # room -> last full-buffer archive ingest (epoch)
+_INGEST_KEY: dict = {}     # room -> last buffer fingerprint (live-tail change tracking)
 _SELF = {"name": "", "at": 0.0}   # our slskd username, cached (network call)
 _AVAILABLE = {"rooms": None, "at": 0.0}   # /rooms/available cache (big list, 5-min TTL)
 
@@ -395,6 +397,49 @@ def _parse_youtube_id(q: str):
         if m:
             return m.group(1)
     return None
+
+
+# how many yt-dlp is asked for before the jukebox picks its five. the
+# duration gate in search_videos (30 s to 15 min) used to eat most of a
+# five-result ask, so the picker showed one or two.
+_JUKEBOX_SEARCH_POOL = 15
+_JUKEBOX_RESULTS = 5
+_JBX_WEAK = _re.compile(r"\b(reaction|reacts?|review|karaoke|tutorial|lesson|how to|"
+                        r"explained|interview|podcast|unboxing|trailer|8d audio|slowed|sped up|"
+                        r"nightcore)\b", _re.I)
+_JBX_STRONG = _re.compile(r"\b(official|audio|visualizer|vevo|topic)\b", _re.I)
+
+
+def _jukebox_score(v) -> float:
+    """a jukebox wants the song, so the ranking says what youtube's order
+    doesn't: the artist's own upload or a Topic/VEVO channel first, a
+    reaction or a karaoke track last, and views only to break ties."""
+    title = str(getattr(v, "title", "") or "")
+    channel = str(getattr(v, "channel", "") or "")
+    score = 0.0
+    if _JBX_STRONG.search(title) or _JBX_STRONG.search(channel):
+        score += 3.0
+    if channel.lower().endswith(" - topic") or "vevo" in channel.lower():
+        score += 2.0
+    if _JBX_WEAK.search(title):
+        score -= 6.0
+    if _re.search(r"\b(cover|remix|live|acoustic)\b", title, _re.I):
+        score -= 1.5
+    try:
+        views = float(getattr(v, "view_count", 0) or 0)
+        if views > 0:
+            score += min(3.0, _math.log10(views) / 3.0)
+    except (TypeError, ValueError):
+        pass
+    return score
+
+
+def rank_jukebox_results(found, limit: int = _JUKEBOX_RESULTS) -> list:
+    """the best `limit` of what yt-dlp returned, valid ids only, best first,
+    ties keeping youtube's order."""
+    keep = [v for v in (found or []) if _YT_ID_RE.match(str(getattr(v, "video_id", "") or ""))]
+    ranked = sorted(enumerate(keep), key=lambda iv: (-_jukebox_score(iv[1]), iv[0]))
+    return [v for _, v in ranked[:limit]]
 
 
 def _oembed_fetch(video_id):
@@ -1210,8 +1255,14 @@ def create_blueprint() -> Blueprint:
             try:
                 import time as _time
                 now = _time.time()
-                if now - _INGEST_AT.get(room, 0) > 60:
+                if not _INGEST_AT:
+                    _INGEST_KEY.clear()
+                live_key = (str(live[-1].get("timestamp") or "") + ":" + str(len(live))) if live else ""
+                last_key = _INGEST_KEY.get(room)
+                should_ingest = (now - _INGEST_AT.get(room, 0) > 60) or (live_key and live_key != last_key)
+                if should_ingest:
                     _INGEST_AT[room] = now
+                    _INGEST_KEY[room] = live_key
                     db.add_chat_messages(room, live)
                     # The WRITE is throttled with the messages; the read below
                     # is not. Reactions are carriers, so the message archive
@@ -1234,7 +1285,16 @@ def create_blueprint() -> Blueprint:
                 db.add_chat_game_carriers(room, protocol_events)
                 arch = db.get_chat_messages(room, limit=100)
                 if arch:
-                    out = arch
+                    seen = {}
+                    for m in arch:
+                        k = (str(m.get("username") or ""), str(m.get("timestamp") or ""), str(m.get("message") or ""))
+                        seen[k] = m
+                    for m in live:
+                        k = (str(m.get("username") or ""), str(m.get("timestamp") or ""), str(m.get("message") or ""))
+                        seen[k] = m
+                    merged = list(seen.values())
+                    merged.sort(key=lambda x: str(x.get("timestamp") or ""))
+                    out = merged[-100:]
             except Exception:
                 logger.debug("chat: archive unavailable, serving live buffer", exc_info=True)
         # Games outlive slskd's buffer: replay the archived gm.* carriers
@@ -1317,10 +1377,15 @@ def create_blueprint() -> Blueprint:
 
         vid = _parse_youtube_id(q)
         if vid:
+            # oembed is for the title. it answers 401 for a video whose owner
+            # disallows embedding (plenty of label uploads) and 404 for a
+            # private one; the id plays either way, so a failed lookup means
+            # "no title yet", never "no link". links used to die here.
             try:
                 meta = _oembed_fetch(vid) or {}
-            except Exception:
-                return jsonify({"error": "That video could not be resolved"}), 404
+            except Exception as exc:
+                logger.debug("chat: jukebox oembed lookup failed for %s: %s", vid, exc)
+                meta = {}
             return jsonify({"results": [{
                 "id": vid,
                 "title": str(meta.get("title") or "")[:120] or vid,
@@ -1330,15 +1395,13 @@ def create_blueprint() -> Blueprint:
         if _youtube_search is None:
             return jsonify({"error": "Search is unavailable — paste a YouTube link"}), 503
         try:
-            found = _youtube_search(q, 5) or []
+            found = _youtube_search(q, _JUKEBOX_SEARCH_POOL) or []
         except Exception:
             logger.exception("chat: jukebox search failed")
             return jsonify({"error": "YouTube search failed"}), 502
         results = []
-        for v in found[:5]:
+        for v in rank_jukebox_results(found):
             vid2 = str(getattr(v, "video_id", "") or "")
-            if not _YT_ID_RE.match(vid2):
-                continue
             results.append({
                 "id": vid2,
                 "title": str(getattr(v, "title", "") or "")[:120],

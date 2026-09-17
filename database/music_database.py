@@ -792,7 +792,7 @@ class MusicDatabase:
             # whole row (add_chat_messages requires a message) and a template
             # shared into the room simply vanished on reload.
             for _chat_col in ('chan TEXT', 'thread TEXT', 'thread_name TEXT', 'av INTEGER',
-                              'edit_target TEXT', 'overlay TEXT'):
+                              'edit_target TEXT', 'overlay TEXT', 'np TEXT', 'want TEXT'):
                 try:
                     cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN " + _chat_col)
                 except sqlite3.OperationalError:
@@ -8526,6 +8526,90 @@ class MusicDatabase:
             logger.error(f"Error deleting stale tracks for {server_source}: {e}")
             return 0
 
+    # columns the server writes on every scan; everything else on a track row
+    # is enrichment or user state and travels with the file when its row is
+    # superseded
+    _TRACK_SERVER_COLUMNS = frozenset({
+        'id', 'album_id', 'artist_id', 'title', 'track_number', 'disc_number',
+        'duration', 'file_path', 'bitrate', 'file_size', 'server_source',
+        'title_norm', 'created_at', 'updated_at',
+    })
+
+    @staticmethod
+    def _track_file_key(row) -> tuple:
+        """same album, same disc, same file name, same length = the same file.
+        the path itself is not compared: a reorganize stores the local form
+        and the server reports its own, so they differ on any mapped setup."""
+        path = str(row['file_path'] or '')
+        name = path.replace('\\', '/').rsplit('/', 1)[-1].lower()
+        duration = row['duration'] or 0
+        return (row['album_id'], row['disc_number'] or 1, name, int(duration // 1000))
+
+    def absorb_superseded_tracks(self, album_ids, seen_track_ids, server_source: str) -> int:
+        """fold rows the server no longer lists into the live row for the same file.
+
+        after a move the server trashes the old item and mints a new one, so
+        the album carries two rows for one file: the old id (repointed by the
+        reorganize) and the new. the live row keeps its id, takes every
+        enrichment column the old row had that it lacks, inherits the old
+        row's play history, and the old row goes. only rows whose id this
+        scan did NOT see are absorbed, and only into a row it did, so two
+        items the server genuinely lists are never merged (#1257)."""
+        if not album_ids or not seen_track_ids:
+            return 0
+        absorbed = 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                columns = [c[1] for c in cursor.execute("PRAGMA table_info(tracks)").fetchall()]
+                carry = [c for c in columns if c not in self._TRACK_SERVER_COLUMNS]
+                album_list = list(album_ids)
+                for i in range(0, len(album_list), 400):
+                    batch = album_list[i:i + 400]
+                    placeholders = ','.join('?' * len(batch))
+                    rows = cursor.execute(
+                        f"""SELECT id, album_id, disc_number, file_path, duration FROM tracks
+                            WHERE album_id IN ({placeholders}) AND server_source = ?
+                              AND file_path IS NOT NULL AND file_path != ''""",
+                        [str(a) for a in batch] + [server_source]).fetchall()
+                    groups: Dict[tuple, list] = {}
+                    for row in rows:
+                        groups.setdefault(self._track_file_key(row), []).append(str(row['id']))
+                    for ids in groups.values():
+                        if len(ids) < 2:
+                            continue
+                        live = [t for t in ids if t in seen_track_ids]
+                        gone = [t for t in ids if t not in seen_track_ids]
+                        if not live or not gone:
+                            continue
+                        keeper = live[0]
+                        for old_id in gone:
+                            self._absorb_track_row(cursor, old_id, keeper, carry)
+                            absorbed += 1
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Superseded track pass failed for {server_source}: {e}")
+            return absorbed
+        if absorbed:
+            logger.info(f"Superseded track rows folded for {server_source}: {absorbed}")
+        return absorbed
+
+    def _absorb_track_row(self, cursor, old_id: str, keeper_id: str, carry: list) -> None:
+        """move what the old row knew onto the keeper, then drop the old row."""
+        if carry:
+            sets = ', '.join(
+                f"{c} = COALESCE({c}, (SELECT {c} FROM tracks WHERE id = ?))" for c in carry)
+            cursor.execute(f"UPDATE tracks SET {sets} WHERE id = ?",
+                           [old_id] * len(carry) + [keeper_id])
+        try:
+            cursor.execute("UPDATE listening_history SET db_track_id = ? WHERE db_track_id = ?",
+                           (keeper_id, old_id))
+        except Exception as e:
+            logger.debug("listening_history repoint skipped: %s", e)
+        cursor.execute("DELETE FROM track_credits WHERE track_id = ?", (old_id,))
+        cursor.execute("DELETE FROM tracks WHERE id = ?", (old_id,))
+        logger.debug(f"Track row {old_id} folded into {keeper_id}")
+
     def delete_removed_content(self, removed_artist_ids: set, removed_album_ids: set,
                                server_source: str):
         """Delete artists and albums that were removed from the media server.
@@ -13417,9 +13501,58 @@ class MusicDatabase:
                         ovl_json = None
                 except (ValueError, TypeError):
                     ovl_json = None
+            np = m.get('np')
+            np_json = None
+            if isinstance(np, dict) and np.get('t') and np.get('a'):
+                try:
+                    np_data = {
+                        't': str(np.get('t'))[:200],
+                        'a': str(np.get('a'))[:160],
+                    }
+                    if np.get('al'): np_data['al'] = str(np['al'])[:160]
+                    if np.get('src'): np_data['src'] = str(np['src'])[:32]
+                    if np.get('id'): np_data['id'] = str(np['id'])[:120]
+                    if np.get('img'): np_data['img'] = str(np['img'])[:1000]
+                    if np.get('dur'):
+                        try:
+                            d = int(np['dur'])
+                            if 0 < d < 10**7: np_data['dur'] = d
+                        except (TypeError, ValueError): pass
+                    if np.get('br'):
+                        try:
+                            b = int(np['br'])
+                            if 0 < b < 20000: np_data['br'] = b
+                        except (TypeError, ValueError): pass
+                    np_json = json.dumps(np_data)
+                except (ValueError, TypeError):
+                    np_json = None
+
+            want = m.get('want')
+            want_json = None
+            if isinstance(want, dict) and want.get('t') and want.get('a'):
+                try:
+                    want_data = {
+                        't': str(want.get('t'))[:200],
+                        'a': str(want.get('a'))[:160],
+                        'ty': str(want.get('ty') or 'album')[:16],
+                    }
+                    if want.get('al'): want_data['al'] = str(want['al'])[:160]
+                    if want.get('src'): want_data['src'] = str(want['src'])[:32]
+                    if want.get('id'): want_data['id'] = str(want['id'])[:120]
+                    if want.get('img'): want_data['img'] = str(want['img'])[:1000]
+                    if want.get('y'): want_data['y'] = str(want['y'])[:10]
+                    if want.get('dur'):
+                        try:
+                            d = int(want['dur'])
+                            if 0 < d < 10**7: want_data['dur'] = d
+                        except (TypeError, ValueError): pass
+                    want_json = json.dumps(want_data)
+                except (ValueError, TypeError):
+                    want_json = None
+
             # An overlay share carries no text ON PURPOSE - the card is the
             # message. Requiring one dropped every share from the archive.
-            if not user or not ts or (not msg and not ovl_json):
+            if not user or not ts or (not msg and not ovl_json and not np_json and not want_json):
                 continue
             rep = m.get('reply')
             rep_json = None
@@ -13446,7 +13579,9 @@ class MusicDatabase:
                          str(_tn)[:80] if _tn else None,
                          _av,
                          str(_ed)[:160] if _ed else None,
-                         ovl_json))
+                         ovl_json,
+                         np_json,
+                         want_json))
         if not rows:
             return 0
         try:
@@ -13454,8 +13589,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -13686,7 +13821,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -13699,7 +13834,7 @@ class MusicDatabase:
             rows.reverse()
             for r in rows:
                 r['rich'] = bool(r['rich'])
-                for k in ('reply', 'file'):
+                for k in ('reply', 'file', 'np', 'want'):
                     if r.get(k):
                         try:
                             r[k] = json.loads(r[k])
@@ -14779,8 +14914,12 @@ class MusicDatabase:
         enclosure_url: Optional[str] = None,
         guid: Optional[str] = None,
         title: Optional[str] = None,
+        show_title: Optional[str] = None,
     ) -> bool:
-        """Check if an episode has already been downloaded (or pruned)."""
+        """Check if an episode has already been downloaded (or pruned).
+
+        ``show_title`` scopes the last-resort title match: without it an
+        "Episode 1" from any other show counted as this one."""
         feed_url = str(feed_url or "").strip()
         enc = str(enclosure_url or "").strip()
         g = str(guid or "").strip()
@@ -14789,22 +14928,27 @@ class MusicDatabase:
             return False
         try:
             with self._get_connection() as conn:
-                # 1. Check downloaded_podcast_episodes table
+                # 1. Check downloaded_podcast_episodes table. a row is written
+                # the moment an episode is QUEUED, before a byte arrives; only
+                # a row with a file (or one pruned after having a file) is a
+                # download. counting the placeholder meant a failed or
+                # cancelled auto-download was "done" forever and never retried.
+                landed = "(file_path IS NOT NULL AND file_path != '' OR pruned_at IS NOT NULL)"
                 if enc and g:
                     row = conn.execute(
                         "SELECT 1 FROM downloaded_podcast_episodes "
-                        "WHERE (feed_url = ? AND enclosure_url = ?) OR (guid = ?)",
+                        f"WHERE ((feed_url = ? AND enclosure_url = ?) OR (guid = ?)) AND {landed}",
                         (feed_url, enc, g),
                     ).fetchone()
                 elif enc:
                     row = conn.execute(
                         "SELECT 1 FROM downloaded_podcast_episodes "
-                        "WHERE feed_url = ? AND enclosure_url = ?",
+                        f"WHERE feed_url = ? AND enclosure_url = ? AND {landed}",
                         (feed_url, enc),
                     ).fetchone()
                 elif g:
                     row = conn.execute(
-                        "SELECT 1 FROM downloaded_podcast_episodes WHERE guid = ?",
+                        f"SELECT 1 FROM downloaded_podcast_episodes WHERE guid = ? AND {landed}",
                         (g,),
                     ).fetchone()
                 else:
@@ -14826,17 +14970,46 @@ class MusicDatabase:
                         return True
 
                 if t:
-                    row = conn.execute(
-                        "SELECT 1 FROM library_history WHERE event_type = 'podcast' "
-                        "AND title = ?",
-                        (t,),
-                    ).fetchone()
+                    show = str(show_title or "").strip()
+                    if show:
+                        row = conn.execute(
+                            "SELECT 1 FROM library_history WHERE event_type = 'podcast' "
+                            "AND title = ? AND album_name = ?",
+                            (t, show),
+                        ).fetchone()
+                    else:
+                        row = conn.execute(
+                            "SELECT 1 FROM library_history WHERE event_type = 'podcast' "
+                            "AND title = ?",
+                            (t,),
+                        ).fetchone()
                     if row:
                         return True
 
                 return False
         except Exception as e:
             logger.debug("is_podcast_episode_downloaded check failed: %s", e)
+            return False
+
+    def forget_podcast_episode_attempt(self, feed_url: str, enclosure_url: str) -> bool:
+        """Drop the placeholder a queued download wrote, when it did not land.
+
+        Only a row with no file and no prune stamp: a real download's record
+        is history and stays, whatever happens to a later attempt."""
+        if not feed_url or not enclosure_url:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cur = conn.execute(
+                    "DELETE FROM downloaded_podcast_episodes "
+                    "WHERE feed_url = ? AND enclosure_url = ? "
+                    "AND (file_path IS NULL OR file_path = '') AND pruned_at IS NULL",
+                    (str(feed_url).strip(), str(enclosure_url).strip()),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("forget_podcast_episode_attempt failed: %s", e)
             return False
 
     def get_downloaded_podcast_episodes(
@@ -20105,36 +20278,59 @@ class MusicDatabase:
             logger.error("Error removing quarantine source block: %s", e)
             return False
 
-    def count_library_history_unverified(self) -> int:
+    @staticmethod
+    def _exclude_sources_clause(exclude_download_sources):
+        """``AND download_source NOT IN (...)`` for the sources given, tolerant
+        of a NULL download_source (a real download always has one; the
+        acoustid scanner's synthetic rows carry 'acoustid_scan')."""
+        sources = [str(x) for x in (exclude_download_sources or ()) if x]
+        if not sources:
+            return "", []
+        placeholders = ','.join('?' * len(sources))
+        return f" AND (download_source IS NULL OR download_source NOT IN ({placeholders}))", sources
+
+    def count_library_history_unverified(self, exclude_download_sources=()) -> int:
         """just the count for the review badge. the full fetch pulls every row
-        with SELECT *, way too much work to render a number every few seconds."""
+        with SELECT *, way too much work to render a number every few seconds.
+
+        ``exclude_download_sources`` drops the acoustid scanner's synthetic rows
+        for the Downloads page, the same way the history tail does: they are
+        pre-existing library files, not downloads (see get_library_history)."""
+        clause, params = self._exclude_sources_clause(exclude_download_sources)
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT COUNT(*) FROM library_history
-                WHERE verification_status IN ('unverified', 'force_imported')
-            """)
+                WHERE verification_status IN ('unverified', 'force_imported'){clause}
+            """, params)
             return int(cursor.fetchone()[0] or 0)
         except Exception as e:
             logger.error("Error counting unverified library history: %s", e)
             return 0
 
-    def get_library_history_unverified(self) -> list[dict]:
+    def get_library_history_unverified(self, exclude_download_sources=()) -> list[dict]:
         """Return every library_history row that still needs human confirmation.
 
         Fetches all rows where verification_status is 'unverified' or
         'force_imported', ordered newest-first. No row limit — the full
         set must always be visible on the Downloads → Unverified tab.
+
+        ``exclude_download_sources`` drops the acoustid scanner's synthetic
+        rows for the Downloads page. storm: 735 pre-existing library files
+        sat in the list as "Completed", Clear Completed removed them and the
+        next daily scan put them all back. those files are reviewed from the
+        scanner's own findings, not as downloads.
         """
+        clause, params = self._exclude_sources_clause(exclude_download_sources)
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT * FROM library_history
-                WHERE verification_status IN ('unverified', 'force_imported')
+                WHERE verification_status IN ('unverified', 'force_imported'){clause}
                 ORDER BY created_at DESC
-            """)
+            """, params)
             return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error("Error querying unverified library history: %s", e)
@@ -20317,12 +20513,19 @@ class MusicDatabase:
             return False
 
     def update_sync_history_completion(self, batch_id, tracks_found=0, tracks_downloaded=0, tracks_failed=0):
-        """Update a sync_history entry with completion stats."""
+        """Update a sync_history entry with completion stats.
+
+        ``tracks_found=None`` keeps the value already on the row. two writers
+        share this row: the sync (which knows how many tracks matched) and the
+        download batch that follows it (which knows what downloaded). a batch
+        with no analysis of its own used to write tracks_found = 0 over the
+        sync's count, so the dashboard read "0/240 in library" against a
+        details modal that listed 236 matched."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                UPDATE sync_history SET tracks_found = ?, tracks_downloaded = ?,
+                UPDATE sync_history SET tracks_found = COALESCE(?, tracks_found), tracks_downloaded = ?,
                     tracks_failed = ?, completed_at = CURRENT_TIMESTAMP
                 WHERE batch_id = ?
             """, (tracks_found, tracks_downloaded, tracks_failed, batch_id))

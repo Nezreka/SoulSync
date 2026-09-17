@@ -229,6 +229,12 @@ def scan(root: Optional[str] = None, db: Any = None, progress=None,
                         summary["removed"] += 1
                 except Exception as exc:
                     error(path,str(exc))
+        # a wanted book that just turned up on disk is done now, not at the
+        # next wishlist pass
+        try:
+            summary["wishlist_done"] = database.mark_owned_wishlist_done()
+        except Exception as exc:
+            logger.debug("Could not reconcile the wishlist after the scan: %s", exc)
         if match_catalog:
             from core.audiobook_library_matching import match_library
             summary["phase"] = "matching"

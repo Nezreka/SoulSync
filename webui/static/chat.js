@@ -36,6 +36,7 @@
         newMarker: null,         // frozen last-seen ts for the NEW divider (per room open)
         renderedCount: 0,        // for the new-messages pill delta
         msgs: [],                // room message store: archive pages + live tail (merged)
+        pmMsgs: [],              // active PM conversation store (messages + pending outgoing)
         loadingOlder: false,     // scrollback fetch in flight
         historyDone: false,      // no more archive pages
         selfName: '',            // our slskd username (@mention highlighting)
@@ -6394,21 +6395,49 @@
             var k = _msgKey(m);
             var existing = byKey[k];
             if (!existing) {
-                byKey[k] = m; state.msgs.push(m); added++;
-                if (_pingWorthy(m)) _chatPing();
+                // Check if this incoming message confirms an optimistic pending send
+                var pendingIdx = -1;
+                for (var pi = 0; pi < state.msgs.length; pi++) {
+                    var pm = state.msgs[pi];
+                    if (pm && pm._pending && pm.message === m.message) {
+                        var sameUser = (pm.username === m.username) ||
+                                       (pm.self && (m.self || m.direction === 'Out' || m.username === state.selfName));
+                        if (sameUser) {
+                            pendingIdx = pi;
+                            break;
+                        }
+                    }
+                }
+                if (pendingIdx > -1) {
+                    var oldKey = _msgKey(state.msgs[pendingIdx]);
+                    delete byKey[oldKey];
+                    state.msgs[pendingIdx] = m;
+                    byKey[k] = m;
+                    added++;
+                    reactionsChanged = true;
+                } else {
+                    byKey[k] = m; state.msgs.push(m); added++;
+                    if (_pingWorthy(m)) _chatPing();
+                }
             } else {
-                // Reactions are server-side aggregate state that changes over a
-                // message's life. mergeMessages used to only ADD new messages,
-                // so a reaction added after we first saw a message never showed
-                // without a full page reload. Reconcile the authoritative server
-                // reactions onto the copy we already hold, then re-assert our own
-                // just-sent reaction until slskd echoes it (avoids a flicker
-                // where the optimistic chip vanishes then returns).
+                // Upgrade card metadata or clear pending flag on existing message
+                if (existing._pending || (m.np && !existing.np) || (m.want && !existing.want) || (m.overlay && !existing.overlay)) {
+                    Object.assign(existing, m);
+                    delete existing._pending;
+                    reactionsChanged = true;
+                }
                 var was = JSON.stringify(existing.reactions || []);
                 existing.reactions = m.reactions || [];
                 _reapplyPendingReactions(existing);
                 if (JSON.stringify(existing.reactions || []) !== was) reactionsChanged = true;
             }
+        });
+        // Expire stale pending messages older than 45 seconds so failed sends don't hang indefinitely
+        var nowMs = Date.now();
+        state.msgs = state.msgs.filter(function (m) {
+            if (!m._pending) return true;
+            var msgTs = Date.parse(m.timestamp) || 0;
+            return (nowMs - msgTs) < 45000;
         });
         if (added) {
             state.msgs.sort(function (a, b) {
@@ -6574,7 +6603,23 @@
                     state.connectionError = null;
                     state.canSend = !!res.body.can_send;
                     renderHead(); renderComposer();
-                    renderMessages(res.body.messages);
+                    var incoming = res.body.messages || [];
+                    var nowMs = Date.now();
+                    var pending = (state.pmMsgs || []).filter(function (m) {
+                        if (!m || !m._pending) return false;
+                        var msgTs = Date.parse(m.timestamp) || 0;
+                        return (nowMs - msgTs) < 45000;
+                    });
+                    var unconfirmed = [];
+                    pending.forEach(function (pm) {
+                        var found = incoming.some(function (im) {
+                            var selfMsg = im.self === true || im.direction === 'Out' || im.username === (state.selfName || 'you');
+                            return selfMsg && im.message === pm.message;
+                        });
+                        if (!found) unconfirmed.push(pm);
+                    });
+                    state.pmMsgs = incoming.concat(unconfirmed);
+                    renderMessages(state.pmMsgs);
                     state.renderedOk = true;
                     renderUsers(null);
                 });
@@ -7065,6 +7110,7 @@
         unhideDm(username);
         state.view = 'pm'; state.pmUser = username; state.lastStamp = null; state.stickBottom = true;
         state.searchMode = false; state.renderedOk = false;
+        state.pmMsgs = [];
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
         cancelReply();
         cancelEdit();
@@ -7126,27 +7172,41 @@
                 }
                 return;
             }
-            // Optimistic echo: slskd takes a beat to include a just-sent message,
-            // and the poll adds up to 4s more — paint it NOW, then let the next
-            // authoritative render replace it (lastStamp reset forces that).
-            // Except edits: their echo would paint as a stray ✏ line under the
-            // original — the authoritative render folds it in place instead.
-            var host = q('[data-chat-messages]');
-            if (host && !sentEdit) {
-                var empty = host.querySelector('.chat-empty');
-                if (empty) empty.remove();
-                host.insertAdjacentHTML('beforeend', renderGroups([{
-                    username: 'you', message: text,
-                    timestamp: new Date().toISOString(), self: true,
-                    reply: sentReply || undefined,
-                    // room sends ride the envelope → render the echo rich too.
-                    // a plain send does not, and claiming rich would paint it
-                    // as a SoulSync message the other clients will not see.
-                    rich: state.view === 'room' && !_plainOn(),
-                }]));
-                host.scrollTop = host.scrollHeight;
+            // Optimistic echo: store in state.msgs (room) or state.pmMsgs (PM) with _pending: true.
+            // When renderMessages is called by refresh(), the message remains rendered in state
+            // and does NOT vanish from the screen while waiting for the server echo.
+            var myName = state.selfName || 'you';
+            var nowIso = new Date().toISOString();
+            if (state.view === 'room') {
+                if (!sentEdit) {
+                    var optMsg = {
+                        username: myName,
+                        message: text,
+                        timestamp: nowIso,
+                        self: true,
+                        reply: sentReply || undefined,
+                        rich: state.view === 'room' && !_plainOn(),
+                        chan: state.channel || 'general',
+                        _pending: true,
+                    };
+                    state.msgs = state.msgs || [];
+                    state.msgs.push(optMsg);
+                    state.lastStamp = null;
+                    renderMessages(state.msgs);
+                }
+            } else if (state.view === 'pm') {
+                var optPm = {
+                    username: myName,
+                    message: text,
+                    timestamp: nowIso,
+                    self: true,
+                    direction: 'Out',
+                    _pending: true,
+                };
+                state.pmMsgs = state.pmMsgs || [];
+                state.pmMsgs.push(optPm);
                 state.lastStamp = null;
-                _unfurlPendingLinks(host);
+                renderMessages(state.pmMsgs);
             }
             state.stickBottom = true;
             cancelReply();
@@ -10325,7 +10385,13 @@
                 ' mentioned you in # ' + (state.room || 'chat'), 'info');
         }
         if (pageVisible() && state.view === 'room') {
-            refresh();               // live update, nothing to badge
+            if (d && d.messages && d.messages.length) {
+                mergeMessages(d.messages);
+                _clearTypingFor(d.messages);
+                renderMessages(state.msgs);
+            } else {
+                refresh();               // live update fallback
+            }
             return;
         }
         unread.room += (d && d.messages ? d.messages.length : 0);

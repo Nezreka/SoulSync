@@ -180,6 +180,33 @@ def test_scan_skips_when_auto_download_disabled():
         mock_db.mark_watchlist_podcast_scanned.assert_called_once()
 
 
+def test_retention_never_prunes_an_episode_that_never_landed():
+    # a queued-then-failed download leaves a row with no file. marking it
+    # pruned would make it count as downloaded, and it would never be tried
+    # again. the row is left for the next scan to retry.
+    mock_db = MagicMock()
+    mock_db.get_watchlist_podcasts.return_value = [{
+        "id": 1, "feed_url": "https://feeds.example.com/prune.xml", "title": "Prune Show",
+        "author": "Host", "auto_download": 0, "retention_days": 7,
+    }]
+    old_date = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    mock_db.get_downloaded_podcast_episodes.return_value = [{
+        "id": 43, "feed_url": "https://feeds.example.com/prune.xml",
+        "enclosure_url": "https://example.com/never.mp3", "file_path": None, "downloaded_at": old_date,
+    }]
+    mock_podcast_client = MagicMock()
+    mock_podcast_client.fetch_feed.return_value = PodcastShow(
+        feed_url="https://feeds.example.com/prune.xml", title="Prune Show", author="Host",
+        description="", artwork_url="", website="", itunes_id=None, language="en",
+        categories=[], explicit=False, episode_count=0, episodes=[],
+    )
+    with patch("core.podcast_automation._get_db", return_value=mock_db), \
+         patch("core.podcast_automation.get_podcast_client", return_value=mock_podcast_client):
+        result = scan_and_auto_download_podcasts(profile_id=1)
+    assert result["episodes_pruned"] == 0
+    mock_db.mark_podcast_episode_pruned.assert_not_called()
+
+
 def test_scan_retention_prunes_expired_files():
     mock_db = MagicMock()
     mock_db.get_watchlist_podcasts.return_value = [

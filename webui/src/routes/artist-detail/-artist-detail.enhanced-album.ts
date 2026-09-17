@@ -590,6 +590,58 @@ export function normalizeCanonicalTracks(
   }));
 }
 
+/**
+ * The canonical tracklist load (ensureEnhancedAlbumCanonicalTracks,
+ * library.js:4122): fetch the source's tracklist for the album, diff it
+ * against what we own, and hand back the patch the row folds into its album.
+ *
+ * This is the step the React port dropped. Every piece below it came across
+ * (the diff, the missing-row normaliser, the Manage modal with "I Have This")
+ * and nothing called it, so no album ever grew a missing row and the whole
+ * flow sat unreachable behind green tests.
+ *
+ * Returns a patch rather than mutating: the row holds its album in state, and
+ * a refetched album arrives without these fields, which is exactly when the
+ * diff should run again.
+ */
+export async function loadCanonicalTracks(
+  album: EnhancedAlbum,
+  artistName: string,
+): Promise<Partial<EnhancedAlbum>> {
+  const canonical = getAlbumCanonicalSource(album);
+  if (!canonical) return { _canonicalTracksLoaded: true };
+
+  try {
+    const params = new URLSearchParams({
+      name: String(album.title || ''),
+      artist: artistName,
+      source: canonical.source,
+    });
+    const response = await fetch(`/api/album/${encodeURIComponent(canonical.id)}/tracks?${params}`);
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Failed to load canonical tracklist');
+    }
+    const canonicalTracks = normalizeCanonicalTracks(
+      Array.isArray(data.tracks) ? data.tracks : [],
+      canonical.source,
+      canonical.id,
+      data.source,
+    );
+    return {
+      canonical_tracks: canonicalTracks,
+      api_track_count: Math.max(Number(album.api_track_count || 0), canonicalTracks.length),
+      missing_tracks: deriveMissingTracks(album, canonicalTracks),
+      _canonicalTracksLoaded: true,
+    };
+  } catch (error) {
+    return {
+      _canonicalTracksLoaded: true,
+      _canonicalTracksError: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export interface TrackMatchChip {
   service: string;
   label: string;

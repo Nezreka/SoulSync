@@ -1,7 +1,9 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
-import { SinglesImportTab } from './-ui/singles-import-tab';
-
+// the old tab. bookmarks and the guided tour still point here; the inbox
+// replaced all three tabs with one list.
 export const Route = createFileRoute('/import/singles')({
-  component: SinglesImportTab,
+  beforeLoad: () => {
+    throw redirect({ to: '/import', replace: true });
+  },
 });

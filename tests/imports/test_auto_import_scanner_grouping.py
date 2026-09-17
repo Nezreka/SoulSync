@@ -297,3 +297,34 @@ def test_disc_only_directory_still_works(worker, tmp_path):
         1: candidates[0].disc_structure[1],
         2: candidates[0].disc_structure[2],
     }
+
+
+# ---------------------------------------------------------------------------
+# Untagged files inside a subfolder are that folder's album
+# ---------------------------------------------------------------------------
+
+
+def test_untagged_files_in_a_subfolder_are_one_album_named_by_the_folder(worker, tmp_path):
+    """Folder-name identification exists for exactly this layout, and it
+    never ran because each file was split off as a single first."""
+    album = tmp_path / 'Boards of Canada - Geogaddi'
+    album.mkdir()
+    for i in range(1, 4):
+        _write_flac(str(album / f'{i:02d}.flac'), album='', track=0, title='')
+
+    candidates = []
+    worker._scan_directory(str(tmp_path), candidates, staging_root=str(tmp_path))
+
+    assert len(candidates) == 1
+    c = candidates[0]
+    assert not c.is_single
+    assert c.name == 'Boards of Canada - Geogaddi'
+    assert len(c.audio_files) == 3
+
+
+def test_untagged_files_at_the_root_stay_singles(worker, tmp_path):
+    for i in range(1, 3):
+        _write_flac(str(tmp_path / f'{i:02d}.flac'), album='', track=0, title='')
+    candidates = []
+    worker._scan_directory(str(tmp_path), candidates, staging_root=str(tmp_path))
+    assert [c.is_single for c in candidates] == [True, True]

@@ -1,4 +1,3 @@
-import { checkTracksBody, mergeOwnership } from '../-artist-detail.owned-tracks';
 import { useQuery } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -37,6 +36,7 @@ import {
   releaseToAlbumData,
   stillCheckingMessage,
 } from '../-artist-detail.open-release';
+import { checkTracksBody, mergeOwnership } from '../-artist-detail.owned-tracks';
 import { scrollArtistDetailToTop } from '../-artist-detail.scroll';
 import { useCompletionStream } from '../-artist-detail.use-completion';
 import { useEnhancedData } from '../-artist-detail.use-enhanced';
@@ -45,9 +45,9 @@ import { clearVanillaArtist, syncVanillaArtist } from '../-artist-detail.vanilla
 import { ArtistDetailBackButton } from './artist-detail-back-button';
 import { ArtistHero } from './artist-hero';
 import { ArtistVideosSection } from './artist-videos-section';
+import { ConcertsSection } from './concerts-section';
 import { DiscographyFilters } from './discography-filters';
 import { DiscographySection } from './discography-section';
-import { ConcertsSection } from './concerts-section';
 import { EnhancedView } from './enhanced-view';
 import { SimilarArtistsSection } from './similar-artists-section';
 
@@ -440,6 +440,13 @@ export function ArtistDetailPage() {
         streamCompleted={stream.completed}
         enrichment={payload.enrichment_coverage}
         watchlist={watchlistIdentity(payload)}
+        canFixMatches={canEnhance}
+        onMatchesChanged={() => {
+          // the hero badges come from the page payload, the chips from the
+          // enhanced one; a match change has to reach both
+          void query.refetch();
+          enhancedState.reload();
+        }}
       />
 
       <div className="artist-detail-content">

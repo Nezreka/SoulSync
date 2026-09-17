@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.2"
+_SOULSYNC_BASE_VERSION = "3.4.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -15419,7 +15419,11 @@ def _build_status_deps():
             # and pushed every real download out of the cap
             exclude_download_sources=('acoustid_scan',),
         )[0],
-        get_unverified_download_history=lambda: get_database().get_library_history_unverified(),
+        # same exclusion as the tail above: a scan-flagged library file is
+        # reviewed from the acoustid scanner's findings, not as a download
+        get_unverified_download_history=lambda: get_database().get_library_history_unverified(
+            exclude_download_sources=('acoustid_scan',),
+        ),
     )
 
 
@@ -20803,6 +20807,18 @@ def _emit_chat_push_loop():
                             _ed2 = chat_codec.edit_of(dec)
                             if _ed2:
                                 out['ed'] = _ed2
+                            _np = chat_codec.np_of(dec)
+                            if _np:
+                                out['np'] = _np
+                            _w = chat_codec.want_of(dec)
+                            if _w:
+                                out['want'] = _w
+                            _ov = chat_codec.overlay_of(dec)
+                            if _ov:
+                                out['overlay'] = {'n': _ov['n'],
+                                                  'layers': len(_ov['d'].get('layers') or []),
+                                                  'assets': chat_codec.overlay_assets(_ov['d']),
+                                                  'd': _ov['d']}
                         return out
                     decoded = [x for x in (_unwrap(m) for m in fresh) if x]
                     if proto_events:
