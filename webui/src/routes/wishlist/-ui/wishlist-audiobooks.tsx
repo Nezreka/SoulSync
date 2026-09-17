@@ -12,6 +12,7 @@ import type {
 import {
   fetchWishlist,
   removeFromWishlist,
+  retryWishlistEntry,
   runWishlistPass,
   setNarratorMode,
 } from '@/routes/audiobooks/-audiobooks.api';
@@ -128,6 +129,20 @@ export function WishlistAudiobooks() {
     setItems((current) => current.filter((item) => item.asin !== asin));
     await removeFromWishlist(asin);
     await load();
+  };
+
+  // the way back from cancelled, and past the backoff on a miss. the row
+  // shows "Looking" at once; the next pass (or Search now) picks it up first
+  const lookAgain = async (asin: string) => {
+    setItems((current) =>
+      current.map((item) =>
+        item.asin === asin
+          ? { ...item, status: 'wanted', last_error: '', last_attempt_at: 0 }
+          : item,
+      ),
+    );
+    const ok = await retryWishlistEntry(asin);
+    if (!ok) await load();
   };
 
   const backoffHours = Math.round((worker?.retry_after_seconds ?? 0) / 3600);
@@ -282,6 +297,20 @@ export function WishlistAudiobooks() {
                     }
                   >
                     {item.narrator_mode === 'exact' ? 'Narrator locked' : 'Any narrator'}
+                  </button>
+                )}
+                {(item.status === 'failed' || item.status === 'cancelled') && (
+                  <button
+                    type="button"
+                    className={styles.action}
+                    title={
+                      item.status === 'cancelled'
+                        ? 'Cancelled downloads are never retried on their own \u2014 want it again'
+                        : 'Skip the wait and look on the next pass'
+                    }
+                    onClick={() => void lookAgain(item.asin)}
+                  >
+                    Look again
                   </button>
                 )}
                 <button

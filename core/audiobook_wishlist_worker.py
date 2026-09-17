@@ -125,13 +125,17 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
     outcome = {"asin": asin, "found": 0, "grabbed": False, "error": "", "owned": False}
     if not asin:
         return outcome
+    # the row's own profile, on every write below. defaulting to 1 meant a
+    # second profile's book never left "wanted": no backoff, and a fresh grab
+    # on every pass.
+    profile_id = int(row.get("profile_id") or 1)
 
     # Already on disk — the usual reason is that it was imported by hand, or the
     # library scan found a copy. Searching indexers for a book we have is waste,
     # and grabbing it would be worse.
     try:
         if database.is_owned(asin):
-            database.mark_wishlist_status(asin, STATUS_DONE)
+            database.mark_wishlist_status(asin, STATUS_DONE, profile_id=profile_id)
             outcome["owned"] = True
             return outcome
     except Exception as exc:                                # noqa: BLE001
@@ -139,7 +143,7 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
 
     book = _book_from_row(row)
     # Claimed before the search so a second pass cannot pick up the same book.
-    database.mark_wishlist_status(asin, STATUS_SEARCHING)
+    database.mark_wishlist_status(asin, STATUS_SEARCHING, profile_id=profile_id)
 
     try:
         # The narrator choice is the listener's, made when they wished for the
@@ -150,20 +154,23 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
         )
     except Exception as exc:                                # noqa: BLE001
         logger.warning("Audiobook wishlist search failed for %s: %s", asin, exc)
-        database.mark_wishlist_status(asin, STATUS_FAILED, error=str(exc), count_attempt=True)
+        database.mark_wishlist_status(asin, STATUS_FAILED, profile_id=profile_id,
+                                      error=str(exc), count_attempt=True)
         outcome["error"] = str(exc)
         return outcome
 
     outcome["found"] = len(releases)
     if not releases:
         database.mark_wishlist_status(
-            asin, STATUS_FAILED, error="No releases found", count_attempt=True,
+            asin, STATUS_FAILED, profile_id=profile_id,
+            error="No releases found", count_attempt=True,
         )
         return outcome
 
     if not auto_grab:
         database.mark_wishlist_status(
-            asin, STATUS_FAILED, error="Found, not grabbed", count_attempt=True,
+            asin, STATUS_FAILED, profile_id=profile_id,
+            error="Found, not grabbed", count_attempt=True,
         )
         return outcome
 
@@ -215,7 +222,7 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
             # to downloads" with nothing behind it - the state reset_stale_grabbed
             # exists to clean up. Fail it and let the next pass try again.
             database.mark_wishlist_status(
-                asin, STATUS_FAILED,
+                asin, STATUS_FAILED, profile_id=profile_id,
                 error="The client accepted the release but returned no handle",
                 count_attempt=True,
             )
@@ -225,12 +232,13 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
             )
             return outcome
 
-        database.mark_wishlist_status(asin, STATUS_GRABBED, count_attempt=True)
+        database.mark_wishlist_status(asin, STATUS_GRABBED, profile_id=profile_id, count_attempt=True)
         outcome["grabbed"] = True
         logger.info("Audiobook wishlist grabbed %s for %s", best.title, asin)
     else:
         error = str(result.get("error") or "Grab failed")
-        database.mark_wishlist_status(asin, STATUS_FAILED, error=error, count_attempt=True)
+        database.mark_wishlist_status(asin, STATUS_FAILED, profile_id=profile_id,
+                                      error=error, count_attempt=True)
         outcome["error"] = error
     return outcome
 
@@ -245,27 +253,12 @@ def run_pass(db: Any = None, limit: Optional[int] = None) -> Dict[str, Any]:
 
     database = db if db is not None else get_audiobook_db()
     summary = {"checked": 0, "found": 0, "grabbed": 0, "errors": 0,
-               "freed": 0, "unstuck": 0}
+               "freed": 0, "unstuck": 0, "already_owned": 0}
 
     # Self-healing, at the start of every pass rather than only at boot: a pass
     # that died mid-search leaves rows claimed as "searching", and the retry
     # query never looks at those again. Waiting for a restart to notice would
     # mean a book silently stops being searched for until someone reboots.
-    try:
-        summary["freed"] = database.reset_stale_searching()
-    except Exception as exc:                                # noqa: BLE001
-        logger.debug("Could not free stale searching rows: %s", exc)
-
-    # A row handed to a download client is moved off "grabbed" by the download
-    # MONITOR, which only watches live downloads. If that download never
-    # registered, was cleared, or the monitor stopped running, the row sits on
-    # "sent to downloads" forever and no pass looks at it again. Same recovery
-    # as above, for the same reason.
-    try:
-        summary["unstuck"] = database.reset_stale_grabbed()
-    except Exception as exc:                                # noqa: BLE001
-        logger.debug("Could not free stale grabbed rows: %s", exc)
-
     # Every profile, not just the first. There is no request behind a timed
     # pass, so the profile has to come from the rows — and sweeping only
     # profile 1 meant a second person's wishlist was never searched at all.
@@ -277,6 +270,30 @@ def run_pass(db: Any = None, limit: Optional[int] = None) -> Dict[str, Any]:
     except Exception as exc:                                # noqa: BLE001
         logger.debug("Could not list audiobook profiles: %s", exc)
         profiles = [1]
+
+    for profile_id in profiles:
+        try:
+            summary["freed"] += database.reset_stale_searching(profile_id=profile_id)
+        except Exception as exc:                            # noqa: BLE001
+            logger.debug("Could not free stale searching rows: %s", exc)
+
+        # A row handed to a download client is moved off "grabbed" by the
+        # download MONITOR, which only watches live downloads. If that download
+        # never registered, was cleared, or the monitor stopped running, the
+        # row sits on "sent to downloads" forever and no pass looks at it
+        # again. Same recovery as above, for the same reason.
+        try:
+            summary["unstuck"] += database.reset_stale_grabbed(profile_id=profile_id)
+        except Exception as exc:                            # noqa: BLE001
+            logger.debug("Could not free stale grabbed rows: %s", exc)
+
+    # A book already in the library is done, whoever wanted it and however
+    # far down the queue its row sits. Checking only when a pass reached the
+    # row left a hand-imported book on "Looking" for hours.
+    try:
+        summary["already_owned"] = database.mark_owned_wishlist_done()
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not reconcile the wishlist with the library: %s", exc)
 
     due = []
     for profile_id in profiles:

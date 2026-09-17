@@ -186,7 +186,10 @@ export interface ArtApplyResult {
   success: boolean;
   error?: string;
   server_updated?: boolean;
+  /** the artist path's artist.jpg. */
   disk_written?: boolean;
+  /** the album path's cover.jpg. */
+  cover_written?: boolean;
 }
 
 function artEndpoint(target: ArtPickerTarget): string {
@@ -227,4 +230,12 @@ export function artistArtAppliedMessage(result: ArtApplyResult): string {
   if (result.server_updated) parts.push('server');
   if (result.disk_written) parts.push('artist.jpg');
   return 'Artist photo updated' + (parts.length ? ' (also updated: ' + parts.join(', ') + ')' : '');
+}
+
+/** the album twin: the server poster and cover.jpg now get the pick too. */
+export function albumArtAppliedMessage(result: ArtApplyResult): string {
+  const parts = [];
+  if (result.server_updated) parts.push('server');
+  if (result.cover_written) parts.push('cover.jpg');
+  return 'Cover art updated' + (parts.length ? ' (also updated: ' + parts.join(', ') + ')' : '');
 }

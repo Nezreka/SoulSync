@@ -183,6 +183,23 @@ def test_a_book_with_a_sidecar_is_adopted(tmp_path, db):
     assert db.is_owned("B08G9PRS1K") is True
 
 
+def test_a_wanted_book_found_on_disk_is_done_at_once(tmp_path, db):
+    # for every profile that wanted it, and without waiting for the next
+    # wishlist pass to reach the row
+    from core.audiobook_database import STATUS_DONE, STATUS_WANTED
+    db.add_to_wishlist({"asin": "B08G9PRS1K", "title": "Project Hail Mary"}, profile_id=1)
+    db.add_to_wishlist({"asin": "B08G9PRS1K", "title": "Project Hail Mary"}, profile_id=2)
+    db.add_to_wishlist({"asin": "B0OTHER001", "title": "Other"}, profile_id=1)
+    make_book_folder(tmp_path, "Andy Weir", "Project Hail Mary")
+
+    summary = scan(root=str(tmp_path), db=db)
+
+    assert summary["wishlist_done"] == 2
+    assert db.get_wishlist(1)[0]["status"] == STATUS_WANTED         # "Other", still wanted
+    assert {r["status"] for r in db.get_wishlist(1) if r["asin"] == "B08G9PRS1K"} == {STATUS_DONE}
+    assert db.get_wishlist(2)[0]["status"] == STATUS_DONE
+
+
 def test_an_adopted_book_keeps_its_title_and_author(tmp_path, db):
     make_book_folder(tmp_path, "Andy Weir", "Project Hail Mary")
     scan(root=str(tmp_path), db=db)

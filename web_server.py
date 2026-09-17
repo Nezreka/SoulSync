@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.2"
+_SOULSYNC_BASE_VERSION = "3.4.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -634,6 +634,7 @@ def _enforce_launch_pin():
 def _set_profile_context():
     """Set g.profile_id from session for every request"""
     g.request_start_monotonic = time.perf_counter()
+    g.request_start_cpu = time.thread_time()
     # Skip for profile management, static, and root routes
     path = request.path
     if (path.startswith('/api/profiles') or
@@ -688,12 +689,18 @@ def _log_slow_request(response):
         elapsed_ms = (time.perf_counter() - start) * 1000
         slow_threshold_ms = 1000.0
         if elapsed_ms >= slow_threshold_ms:
+            # cpu next to wall: a request that spent 2 s of wall on 30 ms of
+            # cpu was waiting (the gil, a lock, the disk), not working, and
+            # the fix is somewhere else entirely
+            cpu_start = getattr(g, 'request_start_cpu', None)
+            cpu_ms = (time.thread_time() - cpu_start) * 1000 if cpu_start is not None else -1
             logger.warning(
-                "Slow request: %s %s -> %s in %.1fms",
+                "Slow request: %s %s -> %s in %.1fms (cpu %.0fms)",
                 request.method,
                 request.full_path.rstrip('?'),
                 response.status_code,
                 elapsed_ms,
+                cpu_ms,
             )
     except Exception as e:
         logger.debug("slow request log failed: %s", e)
@@ -5583,9 +5590,13 @@ def enhanced_search_source(source_name):
         youtube_client = _search_orchestrator.resolve_youtube_videos_client(deps)
         if youtube_client is None:
             return jsonify({"videos": [], "available": False})
+        # the artist page's "show more" asks for a bigger pool; everyone else
+        # sends no limit and gets the default
+        max_results = _search_orchestrator.clamp_youtube_video_limit(data.get('limit'))
         try:
             return app.response_class(
-                _search_orchestrator.stream_youtube_videos(query, youtube_client, run_async),
+                _search_orchestrator.stream_youtube_videos(
+                    query, youtube_client, run_async, max_results=max_results),
                 mimetype='application/x-ndjson',
             )
         except Exception as e:
@@ -15412,7 +15423,11 @@ def _build_status_deps():
             # and pushed every real download out of the cap
             exclude_download_sources=('acoustid_scan',),
         )[0],
-        get_unverified_download_history=lambda: get_database().get_library_history_unverified(),
+        # same exclusion as the tail above: a scan-flagged library file is
+        # reviewed from the acoustid scanner's findings, not as a download
+        get_unverified_download_history=lambda: get_database().get_library_history_unverified(
+            exclude_download_sources=('acoustid_scan',),
+        ),
     )
 
 
@@ -20796,6 +20811,18 @@ def _emit_chat_push_loop():
                             _ed2 = chat_codec.edit_of(dec)
                             if _ed2:
                                 out['ed'] = _ed2
+                            _np = chat_codec.np_of(dec)
+                            if _np:
+                                out['np'] = _np
+                            _w = chat_codec.want_of(dec)
+                            if _w:
+                                out['want'] = _w
+                            _ov = chat_codec.overlay_of(dec)
+                            if _ov:
+                                out['overlay'] = {'n': _ov['n'],
+                                                  'layers': len(_ov['d'].get('layers') or []),
+                                                  'assets': chat_codec.overlay_assets(_ov['d']),
+                                                  'd': _ov['d']}
                         return out
                     decoded = [x for x in (_unwrap(m) for m in fresh) if x]
                     if proto_events:

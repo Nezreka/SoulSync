@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { thumb } from '@/platform/artwork-thumb';
 
@@ -91,9 +91,33 @@ function BadgeIcon({ badge }: { badge: ArtistBadge }) {
  * hop would silently lose artwork for every artist whose stored image_url has
  * rotted but who has a deezer_id.
  */
+type ImageStage = 'primary' | 'deezer' | 'placeholder';
+
+/**
+ * where the image chain starts. no stored photo but a deezer id is the
+ * #1253 shape: a server with no art for the artist, and enrichment that
+ * matched them but never got to backfill. the artist page already shows
+ * deezer's photo for that artist; the grid should not sit on a music note.
+ */
+export function initialImageStage(artist: LibraryArtist, hasImage: boolean): ImageStage {
+  if (hasImage) return 'primary';
+  return artist.deezer_id ? 'deezer' : 'placeholder';
+}
+
 function ArtistImage({ artist, hasImage }: { artist: LibraryArtist; hasImage: boolean }) {
-  type Stage = 'primary' | 'deezer' | 'placeholder';
-  const [stage, setStage] = useState<Stage>(hasImage ? 'primary' : 'placeholder');
+  const [stage, setStage] = useState<ImageStage>(() => initialImageStage(artist, hasImage));
+  // the picture eases in from the dark tile once its bytes have arrived,
+  // instead of popping. reset per stage so a deezer retry fades too.
+  const [loaded, setLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    setLoaded(false);
+    // a cached image can be complete before onLoad is wired; read it off the
+    // element so a paged-back card does not sit invisible
+    const el = imgRef.current;
+    if (el && el.complete && el.naturalWidth > 0) setLoaded(true);
+  }, [stage]);
 
   const onError = () => {
     // One retry only, and only when there is a Deezer id to retry with.
@@ -111,7 +135,16 @@ function ArtistImage({ artist, hasImage }: { artist: LibraryArtist; hasImage: bo
   // so each stage gets a clean load cycle. Not test-observable: jsdom never
   // fetches images, so the error events above are synthetic either way.
   return (
-    <img key={stage} src={thumb(src, 'grid')} alt={artist.name} loading="lazy" onError={onError} />
+    <img
+      key={stage}
+      ref={imgRef}
+      src={thumb(src, 'grid')}
+      alt={artist.name}
+      loading="lazy"
+      className={loaded ? 'is-loaded' : 'is-loading'}
+      onLoad={() => setLoaded(true)}
+      onError={onError}
+    />
   );
 }
 

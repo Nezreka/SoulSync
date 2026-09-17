@@ -1267,45 +1267,56 @@ const DOCS_SECTIONS = [
         title: 'Import Music',
         icon: '/static/import.jpg',
         children: [
-            { id: 'imp-setup', title: 'Staging Setup' },
-            { id: 'imp-workflow', title: 'Import Workflow' },
-            { id: 'imp-singles', title: 'Singles Import' },
-            { id: 'imp-matching', title: 'Track Matching' },
+            { id: 'imp-setup', title: 'Import Folder' },
+            { id: 'imp-workflow', title: 'The Inbox' },
+            { id: 'imp-auto', title: 'Auto-import' },
+            { id: 'imp-matching', title: 'The Matcher' },
+            { id: 'imp-singles', title: 'Singles' },
             { id: 'imp-textfile', title: 'Import from Text File' }
         ],
         content: () => `
             <div class="docs-subsection" id="imp-setup">
-                <h3 class="docs-subsection-title">Staging Setup</h3>
-                <p class="docs-text">Set your <strong>import folder path</strong> in Settings &rarr; Download Settings. Place audio files you want to import into this folder. SoulSync scans the folder and detects albums from the file structure.</p>
-                <p class="docs-text">Place albums in subfolders (e.g., <code>Artist - Album/</code>) and loose singles at the root level.</p>
-                <p class="docs-text">The import page header shows the total files in staging and their combined size.</p>
-                ${docsImg('imp-staging.jpg', 'Import staging page')}
-                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Files not showing up?</strong> Check that your import folder path is correct in Settings and that the folder has read permissions. Docker users: make sure the import volume mount is configured in your docker-compose.yml.</div></div>
+                <h3 class="docs-subsection-title">Import Folder</h3>
+                <p class="docs-text">Set your <strong>import folder path</strong> in Settings &rarr; Download Settings. Drop audio files you want to import into it. Album folders (e.g. <code>Artist - Album/</code>), loose files that share an album tag, and single files each become one item in the inbox.</p>
+                <p class="docs-text">You can also upload from the browser: drop files or a folder anywhere on the list, or use <strong>Add files</strong> / <strong>Add a folder</strong>. A dropped folder keeps its name, so an album lands as one item.</p>
+                <p class="docs-text">The strip under the page header shows the folder, how many items and files are in it, and the auto-import switch.</p>
+                ${docsImg('imp-staging.jpg', 'Import page')}
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Files not showing up?</strong> The page says so when it cannot read a folder. On a bind mount that is nearly always ownership: the folder's owner has to match the container's PUID/PGID (TrueNAS datasets are usually owned by the <code>apps</code> user, uid 568, while the container defaults to 1000).</div></div>
             </div>
             <div class="docs-subsection" id="imp-workflow">
-                <h3 class="docs-subsection-title">Import Workflow</h3>
-                <ol class="docs-steps">
-                    <li>Place audio files in your import folder</li>
-                    <li>Navigate to the <strong>Import</strong> page &mdash; SoulSync detects and suggests album matches</li>
-                    <li>Search for the correct album on Spotify/iTunes if the suggestion is wrong</li>
-                    <li><strong>Match tracks</strong> &mdash; Drag-and-drop staged files onto album track slots, or let auto-match attempt it</li>
-                    <li>Review the match and click <strong>Confirm</strong> to import &mdash; files are tagged, organized, and added to your library</li>
-                </ol>
-                ${docsImg('imp-matching.jpg', 'Track matching interface')}
+                <h3 class="docs-subsection-title">The Inbox</h3>
+                <p class="docs-text">One row per item, with its state and the actions it earns:</p>
+                <ul class="docs-list">
+                    <li><strong>Waiting</strong> &mdash; nobody has looked at it. Auto-import will, or you can identify it yourself.</li>
+                    <li><strong>Needs review</strong> &mdash; a probable match (70&ndash;90%). Approve it, fix it in the matcher, or dismiss it.</li>
+                    <li><strong>Needs identifying</strong> &mdash; tags, folder name and fingerprint all came up empty. Identify it in the matcher.</li>
+                    <li><strong>Importing</strong> &mdash; tagging and moving files, with the live track.</li>
+                    <li><strong>Failed</strong> &mdash; the import did not finish. Retry it, or fix the match.</li>
+                    <li><strong>Imported</strong> / <strong>Dismissed</strong> &mdash; history.</li>
+                </ul>
+                <p class="docs-text"><strong>Needs attention</strong> is the default filter and shows only what needs a person. Tick rows to approve or dismiss several at once, or to import waiting singles straight from their own tags. <strong>Show files</strong> opens the per-file list with length, bitrate and size. Keyboard: <kbd>j</kbd>/<kbd>k</kbd> move, <kbd>x</kbd> tick, <kbd>a</kbd> approve, <kbd>d</kbd> dismiss, <kbd>Enter</kbd> opens the matcher.</p>
+                <p class="docs-text">The <strong>Import Needs Attention</strong> automation trigger fires whenever the watcher leaves something for you, so a notification can reach you without opening the page.</p>
             </div>
-            <div class="docs-subsection" id="imp-singles">
-                <h3 class="docs-subsection-title">Singles Import</h3>
-                <p class="docs-text">The <strong>Singles</strong> tab handles individual tracks that aren't part of an album structure. Files in the staging root (not in subfolders) appear here. Search for the correct track on Spotify/iTunes, confirm the match, and import. The file is tagged, renamed, and placed in your library.</p>
+            <div class="docs-subsection" id="imp-auto">
+                <h3 class="docs-subsection-title">Auto-import</h3>
+                <p class="docs-text">With the switch on, a watcher checks the folder on a timer, identifies each item from its tags, folder name or AcoustID fingerprint, matches the files to the release's tracklist, and imports anything above the <strong>confidence line</strong> on its own. Between 70% and the line it waits for review; below 70% it needs identifying.</p>
+                <p class="docs-text">The gear opens the settings: the confidence line, how often the folder is checked, whether matches import without asking, and which quality profile they are checked against.</p>
             </div>
             <div class="docs-subsection" id="imp-matching">
-                <h3 class="docs-subsection-title">Track Matching</h3>
-                <p class="docs-text">The import matching system compares staged files against official album track lists:</p>
+                <h3 class="docs-subsection-title">The Matcher</h3>
+                <p class="docs-text">Identify, Fix match and the per-file "Open in the matcher" link all open the same page: the release on the left, its tracklist on the right.</p>
                 <ul class="docs-list">
-                    <li><strong>Auto-Match</strong> &mdash; Attempts to match files to tracks automatically based on filename, duration, and track order</li>
-                    <li><strong>Drag & Drop</strong> &mdash; Manually drag staged files onto the correct album track slots</li>
-                    <li><strong>Conflict Detection</strong> &mdash; Highlights when a file matches multiple tracks or when tracks are unmatched</li>
+                    <li><strong>Release</strong> &mdash; the pick, with the other candidates under it. Click one to swap. Search when none fit; pick a specific source to bypass the primary one.</li>
+                    <li><strong>Tracks</strong> &mdash; each release track beside the file matched to it, with the file's own length and bitrate. A length that differs from the release is flagged.</li>
+                    <li><strong>Files without a track</strong> &mdash; drag one onto a track, or tap it and then the track. The &times; takes a file off a track.</li>
                 </ul>
-                <p class="docs-text">After matching, the import process tags files with the official metadata (title, artist, album, track number, cover art) and moves them to your output path following the standard file organization template.</p>
+                <p class="docs-text">Under the table, <strong>before it imports</strong>: where each file will land on your naming template, which tags the release will change, and which tracks your library already has (kept or replaced by quality). Show details lists it per track.</p>
+                <p class="docs-text"><strong>Import</strong> tags the matched files with the release's metadata (title, artist, album, track number, cover art) and moves them into your library on the standard file template. Files without a track stay in the import folder.</p>
+                ${docsImg('imp-matching.jpg', 'The matcher')}
+            </div>
+            <div class="docs-subsection" id="imp-singles">
+                <h3 class="docs-subsection-title">Singles</h3>
+                <p class="docs-text">A single file gets the same matcher with track candidates instead of releases. Pick the track it is and import; pick nothing and it imports from its own tags.</p>
             </div>
             <div class="docs-subsection" id="imp-textfile">
                 <h3 class="docs-subsection-title">Import from Text File</h3>

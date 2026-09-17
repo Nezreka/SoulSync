@@ -55,6 +55,36 @@ _download_lock = threading.Lock()
 _downloads: Dict[str, Dict[str, Any]] = {}
 _download_client: Optional[PodcastDownloadClient] = None
 
+# how many episodes download at once. every queued episode used to get its
+# own thread the moment it was queued; the batch's max_concurrent was a
+# number nobody read, and one scan across a few shows with a backlog opened
+# every download at the same time. the rest now wait in line as "queued".
+DEFAULT_MAX_CONCURRENT_DOWNLOADS = 3
+_download_slots: Optional[threading.BoundedSemaphore] = None
+_download_slots_size = 0
+_download_slots_lock = threading.Lock()
+
+
+def _max_concurrent_downloads() -> int:
+    try:
+        from core.settings import config_manager
+        value = int(config_manager.get("podcasts.max_concurrent_downloads",
+                                       DEFAULT_MAX_CONCURRENT_DOWNLOADS) or 0)
+    except Exception:
+        value = DEFAULT_MAX_CONCURRENT_DOWNLOADS
+    return max(1, min(10, value))
+
+
+def _download_slot_semaphore() -> threading.BoundedSemaphore:
+    """the shared limiter, rebuilt if the setting changed since it was made."""
+    global _download_slots, _download_slots_size
+    size = _max_concurrent_downloads()
+    with _download_slots_lock:
+        if _download_slots is None or _download_slots_size != size:
+            _download_slots = threading.BoundedSemaphore(size)
+            _download_slots_size = size
+        return _download_slots
+
 # Cache for featured, search results, and parsed show feeds
 _featured_cache: Dict[str, Dict[str, Any]] = {}
 _show_cache: Dict[str, Dict[str, Any]] = {}
@@ -138,6 +168,39 @@ def show_to_dict(show: PodcastShow, include_episodes: bool = True) -> Dict[str, 
     else:
         d["episodes"] = []
     return d
+
+
+def _with_downloaded_flags(show_data: Dict[str, Any], feed_url: str) -> Dict[str, Any]:
+    """the show with each episode saying whether it is on disk.
+
+    the page used to learn "downloaded" only from the in-memory download
+    list, which a restart empties: every episode looked downloadable again
+    and a click fetched it a second time. the database remembers; this is
+    read per request, after the feed cache, so it is never stale. a pruned
+    episode (retention took the file) is not on disk and reads as not
+    downloaded, which is what a manual click should see."""
+    db = _db()
+    if not db or not feed_url:
+        return show_data
+    try:
+        rows = db.get_downloaded_podcast_episodes(feed_url=feed_url, unpruned_only=True)
+    except Exception as exc:
+        logger.debug("Could not read downloaded episodes for %s: %s", feed_url[:80], exc)
+        return show_data
+    on_disk = {}
+    for row in rows:
+        if not row.get("file_path"):
+            continue
+        for key in (row.get("enclosure_url"), row.get("guid")):
+            if key:
+                on_disk[str(key)] = row["file_path"]
+    if not on_disk:
+        return show_data
+    episodes = []
+    for ep in show_data.get("episodes") or []:
+        path = on_disk.get(str(ep.get("enclosure_url") or "")) or on_disk.get(str(ep.get("guid") or ""))
+        episodes.append({**ep, "downloaded": True, "file_path": path} if path else ep)
+    return {**show_data, "episodes": episodes}
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +370,32 @@ def generate_opml_content(shows: List[Dict[str, Any]]) -> str:
 # Background Download Queuing
 # ---------------------------------------------------------------------------
 
+def _finish_without_download(download_id: str, task_id: str, status: str, error: str,
+                             feed_url: str, enclosure_url: str) -> None:
+    """a download that did not land: the placeholder row that was written at
+    queue time goes, so the next scan tries again instead of treating the
+    episode as downloaded forever, and then the card says so. the record
+    first, the card second: anything that reacts to the card's state finds
+    the truth already written."""
+    db = _db()
+    if db and feed_url and enclosure_url:
+        try:
+            db.forget_podcast_episode_attempt(feed_url=feed_url, enclosure_url=enclosure_url)
+        except Exception as exc:
+            logger.debug("Could not drop the podcast download placeholder: %s", exc)
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if task:
+            task["status"] = status
+            task["error_message"] = error
+            task["status_change_time"] = time.time()
+    with _download_lock:
+        rec = _downloads.get(download_id)
+        if rec:
+            rec["status"] = "cancelled" if status == "cancelled" else "error"
+            rec["error"] = error
+
+
 def queue_podcast_download(data: Dict[str, Any]) -> Dict[str, Any]:
     """Queue background download of a podcast episode and register it in download_tasks."""
     enclosure_url = (data.get("enclosure_url") or "").strip()
@@ -430,6 +519,25 @@ def queue_podcast_download(data: Dict[str, Any]) -> Dict[str, Any]:
 
     # Run background worker thread
     def _worker():
+        slots = _download_slot_semaphore()
+        # wait for a slot as "queued". a cancel while waiting is honoured
+        # before any byte moves.
+        while not slots.acquire(timeout=1.0):
+            with tasks_lock:
+                t = download_tasks.get(task_id)
+                waiting_cancelled = bool(t and (t.get("cancel_requested") or t.get("status") == "cancelled"))
+            with _download_lock:
+                rec = _downloads.get(download_id)
+                waiting_cancelled = waiting_cancelled or bool(rec and rec.get("status") == "cancelled")
+            if waiting_cancelled:
+                _finish_without_download(download_id, task_id, "cancelled", "Download cancelled", feed_url, enclosure_url)
+                return
+        try:
+            _run_download()
+        finally:
+            slots.release()
+
+    def _run_download():
         with tasks_lock:
             if "podcasts" in download_batches:
                 download_batches["podcasts"]["active_count"] = (
@@ -596,32 +704,10 @@ def queue_podcast_download(data: Dict[str, Any]) -> Dict[str, Any]:
 
         except (InterruptedError, KeyboardInterrupt):
             logger.info("Podcast download cancelled: %s", title)
-            with tasks_lock:
-                task = download_tasks.get(task_id)
-                if task:
-                    task["status"] = "cancelled"
-                    task["error_message"] = "Download cancelled"
-                    task["status_change_time"] = time.time()
-            with _download_lock:
-                rec = _downloads.get(download_id)
-                if rec:
-                    rec["status"] = "cancelled"
-                    rec["error"] = "Download cancelled"
-
+            _finish_without_download(download_id, task_id, "cancelled", "Download cancelled", feed_url, enclosure_url)
         except Exception as exc:
             logger.error("Podcast download failed for %s: %s", title, exc)
-            with tasks_lock:
-                task = download_tasks.get(task_id)
-                if task:
-                    task["status"] = "failed"
-                    task["error_message"] = str(exc)
-                    task["status_change_time"] = time.time()
-            with _download_lock:
-                rec = _downloads.get(download_id)
-                if rec:
-                    rec["status"] = "error"
-                    rec["error"] = str(exc)
-
+            _finish_without_download(download_id, task_id, "failed", str(exc), feed_url, enclosure_url)
         finally:
             with tasks_lock:
                 if "podcasts" in download_batches:
@@ -759,7 +845,7 @@ def create_podcasts_blueprint() -> Blueprint:
         now = time.time()
         cached_show = _show_cache.get(feed_url)
         if cached_show and (now - cached_show["timestamp"]) < _SHOW_CACHE_TTL:
-            return jsonify({"success": True, "show": cached_show["show"]})
+            return jsonify({"success": True, "show": _with_downloaded_flags(cached_show["show"], feed_url)})
 
         show = client.fetch_feed(feed_url, show_hint=show_hint)
         if show is None:
@@ -768,7 +854,7 @@ def create_podcasts_blueprint() -> Blueprint:
         show_data = show_to_dict(show, include_episodes=True)
         _show_cache[feed_url] = {"timestamp": now, "show": show_data}
 
-        return jsonify({"success": True, "show": show_data})
+        return jsonify({"success": True, "show": _with_downloaded_flags(show_data, feed_url)})
 
     @bp.route("/download", methods=["POST"])
     def download_episode():

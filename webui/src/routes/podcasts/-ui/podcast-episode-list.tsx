@@ -82,7 +82,9 @@ export function PodcastEpisodeList({
           const dlRecord = Object.values(downloads).find(
             (d) => d.enclosure_url === ep.enclosure_url,
           );
-          const isDownloaded = dlRecord?.status === 'completed';
+          // the server says what is on disk (survives a restart); the live
+          // download list says what is landing right now
+          const isDownloaded = dlRecord?.status === 'completed' || Boolean(ep.downloaded);
           const isDownloading = dlRecord?.status === 'downloading' || dlRecord?.status === 'queued';
 
           const pubDateStr = ep.pub_date

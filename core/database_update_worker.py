@@ -57,6 +57,12 @@ class DatabaseUpdateWorker:
         self._touched_artist_ids = set()
         self._touched_album_ids = set()
 
+        # Every server track id this run actually saw, whatever the scan
+        # type. The superseded-row pass at the end folds a row the server no
+        # longer lists into the live row for the same file (#1257).
+        self._seen_track_ids = set()
+        self._trashed_skipped = 0
+
         # Optional callback(worker) run as the FINAL scan phase, immediately
         # before the 'finished' signal — so the auto-reconcile is inside the
         # scan's running window (automations/UI treat it as a normal phase and
@@ -93,6 +99,45 @@ class DatabaseUpdateWorker:
         # Database instance
         self.database: Optional[MusicDatabase] = None
     
+    @staticmethod
+    def _is_trashed(item) -> bool:
+        """plex keeps a moved or deleted file's item around, marked
+        ``deletedAt``, until the trash is emptied. plexapi does not surface
+        the attribute, so read it off the raw element. a trashed item is not
+        library content: writing it re-creates the row a reorganize just
+        repointed, and that is where the doubled albums come from (#1257)."""
+        if getattr(item, 'deletedAt', None):
+            return True
+        data = getattr(item, '_data', None)
+        attrib = getattr(data, 'attrib', None)
+        return bool(attrib and attrib.get('deletedAt'))
+
+    def _absorb_superseded_tracks(self):
+        """fold rows this run did not see into the live row for the same file.
+
+        a reorganize repoints a row at the new path; the server then trashes
+        that item and mints a new one for the same file, so the next scan
+        inserts a second row and the album lists every track twice. only the
+        deep scan removed the old row, and its 50% safety skipped exactly the
+        libraries that had this the worst. runs after every scan, over the
+        albums this run touched, and never touches a row the server still
+        lists."""
+        # getattr: tests build workers through __new__ without the run state
+        touched = getattr(self, '_touched_album_ids', None)
+        seen = getattr(self, '_seen_track_ids', None)
+        if not self.database or not touched or not seen:
+            return 0
+        try:
+            absorbed = self.database.absorb_superseded_tracks(touched, seen, self.server_type)
+        except Exception as e:
+            logger.warning(f"Superseded track pass failed (non-fatal): {e}")
+            return 0
+        if absorbed:
+            logger.info(f"Folded {absorbed} superseded track rows into their live rows")
+        if getattr(self, '_trashed_skipped', 0):
+            logger.info(f"Skipped {self._trashed_skipped} trashed {self.server_type} items")
+        return absorbed
+
     def _emit_signal(self, signal_name: str, *args):
         """Emit a signal through the callback registry."""
         for callback in self.callbacks.get(signal_name, []):
@@ -273,6 +318,8 @@ class DatabaseUpdateWorker:
             
             self._repair_navidrome_identities()
 
+            self._absorb_superseded_tracks()
+
             # Detect and remove content deleted from the media server
             # Only run on full refreshes — fetching the entire catalog on every
             # incremental scan is too expensive (especially for Plex) and unnecessary
@@ -289,6 +336,14 @@ class DatabaseUpdateWorker:
                                        f"{r_albums} albums, {r_tracks} tracks removed")
                 except Exception as e:
                     logger.warning(f"Removal detection failed (non-fatal): {e}")
+
+            # #1253: artists the server has no photo for used to get a url that
+            # 404s, which also kept enrichment from ever filling a real one in.
+            # a full refresh rewrites every artist so it heals on its own; an
+            # incremental scan never revisits them, so sweep here. one
+            # lightweight call, jellyfin/emby only (the client decides).
+            if self.database:
+                self._clear_phantom_artist_thumbs()
 
             # Cleanup orphaned records after incremental updates (catches fixed matches)
             if not self.full_refresh and self.database:
@@ -427,6 +482,11 @@ class DatabaseUpdateWorker:
             self._deep_scan_process_all_artists(artists, seen_track_ids)
 
             identity_repair_ok = self._repair_navidrome_identities()
+
+            # superseded rows go first: they are certain, and they must not
+            # count toward the 50% safety below (a reorganized library is
+            # nearly half superseded rows, which is what kept tripping it)
+            self._absorb_superseded_tracks()
 
             # Phase 3: Stale track removal
             self._emit_signal('phase_changed', "Deep scan: Checking for stale tracks...")
@@ -1076,8 +1136,12 @@ class DatabaseUpdateWorker:
                                     for track in album_tracks:
                                         if self.should_stop:
                                             break
-                                            
+                                        if self._is_trashed(track):
+                                            self._trashed_skipped += 1
+                                            continue
+
                                         try:
+                                            self._seen_track_ids.add(str(track.ratingKey))
                                             track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
                                             if track_success:
                                                 total_processed_tracks += 1
@@ -1164,6 +1228,23 @@ class DatabaseUpdateWorker:
             logger.debug(f"Error checking for metadata changes: {e}")
             return False  # Assume no changes if we can't check
     
+    def _clear_phantom_artist_thumbs(self):
+        """null the server-built photo url of every artist the server says has
+        no image. non-fatal, and a client that can't answer is left alone."""
+        getter = getattr(self.media_client, 'get_artist_ids_without_image', None)
+        if not callable(getter):
+            return
+        try:
+            without_image = getter()
+            if not without_image:
+                return
+            cleared = self.database.clear_phantom_artist_thumbs(without_image, self.server_type)
+            if cleared:
+                logger.info(f"Cleared {cleared} phantom artist photo urls "
+                            f"({self.server_type} has no image for them)")
+        except Exception as e:
+            logger.warning(f"Phantom artist photo sweep failed (non-fatal): {e}")
+
     def _detect_and_remove_stale_content(self):
         """Detect and remove content that was deleted from the media server.
 
@@ -1596,12 +1677,16 @@ class DatabaseUpdateWorker:
                                 for track in tracks:
                                     if self.should_stop:
                                         break
+                                    if self._is_trashed(track):
+                                        self._trashed_skipped += 1
+                                        continue
                                     track_batch.append((track, album_id, artist_id))
 
                                 # Process track batch
                                 for track, alb_id, art_id in track_batch:
                                     try:
                                         track_id_str = str(track.ratingKey)
+                                        self._seen_track_ids.add(track_id_str)
 
                                         # Deep scan: collect all server track IDs
                                         if seen_track_ids is not None:

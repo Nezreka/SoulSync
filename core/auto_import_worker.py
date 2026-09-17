@@ -305,6 +305,12 @@ class AutoImportWorker:
         self._stats = {'scanned': 0, 'auto_processed': 0, 'pending_review': 0, 'failed': 0}
         self._stats_lock = threading.Lock()
         self._last_scan_time = None
+        # what the last scan could not read, so "0 candidates" can say why.
+        # a staging folder the container user cannot open used to produce
+        # exactly the same log line as an empty one (truenas apps uid vs
+        # PUID). warned once per path, then quiet until it clears.
+        self._scan_problems: List[Dict[str, str]] = []
+        self._warned_scan_problems: set = set()
 
     # ── Per-candidate UI state helpers ──
 
@@ -479,6 +485,7 @@ class AutoImportWorker:
             'active_imports': active,
             'stats': stats_snapshot,
             'last_scan_time': self._last_scan_time,
+            'scan_problems': list(self._scan_problems),
         }
 
     def _interruptible_sleep(self, seconds: float) -> bool:
@@ -561,7 +568,12 @@ class AutoImportWorker:
             return
 
         candidates = self._enumerate_folders(staging)
-        logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
+        if self._scan_problems:
+            unreadable = '; '.join(f"{p['path']}: {p['error']}" for p in self._scan_problems[:3])
+            logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging} "
+                        f"(could not read: {unreadable})")
+        else:
+            logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
         if not candidates:
             return
 
@@ -645,6 +657,8 @@ class AutoImportWorker:
                 self._record_result(candidate, 'needs_identification', 0.0,
                                     error_message='Could not identify album from tags, folder name, or fingerprint')
                 self._bump_stat('failed')
+                self._emit_needs_attention(candidate, 'needs_identification', None,
+                                           'Could not identify album from tags, folder name, or fingerprint')
                 return
 
             # Phase 4: Match tracks
@@ -658,8 +672,13 @@ class AutoImportWorker:
                                     image_url=identification.get('image_url'),
                                     error_message='Could not match tracks to album tracklist')
                 self._bump_stat('failed')
+                self._emit_needs_attention(candidate, 'needs_identification', identification,
+                                           'Could not match tracks to album tracklist')
                 return
 
+            # which source the tracklist came from rides along into history,
+            # so the inbox matcher can reopen the same release.
+            match_result.setdefault('source', identification.get('source'))
             confidence = match_result['confidence']
             status = 'matched'
 
@@ -725,6 +744,8 @@ class AutoImportWorker:
                                     image_url=identification.get('image_url'),
                                     identification_method=identification.get('method'),
                                     match_data=match_result)
+                self._emit_needs_attention(candidate, status, identification,
+                                           f"{confidence:.0%} match, wants a look", confidence)
             else:
                 status = 'needs_identification'
                 self._bump_stat('failed')
@@ -736,11 +757,14 @@ class AutoImportWorker:
                                     image_url=identification.get('image_url'),
                                     identification_method=identification.get('method'),
                                     match_data=match_result)
+                self._emit_needs_attention(candidate, status, identification,
+                                           f"{confidence:.0%} match, too low to trust", confidence)
 
         except Exception as e:
             logger.error(f"[Auto-Import] Error processing {candidate.name}: {e}")
             self._record_result(candidate, 'failed', 0.0, error_message=str(e))
             self._bump_stat('failed')
+            self._emit_needs_attention(candidate, 'failed', None, str(e))
         finally:
             with self._submitted_lock:
                 self._submitted_hashes.discard(candidate.folder_hash)
@@ -748,6 +772,28 @@ class AutoImportWorker:
             # No stale "processing track 3/14" because the entry is
             # gone — the UI's polling read returns an empty array.
             self._unregister_active(candidate.folder_hash)
+
+    def _emit_needs_attention(self, candidate: 'FolderCandidate', status: str,
+                              identification: Optional[Dict], reason: str,
+                              confidence: float = 0.0) -> None:
+        """The automation event for a folder the worker could not finish on its
+        own. Before this the only way to learn an import was waiting on you
+        was to open the page."""
+        if not self._automation_engine:
+            return
+        try:
+            ident = identification or {}
+            self._automation_engine.emit('import_needs_attention', {
+                'folder_name': candidate.name,
+                'status': status,
+                'reason': reason,
+                'album_name': ident.get('album_name') or '',
+                'artist': ident.get('artist_name') or '',
+                'confidence': f"{confidence:.0%}" if confidence else '',
+                'track_count': str(len(candidate.audio_files)),
+            })
+        except Exception as e:
+            logger.debug("automation emit failed: %s", e)
 
     # ── Scanning ──
 
@@ -763,13 +809,38 @@ class AutoImportWorker:
                 return candidate
         return None
 
+    def enumerate_candidates(self, staging: str) -> Tuple[List[FolderCandidate], List[Dict[str, str]]]:
+        """The scan without the side effects: candidates plus the directories
+        it could not list. The inbox endpoint reads staging through this so
+        a page load never rewrites what the worker's own last scan saw."""
+        candidates: List[FolderCandidate] = []
+        problems: List[Dict[str, str]] = []
+        self._scan_directory(staging, candidates, staging_root=staging, problems=problems)
+        return candidates, problems
+
     def _enumerate_folders(self, staging: str) -> List[FolderCandidate]:
         """Find album folder and single file candidates in staging directory (recursive)."""
-        candidates = []
-        self._scan_directory(staging, candidates, staging_root=staging)
+        candidates, problems = self.enumerate_candidates(staging)
+        self._scan_problems = problems
+        for problem in problems:
+            self._warn_scan_problem(problem)
+        if not problems:
+            self._warned_scan_problems.clear()
         return candidates
 
-    def _scan_directory(self, directory: str, candidates: List[FolderCandidate], staging_root: str = ''):
+    def _warn_scan_problem(self, problem: Dict[str, str]) -> None:
+        """WARNING the first time each path fails, DEBUG after."""
+        key = (problem['path'], problem['error'])
+        if key in self._warned_scan_problems:
+            logger.debug(f"[Auto-Import] Still cannot read {problem['path']}: {problem['error']}")
+            return
+        self._warned_scan_problems.add(key)
+        logger.warning(f"[Auto-Import] Cannot read {problem['path']}: {problem['error']}. "
+                       f"Files in it will not be found. If this is a bind mount, check the "
+                       f"folder's owner against the container's PUID/PGID.")
+
+    def _scan_directory(self, directory: str, candidates: List[FolderCandidate], staging_root: str = '',
+                        problems: Optional[List[Dict[str, str]]] = None):
         """Recursively scan a directory for album folders and loose audio files.
 
         Loose-file handling:
@@ -792,9 +863,12 @@ class AutoImportWorker:
           common when a user moves some tracks out of an album folder
           while leaving the parent album folder intact.
         """
+        if problems is None:
+            problems = []
         try:
             entries = sorted(os.listdir(directory))
-        except OSError:
+        except OSError as e:
+            problems.append({'path': directory, 'error': e.strerror or str(e)})
             return
 
         loose_files = []
@@ -820,14 +894,16 @@ class AutoImportWorker:
                 disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
                               if os.path.isfile(os.path.join(sub_path, f))
                               and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
-            except OSError:
+            except OSError as e:
+                problems.append({'path': sub_path, 'error': e.strerror or str(e)})
                 disc_files = []
             if disc_files:
                 disc_files_by_num[disc_num] = disc_files
 
         if loose_files:
+            is_root = bool(staging_root) and os.path.normpath(directory) == os.path.normpath(staging_root)
             self._build_loose_file_candidates(
-                directory, loose_files, disc_files_by_num, candidates,
+                directory, loose_files, disc_files_by_num, candidates, is_root=is_root,
             )
         elif disc_files_by_num and not non_disc_subdirs:
             # Disc-only directory — treat THIS directory as the album.
@@ -854,7 +930,7 @@ class AutoImportWorker:
         # beside loose tracks get silently ignored (the bug a chaotic
         # staging root surfaced on 2026-05-09).
         for _sub_name, sub_path in non_disc_subdirs:
-            self._scan_directory(sub_path, candidates, staging_root=staging_root)
+            self._scan_directory(sub_path, candidates, staging_root=staging_root, problems=problems)
 
     def _build_loose_file_candidates(
         self,
@@ -862,14 +938,19 @@ class AutoImportWorker:
         loose_files: List[str],
         disc_files_by_num: Dict[int, List[str]],
         candidates: List[FolderCandidate],
+        is_root: bool = True,
     ) -> None:
         """Group loose audio files by `album` tag, build one candidate
         per album group + attach matching disc folders.
 
         - Tagged files cluster by their album name (case-insensitive,
           whitespace-stripped).
-        - Untagged files become individual single candidates (can't
-          group what we don't have a key for).
+        - Untagged files at the staging ROOT become individual single
+          candidates (can't group what we don't have a key for).
+        - Untagged files inside a subfolder are that folder's album. The
+          folder name is the key we do have, and folder-name
+          identification exists for exactly this case; splitting them
+          into singles meant it never ran on them.
         - Disc folders attach to whichever loose group's album tag
           matches the first disc-folder track's album tag. Disc folders
           with no matching loose group fall through to a standalone
@@ -939,14 +1020,34 @@ class AutoImportWorker:
                 folder_hash=folder_hash,
             ))
 
-        # Untagged singles — one candidate per file. Can't group them.
-        for f in untagged:
-            audio_files = [f]
-            folder_hash = _compute_folder_hash(audio_files)
+        if untagged and not is_root:
+            # A subfolder of untagged files is one album named by the folder.
+            # Discs nobody claimed by tag belong to it too.
+            audio_files = list(untagged)
+            disc_structure: Dict[int, List[str]] = {}
+            for disc_num, disc_files in disc_files_by_num.items():
+                if disc_num not in merged_disc_nums:
+                    audio_files.extend(disc_files)
+                    disc_structure[disc_num] = list(disc_files)
+                    merged_disc_nums.add(disc_num)
+            if disc_structure:
+                disc_structure[0] = list(untagged)
             candidates.append(FolderCandidate(
-                path=f, name=os.path.basename(f),
-                audio_files=audio_files, folder_hash=folder_hash, is_single=True,
+                path=directory,
+                name=os.path.basename(directory),
+                audio_files=audio_files,
+                disc_structure=disc_structure,
+                folder_hash=_compute_folder_hash(audio_files),
             ))
+        else:
+            # Untagged singles at the root — one candidate per file.
+            for f in untagged:
+                audio_files = [f]
+                folder_hash = _compute_folder_hash(audio_files)
+                candidates.append(FolderCandidate(
+                    path=f, name=os.path.basename(f),
+                    audio_files=audio_files, folder_hash=folder_hash, is_single=True,
+                ))
 
         # Standalone disc folders (no loose group claimed them) — bundle
         # into a multi-disc candidate scoped to the directory.
@@ -2234,6 +2335,7 @@ class AutoImportWorker:
                 'total_tracks': match_data.get('total_tracks', 0),
                 'matched_count': match_data.get('matched_count', 0),
                 'coverage': match_data.get('coverage', 0),
+                'source': match_data.get('source'),
             }
             return json.dumps(serializable)
         except Exception:
@@ -2326,6 +2428,49 @@ class AutoImportWorker:
         finally:
             if conn is not None:
                 conn.close()
+
+    def retry_item(self, item_id: int) -> Dict:
+        """Forget a finished row so the next scan picks the folder up again.
+
+        The dedup guard treats failed / needs-identification / rejected as
+        terminal, so without this a folder that failed once was never
+        looked at again unless the user changed its files."""
+        try:
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM auto_import_history WHERE id = ? AND status IN "
+                "('failed', 'needs_identification', 'rejected', 'partial')",
+                (item_id,),
+            )
+            deleted = cursor.rowcount
+            conn.commit()
+            conn.close()
+            if deleted != 1:
+                return {'success': False, 'error': 'Item not found or not in a retryable state'}
+            return {'success': True}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def resolve_item(self, item_id: int, method: str = 'manual') -> Dict:
+        """Mark a row imported by hand (the inbox matcher) so history shows
+        what happened instead of a stale "needs identification"."""
+        try:
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE auto_import_history SET status = 'completed', identification_method = ?, "
+                "error_message = NULL, processed_at = ? WHERE id = ?",
+                (method, datetime.now().isoformat(), item_id),
+            )
+            updated = cursor.rowcount
+            conn.commit()
+            conn.close()
+            if updated != 1:
+                return {'success': False, 'error': 'Item not found'}
+            return {'success': True}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
 
     def reject_item(self, item_id: int) -> Dict:
         """Reject/dismiss an auto-import item."""

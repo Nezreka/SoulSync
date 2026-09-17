@@ -243,7 +243,11 @@ def record_sync_history_completion(database, batch_id: str, batch: dict) -> None
     """
     try:
         analysis_results = batch.get('analysis_results', [])
-        tracks_found = sum(1 for r in analysis_results if r.get('found'))
+        # a batch that ran no analysis of its own has nothing to say about how
+        # many tracks matched; the sync that created the row already wrote
+        # that, and writing 0 over it is what made the dashboard read
+        # "0/240 in library" against a modal listing 236 matched
+        tracks_found = sum(1 for r in analysis_results if r.get('found')) if analysis_results else None
         queue = batch.get('queue', [])
         completed_count = 0
         failed_count = len(batch.get('permanently_failed_tracks', []))

@@ -36,7 +36,9 @@ import { Route as ImportSinglesRouteImport } from './routes/import/singles'
 import { Route as ImportAutoRouteImport } from './routes/import/auto'
 import { Route as ImportAlbumRouteImport } from './routes/import/album'
 import { Route as AudiobooksWishlistRouteImport } from './routes/audiobooks/wishlist'
+import { Route as AudiobooksLibraryRouteImport } from './routes/audiobooks/library'
 import { Route as AudiobooksAsinRouteImport } from './routes/audiobooks/$asin'
+import { Route as ImportMatchKeyRouteImport } from './routes/import/match.$key'
 import { Route as AudiobooksNarratorNameRouteImport } from './routes/audiobooks/narrator/$name'
 import { Route as AudiobooksAuthorNameRouteImport } from './routes/audiobooks/author/$name'
 import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail/$source/$id'
@@ -176,10 +178,20 @@ const AudiobooksWishlistRoute = AudiobooksWishlistRouteImport.update({
   path: '/wishlist',
   getParentRoute: () => AudiobooksRouteRoute,
 } as any)
+const AudiobooksLibraryRoute = AudiobooksLibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
+  getParentRoute: () => AudiobooksRouteRoute,
+} as any)
 const AudiobooksAsinRoute = AudiobooksAsinRouteImport.update({
   id: '/$asin',
   path: '/$asin',
   getParentRoute: () => AudiobooksRouteRoute,
+} as any)
+const ImportMatchKeyRoute = ImportMatchKeyRouteImport.update({
+  id: '/match/$key',
+  path: '/match/$key',
+  getParentRoute: () => ImportRouteRoute,
 } as any)
 const AudiobooksNarratorNameRoute = AudiobooksNarratorNameRouteImport.update({
   id: '/narrator/$name',
@@ -217,6 +229,7 @@ export interface FileRoutesByFullPath {
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/audiobooks/$asin': typeof AudiobooksAsinRoute
+  '/audiobooks/library': typeof AudiobooksLibraryRoute
   '/audiobooks/wishlist': typeof AudiobooksWishlistRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -229,6 +242,7 @@ export interface FileRoutesByFullPath {
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
   '/audiobooks/author/$name': typeof AudiobooksAuthorNameRoute
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
+  '/import/match/$key': typeof ImportMatchKeyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -247,6 +261,7 @@ export interface FileRoutesByTo {
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/audiobooks/$asin': typeof AudiobooksAsinRoute
+  '/audiobooks/library': typeof AudiobooksLibraryRoute
   '/audiobooks/wishlist': typeof AudiobooksWishlistRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -259,6 +274,7 @@ export interface FileRoutesByTo {
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
   '/audiobooks/author/$name': typeof AudiobooksAuthorNameRoute
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
+  '/import/match/$key': typeof ImportMatchKeyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -281,6 +297,7 @@ export interface FileRoutesById {
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/audiobooks/$asin': typeof AudiobooksAsinRoute
+  '/audiobooks/library': typeof AudiobooksLibraryRoute
   '/audiobooks/wishlist': typeof AudiobooksWishlistRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -293,6 +310,7 @@ export interface FileRoutesById {
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
   '/audiobooks/author/$name': typeof AudiobooksAuthorNameRoute
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
+  '/import/match/$key': typeof ImportMatchKeyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -316,6 +334,7 @@ export interface FileRouteTypes {
     | '/wishlist'
     | '/$'
     | '/audiobooks/$asin'
+    | '/audiobooks/library'
     | '/audiobooks/wishlist'
     | '/import/album'
     | '/import/auto'
@@ -328,6 +347,7 @@ export interface FileRouteTypes {
     | '/artist-detail/$source/$id'
     | '/audiobooks/author/$name'
     | '/audiobooks/narrator/$name'
+    | '/import/match/$key'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -346,6 +366,7 @@ export interface FileRouteTypes {
     | '/wishlist'
     | '/$'
     | '/audiobooks/$asin'
+    | '/audiobooks/library'
     | '/audiobooks/wishlist'
     | '/import/album'
     | '/import/auto'
@@ -358,6 +379,7 @@ export interface FileRouteTypes {
     | '/artist-detail/$source/$id'
     | '/audiobooks/author/$name'
     | '/audiobooks/narrator/$name'
+    | '/import/match/$key'
   id:
     | '__root__'
     | '/'
@@ -379,6 +401,7 @@ export interface FileRouteTypes {
     | '/wishlist'
     | '/$'
     | '/audiobooks/$asin'
+    | '/audiobooks/library'
     | '/audiobooks/wishlist'
     | '/import/album'
     | '/import/auto'
@@ -391,6 +414,7 @@ export interface FileRouteTypes {
     | '/artist-detail/$source/$id'
     | '/audiobooks/author/$name'
     | '/audiobooks/narrator/$name'
+    | '/import/match/$key'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -607,12 +631,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AudiobooksWishlistRouteImport
       parentRoute: typeof AudiobooksRouteRoute
     }
+    '/audiobooks/library': {
+      id: '/audiobooks/library'
+      path: '/library'
+      fullPath: '/audiobooks/library'
+      preLoaderRoute: typeof AudiobooksLibraryRouteImport
+      parentRoute: typeof AudiobooksRouteRoute
+    }
     '/audiobooks/$asin': {
       id: '/audiobooks/$asin'
       path: '/$asin'
       fullPath: '/audiobooks/$asin'
       preLoaderRoute: typeof AudiobooksAsinRouteImport
       parentRoute: typeof AudiobooksRouteRoute
+    }
+    '/import/match/$key': {
+      id: '/import/match/$key'
+      path: '/match/$key'
+      fullPath: '/import/match/$key'
+      preLoaderRoute: typeof ImportMatchKeyRouteImport
+      parentRoute: typeof ImportRouteRoute
     }
     '/audiobooks/narrator/$name': {
       id: '/audiobooks/narrator/$name'
@@ -640,6 +678,7 @@ declare module '@tanstack/react-router' {
 
 interface AudiobooksRouteRouteChildren {
   AudiobooksAsinRoute: typeof AudiobooksAsinRoute
+  AudiobooksLibraryRoute: typeof AudiobooksLibraryRoute
   AudiobooksWishlistRoute: typeof AudiobooksWishlistRoute
   AudiobooksIndexRoute: typeof AudiobooksIndexRoute
   AudiobooksAuthorNameRoute: typeof AudiobooksAuthorNameRoute
@@ -648,6 +687,7 @@ interface AudiobooksRouteRouteChildren {
 
 const AudiobooksRouteRouteChildren: AudiobooksRouteRouteChildren = {
   AudiobooksAsinRoute: AudiobooksAsinRoute,
+  AudiobooksLibraryRoute: AudiobooksLibraryRoute,
   AudiobooksWishlistRoute: AudiobooksWishlistRoute,
   AudiobooksIndexRoute: AudiobooksIndexRoute,
   AudiobooksAuthorNameRoute: AudiobooksAuthorNameRoute,
@@ -663,6 +703,7 @@ interface ImportRouteRouteChildren {
   ImportAutoRoute: typeof ImportAutoRoute
   ImportSinglesRoute: typeof ImportSinglesRoute
   ImportIndexRoute: typeof ImportIndexRoute
+  ImportMatchKeyRoute: typeof ImportMatchKeyRoute
 }
 
 const ImportRouteRouteChildren: ImportRouteRouteChildren = {
@@ -670,6 +711,7 @@ const ImportRouteRouteChildren: ImportRouteRouteChildren = {
   ImportAutoRoute: ImportAutoRoute,
   ImportSinglesRoute: ImportSinglesRoute,
   ImportIndexRoute: ImportIndexRoute,
+  ImportMatchKeyRoute: ImportMatchKeyRoute,
 }
 
 const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(

@@ -924,7 +924,7 @@ Remove a track from the wishlist by its Spotify track ID.
 
 #### `POST /api/v1/wishlist/process`
 
-Trigger wishlist download processing (retries all failed tracks).
+Trigger wishlist download processing (retries all failed tracks). `409 CONFLICT` while a run is already in progress.
 
 ---
 
@@ -2112,6 +2112,87 @@ Update settings (partial update). Uses dot-notation keys.
 
 ---
 
+### Video
+
+The movies and TV side. Every endpoint runs the same handler the web UI uses and wraps it in the v1 envelope. Returns `503 NOT_AVAILABLE` on a server with the video side disabled.
+
+#### `GET /api/v1/video/library`
+
+Titles in the video library. `kind=movies|shows` (default `movies`), plus `search`, `letter`, `sort`, `status`, `genre`, `resolution`, `page`, `limit`.
+
+#### `GET /api/v1/video/library/genres`
+
+#### `GET /api/v1/video/search?q=`
+
+TMDB multi-search over movies, shows and people.
+
+#### `GET /api/v1/video/trending`
+
+#### `GET /api/v1/video/wishlist`
+
+`kind=movie|show` for a page of items (`search`, `sort`, `page`, `limit`); no `kind` returns counts only.
+
+#### `GET /api/v1/video/wishlist/counts`
+
+#### `POST /api/v1/video/wishlist`
+
+Add a movie, or a set of a show's episodes:
+
+```json
+{"movie": {"tmdb_id": 603, "title": "The Matrix", "year": 1999}}
+```
+
+```json
+{"show": {"tmdb_id": 1396, "title": "Breaking Bad"},
+ "episodes": [{"season_number": 1, "episode_number": 1}, {"season_number": 1, "episode_number": 2}]}
+```
+
+#### `DELETE /api/v1/video/wishlist`
+
+Body: `{"scope": "movie|show|season|episode", "tmdb_id": 603, "season_number"?: 1, "episode_number"?: 1}`.
+
+#### `GET /api/v1/video/watchlist`
+
+Followed shows, people and studios.
+
+#### `POST /api/v1/video/watchlist`
+
+Body: `{"kind": "show|person|studio", "tmdb_id": 1396, "title": "Breaking Bad"}`.
+
+#### `DELETE /api/v1/video/watchlist`
+
+Body: `{"kind": "show", "tmdb_id": 1396}`.
+
+#### `POST /api/v1/video/scan`
+
+Ask for a library scan. Body: `{"mode"?: "incremental|deep|full"}`. `409 CONFLICT` while one is running.
+
+#### `GET /api/v1/video/scan/status`
+
+#### `GET /api/v1/video/downloads`
+
+Active video downloads.
+
+#### `GET /api/v1/video/downloads/status`
+
+#### `GET /api/v1/video/downloads/history`
+
+#### `GET /api/v1/video/calendar`
+
+Upcoming and recent episodes and releases. `start` and `end` as ISO dates.
+
+#### `GET /api/v1/video/requests`
+
+#### `POST /api/v1/video/requests`
+
+File a request for an admin to approve. Body: `{"kind": "movie|show", "tmdb_id": 27205, "title": "Inception", "year"?: 2010, "note"?: "..."}`.
+
+#### `POST /api/v1/video/requests/<id>/approve`
+
+#### `POST /api/v1/video/requests/<id>/deny`
+
+---
+
 ### API Key Management
 
 #### `GET /api/v1/api-keys`
@@ -2426,6 +2507,28 @@ curl -H "Authorization: Bearer sk_..." \
 | GET | `/playlists` | List playlists |
 | GET | `/playlists/<id>` | Playlist detail + tracks |
 | POST | `/playlists/<id>/sync` | Trigger playlist sync |
+| **Video** | | |
+| GET | `/video/library` | Movies or shows in the library |
+| GET | `/video/library/genres` | Video genres |
+| GET | `/video/search` | TMDB multi-search |
+| GET | `/video/trending` | Trending titles |
+| GET | `/video/wishlist` | Wishlist page or counts |
+| GET | `/video/wishlist/counts` | Wishlist counts |
+| POST | `/video/wishlist` | Add a movie or episodes |
+| DELETE | `/video/wishlist` | Remove at any scope |
+| GET | `/video/watchlist` | Followed shows / people / studios |
+| POST | `/video/watchlist` | Follow |
+| DELETE | `/video/watchlist` | Unfollow |
+| POST | `/video/scan` | Ask for a library scan |
+| GET | `/video/scan/status` | Scan progress |
+| GET | `/video/downloads` | Active downloads |
+| GET | `/video/downloads/status` | Download status |
+| GET | `/video/downloads/history` | Download history |
+| GET | `/video/calendar` | Upcoming / recent releases |
+| GET | `/video/requests` | Requests |
+| POST | `/video/requests` | File a request |
+| POST | `/video/requests/<id>/approve` | Approve |
+| POST | `/video/requests/<id>/deny` | Deny |
 | **Settings** | | |
 | GET | `/settings` | Get settings (redacted) |
 | PATCH | `/settings` | Update settings |

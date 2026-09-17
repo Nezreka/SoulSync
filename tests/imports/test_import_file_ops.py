@@ -116,6 +116,10 @@ def test_read_staging_file_metadata_reads_tags(monkeypatch, tmp_path):
         "album": "Album One",
         "track_number": 3,
         "disc_number": 2,
+        # off audio.info; the dummy has none, and "fake" is 4 bytes on disk
+        "duration_ms": 0,
+        "bitrate": 0,
+        "size": 4,
     }
 
 
@@ -186,6 +190,9 @@ def test_read_staging_file_metadata_uses_filename_fallbacks_when_tags_are_invali
         "album": "Album One",
         "track_number": 2,
         "disc_number": 1,
+        "duration_ms": 0,
+        "bitrate": 0,
+        "size": 4,
     }
 
 

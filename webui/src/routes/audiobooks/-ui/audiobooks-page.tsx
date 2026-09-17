@@ -20,7 +20,6 @@ import { AudiobookCard } from './audiobook-card';
 import { useAudiobookContext } from './audiobook-context';
 import { AudiobookGenreNav } from './audiobook-genre-nav';
 import { AudiobookHero } from './audiobook-hero';
-import { AudiobookLibraryModal } from './audiobook-library-modal';
 import { AudiobookPeopleRow } from './audiobook-people-row';
 import { AudiobookRail } from './audiobook-rail';
 import { AudiobookReviewModal } from './audiobook-review-modal';
@@ -56,7 +55,6 @@ export function AudiobooksBrowsePage() {
   const mode = activeQuery ? 'search' : activeGenre ? 'genre' : 'home';
 
   const [showBlocklist, setShowBlocklist] = useState(false);
-  const [showLibrary, setShowLibrary] = useState(false);
   const [draft, setDraft] = useState(activeQuery);
 
   const [home, setHome] = useState<AudiobookHome>({ hero: null, shelves: [] });
@@ -200,10 +198,9 @@ export function AudiobooksBrowsePage() {
         </Link>
 
         {/* What you already have, beside what you want and what you refuse. */}
-        <button
-          type="button"
+        <Link
+          to="/audiobooks/library"
           className={styles.wishlistLink}
-          onClick={() => setShowLibrary(true)}
           title="Audiobooks in your library folder"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -216,7 +213,7 @@ export function AudiobooksBrowsePage() {
             />
           </svg>
           Library
-        </button>
+        </Link>
 
         {/* Beside the wishlist because they are two halves of the same idea:
             what to fetch, and what never to fetch again. */}
@@ -234,7 +231,6 @@ export function AudiobooksBrowsePage() {
         </button>
       </div>
 
-      {showLibrary && <AudiobookLibraryModal onClose={() => setShowLibrary(false)} />}
       {showBlocklist && <AudiobookReviewModal onClose={() => setShowBlocklist(false)} />}
 
       <AudiobookGenreNav categories={categories} active={activeGenre} onSelect={selectGenre} />

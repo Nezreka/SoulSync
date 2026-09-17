@@ -14,6 +14,9 @@ export interface PodcastEpisodeItem {
   artwork_url?: string | null;
   chapter_url?: string | null;
   transcript_url?: string | null;
+  /** on disk already, from the database. survives a restart, unlike the live download list. */
+  downloaded?: boolean;
+  file_path?: string | null;
 }
 
 export interface PodcastShowSummary {

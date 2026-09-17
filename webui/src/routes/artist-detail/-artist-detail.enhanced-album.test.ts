@@ -13,6 +13,7 @@ import {
   albumMetaUpdates,
   deriveMissingTracks,
   getAlbumCanonicalSource,
+  loadCanonicalTracks,
   normalizeCanonicalTracks,
   normTitleForMatch,
   albumIdBadges,
@@ -548,6 +549,57 @@ describe('deriveMissingTracks', () => {
     const album = { id: 1, tracks: [] };
     const [row] = deriveMissingTracks(album, [{ ...canonical(1, 'X'), duration: 1234 }]);
     expect(row.duration_ms).toBe(1234);
+  });
+});
+
+describe('loadCanonicalTracks', () => {
+  const ok = (body: unknown) =>
+    Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('marks an unmatched album loaded without touching the network', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    expect(await loadCanonicalTracks({ id: 1, title: 'X' }, 'A')).toEqual({
+      _canonicalTracksLoaded: true,
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('asks the canonical source and diffs the answer against what is owned', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        ok({
+          success: true,
+          source: 'deezer',
+          tracks: [
+            { id: 't1', name: 'One', track_number: 1 },
+            { id: 't2', name: 'Two', track_number: 2 },
+          ],
+        }),
+      ),
+    );
+    const patch = await loadCanonicalTracks(
+      { id: 1, title: 'X', deezer_id: 'dz', tracks: [{ id: 9, title: 'One', track_number: 1 }] },
+      'A',
+    );
+    expect(patch._canonicalTracksLoaded).toBe(true);
+    expect(patch.api_track_count).toBe(2);
+    expect((patch.canonical_tracks as unknown[]).length).toBe(2);
+    expect((patch.missing_tracks as { name: string }[]).map((t) => t.name)).toEqual(['Two']);
+  });
+
+  it('records a failed fetch as loaded, so the panel does not retry forever', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => ok({ success: false, error: 'nope' })),
+    );
+    const patch = await loadCanonicalTracks({ id: 1, title: 'X', spotify_album_id: 's' }, 'A');
+    expect(patch).toEqual({ _canonicalTracksLoaded: true, _canonicalTracksError: 'nope' });
   });
 });
 

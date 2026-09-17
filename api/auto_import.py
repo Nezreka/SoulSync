@@ -139,6 +139,30 @@ def auto_import_reject(item_id):
     return jsonify(_auto_import_worker().reject_item(item_id))
 
 
+@bp.route('/api/auto-import/retry/<int:item_id>', methods=['POST'])
+def auto_import_retry(item_id):
+    """forget a finished row so the next scan picks the folder up again, and
+    kick that scan off if the worker is running."""
+    if not _auto_import_worker():
+        return jsonify({"success": False, "error": "Auto-import not available"}), 500
+    result = _auto_import_worker().retry_item(item_id)
+    if result.get('success') and _auto_import_worker().running:
+        threading.Thread(
+            target=_auto_import_worker().trigger_scan,
+            daemon=True,
+            name='AutoImportRetryScan',
+        ).start()
+    return jsonify(result)
+
+
+@bp.route('/api/auto-import/resolve/<int:item_id>', methods=['POST'])
+def auto_import_resolve(item_id):
+    """the inbox matcher imported this item by hand; record it as done."""
+    if not _auto_import_worker():
+        return jsonify({"success": False, "error": "Auto-import not available"}), 500
+    return jsonify(_auto_import_worker().resolve_item(item_id))
+
+
 @bp.route('/api/auto-import/scan-now', methods=['POST'])
 def auto_import_scan_now():
     """Trigger an immediate scan cycle.

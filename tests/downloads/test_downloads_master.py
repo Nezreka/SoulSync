@@ -687,6 +687,61 @@ def test_mb_release_preflight_caches_mbid(monkeypatch):
     assert detail_cache['mbid-xyz'] == fake_release
 
 
+def test_mb_release_preflight_is_skipped_for_an_album_already_owned(monkeypatch):
+    """boulder: "click begin analysis ... takes a while before any tracks
+    start marking as owned or missing". the preflight (an MB search plus
+    up to eight full release fetches, 1 req/s, 503 retries) used to run
+    before a single track was checked, and it exists only to tag files
+    that get downloaded. an album you own downloads nothing."""
+    db = _FakeDB(album=_DBAlbum(id_=7, title='Owned Album'), album_tracks=[_DBTrack('T1')])
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    calls = []
+
+    import core.album_consistency as ac
+    monkeypatch.setattr(ac, '_find_best_release',
+                        lambda album, artist, count, svc: calls.append(album) or {'id': 'mbid-1'})
+    cache = {}
+    deps = _build_deps(mb_worker=_FakeMBWorker(svc=_FakeMBSvc()), mb_release_cache=cache)
+    _seed_batch('B12', is_album_download=True,
+                album_context={'name': 'Owned Album', 'total_tracks': 1},
+                artist_context={'name': 'Artist'})
+
+    mw.run_full_missing_tracks_process('B12', 'album:1', [{'name': 'T1', 'artists': ['Artist']}], deps)
+
+    assert download_batches['B12']['phase'] == 'complete'
+    assert calls == [], "nothing to download, nothing to pin"
+    assert cache == {}
+
+
+def test_mb_release_preflight_runs_after_every_track_is_analysed(monkeypatch):
+    """the analysis (what the modal shows) must finish before the network wait starts."""
+    # one owned, one missing, so the album path both analyses and downloads
+    db = _FakeDB(album=_DBAlbum(id_=8, title='Album'), album_tracks=[_DBTrack('T1')])
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    order = []
+    real_lookup = db.get_tracks_by_album
+
+    def spying_lookup(*a, **k):
+        order.append('analysed')
+        return real_lookup(*a, **k)
+    db.get_tracks_by_album = spying_lookup
+
+    import core.album_consistency as ac
+    monkeypatch.setattr(ac, '_find_best_release',
+                        lambda album, artist, count, svc: order.append('preflight') or {'id': 'mbid-1'})
+    deps = _build_deps(mb_worker=_FakeMBWorker(svc=_FakeMBSvc()), mb_release_cache={})
+    _seed_batch('B13', is_album_download=True,
+                album_context={'name': 'Album', 'total_tracks': 2},
+                artist_context={'name': 'Artist'})
+
+    mw.run_full_missing_tracks_process('B13', 'album:1',
+                                       [{'name': 'T1', 'artists': ['Artist']},
+                                        {'name': 'T2', 'artists': ['Artist']}], deps)
+
+    assert 'preflight' in order and 'analysed' in order
+    assert order.index('preflight') > order.index('analysed')
+
+
 def test_mb_release_preflight_skipped_when_no_mb_worker(monkeypatch):
     """Without mb_worker, preflight quietly skips."""
     db = _FakeDB()
