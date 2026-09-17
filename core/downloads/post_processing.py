@@ -69,24 +69,13 @@ def _reject_non_audio_found_file(found_file: Optional[str], file_location: Optio
 
 
 def _found_file_matches_expected(found_file: Optional[str],
-                                 expected_final_filename: Optional[str]) -> bool:
-    """True iff a file found in the TRANSFER folder is the file this task's
-    context describes — same name stem as the context-derived expected final
-    filename. Extension is ignored because ``expected_final_filename`` is
-    generated with a hardcoded ``.flac``.
-
-    jadux's wrong-metadata report: under heavy concurrency the finder (fuzzy
-    basename search) or the context lookup (fuzzy fallback) can pair THIS
-    task's context with ANOTHER track's already-imported file; writing tags
-    then stamps the wrong track's metadata into a correct file. The name the
-    tagging context itself predicts is the identity check: if the found file
-    isn't named what this context would have named it, it isn't ours to write.
-    """
-    if not found_file or not expected_final_filename:
+                                 expected_final_path: Optional[str]) -> bool:
+    """Only the import pipeline's recorded destination proves transfer identity."""
+    if not found_file or not expected_final_path:
         return False
-    found_stem = os.path.splitext(os.path.basename(found_file))[0]
-    expected_stem = os.path.splitext(expected_final_filename)[0]
-    return found_stem.casefold() == expected_stem.casefold()
+    return os.path.normcase(os.path.realpath(found_file)) == os.path.normcase(
+        os.path.realpath(expected_final_path)
+    )
 
 
 def _normalize_match_text(value: str) -> str:
@@ -224,10 +213,10 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
         download_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.download_path', './downloads'))
         transfer_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.transfer_path', './Transfer'))
 
-        # Try to get context for generating the correct final filename
+        # The importer records the actual destination before moving a file.
+        # Guessing its name here ignores user templates and unknown numbering.
         task_basename = deps.extract_filename(task_filename)
         context_key = deps.make_context_key(task_username, task_filename)
-        expected_final_filename = None
 
         logger.info(f"[Post-Processing] Looking up context with key: {context_key}")
 
@@ -239,26 +228,6 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
         if context:
             logger.info(f"[Post-Processing] Found context for key: {context_key}")
-            try:
-                original_search = context.get("original_search_result", {})
-                logger.info(f"[Post-Processing] original_search keys: {list(original_search.keys())}")
-
-                clean_title = get_import_clean_title(context, default=original_search.get('title', ''))
-                track_number = original_search.get('track_number')
-
-                logger.info(f"[Post-Processing] clean_title: '{clean_title}', track_number: {track_number}")
-
-                if clean_title and track_number:
-                    # Generate expected final filename that stream processor would create
-                    # Pattern: f"{track_number:02d} - {clean_title}.flac"
-                    sanitized_title = clean_title.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-                    expected_final_filename = f"{track_number:02d} - {sanitized_title}.flac"
-                    logger.info(f"[Post-Processing] Generated expected final filename: {expected_final_filename}")
-                else:
-                    logger.warning(f"[Post-Processing] Missing required data - clean_title: {bool(clean_title)}, track_number: {bool(track_number)}")
-            except Exception as e:
-                logger.error(f"[Post-Processing] Error generating expected filename: {e}")
-                traceback.print_exc()
         else:
             logger.warning(f"[Post-Processing] No context found for key: {context_key}")
             # Try fuzzy matching with similar keys containing the filename
@@ -283,33 +252,14 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                 fuzzy_key = similar_keys[0]
                 context = matched_downloads_context.get(fuzzy_key)
                 logger.info(f"[Post-Processing] Found context using fuzzy key matching: {fuzzy_key}")
-
-                # Generate expected final filename using the found context
-                try:
-                    original_search = context.get("original_search_result", {})
-                    logger.info(f"[Post-Processing] fuzzy context original_search keys: {list(original_search.keys())}")
-
-                    clean_title = get_import_clean_title(context, default=original_search.get('title', ''))
-                    track_number = original_search.get('track_number')
-
-                    logger.info(f"[Post-Processing] fuzzy context clean_title: '{clean_title}', track_number: {track_number}")
-
-                    if clean_title and track_number:
-                        # Generate expected final filename that stream processor would create
-                        # Pattern: f"{track_number:02d} - {clean_title}.flac"
-                        sanitized_title = clean_title.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
-                        expected_final_filename = f"{track_number:02d} - {sanitized_title}.flac"
-                        logger.info(f"[Post-Processing] Generated expected final filename from fuzzy match: {expected_final_filename}")
-                    else:
-                        logger.warning(f"[Post-Processing] Missing required data from fuzzy match - clean_title: {bool(clean_title)}, track_number: {bool(track_number)}")
-                except Exception as e:
-                    logger.error(f"[Post-Processing] Error generating expected filename from fuzzy match: {e}")
-                    traceback.print_exc()
             else:
                 logger.warning(f"[Post-Processing] No similar keys found containing '{task_basename}'")
                 # Show a sample of what keys actually exist for debugging
                 sample_keys = list(matched_downloads_context.keys())[:5]
                 logger.info(f"[Post-Processing] Sample of existing keys: {sample_keys}")
+
+        expected_final_path = (context or {}).get('_final_processed_path')
+        expected_final_filename = os.path.basename(expected_final_path) if expected_final_path else None
 
         # RESILIENT FILE-FINDING LOOP: Try up to 3 times with delays
         found_file = None
@@ -450,7 +400,9 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             else:
                 logger.error("[Post-Processing] Strategy 1 FAILED: Original filename not found in either location")
 
-            # Strategy 2: If not found and we have an expected final filename, try that in transfer folder
+            # Strategy 2: Prefer the exact destination recorded by the importer.
+            if not found_file and expected_final_path and os.path.isfile(expected_final_path):
+                found_file, file_location = _reject_non_audio_found_file(expected_final_path, 'transfer')
             if not found_file and expected_final_filename:
                 logger.info("[Post-Processing] Strategy 2: Searching transfer folder with expected final filename...")
                 found_result = deps.find_completed_file(transfer_dir, expected_final_filename)
@@ -466,12 +418,12 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             elif not expected_final_filename:
                 logger.warning("[Post-Processing] Strategy 2 SKIPPED: No expected final filename available")
 
-            if (found_file and file_location == 'transfer' and expected_final_filename
-                    and not _found_file_matches_expected(found_file, expected_final_filename)):
+            if (found_file and file_location == 'transfer'
+                    and not _found_file_matches_expected(found_file, expected_final_path)):
                 logger.warning(
-                    "[Post-Processing] Transfer file '%s' does not match expected '%s' "
+                    "[Post-Processing] Transfer file '%s' is not this task's recorded import '%s' "
                     "— ignoring fuzzy match",
-                    os.path.basename(found_file), expected_final_filename,
+                    found_file, expected_final_path,
                 )
                 found_file = None
                 file_location = None
@@ -524,20 +476,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             if not metadata_enhanced:
                 logger.warning("[Post-Processing] File in transfer folder missing metadata enhancement - completing now")
                 # Attempt to complete metadata enhancement using context
-                if context and expected_final_filename and \
-                        not _found_file_matches_expected(found_file, expected_final_filename):
-                    # jadux #wrong-metadata: the found transfer file is NOT the
-                    # file this context describes (fuzzy file finder / fuzzy
-                    # context under heavy concurrency). Writing here stamped
-                    # another track's metadata into a correctly-imported
-                    # neighbor. Never write to a transfer file whose name
-                    # doesn't match what this context would have named it.
-                    logger.warning(
-                        f"[Post-Processing] Transfer file '{os.path.basename(found_file)}' does not "
-                        f"match this task's expected '{expected_final_filename}' — refusing to write "
-                        f"tags to a file that isn't provably this track's"
-                    )
-                elif context and expected_final_filename:
+                if context and expected_final_path:
                     try:
                         context = normalize_import_context(context)
                         # Extract required data from context

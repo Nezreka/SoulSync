@@ -242,7 +242,8 @@ def _album_context_richness(album_ctx: dict) -> int:
 
 
 def _score_album_folder(album_result: Any, album_context: dict, artist_context: dict,
-                        tracks_json: list[dict], filtered_tracks: list) -> float:
+                        tracks_json: list[dict], filtered_tracks: list,
+                        coverage_score: float | None = None) -> float:
     """Score one slskd folder as a whole release, not as isolated tracks."""
     expected_album = str((album_context or {}).get('name') or '')
     expected_artist = str((artist_context or {}).get('name') or '')
@@ -255,8 +256,10 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
     )
     candidate_tracks = list(filtered_tracks)
     expected_tracks = [track for track in tracks_json if track.get('name')]
-    assignment = assign_album_tracks(expected_tracks, candidate_tracks, album=expected_album)
-    coverage_score = assignment.coverage
+    if coverage_score is None:
+        coverage_score = assign_album_tracks(
+            expected_tracks, candidate_tracks, album=expected_album,
+        ).coverage
     # A release's metadata can make a half-album look plausible. Only a
     # folder with enough distinct, profile-eligible titles is a bundle pick;
     # partial folders remain available through the per-track path.
@@ -1160,18 +1163,19 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                     profile_id=batch_quality_profile_id,
                                 )
                             if filtered_tracks:
+                                folder_coverage = assign_album_tracks(
+                                    [track for track in tracks_json if track.get('name')],
+                                    filtered_tracks,
+                                    album=str((batch_album_context or {}).get('name') or ''),
+                                ).coverage
                                 folder_score = _score_album_folder(
                                     ar,
                                     batch_album_context,
                                     batch_artist_context,
                                     tracks_json,
                                     filtered_tracks,
+                                    coverage_score=folder_coverage,
                                 )
-                                folder_coverage = assign_album_tracks(
-                                    [track for track in tracks_json if track.get('name')],
-                                    filtered_tracks,
-                                    album=str((batch_album_context or {}).get('name') or ''),
-                                ).coverage
                                 scored_albums.append((ar, len(filtered_tracks), folder_score,
                                                       folder_coverage))
                                 _sr.info(
@@ -1200,13 +1204,13 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                         f'{row[0].album_title} {row[0].album_path}',
                                     ) == leader_variant]
                             if len(band) > 1:
-                                from core.downloads.peer_observation import peer_speed
+                                from core.downloads.peer_observation import HEALTHY_PEER_BPS, peer_speed
 
                                 def album_availability(row):
                                     album = row[0]
                                     observed = peer_speed(album.username)
                                     return (
-                                        1 if observed is None else (2 if observed >= 500_000 else 0),
+                                        1 if observed is None else (2 if observed >= HEALTHY_PEER_BPS else 0),
                                         observed or 0,
                                         getattr(album, 'free_upload_slots', 0) or 0,
                                         -(getattr(album, 'queue_length', 0) or 0),

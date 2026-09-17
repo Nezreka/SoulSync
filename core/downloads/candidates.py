@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from core.downloads.track_metadata_backfill import hydrate_download_metadata
-from core.downloads.peer_observation import peer_speed
+from core.downloads.peer_observation import HEALTHY_PEER_BPS, peer_speed
 from core.runtime_state import (
     download_tasks,
     matched_context_lock,
@@ -252,7 +252,7 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
                 return (
                     # Unknown peers stay ahead of a known crawler, but below
                     # a peer with measured healthy throughput.
-                    1 if observed is None else (2 if observed >= 500_000 else 0),
+                    1 if observed is None else (2 if observed >= HEALTHY_PEER_BPS else 0),
                     observed or 0,
                     getattr(row, 'free_upload_slots', 0) or 0,
                     -(getattr(row, 'queue_length', 0) or 0),

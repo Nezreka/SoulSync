@@ -1142,3 +1142,30 @@ def test_search_uses_terminal_state_after_initial_collection_grace():
     assert counts['responses'] >= 16
     assert counts['responses'] < 30
     assert counts['status'] == 1
+
+
+def test_search_keeps_polling_an_active_search_through_a_quiet_period():
+    client = _search_ready_client()
+    counts = {'responses': 0}
+
+    async def fake_request(method, endpoint, **kwargs):
+        if method == 'POST':
+            return {'id': 'search-1'}
+        if endpoint.endswith('/responses'):
+            counts['responses'] += 1
+            files = [{'filename': 'Artist - First.flac', 'size': 10}]
+            if counts['responses'] >= 25:
+                files.append({'filename': 'Artist - Late.flac', 'size': 11})
+            return [{'username': 'peer', 'files': files}]
+        if endpoint == 'searches/search-1':
+            return {'state': 'InProgress' if counts['responses'] < 25 else 'Completed'}
+        raise AssertionError(endpoint)
+
+    with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
+         patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
+         patch.object(client, '_make_request', side_effect=fake_request), \
+         patch('core.soulseek_client.asyncio.sleep', AsyncMock()):
+        tracks, _ = _run_async(client.search('Artist', timeout=30))
+
+    assert counts['responses'] >= 25
+    assert {track.filename for track in tracks} == {'Artist - First.flac', 'Artist - Late.flac'}

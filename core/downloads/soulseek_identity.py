@@ -125,6 +125,14 @@ def _field(target: Any, key: str, default: Any = None) -> Any:
     return target.get(key, default) if isinstance(target, dict) else getattr(target, key, default)
 
 
+def _track_number(value: Any) -> int | None:
+    try:
+        number = int(str(value).split('/')[0])
+        return number if number > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def match_track(target: Any, candidate: Any, *, album: str = '') -> IdentityResult:
     """Require an interpreted title; unknown layouts fail closed."""
     wanted = _title_key(_field(target, 'name', '') or _field(target, 'title', ''))
@@ -143,11 +151,9 @@ def match_track(target: Any, candidate: Any, *, album: str = '') -> IdentityResu
                str(filename or '').replace('\\', '/').split('/')[:-1]]
     artist_evidence = bool(artist and normalize(artist) in parents)
     album_evidence = bool(album and normalize(_without_year(str(album))) in parents)
-    expected_number = _field(target, 'track_number', None) or _field(target, 'trackNumber', None)
-    try:
-        expected_number = int(expected_number) if expected_number else None
-    except (TypeError, ValueError):
-        expected_number = None
+    expected_number = _track_number(
+        _field(target, 'track_number', None) or _field(target, 'trackNumber', None)
+    )
     expected_disc = _field(target, 'disc_number', None) or _field(target, 'discNumber', None)
     try:
         expected_disc = int(expected_disc) if expected_disc else None
@@ -192,11 +198,10 @@ def assign_album_tracks(expected: Sequence[Any], candidates: Sequence[Any], *, a
         for candidate_index, candidate in enumerate(candidates):
             result = match_track(target, candidate, album=album)
             if result.matches:
-                number = _field(target, 'track_number', None) or _field(target, 'trackNumber', None)
-                try:
-                    number_agrees = bool(number and result.number and int(str(number).split('/')[0]) == result.number)
-                except (TypeError, ValueError):
-                    number_agrees = False
+                number = _track_number(
+                    _field(target, 'track_number', None) or _field(target, 'trackNumber', None)
+                )
+                number_agrees = bool(number and result.number and number == result.number)
                 edges[expected_index].append((not number_agrees, candidate_index))
     owner: dict[int, int] = {}
 

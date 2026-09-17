@@ -60,6 +60,12 @@ def test_disc_evidence_rejects_same_title_on_another_disc():
     assert not match_track(target, _file('Artist/Album/1-01 - Intro.flac')).matches
 
 
+def test_fractional_track_number_still_rejects_wrong_number():
+    target = _track('Intro', '1/12')
+    assert match_track(target, _file('01 - Intro.flac')).matches
+    assert not match_track(target, _file('02 - Intro.flac')).matches
+
+
 def test_assignment_does_not_count_one_file_twice():
     expected = [_track('SexyBack', 2), _track('SexyBack', 2), _track('My Love', 3)]
     candidates = [

@@ -115,6 +115,63 @@ def _cancel_on_giveup(task, deferred_ops, trigger):
         )
 
 
+def _replace_slow_download(task_id, batch_id, download_id, username, filename,
+                           source_was_used):
+    """Only restart a slow task after slskd confirms the old transfer stopped."""
+    try:
+        cancelled = bool(run_async(download_orchestrator.cancel_download(
+            download_id, username, remove=True,
+        )))
+    except Exception as exc:
+        logger.warning("[Observed Speed] Could not cancel %s: %s", download_id, exc)
+        cancelled = False
+
+    if cancelled:
+        try:
+            for _ in range(3):
+                rows = run_async(download_orchestrator.get_all_downloads())
+                still_active = any(
+                    row.username == username and row.id == download_id
+                    and not any(token in (row.state or '') for token in (
+                        'Completed', 'Succeeded', 'Failed', 'Errored',
+                        'Cancelled', 'Aborted', 'Rejected',
+                    ))
+                    for row in rows
+                )
+                if not still_active:
+                    break
+                time.sleep(1)
+            else:
+                cancelled = False
+        except Exception as exc:
+            logger.warning("[Observed Speed] Could not confirm cancellation of %s: %s",
+                           download_id, exc)
+            cancelled = False
+
+    context_key = _make_context_key(username, filename)
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if not task or task.get('status') != 'searching' or task.get('retry_trigger') != 'observed_speed':
+            return
+        if not cancelled:
+            task.update(download_id=download_id, username=username, filename=filename,
+                        status='downloading', _observed_speed_exempt=True)
+            task.pop('_slow_fallback_source_key', None)
+            task.pop('_slow_fallback_speed_bps', None)
+            task.pop('retry_info', None)
+            task.pop('retry_trigger', None)
+            if not source_was_used:
+                task.get('used_sources', set()).discard(f"{username}_{filename}")
+            logger.warning("[Observed Speed] Cancellation unconfirmed for %s; keeping original transfer",
+                           download_id)
+            return
+
+    _orphaned_download_keys.add(context_key)
+    with matched_context_lock:
+        matched_downloads_context.pop(context_key, None)
+    missing_download_executor.submit(_download_track_worker, task_id, batch_id)
+
+
 def _remaining_fallback_sources(exhausted):
     """Sources in the configured hybrid chain that haven't exhausted their
     per-source budget yet.
@@ -548,6 +605,8 @@ class WebUIDownloadMonitor:
                     logger.debug(f"[Deferred] Restarting worker for task {task_id}")
                     missing_download_executor.submit(_download_track_worker, task_id, batch_id)
                     logger.debug(f"[Deferred] Successfully restarted worker for task {task_id}")
+                elif op[0] == 'replace_slow_download':
+                    _replace_slow_download(*op[1:])
             except Exception as e:
                 logger.error(f"[Deferred] Error executing deferred operation {op[0]}: {e}")
 
@@ -1208,17 +1267,15 @@ class WebUIDownloadMonitor:
             task['_slow_fallback_source_key'] = source_key
             task['_slow_fallback_speed_bps'] = average_bps or 0
 
-        if download_id:
-            deferred_ops.append((
-                'cancel_download', download_id, username, 'observed_speed_below_minimum'))
+        if not download_id or not task.get('batch_id'):
+            task['_observed_speed_exempt'] = True
+            task.pop('_observed_speed_tracker', None)
+            return True
 
         used_sources = task.get('used_sources', set())
+        source_was_used = source_key in used_sources
         used_sources.add(source_key)
         task['used_sources'] = used_sources
-
-        old_context_key = _make_context_key(username, filename)
-        _orphaned_download_keys.add(old_context_key)
-        deferred_ops.append(('cleanup_orphan', old_context_key))
 
         task.pop('download_id', None)
         task.pop('username', None)
@@ -1232,8 +1289,8 @@ class WebUIDownloadMonitor:
         task.pop('downloading_start_time', None)
 
         batch_id = task.get('batch_id')
-        if task_id and batch_id:
-            deferred_ops.append(('restart_worker', task_id, batch_id))
+        deferred_ops.append(('replace_slow_download', task_id, batch_id, download_id,
+                             username, filename, source_was_used))
         logger.warning(
             "[Observed Speed] Task %s averaged %.0f KB/s below the %.0f KB/s "
             "minimum — trying the next candidate",

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -87,7 +89,63 @@ def test_sustained_slow_transfer_reuses_existing_retry_path(monitor):
     assert task['_slow_fallback_source_key'].startswith('slow-peer_')
     assert task['retry_trigger'] == 'observed_speed'
     assert task.get('download_id') is None
-    assert [op[0] for op in ops] == ['cancel_download', 'cleanup_orphan', 'restart_worker']
+    assert [op[0] for op in ops] == ['replace_slow_download']
+
+
+@pytest.mark.parametrize('cancelled', [False, True])
+def test_slow_replacement_waits_for_confirmed_cancellation(monitor, monkeypatch, cancelled):
+    task = _task()
+    monkeypatch.setattr(dm, 'download_tasks', {'task-1': task})
+    monkeypatch.setattr(dm, 'matched_downloads_context', {
+        'slow-peer::' + task['filename']: {'title': 'Slow Song'},
+    })
+    cancel = AsyncMock(return_value=cancelled)
+    submit = Mock()
+    monkeypatch.setattr(dm, 'run_async', asyncio.run)
+    monkeypatch.setattr(dm, 'download_orchestrator', SimpleNamespace(
+        cancel_download=cancel, get_all_downloads=AsyncMock(return_value=[]),
+    ))
+    monkeypatch.setattr(dm, 'missing_download_executor', SimpleNamespace(submit=submit))
+    for now in (0, 30):
+        _observe(monitor, task, now, now * 100_000)
+    _, ops = _observe(monitor, task, 60, 6_000_000)
+
+    dm._replace_slow_download(*ops[0][1:])
+
+    cancel.assert_awaited_once_with('dl-1', 'slow-peer', remove=True)
+    if cancelled:
+        submit.assert_called_once()
+        assert task['status'] == 'searching'
+        assert not dm.matched_downloads_context
+    else:
+        submit.assert_not_called()
+        assert task['status'] == 'downloading'
+        assert task['download_id'] == 'dl-1'
+        assert task['_observed_speed_exempt'] is True
+        assert dm.matched_downloads_context
+
+
+def test_accepted_cancel_without_terminal_transfer_does_not_restart(monitor, monkeypatch):
+    task = _task()
+    monkeypatch.setattr(dm, 'download_tasks', {'task-1': task})
+    monkeypatch.setattr(dm, 'run_async', asyncio.run)
+    monkeypatch.setattr(dm.time, 'sleep', lambda seconds: None)
+    submit = Mock()
+    monkeypatch.setattr(dm, 'missing_download_executor', SimpleNamespace(submit=submit))
+    still_running = SimpleNamespace(id='dl-1', username='slow-peer', state='InProgress')
+    monkeypatch.setattr(dm, 'download_orchestrator', SimpleNamespace(
+        cancel_download=AsyncMock(return_value=True),
+        get_all_downloads=AsyncMock(return_value=[still_running]),
+    ))
+    for now in (0, 30):
+        _observe(monitor, task, now, now * 100_000)
+    _, ops = _observe(monitor, task, 60, 6_000_000)
+
+    dm._replace_slow_download(*ops[0][1:])
+
+    submit.assert_not_called()
+    assert task['status'] == 'downloading'
+    assert task['_observed_speed_exempt'] is True
 
 
 @pytest.mark.parametrize(

@@ -741,7 +741,10 @@ class SoulseekClient(DownloadSourcePlugin):
                     if self._search_is_terminal(search_state):
                         logger.info("Soulseek search reached terminal state after %d peers", len(responses_by_peer))
                         break
-                    if poll_count - last_new_poll >= 5:
+                    has_search_state = isinstance(search_state, dict) and bool(
+                        search_state.get('state') or search_state.get('status')
+                    )
+                    if not has_search_state and poll_count - last_new_poll >= 5:
                         logger.info("Soulseek search quiet for five polls after %d peers", len(responses_by_peer))
                         break
                 
@@ -2256,13 +2259,6 @@ class SoulseekClient(DownloadSourcePlugin):
                 pending,
             )
         return finish('timeout')
-        logger.error(
-            "[Soulseek album] Timed out waiting for %d album files (%d failed, %d pending)",
-            len(transfer_keys),
-            len(failed_states),
-            pending,
-        )
-        return []
 
     def _resolve_downloaded_album_file(self, remote_filename: str) -> Optional[Path]:
         # Pre-fix this tried three hardcoded candidate paths and

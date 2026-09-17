@@ -9,6 +9,8 @@ from dataclasses import dataclass
 
 _TTL_SECONDS = 3600
 _MAX_PEERS = 512
+# Ranking signal, intentionally separate from the user-configured retry floor.
+HEALTHY_PEER_BPS = 500_000
 _lock = threading.Lock()
 
 
