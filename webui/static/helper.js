@@ -3467,20 +3467,26 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.4.2': [
-        { date: 'September 2026 \u00b7 3.4.2' },
-        {"title": "Now Playing and Wanted cards in chat", "desc": "share what you are playing with /np, or ask for a release with /want and /iso. cards carry artwork and actions, check your library, and offer a one-click PM to whoever has it.", "page": "chat"},
-        {"title": "Richer chat", "desc": "inline players and preview cards for links, a friends, block list and bookmarks drawer, a folder-tree peer explorer with one-click downloads, and drag-and-drop uploads.", "page": "chat"},
-        {"title": "Search upgraded", "desc": "an explore hub on the idle page, a hero result, a sticky jump bar with counts, hover play on cards, and Deezer playlist search with preview art.", "page": "search"},
-        {"title": "Discovery correctness", "desc": "duration mismatches and tribute, karaoke and preview copies are rejected, manual matches survive a re-discovery, and cancelling a sync actually stops the work.", "page": "sync"},
-        {"title": "Batch delete mirrored playlists", "desc": "Select on the Mirrored tab, pick the cards or search a name and Select all visible, and delete them in one confirm.", "page": "sync"},
-        {"title": "Sync keeps your playlists", "desc": "a sync that finds no library matches no longer empties the server playlist, and artist agreement is enforced so a long shared title cannot override an artist mismatch.", "page": "sync"},
-        {"title": "Ownership that survives tag differences", "desc": "library checks fold accents, punctuation and multi-artist strings, and discography completion skips upstream calls for releases you do not own.", "page": "library"},
-        {"title": "MusicBrainz release kept through import", "desc": "the release you picked is used for import and completion, every track of an album gets the same release id, and tags are written the way Picard writes them.", "page": "downloads"},
-        {"title": "Music size limit", "desc": "an optional cap on megabytes per minute of audio, applied before a download is chosen.", "page": "settings"},
-        {"title": "Client and server fixes", "desc": "qBittorrent 5.0+ add responses are parsed, Transmission web UI URLs normalize to the RPC endpoint, stale Navidrome playlist ids are no longer reused (#1248), and Jellyfin 12 accepts every video-side call (#1250).", "page": "settings"},
-        {"title": "Matching fixes", "desc": "band names with commas, slashes or ampersands are no longer split into separate artists, releases with unknown track counts are not assumed to be singles, and the Download Missing Tracks modal from a chat card shows real artists, durations and art.", "page": "sync"},
-        {"title": "Earlier versions", "desc": "3.4.1 cut waiting on downloads and imports, refreshed Discover, Watchlist and Settings, and improved audiobook libraries. 3.4.0 introduced podcasts and audiobooks."},
+    '3.4.3': [
+        { date: 'September 2026 · 3.4.3' },
+        {"title": "Import is one inbox and one matcher", "desc": "every staging item is a row with its state and the actions it earns: approve, identify or fix in the matcher, retry, dismiss. needs attention is the default filter, and the worker's settings live behind the gear.", "page": "import"},
+        {"title": "A Picard-style matcher", "desc": "release, candidates and search on the left, the tracklist on the right with each file's length and bitrate, mismatches flagged, drag or tap to assign. see the destination and tag changes before the import runs.", "page": "import"},
+        {"title": "Upload from the browser", "desc": "drop files or folders onto the inbox and they land in the import folder with their folder names kept. uploads go in pieces so a reverse proxy cannot refuse a whole flac.", "page": "import"},
+        {"title": "Identify by fingerprint", "desc": "a folder whose tags and name say nothing can ask the audio itself through AcoustID, and an import_needs_attention trigger can notify you when the worker leaves a folder for a person.", "page": "import"},
+        {"title": "Public API repaired, video API added", "desc": "the v1 wishlist, watchlist, sync and search endpoints work again (#1259), and /api/v1/video covers library, search, wishlist, watchlist, scan, downloads, calendar and requests.", "page": "settings"},
+        {"title": "Wrong match? on the artist page", "desc": "one panel beside DB Record with every source match, a link to check it, and change / clear / auto per row. Your library shows missing tracks again so I Have This is reachable.", "page": "library"},
+        {"title": "Artist page fixes", "desc": "the Write Tags modals scroll and have their card back (#1254), the bulk action bar floats above the player (#1255), and the source-match pills keep their shape.", "page": "library"},
+        {"title": "Dark select menus", "desc": "native select lists paint dark instead of white text on a white list (#1258).", "page": "settings"},
+        {"title": "Crossfade continues", "desc": "a crossfaded track carries on where the fade left it instead of playing its opening twice.", "page": "library"},
+        {"title": "Moved files list once", "desc": "a file the server re-ids after a reorganize no longer shows twice in every album (#1257); the scan folds the old row into the live one and keeps its enrichment and play history.", "page": "library"},
+        {"title": "Faster begin analysis", "desc": "tracks mark as owned or missing right away; the MusicBrainz release preflight runs after, and only when there is something to download.", "page": "active-downloads"},
+        {"title": "Downloads and sync counts", "desc": "scan-flagged library files no longer sit in Downloads as completed, and a download batch no longer writes 0 over the sync's match count.", "page": "active-downloads"},
+        {"title": "Chat fixes", "desc": "jukebox links play again and searches rank the song above the reaction, messages no longer vanish on send, and Now Playing and Wanted cards persist.", "page": "chat"},
+        {"title": "Audiobooks per profile", "desc": "wishlist writes and followed authors land on the profile that wanted them, the library is a page at /audiobooks/library, Look again retries a book, and a download the client lost is given up on.", "page": "audiobooks"},
+        {"title": "Podcast downloads", "desc": "downloads wait their turn, a failed episode is tried again, and the page knows which episodes are on disk after a restart.", "page": "podcasts"},
+        {"title": "MusicBrainz outages keep your tags", "desc": "a 503 during import no longer aborts the tag write; the track keeps its release, recording and source ids and only loses the ISRC and genres that call would have supplied.", "page": "active-downloads"},
+        {"title": "Fix Unknown Artists everywhere", "desc": "the repair job recognises every server's placeholder, bracketed or not, and takes your own spellings.", "page": "tools"},
+        {"title": "Earlier versions", "desc": "3.4.2 rebuilt chat around shareable cards, upgraded search, made large libraries fast and played music videos on the artist page. 3.4.1 cut waiting on downloads and imports. 3.4.0 introduced podcasts and audiobooks."},
     ],
 };
 
@@ -3511,7 +3517,30 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-    "title": "3.4.2: chat that shares music, sharper search and sync you can trust",
+    "title": "3.4.3: an import inbox you can trust, a public api that answers, and reported fixes",
+    "description": "This update rebuilds the import page into one inbox with a Picard-style matcher and browser uploads, repairs the v1 API and gives the video side a public one, fixes a run of reported artist page and UI bugs, and closes profile and restart gaps on the audiobook and podcast sides.",
+    "features": [
+        "Import is one inbox and one matcher: every staging item is a row with its state and the actions it earns (approve, identify or fix, retry, dismiss). Needs attention is the default filter; the header strip shows the folder, its size, the auto-import switch and a countdown to the next scan.",
+        "A Picard-style matcher: release, candidates and search on the left, the tracklist on the right with each file's length and bitrate, length mismatches flagged, drag or tap to assign. The destination and per-track tag changes are shown before the import runs, and tracks the library already has are badged with their format.",
+        "Upload from the browser: drop files or folders onto the inbox and they land in the import folder with folder names kept, in 8 MB pieces so a reverse proxy's body cap cannot refuse a whole flac. Identify by fingerprint asks AcoustID when tags and folder names say nothing.",
+        "Import keeps you informed: an import_needs_attention automation trigger fires when the worker leaves a folder for a person, an unreadable import folder says so with the PUID hint instead of reporting zero files, and finished rows can be retried, resolved or cleared from history.",
+        "Public API repaired (#1259): the v1 wishlist/process, watchlist/scan, playlist sync and search endpoints answered 501 since the web_server split; each now runs the app's own handler. The video side gets /api/v1/video for library, search, wishlist, watchlist, scan, downloads, calendar and requests.",
+        "Wrong match? on the artist page: one panel beside DB Record with every source match, what it points at, when it was last tried, and change / clear / auto per row with the search inline.",
+        "Artist page fixes: Your library shows missing tracks again so I Have This is reachable, the Write Tags modals scroll and have their card back (#1254), the bulk action bar floats above the player and corner buttons (#1255), and the source-match pills no longer inherit a global style.",
+        "Dark select menus (#1258): native select lists paint dark in every browser instead of white text on a white list.",
+        "A crossfaded track carries on where the fade left it instead of playing its opening twice.",
+        "Moved files list once (#1257): Plex re-ids a reorganized file, so the next scan added a second row. Trashed items are never written and every scan folds superseded rows into the live one, keeping enrichment and play history.",
+        "Faster begin analysis: tracks mark as owned or missing as fast as the checks run; the MusicBrainz release preflight moves after the analysis and only runs when there is something to download.",
+        "Downloads and sync: scan-flagged library files no longer sit in the Downloads list as completed and unclearable, and a download batch no longer writes 0 over the sync's match count.",
+        "Chat: jukebox links play again (a blocked-embed title lookup was read as no link) and a search ranks official uploads above reactions and karaoke; messages no longer flicker or vanish on send, and Now Playing and Wanted cards persist across a reload.",
+        "Audiobooks per profile: wishlist writes and a followed author's new books land on the profile that wanted them, the library is a page at /audiobooks/library, a library scan marks found books done at once, Look again retries a cancelled or not-found book, and a download the client no longer has is given up on instead of waited for forever.",
+        "Podcasts: downloads wait their turn behind a bounded limit, a failed or cancelled episode is tried again instead of counting as done, the page knows which episodes are on disk after a restart, and retention never prunes an episode that never landed.",
+        "A MusicBrainz 503 during import no longer wipes every source id off the track: the tag write used to abort on the failed recording lookup, so the file landed with no release, recording, Deezer or Spotify ids at all. It keeps everything but the ISRC and genres that one call would have supplied.",
+        "Fix Unknown Artists recognises every server's placeholder, bracketed or not, and takes your own spellings in a job setting."
+    ]
+},
+    {
+    "title": "Earlier in 3.4.2: chat that shares music, sharper search and sync you can trust",
     "description": "This update rebuilds chat around shareable music cards, upgrades search, tightens playlist discovery and sync correctness, and fixes reported Jellyfin, Navidrome and torrent client problems.",
     "features": [
         "Now Playing and Wanted cards in chat: /np shares what you are playing with artwork, bitrate and direct actions; /want and /iso search Spotify, Deezer, Apple Music, Discogs and MusicBrainz, check your library, and offer a one-click PM to whoever has it. Vanilla Soulseek clients see plain text.",
