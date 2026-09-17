@@ -5860,7 +5860,8 @@
     // must use this — a file share and the GIF picker built their payloads by
     // hand, skipped the tags, and their messages folded into #general no matter
     // which channel they were sent from (kvkarlsson's uploads-in-the-wrong-
-    // channel report).
+    // channel report). Plain mode is only ever true in #general (_plainOn), so
+    // the early return below never drops a channel the user was standing in.
     // One control, not two. The room filter already says which world you are
     // in: "SoulSync only" means you are talking to SoulSync clients, so the
     // envelope earns its keep. "All messages" means you can SEE the vanilla
@@ -5868,8 +5869,19 @@
     // sending something they cannot read.
     //
     // A PM is already plaintext, so this is a ROOM idea only.
+    //
+    // And a #general idea only. Every other channel, and every thread, exists
+    // INSIDE the envelope: a vanilla client is never "in" #bugs, it only ever
+    // sees the flat room. So "talk plain so they can read it" means nothing
+    // there, and what plain mode actually did was strip the tag and refile the
+    // message into #general behind the sender's back (nanomite, Deathwing:
+    // "sent in bugs but it's showing up in general?!"). The channel you are
+    // standing in wins over the filter.
     function _plainOn() {
-        return state.view === 'room' && !state.ssOnly;
+        if (state.view !== 'room' || state.ssOnly) return false;
+        if (_chanRoom() && (state.thread ||
+                (state.channel || CHAT_DEFAULT_CHANNEL) !== CHAT_DEFAULT_CHANNEL)) return false;
+        return true;
     }
 
     function _syncModeBtn() {
@@ -10460,6 +10472,9 @@
                         renderUserPanel: renderUserPanel, renderGuilds: renderGuilds,
                         openWebPreviewModal: openWebPreviewModal, closeWebPreviewModal: closeWebPreviewModal,
                         _testSetSelf: function (n) { state.selfName = n; },
+                        // send format: the filter/channel rules that decide
+                        // envelope vs plain (tests/js/chat_send_format_harness.mjs)
+                        _plainOn: _plainOn, _tagRoomPayload: _tagRoomPayload,
                         _testSetState: function (patch) {
                             Object.keys(patch || {}).forEach(function (k) { state[k] = patch[k]; });
                         } };
