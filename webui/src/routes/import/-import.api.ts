@@ -1,6 +1,7 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
+import { appURL } from '@/platform/url-base';
 
 import type {
   ImportAlbum,
@@ -11,7 +12,10 @@ import type {
   ImportAutoImportSettingsPayload,
   ImportAutoImportStatusPayload,
   ImportInboxPayload,
+  ImportPreviewPayload,
   ImportProcessPayload,
+  ImportUploadPayload,
+  LibraryCheckPayload,
   ImportSearchSourcesPayload,
   ImportStagingFilesPayload,
   ImportStagingGroupsPayload,
@@ -355,4 +359,66 @@ export function invalidateAutoImportQueries(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: [...IMPORT_QUERY_KEY, 'auto-import-settings'] }),
     queryClient.invalidateQueries({ queryKey: [...IMPORT_QUERY_KEY, 'auto-import-results'] }),
   ]);
+}
+
+/** What an album import would do, per track. Nothing is written. */
+export async function previewImportAlbum(input: {
+  album: ImportAlbum;
+  matches: ImportAlbumMatch[];
+}): Promise<ImportPreviewPayload> {
+  return readJson<ImportPreviewPayload>(
+    apiClient.post('import/album/preview', { json: input, timeout: 60_000 }),
+  );
+}
+
+/** Which of these track names the library already has, for this artist. */
+export async function checkLibraryTracks(input: {
+  artistName: string;
+  albumName?: string;
+  tracks: { name: string }[];
+}): Promise<LibraryCheckPayload> {
+  return readJson<LibraryCheckPayload>(
+    apiClient.post('library/check-tracks', {
+      json: {
+        artist_name: input.artistName,
+        album_name: input.albumName ?? '',
+        tracks: input.tracks,
+      },
+      timeout: 60_000,
+    }),
+  );
+}
+
+/**
+ * Upload one file into the import folder, keeping the relative path the
+ * browser knows (a dropped folder's name). XHR rather than ky: ky has no
+ * upload progress, and a 400 MB FLAC deserves a bar.
+ */
+export function uploadImportFile(
+  file: File,
+  relativePath: string,
+  onProgress?: (fraction: number) => void,
+): Promise<ImportUploadPayload> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('files', file, file.name);
+    form.append('paths', relativePath);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', appURL('/api/import/upload'));
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) onProgress(event.loaded / event.total);
+    };
+    xhr.onload = () => {
+      let payload: ImportUploadPayload | null = null;
+      try {
+        payload = JSON.parse(xhr.responseText) as ImportUploadPayload;
+      } catch {
+        payload = null;
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && payload) resolve(payload);
+      else reject(new Error(payload?.error || `Upload failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error('Upload failed'));
+    xhr.send(form);
+  });
 }

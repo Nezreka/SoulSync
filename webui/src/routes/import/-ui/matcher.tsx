@@ -13,14 +13,18 @@ import type {
   ImportAlbumResult,
   ImportInboxFile,
   ImportInboxItem,
+  ImportPreviewTrack,
   ImportStagingFile,
   ImportTrackResult,
+  LibraryOwnedEntry,
 } from '../-import.types';
 
 import {
+  checkLibraryTracks,
   importInboxQueryOptions,
   importSearchSourcesQueryOptions,
   matchImportAlbum,
+  previewImportAlbum,
   searchImportAlbums,
   searchImportTracks,
 } from '../-import.api';
@@ -129,6 +133,9 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
   const [overrides, setOverrides] = useState<Record<number, number>>({});
   const [dragOver, setDragOver] = useState<number | null>(null);
   const [heldChip, setHeldChip] = useState<number | null>(null);
+  const [preview, setPreview] = useState<ImportPreviewTrack[] | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [owned, setOwned] = useState<Record<string, LibraryOwnedEntry>>({});
 
   const search = async (text: string, override: string) => {
     const trimmed = text.trim();
@@ -164,6 +171,18 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
         filePaths: item.files.map((file) => file.full_path),
       });
       setMatch(payload);
+      setOwned({});
+      // which of these tracks the library already has: a re-import of an
+      // album you own is the commonest surprise, and the cheapest to warn about
+      const names = (payload.matches ?? [])
+        .map((m) => m.track?.name || m.track?.title || '')
+        .filter(Boolean)
+        .map((name) => ({ name }));
+      if (names.length) {
+        void checkLibraryTracks({ artistName: album.artist, albumName: album.name, tracks: names })
+          .then((res) => setOwned(res.owned_tracks ?? {}))
+          .catch(() => setOwned({}));
+      }
     } catch (error) {
       setMatchError(getErrorMessage(error));
     } finally {
@@ -192,6 +211,35 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
   const effective = getEffectiveAlbumMatches(matches, stagingFiles, overrides);
   const unmatched = getUnmatchedStagingFiles(matches, stagingFiles, overrides);
   const leftOver = stagingFiles.length - effective.length;
+  const ownedCount = matches.filter((m) => {
+    const name = m.track?.name || m.track?.title || '';
+    return name && owned[name]?.owned;
+  }).length;
+
+  // the preview follows the effective matches, so a re-assign re-previews.
+  // keyed on the file list so drags that change nothing do not refetch.
+  const effectiveKey = effective
+    .map((m, i) => `${i}:${m.staging_file?.full_path ?? ''}:${m.track?.track_number ?? ''}`)
+    .join('|');
+  useEffect(() => {
+    const album = match?.album;
+    if (!album || effective.length === 0) {
+      setPreview(null);
+      return;
+    }
+    let live = true;
+    void previewImportAlbum({ album, matches: effective })
+      .then((res) => {
+        if (live) setPreview(res.tracks ?? []);
+      })
+      .catch(() => {
+        if (live) setPreview(null);
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match?.album, effectiveKey]);
 
   const assign = (trackIndex: number, fileIndex: number) => {
     setOverrides((current) => {
@@ -362,6 +410,7 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
                     key={index}
                     index={index}
                     match={row}
+                    owned={owned[row.track?.name || row.track?.title || '']}
                     stagingFiles={stagingFiles}
                     overrides={overrides}
                     dragOver={dragOver === index}
@@ -412,6 +461,14 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
                 ) : null}
               </div>
 
+              {preview && preview.length > 0 ? (
+                <PreviewBlock
+                  tracks={preview}
+                  open={previewOpen}
+                  onToggle={() => setPreviewOpen((o) => !o)}
+                />
+              ) : null}
+
               <div className={styles.matcherFooter}>
                 <span className={styles.footerNote}>
                   <strong>{effective.length}</strong> of {matches.length} tracks matched
@@ -421,6 +478,9 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
                       · {leftOver} {leftOver === 1 ? 'file stays' : 'files stay'} in the import
                       folder
                     </>
+                  ) : null}
+                  {ownedCount > 0 ? (
+                    <> · {ownedCount} already in your library (kept or replaced by quality)</>
                   ) : null}
                 </span>
                 <Button
@@ -490,6 +550,7 @@ const LENGTH_TOLERANCE_MS = 8_000;
 function TrackRow({
   index,
   match,
+  owned,
   stagingFiles,
   overrides,
   dragOver,
@@ -501,6 +562,7 @@ function TrackRow({
 }: {
   index: number;
   match: ImportAlbumMatch;
+  owned?: LibraryOwnedEntry;
   stagingFiles: ImportStagingFile[];
   overrides: Record<number, number>;
   dragOver: boolean;
@@ -545,6 +607,18 @@ function TrackRow({
       <span className={styles.trackNum}>{info.displayTrackNumber}</span>
       <span className={styles.trackName} title={info.name}>
         {info.name}
+        {owned?.owned ? (
+          <>
+            {' '}
+            <span
+              className={styles.inLibrary}
+              title={owned.file_path ? `In your library: ${owned.file_path}` : 'In your library'}
+            >
+              in library
+              {owned.format ? ` · ${String(owned.format).replace('.', '').toUpperCase()}` : ''}
+            </span>
+          </>
+        ) : null}
       </span>
       <span className={styles.trackLen}>{formatDuration(trackLen)}</span>
       <span className={styles.trackFile}>
@@ -607,6 +681,84 @@ function TrackRow({
           </button>
         ) : null}
       </span>
+    </div>
+  );
+}
+
+/**
+ * What the import will do, before it does it: the destination on the user's
+ * template and the tags that change. Picard shows this; nobody else does,
+ * and it is the difference between trusting an importer and checking after.
+ */
+function PreviewBlock({
+  tracks,
+  open,
+  onToggle,
+}: {
+  tracks: ImportPreviewTrack[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const changed = tracks.filter((t) => t.changed.length > 0).length;
+  const first = tracks[0]?.destination ?? null;
+  const folder = first ? first.replace(/[\\/][^\\/]*$/, '') : null;
+  const FIELDS: { key: keyof ImportPreviewTrack['after']; label: string }[] = [
+    { key: 'title', label: 'title' },
+    { key: 'artist', label: 'artist' },
+    { key: 'albumartist', label: 'album artist' },
+    { key: 'album', label: 'album' },
+    { key: 'track_number', label: 'track' },
+    { key: 'disc_number', label: 'disc' },
+    { key: 'year', label: 'year' },
+  ];
+  return (
+    <div className={styles.preview} id="import-page-preview">
+      <div className={styles.previewHead}>
+        <span className={styles.footerNote}>
+          {folder ? (
+            <>
+              Lands in <code className={styles.previewDest}>{folder}</code>
+            </>
+          ) : (
+            'Destination unknown'
+          )}
+          {changed > 0
+            ? ` · tags change on ${changed} ${changed === 1 ? 'file' : 'files'}`
+            : ' · tags already match'}
+        </span>
+        <Button variant="ghost" size="sm" aria-expanded={open} onClick={onToggle}>
+          {open ? 'Hide details' : 'Show details'}
+        </Button>
+      </div>
+      {open ? (
+        <div className={styles.previewRows}>
+          {tracks.map((t) => (
+            <div key={t.full_path} className={styles.previewRow}>
+              <span className={styles.trackNum}>{t.after.track_number ?? ''}</span>
+              <span>
+                <span className={styles.previewDest} title={t.destination ?? t.path_error ?? ''}>
+                  {t.destination ? (
+                    t.destination.split(/[\\/]/).pop()
+                  ) : (
+                    <span className={styles.warn}>{t.path_error || 'no destination'}</span>
+                  )}
+                </span>
+                {t.changed.length > 0 ? (
+                  <span className={styles.previewDiff}>
+                    {FIELDS.filter((f) => t.changed.includes(f.key)).map((f) => (
+                      <span key={f.key}>
+                        <b>{f.label}</b>{' '}
+                        {t.before[f.key] ? <del>{String(t.before[f.key])}</del> : null}{' '}
+                        <ins>{String(t.after[f.key] ?? '')}</ins>
+                      </span>
+                    ))}
+                  </span>
+                ) : null}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

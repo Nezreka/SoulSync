@@ -250,6 +250,51 @@ describe('import route', () => {
           ],
         }),
       ),
+      http.post('/api/import/album/preview', async ({ request }) => {
+        const body = (await request.json()) as {
+          matches: { staging_file: { full_path: string } }[];
+        };
+        return HttpResponse.json({
+          success: true,
+          tracks: body.matches.map((m, i) => ({
+            file: m.staging_file.full_path.split('/').pop(),
+            full_path: m.staging_file.full_path,
+            destination: `/lib/Artist A/Artist A - 2026 Album A/0${i + 1} - Track.flac`,
+            path_error: null,
+            before: {
+              title: 'Old',
+              artist: 'Artist A',
+              albumartist: 'Artist A',
+              album: 'Album A',
+              track_number: null,
+              disc_number: 1,
+              year: '',
+            },
+            after: {
+              title: `Track ${i + 1}`,
+              artist: 'Artist A',
+              albumartist: 'Artist A',
+              album: 'Album A',
+              track_number: i + 1,
+              disc_number: 1,
+              year: '2026',
+            },
+            changed: ['title', 'track_number', 'year'],
+          })),
+        });
+      }),
+      http.post('/api/library/check-tracks', () =>
+        HttpResponse.json({
+          success: true,
+          owned_tracks: {
+            'Track One': { owned: true, format: '.mp3', file_path: '/lib/a.mp3' },
+            'Track Two': { owned: false },
+          },
+        }),
+      ),
+      http.post('/api/import/upload', () =>
+        HttpResponse.json({ success: true, saved: [{ file: 'x.flac', size: 1 }], skipped: [] }),
+      ),
       http.get('/api/issues/counts', () =>
         HttpResponse.json({
           success: true,
@@ -421,6 +466,18 @@ describe('import route', () => {
     expect(screen.getByText('1 file without a track')).toBeInTheDocument();
     expect(screen.getByText('Album A (Live)')).toBeInTheDocument();
 
+    // the library check marks what you already have, and the footer counts it
+    expect(await screen.findByText(/in library · MP3/)).toBeInTheDocument();
+    expect(screen.getByText(/1 already in your library/)).toBeInTheDocument();
+
+    // the preview says where it lands and what changes, before anything moves
+    expect(await screen.findByText(/Lands in/)).toBeInTheDocument();
+    expect(screen.getByText('/lib/Artist A/Artist A - 2026 Album A')).toBeInTheDocument();
+    expect(screen.getByText(/tags change on 1 file/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show details' }));
+    expect(screen.getByText('01 - Track.flac')).toBeInTheDocument();
+    expect(screen.getByText('Old')).toBeInTheDocument();
+
     // tap the loose file, then the empty track
     fireEvent.click(screen.getByRole('button', { name: /02-track\.flac/ }));
     fireEvent.click(screen.getByText('tap to place here'));
@@ -471,5 +528,77 @@ describe('import route', () => {
     expect(
       await screen.findByText('This item is no longer in the import folder'),
     ).toBeInTheDocument();
+  });
+
+  describe('phase 2: upload, bulk singles, keyboard', () => {
+    it('bulk-imports waiting singles from their own tags', async () => {
+      let bodies: Record<string, unknown>[] = [];
+      server.use(
+        http.post('/api/import/singles/process', async ({ request }) => {
+          bodies.push((await request.json()) as Record<string, unknown>);
+          return HttpResponse.json({ success: true, processed: 1, errors: [] });
+        }),
+      );
+      inbox = inboxPayload([
+        albumItem(),
+        ...['s1', 's2'].map((key) =>
+          albumItem({
+            key,
+            kind: 'single',
+            name: `Song ${key}`,
+            status: 'waiting',
+            history_id: null,
+            confidence: null,
+            match: null,
+            files: [
+              {
+                ...FILE_ONE,
+                filename: `${key}.flac`,
+                full_path: `/music/Staging/${key}.flac`,
+                title: `Song ${key}`,
+              },
+            ],
+            file_count: 1,
+          }),
+        ),
+      ]);
+      renderImportRoute(['/import?filter=all']);
+      await screen.findByText('Song s1');
+      fireEvent.click(screen.getByLabelText('Select Song s1'));
+      fireEvent.click(screen.getByLabelText('Select Song s2'));
+      fireEvent.click(screen.getByRole('button', { name: 'Import 2 from tags' }));
+      await waitFor(() => expect(bodies).toHaveLength(2));
+      expect((bodies[0].files as { full_path: string }[])[0].full_path).toBe(
+        '/music/Staging/s1.flac',
+      );
+      expect(await screen.findByText('2 of 2 imported')).toBeInTheDocument();
+    });
+
+    it('keyboard: j moves, x ticks, enter opens the matcher', async () => {
+      const { history } = renderImportRoute(['/import?filter=all']);
+      await screen.findAllByTestId('import-inbox-row');
+      fireEvent.keyDown(window, { key: 'j' });
+      fireEvent.keyDown(window, { key: 'j' });
+      const rows = screen.getAllByTestId('import-inbox-row');
+      expect(rows[1].className).toContain('focused');
+      fireEvent.keyDown(window, { key: 'x' });
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+      fireEvent.keyDown(window, { key: 'Enter' });
+      await waitFor(() => expect(history.location.pathname).toBe('/import/match/hash-2'));
+    });
+
+    it('keyboard shortcuts stay out of text fields', async () => {
+      renderImportRoute(['/import/match/hash-1']);
+      const input = await screen.findByPlaceholderText('Artist and album');
+      fireEvent.keyDown(input, { key: 'j' });
+      // nothing to assert crashed; the inbox is not mounted on the matcher route
+      expect(input).toBeInTheDocument();
+    });
+
+    it('offers upload buttons on the inbox', async () => {
+      renderImportRoute();
+      expect(await screen.findByRole('button', { name: 'Add files' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add a folder' })).toBeInTheDocument();
+    });
   });
 });

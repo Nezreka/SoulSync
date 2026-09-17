@@ -1663,6 +1663,15 @@ const HELPER_CONTENT = {
         description: 'The confidence line, how often the folder is checked, whether matches import without asking, and which quality profile they are checked against.',
         docsId: 'imp-auto'
     },
+    '#import-upload-files': {
+        title: 'Add files',
+        description: 'Upload straight into the import folder from the browser. Drop files or a whole folder anywhere on the list; a dropped folder keeps its name, so an album lands as one item.',
+    },
+    '#import-page-preview': {
+        title: 'Before it imports',
+        description: 'Where each file will land on your naming template, and which tags the release will change, shown before anything moves. Show details lists it per track.',
+        docsId: 'imp-matching'
+    },
     '#import-page-queue': {
         title: 'Importing',
         description: 'Imports you started from the matcher, with progress per track. The watcher\'s own imports show on their rows in the list instead.',

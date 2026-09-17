@@ -607,6 +607,181 @@ def album_match(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict
         return {"success": False, "error": str(exc)}, 500
 
 
+# an upload is capped per file, not per request: the browser sends one
+# request per file so a whole album does not have to fit one body.
+UPLOAD_MAX_BYTES = 1_024 * 1_024 * 1_024  # 1 GB, a DSD or a long WAV fits
+
+
+def _safe_relative_path(raw: str) -> Optional[str]:
+    """A relative path a browser sent, cleaned: forward or back slashes,
+    no absolute, no dot-dot, no empty segment. None when it is not one."""
+    text = str(raw or "").replace("\\", "/").strip().strip("/")
+    if not text:
+        return None
+    parts = []
+    for part in text.split("/"):
+        part = part.strip()
+        if part in ("", ".", ".."):
+            return None
+        if ":" in part:
+            return None
+        parts.append(part)
+    return os.path.join(*parts)
+
+
+def upload_to_staging(runtime: ImportRouteRuntime, files: list, relative_paths: list) -> tuple[Dict[str, Any], int]:
+    """Write browser-uploaded audio into the import folder, keeping the
+    folder structure the browser sent (a dropped folder keeps its name, so
+    it lands as one album). Audio extensions only; the staging cache is
+    dropped so the inbox sees the files on its next read.
+
+    ``files`` are werkzeug FileStorage objects; ``relative_paths`` the
+    matching ``webkitRelativePath`` (or filename) for each."""
+    try:
+        staging_path = runtime.get_staging_path()
+        os.makedirs(staging_path, exist_ok=True)
+        staging_root = os.path.realpath(staging_path)
+
+        saved, skipped = [], []
+        for index, storage in enumerate(files):
+            name = storage.filename or ""
+            rel = _safe_relative_path(relative_paths[index] if index < len(relative_paths) and relative_paths[index] else name)
+            if rel is None:
+                skipped.append({"file": name, "reason": "bad path"})
+                continue
+            if os.path.splitext(rel)[1].lower() not in AUDIO_EXTENSIONS:
+                skipped.append({"file": rel, "reason": "not an audio file"})
+                continue
+            target = os.path.realpath(os.path.join(staging_root, rel))
+            if os.path.commonpath([staging_root, target]) != staging_root:
+                skipped.append({"file": rel, "reason": "outside the import folder"})
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            # never clobber: a second upload of the same name gets a suffix
+            final = target
+            stem, ext = os.path.splitext(target)
+            n = 1
+            while os.path.exists(final):
+                n += 1
+                final = f"{stem} ({n}){ext}"
+            storage.save(final)
+            size = os.path.getsize(final)
+            if size > UPLOAD_MAX_BYTES:
+                os.remove(final)
+                skipped.append({"file": rel, "reason": "over the 1 GB per-file limit"})
+                continue
+            saved.append({"file": os.path.relpath(final, staging_root), "size": size})
+
+        if saved:
+            invalidate_staging_scan_cache()
+        return {"success": True, "saved": saved, "skipped": skipped, "staging_path": staging_path}, 200
+    except Exception as exc:
+        runtime.logger.error("Error uploading to staging: %s", exc)
+        return {"success": False, "error": str(exc)}, 500
+
+
+def album_preview(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
+    """What an album import WOULD do, per track: the destination path on the
+    user's template, and the tags the release will write against the tags the
+    file has now. Nothing is created (the path builder runs with
+    create_dirs=False, the reorganize dry run's seam). The pipeline still owns
+    the real answer; this is the same builders on the same context."""
+    try:
+        from core.imports.context import build_import_album_info, get_import_clean_title
+        from core.imports.paths import _extract_year_from_release_date, build_final_path_for_track
+        from core.imports.track_number import resolve_disc_for_track
+
+        data = data or {}
+        album = data.get("album") or {}
+        matches = data.get("matches") or []
+        source = str(album.get("source") or data.get("source") or "").strip().lower()
+        if not album or not matches:
+            return {"success": False, "error": "album and matches are required"}, 400
+
+        total_discs = max(
+            (int(m.get("track", {}).get("disc_number") or 1) for m in matches if m.get("track")),
+            default=1,
+        )
+        artist_context = runtime.resolve_album_artist_context(album, source=source)
+        rows = []
+        for match in matches:
+            staging_file = match.get("staging_file") or {}
+            track = match.get("track") or {}
+            if not staging_file or not track:
+                continue
+            full_path = staging_file.get("full_path", "")
+            ext = os.path.splitext(full_path)[1] or ".flac"
+            context = runtime.build_album_import_context(
+                album, track, artist_context=artist_context, total_discs=total_discs, source=source,
+            )
+            context["is_local_import"] = True
+            ctx_artist = context.get("artist") or artist_context or {}
+            album_info = build_import_album_info(context, force_album=True)
+            album_info["track_number"] = int(track.get("track_number") or 1)
+            album_info["clean_track_name"] = get_import_clean_title(
+                context, album_info=album_info, default=track.get("name") or "Unknown Track",
+            )
+            try:
+                album_info["disc_number"] = resolve_disc_for_track(
+                    context.get("original_search") or {}, album_info,
+                )
+            except Exception:  # noqa: BLE001 - disc is a nicety in a preview
+                album_info["disc_number"] = int(track.get("disc_number") or 1)
+
+            destination = None
+            path_error = None
+            try:
+                destination, _ = build_final_path_for_track(
+                    context, ctx_artist, album_info, ext, create_dirs=False,
+                )
+            except Exception as exc:  # noqa: BLE001 - say why, do not fail the preview
+                path_error = str(exc)
+
+            current = {}
+            try:
+                if full_path and os.path.isfile(full_path):
+                    current = runtime.read_staging_file_metadata(full_path, os.path.basename(full_path))
+            except Exception:  # noqa: BLE001
+                current = {}
+
+            artists = track.get("artists") or []
+            artist_names = [a.get("name") if isinstance(a, dict) else str(a) for a in artists]
+            artist_names = [a for a in artist_names if a]
+            after = {
+                "title": album_info.get("clean_track_name") or track.get("name") or "",
+                "artist": ", ".join(artist_names) or ctx_artist.get("name") or album.get("artist") or "",
+                "albumartist": ctx_artist.get("name") or album.get("artist") or "",
+                "album": album_info.get("album_name") or album.get("name") or "",
+                "track_number": album_info.get("track_number"),
+                "disc_number": album_info.get("disc_number"),
+                "year": _extract_year_from_release_date(album.get("release_date") or "") or "",
+            }
+            before = {
+                "title": current.get("title") or "",
+                "artist": current.get("artist") or "",
+                "albumartist": current.get("albumartist") or "",
+                "album": current.get("album") or "",
+                "track_number": current.get("track_number") or None,
+                "disc_number": current.get("disc_number") or None,
+                "year": "",
+            }
+            changed = [k for k in after if str(after[k] or "") != str(before.get(k) or "") and after[k] not in (None, "")]
+            rows.append({
+                "file": os.path.basename(full_path),
+                "full_path": full_path,
+                "destination": destination,
+                "path_error": path_error,
+                "before": before,
+                "after": after,
+                "changed": changed,
+            })
+
+        return {"success": True, "tracks": rows}, 200
+    except Exception as exc:
+        runtime.logger.error("Error previewing album import: %s", exc)
+        return {"success": False, "error": str(exc)}, 500
+
+
 def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
     """Process matched album files through the post-processing pipeline."""
     try:

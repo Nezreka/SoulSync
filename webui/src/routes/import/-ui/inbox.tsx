@@ -7,7 +7,12 @@ import { Button, Checkbox, Switch } from '@/components/form/form';
 import { Notice } from '@/components/primitives';
 import { browserSafeImageUrl } from '@/platform/artwork-thumb';
 
-import type { ImportInboxFilter, ImportInboxItem, ImportInboxPayload } from '../-import.types';
+import type {
+  ImportInboxFilter,
+  ImportInboxItem,
+  ImportInboxPayload,
+  ImportStagingFile,
+} from '../-import.types';
 
 import {
   approveAutoImportResult,
@@ -46,7 +51,9 @@ import {
   getErrorMessage,
   NoteIcon,
   RefreshIcon,
+  useImportQueueActions,
 } from './import-shared';
+import { UploadZone } from './upload-zone';
 
 /** live states poll fast; a quiet inbox with the worker off can wait */
 function pollInterval(payload: ImportInboxPayload | undefined): number | false {
@@ -67,11 +74,14 @@ export function Inbox({
   onFilterChange: (next: ImportInboxFilter) => void;
 }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { addQueueJob } = useImportQueueActions();
   const inbox = useQuery({
     ...importInboxQueryOptions(),
     refetchInterval: (query) => pollInterval(query.state.data),
   });
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [focused, setFocused] = useState<string | null>(null);
 
   const payload = inbox.data;
   const items = payload?.items ?? [];
@@ -144,6 +154,111 @@ export function Inbox({
   });
 
   const selectedItems = visible.filter((item) => selected.has(item.key));
+  // loose files with no worker verdict can go in straight from their own tags,
+  // which is what the old singles tab did with one button
+  const selectedSingles = selectedItems.filter(
+    (item) => item.kind === 'single' && item.status === 'waiting' && item.files.length === 1,
+  );
+  const importSinglesFromTags = () => {
+    if (selectedSingles.length === 0) return;
+    const files: ImportStagingFile[] = selectedSingles.map((item) => {
+      const f = item.files[0];
+      return {
+        filename: f.filename,
+        rel_path: f.rel_path,
+        full_path: f.full_path,
+        title: f.title,
+        artist: f.artist,
+        album: f.album,
+        track_number: f.track_number,
+        disc_number: f.disc_number,
+        extension: f.extension,
+        size: f.size,
+        duration_ms: f.duration_ms,
+        bitrate: f.bitrate,
+      };
+    });
+    addQueueJob({
+      type: 'singles',
+      label: `${files.length} ${files.length === 1 ? 'single' : 'singles'} from tags`,
+      sublabel:
+        files
+          .map((f) => f.title || f.filename)
+          .slice(0, 3)
+          .join(', ') + (files.length > 3 ? '…' : ''),
+      imageUrl: null,
+      items: files,
+    });
+    setSelected(new Set());
+  };
+
+  // j/k move, enter opens the matcher, a approves, d dismisses, x ticks.
+  // only while nothing else has the keyboard.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+      if (target?.isContentEditable || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (visible.length === 0) return;
+      const index = focused ? visible.findIndex((item) => item.key === focused) : -1;
+      const current = index >= 0 ? visible[index] : null;
+      switch (event.key) {
+        case 'j':
+        case 'ArrowDown':
+          event.preventDefault();
+          setFocused(visible[Math.min(visible.length - 1, index + 1)].key);
+          break;
+        case 'k':
+        case 'ArrowUp':
+          event.preventDefault();
+          setFocused(visible[Math.max(0, index - 1)].key);
+          break;
+        case 'Enter':
+          if (current && inboxActions(current).includes('identify')) {
+            event.preventDefault();
+            void navigate({ to: '/import/match/$key', params: { key: current.key } });
+          }
+          break;
+        case 'a':
+          if (current && inboxActions(current).includes('approve') && current.history_id != null) {
+            approve.mutate([current.history_id]);
+          }
+          break;
+        case 'd':
+          if (current && inboxActions(current).includes('dismiss') && current.history_id != null) {
+            void (async () => {
+              const ok = await confirmAction({
+                title: 'Dismiss',
+                message: `Dismiss "${current.name}"? Its files stay in the import folder.`,
+                confirmText: 'Dismiss',
+              });
+              if (ok) dismiss.mutate([current.history_id!]);
+            })();
+          }
+          break;
+        case 'x':
+          if (current && inboxActions(current).length > 0) {
+            setSelected((prev) => {
+              const next = new Set(prev);
+              if (next.has(current.key)) next.delete(current.key);
+              else next.add(current.key);
+              return next;
+            });
+          }
+          break;
+        default:
+          return;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [visible, focused, navigate, approve, dismiss]);
+  useEffect(() => {
+    if (!focused) return;
+    const el = document.querySelector(`[data-inbox-key="${CSS.escape(focused)}"]`);
+    // jsdom has no scrollIntoView; a missing method must not take the page down
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' });
+  }, [focused]);
   const selectedApprovable = selectedItems.filter(
     (item) => item.status === 'needs_review' && item.history_id != null,
   );
@@ -234,6 +349,16 @@ export function Inbox({
                 Approve {selectedApprovable.length}
               </Button>
             ) : null}
+            {selectedSingles.length > 0 ? (
+              <Button
+                variant={selectedApprovable.length > 0 ? 'secondary' : 'primary'}
+                size="sm"
+                title="Import these files as they are, tagged from what they carry"
+                onClick={importSinglesFromTags}
+              >
+                Import {selectedSingles.length} from tags
+              </Button>
+            ) : null}
             {selectedDismissable.length > 0 ? (
               <Button
                 variant="secondary"
@@ -255,51 +380,60 @@ export function Inbox({
         ) : null}
       </div>
 
-      {inbox.error && !payload ? (
-        <Notice tone="danger" role="alert">
-          {getErrorMessage(inbox.error)}
-        </Notice>
-      ) : payload?.scanning ? (
-        <div className={styles.empty}>
-          <div className={styles.emptyTitle}>Reading the import folder…</div>
-          {payload.progress && payload.progress.total > 0
-            ? `${payload.progress.scanned} of ${payload.progress.total} files`
-            : null}
-        </div>
-      ) : !inbox.isLoading && visible.length === 0 ? (
-        <EmptyState filter={filter} total={counts.all} stagingPath={payload?.staging_path} />
-      ) : (
-        <div className={styles.list} id="import-inbox-list">
-          {visible.map((item) => (
-            <InboxRow
-              key={item.key}
-              item={item}
-              selectable={inboxActions(item).length > 0}
-              selected={selected.has(item.key)}
-              busy={approve.isPending || dismiss.isPending || retry.isPending}
-              onSelectedChange={(next) =>
-                setSelected((current) => {
-                  const copy = new Set(current);
-                  if (next) copy.add(item.key);
-                  else copy.delete(item.key);
-                  return copy;
-                })
-              }
-              onApprove={() => item.history_id != null && approve.mutate([item.history_id])}
-              onDismiss={async () => {
-                if (item.history_id == null) return;
-                const ok = await confirmAction({
-                  title: 'Dismiss',
-                  message: `Dismiss "${item.name}"? Its files stay in the import folder.`,
-                  confirmText: 'Dismiss',
-                });
-                if (ok) dismiss.mutate([item.history_id]);
-              }}
-              onRetry={() => item.history_id != null && retry.mutate(item.history_id)}
-            />
-          ))}
-        </div>
-      )}
+      <UploadZone>
+        {inbox.error && !payload ? (
+          <Notice tone="danger" role="alert">
+            {getErrorMessage(inbox.error)}
+          </Notice>
+        ) : payload?.scanning ? (
+          <div className={styles.empty}>
+            <div className={styles.emptyTitle}>Reading the import folder…</div>
+            {payload.progress && payload.progress.total > 0
+              ? `${payload.progress.scanned} of ${payload.progress.total} files`
+              : null}
+          </div>
+        ) : !inbox.isLoading && visible.length === 0 ? (
+          <EmptyState filter={filter} total={counts.all} stagingPath={payload?.staging_path} />
+        ) : (
+          <div className={styles.list} id="import-inbox-list">
+            {visible.map((item) => (
+              <InboxRow
+                key={item.key}
+                item={item}
+                focused={focused === item.key}
+                selectable={inboxActions(item).length > 0}
+                selected={selected.has(item.key)}
+                busy={approve.isPending || dismiss.isPending || retry.isPending}
+                onSelectedChange={(next) =>
+                  setSelected((current) => {
+                    const copy = new Set(current);
+                    if (next) copy.add(item.key);
+                    else copy.delete(item.key);
+                    return copy;
+                  })
+                }
+                onApprove={() => item.history_id != null && approve.mutate([item.history_id])}
+                onDismiss={async () => {
+                  if (item.history_id == null) return;
+                  const ok = await confirmAction({
+                    title: 'Dismiss',
+                    message: `Dismiss "${item.name}"? Its files stay in the import folder.`,
+                    confirmText: 'Dismiss',
+                  });
+                  if (ok) dismiss.mutate([item.history_id]);
+                }}
+                onRetry={() => item.history_id != null && retry.mutate(item.history_id)}
+              />
+            ))}
+          </div>
+        )}
+        {visible.length > 1 ? (
+          <div className={styles.kbdHint}>
+            <kbd>j</kbd> <kbd>k</kbd> move · <kbd>x</kbd> tick · <kbd>a</kbd> approve · <kbd>d</kbd>{' '}
+            dismiss · <kbd>↵</kbd> open
+          </div>
+        ) : null}
+      </UploadZone>
     </>
   );
 }
@@ -490,6 +624,7 @@ function EmptyState({
 
 function InboxRow({
   item,
+  focused,
   selectable,
   selected,
   busy,
@@ -499,6 +634,7 @@ function InboxRow({
   onRetry,
 }: {
   item: ImportInboxItem;
+  focused: boolean;
   selectable: boolean;
   selected: boolean;
   busy: boolean;
@@ -527,8 +663,10 @@ function InboxRow({
       className={clsx(styles.row, {
         [styles.selected]: selected,
         [styles.history]: !item.in_staging,
+        [styles.focused]: focused,
       })}
       data-status={item.status}
+      data-inbox-key={item.key}
       data-testid="import-inbox-row"
     >
       <div className={clsx(styles.rowCheck, { [styles.empty]: !selectable })}>

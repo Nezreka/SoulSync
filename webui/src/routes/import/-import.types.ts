@@ -412,3 +412,55 @@ export interface ImportSinglesQueueJob {
 }
 
 export type ImportQueueJob = ImportAlbumQueueJob | ImportSinglesQueueJob;
+
+/** One track of the pre-import preview: where it lands and which tags change. */
+export interface ImportPreviewTags {
+  title: string;
+  artist: string;
+  albumartist: string;
+  album: string;
+  track_number: number | string | null;
+  disc_number: number | string | null;
+  year: string;
+}
+
+export interface ImportPreviewTrack {
+  file: string;
+  full_path: string;
+  destination: string | null;
+  path_error: string | null;
+  before: ImportPreviewTags;
+  after: ImportPreviewTags;
+  changed: (keyof ImportPreviewTags)[];
+}
+
+export interface ImportPreviewPayload {
+  success: boolean;
+  tracks?: ImportPreviewTrack[];
+  error?: string;
+}
+
+/** /api/library/check-tracks: per track name, whether the library has it. */
+export interface LibraryOwnedEntry {
+  owned: boolean;
+  track_id?: number | null;
+  title?: string | null;
+  file_path?: string | null;
+  format?: string | null;
+  bitrate?: number | null;
+  album?: string | null;
+}
+
+export interface LibraryCheckPayload {
+  success: boolean;
+  owned_tracks?: Record<string, LibraryOwnedEntry>;
+  error?: string;
+}
+
+export interface ImportUploadPayload {
+  success: boolean;
+  saved?: { file: string; size: number }[];
+  skipped?: { file: string; reason: string }[];
+  staging_path?: string;
+  error?: string;
+}

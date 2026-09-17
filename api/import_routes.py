@@ -13,7 +13,9 @@ from flask import Blueprint, current_app, jsonify, request
 from core.imports.album import build_album_import_match_payload
 from core.imports.routes import ImportRouteRuntime as _ImportRouteRuntime
 from core.imports.routes import album_match as _import_album_match
+from core.imports.routes import album_preview as _import_album_preview
 from core.imports.routes import album_process as _import_album_process
+from core.imports.routes import upload_to_staging as _import_upload_to_staging
 from core.imports.routes import inbox as _import_inbox
 from core.imports.routes import process_single_import_file as _import_process_single_import_file
 from core.imports.routes import search_albums as _import_search_albums
@@ -80,6 +82,27 @@ def import_staging_files():
 @bp.route('/api/import/inbox', methods=['GET'])
 def import_inbox():
     payload, status = _import_inbox(_build_import_route_runtime(), auto_import_worker)
+    return jsonify(payload), status
+
+
+@bp.route('/api/import/upload', methods=['POST'])
+@admin_only
+def import_upload():
+    """browser upload into the import folder. multipart: one or more
+    `files`, and a matching `paths` field per file carrying the relative
+    path the browser knows (webkitRelativePath) so a dropped folder lands
+    as a folder."""
+    files = request.files.getlist('files')
+    if not files:
+        return jsonify({"success": False, "error": "no files"}), 400
+    paths = request.form.getlist('paths')
+    payload, status = _import_upload_to_staging(_build_import_route_runtime(), files, paths)
+    return jsonify(payload), status
+
+
+@bp.route('/api/import/album/preview', methods=['POST'])
+def import_album_preview():
+    payload, status = _import_album_preview(_build_import_route_runtime(), request.get_json() or {})
     return jsonify(payload), status
 
 

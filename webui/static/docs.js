@@ -1278,6 +1278,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="imp-setup">
                 <h3 class="docs-subsection-title">Import Folder</h3>
                 <p class="docs-text">Set your <strong>import folder path</strong> in Settings &rarr; Download Settings. Drop audio files you want to import into it. Album folders (e.g. <code>Artist - Album/</code>), loose files that share an album tag, and single files each become one item in the inbox.</p>
+                <p class="docs-text">You can also upload from the browser: drop files or a folder anywhere on the list, or use <strong>Add files</strong> / <strong>Add a folder</strong>. A dropped folder keeps its name, so an album lands as one item.</p>
                 <p class="docs-text">The strip under the page header shows the folder, how many items and files are in it, and the auto-import switch.</p>
                 ${docsImg('imp-staging.jpg', 'Import page')}
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Files not showing up?</strong> The page says so when it cannot read a folder. On a bind mount that is nearly always ownership: the folder's owner has to match the container's PUID/PGID (TrueNAS datasets are usually owned by the <code>apps</code> user, uid 568, while the container defaults to 1000).</div></div>
@@ -1293,7 +1294,8 @@ const DOCS_SECTIONS = [
                     <li><strong>Failed</strong> &mdash; the import did not finish. Retry it, or fix the match.</li>
                     <li><strong>Imported</strong> / <strong>Dismissed</strong> &mdash; history.</li>
                 </ul>
-                <p class="docs-text"><strong>Needs attention</strong> is the default filter and shows only what needs a person. Tick rows to approve or dismiss several at once. <strong>Show files</strong> opens the per-file list with length, bitrate and size.</p>
+                <p class="docs-text"><strong>Needs attention</strong> is the default filter and shows only what needs a person. Tick rows to approve or dismiss several at once, or to import waiting singles straight from their own tags. <strong>Show files</strong> opens the per-file list with length, bitrate and size. Keyboard: <kbd>j</kbd>/<kbd>k</kbd> move, <kbd>x</kbd> tick, <kbd>a</kbd> approve, <kbd>d</kbd> dismiss, <kbd>Enter</kbd> opens the matcher.</p>
+                <p class="docs-text">The <strong>Import Needs Attention</strong> automation trigger fires whenever the watcher leaves something for you, so a notification can reach you without opening the page.</p>
             </div>
             <div class="docs-subsection" id="imp-auto">
                 <h3 class="docs-subsection-title">Auto-import</h3>
@@ -1308,6 +1310,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Tracks</strong> &mdash; each release track beside the file matched to it, with the file's own length and bitrate. A length that differs from the release is flagged.</li>
                     <li><strong>Files without a track</strong> &mdash; drag one onto a track, or tap it and then the track. The &times; takes a file off a track.</li>
                 </ul>
+                <p class="docs-text">Under the table, <strong>before it imports</strong>: where each file will land on your naming template, which tags the release will change, and which tracks your library already has (kept or replaced by quality). Show details lists it per track.</p>
                 <p class="docs-text"><strong>Import</strong> tags the matched files with the release's metadata (title, artist, album, track number, cover art) and moves them into your library on the standard file template. Files without a track stay in the import folder.</p>
                 ${docsImg('imp-matching.jpg', 'The matcher')}
             </div>

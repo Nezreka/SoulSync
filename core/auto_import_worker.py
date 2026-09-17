@@ -657,6 +657,8 @@ class AutoImportWorker:
                 self._record_result(candidate, 'needs_identification', 0.0,
                                     error_message='Could not identify album from tags, folder name, or fingerprint')
                 self._bump_stat('failed')
+                self._emit_needs_attention(candidate, 'needs_identification', None,
+                                           'Could not identify album from tags, folder name, or fingerprint')
                 return
 
             # Phase 4: Match tracks
@@ -670,6 +672,8 @@ class AutoImportWorker:
                                     image_url=identification.get('image_url'),
                                     error_message='Could not match tracks to album tracklist')
                 self._bump_stat('failed')
+                self._emit_needs_attention(candidate, 'needs_identification', identification,
+                                           'Could not match tracks to album tracklist')
                 return
 
             # which source the tracklist came from rides along into history,
@@ -740,6 +744,8 @@ class AutoImportWorker:
                                     image_url=identification.get('image_url'),
                                     identification_method=identification.get('method'),
                                     match_data=match_result)
+                self._emit_needs_attention(candidate, status, identification,
+                                           f"{confidence:.0%} match, wants a look", confidence)
             else:
                 status = 'needs_identification'
                 self._bump_stat('failed')
@@ -751,11 +757,14 @@ class AutoImportWorker:
                                     image_url=identification.get('image_url'),
                                     identification_method=identification.get('method'),
                                     match_data=match_result)
+                self._emit_needs_attention(candidate, status, identification,
+                                           f"{confidence:.0%} match, too low to trust", confidence)
 
         except Exception as e:
             logger.error(f"[Auto-Import] Error processing {candidate.name}: {e}")
             self._record_result(candidate, 'failed', 0.0, error_message=str(e))
             self._bump_stat('failed')
+            self._emit_needs_attention(candidate, 'failed', None, str(e))
         finally:
             with self._submitted_lock:
                 self._submitted_hashes.discard(candidate.folder_hash)
@@ -763,6 +772,28 @@ class AutoImportWorker:
             # No stale "processing track 3/14" because the entry is
             # gone — the UI's polling read returns an empty array.
             self._unregister_active(candidate.folder_hash)
+
+    def _emit_needs_attention(self, candidate: 'FolderCandidate', status: str,
+                              identification: Optional[Dict], reason: str,
+                              confidence: float = 0.0) -> None:
+        """The automation event for a folder the worker could not finish on its
+        own. Before this the only way to learn an import was waiting on you
+        was to open the page."""
+        if not self._automation_engine:
+            return
+        try:
+            ident = identification or {}
+            self._automation_engine.emit('import_needs_attention', {
+                'folder_name': candidate.name,
+                'status': status,
+                'reason': reason,
+                'album_name': ident.get('album_name') or '',
+                'artist': ident.get('artist_name') or '',
+                'confidence': f"{confidence:.0%}" if confidence else '',
+                'track_count': str(len(candidate.audio_files)),
+            })
+        except Exception as e:
+            logger.debug("automation emit failed: %s", e)
 
     # ── Scanning ──
 

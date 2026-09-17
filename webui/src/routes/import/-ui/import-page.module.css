@@ -1085,6 +1085,211 @@
   justify-content: space-between;
 }
 
+/* ── upload ───────────────────────────────────────────────────── */
+
+.dropzone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 14px;
+}
+
+.dropzoneOver {
+  outline: 2px dashed rgba(var(--accent-rgb), 0.7);
+  outline-offset: 6px;
+}
+
+.dropOverlay {
+  position: absolute;
+  inset: -6px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 16px;
+  background: rgba(8, 8, 8, 0.82);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.dropOverlayText {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.dropOverlayHint {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.uploadBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.uploadHint {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.uploadList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.uploadRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 120px 110px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.uploadRow[data-status='error'],
+.uploadRow[data-status='skipped'] {
+  color: #ff9a9a;
+}
+
+.uploadName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}
+
+.uploadSize {
+  text-align: right;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.uploadStatus {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.progressFailed {
+  background: #ff5c5c;
+}
+
+/* ── the pre-import preview in the matcher ────────────────────── */
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.previewHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.previewRows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.previewRow {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 12px;
+}
+
+.previewDest {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewDest .warn {
+  color: #ffd27a;
+}
+
+.previewDiff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.previewDiff del {
+  color: rgba(255, 138, 138, 0.8);
+  text-decoration: line-through;
+}
+
+.previewDiff ins {
+  color: rgb(var(--accent-light-rgb));
+  text-decoration: none;
+}
+
+.previewDiff b {
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 600;
+}
+
+.inLibrary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(88, 166, 255, 0.16);
+  color: #9ccbff;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.kbdHint {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.kbdHint kbd {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.row.focused {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.18);
+}
+
 /* ── responsive ───────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
@@ -1144,6 +1349,15 @@
 
   .job {
     grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .uploadRow {
+    grid-template-columns: minmax(0, 1fr) 80px;
+  }
+
+  .uploadSize,
+  .uploadRow .progress {
+    display: none;
   }
 
   .jobSide {
