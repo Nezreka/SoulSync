@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import uuid
@@ -677,6 +678,150 @@ def upload_to_staging(runtime: ImportRouteRuntime, files: list, relative_paths: 
         return {"success": True, "saved": saved, "skipped": skipped, "staging_path": staging_path}, 200
     except Exception as exc:
         runtime.logger.error("Error uploading to staging: %s", exc)
+        return {"success": False, "error": str(exc)}, 500
+
+
+UPLOAD_PART_DIR = ".uploads"
+_UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def _upload_target(staging_root: str, rel: str) -> Optional[str]:
+    target = os.path.realpath(os.path.join(staging_root, rel))
+    if os.path.commonpath([staging_root, target]) != staging_root:
+        return None
+    return target
+
+
+def _unique_path(target: str) -> str:
+    final = target
+    stem, ext = os.path.splitext(target)
+    n = 1
+    while os.path.exists(final):
+        n += 1
+        final = f"{stem} ({n}){ext}"
+    return final
+
+
+def upload_chunk_to_staging(runtime: ImportRouteRuntime, *, upload_id: str, index: int, total: int,
+                            relative_path: str, chunk) -> tuple[Dict[str, Any], int]:
+    """One piece of a browser upload. A reverse proxy in front of a docker
+    install commonly caps a request body at a megabyte or so, which would
+    refuse every whole-file upload; pieces of a few megabytes get through
+    anything. Pieces append to a part file under staging/.uploads; the last
+    one moves it into place. The part dir starts with a dot so the scanner
+    never mistakes a half-uploaded file for an album."""
+    try:
+        if not _UPLOAD_ID_RE.match(str(upload_id or "")):
+            return {"success": False, "error": "bad upload id"}, 400
+        try:
+            index = int(index)
+            total = int(total)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "bad chunk index"}, 400
+        if total < 1 or index < 0 or index >= total:
+            return {"success": False, "error": "bad chunk index"}, 400
+        rel = _safe_relative_path(relative_path)
+        if rel is None:
+            return {"success": False, "error": "bad path"}, 400
+        if os.path.splitext(rel)[1].lower() not in AUDIO_EXTENSIONS:
+            return {"success": False, "error": "not an audio file"}, 400
+
+        staging_path = runtime.get_staging_path()
+        os.makedirs(staging_path, exist_ok=True)
+        staging_root = os.path.realpath(staging_path)
+        target = _upload_target(staging_root, rel)
+        if target is None:
+            return {"success": False, "error": "outside the import folder"}, 400
+
+        part_dir = os.path.join(staging_root, UPLOAD_PART_DIR)
+        os.makedirs(part_dir, exist_ok=True)
+        part = os.path.join(part_dir, f"{upload_id}.part")
+        # the first piece starts the file over: a retried upload must not
+        # stack onto a stale part from the last try
+        mode = "wb" if index == 0 else "ab"
+        with open(part, mode) as handle:
+            chunk.save(handle)
+        size = os.path.getsize(part)
+        if size > UPLOAD_MAX_BYTES:
+            os.remove(part)
+            return {"success": False, "error": "over the 1 GB per-file limit"}, 413
+
+        if index < total - 1:
+            return {"success": True, "received": index + 1, "total": total}, 200
+
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        final = _unique_path(target)
+        os.replace(part, final)
+        invalidate_staging_scan_cache()
+        return {
+            "success": True,
+            "received": total,
+            "total": total,
+            "saved": {"file": os.path.relpath(final, staging_root), "size": os.path.getsize(final)},
+        }, 200
+    except Exception as exc:
+        runtime.logger.error("Error receiving upload chunk: %s", exc)
+        return {"success": False, "error": str(exc)}, 500
+
+
+# fingerprinting is a second a file plus a network call; three files say
+# who the artist is as well as thirty would
+FINGERPRINT_MAX_FILES = 3
+
+
+def fingerprint_files(runtime: ImportRouteRuntime, file_paths: list,
+                      *, client_factory=None) -> tuple[Dict[str, Any], int]:
+    """Identify staging files by AcoustID fingerprint, on demand. The worker
+    already tries this last on its own; here it is a button for the matcher,
+    for the folder whose tags and name say nothing. Returns what each file
+    was recognised as and a search query the matcher can run from it."""
+    try:
+        paths = [p for p in (file_paths or []) if isinstance(p, str)][:FINGERPRINT_MAX_FILES]
+        if not paths:
+            return {"success": False, "error": "file_paths is required"}, 400
+
+        if client_factory is None:
+            from core.acoustid_client import AcoustIDClient
+            client_factory = AcoustIDClient
+        try:
+            client = client_factory()
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"AcoustID is not available: {exc}"}, 503
+        available, reason = client.is_available()
+        if not available:
+            return {"success": False, "error": reason or "AcoustID is not set up", "code": "acoustid_unavailable"}, 503
+
+        results = []
+        for raw in paths:
+            resolved, error = _validate_import_file(runtime, raw)
+            if error:
+                results.append({"file": os.path.basename(str(raw)), "status": "error", "error": error})
+                continue
+            res = client.lookup_with_status(resolved)
+            best = (res.get("recordings") or [None])[0]
+            results.append({
+                "file": os.path.basename(resolved),
+                "status": res.get("status"),
+                "error": res.get("error"),
+                "title": best.get("title") if best else None,
+                "artist": best.get("artist") if best else None,
+                "mbid": best.get("mbid") if best else None,
+                "score": round(float(best.get("score") or 0), 3) if best else None,
+            })
+
+        artists = [r["artist"] for r in results if r.get("artist")]
+        artist = max(set(artists), key=artists.count) if artists else None
+        titles = [r["title"] for r in results if r.get("title")]
+        recognised = sum(1 for r in results if r.get("status") == "ok")
+        return {
+            "success": True,
+            "results": results,
+            "recognised": recognised,
+            "artist": artist,
+            "title": titles[0] if len(paths) == 1 and titles else None,
+        }, 200
+    except Exception as exc:
+        runtime.logger.error("Error fingerprinting import files: %s", exc)
         return {"success": False, "error": str(exc)}, 500
 
 

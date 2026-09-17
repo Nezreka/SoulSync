@@ -146,3 +146,99 @@ def test_needs_attention_is_a_registered_trigger():
     trigger = next(t for t in TRIGGERS if t['type'] == 'import_needs_attention')
     assert trigger['available'] is True
     assert set(trigger['variables']) == {'folder_name', 'status', 'reason', 'album_name', 'artist', 'confidence', 'track_count'}
+
+
+# ---- fingerprint on demand ----
+
+class _Fp:
+    def __init__(self, answers):
+        self.answers = answers
+
+    def is_available(self):
+        return True, ''
+
+    def lookup_with_status(self, path):
+        return self.answers.get(os.path.basename(path), {'status': 'no_match', 'recordings': [], 'error': 'no match'})
+
+
+def test_fingerprint_names_the_artist_and_ignores_what_it_cannot_read(tmp_path):
+    for n in ('01.flac', '02.flac', '03.flac', '04.flac'):
+        (tmp_path / n).write_bytes(b'x')
+    answers = {
+        '01.flac': {'status': 'ok', 'recordings': [{'mbid': 'm1', 'title': 'One', 'artist': 'Boards of Canada', 'score': 0.98}]},
+        '02.flac': {'status': 'ok', 'recordings': [{'mbid': 'm2', 'title': 'Two', 'artist': 'Boards of Canada', 'score': 0.91}]},
+    }
+    rt = _runtime(str(tmp_path), get_allowed_import_roots=lambda: [str(tmp_path)])
+    payload, status = routes.fingerprint_files(
+        rt, [str(tmp_path / n) for n in ('01.flac', '02.flac', '03.flac', '04.flac')],
+        client_factory=lambda: _Fp(answers))
+    assert status == 200, payload
+    assert [r['file'] for r in payload['results']] == ['01.flac', '02.flac', '03.flac']   # capped at 3
+    assert payload['artist'] == 'Boards of Canada' and payload['recognised'] == 2
+    assert payload['results'][0]['score'] == 0.98 and payload['results'][2]['status'] == 'no_match'
+    assert payload['title'] is None   # an album, not a single
+
+
+def test_fingerprint_single_returns_a_title(tmp_path):
+    (tmp_path / 'x.flac').write_bytes(b'x')
+    rt = _runtime(str(tmp_path), get_allowed_import_roots=lambda: [str(tmp_path)])
+    payload, _ = routes.fingerprint_files(rt, [str(tmp_path / 'x.flac')], client_factory=lambda: _Fp({
+        'x.flac': {'status': 'ok', 'recordings': [{'mbid': 'm', 'title': 'Dayvan Cowboy', 'artist': 'BoC', 'score': 0.9}]}}))
+    assert payload['title'] == 'Dayvan Cowboy' and payload['artist'] == 'BoC'
+
+
+def test_fingerprint_refuses_files_outside_the_roots_and_says_when_acoustid_is_off(tmp_path):
+    outside = tmp_path / 'elsewhere.flac'
+    outside.write_bytes(b'x')
+    rt = _runtime(str(tmp_path / 'Staging'), get_allowed_import_roots=lambda: [str(tmp_path / 'Staging')])
+    payload, status = routes.fingerprint_files(rt, [str(outside)], client_factory=lambda: _Fp({}))
+    assert status == 200 and payload['results'][0]['status'] == 'error'
+
+    class Off(_Fp):
+        def is_available(self):
+            return False, 'No AcoustID API key configured'
+
+    payload, status = routes.fingerprint_files(rt, [str(outside)], client_factory=lambda: Off({}))
+    assert status == 503 and payload['code'] == 'acoustid_unavailable'
+
+
+# ---- chunked upload ----
+
+def test_chunks_assemble_in_order_and_land_once(tmp_path):
+    staging = str(tmp_path / 'Staging')
+    rt = _runtime(staging)
+    kw = dict(upload_id='abcdefgh1234', total=3, relative_path='Artist - Album/01.flac')
+    p1, s1 = routes.upload_chunk_to_staging(rt, index=0, chunk=_storage('01.flac', b'aaa'), **kw)
+    assert s1 == 200 and p1 == {'success': True, 'received': 1, 'total': 3}
+    assert os.path.isfile(os.path.join(staging, '.uploads', 'abcdefgh1234.part'))
+    assert not os.path.exists(os.path.join(staging, 'Artist - Album', '01.flac'))
+    routes.upload_chunk_to_staging(rt, index=1, chunk=_storage('01.flac', b'bbb'), **kw)
+    p3, _ = routes.upload_chunk_to_staging(rt, index=2, chunk=_storage('01.flac', b'cc'), **kw)
+    assert p3['saved'] == {'file': os.path.join('Artist - Album', '01.flac'), 'size': 8}
+    with open(os.path.join(staging, 'Artist - Album', '01.flac'), 'rb') as f:
+        assert f.read() == b'aaabbbcc'
+    assert not os.path.exists(os.path.join(staging, '.uploads', 'abcdefgh1234.part'))
+
+
+def test_a_retried_first_chunk_starts_over(tmp_path):
+    staging = str(tmp_path / 'Staging')
+    rt = _runtime(staging)
+    kw = dict(upload_id='retry-me-0001', total=2, relative_path='x.flac')
+    routes.upload_chunk_to_staging(rt, index=0, chunk=_storage('x.flac', b'stale'), **kw)
+    routes.upload_chunk_to_staging(rt, index=0, chunk=_storage('x.flac', b'fresh'), **kw)
+    p, _ = routes.upload_chunk_to_staging(rt, index=1, chunk=_storage('x.flac', b'!'), **kw)
+    with open(os.path.join(staging, 'x.flac'), 'rb') as f:
+        assert f.read() == b'fresh!'
+
+
+def test_chunk_refuses_bad_ids_paths_and_indexes(tmp_path):
+    rt = _runtime(str(tmp_path / 'Staging'))
+    bad = [
+        dict(upload_id='x', index=0, total=1, relative_path='a.flac'),
+        dict(upload_id='abcdefgh1234', index=1, total=1, relative_path='a.flac'),
+        dict(upload_id='abcdefgh1234', index=0, total=1, relative_path='../a.flac'),
+        dict(upload_id='abcdefgh1234', index=0, total=1, relative_path='a.txt'),
+    ]
+    for kw in bad:
+        _, status = routes.upload_chunk_to_staging(rt, chunk=_storage('a.flac'), **kw)
+        assert status == 400, kw

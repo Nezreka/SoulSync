@@ -457,10 +457,38 @@ export interface LibraryCheckPayload {
   error?: string;
 }
 
+export interface ImportUploadChunkPayload {
+  success: boolean;
+  error?: string;
+  received?: number;
+  total?: number;
+  saved?: { file: string; size: number };
+}
+
 export interface ImportUploadPayload {
   success: boolean;
   saved?: { file: string; size: number }[];
   skipped?: { file: string; reason: string }[];
   staging_path?: string;
   error?: string;
+}
+
+export interface ImportFingerprintResult {
+  file: string;
+  status: string;
+  error?: string | null;
+  title?: string | null;
+  artist?: string | null;
+  mbid?: string | null;
+  score?: number | null;
+}
+
+export interface ImportFingerprintPayload {
+  success: boolean;
+  error?: string;
+  code?: string;
+  results?: ImportFingerprintResult[];
+  recognised?: number;
+  artist?: string | null;
+  title?: string | null;
 }

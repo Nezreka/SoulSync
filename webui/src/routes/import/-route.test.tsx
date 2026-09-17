@@ -595,6 +595,102 @@ describe('import route', () => {
       expect(input).toBeInTheDocument();
     });
 
+    it('fingerprint fills the search from what the audio is', async () => {
+      let searched: string[] = [];
+      server.use(
+        http.post('/api/import/fingerprint', () =>
+          HttpResponse.json({
+            success: true,
+            recognised: 2,
+            artist: 'Artist A',
+            title: null,
+            results: [
+              {
+                file: '01-track.flac',
+                status: 'ok',
+                title: 'Track One',
+                artist: 'Artist A',
+                score: 0.97,
+              },
+              {
+                file: '02-track.flac',
+                status: 'ok',
+                title: 'Track Two',
+                artist: 'Artist A',
+                score: 0.9,
+              },
+            ],
+          }),
+        ),
+        http.get('/api/import/search/albums', ({ request }) => {
+          searched.push(new URL(request.url).searchParams.get('q') ?? '');
+          return HttpResponse.json({ success: true, primary_source: 'spotify', albums: [] });
+        }),
+      );
+      renderImportRoute(['/import/match/hash-1']);
+      await screen.findByPlaceholderText('Artist and album');
+      fireEvent.click(await screen.findByRole('button', { name: 'Identify by fingerprint' }));
+      expect(
+        await screen.findByText('Sounds like Artist A (Track One, Track Two)'),
+      ).toBeInTheDocument();
+      await waitFor(() => expect(searched).toContain('Artist A Album A'));
+    });
+
+    it('fingerprint says so when acoustid is not set up', async () => {
+      server.use(
+        http.post('/api/import/fingerprint', () =>
+          HttpResponse.json(
+            {
+              success: false,
+              error: 'No AcoustID API key configured',
+              code: 'acoustid_unavailable',
+            },
+            { status: 503 },
+          ),
+        ),
+      );
+      renderImportRoute(['/import/match/hash-2']);
+      fireEvent.click(await screen.findByRole('button', { name: 'Identify by fingerprint' }));
+      expect(await screen.findByText('No AcoustID API key configured')).toBeInTheDocument();
+    });
+
+    it('uploads a picked file in pieces and re-reads the inbox', async () => {
+      const chunks: { index: string; total: string; path: string; id: string }[] = [];
+      server.use(
+        http.post('/api/import/upload/chunk', async ({ request }) => {
+          const form = await request.formData();
+          chunks.push({
+            index: String(form.get('index')),
+            total: String(form.get('total')),
+            path: String(form.get('path')),
+            id: String(form.get('upload_id')),
+          });
+          const last = form.get('index') === String(Number(form.get('total')) - 1);
+          return HttpResponse.json({
+            success: true,
+            received: Number(form.get('index')) + 1,
+            total: Number(form.get('total')),
+            ...(last ? { saved: { file: String(form.get('path')), size: 3 } } : {}),
+          });
+        }),
+      );
+      const { container } = renderImportRoute();
+      expect(await screen.findByRole('button', { name: 'Add files' })).toBeInTheDocument();
+      const input = container.querySelector('input[type="file"][accept]') as HTMLInputElement;
+      const file = new File([new Uint8Array(3)], 'new.flac', { type: 'audio/flac' });
+      fireEvent.change(input, { target: { files: [file] } });
+      await waitFor(() => expect(chunks).toHaveLength(1));
+      expect(chunks[0]).toMatchObject({ index: '0', total: '1', path: 'new.flac' });
+      expect(chunks[0].id).toMatch(/^[0-9a-f]{24}$/);
+      expect(await screen.findByText('1 uploaded')).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          getFetchUrls().filter((url) => url.includes('/api/import/inbox')).length,
+        ).toBeGreaterThan(1),
+      );
+      expect(window.showToast).toHaveBeenCalledWith('1 file in the import folder', 'success');
+    });
+
     it('offers upload buttons on the inbox', async () => {
       renderImportRoute();
       expect(await screen.findByRole('button', { name: 'Add files' })).toBeInTheDocument();

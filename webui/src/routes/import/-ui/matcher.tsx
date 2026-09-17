@@ -21,6 +21,7 @@ import type {
 
 import {
   checkLibraryTracks,
+  fingerprintImportFiles,
   importInboxQueryOptions,
   importSearchSourcesQueryOptions,
   matchImportAlbum,
@@ -136,6 +137,38 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
   const [preview, setPreview] = useState<ImportPreviewTrack[] | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [owned, setOwned] = useState<Record<string, LibraryOwnedEntry>>({});
+  const [fingerprinting, setFingerprinting] = useState(false);
+  const [fingerprintNote, setFingerprintNote] = useState<string | null>(null);
+
+  // for the folder whose tags and name say nothing: ask the audio itself.
+  // three files name the artist; the folder name is the best guess at the
+  // album, and the search runs from the two.
+  const fingerprint = async () => {
+    setFingerprinting(true);
+    setFingerprintNote(null);
+    try {
+      const res = await fingerprintImportFiles(item.files.slice(0, 3).map((f) => f.full_path));
+      if (!res.artist) {
+        setFingerprintNote(
+          res.recognised
+            ? 'Recognised the tracks but not the artist'
+            : 'AcoustID did not recognise these files',
+        );
+        return;
+      }
+      const titles = (res.results ?? []).map((r) => r.title).filter(Boolean);
+      setFingerprintNote(
+        `Sounds like ${res.artist}${titles.length ? ` (${titles.slice(0, 2).join(', ')})` : ''}`,
+      );
+      const guess = `${res.artist} ${item.name && item.name !== item.folder_name ? item.name : item.folder_name}`;
+      setQuery(guess);
+      await search(guess, sourceOverride);
+    } catch (error) {
+      setFingerprintNote(getErrorMessage(error));
+    } finally {
+      setFingerprinting(false);
+    }
+  };
 
   const search = async (text: string, override: string) => {
     const trimmed = text.trim();
@@ -360,6 +393,21 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
               >
                 Search
               </Button>
+            </div>
+            <div className={styles.fingerprintRow}>
+              <Button
+                variant="ghost"
+                size="sm"
+                id="import-page-fingerprint"
+                title="Fingerprint the first files with AcoustID and search from what they are"
+                disabled={fingerprinting}
+                onClick={() => void fingerprint()}
+              >
+                {fingerprinting ? 'Listening…' : 'Identify by fingerprint'}
+              </Button>
+              {fingerprintNote ? (
+                <span className={styles.searchHint}>{fingerprintNote}</span>
+              ) : null}
             </div>
             {(sources.data?.sources?.length ?? 0) > 1 ? (
               <div style={{ marginTop: 8 }}>
@@ -778,6 +826,29 @@ function SingleMatcher({ item }: { item: ImportInboxItem }) {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<ImportTrackResult | null>(null);
+  const [fingerprinting, setFingerprinting] = useState(false);
+  const [fingerprintNote, setFingerprintNote] = useState<string | null>(null);
+
+  const fingerprint = async () => {
+    if (!file) return;
+    setFingerprinting(true);
+    setFingerprintNote(null);
+    try {
+      const res = await fingerprintImportFiles([file.full_path]);
+      if (!res.title && !res.artist) {
+        setFingerprintNote('AcoustID did not recognise this file');
+        return;
+      }
+      const guess = [res.artist, res.title].filter(Boolean).join(' - ');
+      setFingerprintNote(`Sounds like ${guess}`);
+      setQuery(guess);
+      await search(guess);
+    } catch (err) {
+      setFingerprintNote(getErrorMessage(err));
+    } finally {
+      setFingerprinting(false);
+    }
+  };
 
   const search = async (text: string) => {
     const trimmed = text.trim();
@@ -834,6 +905,18 @@ function SingleMatcher({ item }: { item: ImportInboxItem }) {
             <Button variant="secondary" disabled={searching} onClick={() => void search(query)}>
               Search
             </Button>
+          </div>
+          <div className={styles.fingerprintRow}>
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Fingerprint the file with AcoustID and search from what it is"
+              disabled={fingerprinting}
+              onClick={() => void fingerprint()}
+            >
+              {fingerprinting ? 'Listening…' : 'Identify by fingerprint'}
+            </Button>
+            {fingerprintNote ? <span className={styles.searchHint}>{fingerprintNote}</span> : null}
           </div>
           {searching ? (
             <div className={styles.searchHint}>Searching…</div>

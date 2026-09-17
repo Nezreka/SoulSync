@@ -11,9 +11,11 @@ import type {
   ImportAutoImportResultsPayload,
   ImportAutoImportSettingsPayload,
   ImportAutoImportStatusPayload,
+  ImportFingerprintPayload,
   ImportInboxPayload,
   ImportPreviewPayload,
   ImportProcessPayload,
+  ImportUploadChunkPayload,
   ImportUploadPayload,
   LibraryCheckPayload,
   ImportSearchSourcesPayload,
@@ -389,36 +391,69 @@ export async function checkLibraryTracks(input: {
   );
 }
 
-/**
- * Upload one file into the import folder, keeping the relative path the
- * browser knows (a dropped folder's name). XHR rather than ky: ky has no
- * upload progress, and a 400 MB FLAC deserves a bar.
- */
-export function uploadImportFile(
-  file: File,
-  relativePath: string,
-  onProgress?: (fraction: number) => void,
-): Promise<ImportUploadPayload> {
-  return new Promise((resolve, reject) => {
-    const form = new FormData();
-    form.append('files', file, file.name);
-    form.append('paths', relativePath);
+/** pieces of a few megabytes get through any reverse proxy's body cap */
+const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+
+function postForm(url: string, form: FormData, onProgress?: (fraction: number) => void) {
+  return new Promise<ImportUploadChunkPayload>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', appURL('/api/import/upload'));
+    xhr.open('POST', url);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) onProgress(event.loaded / event.total);
     };
     xhr.onload = () => {
-      let payload: ImportUploadPayload | null = null;
+      let payload: ImportUploadChunkPayload | null = null;
       try {
-        payload = JSON.parse(xhr.responseText) as ImportUploadPayload;
+        payload = JSON.parse(xhr.responseText) as ImportUploadChunkPayload;
       } catch {
         payload = null;
       }
-      if (xhr.status >= 200 && xhr.status < 300 && payload) resolve(payload);
+      if (xhr.status >= 200 && xhr.status < 300 && payload?.success) resolve(payload);
       else reject(new Error(payload?.error || `Upload failed (${xhr.status})`));
     };
     xhr.onerror = () => reject(new Error('Upload failed'));
     xhr.send(form);
   });
+}
+
+/**
+ * Upload one file into the import folder in pieces, keeping the relative
+ * path the browser knows (a dropped folder's name). XHR rather than ky: ky
+ * has no upload progress, and a 400 MB FLAC deserves a bar. Pieces because
+ * a proxy in front of a docker install may cap a body at a megabyte.
+ */
+export async function uploadImportFile(
+  file: File,
+  relativePath: string,
+  onProgress?: (fraction: number) => void,
+): Promise<ImportUploadPayload> {
+  const total = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_BYTES));
+  const uploadId = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) =>
+    b.toString(16).padStart(2, '0'),
+  ).join('');
+  let last: ImportUploadChunkPayload | null = null;
+  for (let index = 0; index < total; index += 1) {
+    const start = index * UPLOAD_CHUNK_BYTES;
+    const piece = file.slice(start, Math.min(file.size, start + UPLOAD_CHUNK_BYTES));
+    const form = new FormData();
+    form.append('upload_id', uploadId);
+    form.append('index', String(index));
+    form.append('total', String(total));
+    form.append('path', relativePath);
+    form.append('chunk', piece, file.name);
+    last = await postForm(appURL('/api/import/upload/chunk'), form, (fraction) => {
+      if (onProgress) onProgress((index + fraction) / total);
+    });
+  }
+  if (onProgress) onProgress(1);
+  return { success: true, saved: last?.saved ? [last.saved] : [], skipped: [] };
+}
+
+/** AcoustID the first few files of an item, on demand. */
+export async function fingerprintImportFiles(
+  filePaths: string[],
+): Promise<ImportFingerprintPayload> {
+  return readJson<ImportFingerprintPayload>(
+    apiClient.post('import/fingerprint', { json: { file_paths: filePaths }, timeout: 120_000 }),
+  );
 }

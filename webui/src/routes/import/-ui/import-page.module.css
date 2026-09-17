@@ -706,6 +706,14 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
+.fingerprintRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* the track table */
 .tracks {
   display: flex;
