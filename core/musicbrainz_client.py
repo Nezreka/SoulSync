@@ -54,13 +54,18 @@ def _looks_like_busy_body(data: Any) -> bool:
 
     An `error` key with none of the collection keys a real search/browse
     response carries — a legitimate empty result (e.g. `{"recordings": []}`)
-    has no `error` key at all, so it is never mistaken for this.
+    has no `error` key at all, so it is never mistaken for this. The message
+    must also actually say the server is busy/to retry: MusicBrainz's `error`
+    key is also how it reports genuine 200-status validation failures (e.g. a
+    malformed Lucene query), and those are not transient — retrying one just
+    repeats the same 200 three times before giving up on a request that was
+    never going to succeed.
     """
-    return (
-        isinstance(data, dict)
-        and 'error' in data
-        and not _MB_COLLECTION_KEYS.intersection(data.keys())
-    )
+    if not (isinstance(data, dict) and 'error' in data
+            and not _MB_COLLECTION_KEYS.intersection(data.keys())):
+        return False
+    message = str(data.get('error') or '').lower()
+    return 'busy' in message or 'try again' in message
 
 
 def _config_setting(env_name: str, config_key: str) -> Any:

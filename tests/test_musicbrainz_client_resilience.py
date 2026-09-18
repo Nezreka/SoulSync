@@ -125,6 +125,31 @@ def test_busy_body_propagates_like_a_503_after_retries_exhausted(monkeypatch):
     assert len(session.calls) == 2
 
 
+def test_a_non_busy_200_error_body_is_not_retried(monkeypatch):
+    # MusicBrainz also reports genuine, non-transient failures (e.g. a
+    # malformed Lucene query) as an `error` key at HTTP 200. Retrying one
+    # would just repeat the same 200 across the whole retry budget for a
+    # request that was never going to succeed — only "busy"/"try again"
+    # wording should be treated as transient.
+    session = _Session([_Response({'error': 'Invalid search syntax near: foo:('})])
+    client = _client(session, retries=1)
+    monkeypatch.setattr('core.musicbrainz_client._wait_for_musicbrainz_slot', lambda *args: None)
+
+    response = client._get('/recording', params={'query': 'recording:\"Song\"'})
+
+    assert response.json() == {'error': 'Invalid search syntax near: foo:('}
+    assert len(session.calls) == 1
+
+
+def test_search_recording_returns_empty_for_a_non_busy_200_error_body(monkeypatch):
+    session = _Session([_Response({'error': 'Invalid search syntax near: foo:('})])
+    client = _client(session, retries=1)
+    monkeypatch.setattr('core.musicbrainz_client._wait_for_musicbrainz_slot', lambda *args: None)
+
+    assert client.search_recording('Song', 'Artist') == []
+    assert len(session.calls) == 1
+
+
 def test_legit_empty_result_is_not_mistaken_for_a_busy_body(monkeypatch):
     session = _Session([_Response({'recordings': []})])
     client = _client(session, retries=1)
