@@ -483,10 +483,154 @@ class MusicBrainzService:
             logger.error(f"Error matching release '{album_name}': {e}")
             return None
     
+    def _score_recording_candidates(self, track_name: str, artist_name: Optional[str],
+                                    results: list, *, artist_pinned: bool) -> tuple:
+        """Shared scoring pass for both the plain and artist-pinned recording
+        searches — same title-similarity gate and confidence formula either
+        way. When ``artist_pinned`` is True the query already constrained the
+        artist via ``arid:<mbid>``, so a candidate is treated as artist-matched
+        (full artist bonus) without re-checking the printed credit text —
+        that's the whole point of pinning.
+
+        Returns (best_match, best_confidence).
+        """
+        best_match = None
+        best_confidence = 0
+
+        for result in results:
+            mb_title = result.get('title', '')
+            mb_score = result.get('score', 0)
+
+            # Calculate title similarity
+            title_similarity = self._calculate_similarity(track_name, mb_title)
+
+            # Hard gate: title must be at least 60% similar.
+            # Without this, artist bonus + MB score can push totally
+            # different titles (e.g. "Sweet Surrender" → "Answers")
+            # past the confidence threshold.
+            if title_similarity < 0.6:
+                continue
+
+            # If we have artist info, check artist match too
+            artist_bonus = 0
+            if artist_pinned:
+                artist_bonus = 20
+            elif artist_name and 'artist-credit' in result:
+                artist_credits = result['artist-credit']
+                for credit in artist_credits:
+                    if isinstance(credit, dict) and 'artist' in credit:
+                        mb_artist = credit['artist'].get('name', '')
+                        artist_similarity = self._calculate_similarity(artist_name, mb_artist)
+                        if artist_similarity > 0.7:
+                            artist_bonus = 20
+                            break
+
+            # Combine scores - cap at 100
+            confidence = min(100, int((title_similarity * 50) + (mb_score / 100 * 30) + artist_bonus))
+
+            if confidence > best_confidence:
+                best_confidence = confidence
+                best_match = result
+
+        return best_match, best_confidence
+
+    @staticmethod
+    def _artist_name_or_alias_matches(result: Dict[str, Any], artist_name: str) -> bool:
+        """Whether an artist search result's own name or a matched alias is
+        already an exact (case-insensitive) spelling of the query."""
+        query = (artist_name or '').strip().lower()
+        if not query:
+            return False
+        if str(result.get('name', '')).strip().lower() == query:
+            return True
+        for alias in result.get('aliases') or []:
+            if isinstance(alias, dict) and str(alias.get('name', '')).strip().lower() == query:
+                return True
+        return False
+
+    def _resolve_unambiguous_artist_mbid(self, artist_name: str) -> Optional[str]:
+        """Resolve an artist name to an MBID for the recording-pin fallback,
+        or None when no confident/unambiguous identity exists.
+
+        Uses `search_artist(strict=False)` — a bare query, which hits MB's
+        alias/sortname indexes and is what makes a romanised or cross-script
+        name resolvable at all (the strict `artist:"..."` field alone would
+        not find it, same #586 pattern as `lookup_artist_aliases`).
+
+        Deliberately conservative: this MBID gets pinned onto a recording
+        search and the result cached, so a wrong resolution here is a wrong
+        recording match cached for the row's TTL. Accepted only when the top
+        result's own MB relevance score is >= 90 AND either no other result
+        is within 10 points of it, or the top result's name/alias already
+        equals the query outright (so even a close runner-up cannot be the
+        "right" one instead).
+
+        Cached under its own entity_type so this costs one round trip per
+        artist name, not one per track.
+        """
+        cached = self._check_cache('artist_recording_pin', artist_name)
+        if cached is not None:
+            return cached.get('musicbrainz_id')
+
+        try:
+            results = self.mb_client.search_artist(artist_name, limit=5, strict=False)
+        except Exception as e:
+            logger.debug("artist pin resolution for %r raised: %s", artist_name, e)
+            return None
+
+        if not results:
+            self._save_to_cache('artist_recording_pin', artist_name, None, None, None, 0)
+            return None
+
+        top = results[0]
+        top_score = top.get('score', 0) or 0
+        second_score = (results[1].get('score', 0) or 0) if len(results) > 1 else 0
+        gap_ok = (top_score - second_score) >= 10
+        name_matches = self._artist_name_or_alias_matches(top, artist_name)
+
+        if top_score >= 90 and (gap_ok or name_matches):
+            mbid = top.get('id')
+            self._save_to_cache('artist_recording_pin', artist_name, None, mbid, top, top_score)
+            return mbid
+
+        logger.debug(
+            "artist pin resolution for %r is ambiguous (top=%s, second=%s) — "
+            "no pin", artist_name, top_score, second_score,
+        )
+        self._save_to_cache('artist_recording_pin', artist_name, None, None, top, top_score)
+        return None
+
+    def _match_recording_by_artist_pin(self, track_name: str, artist_name: str) -> tuple:
+        """Fallback for `match_recording` when the strict name+artist search
+        found nothing usable. Resolves the artist to an MBID via the
+        alias-aware artist search and retries the recording search pinned to
+        that identity (`arid:<mbid>`) instead of the printed credit text.
+
+        Fail-soft by design — any exception here must never propagate out of
+        `match_recording` and reach `export_sources.musicbrainz_recording_mbid`.
+        Returns (best_match, best_confidence), (None, 0) on no pin / no result.
+        """
+        try:
+            artist_mbid = self._resolve_unambiguous_artist_mbid(artist_name)
+            if not artist_mbid:
+                return None, 0
+            results = self.mb_client.search_recording_by_artist_mbid(
+                track_name, artist_mbid, limit=5)
+            if not results:
+                return None, 0
+            return self._score_recording_candidates(
+                track_name, artist_name, results, artist_pinned=True)
+        except Exception as e:  # noqa: BLE001 — fail-soft, see docstring
+            logger.debug(
+                "artist-pinned recording fallback for '%s' / '%s' failed: %s",
+                track_name, artist_name, e,
+            )
+            return None, 0
+
     def match_recording(self, track_name: str, artist_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Match a recording (track) by name to MusicBrainz
-        
+
         Returns:
             Dict with 'mbid', 'title', 'confidence' or None if no good match
         """
@@ -500,63 +644,45 @@ class MusicBrainzService:
                 'confidence': cached['confidence'],
                 'cached': True
             }
-        
+
         # Search MusicBrainz
         try:
             results = self.mb_client.search_recording(track_name, artist_name, limit=5)
-            
-            if not results:
+
+            best_match, best_confidence = (None, 0)
+            if results:
+                best_match, best_confidence = self._score_recording_candidates(
+                    track_name, artist_name, results, artist_pinned=False)
+
+            # The `artist:"..."` clause on a strict recording search matches
+            # the CREDIT printed on that recording, never the artist entity's
+            # aliases — there is no alias field on /recording at all. A
+            # romanised or cross-script artist name (e.g. "Tatsuro Yamashita"
+            # for a recording credited "山下達郎") therefore finds nothing no
+            # matter how exact the title is. When the plain search came back
+            # empty, or nothing on it cleared the title-similarity gate, retry
+            # once pinned to the artist's resolved MBID instead of its name.
+            if not best_match and artist_name and str(artist_name).strip():
+                pin_match, pin_confidence = self._match_recording_by_artist_pin(
+                    track_name, artist_name)
+                if pin_match:
+                    best_match, best_confidence = pin_match, pin_confidence
+
+            if not best_match:
                 logger.info(f"No MusicBrainz results for recording '{track_name}'")
                 self._save_to_cache('recording', track_name, artist_name, None, None, 0)
                 return None
-            
-            # Find best match
-            best_match = None
-            best_confidence = 0
-            
-            for result in results:
-                mb_title = result.get('title', '')
-                mb_score = result.get('score', 0)
-
-                # Calculate title similarity
-                title_similarity = self._calculate_similarity(track_name, mb_title)
-
-                # Hard gate: title must be at least 60% similar.
-                # Without this, artist bonus + MB score can push totally
-                # different titles (e.g. "Sweet Surrender" → "Answers")
-                # past the confidence threshold.
-                if title_similarity < 0.6:
-                    continue
-
-                # If we have artist info, check artist match too
-                artist_bonus = 0
-                if artist_name and 'artist-credit' in result:
-                    artist_credits = result['artist-credit']
-                    for credit in artist_credits:
-                        if isinstance(credit, dict) and 'artist' in credit:
-                            mb_artist = credit['artist'].get('name', '')
-                            artist_similarity = self._calculate_similarity(artist_name, mb_artist)
-                            if artist_similarity > 0.7:
-                                artist_bonus = 20
-                                break
-
-                # Combine scores - cap at 100
-                confidence = min(100, int((title_similarity * 50) + (mb_score / 100 * 30) + artist_bonus))
-
-                if confidence > best_confidence:
-                    best_confidence = confidence
-                    best_match = result
 
             # Only return matches with confidence >= 70%
             if best_match and best_confidence >= 70:
                 mbid = best_match.get('id')
                 mb_title = best_match.get('title')
-                
+
                 # Save to cache
                 self._save_to_cache('recording', track_name, artist_name, mbid, best_match, best_confidence)
-                
+
                 logger.info(f"Matched recording '{track_name}' → '{mb_title}' (MBID: {mbid}, confidence: {best_confidence})")
-                
+
                 return {
                     'mbid': mbid,
                     'title': mb_title,
@@ -567,7 +693,7 @@ class MusicBrainzService:
                 logger.info(f"Low confidence match for recording '{track_name}' (best: {best_confidence})")
                 self._save_to_cache('recording', track_name, artist_name, None, None, best_confidence)
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error matching recording '{track_name}': {e}")
             return None
