@@ -3,7 +3,7 @@ mbid_mismatch_detector so the export MBID waterfall (core/exports/export_sources
 and the repair job compare titles the exact same way. Pins the detector's existing
 behavior didn't change during the extraction."""
 
-from core.metadata.title_match import TITLE_SIMILARITY_THRESHOLD, title_matches
+from core.metadata.mbid_title_check import TITLE_SIMILARITY_THRESHOLD, title_matches
 
 
 def test_exact_match():

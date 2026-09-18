@@ -18198,6 +18198,11 @@ class MusicDatabase:
         already corrected in the meantime (no longer the bad one) is left alone. Not part
         of ``TRACK_EDITABLE_FIELDS``/``update_track_fields`` on purpose — this is a narrow,
         repair-specific mutation, not a user-editable field.
+
+        Compares case-insensitively: ``side_effects.py`` lowercases the MBID before storing
+        it on import (``.strip().lower()``), but a repair finding's ``details['mbid']``
+        carries whatever case the file tag itself was written in — a plain ``=`` comparison
+        would silently match 0 rows for any tag that wasn't already lowercase.
         """
         if not expected_mbid or track_id is None:
             return False
@@ -18207,7 +18212,7 @@ class MusicDatabase:
                 cursor.execute(
                     "UPDATE tracks SET musicbrainz_recording_id = NULL, "
                     "updated_at = CURRENT_TIMESTAMP "
-                    "WHERE id = ? AND musicbrainz_recording_id = ?",
+                    "WHERE id = ? AND LOWER(musicbrainz_recording_id) = LOWER(?)",
                     (track_id, expected_mbid),
                 )
                 conn.commit()

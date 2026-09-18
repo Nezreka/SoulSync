@@ -15,7 +15,7 @@ from core.library.path_resolver import resolve_library_file_path
 # Re-exported: TITLE_SIMILARITY_THRESHOLD is not used directly in this module anymore
 # (moved into title_matches' default), but kept importable here for anything that
 # still references core.repair_jobs.mbid_mismatch_detector.TITLE_SIMILARITY_THRESHOLD.
-from core.metadata.title_match import TITLE_SIMILARITY_THRESHOLD, title_matches as _title_matches  # noqa: F401
+from core.metadata.mbid_title_check import TITLE_SIMILARITY_THRESHOLD, title_matches as _title_matches  # noqa: F401
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger

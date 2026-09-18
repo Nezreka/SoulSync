@@ -40,7 +40,7 @@ from core.exports.mbid_resolver import (
     normalize_key,
     resolve_recording_mbid,
 )
-from core.metadata.title_match import title_matches
+from core.metadata.mbid_title_check import title_matches
 
 logger = get_logger("exports.export_sources")
 
@@ -333,16 +333,22 @@ def musicbrainz_recording_mbid(artist: str, title: str) -> Optional[str]:
     return None
 
 
-def mbid_flagged_by_repair_finding(artist: str, title: str) -> bool:
+def mbid_flagged_by_repair_finding(track_id: Optional[str], file_path: Optional[str]) -> bool:
     """Default ``mbid_flagged_fn`` for ``build_resolve_fn``: True when the
     ``mbid_mismatch_detector`` repair job (``core/repair_jobs/mbid_mismatch_detector.py``)
-    already has a PENDING ``mbid_mismatch`` finding against the (artist, title)'s matched
-    library track — by its DB row id, or by its file path. That job already proved (via a
-    live MusicBrainz lookup + title comparison) that the file's/DB's embedded MBID points
-    at the wrong recording, so the DB and file rungs here must not trust it either.
+    already has a PENDING ``mbid_mismatch`` finding against this track — by its DB row id,
+    or by its file path. That job already proved (via a live MusicBrainz lookup + title
+    comparison) that the file's/DB's embedded MBID points at the wrong recording, so the DB
+    and file rungs here must not trust it either.
+
+    Takes the already-resolved ``track_id``/``file_path`` rather than an (artist, title)
+    pair and re-querying the library itself — ``build_resolve_fn`` resolves that once per
+    (artist, title) via ``track_lookup_fn`` and passes it in here (see MINOR-4 in the
+    #903 follow-up review: this used to run its own extra ``_db_match`` on top of the one
+    ``db_fn``/``file_fn`` already did).
+
     Fail-safe: any DB error is treated as "not flagged" — this is a defensive extra check,
     never the reason an export breaks."""
-    _mbid, file_path, track_id = _db_match(artist, title)
     if track_id is None and not file_path:
         return False
     try:
@@ -371,26 +377,71 @@ def mbid_flagged_by_repair_finding(artist: str, title: str) -> bool:
             except Exception:  # noqa: S110
                 pass
     except Exception as exc:
-        logger.debug(f"export mbid_flagged lookup failed for '{artist} - {title}': {exc}")
+        logger.debug(f"export mbid_flagged lookup failed for track {track_id}: {exc}")
         return False
+
+
+def _default_track_lookup(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+    """Default ``track_lookup_fn`` for ``build_resolve_fn``: the (track_id, file_path) of
+    the library track (artist, title) text-matches, via the same ``_db_match`` the DB/file
+    rungs already use."""
+    _mbid, file_path, track_id = _db_match(artist, title)
+    return (track_id, file_path)
+
+
+# entity_type used to persist verify_recording_title's live-MusicBrainz verdicts into the
+# existing musicbrainz_cache table (via MusicBrainzService._check_cache/_save_to_cache),
+# keyed on (mbid, title) — see verify_recording_title.
+_VERIFY_CACHE_ENTITY_TYPE = "recording_title_verified"
 
 
 def verify_recording_title(mbid: str, title: str) -> bool:
     """Default ``verify_fn`` for ``build_resolve_fn``: a cheap live cross-check that a
     DB/file MBID an export is about to accept actually points at a recording named (close
     enough to) this track's title — using the SAME normaliser/threshold as the
-    mbid_mismatch repair job (``core/metadata/title_match.title_matches``) so the two
-    can't drift apart. No MusicBrainz client available -> nothing to verify against ->
-    accept. Any exception (network, service init, ...) is left to the caller
-    (``build_resolve_fn`` memoizes and fail-opens) rather than swallowed here."""
+    mbid_mismatch repair job (``core/metadata/mbid_title_check.title_matches``) so the two
+    can't drift apart.
+
+    Persisted across runs (#903 follow-up MAJOR-2): every export would otherwise re-verify
+    every DB/file hit with a fresh, rate-limited MusicBrainz call forever. The verdict
+    (matched or mismatched) is cached in the existing ``musicbrainz_cache`` table under
+    ``_VERIFY_CACHE_ENTITY_TYPE``, keyed on (mbid, title) — checked first, so a second
+    export of the same song costs nothing. A TRANSPORT failure is never cached (there is no
+    verdict to remember), only a genuine answer (found+matched, found+mismatched, or a
+    confirmed 404) is.
+
+    No MusicBrainz client available -> nothing to verify against -> accept. A transport
+    failure (``get_recording(..., raise_on_error=True)``) is raised, not swallowed here —
+    left for the caller (``build_resolve_fn``'s memoizing wrapper) to fail open, so a
+    MusicBrainz outage degrades an export to "skip verification", never to "every DB/file
+    hit looks wrong". A genuine 404 (the MBID doesn't exist) is a real mismatch."""
     svc = _get_mb_service()
-    client = getattr(svc, "mb_client", None) if svc else None
+    if not svc:
+        return True
+
+    cached = svc._check_cache(_VERIFY_CACHE_ENTITY_TYPE, mbid, title)
+    if cached is not None:
+        meta = cached.get("metadata") or {}
+        return bool(meta.get("matched", cached.get("musicbrainz_id") is not None))
+
+    client = getattr(svc, "mb_client", None)
     if not client:
         return True
-    recording = client.get_recording(mbid, includes=["artist-credits"])
-    if not recording:
-        return False
-    return title_matches(title, recording.get("title", ""))
+
+    recording = client.get_recording(mbid, includes=["artist-credits"], raise_on_error=True)
+    matched = bool(recording) and title_matches(title, recording.get("title", ""))
+
+    try:
+        svc._save_to_cache(
+            _VERIFY_CACHE_ENTITY_TYPE, mbid, title,
+            mbid if matched else None,
+            {"matched": matched},
+            100 if matched else 0,
+        )
+    except Exception as exc:  # caching the verdict is best-effort — never fail verification over it
+        logger.debug(f"export verify cache write failed for {mbid} / '{title}': {exc}")
+
+    return matched
 
 
 def build_resolve_fn(
@@ -400,31 +451,42 @@ def build_resolve_fn(
     mb_fn: Callable[[str, str], Optional[str]] = musicbrainz_recording_mbid,
     cache_lookup: Optional[Callable[[str], Optional[str]]] = None,
     cache_record: Optional[Callable[[str, str], bool]] = None,
-    mbid_flagged_fn: Optional[Callable[[str, str], bool]] = None,
+    mbid_flagged_fn: Optional[Callable[[Optional[str], Optional[str]], bool]] = None,
     verify_fn: Optional[Callable[[str, str], bool]] = None,
+    track_lookup_fn: Optional[Callable[[str, str], Tuple[Optional[str], Optional[str]]]] = None,
 ) -> Callable[[str, str], Tuple[Optional[str], Optional[str]]]:
     """Assemble the export ``resolve_fn(artist, title) -> (mbid, source_label)``.
 
     Runs cache -> DB -> file -> MusicBrainz, and writes a fresh (non-cache) hit back to the
     persistent cache. All sources are injectable so the wiring is unit-testable; defaults
-    use the real cache module.
+    use the real cache module. The cache rung (rung 1, ``recording_mbid_cache``) is
+    deliberately NOT gated below — see the note at the bottom of this docstring.
 
     Before a DB or file MBID is accepted, two extra gates run (#903 follow-up — a
     mis-tagged file poisons both the DB column and the file tag it was copied from at
     import, and the export waterfall used to trust either blindly):
 
-    1. ``mbid_flagged_fn(artist, title) -> bool`` — True when the repair job already
-       flagged this track's embedded MBID as wrong (a pending ``mbid_mismatch`` finding).
-       Defaults to ``mbid_flagged_by_repair_finding`` (a DB read).
+    1. ``mbid_flagged_fn(track_id, file_path) -> bool`` — True when the repair job already
+       flagged this track as wrong (a pending ``mbid_mismatch`` finding). Defaults to
+       ``mbid_flagged_by_repair_finding`` (a DB read). ``track_id``/``file_path`` come from
+       ``track_lookup_fn(artist, title)`` (default ``_default_track_lookup``), resolved
+       once per (artist, title) and memoized — not re-queried per rung.
     2. ``verify_fn(mbid, title) -> bool`` — a live MusicBrainz title cross-check. Defaults
-       to ``verify_recording_title``. On a verifier exception the MBID is ACCEPTED
-       (fail-open — a network hiccup must not degrade an export), logged at debug.
+       to ``verify_recording_title`` (itself persisted across runs — see its docstring).
+       On a verifier exception the MBID is ACCEPTED (fail-open — a network hiccup must not
+       degrade an export), logged at debug.
 
     Either gate failing turns the rung into a miss, so the waterfall falls through (to
     file, then live MusicBrainz search) exactly as if that rung had returned nothing.
-    Both gates are memoized per ``resolve_fn`` (i.e. per export run) so the same
-    (artist, title) flag check and the same (mbid, title) verification are each done at
-    most once, however many rungs/tracks would otherwise repeat them.
+    Both gates (and the track lookup) are memoized per ``resolve_fn`` (i.e. per export run)
+    so the same (artist, title) track/flag lookup and the same (mbid, title) verification
+    are each done at most once, however many rungs would otherwise repeat them.
+
+    NOTE — the cache rung (``recording_mbid_cache``, populated by a fresh non-cache hit
+    below) is NOT gated by either check: it's a plain (artist,title)->mbid store with no
+    track_id/file_path to flag-check, and re-verifying it live on every hit would defeat
+    the point of caching. This means a row written by an EARLIER export, before this fix
+    shipped, could still be poisoned — a one-off cache purge is a follow-up, not done here.
     """
     if cache_lookup is None or cache_record is None:
         from core.exports import recording_mbid_cache as _cache
@@ -432,15 +494,28 @@ def build_resolve_fn(
         cache_record = cache_record or _cache.record
     mbid_flagged_fn = mbid_flagged_fn or mbid_flagged_by_repair_finding
     verify_fn = verify_fn or verify_recording_title
+    track_lookup_fn = track_lookup_fn or _default_track_lookup
 
+    _track_memo: Dict[Tuple[str, str], Tuple[Optional[str], Optional[str]]] = {}
     _flagged_memo: Dict[Tuple[str, str], bool] = {}
     _verify_memo: Dict[Tuple[str, str], bool] = {}
+
+    def _track_ids(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+        key = (artist, title)
+        if key not in _track_memo:
+            try:
+                _track_memo[key] = track_lookup_fn(artist, title)
+            except Exception as exc:
+                logger.debug(f"export track_lookup_fn raised for '{artist} - {title}': {exc}")
+                _track_memo[key] = (None, None)
+        return _track_memo[key]
 
     def _flagged(artist: str, title: str) -> bool:
         key = (artist, title)
         if key not in _flagged_memo:
+            track_id, file_path = _track_ids(artist, title)
             try:
-                _flagged_memo[key] = bool(mbid_flagged_fn(artist, title))
+                _flagged_memo[key] = bool(mbid_flagged_fn(track_id, file_path))
             except Exception as exc:  # a flagged-check error must never block the rung
                 logger.debug(f"export mbid_flagged_fn raised for '{artist} - {title}': {exc}")
                 _flagged_memo[key] = False
