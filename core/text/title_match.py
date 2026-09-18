@@ -206,9 +206,21 @@ _VERSION_MARKER_TOKENS = frozenset({
 # as the bare title. ("album" and "original" aren't in _VERSION_MARKER_TOKENS
 # at all, so subtracting them here is a no-op — listed anyway for the reader,
 # since they're exactly the kind of word someone would expect to find there.)
+#
+# "edition"/"bonus"/"mono"/"stereo"/"explicit"/"clean" are PACKAGE/FORMAT
+# metadata, not a different performance: "(Deluxe Edition)", "(Bonus
+# Track)", "(Mono)", "(Stereo)", "(Explicit)", "(Clean)" are all the same
+# recording as the bare title, so a bare-title query must still match them.
+# "deluxe"/"track"/"anniversary"/"expanded"/"special" are album-EDITION
+# words from match_release's _VERSION_QUALIFIERS, never added to
+# _VERSION_MARKER_TOKENS in the first place — listed here too (as no-ops,
+# like "album"/"original" above) so nobody re-adds them as recording
+# markers later without re-reading this comment.
 _RECORDING_NOISE_TOKENS = frozenset({
     "remaster", "remastered", "single", "radio", "album", "edit", "mix",
     "version", "versions", "ver", "original",
+    "edition", "deluxe", "bonus", "track", "mono", "stereo", "explicit",
+    "clean", "anniversary", "expanded", "special",
 })
 
 # Markers _VERSION_MARKER_TOKENS doesn't carry: bare language qualifiers
