@@ -333,6 +333,11 @@ def _replace_template_variables(template: str, context: dict) -> str:
     _total_discs = _coerce_int(clean_context.get("total_discs", 1), 1)
     _disc_number = _coerce_int(clean_context.get("disc_number", 1), 1)
     cdnum_value = f"CD{_disc_number:02d}" if _total_discs > 1 else ""
+    _track_number = clean_context.get("track_number", 1)
+    track_value = (
+        "00" if type(_track_number) is int and _track_number == 0
+        else f"{_coerce_int(_track_number, 1):02d}"
+    )
 
     bracket_map = {
         "albumartist": album_artist_value,
@@ -342,7 +347,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
         "artist": clean_context.get("artist", "Unknown Artist"),
         "album": clean_context.get("album", "Unknown Album"),
         "title": clean_context.get("title", "Unknown Track"),
-        "track": f"{_coerce_int(clean_context.get('track_number', 1), 1):02d}",
+        "track": track_value,
         "cdnum": cdnum_value,
         # #981: ${disc}/${discnum} vanish on single-disc albums, matching ${cdnum}
         # (a track on disc 2+ still shows even if total_discs wasn't populated).
@@ -365,7 +370,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
     # rule used throughout this function (no current $c* var collides, but
     # ordering matches the web_server.py path-builder for parity).
     result = result.replace("$cdnum", cdnum_value)
-    result = result.replace("$track", f"{clean_context.get('track_number', 1):02d}")
+    result = result.replace("$track", track_value)
     result = result.replace("$year", str(clean_context.get("year", "")))
 
     result = re.sub(r"\s+", " ", result)
@@ -727,7 +732,9 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
 
     if album_info and album_info.get("is_album"):
         clean_track_name = get_import_clean_title(context, album_info=album_info, default=original_search.get("title", "Unknown Track"))
-        track_number = _coerce_int(album_info.get("track_number", 1), 1)
+        raw_track_number = album_info.get("track_number", 1)
+        track_number = (0 if raw_album_type in ("compilation", "compile") and raw_track_number == 0
+                        else _coerce_int(raw_track_number, 1))
         disc_number = _coerce_int(album_info.get("disc_number", 1), 1)
         _artists = original_search.get("artists") or track_info.get("artists") or []
         _album_ctx = album_context
@@ -743,7 +750,15 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 _itunes_aid = _ext["itunes_artist_id"]
 
         _artist_name = artist_name
-        _album_artist_name = _artist_name
+        if raw_album_type in ("compilation", "compile") and _artists:
+            _first_track_artist = _artists[0]
+            _track_artist_name = (
+                _first_track_artist.get("name") if isinstance(_first_track_artist, dict)
+                else str(_first_track_artist)
+            )
+            if _track_artist_name:
+                _artist_name = _track_artist_name
+        _album_artist_name = artist_name
         _album_artists_for_collab = None
         _explicit_artist_ctx = track_info.get("_explicit_artist_context") if isinstance(track_info, dict) else None
         if isinstance(_explicit_artist_ctx, dict) and _explicit_artist_ctx.get("name"):

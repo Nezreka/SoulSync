@@ -32,10 +32,10 @@ import time
 import uuid
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from pathlib import Path
 from typing import Any, Callable, Optional
 
 from core.downloads import album_bundle_dispatch as _album_bundle_dispatch
+from core.downloads.soulseek_identity import assign_album_tracks
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 
 logger = get_logger("downloads.master")
@@ -73,30 +73,69 @@ def _similarity(left: Any, right: Any) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
-def _track_title_from_candidate(candidate: Any) -> str:
-    title = getattr(candidate, 'title', None)
-    if title:
-        return str(title)
-    filename = getattr(candidate, 'filename', '') or ''
-    stem = Path(filename.replace('\\', '/')).stem
-    stem = re.sub(r'^\s*(?:disc\s*)?\d+[-_.\s]+', '', stem, flags=re.IGNORECASE)
-    return stem
+def _album_title_similarity(expected: str, artist: str, year: str,
+                            album_title: str, album_path: str) -> float:
+    """Compare unchanged text, then omit metadata outside one album span."""
+    album = _norm_text(expected)
+    if not album:
+        return 0.0
+    artist = _norm_text(artist)
+    year = _norm_text(year)
+    if len(year) != 4 or not year.isdigit():
+        year = ''
+
+    def spans(text: str, word: str, *, whole_word: bool = True) -> list[tuple[int, int]]:
+        if not word:
+            return []
+        pattern = re.escape(word)
+        if whole_word:
+            pattern = rf'(?<![a-z0-9]){pattern}(?![a-z0-9])'
+        return [match.span() for match in re.finditer(
+            pattern, text)]
+
+    best = 0.0
+    for value in (album_title, album_path):
+        text = _norm_text(value)
+        best = max(best, _similarity(album, text))
+        if best == 1.0:
+            return best
+        album_spans = spans(text, album) or spans(text, album, whole_word=False)
+        if not album_spans:
+            continue
+        album_start, album_end = album_spans[0]
+        removed = sorted(
+            (start, end) for start, end in (*spans(text, artist), *spans(text, year))
+            if end <= album_start or start >= album_end
+        )
+        if not removed:
+            continue
+        pieces = []
+        cursor = 0
+        for start, end in removed:
+            if start > cursor:
+                pieces.append(text[cursor:start])
+            cursor = max(cursor, end)
+        pieces.append(text[cursor:])
+        best = max(best, _similarity(album, ''.join(pieces)))
+        if best == 1.0:
+            return best
+    return best
 
 
-def _track_number_from_track(track_data: dict) -> int:
-    value = track_data.get('track_number') or track_data.get('trackNumber') or 0
-    try:
-        return int(str(value).split('/')[0])
-    except (TypeError, ValueError):
-        return 0
-
-
-def _track_number_from_candidate(candidate: Any) -> int:
-    value = getattr(candidate, 'track_number', None) or 0
-    try:
-        return int(str(value).split('/')[0])
-    except (TypeError, ValueError):
-        return 0
+def _album_search_queries(artist: str, album: str, year: str) -> list[str]:
+    """Avoid repeating the same term for a self-titled Soulseek album."""
+    clean_artist = re.sub(r'\s*\(.*?\)', '', artist).strip()
+    clean_artist = re.sub(
+        r'\s*(feat\.?|ft\.?|featuring)\s+.*$', '', clean_artist,
+        flags=re.IGNORECASE,
+    ).strip()
+    if _norm_text(clean_artist) == _norm_text(album):
+        return [f'{clean_artist} {year}', album] if year else [album]
+    queries = [f'{artist} {album}']
+    if clean_artist != artist:
+        queries.append(f'{clean_artist} {album}')
+    queries.append(album)
+    return queries
 
 
 def _folder_variant_penalty(expected_album_name: str, folder_text: str) -> float:
@@ -203,7 +242,8 @@ def _album_context_richness(album_ctx: dict) -> int:
 
 
 def _score_album_folder(album_result: Any, album_context: dict, artist_context: dict,
-                        tracks_json: list[dict], filtered_track_count: int) -> float:
+                        tracks_json: list[dict], filtered_tracks: list,
+                        coverage_score: float | None = None) -> float:
     """Score one slskd folder as a whole release, not as isolated tracks."""
     expected_album = str((album_context or {}).get('name') or '')
     expected_artist = str((artist_context or {}).get('name') or '')
@@ -214,14 +254,30 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
         str(getattr(album_result, attr, '') or '')
         for attr in ('album_title', 'album_path')
     )
-    album_score = max(
-        _similarity(expected_album, getattr(album_result, 'album_title', '')),
-        _similarity(expected_album, getattr(album_result, 'album_path', '')),
+    candidate_tracks = list(filtered_tracks)
+    expected_tracks = [track for track in tracks_json if track.get('name')]
+    if coverage_score is None:
+        coverage_score = assign_album_tracks(
+            expected_tracks, candidate_tracks, album=expected_album,
+        ).coverage
+    # A release's metadata can make a half-album look plausible. Only a
+    # folder with enough distinct, profile-eligible titles is a bundle pick;
+    # partial folders remain available through the per-track path.
+    if expected_tracks and coverage_score < 0.8:
+        return 0.0
+    album_score = _album_title_similarity(
+        expected_album,
+        expected_artist,
+        expected_year,
+        str(getattr(album_result, 'album_title', '') or ''),
+        str(getattr(album_result, 'album_path', '') or ''),
     )
     artist_score = max(
         _similarity(expected_artist, getattr(album_result, 'artist', '')),
         _similarity(expected_artist, getattr(album_result, 'album_path', '')),
     )
+    if (expected_album and album_score < 0.65) or (expected_artist and artist_score < 0.65):
+        return 0.0
 
     actual_count = int(getattr(album_result, 'track_count', 0) or len(getattr(album_result, 'tracks', []) or []))
     if expected_count > 0 and actual_count > 0:
@@ -237,27 +293,6 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
     else:
         count_score = 0.4
 
-    candidate_tracks = list(getattr(album_result, 'tracks', []) or [])
-    matched = 0
-    expected_tracks = [
-        (track_data, _norm_text(track_data.get('name', '')))
-        for track_data in tracks_json
-        if track_data.get('name')
-    ]
-    for track_data, expected_title in expected_tracks:
-        expected_number = _track_number_from_track(track_data)
-        best = 0.0
-        for candidate in candidate_tracks:
-            cand_title = _norm_text(_track_title_from_candidate(candidate))
-            title_sim = _similarity(expected_title, cand_title)
-            cand_number = _track_number_from_candidate(candidate)
-            if expected_number and cand_number and expected_number == cand_number:
-                title_sim = min(1.0, title_sim + 0.12)
-            best = max(best, title_sim)
-        if best >= 0.72:
-            matched += 1
-    coverage_score = matched / max(1, len(expected_tracks))
-
     year_score = 0.5
     folder_year = str(getattr(album_result, 'year', '') or '')
     if expected_year and folder_year:
@@ -265,7 +300,7 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
     elif expected_year and expected_year in _norm_text(folder_text):
         year_score = 1.0
 
-    quality_count_score = min(1.0, filtered_track_count / max(1, expected_count or actual_count or 1))
+    quality_count_score = min(1.0, len(filtered_tracks) / max(1, expected_count or actual_count or 1))
     peer_score = _source_quality_score(album_result)
     penalty = _folder_variant_penalty(expected_album, folder_text)
 
@@ -1083,6 +1118,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         # Only run pre-flight when Soulseek is the download source (or hybrid with soulseek)
         preflight_source = None
         preflight_tracks = None
+        scored_albums = []
         _soulseek_bundle_plugin = (
             _configured_bundle_plugin('soulseek')
             if _soulseek_bundle_index is not None and not batch_private_album_bundle
@@ -1104,15 +1140,10 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
 
                     slsk = _soulseek_bundle_plugin
 
-                    # Try multiple query variations (banned keywords in artist/album name can return 0 results)
-                    album_queries = [f"{artist_name} {album_name}"]
-                    # Clean artist name (remove feat., parentheticals)
-                    clean_artist = re.sub(r'\s*\(.*?\)', '', artist_name).strip()
-                    clean_artist = re.sub(r'\s*(feat\.?|ft\.?|featuring)\s+.*$', '', clean_artist, flags=re.IGNORECASE).strip()
-                    if clean_artist != artist_name:
-                        album_queries.append(f"{clean_artist} {album_name}")
-                    # Album name only (some users file by album)
-                    album_queries.append(album_name)
+                    album_queries = _album_search_queries(
+                        artist_name, album_name,
+                        str((batch_album_context or {}).get('release_date') or '')[:4],
+                    )
 
                     album_results = []
                     track_results = []
@@ -1142,14 +1173,21 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                     profile_id=batch_quality_profile_id,
                                 )
                             if filtered_tracks:
+                                folder_coverage = assign_album_tracks(
+                                    [track for track in tracks_json if track.get('name')],
+                                    filtered_tracks,
+                                    album=str((batch_album_context or {}).get('name') or ''),
+                                ).coverage
                                 folder_score = _score_album_folder(
                                     ar,
                                     batch_album_context,
                                     batch_artist_context,
                                     tracks_json,
-                                    len(filtered_tracks),
+                                    filtered_tracks,
+                                    coverage_score=folder_coverage,
                                 )
-                                scored_albums.append((ar, len(filtered_tracks), folder_score))
+                                scored_albums.append((ar, len(filtered_tracks), folder_score,
+                                                      folder_coverage))
                                 _sr.info(
                                     f"[Album Pre-flight] Candidate {ar.username}:{ar.album_path} "
                                     f"score={folder_score:.3f}, tracks={ar.track_count}, "
@@ -1160,7 +1198,41 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         best_score = 0.0
                         if scored_albums:
                             scored_albums.sort(key=lambda x: (x[2], x[1], x[0].quality_score), reverse=True)
-                            best_album, _best_filtered_count, best_score = scored_albums[0]
+                            # Within a narrow correctness band, a live peer is
+                            # preferable to a queued crawler. Keep differing
+                            # release variants and coverage outside the band.
+                            leader = scored_albums[0]
+                            leader_variant = _folder_variant_penalty(
+                                str((batch_album_context or {}).get('name') or ''),
+                                f'{leader[0].album_title} {leader[0].album_path}',
+                            )
+                            band = [row for row in scored_albums if
+                                    leader[2] - row[2] <= 0.06
+                                    and abs(leader[3] - row[3]) <= 0.05
+                                    and _folder_variant_penalty(
+                                        str((batch_album_context or {}).get('name') or ''),
+                                        f'{row[0].album_title} {row[0].album_path}',
+                                    ) == leader_variant]
+                            if len(band) > 1:
+                                from core.downloads.peer_observation import HEALTHY_PEER_BPS, peer_speed
+
+                                def album_availability(row):
+                                    album = row[0]
+                                    observed = peer_speed(album.username)
+                                    return (
+                                        1 if observed is None else (2 if observed >= HEALTHY_PEER_BPS else 0),
+                                        observed or 0,
+                                        getattr(album, 'free_upload_slots', 0) or 0,
+                                        -(getattr(album, 'queue_length', 0) or 0),
+                                        getattr(album, 'upload_speed', 0) or 0,
+                                        row[2], album.username,
+                                    )
+
+                                band.sort(key=album_availability, reverse=True)
+                                band_ids = {id(row) for row in band}
+                                scored_albums = band + [row for row in scored_albums
+                                                         if id(row) not in band_ids]
+                            best_album, _best_filtered_count, best_score, _ = scored_albums[0]
                             if best_score < _ALBUM_PREFLIGHT_MIN_SCORE:
                                 _sr.info(
                                     f"[Album Pre-flight] Best folder score {best_score:.3f} below "
@@ -1182,6 +1254,24 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                 folder_tracks = slsk.parse_browse_results_to_tracks(
                                     best_album.username, browse_files, directory=best_album.album_path
                                 )
+                                if folder_tracks:
+                                    if batch_quality_profile_id is None:
+                                        eligible_tracks = slsk.filter_results_by_quality_preference(folder_tracks)
+                                    else:
+                                        eligible_tracks = slsk.filter_results_by_quality_preference(
+                                            folder_tracks, profile_id=batch_quality_profile_id,
+                                        )
+                                    browse_coverage = assign_album_tracks(
+                                        [track for track in tracks_json if track.get('name')],
+                                        eligible_tracks,
+                                        album=str((batch_album_context or {}).get('name') or ''),
+                                    ).coverage
+                                    if browse_coverage < 0.8:
+                                        logger.warning(
+                                            '[Album Pre-flight] Browsed folder %s covers only %.0f%% of requested tracks',
+                                            best_album.album_path, browse_coverage * 100,
+                                        )
+                                        folder_tracks = []
                                 if folder_tracks:
                                     preflight_source = {
                                         'username': best_album.username,
@@ -1220,6 +1310,17 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         _bundle_state = _BatchStateAccessImpl()
         if soulseek_is_source:
             _album_bundle_source = 'soulseek'
+            _preflight_alternatives = [
+                {
+                    'username': album.username,
+                    'folder_path': album.album_path,
+                    'tracks': album.tracks,
+                }
+                for album, _, score, _ in scored_albums[:5]
+                if score >= _ALBUM_PREFLIGHT_MIN_SCORE
+                and (not preflight_source or album.username != preflight_source['username']
+                     or album.album_path != preflight_source['folder_path'])
+            ]
             if _album_bundle_dispatch.try_dispatch(
                 batch_id=batch_id,
                 is_album=batch_is_album,
@@ -1230,10 +1331,12 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 state=_bundle_state,
                 source_override=_album_bundle_source,
                 plugin_kwargs={
+                    'expected_tracks': tracks_json,
                     **(
                         {
                             'preferred_source': preflight_source,
                             'preferred_tracks': preflight_tracks,
+                            'preferred_alternatives': _preflight_alternatives,
                         }
                         if preflight_source and preflight_tracks else {}
                     ),
