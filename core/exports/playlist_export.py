@@ -13,13 +13,31 @@ network or database. The returned ``resolved`` list feeds straight into ``jspf_e
 
 from __future__ import annotations
 
+import inspect
+
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.exports.mbid_resolver import normalize_key
 
 # resolve_fn(artist, title) -> (recording_mbid|None, source_label|None)
-ResolveFn = Callable[[str, str], Tuple[Optional[str], Optional[str]]]
+# May optionally accept a third `track` argument (the full mirrored-playlist row) — see
+# `_resolve_fn_wants_track` below. Existing 2-arg resolve_fns are unaffected.
+ResolveFn = Callable[..., Tuple[Optional[str], Optional[str]]]
 ProgressFn = Callable[[int, int, Dict[str, Any]], None]
+
+
+def _resolve_fn_wants_track(resolve_fn: Callable[..., Any]) -> bool:
+    """Whether ``resolve_fn`` accepts a third (``track``) argument, so callers that
+    still define ``resolve_fn(artist, title)`` — every pre-existing test and the
+    service-export resolver — keep being called exactly as before."""
+    try:
+        params = list(inspect.signature(resolve_fn).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    if any(p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD) for p in params):
+        return True
+    positional = [p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    return len(positional) >= 3
 
 
 def _field(track: Dict[str, Any], *names: str) -> str:
@@ -54,11 +72,16 @@ def resolve_playlist_tracks(
     order, and stats carries ``total, resolved, unmatched, deduped, by_source``.
     """
     total = len(tracks or [])
+    # Memoized per (artist, title) text, NOT per-track — two rows with identical
+    # artist+title but different source ISRCs are the same song for playlist purposes,
+    # so the second one reuses the first's resolution rather than paying for (or
+    # re-checking) its own ISRC/MB lookup.
     memo: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
     resolved: List[Dict[str, Any]] = []
     stats: Dict[str, Any] = {
         "total": total, "resolved": 0, "unmatched": 0, "deduped": 0, "by_source": {},
     }
+    wants_track = _resolve_fn_wants_track(resolve_fn)
 
     for i, t in enumerate(tracks or []):
         if not isinstance(t, dict):
@@ -73,7 +96,7 @@ def resolve_playlist_tracks(
             stats["deduped"] += 1
             fresh = False
         else:
-            mbid, source = resolve_fn(artist, title)
+            mbid, source = resolve_fn(artist, title, t) if wants_track else resolve_fn(artist, title)
             memo[key] = (mbid, source)
             fresh = True
 

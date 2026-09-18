@@ -236,3 +236,170 @@ def test_resolve_no_search_fn_leaves_tail_unmatched():
                                     db_fn=lambda a, t, s: None)   # search_id_fn omitted
     assert out['resolved'][0]['service_track_id'] is None
     assert out['stats']['unmatched'] == 1 and out['stats']['from_search'] == 0
+
+
+# ── ISRC rung (#903 review): use discovery's own matched Deezer id → ISRC → exact MBID ──
+
+from core.exports.export_sources import isrc_recording_mbid, build_resolve_fn
+from core.exports.mbid_resolver import SRC_DB, SRC_FILE, SRC_ISRC, SRC_MUSICBRAINZ
+
+ISRC = 'USUM71703861'
+MBID_A = 'e8f9b188-f819-4e43-ab0f-4bd26ce9ff56'
+MBID_B = '8f3471b5-7e6a-4c1f-9c1a-2b2b2b2b2b2b'
+
+
+def _isrc_track(provider='deezer', tid=111, isrc=None, discovered=True, title='Title'):
+    matched = {'id': tid}
+    if isrc is not None:
+        matched['isrc'] = isrc
+    return {
+        'extra_data': _json.dumps({'discovered': discovered, 'provider': provider,
+                                   'matched_data': matched}),
+        'title': title,
+    }
+
+
+def test_isrc_rung_deezer_provider_fetches_isrc_and_resolves():
+    track = _isrc_track(isrc=None)   # discovery didn't store isrc → must be fetched
+    fetched = {}
+    def deezer_track_fn(tid):
+        fetched['tid'] = tid
+        return {'isrc': ISRC}
+    def isrc_lookup_fn(code):
+        assert code == ISRC
+        return [{'id': MBID_A, 'title': 'Title'}]
+    mbid = isrc_recording_mbid(track, deezer_track_fn=deezer_track_fn, isrc_lookup_fn=isrc_lookup_fn)
+    assert mbid == MBID_A
+    assert fetched['tid'] == 111
+
+
+def test_isrc_rung_uses_isrc_already_in_matched_data_no_deezer_call():
+    track = _isrc_track(isrc=ISRC)
+    def deezer_track_fn(tid):
+        raise AssertionError('should not fetch — isrc was already on matched_data')
+    mbid = isrc_recording_mbid(
+        track, deezer_track_fn=deezer_track_fn,
+        isrc_lookup_fn=lambda code: [{'id': MBID_A, 'title': 'Title'}],
+    )
+    assert mbid == MBID_A
+
+
+def test_isrc_rung_spotify_provider_is_skipped_no_deezer_call():
+    track = _isrc_track(provider='spotify', isrc=ISRC)
+    def deezer_track_fn(tid):
+        raise AssertionError('must never call Deezer for a non-Deezer id')
+    mbid = isrc_recording_mbid(track, deezer_track_fn=deezer_track_fn,
+                               isrc_lookup_fn=lambda code: [{'id': MBID_A}])
+    assert mbid is None
+
+
+def test_isrc_rung_wing_it_stub_is_skipped():
+    track = _isrc_track(provider='wing_it_fallback', tid='wing_it_12345', isrc=ISRC)
+    mbid = isrc_recording_mbid(track, isrc_lookup_fn=lambda code: [{'id': MBID_A}])
+    assert mbid is None
+
+
+def test_isrc_rung_not_discovered_is_skipped():
+    track = _isrc_track(discovered=False, isrc=ISRC)
+    mbid = isrc_recording_mbid(track, isrc_lookup_fn=lambda code: [{'id': MBID_A}])
+    assert mbid is None
+
+
+def test_isrc_rung_multiple_recordings_picks_title_closest():
+    track = _isrc_track(isrc=ISRC, title='Shape of You')
+    recordings = [
+        {'id': MBID_B, 'title': 'Shape of You (Extended Remaster)'},
+        {'id': MBID_A, 'title': 'Shape of You'},
+    ]
+    mbid = isrc_recording_mbid(track, isrc_lookup_fn=lambda code: recordings)
+    assert mbid == MBID_A
+
+
+def test_isrc_rung_no_recordings_returns_none():
+    track = _isrc_track(isrc=ISRC)
+    assert isrc_recording_mbid(track, isrc_lookup_fn=lambda code: []) is None
+
+
+def test_isrc_rung_exceptions_are_swallowed():
+    track = _isrc_track(isrc=ISRC)
+    def boom(code):
+        raise RuntimeError('musicbrainz flaked')
+    assert isrc_recording_mbid(track, isrc_lookup_fn=boom) is None
+
+    def deezer_boom(tid):
+        raise RuntimeError('deezer flaked')
+    assert isrc_recording_mbid(_isrc_track(isrc=None), deezer_track_fn=deezer_boom) is None
+
+
+def test_isrc_rung_malformed_track_returns_none():
+    assert isrc_recording_mbid(None) is None
+    assert isrc_recording_mbid({}) is None
+    assert isrc_recording_mbid({'extra_data': 'not json{'}) is None
+
+
+# ── waterfall ordering: ISRC rung sits after file, before live MusicBrainz ──
+
+def test_waterfall_isrc_rung_hit_short_circuits_musicbrainz():
+    track = _isrc_track(isrc=ISRC)
+    mb_called = {'n': 0}
+    def mb_fn(a, t):
+        mb_called['n'] += 1
+        return MBID_B
+    fn = build_resolve_fn(
+        db_fn=lambda a, t: None,
+        file_fn=lambda a, t: None,
+        isrc_fn=lambda trk: MBID_A,
+        mb_fn=mb_fn,
+        cache_lookup=lambda k: None,
+        cache_record=lambda k, m: True,
+    )
+    mbid, label = fn('Artist', 'Title', track)
+    assert (mbid, label) == (MBID_A, SRC_ISRC)
+    assert mb_called['n'] == 0   # ISRC hit -> MusicBrainz never queried
+
+
+def test_waterfall_isrc_rung_miss_falls_through_to_musicbrainz():
+    track = _isrc_track(isrc=ISRC)
+    fn = build_resolve_fn(
+        db_fn=lambda a, t: None,
+        file_fn=lambda a, t: None,
+        isrc_fn=lambda trk: None,
+        mb_fn=lambda a, t: MBID_B,
+        cache_lookup=lambda k: None,
+        cache_record=lambda k, m: True,
+    )
+    mbid, label = fn('Artist', 'Title', track)
+    assert (mbid, label) == (MBID_B, SRC_MUSICBRAINZ)
+
+
+def test_waterfall_db_hit_short_circuits_isrc_rung():
+    isrc_called = {'n': 0}
+    def isrc_fn(trk):
+        isrc_called['n'] += 1
+        return MBID_A
+    fn = build_resolve_fn(
+        db_fn=lambda a, t: MBID_B,
+        file_fn=lambda a, t: None,
+        isrc_fn=isrc_fn,
+        mb_fn=lambda a, t: None,
+        cache_lookup=lambda k: None,
+        cache_record=lambda k, m: True,
+    )
+    mbid, label = fn('Artist', 'Title', _isrc_track(isrc=ISRC))
+    assert (mbid, label) == (MBID_B, SRC_DB)
+    assert isrc_called['n'] == 0
+
+
+def test_waterfall_resolve_fn_still_callable_with_two_args():
+    """Every pre-existing caller/test calls resolve_fn(artist, title) — the ISRC rung
+    being track-aware must not break that; without a track it's simply skipped."""
+    fn = build_resolve_fn(
+        db_fn=lambda a, t: None,
+        file_fn=lambda a, t: None,
+        isrc_fn=lambda trk: MBID_A,   # would hit if ever called
+        mb_fn=lambda a, t: MBID_B,
+        cache_lookup=lambda k: None,
+        cache_record=lambda k, m: True,
+    )
+    mbid, label = fn('Artist', 'Title')
+    assert (mbid, label) == (MBID_B, SRC_MUSICBRAINZ)   # ISRC rung skipped, no track given

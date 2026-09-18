@@ -100,3 +100,47 @@ def test_custom_id_key_carries_service_id():
     assert out['resolved'][1]['service_track_id'] is None
     assert 'recording_mbid' not in out['resolved'][0]
     assert out['stats']['resolved'] == 1 and out['stats']['unmatched'] == 1
+
+
+# ── track-aware resolve_fn (#903 review: ISRC rung needs the full row's extra_data) ──
+
+def test_resolve_fn_receives_full_track_dict_when_it_accepts_one():
+    """A resolve_fn(artist, title, track) — the ISRC-rung shape build_resolve_fn returns —
+    must get the ORIGINAL track dict for each row, not just its artist/title strings."""
+    seen = []
+    def rf(artist, title, track=None):
+        seen.append(track)
+        return (MBID, 'isrc') if track and track.get('extra_data') else (None, None)
+
+    track1 = {'artist': 'A', 'title': 'X', 'extra_data': '{"discovered": true}'}
+    track2 = {'artist': 'B', 'title': 'Y'}
+    out = resolve_playlist_tracks([track1, track2], rf)
+
+    assert seen == [track1, track2]              # exact same dict objects, not copies
+    assert out['resolved'][0]['recording_mbid'] == MBID
+    assert out['resolved'][1]['recording_mbid'] is None
+
+
+def test_two_arg_resolve_fn_is_never_called_with_a_third_positional():
+    """A plain 2-param resolve_fn (every existing caller) must keep being called with
+    exactly (artist, title) — passing a 3rd positional would raise TypeError."""
+    def rf(artist, title):
+        return (MBID, 'db')
+    out = resolve_playlist_tracks([{'artist': 'A', 'title': 'X', 'extra_data': '{}'}], rf)
+    assert out['resolved'][0]['recording_mbid'] == MBID
+
+
+def test_track_aware_resolve_fn_dedup_still_uses_artist_title_memo():
+    """Two rows with the same artist+title text but different extra_data (e.g. different
+    source ISRCs) are still the same song for playlist purposes: resolve_fn is called
+    once, and the SECOND row's own extra_data is never even looked at."""
+    calls = []
+    def rf(artist, title, track=None):
+        calls.append(track)
+        return (MBID, 'isrc')
+    track1 = {'artist': 'A', 'title': 'Song', 'extra_data': '{"isrc": "AAA"}'}
+    track2 = {'artist': 'A', 'title': 'Song', 'extra_data': '{"isrc": "BBB"}'}
+    out = resolve_playlist_tracks([track1, track2], rf)
+    assert len(calls) == 1 and calls[0] is track1
+    assert out['stats']['deduped'] == 1
+    assert all(r['recording_mbid'] == MBID for r in out['resolved'])
