@@ -5975,6 +5975,19 @@ const TOOL_HELP_CONTENT = {
             <p>This permanently deletes files. Make sure you've reviewed quarantined files before setting up an automation for this.</p>
         `
     },
+    'auto-library_cleanup': {
+        title: 'Clear Quarantine + Empty Recycle Bin',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Two bins in one sweep. First it deletes everything in the download quarantine (downloads that failed verification). Then it empties the recycle bin, where the duplicate cleaner and repair tools put files they removed. Either half can be switched off in the action's settings.</p>
+
+            <h4>The recycle bin keep window</h4>
+            <p>The Recycle Bin tab on the Downloads page has a keep window. When one is set, this action only deletes files older than it. When it is on "keep forever", switching this automation on means you want the bin emptied, so it deletes everything in it.</p>
+
+            <h4>Warning</h4>
+            <p>This permanently deletes files. The seeded "Weekly Cleanup" automation runs it and ships switched off for that reason.</p>
+        `
+    },
     'auto-cleanup_wishlist': {
         title: 'Clean Up Wishlist',
         content: `

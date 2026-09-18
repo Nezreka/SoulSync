@@ -209,6 +209,18 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'deep_scan_library',
         'initial_delay': 900,  # 15 min after startup
     },
+    # Quarantine + recycle bin sweep. Seeded SWITCHED OFF: it deletes files
+    # for good, so it is a thing you turn on, not a thing that starts happening
+    # to you after an update. enabled_on_create is honoured on the row's first
+    # creation only, so flipping it on sticks across restarts.
+    {
+        'name': 'Weekly Cleanup',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 7, 'unit': 'days'},
+        'action_type': 'library_cleanup',
+        'initial_delay': 1500,  # 25 min after startup, once enabled
+        'enabled_on_create': False,
+    },
     {
         'name': 'Auto-Backup Database',
         'trigger_type': 'schedule',
@@ -657,6 +669,10 @@ class AutomationEngine:
                 )
                 if aid:
                     self.db.update_automation(aid, is_system=1)
+                    if spec.get('enabled_on_create') is False:
+                        # first creation only: an existing row keeps whatever
+                        # the user set, or turning it on would never stick
+                        self.db.update_automation(aid, enabled=0)
                     logger.info(f"Created system automation: {spec['name']} (id={aid})")
                 existing = self.db.get_system_automation_by_action(spec['action_type'])
 

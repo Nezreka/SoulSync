@@ -22,6 +22,7 @@ from core.automation.handlers.discover_playlist import auto_discover_playlist
 from core.automation.handlers.playlist_pipeline import auto_playlist_pipeline
 from core.automation.handlers.personalized_pipeline import auto_personalized_pipeline
 from core.automation.handlers.lastfm_import import auto_import_lastfm_listening
+from core.automation.handlers.library_cleanup import auto_library_cleanup
 from core.automation.handlers.database_update import (
     auto_start_database_update, auto_deep_scan_library,
 )
@@ -198,6 +199,10 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'clear_quarantine',
         lambda config: auto_clear_quarantine(config, deps),
+    )
+    engine.register_action_handler(
+        'library_cleanup',
+        lambda config: auto_library_cleanup(config, deps),
     )
     engine.register_action_handler(
         'cleanup_wishlist',

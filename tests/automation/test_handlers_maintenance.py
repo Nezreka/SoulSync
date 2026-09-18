@@ -483,3 +483,45 @@ class TestSearchAndDownload:
         result = auto_search_and_download({'query': 'xyz'}, deps)
         assert result['status'] == 'not_found'
         assert result['query'] == 'xyz'
+
+
+# ─── full_cleanup: the quarantine step ────────────────────────────────
+
+
+class TestFullCleanupQuarantineStep:
+    """full_cleanup carried its own copy of the quarantine walk; it now calls
+    core.library.cleanup like the route and clear_quarantine do. Pinned end
+    to end, the other steps stubbed to no-ops."""
+
+    def _deps(self, tmp_path):
+        from core.automation.handlers.download_cleanup import auto_full_cleanup
+        lines: List[Dict[str, Any]] = []
+        deps = _build_deps(
+            config_manager=_StubConfig({'soulseek.download_path': str(tmp_path),
+                                        'soulseek.auto_clear_searches': False}),
+            update_progress=lambda automation_id, **kw: lines.append(kw),
+            get_staging_path=lambda: str(tmp_path / 'no-staging'),
+        )
+        return auto_full_cleanup, deps, lines
+
+    def test_clears_the_quarantine_and_reports_the_count(self, tmp_path, monkeypatch):
+        from core.downloads import cleanup as dl_cleanup
+        monkeypatch.setattr(dl_cleanup, 'sweep_orphaned_download_audio', lambda *a, **k: [])
+        q = tmp_path / 'ss_quarantine'
+        q.mkdir()
+        (q / 'a.flac').write_bytes(b'')
+        (q / 'album').mkdir()
+        run, deps, lines = self._deps(tmp_path)
+        result = run({}, deps)
+        assert result['status'] == 'completed'
+        assert result['quarantine_removed'] == '2'
+        assert os.listdir(q) == []
+        assert {'log_line': 'Quarantine: removed 2 items', 'log_type': 'success'} in lines
+
+    def test_a_missing_quarantine_is_zero(self, tmp_path, monkeypatch):
+        from core.downloads import cleanup as dl_cleanup
+        monkeypatch.setattr(dl_cleanup, 'sweep_orphaned_download_audio', lambda *a, **k: [])
+        run, deps, lines = self._deps(tmp_path)
+        result = run({}, deps)
+        assert result['quarantine_removed'] == '0'
+        assert {'log_line': 'Quarantine: removed 0 items', 'log_type': 'info'} in lines
