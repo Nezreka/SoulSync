@@ -1502,11 +1502,30 @@ class AutomationEngine:
         multipliers = {'minutes': 60, 'hours': 3600, 'days': 86400}
         return max(int(interval), 1) * multipliers.get(unit, 3600)
 
+    # an interval automation whose slot passed while the app was down (or
+    # while it sat disabled) runs soon after it is armed again, not a full
+    # interval later. before this a past next_run fell through to the full
+    # interval, so a weekly automation on an install that restarts more
+    # often than weekly never ran at all. system rows were always caught
+    # up by ensure_system_automations; this is the same treatment for the
+    # rows users make. the id spreads a startup burst over a few minutes.
+    _OVERDUE_CATCHUP_SECONDS = 120
+    _OVERDUE_STAGGER_SECONDS = 20
+    _OVERDUE_STAGGER_SLOTS = 6
+
+    def _overdue_catchup_seconds(self, automation_id) -> int:
+        try:
+            slot = int(automation_id) % self._OVERDUE_STAGGER_SLOTS
+        except (TypeError, ValueError):
+            slot = 0
+        return self._OVERDUE_CATCHUP_SECONDS + slot * self._OVERDUE_STAGGER_SECONDS
+
     def _setup_schedule_trigger(self, automation_id, config):
         """Config: {"interval": 6, "unit": "hours"}"""
         delay = self._calc_delay_seconds(config)
 
-        # If there's a next_run in the future, use remaining time instead
+        # If there's a next_run in the future, use remaining time instead.
+        # a next_run in the past is a missed slot: catch up soon.
         auto = self.db.get_automation(automation_id)
         if auto and auto.get('next_run'):
             try:
@@ -1514,6 +1533,12 @@ class AutomationEngine:
                 remaining = (next_run - _utcnow()).total_seconds()
                 if remaining > 0:
                     delay = remaining
+                else:
+                    # never later than the interval itself (a 1-minute automation
+                    # is not "caught up" by a 2-minute wait)
+                    delay = min(self._overdue_catchup_seconds(automation_id), delay)
+                    logger.info(f"Automation {automation_id} missed its slot by {-remaining/3600:.1f}h, "
+                                f"running in {delay}s instead of a full interval")
             except (ValueError, TypeError):
                 pass
 
