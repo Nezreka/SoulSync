@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
@@ -88,6 +89,16 @@ def _source_label(spotify_track) -> str:
     artist = _artist_name(artists[0]) if artists else ''
     title = getattr(spotify_track, 'name', '') or ''
     return f"{artist} - {title}" if artist else title
+
+
+# the profile a sync runs AS, scoped to the task running it. it was an
+# attribute on the one shared PlaylistSyncService, and the sync pool runs
+# three playlists at once: profile 2's sync set it, profile 3's overwrote it
+# a moment later, and profile 2's library selection and wishlist adds went
+# out under profile 3. a ContextVar set inside sync_playlist is visible to
+# every await below it in that task and to nothing else.
+_sync_profile_id: "contextvars.ContextVar[Optional[int]]" = contextvars.ContextVar(
+    "sync_profile_id", default=None)
 
 
 def reresolve_manual_match_live_plex(cache_db, media_client, m, *, profile_id,
@@ -253,11 +264,11 @@ class PlaylistSyncService:
     def _get_active_media_client(self, profile_id=None):
         """Get the active media client based on config settings.
 
-        If profile_id is provided (or set on the instance via sync_playlist),
+        If profile_id is provided (or the running sync_playlist set one),
         and that profile has a custom library selection, sets the library on
         the client before returning.
         """
-        profile_id = profile_id or getattr(self, '_active_profile_id', None)
+        profile_id = profile_id or _sync_profile_id.get()
         try:
             from core.settings import config_manager
             active_server = config_manager.get_active_media_server()
@@ -401,7 +412,14 @@ class PlaylistSyncService:
         return client.update_playlist(playlist_name, tracks)
 
     async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace') -> SyncResult:
-        self._active_profile_id = profile_id
+        # scoped to this task, not the shared instance (see _sync_profile_id)
+        _profile_token = _sync_profile_id.set(profile_id)
+        try:
+            return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode)
+        finally:
+            _sync_profile_id.reset(_profile_token)
+
+    async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str) -> SyncResult:
         # Check if THIS specific playlist is already syncing
         syncing = getattr(self, 'syncing_playlists', None)
         if syncing is None:
@@ -690,7 +708,7 @@ class PlaylistSyncService:
                                 'sync_type': 'automatic_sync',
                                 'timestamp': datetime.now().isoformat()
                             },
-                            profile_id=getattr(self, '_active_profile_id', None) or 1,
+                            profile_id=_sync_profile_id.get() or 1,
                             quality_profile_id=(
                                 original_track_data.get('quality_profile_id')
                                 if isinstance(original_track_data, dict)
