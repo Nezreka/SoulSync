@@ -18185,6 +18185,37 @@ class MusicDatabase:
             logger.error(f"Error batch updating tracks: {e}")
             return {'success': False, 'error': str(e)}
 
+    def clear_track_recording_mbid_if_matches(self, track_id, expected_mbid: str) -> bool:
+        """Null out ``tracks.musicbrainz_recording_id`` for ``track_id``, but ONLY when its
+        current value equals ``expected_mbid``.
+
+        Used by the mbid_mismatch repair fix (``RepairWorker._fix_mbid_mismatch``) right
+        after it strips that same bad MBID from the audio file's tag. The column is
+        populated verbatim from file tags at import (``core/imports/side_effects.py``),
+        and the export MBID waterfall's DB rung (``core/exports/export_sources.py``) reads
+        it directly — so clearing only the file tag would leave exports still resolving
+        the wrong recording out of the DB. The equality guard means a value something else
+        already corrected in the meantime (no longer the bad one) is left alone. Not part
+        of ``TRACK_EDITABLE_FIELDS``/``update_track_fields`` on purpose — this is a narrow,
+        repair-specific mutation, not a user-editable field.
+        """
+        if not expected_mbid or track_id is None:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE tracks SET musicbrainz_recording_id = NULL, "
+                    "updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND musicbrainz_recording_id = ?",
+                    (track_id, expected_mbid),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error clearing musicbrainz_recording_id for track {track_id}: {e}")
+            return False
+
     # ==================== Discovery Match Cache Methods ====================
 
     def get_discovery_cache_match(self, normalized_title: str, normalized_artist: str, provider: str) -> Optional[Dict]:

@@ -14,7 +14,11 @@ from core.exports.mbid_resolver import SRC_CACHE, SRC_DB, SRC_MUSICBRAINZ
 MBID = "e8f9b188-f819-4e43-ab0f-4bd26ce9ff56"
 
 
-def _wire(db=None, file=None, mb=None, cache=None):
+def _wire(db=None, file=None, mb=None, cache=None, flagged=None, verify=None):
+    """Wire a resolve_fn from fakes. ``flagged``/``verify`` default to "nothing is
+    flagged, everything verifies" so the existing waterfall-order tests below don't
+    have to know about the #903-follow-up gates at all — only the new gate-specific
+    tests pass non-default fakes for them."""
     recorded = {}
     store = dict(cache or {})
     fn = build_resolve_fn(
@@ -23,6 +27,8 @@ def _wire(db=None, file=None, mb=None, cache=None):
         mb_fn=lambda a, t: (mb or {}).get((a, t)),
         cache_lookup=lambda k: store.get(k),
         cache_record=lambda k, m: recorded.__setitem__(k, m) or True,
+        mbid_flagged_fn=flagged if flagged is not None else (lambda a, t: False),
+        verify_fn=verify if verify is not None else (lambda m, t: True),
     )
     return fn, recorded
 
@@ -57,6 +63,165 @@ def test_all_miss_returns_none_and_no_write():
     fn, recorded = _wire()
     assert fn("A", "T") == (None, None)
     assert recorded == {}
+
+
+# ── #903 follow-up: DB/file rungs are gated by the mbid_mismatch repair job's pending
+# findings, plus a live MusicBrainz title cross-check — either gate failing makes the
+# rung a miss so the waterfall falls through instead of exporting the wrong recording ──
+
+OTHER_MBID = "11111111-2222-3333-4444-555555555555"
+
+
+def test_db_hit_flagged_by_pending_finding_falls_through_to_musicbrainz():
+    """The repair job already has a pending mbid_mismatch finding for this track -> the
+    DB rung's MBID is a miss, so the waterfall goes on to the file rung. Since the file
+    rung resolves the SAME (still-flagged) track, that's a miss too -> falls all the way
+    to the live MusicBrainz rung, proving both later rungs were actually consulted."""
+    fn, _ = _wire(
+        db={("A", "T"): MBID},
+        file={("A", "T"): OTHER_MBID},
+        mb={("A", "T"): "99999999-8888-7777-6666-555555555555"},
+        flagged=lambda a, t: True,
+    )
+    assert fn("A", "T") == ("99999999-8888-7777-6666-555555555555", SRC_MUSICBRAINZ)
+
+
+def test_file_hit_flagged_by_pending_finding_falls_through_to_musicbrainz():
+    """DB rung misses outright; the file rung's MBID is flagged -> falls through to the
+    live MusicBrainz rung."""
+    fn, _ = _wire(
+        db={},
+        file={("A", "T"): MBID},
+        mb={("A", "T"): OTHER_MBID},
+        flagged=lambda a, t: True,
+    )
+    assert fn("A", "T") == (OTHER_MBID, SRC_MUSICBRAINZ)
+
+
+def test_flagged_predicate_is_per_track_not_global():
+    fn, _ = _wire(
+        db={("A", "T"): MBID, ("A", "Other"): MBID},
+        flagged=lambda a, t: t == "T",
+    )
+    assert fn("A", "T") == (None, None)
+    assert fn("A", "Other") == (MBID, SRC_DB)
+
+
+def test_flagged_fn_called_once_across_db_and_file_rung_for_same_track():
+    """Both the DB and file rungs resolve to (different) MBIDs for the same track, and
+    both get rejected by the flagged predicate -> the per-run memo means the predicate is
+    only actually invoked once for ('A', 'T'), not once per rung."""
+    calls = []
+
+    def flagged(a, t):
+        calls.append((a, t))
+        return True
+
+    fn, _ = _wire(db={("A", "T"): MBID}, file={("A", "T"): OTHER_MBID}, flagged=flagged)
+    assert fn("A", "T") == (None, None)
+    assert calls == [("A", "T")]
+
+
+def test_verify_fn_mismatch_falls_through_to_next_rung():
+    fn, _ = _wire(
+        db={("A", "T"): MBID},
+        mb={("A", "T"): OTHER_MBID},
+        verify=lambda m, t: False,
+    )
+    assert fn("A", "T") == (OTHER_MBID, SRC_MUSICBRAINZ)
+
+
+def test_verify_fn_match_accepts_the_rung():
+    fn, _ = _wire(db={("A", "T"): MBID}, verify=lambda m, t: True)
+    assert fn("A", "T") == (MBID, SRC_DB)
+
+
+def test_verify_fn_exception_fails_open_and_accepts_the_rung():
+    """Network trouble in the verifier must never degrade the export -> accept."""
+    def boom(m, t):
+        raise RuntimeError("musicbrainz flaked")
+    fn, _ = _wire(db={("A", "T"): MBID}, verify=boom)
+    assert fn("A", "T") == (MBID, SRC_DB)
+
+
+def test_verify_fn_memoized_at_most_once_per_mbid_title_pair():
+    calls = []
+
+    def verify(m, t):
+        calls.append((m, t))
+        return True
+
+    fn, _ = _wire(db={("A", "T"): MBID}, verify=verify)
+    fn("A", "T")
+    fn("A", "T")
+    assert calls == [(MBID, "T")]
+
+
+def test_mbid_flagged_by_repair_finding_real_sql(tmp_path, monkeypatch):
+    """Run the ACTUAL query against a real (temp) tracks/artists/repair_findings schema —
+    a pending mbid_mismatch finding keyed on the track's id must flag it; a resolved one,
+    or a finding for a different track, must not."""
+    import sqlite3
+    import types
+    import core.exports.export_sources as es
+
+    dbfile = tmp_path / "lib.db"
+    con = sqlite3.connect(str(dbfile))
+    con.executescript(
+        "CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT);"
+        "CREATE TABLE tracks (id TEXT, artist_id TEXT, title TEXT, "
+        "musicbrainz_recording_id TEXT, file_path TEXT);"
+        "CREATE TABLE repair_findings (finding_type TEXT, status TEXT, "
+        "entity_type TEXT, entity_id TEXT, file_path TEXT);"
+        "INSERT INTO artists VALUES ('a1','Fall Out Boy');"
+        "INSERT INTO tracks VALUES "
+        "('t1','a1','Thnks fr th Mmrs','bad-mbid','/music/track1.mp3'),"
+        "('t2','a1','Sugar, We''re Goin Down','ok-mbid','/music/track2.mp3');"
+        "INSERT INTO repair_findings VALUES "
+        "('mbid_mismatch','pending','track','t1','/music/track1.mp3'),"
+        "('mbid_mismatch','resolved','track','t2','/music/track2.mp3');"
+    )
+    con.commit()
+    con.close()
+
+    fake_db = types.SimpleNamespace(_get_connection=lambda: sqlite3.connect(str(dbfile)))
+    monkeypatch.setattr("database.music_database.get_database", lambda: fake_db)
+
+    assert es.mbid_flagged_by_repair_finding("Fall Out Boy", "Thnks fr th Mmrs") is True
+    # resolved (not pending) finding -> not flagged
+    assert es.mbid_flagged_by_repair_finding("Fall Out Boy", "Sugar, We're Goin Down") is False
+    # no matching track at all -> not flagged
+    assert es.mbid_flagged_by_repair_finding("Fall Out Boy", "Unknown Song") is False
+
+
+def test_verify_recording_title_no_client_accepts(monkeypatch):
+    import core.exports.export_sources as es
+    monkeypatch.setattr(es, "_get_mb_service", lambda: None)
+    assert es.verify_recording_title(MBID, "Anything") is True
+
+
+def test_verify_recording_title_matches_and_mismatches(monkeypatch):
+    import types
+    import core.exports.export_sources as es
+
+    def _svc(recording_title):
+        client = types.SimpleNamespace(
+            get_recording=lambda mbid, includes=None: {"title": recording_title})
+        return types.SimpleNamespace(mb_client=client)
+
+    monkeypatch.setattr(es, "_get_mb_service", lambda: _svc("Thnks fr th Mmrs"))
+    assert es.verify_recording_title(MBID, "Thnks Fr Th Mmrs") is True   # case-insensitive match
+
+    monkeypatch.setattr(es, "_get_mb_service", lambda: _svc("Don't You Know Who I Think I Am?"))
+    assert es.verify_recording_title(MBID, "Thnks fr th Mmrs") is False  # real mis-tag case (#903)
+
+
+def test_verify_recording_title_recording_not_found_is_a_mismatch(monkeypatch):
+    import types
+    import core.exports.export_sources as es
+    client = types.SimpleNamespace(get_recording=lambda mbid, includes=None: None)
+    monkeypatch.setattr(es, "_get_mb_service", lambda: types.SimpleNamespace(mb_client=client))
+    assert es.verify_recording_title(MBID, "Anything") is False
 
 
 # ── service track-id resolver (#945 export to Spotify/Deezer) ──
