@@ -31,6 +31,37 @@ DEFAULT_CONNECT_TIMEOUT = 5.0
 DEFAULT_MAX_RETRIES = 2
 TRANSIENT_STATUS_CODES = {429, 503, 504}
 
+# Keys a genuine search/browse payload carries. Used to tell a real (if empty)
+# result apart from the 200-status "server busy" body below — see
+# `_looks_like_busy_body`.
+_MB_COLLECTION_KEYS = frozenset({'artists', 'releases', 'recordings', 'release-groups', 'labels'})
+
+
+class MusicBrainzBusyError(RuntimeError):
+    """MusicBrainz answered 200 OK with an overload message instead of data.
+
+    Under load MusicBrainz sometimes reports `{"error": "The MusicBrainz web
+    server is currently busy. Please try again later."}` at HTTP 200 rather
+    than a 503 — `raise_for_status()` never fires, so every caller's
+    `data.get('recordings', [])` (etc.) silently returns `[]`, indistinguishable
+    from a genuine "no results". `_is_transient_musicbrainz_error` recognises
+    this type so it is retried/backed-off exactly like a real 503.
+    """
+
+
+def _looks_like_busy_body(data: Any) -> bool:
+    """True when a parsed JSON body is MusicBrainz's 200-status busy message.
+
+    An `error` key with none of the collection keys a real search/browse
+    response carries — a legitimate empty result (e.g. `{"recordings": []}`)
+    has no `error` key at all, so it is never mistaken for this.
+    """
+    return (
+        isinstance(data, dict)
+        and 'error' in data
+        and not _MB_COLLECTION_KEYS.intersection(data.keys())
+    )
+
 
 def _config_setting(env_name: str, config_key: str) -> Any:
     value = os.environ.get(env_name)
@@ -64,6 +95,8 @@ def _int_setting(env_name: str, config_key: str, default: int) -> int:
 
 
 def _is_transient_musicbrainz_error(exc: Exception) -> bool:
+    if isinstance(exc, MusicBrainzBusyError):
+        return True
     if isinstance(exc, (requests.exceptions.ReadTimeout, requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
         return True
     response = getattr(exc, 'response', None)
@@ -181,6 +214,16 @@ class MusicBrainzClient:
                     raise requests.HTTPError(
                         "MusicBrainz API redirected; configure its final base URL", response=response)
                 response.raise_for_status()
+                # A 200 can still carry MusicBrainz's overload message instead
+                # of data (see MusicBrainzBusyError) — catch it here, in one
+                # place, before any caller's `data.get(key, [])` turns it into
+                # a silent empty result.
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = None
+                if _looks_like_busy_body(payload):
+                    raise MusicBrainzBusyError(str(payload.get('error')))
                 return response
             except Exception as exc:
                 last_exc = exc
@@ -260,7 +303,8 @@ class MusicBrainzClient:
             return []
     
     def search_release(self, album_name: str, artist_name: Optional[str] = None,
-                       limit: int = 10, strict: bool = True) -> List[Dict[str, Any]]:
+                       limit: int = 10, strict: bool = True,
+                       raise_on_error: bool = False) -> List[Dict[str, Any]]:
         """
         Search for releases (albums) by name.
 
@@ -275,6 +319,13 @@ class MusicBrainzClient:
                 hits alias / sortname indexes and folds diacritics,
                 dramatically improving recall for user-facing fuzzy
                 lookups (e.g. the manual Fix popup).
+            raise_on_error: Re-raise a transport failure instead of reporting
+                it as an empty result. The default is the historical
+                fail-soft behaviour, which suits callers that only want a
+                best-effort list. It does NOT suit a caller that WRITES the
+                answer down: a timeout and "MusicBrainz knows no such
+                release" are the same `[]` here, and a negative cache would
+                store the second meaning for a month after seeing the first.
 
         Returns:
             List of release results
@@ -312,13 +363,16 @@ class MusicBrainzClient:
             
             logger.debug(f"Found {len(releases)} releases for query: {album_name}")
             return releases
-            
+
         except Exception as e:
             logger.error(f"Error searching for release '{album_name}': {e}")
+            if raise_on_error:
+                raise
             return []
     
     def search_recording(self, track_name: str, artist_name: Optional[str] = None,
-                         limit: int = 10, strict: bool = True) -> List[Dict[str, Any]]:
+                         limit: int = 10, strict: bool = True,
+                         raise_on_error: bool = False) -> List[Dict[str, Any]]:
         """
         Search for recordings (tracks) by name.
 
@@ -335,6 +389,13 @@ class MusicBrainzClient:
                 when either side mis-matches (e.g. "Bjork" vs canonical
                 "Björk", or a track title with bracketed suffix like
                 "(Live)" that strict phrase match rejects).
+            raise_on_error: Re-raise a transport failure instead of reporting
+                it as an empty result. The default is the historical
+                fail-soft behaviour, which suits callers that only want a
+                best-effort list. It does NOT suit a caller that WRITES the
+                answer down: a timeout and "MusicBrainz knows no such
+                recording" are the same `[]` here, and a negative cache would
+                store the second meaning for a month after seeing the first.
 
         Returns:
             List of recording results
@@ -375,9 +436,11 @@ class MusicBrainzClient:
             
             logger.debug(f"Found {len(recordings)} recordings for query: {track_name}")
             return recordings
-            
+
         except Exception as e:
             logger.error(f"Error searching for recording '{track_name}': {e}")
+            if raise_on_error:
+                raise
             return []
     
     def browse_artist_release_groups(self, artist_mbid: str,
