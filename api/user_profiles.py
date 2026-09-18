@@ -17,7 +17,7 @@ from flask import Blueprint, jsonify, request, session
 
 from core.metadata import registry as metadata_registry
 from core.metadata.status import invalidate_metadata_status_caches
-from core.profile_context import admin_only
+from core.profile_context import admin_only, is_admin_request
 
 from utils.logging_config import get_logger
 
@@ -1038,7 +1038,7 @@ def get_active_sources():
         meta_effective = 'spotify_free' if meta_active == 'spotify_free' else _get_metadata_fallback_source()
         return jsonify({
             'success': True,
-            'editable': get_current_profile_id() == 1,  # admin writes the global default
+            'editable': is_admin_request(),  # admins write the global default, same gate as the POST
             'metadata': {
                 # `active` = the configured choice (what the user picked / edits).
                 # `effective` = what's actually used after auth/availability
