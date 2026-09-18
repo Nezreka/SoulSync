@@ -12,6 +12,7 @@ from core.worker_utils import (
     source_id_conflict,
 )
 from database.music_database import MusicDatabase
+from core.text.title_match import recording_version_markers
 
 logger = get_logger("musicbrainz_service")
 
@@ -526,6 +527,24 @@ class MusicBrainzService:
                 # different titles (e.g. "Sweet Surrender" → "Answers")
                 # past the confidence threshold.
                 if title_similarity < 0.6:
+                    continue
+
+                # Hard, symmetric version-marker gate: a bare query must not
+                # match a "(Live)"/"(Acoustic)"/"(English Version)" recording
+                # and vice versa — those are different PERFORMANCES of the
+                # same song, not the same recording. Neither the title-
+                # similarity floor above nor the bonuses below know this
+                # ("Firewater" vs "Firewater (Acoustic)" scores ~0.76 and
+                # sails past 0.6). Same marker set in both directions
+                # (including both empty) passes; any asymmetry is rejected.
+                query_markers = recording_version_markers(track_name)
+                candidate_markers = recording_version_markers(mb_title)
+                if query_markers != candidate_markers:
+                    logger.debug(
+                        f"Version marker mismatch for recording '{track_name}' "
+                        f"({sorted(query_markers)}) vs '{mb_title}' "
+                        f"({sorted(candidate_markers)}) — skipping"
+                    )
                     continue
 
                 # If we have artist info, check artist match too
