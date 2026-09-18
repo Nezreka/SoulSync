@@ -16047,6 +16047,14 @@ def cancel_batch(batch_id):
                         task['status'] = 'cancelled'
                         cancelled_count += 1
 
+            # close the sync history row with what finished before the cancel.
+            # nothing else ever will: a cancelled batch never reaches a
+            # completion check, and the row read "In progress" for good
+            try:
+                _record_sync_history_completion(batch_id, download_batches[batch_id])
+            except Exception as hist_err:
+                logger.warning(f"[Cancel Batch] Could not close sync history for {batch_id}: {hist_err}")
+
             # Add activity for batch cancellation
             playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')
             add_activity_item("", "Batch Cancelled", f"'{playlist_name}' - {cancelled_count} downloads cancelled", "Now")
