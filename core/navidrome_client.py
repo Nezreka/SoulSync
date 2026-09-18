@@ -3,7 +3,7 @@ import requests
 import hashlib
 import secrets
 import time
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from urllib.parse import urlencode
 import json
@@ -60,6 +60,11 @@ class NavidromeArtist:
         """Get all albums for this artist"""
         return self._client.get_albums_for_artist(self.ratingKey)
 
+    def albums_verified(self):
+        """(albums, ok): ok is False when the server gave no answer, which
+        albums() folds into an empty list. the deep scan reads this one."""
+        return self._client.get_albums_for_artist_verified(self.ratingKey)
+
 class NavidromeAlbum:
     """Wrapper class to mimic Plex album object interface"""
     def __init__(self, navidrome_data: Dict[str, Any], client: 'NavidromeClient'):
@@ -101,6 +106,10 @@ class NavidromeAlbum:
     def tracks(self) -> List['NavidromeTrack']:
         """Get all tracks for this album"""
         return self._client.get_tracks_for_album(self.ratingKey)
+
+    def tracks_verified(self):
+        """(tracks, ok): ok is False when the server gave no answer."""
+        return self._client.get_tracks_for_album_verified(self.ratingKey)
 
 class NavidromeTrack:
     """Wrapper class to mimic Plex track object interface"""
@@ -728,12 +737,19 @@ class NavidromeClient(MediaServerClient):
 
     def get_albums_for_artist(self, artist_id: str) -> List[NavidromeAlbum]:
         """Get all albums for a specific artist"""
+        return self.get_albums_for_artist_verified(artist_id)[0]
+
+    def get_albums_for_artist_verified(self, artist_id: str) -> Tuple[List[NavidromeAlbum], bool]:
+        """(albums, ok). ok is False when the request got no usable answer:
+        not connected, request failed, api error. an empty list with ok True
+        is an artist with no albums. the deep scan must tell the two apart,
+        it deletes what it does not see."""
         # Check cache first
         if artist_id in self._album_cache:
-            return self._album_cache[artist_id]
+            return self._album_cache[artist_id], True
 
         if not self.ensure_connection():
-            return []
+            return [], False
 
         try:
             # Get artist name for progress display
@@ -752,7 +768,7 @@ class NavidromeClient(MediaServerClient):
                 params['musicFolderId'] = self.music_folder_id
             response = self._make_request('getArtist', params)
             if not response:
-                return []
+                return [], False
 
             albums = []
             artist_data = response.get('artist', {})
@@ -777,11 +793,11 @@ class NavidromeClient(MediaServerClient):
             # Cache the result
             self._album_cache[artist_id] = albums
 
-            return albums
+            return albums, True
 
         except Exception as e:
             logger.error(f"Error getting albums for artist {artist_id}: {e}")
-            return []
+            return [], False
 
     def _get_folder_album_ids(self) -> Optional[set]:
         """Get set of album IDs belonging to the selected music folder.
@@ -864,12 +880,16 @@ class NavidromeClient(MediaServerClient):
 
     def get_tracks_for_album(self, album_id: str) -> List[NavidromeTrack]:
         """Get all tracks for a specific album"""
+        return self.get_tracks_for_album_verified(album_id)[0]
+
+    def get_tracks_for_album_verified(self, album_id: str) -> Tuple[List[NavidromeTrack], bool]:
+        """(tracks, ok). same contract as get_albums_for_artist_verified."""
         # Check cache first
         if album_id in self._track_cache:
-            return self._track_cache[album_id]
+            return self._track_cache[album_id], True
 
         if not self.ensure_connection():
-            return []
+            return [], False
 
         try:
             # Get album name for progress display
@@ -888,7 +908,7 @@ class NavidromeClient(MediaServerClient):
 
             response = self._make_request('getAlbum', {'id': album_id})
             if not response:
-                return []
+                return [], False
 
             tracks = []
             album_data = response.get('album', {})
@@ -903,11 +923,11 @@ class NavidromeClient(MediaServerClient):
             # Cache the result
             self._track_cache[album_id] = tracks
 
-            return tracks
+            return tracks, True
 
         except Exception as e:
             logger.error(f"Error getting tracks for album {album_id}: {e}")
-            return []
+            return [], False
 
     def get_artist_by_id(self, artist_id: str) -> Optional[NavidromeArtist]:
         """Get a specific artist by ID"""

@@ -1,6 +1,6 @@
 import requests
 import time
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 import json
 from utils.logging_config import get_logger
@@ -85,6 +85,11 @@ class JellyfinArtist:
         """Get all albums for this artist"""
         return self._client.get_albums_for_artist(self.ratingKey)
 
+    def albums_verified(self):
+        """(albums, ok): ok is False when the server gave no answer, which
+        albums() folds into an empty list. the deep scan reads this one."""
+        return self._client.get_albums_for_artist_verified(self.ratingKey)
+
 class JellyfinAlbum:
     """Wrapper class to mimic Plex album object interface"""
     def __init__(self, jellyfin_data: Dict[str, Any], client: 'JellyfinClient'):
@@ -122,6 +127,10 @@ class JellyfinAlbum:
     def tracks(self) -> List['JellyfinTrack']:
         """Get all tracks for this album"""
         return self._client.get_tracks_for_album(self.ratingKey)
+
+    def tracks_verified(self):
+        """(tracks, ok): ok is False when the server gave no answer."""
+        return self._client.get_tracks_for_album_verified(self.ratingKey)
 
 class JellyfinTrack:
     """Wrapper class to mimic Plex track object interface"""
@@ -597,12 +606,22 @@ class JellyfinClient(MediaServerClient):
             # Page in modest chunks so progress is reported every page — a single
             # huge silent request used to trip the 300s no-progress watchdog on
             # slow servers even though it was alive (see bulk_paginate docstring).
+            tracks_outcome: Dict[str, Any] = {}
             all_tracks = paginate_all_items(
                 _fetch_tracks_page,
                 report_progress=self._progress_callback,
                 label="tracks",
                 on_retry_wait=lambda: time.sleep(5),
+                outcome=tracks_outcome,
             )
+            if not tracks_outcome.get('complete', True):
+                # a prefix of the library is not a cache: an album cut in half
+                # by the failure would read as an album with half its tracks,
+                # and the deep scan deletes what it does not see. per-album
+                # fetches are slower and answer for themselves.
+                logger.warning("Jellyfin bulk track fetch was abandoned after %d tracks; not caching it, "
+                               "albums will be fetched one at a time", len(all_tracks))
+                all_tracks = []
 
             # Group tracks by album ID for instant lookup
             self._track_cache = {}
@@ -634,12 +653,20 @@ class JellyfinClient(MediaServerClient):
                 response = self._make_request(f'/Users/{self.user_id}/Items', params)
                 return response.get('Items', []) if response else None  # None = failed page
 
+            albums_outcome: Dict[str, Any] = {}
             all_albums = paginate_all_items(
                 _fetch_albums_page,
                 report_progress=self._progress_callback,
                 label="albums",
                 on_retry_wait=lambda: time.sleep(5),
+                outcome=albums_outcome,
             )
+            if not albums_outcome.get('complete', True):
+                # same rule: an artist whose later albums fell past the failure
+                # would read as an artist missing those albums
+                logger.warning("Jellyfin bulk album fetch was abandoned after %d albums; not caching it, "
+                               "artists will be fetched one at a time", len(all_albums))
+                all_albums = []
 
             # Group albums by artist ID for instant lookup
             self._album_cache = {}
@@ -861,79 +888,110 @@ class JellyfinClient(MediaServerClient):
             logger.error(f"Error getting album IDs from Jellyfin: {e}")
             return set()
 
+    # page size for the per-artist / per-album listings. these used to be a
+    # single request with Limit 200 / 100 and no second page, so a Various
+    # Artists with 300 albums, or a box set with 120 tracks, listed short and
+    # the deep scan deleted the rest as stale.
+    _ITEM_PAGE_SIZE = 200
+
+    def _fetch_all_items(self, params: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+        """every item for a /Users/<id>/Items query, paged until the server
+        says it is done. None when any page got no answer: a prefix is not a
+        listing."""
+        items: List[Dict[str, Any]] = []
+        start = 0
+        limit = self._ITEM_PAGE_SIZE
+        while True:
+            page_params = dict(params)
+            page_params['StartIndex'] = start
+            page_params['Limit'] = limit
+            response = self._make_request(f'/Users/{self.user_id}/Items', page_params)
+            if not response:
+                return None
+            page = response.get('Items', []) or []
+            items.extend(page)
+            total = response.get('TotalRecordCount')
+            if len(page) < limit:
+                break
+            if isinstance(total, int) and len(items) >= total:
+                break
+            start += limit
+        return items
+
     def get_albums_for_artist(self, artist_id: str) -> List[JellyfinAlbum]:
         """Get all albums for a specific artist"""
+        return self.get_albums_for_artist_verified(artist_id)[0]
+
+    def get_albums_for_artist_verified(self, artist_id: str) -> Tuple[List[JellyfinAlbum], bool]:
+        """(albums, ok). ok is False when the request got no usable answer:
+        not connected, a page failed, an exception. an empty list with ok
+        True is an artist with no albums. the deep scan must tell the two
+        apart, it deletes what it does not see."""
         # Use cache if available
         if artist_id in self._album_cache:
-            return self._album_cache[artist_id]
-            
+            return self._album_cache[artist_id], True
+
         if not self.ensure_connection():
-            return []
-            
+            return [], False
+
         try:
-            # Use smaller, faster API call
             params = {
                 'ArtistIds': artist_id,
                 'IncludeItemTypes': 'MusicAlbum',
                 'Recursive': True,
                 'SortBy': 'ProductionYear,SortName',
                 'SortOrder': 'Ascending',
-                'Limit': 200  # Reasonable limit for most artists
             }
-            
-            response = self._make_request(f'/Users/{self.user_id}/Items', params)
-            if not response:
-                return []
-            
-            albums = []
-            for item in response.get('Items', []):
-                albums.append(JellyfinAlbum(item, self))
-            
+            items = self._fetch_all_items(params)
+            if items is None:
+                return [], False
+
+            albums = [JellyfinAlbum(item, self) for item in items]
+
             # Cache the result
             self._album_cache[artist_id] = albums
-            
-            return albums
-            
+
+            return albums, True
+
         except Exception as e:
             logger.error(f"Error getting albums for artist {artist_id}: {e}")
-            return []
-    
+            return [], False
+
     def get_tracks_for_album(self, album_id: str) -> List[JellyfinTrack]:
         """Get all tracks for a specific album"""
+        return self.get_tracks_for_album_verified(album_id)[0]
+
+    def get_tracks_for_album_verified(self, album_id: str) -> Tuple[List[JellyfinTrack], bool]:
+        """(tracks, ok). same contract as get_albums_for_artist_verified."""
         # Use cache if available
         if album_id in self._track_cache:
-            return self._track_cache[album_id]
-            
+            return self._track_cache[album_id], True
+
         if not self.ensure_connection():
-            return []
-            
+            return [], False
+
         try:
-            # Most albums have < 30 tracks, so this is reasonable
             params = {
                 'ParentId': album_id,
                 'IncludeItemTypes': 'Audio',
                 'Fields': 'Path,MediaSources',
                 'SortBy': 'IndexNumber',
                 'SortOrder': 'Ascending',
-                'Limit': 100  # Most albums won't hit this limit
             }
-            
-            response = self._make_request(f'/Users/{self.user_id}/Items', params)
-            if not response:
-                return []
-            
-            tracks = []
-            for item in response.get('Items', []):
-                tracks.append(JellyfinTrack(item, self))
-            
+            items = self._fetch_all_items(params)
+            if items is None:
+                return [], False
+
+            tracks = [JellyfinTrack(item, self) for item in items]
+
             # Cache the result
             self._track_cache[album_id] = tracks
-            
-            return tracks
-            
+
+            return tracks, True
+
         except Exception as e:
             logger.error(f"Error getting tracks for album {album_id}: {e}")
-            return []
+            return [], False
     
     def get_artist_by_id(self, artist_id: str) -> Optional[JellyfinArtist]:
         """Get a specific artist by ID"""

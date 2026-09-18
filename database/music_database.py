@@ -8494,6 +8494,33 @@ class MusicDatabase:
             logger.error(f"Error getting track IDs for {server_source}: {e}")
             return set()
 
+    def get_track_ids_under_scopes(self, server_source: str, artist_ids: set, album_ids: set) -> Optional[set]:
+        """ids of this server's tracks that live under any of the given artists
+        or albums. the deep scan uses it to fence off the rows it could not
+        verify (an artist whose album listing failed, an album whose track
+        listing failed) so they never count as stale. None when the query
+        itself failed: a fence that might be missing rows is no fence, and
+        the caller has to skip removal rather than trust a partial one."""
+        if not artist_ids and not album_ids:
+            return set()
+        found: set = set()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                for column, ids in (("artist_id", artist_ids), ("album_id", album_ids)):
+                    id_list = [str(i) for i in (ids or ()) if i is not None]
+                    for start in range(0, len(id_list), 500):
+                        batch = id_list[start:start + 500]
+                        placeholders = ','.join('?' * len(batch))
+                        cursor.execute(
+                            f"SELECT id FROM tracks WHERE server_source = ? AND {column} IN ({placeholders})",
+                            [server_source] + batch)
+                        found.update(row[0] for row in cursor.fetchall())
+        except Exception as e:
+            logger.error(f"Error getting scoped track IDs for {server_source}: {e}")
+            return None
+        return found
+
     def delete_stale_tracks(self, stale_track_ids: set, server_source: str) -> int:
         """Delete tracks by ID+server_source that no longer exist on the media server.
         Processes in batches of 500 for database safety."""
