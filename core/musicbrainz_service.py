@@ -566,14 +566,21 @@ class MusicBrainzService:
         "right" one instead).
 
         Cached under its own entity_type so this costs one round trip per
-        artist name, not one per track.
+        artist name, not one per track — but ONLY when MusicBrainz actually
+        answered. `search_artist` is fail-soft by default and collapses a
+        transient timeout/5xx into the same `[]` it returns for a genuine
+        "nobody by that name" (client 256-260); caching that as a negative
+        would silence this whole fallback for the row's TTL off the back of
+        one outage. `raise_on_error=True` tells the two apart, and a raise
+        is deliberately left uncached below.
         """
         cached = self._check_cache('artist_recording_pin', artist_name)
         if cached is not None:
             return cached.get('musicbrainz_id')
 
         try:
-            results = self.mb_client.search_artist(artist_name, limit=5, strict=False)
+            results = self.mb_client.search_artist(
+                artist_name, limit=5, strict=False, raise_on_error=True)
         except Exception as e:
             logger.debug("artist pin resolution for %r raised: %s", artist_name, e)
             return None
@@ -587,6 +594,13 @@ class MusicBrainzService:
         second_score = (results[1].get('score', 0) or 0) if len(results) > 1 else 0
         gap_ok = (top_score - second_score) >= 10
         name_matches = self._artist_name_or_alias_matches(top, artist_name)
+        # A tie on the exact name (three MB artists literally called
+        # "Nirvana") means the query alone cannot single one out even
+        # though it matches the top result's name/alias — that escape hatch
+        # only holds when exactly one candidate carries the name.
+        exact_name_matches = sum(
+            1 for r in results if self._artist_name_or_alias_matches(r, artist_name))
+        name_matches = name_matches and exact_name_matches <= 1
 
         if top_score >= 90 and (gap_ok or name_matches):
             mbid = top.get('id')
@@ -669,8 +683,17 @@ class MusicBrainzService:
                     best_match, best_confidence = pin_match, pin_confidence
 
             if not best_match:
-                logger.info(f"No MusicBrainz results for recording '{track_name}'")
-                self._save_to_cache('recording', track_name, artist_name, None, None, 0)
+                # `results` (the strict search) tells "genuinely nothing
+                # came back" apart from "something came back but every
+                # candidate — including any from the artist-pinned retry —
+                # failed the title-similarity gate". Same cached values
+                # either way (mbid=None, confidence 0), only the log text
+                # tells them apart, same as before this fallback existed.
+                if results:
+                    logger.info(f"Low confidence match for recording '{track_name}' (best: {best_confidence})")
+                else:
+                    logger.info(f"No MusicBrainz results for recording '{track_name}'")
+                self._save_to_cache('recording', track_name, artist_name, None, None, best_confidence)
                 return None
 
             # Only return matches with confidence >= 70%
