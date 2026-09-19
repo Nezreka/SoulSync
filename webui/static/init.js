@@ -1668,10 +1668,24 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
     let users = [];
     const currentLib = profileData || {};
 
+    // navidrome has no library pick, it has a login: playlists a profile
+    // syncs land on the navidrome user the profile logs in as (#1265). ask
+    // which server is active outright, the library probes below never
+    // answer for navidrome.
+    try {
+        const activeRes = await fetch('/api/profiles/me/active-sources');
+        if (activeRes.ok) {
+            const active = await activeRes.json();
+            if (active && active.server && active.server.active === 'navidrome') {
+                serverType = 'navidrome';
+            }
+        }
+    } catch (e) { }
+
     try {
         // Try each server type to find the active one
-        const plexRes = await fetch('/api/plex/music-libraries');
-        if (plexRes.ok) {
+        const plexRes = serverType === 'none' ? await fetch('/api/plex/music-libraries') : null;
+        if (plexRes && plexRes.ok) {
             const plexData = await plexRes.json();
             if (plexData.libraries && plexData.libraries.length > 0) {
                 serverType = 'plex';
@@ -1701,6 +1715,32 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
                     <h4 class="ps-section-title">Media Server</h4>
                 </div>
                 <div class="ps-help-text">No media server connected. Ask your admin to configure Plex, Jellyfin, or Navidrome in Settings.</div>
+            </div>
+        `;
+    } else if (serverType === 'navidrome') {
+        const savedUser = currentLib.navidrome_username || '';
+        section.innerHTML = `
+            <div class="ps-section">
+                <div class="ps-section-header">
+                    <h4 class="ps-section-title">Navidrome</h4>
+                    <span class="ps-connection-badge ${savedUser ? 'connected' : 'disconnected'}">
+                        <span class="ps-connection-dot"></span>
+                        ${savedUser ? escapeHtml(savedUser) : 'App account'}
+                    </span>
+                </div>
+                <div class="ps-help-text" style="margin-bottom:12px;">Log in with your own Navidrome user and the playlists you sync will belong to you in Navidrome. Without a login they belong to the app's account.</div>
+                <div class="ps-form-group">
+                    <label>Navidrome username</label>
+                    <input type="text" id="ps-navidrome-username" value="${escapeHtml(savedUser)}" autocomplete="off">
+                </div>
+                <div class="ps-form-group">
+                    <label>Navidrome password</label>
+                    <input type="password" id="ps-navidrome-password" placeholder="${savedUser ? 'Saved' : ''}" autocomplete="new-password">
+                </div>
+                <div class="ps-actions">
+                    <button class="ps-btn ps-btn-primary" onclick="savePersonalNavidromeLogin()">Save</button>
+                    ${savedUser ? '<button class="ps-btn" onclick="clearPersonalNavidromeLogin()">Use app account</button>' : ''}
+                </div>
             </div>
         `;
     } else if (serverType === 'plex') {
@@ -1805,6 +1845,43 @@ async function savePersonalServerLibrary() {
         showToast('Server library settings saved', 'success');
     } catch (e) {
         showToast('Error saving settings', 'error');
+    }
+}
+
+async function savePersonalNavidromeLogin() {
+    const username = (document.getElementById('ps-navidrome-username')?.value || '').trim();
+    const password = document.getElementById('ps-navidrome-password')?.value || '';
+    if (!username || !password) {
+        showToast('Enter your Navidrome username and password', 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/profiles/me/navidrome-login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(data.error || 'Navidrome refused the login', 'error');
+            return;
+        }
+        showToast(`Playlists you sync will belong to ${username} in Navidrome`, 'success');
+        openPersonalSettings(); // Reload
+    } catch (e) {
+        showToast('Error saving Navidrome login', 'error');
+    }
+}
+
+async function clearPersonalNavidromeLogin() {
+    try {
+        const res = await fetch('/api/profiles/me/navidrome-login', { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Navidrome login removed — using the app account', 'info');
+            openPersonalSettings(); // Reload
+        }
+    } catch (e) {
+        showToast('Error removing Navidrome login', 'error');
     }
 }
 

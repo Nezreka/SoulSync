@@ -780,3 +780,40 @@ class TestRecordLibraryMembership:
         import database.music_database as mdb
         monkeypatch.setattr(mdb, 'get_database', lambda: Exploding(), raising=False)
         _record_library_membership([{'db_track_id': 11}], [{'index': 0, 'status': 'found'}])
+
+
+def test_navidrome_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
+    """a profile with its own navidrome login (#1265) owns the playlist it
+    synced, so the cover check and upload have to run as that user too, or
+    the app account looks for a playlist it does not own and finds nothing."""
+    class _NavWithUsers(_FakeNavidrome):
+        def __init__(self):
+            super().__init__()
+            self.views = []
+
+        def as_user(self, username, password):
+            view = _FakeNavidrome()
+            view.acting_as = username
+            self.views.append(view)
+            return view
+
+    nd = _NavWithUsers()
+    patched_db.get_profile_navidrome_login = lambda pid: ('bob', 'bobpw') if pid == 2 else None
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('pND', 'PND', [_track()], profile_id=2,
+                     playlist_image_url='https://img/z.png', deps=deps)
+
+    assert nd.image_calls == [], "the app account uploaded the cover"
+    assert [v.acting_as for v in nd.views] == ['bob', 'bob']      # the pre-check and the upload
+    assert nd.views[-1].image_calls == [('PND', 'https://img/z.png')]
+
+    # no login: exactly the old path
+    nd2 = _NavWithUsers()
+    deps = _build_deps(sync_service=svc, navidrome=nd2, config=cfg)
+    ds.run_sync_task('pND', 'PND', [_track()], profile_id=3,
+                     playlist_image_url='https://img/z.png', deps=deps)
+    assert nd2.image_calls == [('PND', 'https://img/z.png')] and nd2.views == []

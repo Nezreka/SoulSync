@@ -105,6 +105,10 @@ class PlaylistInfo:
     duration: int
     leaf_count: int
     tracks: List[TrackInfo] = field(default_factory=list)
+    # the server user who owns it, where the server says (subsonic does).
+    # None when unknown; a name lookup that scopes by owner treats None as
+    # "not ours to edit" only when it has an owner to compare against.
+    owner: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Per-server constructors

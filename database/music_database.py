@@ -1074,6 +1074,7 @@ class MusicDatabase:
             self._add_profile_password_support(cursor)
             self._add_profile_recovery_support(cursor)
             self._add_profile_service_credentials(cursor)
+            self._add_profile_navidrome_login(cursor)
             self._add_service_credential_sets(cursor)
             self._add_soul_id_columns(cursor)
             self._add_listening_history_table(cursor)
@@ -5640,6 +5641,60 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error in per-profile service credentials migration: {e}")
 
+    def _add_profile_navidrome_login(self, cursor):
+        """a navidrome login per profile. subsonic writes playlists as whoever
+        authenticated and has no admin impersonation, so a profile's playlists
+        only land on their navidrome user if the app can log in as them
+        (#1265). the password is stored as a fernet token, same as the config."""
+        for sql in (
+            "ALTER TABLE profiles ADD COLUMN navidrome_username TEXT DEFAULT NULL",
+            "ALTER TABLE profiles ADD COLUMN navidrome_password TEXT DEFAULT NULL",
+        ):
+            try:
+                cursor.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+    def set_profile_navidrome_login(self, profile_id: int, username: Optional[str], password: Optional[str]) -> bool:
+        """save (or with empty values clear) a profile's own navidrome login."""
+        try:
+            from core.settings import config_manager
+            username = (username or '').strip() or None
+            token = config_manager._encrypt_value(password) if (username and password) else None
+            if username and not token:
+                return False
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET navidrome_username = ?, navidrome_password = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (username, token, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving navidrome login for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_navidrome_login(self, profile_id: int) -> Optional[Tuple[str, str]]:
+        """(username, password) for the profile, or None when it has no login
+        of its own (which means: act as the configured account, as always)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT navidrome_username, navidrome_password FROM profiles WHERE id = ?",
+                               (profile_id,))
+                row = cursor.fetchone()
+            if not row or not row[0] or not row[1]:
+                return None
+            from core.settings import config_manager
+            password = config_manager._decrypt_value(row[1])
+            if not isinstance(password, str) or not password:
+                return None
+            return row[0], password
+        except Exception as e:
+            logger.error(f"Error reading navidrome login for profile {profile_id}: {e}")
+            return None
+
     def _add_service_credential_sets(self, cursor):
         """Named, switchable credential sets per auth service + each profile's
         selection of which set is active (Phase 0 foundation).
@@ -7232,7 +7287,8 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT plex_library_id, jellyfin_user_id, jellyfin_library_id, navidrome_library_id
+                    SELECT plex_library_id, jellyfin_user_id, jellyfin_library_id, navidrome_library_id,
+                           navidrome_username
                     FROM profiles WHERE id = ?
                 """, (profile_id,))
                 row = cursor.fetchone()
@@ -7243,6 +7299,8 @@ class MusicDatabase:
                     'jellyfin_user_id': row[1],
                     'jellyfin_library_id': row[2],
                     'navidrome_library_id': row[3],
+                    # the username only; the password never leaves the db
+                    'navidrome_username': row[4],
                 }
         except Exception as e:
             logger.error(f"Error getting server library for profile {profile_id}: {e}")

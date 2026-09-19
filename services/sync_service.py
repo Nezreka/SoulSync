@@ -101,6 +101,27 @@ _sync_profile_id: "contextvars.ContextVar[Optional[int]]" = contextvars.ContextV
     "sync_profile_id", default=None)
 
 
+def navidrome_client_for_profile(profile_id, client):
+    """the navidrome client acting as the profile's own user, when the
+    profile has one saved. subsonic writes playlists as whoever
+    authenticated, so this is what puts a profile's playlist on their
+    navidrome user instead of the app account's (#1265). a view, never a
+    change to the shared client. no saved login, no profile, or a db that
+    will not answer = the client as-is."""
+    if not profile_id or client is None:
+        return client
+    try:
+        from database.music_database import MusicDatabase
+        login = MusicDatabase().get_profile_navidrome_login(profile_id)
+    except Exception as e:
+        logger.error(f"Per-profile: could not read navidrome login for profile {profile_id}: {e}")
+        return client
+    if not login or not hasattr(client, 'as_user'):
+        return client
+    logger.info(f"Per-profile: navidrome playlist writes run as '{login[0]}' for profile {profile_id}")
+    return client.as_user(*login)
+
+
 def reresolve_manual_match_live_plex(cache_db, media_client, m, *, profile_id,
                                      source_track_id, server_source):
     """Re-resolve a manual match whose stored Plex ratingKey went stale.
@@ -286,6 +307,8 @@ class PlaylistSyncService:
                 if not client:
                     logger.error("Navidrome client not provided to sync service")
                     return None, "navidrome"
+                if profile_id:
+                    client = self._navidrome_client_for_profile(profile_id, client)
                 return client, "navidrome"
             elif active_server == "soulsync":
                 client = self._media_client('soulsync')
@@ -302,6 +325,9 @@ class PlaylistSyncService:
             logger.error(f"Error determining active media server: {e}")
             return self._media_client('plex'), "plex"  # Fallback to Plex
     
+    def _navidrome_client_for_profile(self, profile_id, client):
+        return navidrome_client_for_profile(profile_id, client)
+
     def _apply_profile_library(self, profile_id, server_type, client):
         """Apply per-profile library selection to a media client if configured."""
         try:

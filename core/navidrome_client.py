@@ -1181,6 +1181,42 @@ class NavidromeClient(MediaServerClient):
         logger.info(f"Navidrome curation: signals for {len(signals)} user(s)")
         return signals
 
+    def _playlist_owner_filter(self) -> Optional[str]:
+        """the user whose playlists a NAME lookup may return: the configured
+        account here, the bound user on a NavidromeUserView.
+
+        subsonic lists other users' playlists too (every public one to
+        everyone, every one to an admin), and a sync finds its playlist by
+        name and then overwrites it, deleting "duplicates" on the way. with
+        one profile syncing "Chill" as itself and another as the app account
+        that would be one user's playlist stomping the other's. so a lookup
+        by name only ever returns the caller's own playlists; get_all_playlists
+        (the Server Playlists page) still lists everything the account sees."""
+        return self.username
+
+    def _owned_by_me(self, playlist: PlaylistInfo) -> bool:
+        mine = self._playlist_owner_filter()
+        if not mine or playlist.owner is None:
+            return True      # nothing to compare against: the old behaviour
+        return str(playlist.owner).lower() == str(mine).lower()
+
+    def as_user(self, username: str, password: str) -> 'NavidromeUserView':
+        """this client, acting as one navidrome user (see NavidromeUserView)."""
+        return NavidromeUserView(self, username, password)
+
+    def verify_user_login(self, username: str, password: str) -> tuple:
+        """(ok, error) for a user's own login: one ping as that user. the
+        profile settings page calls this before saving a per-profile login,
+        so a typo is refused there and not discovered by a failing sync."""
+        if not username or not password:
+            return False, "username and password are required"
+        if not self.ensure_connection():
+            return False, "Navidrome is not connected"
+        response = self._make_request('ping', as_user=(username, password))
+        if response and response.get('status') == 'ok':
+            return True, None
+        return False, getattr(self, "last_api_error", None) or "Navidrome refused the login"
+
     def get_all_playlists(self) -> List[PlaylistInfo]:
         """Get all playlists from Navidrome server"""
         if not self.ensure_connection():
@@ -1201,7 +1237,8 @@ class NavidromeClient(MediaServerClient):
                     description=playlist_data.get('comment'),
                     duration=playlist_data.get('duration', 0) * 1000,  # Convert to milliseconds
                     leaf_count=playlist_data.get('songCount', 0),
-                    tracks=[]  # Will be populated when needed
+                    tracks=[],  # Will be populated when needed
+                    owner=playlist_data.get('owner'),
                 )
                 playlists.append(playlist_info)
 
@@ -1213,10 +1250,11 @@ class NavidromeClient(MediaServerClient):
             return []
 
     def get_playlist_by_name(self, name: str) -> Optional[PlaylistInfo]:
-        """Get a specific playlist by name"""
+        """Get a specific playlist by name (own playlists only, see
+        _playlist_owner_filter)"""
         playlists = self.get_all_playlists()
         for playlist in playlists:
-            if playlist.title.lower() == name.lower():
+            if playlist.title.lower() == name.lower() and self._owned_by_me(playlist):
                 return playlist
         return None
 
@@ -1435,11 +1473,12 @@ class NavidromeClient(MediaServerClient):
             return []
 
     def get_playlists_by_name(self, name: str) -> List[PlaylistInfo]:
-        """Get all playlists matching a specific name (case-insensitive)"""
+        """Get all playlists matching a specific name (case-insensitive), own
+        playlists only (see _playlist_owner_filter)"""
         matches = []
         playlists = self.get_all_playlists()
         for playlist in playlists:
-            if playlist.title.lower() == name.lower():
+            if playlist.title.lower() == name.lower() and self._owned_by_me(playlist):
                 matches.append(playlist)
         return matches
 
@@ -1780,3 +1819,56 @@ class NavidromeClient(MediaServerClient):
         except Exception as e:
             logger.error(f"Error searching for tracks: {e}")
             return []
+
+
+class NavidromeUserView(NavidromeClient):
+    """the shared NavidromeClient, acting as one user.
+
+    subsonic has no admin impersonation for playlist writes: createPlaylist
+    and updatePlaylist act as whoever authenticated, so a playlist a profile
+    syncs lands on that profile's navidrome user only if the requests carry
+    that user's login. this is the shared client with exactly that: every
+    _make_request goes out as the bound user, and playlist lookups see only
+    that user's own playlists. it is a subclass so every method (reconcile,
+    append, update, the write validator) runs unchanged on the view and its
+    isinstance checks still hold; state it does not set itself is read from
+    the wrapped client, and nothing on the wrapped client is ever changed.
+    """
+
+    def __init__(self, client: NavidromeClient, username: str, password: str):
+        object.__setattr__(self, '_base_client', client)
+        object.__setattr__(self, '_as_user', (username, password))
+
+    def __getattr__(self, name):
+        # only reached when the view itself has no such attribute: read the
+        # shared client's (base_url, caches, connection state)
+        return getattr(object.__getattribute__(self, '_base_client'), name)
+
+    @property
+    def acting_as(self) -> str:
+        return self._as_user[0]
+
+    # the native-api paths (playlist cover upload) log in with
+    # username/password directly rather than through _make_request; on the
+    # view those are the bound user's, so those calls are the user's too
+    @property
+    def username(self) -> str:
+        return self._as_user[0]
+
+    @property
+    def password(self) -> str:
+        return self._as_user[1]
+
+    def ensure_connection(self) -> bool:
+        # the connection (url, app account) belongs to the shared client; a
+        # reconnect must set it up there, not on this view
+        return object.__getattribute__(self, '_base_client').ensure_connection()
+
+    def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None,
+                      as_user: Optional[tuple] = None, timeout=None) -> Optional[Dict[str, Any]]:
+        base = object.__getattribute__(self, '_base_client')
+        result = base._make_request(endpoint, params, as_user=as_user or self._as_user, timeout=timeout)
+        # the error the base client recorded belongs to this call
+        object.__setattr__(self, 'last_api_error', getattr(base, 'last_api_error', None))
+        return result
+

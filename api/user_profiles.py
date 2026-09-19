@@ -963,6 +963,42 @@ def save_profile_server_library():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@bp.route('/api/profiles/me/navidrome-login', methods=['POST'])
+def save_profile_navidrome_login():
+    """save the current profile's own navidrome login. the login is checked
+    with one ping as that user first, so a wrong password is refused here
+    and not found out by a failing sync. a profile with a login of its own
+    gets its playlists written as that user (#1265)."""
+    try:
+        data = request.json or {}
+        username = str(data.get('username') or '').strip()
+        password = str(data.get('password') or '')
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'Username and password are required'}), 400
+        engine = _media_server_engine()
+        client = engine.client('navidrome') if engine is not None else None
+        if client is None:
+            return jsonify({'success': False, 'error': 'Navidrome is not connected'}), 503
+        ok, error = client.verify_user_login(username, password)
+        if not ok:
+            return jsonify({'success': False, 'error': f'Navidrome refused this login: {error}'}), 400
+        if not get_database().set_profile_navidrome_login(get_current_profile_id(), username, password):
+            return jsonify({'success': False, 'error': 'Failed to save login'}), 500
+        return jsonify({'success': True, 'username': username})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/navidrome-login', methods=['DELETE'])
+def clear_profile_navidrome_login():
+    """back to the app account for this profile."""
+    try:
+        get_database().set_profile_navidrome_login(get_current_profile_id(), None, None)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @bp.route('/api/profiles/me/services', methods=['GET'])
 def get_my_service_selections():
     """For the current profile: the available credential sets per service (id +
