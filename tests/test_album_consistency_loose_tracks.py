@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from mutagen.flac import FLAC
 
 from core.album_consistency import adopt_sibling_tags_for_loose_tracks
@@ -149,14 +150,61 @@ def test_the_file_lock_is_taken_for_every_write(tmp_path):
     assert locked == [str(new)]
 
 
-def test_lifecycle_runs_it_where_the_album_pass_does_not(tmp_path):
+def _completed_loose_batch():
+    from core.runtime_state import download_batches, download_tasks
+    download_tasks.clear()
+    download_batches.clear()
+    download_tasks['t1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+    download_batches['b1'] = {
+        'queue': ['t1'], 'queue_index': 1, 'active_count': 0, 'max_concurrent': 1,
+        'permanently_failed_tracks': [], 'cancelled_tracks': set(), 'playlist_name': 'P',
+        # not an album batch: one file, the loose-track pass is the one that runs
+        '_consistency_files': [{'path': '/lib/a/x.flac'}],
+        'album_context': {'name': 'Rebuild'},
+    }
+
+
+def _lifecycle_deps():
+    import threading
+    from core.downloads import lifecycle
+    return lifecycle.LifecycleDeps(
+        config_manager=type('C', (), {'get': lambda self, k, d=None: d})(),
+        automation_engine=None,
+        download_monitor=type('M', (), {'stop_monitoring': lambda self, b: None})(),
+        repair_worker=None, mb_worker=None, is_shutting_down=lambda: False,
+        get_batch_lock=lambda bid: threading.Lock(),
+        submit_download_track_worker=lambda *a: None,
+        submit_failed_to_wishlist=lambda *a: None,
+        submit_failed_to_wishlist_with_auto_completion=lambda *a: None,
+        process_failed_to_wishlist=lambda *a: None,
+        process_failed_to_wishlist_with_auto_completion=lambda *a: None,
+        ensure_wishlist_track_format=lambda t: t, get_track_artist_name=lambda t: 'A',
+        check_and_remove_from_wishlist=lambda *a: None, regenerate_batch_m3u=lambda *a: None,
+        youtube_playlist_states={}, tidal_discovery_states={}, deezer_discovery_states={},
+        spotify_public_discovery_states={},
+    )
+
+
+@pytest.mark.parametrize('path', ['primary', 'v2'])
+def test_lifecycle_runs_it_where_the_album_pass_does_not(monkeypatch, path):
     # both completion paths gate the album pass on is_album_download + 2 files;
-    # the loose-track pass must sit in the else of BOTH, or one path still splits
-    src = Path('core/downloads/lifecycle.py').read_text(encoding='utf-8')
-    album_gates = src.count("if batch.get('is_album_download') and _cons_files and len(_cons_files) >= 2:")
-    loose_calls = src.count('_adopt_loose_tracks(_cons_files,')
-    assert album_gates == 2
-    assert loose_calls == 2
+    # a non-album batch has to reach the loose-track pass from BOTH, or one
+    # path still splits the album. the two paths share one completion block
+    # now, so this drives each of them rather than counting source lines.
+    from core.downloads import lifecycle
+    from core.runtime_state import download_batches
+    calls = []
+    monkeypatch.setattr(lifecycle, 'record_sync_history_completion', lambda *a: None)
+    monkeypatch.setattr(lifecycle, '_adopt_loose_tracks', lambda files, tag, ctx=None: calls.append((files, tag, ctx)))
+    _completed_loose_batch()
+    if path == 'primary':
+        download_batches['b1']['active_count'] = 1
+        lifecycle.on_download_completed('b1', 't1', True, _lifecycle_deps())
+    else:
+        assert lifecycle.check_batch_completion_v2('b1', _lifecycle_deps()) is True
+    assert calls == [([{'path': '/lib/a/x.flac'}], '[Album Consistency]' if path == 'primary' else '[Album Consistency V2]',
+                      {'name': 'Rebuild'})]
+    download_batches.clear()
 
 
 def test_a_pinned_edition_is_never_overwritten_by_the_folder(tmp_path, monkeypatch):
@@ -175,7 +223,3 @@ def test_a_pinned_edition_is_never_overwritten_by_the_folder(tmp_path, monkeypat
     assert len(calls) == 2
 
 
-def test_lifecycle_passes_the_album_context_to_the_loose_pass():
-    src = Path('core/downloads/lifecycle.py').read_text(encoding='utf-8')
-    assert src.count("_adopt_loose_tracks(_cons_files, \"[Album Consistency]\", batch.get('album_context'))") == 1
-    assert src.count("_adopt_loose_tracks(_cons_files, \"[Album Consistency V2]\", batch.get('album_context'))") == 1

@@ -176,6 +176,23 @@ def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -
     except (TypeError, ValueError):
         pass
 
+    # off audio.info, not the tags. the file is already open, and the inbox
+    # shows duration / bitrate / size per file so a 30s clip or a 96k mp3 is
+    # visible before it is imported, not after.
+    info = getattr(tags, "info", None)
+    try:
+        duration_ms = int(round(float(getattr(info, "length", 0) or 0) * 1000))
+    except (TypeError, ValueError):
+        duration_ms = 0
+    try:
+        bitrate = int(getattr(info, "bitrate", 0) or 0)
+    except (TypeError, ValueError):
+        bitrate = 0
+    try:
+        size = os.path.getsize(file_path)
+    except OSError:
+        size = 0
+
     return {
         "title": title,
         "artist": artist,
@@ -183,6 +200,9 @@ def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -
         "album": album,
         "track_number": track_number,
         "disc_number": disc_number,
+        "duration_ms": duration_ms,
+        "bitrate": bitrate,
+        "size": size,
     }
 
 
@@ -638,6 +658,11 @@ def collect_staging_files(file_paths: Optional[Iterable[str]] = None) -> List[Di
                     "albumartist": meta.get("albumartist") or meta.get("artist") or "",
                     "track_number": meta.get("track_number", 1),
                     "disc_number": meta.get("disc_number", 1),
+                    # the matcher shows these beside the release track so a
+                    # length mismatch is visible before the import, not after
+                    "duration_ms": meta.get("duration_ms", 0),
+                    "bitrate": meta.get("bitrate", 0),
+                    "size": meta.get("size", 0),
                 }
             )
 

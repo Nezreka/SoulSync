@@ -17,7 +17,7 @@ from flask import Blueprint, jsonify, request, session
 
 from core.metadata import registry as metadata_registry
 from core.metadata.status import invalidate_metadata_status_caches
-from core.profile_context import admin_only
+from core.profile_context import admin_only, is_admin_request
 
 from utils.logging_config import get_logger
 
@@ -963,6 +963,92 @@ def save_profile_server_library():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@bp.route('/api/profiles/me/navidrome-login', methods=['POST'])
+def save_profile_navidrome_login():
+    """save the current profile's own navidrome login. the login is checked
+    with one ping as that user first, so a wrong password is refused here
+    and not found out by a failing sync. a profile with a login of its own
+    gets its playlists written as that user (#1265)."""
+    try:
+        data = request.json or {}
+        username = str(data.get('username') or '').strip()
+        password = str(data.get('password') or '')
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'Username and password are required'}), 400
+        engine = _media_server_engine()
+        client = engine.client('navidrome') if engine is not None else None
+        if client is None:
+            return jsonify({'success': False, 'error': 'Navidrome is not connected'}), 503
+        ok, error = client.verify_user_login(username, password)
+        if not ok:
+            return jsonify({'success': False, 'error': f'Navidrome refused this login: {error}'}), 400
+        if not get_database().set_profile_navidrome_login(get_current_profile_id(), username, password):
+            return jsonify({'success': False, 'error': 'Failed to save login'}), 500
+        return jsonify({'success': True, 'username': username})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/navidrome-login', methods=['DELETE'])
+def clear_profile_navidrome_login():
+    """back to the app account for this profile."""
+    try:
+        get_database().set_profile_navidrome_login(get_current_profile_id(), None, None)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/plex-home-users', methods=['GET'])
+def list_plex_home_users():
+    """the plex home users a profile can link itself to. names and ids only,
+    and only the flag saying whether one needs a pin."""
+    try:
+        engine = _media_server_engine()
+        client = engine.client('plex') if engine is not None else None
+        if client is None or not hasattr(client, 'list_home_users'):
+            return jsonify({'success': False, 'error': 'Plex is not connected', 'users': []}), 503
+        return jsonify({'success': True, 'users': client.list_home_users()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'users': []}), 500
+
+
+@bp.route('/api/profiles/me/plex-home-user', methods=['POST'])
+def link_plex_home_user():
+    """link the current profile to a plex home user (#1265). the admin token
+    switches to that user once (with their profile pin when they have one,
+    which is used for that call and not kept) and the user's own server
+    access token is stored; the profile's playlists are then theirs."""
+    try:
+        data = request.json or {}
+        user_id = str(data.get('user_id') or '').strip()
+        pin = str(data.get('pin') or '').strip() or None
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Pick a Plex user'}), 400
+        engine = _media_server_engine()
+        client = engine.client('plex') if engine is not None else None
+        if client is None or not hasattr(client, 'mint_home_user_server_token'):
+            return jsonify({'success': False, 'error': 'Plex is not connected'}), 503
+        token, title, error = client.mint_home_user_server_token(user_id, pin)
+        if not token:
+            return jsonify({'success': False, 'error': error or 'Could not link that Plex user'}), 400
+        if not get_database().set_profile_plex_home_user(get_current_profile_id(), user_id, title, token):
+            return jsonify({'success': False, 'error': 'Failed to save the link'}), 500
+        return jsonify({'success': True, 'title': title})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/plex-home-user', methods=['DELETE'])
+def unlink_plex_home_user():
+    """back to the app account for this profile."""
+    try:
+        get_database().set_profile_plex_home_user(get_current_profile_id(), None, None, None)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @bp.route('/api/profiles/me/services', methods=['GET'])
 def get_my_service_selections():
     """For the current profile: the available credential sets per service (id +
@@ -1038,7 +1124,7 @@ def get_active_sources():
         meta_effective = 'spotify_free' if meta_active == 'spotify_free' else _get_metadata_fallback_source()
         return jsonify({
             'success': True,
-            'editable': get_current_profile_id() == 1,  # admin writes the global default
+            'editable': is_admin_request(),  # admins write the global default, same gate as the POST
             'metadata': {
                 # `active` = the configured choice (what the user picked / edits).
                 # `effective` = what's actually used after auth/availability

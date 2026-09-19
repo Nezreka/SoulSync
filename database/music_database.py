@@ -1161,6 +1161,8 @@ class MusicDatabase:
             self._add_profile_password_support(cursor)
             self._add_profile_recovery_support(cursor)
             self._add_profile_service_credentials(cursor)
+            self._add_profile_navidrome_login(cursor)
+            self._add_profile_plex_home_user(cursor)
             self._add_service_credential_sets(cursor)
             self._add_listening_history_table(cursor)
 
@@ -4401,6 +4403,116 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error in per-profile service credentials migration: {e}")
 
+    def _add_profile_navidrome_login(self, cursor):
+        """a navidrome login per profile. subsonic writes playlists as whoever
+        authenticated and has no admin impersonation, so a profile's playlists
+        only land on their navidrome user if the app can log in as them
+        (#1265). the password is stored as a fernet token, same as the config."""
+        for sql in (
+            "ALTER TABLE profiles ADD COLUMN navidrome_username TEXT DEFAULT NULL",
+            "ALTER TABLE profiles ADD COLUMN navidrome_password TEXT DEFAULT NULL",
+        ):
+            try:
+                cursor.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+    def set_profile_navidrome_login(self, profile_id: int, username: Optional[str], password: Optional[str]) -> bool:
+        """save (or with empty values clear) a profile's own navidrome login."""
+        try:
+            from core.settings import config_manager
+            username = (username or '').strip() or None
+            token = config_manager._encrypt_value(password) if (username and password) else None
+            if username and not token:
+                return False
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET navidrome_username = ?, navidrome_password = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (username, token, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving navidrome login for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_navidrome_login(self, profile_id: int) -> Optional[Tuple[str, str]]:
+        """(username, password) for the profile, or None when it has no login
+        of its own (which means: act as the configured account, as always)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT navidrome_username, navidrome_password FROM profiles WHERE id = ?",
+                               (profile_id,))
+                row = cursor.fetchone()
+            if not row or not row[0] or not row[1]:
+                return None
+            from core.settings import config_manager
+            password = config_manager._decrypt_value(row[1])
+            if not isinstance(password, str) or not password:
+                return None
+            return row[0], password
+        except Exception as e:
+            logger.error(f"Error reading navidrome login for profile {profile_id}: {e}")
+            return None
+
+    def _add_profile_plex_home_user(self, cursor):
+        """a plex home user per profile (#1265): who the profile is on the plex
+        server, and the per-user server access token minted for them. plex
+        writes playlists as the connection's token, so this is what puts a
+        profile's playlists on their own plex user. token is a fernet token."""
+        for sql in (
+            "ALTER TABLE profiles ADD COLUMN plex_home_user_id TEXT DEFAULT NULL",
+            "ALTER TABLE profiles ADD COLUMN plex_home_user_title TEXT DEFAULT NULL",
+            "ALTER TABLE profiles ADD COLUMN plex_home_user_token TEXT DEFAULT NULL",
+        ):
+            try:
+                cursor.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+    def set_profile_plex_home_user(self, profile_id: int, user_id: Optional[str], title: Optional[str],
+                                   token: Optional[str]) -> bool:
+        """link (or with empty values unlink) a profile's plex home user."""
+        try:
+            from core.settings import config_manager
+            user_id = (str(user_id) if user_id else '').strip() or None
+            enc = config_manager._encrypt_value(token) if (user_id and token) else None
+            if user_id and not enc:
+                return False
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET plex_home_user_id = ?, plex_home_user_title = ?, plex_home_user_token = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (user_id, (title or None) if user_id else None, enc, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving plex home user for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_plex_home_user(self, profile_id: int) -> Optional[Dict[str, str]]:
+        """{'id', 'title', 'token'} for the profile's linked plex home user,
+        or None when it has none (act as the app account, as always)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT plex_home_user_id, plex_home_user_title, plex_home_user_token "
+                               "FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+            if not row or not row[0] or not row[2]:
+                return None
+            from core.settings import config_manager
+            token = config_manager._decrypt_value(row[2])
+            if not isinstance(token, str) or not token:
+                return None
+            return {'id': row[0], 'title': row[1] or '', 'token': token}
+        except Exception as e:
+            logger.error(f"Error reading plex home user for profile {profile_id}: {e}")
+            return None
+
     def _add_service_credential_sets(self, cursor):
         """Named, switchable credential sets per auth service + each profile's
         selection of which set is active (Phase 0 foundation).
@@ -6012,7 +6124,8 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT plex_library_id, jellyfin_user_id, jellyfin_library_id, navidrome_library_id
+                    SELECT plex_library_id, jellyfin_user_id, jellyfin_library_id, navidrome_library_id,
+                           navidrome_username, plex_home_user_id, plex_home_user_title
                     FROM profiles WHERE id = ?
                 """, (profile_id,))
                 row = cursor.fetchone()
@@ -6023,6 +6136,11 @@ class MusicDatabase:
                     'jellyfin_user_id': row[1],
                     'jellyfin_library_id': row[2],
                     'navidrome_library_id': row[3],
+                    # the username only; the password never leaves the db
+                    'navidrome_username': row[4],
+                    # who the profile is on plex; the token never leaves the db
+                    'plex_home_user_id': row[5],
+                    'plex_home_user_title': row[6],
                 }
         except Exception as e:
             logger.error(f"Error getting server library for profile {profile_id}: {e}")
@@ -7547,6 +7665,33 @@ class MusicDatabase:
             logger.error(f"Error getting track IDs for {server_source}: {e}")
             return set()
 
+    def get_track_ids_under_scopes(self, server_source: str, artist_ids: set, album_ids: set) -> Optional[set]:
+        """ids of this server's tracks that live under any of the given artists
+        or albums. the deep scan uses it to fence off the rows it could not
+        verify (an artist whose album listing failed, an album whose track
+        listing failed) so they never count as stale. None when the query
+        itself failed: a fence that might be missing rows is no fence, and
+        the caller has to skip removal rather than trust a partial one."""
+        if not artist_ids and not album_ids:
+            return set()
+        found: set = set()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                for column, ids in (("artist_id", artist_ids), ("album_id", album_ids)):
+                    id_list = [str(i) for i in (ids or ()) if i is not None]
+                    for start in range(0, len(id_list), 500):
+                        batch = id_list[start:start + 500]
+                        placeholders = ','.join('?' * len(batch))
+                        cursor.execute(
+                            f"SELECT id FROM tracks WHERE server_source = ? AND {column} IN ({placeholders})",
+                            [server_source] + batch)
+                        found.update(row[0] for row in cursor.fetchall())
+        except Exception as e:
+            logger.error(f"Error getting scoped track IDs for {server_source}: {e}")
+            return None
+        return found
+
     def delete_stale_tracks(self, stale_track_ids: set, server_source: str) -> int:
         """Delete tracks by ID+server_source that no longer exist on the media server.
         Processes in batches of 500 for database safety."""
@@ -7573,6 +7718,90 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error deleting stale tracks for {server_source}: {e}")
             return 0
+
+    # columns the server writes on every scan; everything else on a track row
+    # is enrichment or user state and travels with the file when its row is
+    # superseded
+    _TRACK_SERVER_COLUMNS = frozenset({
+        'id', 'album_id', 'artist_id', 'title', 'track_number', 'disc_number',
+        'duration', 'file_path', 'bitrate', 'file_size', 'server_source',
+        'title_norm', 'created_at', 'updated_at',
+    })
+
+    @staticmethod
+    def _track_file_key(row) -> tuple:
+        """same album, same disc, same file name, same length = the same file.
+        the path itself is not compared: a reorganize stores the local form
+        and the server reports its own, so they differ on any mapped setup."""
+        path = str(row['file_path'] or '')
+        name = path.replace('\\', '/').rsplit('/', 1)[-1].lower()
+        duration = row['duration'] or 0
+        return (row['album_id'], row['disc_number'] or 1, name, int(duration // 1000))
+
+    def absorb_superseded_tracks(self, album_ids, seen_track_ids, server_source: str) -> int:
+        """fold rows the server no longer lists into the live row for the same file.
+
+        after a move the server trashes the old item and mints a new one, so
+        the album carries two rows for one file: the old id (repointed by the
+        reorganize) and the new. the live row keeps its id, takes every
+        enrichment column the old row had that it lacks, inherits the old
+        row's play history, and the old row goes. only rows whose id this
+        scan did NOT see are absorbed, and only into a row it did, so two
+        items the server genuinely lists are never merged (#1257)."""
+        if not album_ids or not seen_track_ids:
+            return 0
+        absorbed = 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                columns = [c[1] for c in cursor.execute("PRAGMA table_info(tracks)").fetchall()]
+                carry = [c for c in columns if c not in self._TRACK_SERVER_COLUMNS]
+                album_list = list(album_ids)
+                for i in range(0, len(album_list), 400):
+                    batch = album_list[i:i + 400]
+                    placeholders = ','.join('?' * len(batch))
+                    rows = cursor.execute(
+                        f"""SELECT id, album_id, disc_number, file_path, duration FROM tracks
+                            WHERE album_id IN ({placeholders}) AND server_source = ?
+                              AND file_path IS NOT NULL AND file_path != ''""",
+                        [str(a) for a in batch] + [server_source]).fetchall()
+                    groups: Dict[tuple, list] = {}
+                    for row in rows:
+                        groups.setdefault(self._track_file_key(row), []).append(str(row['id']))
+                    for ids in groups.values():
+                        if len(ids) < 2:
+                            continue
+                        live = [t for t in ids if t in seen_track_ids]
+                        gone = [t for t in ids if t not in seen_track_ids]
+                        if not live or not gone:
+                            continue
+                        keeper = live[0]
+                        for old_id in gone:
+                            self._absorb_track_row(cursor, old_id, keeper, carry)
+                            absorbed += 1
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Superseded track pass failed for {server_source}: {e}")
+            return absorbed
+        if absorbed:
+            logger.info(f"Superseded track rows folded for {server_source}: {absorbed}")
+        return absorbed
+
+    def _absorb_track_row(self, cursor, old_id: str, keeper_id: str, carry: list) -> None:
+        """move what the old row knew onto the keeper, then drop the old row."""
+        if carry:
+            sets = ', '.join(
+                f"{c} = COALESCE({c}, (SELECT {c} FROM tracks WHERE id = ?))" for c in carry)
+            cursor.execute(f"UPDATE tracks SET {sets} WHERE id = ?",
+                           [old_id] * len(carry) + [keeper_id])
+        try:
+            cursor.execute("UPDATE listening_history SET db_track_id = ? WHERE db_track_id = ?",
+                           (keeper_id, old_id))
+        except Exception as e:
+            logger.debug("listening_history repoint skipped: %s", e)
+        cursor.execute("DELETE FROM track_credits WHERE track_id = ?", (old_id,))
+        cursor.execute("DELETE FROM tracks WHERE id = ?", (old_id,))
+        logger.debug(f"Track row {old_id} folded into {keeper_id}")
 
     def delete_removed_content(self, removed_artist_ids: set, removed_album_ids: set,
                                server_source: str):

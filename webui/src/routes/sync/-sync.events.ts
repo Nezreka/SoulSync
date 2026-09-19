@@ -61,5 +61,8 @@ export function deezerProgressLabel(
   if (!frame || String(frame.playlist_id) !== String(playlistId)) return null;
   if (!frame.total) return null;
   const pct = Math.min(100, Math.round((frame.done / frame.total) * 100));
-  return `${frame.phase} ${frame.done}/${frame.total} (${pct}%)`;
+  // both passes count ALBUMS, and there are two of them, so the counter runs
+  // to the album total twice. said plainly or a 1582-track playlist reads as
+  // "only counting up to 1291 tracks" and "goes up, then down again"
+  return `${frame.phase} ${frame.done}/${frame.total} albums (${pct}%), pass ${frame.phase === 'track numbers' ? 2 : 1} of 2`;
 }

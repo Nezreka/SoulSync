@@ -166,6 +166,15 @@ def _clean_message(payload) -> str | None:
     return msg[:_MAX_MESSAGE_LEN]
 
 
+def _flatten_for_wire(msg: str) -> str:
+    """Bare text for the Soulseek server. It silently drops any chat message
+    that contains a newline (Nicotine+ filters them for the same reason): slskd
+    says 201, the echo never comes, and the sender watches their message vanish.
+    Only plain room sends and PMs go out bare; an envelope is base64 and has
+    no newlines to lose."""
+    return str(msg or "").replace("\r", "").replace("\n", " ")
+
+
 def _ensure_joined(client, room: str) -> bool:
     """True when slskd is in ``room`` (joining now if needed)."""
     joined = _run_async(client.get_joined_rooms())
@@ -1718,7 +1727,7 @@ def create_blueprint() -> Blueprint:
             try:
                 if not _ensure_joined(client, room):
                     return jsonify({"error": "Could not join room '%s'" % room}), 502
-                ok = _run_async(client.send_room_message(room, msg))
+                ok = _run_async(client.send_room_message(room, _flatten_for_wire(msg)))
             except Exception as e:
                 logger.exception("chat: plain room send failed")
                 return jsonify({"error": str(e)}), 502
@@ -1861,7 +1870,7 @@ def create_blueprint() -> Blueprint:
         if not msg:
             return jsonify({"error": "empty message"}), 400
         try:
-            ok = _run_async(client.send_private_message(username, msg))
+            ok = _run_async(client.send_private_message(username, _flatten_for_wire(msg)))
         except Exception as e:
             logger.exception("chat: PM send failed")
             return jsonify({"error": str(e)}), 502

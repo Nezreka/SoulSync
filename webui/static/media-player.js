@@ -754,8 +754,10 @@ async function updateStreamStatus() {
 // everyone "stopped" forever. Stream status is driven by the per-session HTTP
 // poller (updateStreamStatus) exclusively.)
 
-async function startAudioPlayback(isCurrent = () => true, signal) {
+async function startAudioPlayback(isCurrent = () => true, signal, handoff = null) {
     // Start HTML5 audio playback of the streamed file with enhanced state management
+    // `handoff` is the crossfade's second audio, still playing the track this
+    // player is about to load; the player joins it where it is, then it stops.
     try {
         if (!audioPlayer) {
             throw new Error('Audio player not initialized');
@@ -831,8 +833,16 @@ async function startAudioPlayback(isCurrent = () => true, signal) {
         while (retryCount < maxRetries) {
             try {
                 if (!isCurrent()) return { status: 'superseded' };
+                if (handoff && npXfadeHandoff === handoff) {
+                    // Read the position as late as possible: the second audio
+                    // has kept moving through the whole load. The lead covers
+                    // the seek + start latency so the join lands level.
+                    const at = handoff.currentTime + 0.15;
+                    if (isFinite(at) && at > 0) { try { audioPlayer.currentTime = at; } catch (_) {} }
+                }
                 await audioPlayer.play();
                 if (!isCurrent()) return { status: 'superseded' };
+                if (handoff) npStopHandoff(handoff);
                 console.log('✅ Audio playback started successfully');
 
                 // Update UI to playing state
@@ -2172,6 +2182,18 @@ let npXfadeAudio = null;
 let npXfadeActive = false;
 let npXfadeTimer = null;
 let npXfadeMainVol = null;   // main-player volume to restore if a crossfade is aborted
+// The second audio while the main player catches up to it after a fade. It
+// keeps playing until the main player is at the same spot, so the handoff is
+// heard as nothing at all instead of the song starting over.
+let npXfadeHandoff = null;
+
+function npStopHandoff(xa) {
+    if (!xa) return;
+    if (npXfadeHandoff === xa) npXfadeHandoff = null;
+    try { xa.pause(); } catch (_) {}
+    xa.src = '';
+    xa.volume = 0;
+}
 
 // Abort an in-flight crossfade (manual skip / stop during the fade). Restores
 // the main player's volume and tears down the second audio element. Safe to
@@ -2179,6 +2201,9 @@ let npXfadeMainVol = null;   // main-player volume to restore if a crossfade is 
 function npCancelCrossfade() {
     if (npXfadeTimer) { clearInterval(npXfadeTimer); npXfadeTimer = null; }
     if (npXfadeAudio) { try { npXfadeAudio.pause(); } catch (_) {} npXfadeAudio.src = ''; npXfadeAudio.volume = 0; npXfadeAudio = null; }
+    // A skip while the main player was still catching up: the handed-off
+    // audio would otherwise play on underneath the new track.
+    if (npXfadeHandoff) npStopHandoff(npXfadeHandoff);
     if (npXfadeActive && audioPlayer && npXfadeMainVol !== null) {
         audioPlayer.volume = npXfadeMainVol; // undo any partial fade-down
     }
@@ -2251,16 +2276,19 @@ function npFinishCrossfade(nextIdx, restoreVol) {
     // the normal play path take over so all the usual state (track info, art,
     // visualizer, server stream_state) is set for the now-current track.
     const xa = npXfadeAudio;
-    if (xa) { try { xa.pause(); } catch (_) {} xa.src = ''; xa.volume = 0; }
     npXfadeAudio = null;
     npXfadeActive = false;
     npXfadeMainVol = null;
     if (npXfadeTimer) { clearInterval(npXfadeTimer); npXfadeTimer = null; }
     if (audioPlayer) audioPlayer.volume = restoreVol;
-    // playQueueItem re-points stream_state + reloads audioPlayer for the next
-    // track; there's a brief silent reload, but the perceived crossfade already
-    // happened. Honest trade-off of the single-stream-state design.
-    playQueueItem(nextIdx);
+    // The second audio keeps playing and rides along into playQueueItem: the
+    // main player seeks to wherever it has got to before it starts, then it
+    // stops. Stopping it here and loading from zero played the six seconds
+    // you had just heard a second time, which is what "the song resets"
+    // meant. Any way the load can fail, the second audio goes quiet with it.
+    playQueueItem(nextIdx, { handoff: xa }).then((result) => {
+        if (!result || result.status !== 'played') npStopHandoff(xa);
+    }).catch(() => npStopHandoff(xa));
 }
 
 function npResetAmbientGlow() {
@@ -2585,6 +2613,9 @@ async function playQueueItem(index, options = {}) {
     // can't fire npFinishCrossfade on top of this change. No-op for the
     // legitimate handoff (npFinishCrossfade already cleared the flag first).
     npCancelCrossfade();
+    // Registered AFTER the cancel: this load owns the second audio now, and
+    // any later load's cancel is what silences it.
+    if (options.handoff) npXfadeHandoff = options.handoff;
     npLoadingQueueItem = true;
     npQueueIndex = index;
     const track = npQueue[index];
@@ -2666,7 +2697,7 @@ async function playQueueItem(index, options = {}) {
             if (!result.success) throw new Error(result.error || 'Failed to start playback');
             // Re-apply repeat-one loop property
             if (audioPlayer) audioPlayer.loop = (npRepeatMode === 'one');
-            const playback = await startAudioPlayback(isCurrent, signal);
+            const playback = await startAudioPlayback(isCurrent, signal, options.handoff || null);
             if (playback?.status !== 'played') {
                 if (playback?.status === 'superseded') return playback;
                 throw new Error(playback?.error || 'Playback did not start');

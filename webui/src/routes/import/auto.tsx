@@ -1,27 +1,9 @@
-import { useNavigate } from '@tanstack/react-router';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
-import type { ImportAutoFilter } from './-import.types';
-
-import { importAutoSearchSchema } from './-import.types';
-import { AutoImportPanel } from './-ui/auto-import-tab';
-
+// the old tab. bookmarks and the guided tour still point here; the inbox
+// replaced all three tabs with one list.
 export const Route = createFileRoute('/import/auto')({
-  validateSearch: importAutoSearchSchema,
-  component: AutoImportRoute,
+  beforeLoad: () => {
+    throw redirect({ to: '/import', replace: true });
+  },
 });
-
-function AutoImportRoute() {
-  const navigate = useNavigate({ from: Route.fullPath });
-  const { autoFilter } = Route.useSearch();
-
-  const setAutoFilter = (nextFilter: ImportAutoFilter) => {
-    void navigate({
-      to: Route.fullPath,
-      search: (prev) => ({ ...prev, autoFilter: nextFilter }),
-      replace: true,
-    });
-  };
-
-  return <AutoImportPanel autoFilter={autoFilter} onFilterChange={setAutoFilter} />;
-}

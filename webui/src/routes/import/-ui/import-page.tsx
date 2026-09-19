@@ -1,233 +1,145 @@
-import { Link, Outlet } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
+import { Outlet } from '@tanstack/react-router';
 import clsx from 'clsx';
+import { useState } from 'react';
 
 import { Button } from '@/components/form/form';
 import { PageHeader } from '@/components/page-header';
-import { Show } from '@/components/primitives';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { ImportQueueEntry } from '../-import.types';
 
-import {
-  getQueueProgressPercent,
-  getQueueStatusText,
-  getStagingStatsText,
-} from '../-import.helpers';
+import { importInboxQueryOptions } from '../-import.api';
+import { getQueueProgressPercent, getQueueStatusText } from '../-import.helpers';
 import { useImportQueueWorkflow } from '../-import.store';
 import styles from './import-page.module.css';
-import { fallbackImage, RefreshIcon, useImportStaging } from './import-shared';
+import { fallbackImage, GearIcon, RefreshIcon, useInboxRefresh } from './import-shared';
+import { SettingsDrawer } from './settings-drawer';
 
+/**
+ * The page shell: header, the client-side processing jobs, and whichever
+ * child is showing (the inbox, or the matcher for one item). The header's
+ * refresh re-reads the import folder; the gear opens the worker's settings,
+ * which used to sit inline above the results and get scrolled past.
+ */
 export function ImportPage() {
   useReactPageShell('import');
-
-  const { refreshStaging, scanning, scanProgress, stagingFiles, stagingPath, stagingQuery } =
-    useImportStaging();
-  const isRefreshing = stagingQuery.isRefetching;
-  const lastRefreshedAt =
-    stagingQuery.dataUpdatedAt > 0 ? formatShortTime(stagingQuery.dataUpdatedAt) : null;
-  // While a large staging folder is still scanning (#947), show progress instead of a count.
-  const fileCountText = scanning
-    ? scanProgress && scanProgress.total > 0
-      ? `Scanning ${scanProgress.scanned} of ${scanProgress.total} files…`
-      : 'Scanning staging folder…'
-    : getStagingStatsText(stagingFiles);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const inbox = useQuery(importInboxQueryOptions());
+  const { refresh, refreshing } = useInboxRefresh();
 
   return (
     <div id="import-page" data-testid="import-page">
-      <div className={styles.importPageContainer}>
-        <ImportHeader
-          error={stagingQuery.error}
-          fileCountText={fileCountText}
-          loading={stagingQuery.isLoading}
-          stagingPath={stagingPath}
-          refreshing={isRefreshing}
-          lastRefreshedAt={lastRefreshedAt}
-          onRefresh={refreshStaging}
+      <div className={styles.page}>
+        <PageHeader
+          icon={<img src="/static/import.png" alt="" />}
+          title="Import"
+          subtitle="What is in your import folder, and what to do about it"
+          actions={
+            <>
+              <Button
+                variant="secondary"
+                title="Re-read the import folder"
+                aria-busy={refreshing || inbox.isFetching}
+                disabled={refreshing}
+                onClick={refresh}
+              >
+                <RefreshIcon />
+                {refreshing ? 'Refreshing…' : 'Refresh'}
+              </Button>
+              <button
+                type="button"
+                className={styles.iconButton}
+                id="import-page-settings"
+                title="Auto-import settings"
+                aria-label="Auto-import settings"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <GearIcon />
+              </button>
+            </>
+          }
         />
-        <ImportProcessingQueue />
-        <ImportTabNav />
-        <section className={clsx(styles.importPageTabContent, styles.active)}>
-          <Outlet />
-        </section>
+        <ImportJobs />
+        <Outlet />
       </div>
+      <SettingsDrawer open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }
 
-function formatShortTime(timestamp: number) {
-  return new Date(timestamp).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
-
-function ImportHeader({
-  error,
-  fileCountText,
-  loading,
-  stagingPath,
-  refreshing,
-  lastRefreshedAt,
-  onRefresh,
-}: {
-  error: unknown;
-  fileCountText: string;
-  loading: boolean;
-  stagingPath: string;
-  refreshing: boolean;
-  lastRefreshedAt: string | null;
-  onRefresh: () => void;
-}) {
-  return (
-    <>
-      <PageHeader
-        icon={<img src="/static/import.png" alt="" />}
-        title="Import Music"
-        actions={
-          <Button
-            variant="secondary"
-            title="Re-scan import folder"
-            aria-busy={refreshing}
-            disabled={refreshing}
-            onClick={onRefresh}
-          >
-            <RefreshIcon />
-            {refreshing ? 'Refreshing...' : 'Refresh'}
-          </Button>
-        }
-      />
-      <div className={styles.importPageStagingBar} id="import-staging-bar">
-        <span className={styles.importStagingPath} id="import-page-staging-path">
-          {error ? 'Import folder: error' : `Import: ${stagingPath}`}
-        </span>
-        <Show when={lastRefreshedAt != null}>
-          <span className={styles.importStagingRefreshAt}>
-            {lastRefreshedAt ? `Last refreshed: ${lastRefreshedAt}` : null}
-          </span>
-        </Show>
-        <span className={styles.importStagingStats} id="import-page-staging-stats">
-          {loading ? 'loading...' : fileCountText}
-        </span>
-      </div>
-    </>
-  );
-}
-
-function ImportProcessingQueue() {
+/** Imports the page itself is running (the matcher's "Import N tracks"). */
+function ImportJobs() {
   const { clearFinishedJobs, queue } = useImportQueueWorkflow();
+  if (queue.length === 0) return null;
   const hasFinished = queue.some((entry) => entry.status !== 'running');
 
   return (
-    <section
-      className={clsx(styles.importPageQueue, {
-        [styles.hidden]: queue.length === 0,
-      })}
-      id="import-page-queue"
-    >
-      <div className={styles.importPageQueueHeader}>
-        <span className={styles.importPageQueueTitle}>Processing</span>
-        <Button
-          variant="ghost"
-          id="import-page-queue-clear"
-          style={{ display: hasFinished ? undefined : 'none' }}
-          onClick={clearFinishedJobs}
-        >
-          Clear finished
-        </Button>
+    <section className={styles.jobs} id="import-page-queue" aria-label="Imports in progress">
+      <div className={styles.jobsHead}>
+        <span className={styles.paneTitle}>Importing</span>
+        {hasFinished ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            id="import-page-queue-clear"
+            onClick={clearFinishedJobs}
+          >
+            Clear finished
+          </Button>
+        ) : null}
       </div>
-      <div className={styles.importPageQueueList} id="import-page-queue-list">
-        {queue.map((entry) => (
-          <ImportQueueItem key={entry.id} entry={entry} />
-        ))}
-      </div>
+      {queue.map((entry) => (
+        <ImportJob key={entry.id} entry={entry} />
+      ))}
     </section>
   );
 }
 
-function ImportQueueItem({ entry }: { entry: ImportQueueEntry }) {
-  const statusText = getQueueStatusText(entry);
-  const statusClass = clsx({
-    [styles.error]:
-      entry.status === 'error' || (entry.status === 'done' && entry.errors.length > 0),
-    [styles.done]: entry.status === 'done',
-  });
-
+function ImportJob({ entry }: { entry: ImportQueueEntry }) {
+  const failed = entry.status === 'error' || (entry.status === 'done' && entry.errors.length > 0);
   return (
-    <div className={styles.importPageQueueItem}>
+    <div className={styles.job}>
       {entry.imageUrl ? (
-        <img
-          className={styles.importPageQueueArt}
-          src={entry.imageUrl}
-          alt=""
-          onError={fallbackImage}
-        />
+        <img className={styles.jobArt} src={entry.imageUrl} alt="" onError={fallbackImage} />
       ) : (
-        <div className={clsx(styles.importPageQueueArt, styles.importPageQueueArtEmpty)}>♪</div>
+        <div className={styles.jobArt} />
       )}
-      <div className={styles.importPageQueueInfo}>
-        <div className={styles.importPageQueueName}>{entry.label}</div>
-        <div className={styles.importPageQueueDetail}>{entry.sublabel}</div>
+      <div className={styles.jobBody}>
+        <div className={styles.jobTitle}>{entry.label}</div>
+        <div className={styles.jobDetail}>{entry.sublabel}</div>
         {entry.blockedByMediaServer ? (
-          <ul className={styles.importPageQueueErrors}>
+          <ul className={styles.jobErrors}>
             <li title={entry.errors[0]}>
               {entry.errors[0]} <a href="/settings">Go to Settings</a>
             </li>
           </ul>
-        ) : (
-          entry.errors.length > 0 && (
-            <ul className={styles.importPageQueueErrors}>
-              {entry.errors.map((err, i) => (
-                <li key={i} title={err}>
-                  {err}
-                </li>
-              ))}
-            </ul>
-          )
-        )}
+        ) : entry.errors.length > 0 ? (
+          <ul className={styles.jobErrors}>
+            {entry.errors.map((err, i) => (
+              <li key={i} title={err}>
+                {err}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
-      <div className={styles.importPageQueueProgress}>
-        <div className={styles.importPageQueueBar}>
+      <div className={styles.jobSide}>
+        <div className={styles.progress}>
           <div
-            className={clsx(styles.importPageQueueFill, {
-              [styles.error]: entry.status === 'error',
-            })}
+            className={styles.progressFill}
             style={{ width: `${getQueueProgressPercent(entry)}%` }}
           />
         </div>
-        <div className={clsx(styles.importPageQueueStatus, statusClass)}>{statusText}</div>
+        <div
+          className={clsx(styles.jobStatus, {
+            [styles.error]: failed,
+            [styles.done]: entry.status === 'done' && !failed,
+          })}
+        >
+          {getQueueStatusText(entry)}
+        </div>
       </div>
     </div>
-  );
-}
-
-function ImportTabNav() {
-  return (
-    <nav className={styles.importPageTabBar} aria-label="Import modes">
-      <Link
-        to="/import/auto"
-        className={styles.importPageTab}
-        activeProps={{ className: clsx(styles.importPageTab, styles.active) }}
-        id="import-page-tab-auto"
-      >
-        Auto
-      </Link>
-      <Link
-        to="/import/album"
-        className={styles.importPageTab}
-        activeProps={{ className: clsx(styles.importPageTab, styles.active) }}
-        id="import-page-tab-album"
-      >
-        Albums
-      </Link>
-      <Link
-        to="/import/singles"
-        className={styles.importPageTab}
-        activeProps={{ className: clsx(styles.importPageTab, styles.active) }}
-        id="import-page-tab-singles"
-      >
-        Singles
-      </Link>
-    </nav>
   );
 }

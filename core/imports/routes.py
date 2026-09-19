@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import uuid
@@ -144,6 +145,10 @@ def _validate_import_file(runtime: ImportRouteRuntime, raw_path: Any) -> tuple[O
 _STAGING_SCAN_LOCK = threading.Lock()
 _STAGING_SCAN_TTL = 6.0  # seconds — covers the page-open burst; re-scans after
 _staging_scan_cache: Dict[str, Any] = {"path": None, "ts": 0.0, "records": None}
+# Directories the last scan could not list, {path, error}. os.walk swallows
+# these by default, so an unreadable staging folder answered "0 files" with
+# nothing to say why (truenas apps uid vs the container's PUID).
+_staging_scan_problems: list = []
 # Bumped by invalidate_staging_scan_cache() so a background scan that finishes after an
 # import doesn't re-commit stale (pre-import) records (see the generation guard above).
 _staging_scan_generation: Dict[str, int] = {"value": 0}
@@ -279,13 +284,26 @@ def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str,
 
         # Pass 1 (fast): collect the audio-file list — no tag I/O — so we know the total.
         audio_files: list[tuple[str, str, Optional[str]]] = []
+        problems: list[Dict[str, str]] = []
+
+        def _unreadable(err: OSError) -> None:
+            problems.append({"path": err.filename or staging_path,
+                             "error": err.strerror or str(err)})
+
         if os.path.isdir(staging_path):
-            for root, _dirs, filenames in os.walk(staging_path):
+            for root, _dirs, filenames in os.walk(staging_path, onerror=_unreadable):
                 rel_dir = os.path.relpath(root, staging_path)
                 top_folder = rel_dir.split(os.sep)[0] if rel_dir != "." else None
                 for fname in filenames:
                     if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
                         audio_files.append((root, fname, top_folder))
+        # The root itself unreadable is not "no files", it is an error the
+        # page has to show: nothing under it can ever be imported.
+        if problems and not audio_files and os.path.normpath(problems[0]["path"]) == os.path.normpath(staging_path):
+            raise PermissionError(
+                f"Import folder is not readable: {problems[0]['error']} ({staging_path}). "
+                f"If it is a bind mount, the folder's owner must match the container's PUID/PGID."
+            )
         if progress is not None:
             progress["total"] = len(audio_files)
             progress["scanned"] = 0
@@ -302,6 +320,8 @@ def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str,
                 "title": meta["title"], "album": meta["album"],
                 "artist": meta["artist"], "albumartist": meta["albumartist"],
                 "track_number": meta["track_number"], "disc_number": meta["disc_number"],
+                "duration_ms": meta.get("duration_ms", 0), "bitrate": meta.get("bitrate", 0),
+                "size": meta.get("size", 0),
                 "top_folder": top_folder,
             })
             if progress is not None:
@@ -311,6 +331,7 @@ def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str,
         # stale — return them to this caller but do NOT commit them as the shared cache.
         if _staging_scan_generation["value"] == start_generation:
             _staging_scan_cache.update({"path": staging_path, "ts": time.time(), "records": records})
+            _staging_scan_problems[:] = problems
         return records
 
 
@@ -320,6 +341,7 @@ def invalidate_staging_scan_cache() -> None:
     scan generation so an in-flight background scan won't re-commit pre-import records."""
     _staging_scan_generation["value"] += 1
     _staging_scan_cache.update({"path": None, "ts": 0.0, "records": None})
+    _staging_scan_problems.clear()
 
 
 def staging_files(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
@@ -348,9 +370,62 @@ def staging_files(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
         ]
 
         files.sort(key=lambda f: f["filename"].lower())
-        return {"success": True, "files": files, "staging_path": staging_path}, 200
+        return {"success": True, "files": files, "staging_path": staging_path,
+                "problems": list(_staging_scan_problems)}, 200
     except Exception as exc:
         runtime.logger.error("Error scanning staging files: %s", exc)
+        return {"success": False, "error": str(exc)}, 500
+
+
+def inbox(runtime: ImportRouteRuntime, worker: Any) -> tuple[Dict[str, Any], int]:
+    """Every staging item with its state: the page's one list.
+
+    ``worker`` is the auto-import worker (its enumeration is the unit of
+    work, its history and live state are the status). None when the worker
+    failed to boot; the inbox then lists staging with nothing joined."""
+    try:
+        staging_path = runtime.get_staging_path()
+        records, scanning = _records_or_scanning_payload(runtime, staging_path)
+        if scanning is not None:
+            return scanning, 200
+
+        from core.imports.inbox import build_inbox, summarize
+
+        problems = list(_staging_scan_problems)
+        candidates: list = []
+        history: list = []
+        status: Dict[str, Any] = {}
+        if worker is not None:
+            candidates, walk_problems = worker.enumerate_candidates(staging_path)
+            seen = {(p["path"], p["error"]) for p in problems}
+            problems.extend(p for p in walk_problems if (p["path"], p["error"]) not in seen)
+            history = worker.get_results(limit=200)
+            status = worker.get_status()
+        else:
+            from core.auto_import_worker import AutoImportWorker
+            bare = AutoImportWorker.__new__(AutoImportWorker)
+            candidates, walk_problems = bare.enumerate_candidates(staging_path)
+            problems.extend(walk_problems)
+
+        rows = build_inbox(candidates, records, history, status.get("active_imports") or [],
+                           staging_root=staging_path)
+        return {
+            "success": True,
+            "staging_path": staging_path,
+            "items": rows,
+            "summary": summarize(rows),
+            "problems": problems,
+            "worker": {
+                "available": worker is not None,
+                "running": bool(status.get("running")),
+                "paused": bool(status.get("paused")),
+                "current_status": status.get("current_status", "idle"),
+                "last_scan_time": status.get("last_scan_time"),
+                "stats": status.get("stats") or {},
+            },
+        }, 200
+    except Exception as exc:
+        runtime.logger.error("Error building import inbox: %s", exc)
         return {"success": False, "error": str(exc)}, 500
 
 
@@ -530,6 +605,325 @@ def album_match(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict
         return payload, 200
     except Exception as exc:
         runtime.logger.error("Error matching album for import: %s", exc)
+        return {"success": False, "error": str(exc)}, 500
+
+
+# an upload is capped per file, not per request: the browser sends one
+# request per file so a whole album does not have to fit one body.
+UPLOAD_MAX_BYTES = 1_024 * 1_024 * 1_024  # 1 GB, a DSD or a long WAV fits
+
+
+def _safe_relative_path(raw: str) -> Optional[str]:
+    """A relative path a browser sent, cleaned: forward or back slashes,
+    no absolute, no dot-dot, no empty segment. None when it is not one."""
+    text = str(raw or "").replace("\\", "/").strip().strip("/")
+    if not text:
+        return None
+    parts = []
+    for part in text.split("/"):
+        part = part.strip()
+        if part in ("", ".", ".."):
+            return None
+        if ":" in part:
+            return None
+        parts.append(part)
+    return os.path.join(*parts)
+
+
+def upload_to_staging(runtime: ImportRouteRuntime, files: list, relative_paths: list) -> tuple[Dict[str, Any], int]:
+    """Write browser-uploaded audio into the import folder, keeping the
+    folder structure the browser sent (a dropped folder keeps its name, so
+    it lands as one album). Audio extensions only; the staging cache is
+    dropped so the inbox sees the files on its next read.
+
+    ``files`` are werkzeug FileStorage objects; ``relative_paths`` the
+    matching ``webkitRelativePath`` (or filename) for each."""
+    try:
+        staging_path = runtime.get_staging_path()
+        os.makedirs(staging_path, exist_ok=True)
+        staging_root = os.path.realpath(staging_path)
+
+        saved, skipped = [], []
+        for index, storage in enumerate(files):
+            name = storage.filename or ""
+            rel = _safe_relative_path(relative_paths[index] if index < len(relative_paths) and relative_paths[index] else name)
+            if rel is None:
+                skipped.append({"file": name, "reason": "bad path"})
+                continue
+            if os.path.splitext(rel)[1].lower() not in AUDIO_EXTENSIONS:
+                skipped.append({"file": rel, "reason": "not an audio file"})
+                continue
+            target = os.path.realpath(os.path.join(staging_root, rel))
+            if os.path.commonpath([staging_root, target]) != staging_root:
+                skipped.append({"file": rel, "reason": "outside the import folder"})
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            # never clobber: a second upload of the same name gets a suffix
+            final = target
+            stem, ext = os.path.splitext(target)
+            n = 1
+            while os.path.exists(final):
+                n += 1
+                final = f"{stem} ({n}){ext}"
+            storage.save(final)
+            size = os.path.getsize(final)
+            if size > UPLOAD_MAX_BYTES:
+                os.remove(final)
+                skipped.append({"file": rel, "reason": "over the 1 GB per-file limit"})
+                continue
+            saved.append({"file": os.path.relpath(final, staging_root), "size": size})
+
+        if saved:
+            invalidate_staging_scan_cache()
+        return {"success": True, "saved": saved, "skipped": skipped, "staging_path": staging_path}, 200
+    except Exception as exc:
+        runtime.logger.error("Error uploading to staging: %s", exc)
+        return {"success": False, "error": str(exc)}, 500
+
+
+UPLOAD_PART_DIR = ".uploads"
+_UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def _upload_target(staging_root: str, rel: str) -> Optional[str]:
+    target = os.path.realpath(os.path.join(staging_root, rel))
+    if os.path.commonpath([staging_root, target]) != staging_root:
+        return None
+    return target
+
+
+def _unique_path(target: str) -> str:
+    final = target
+    stem, ext = os.path.splitext(target)
+    n = 1
+    while os.path.exists(final):
+        n += 1
+        final = f"{stem} ({n}){ext}"
+    return final
+
+
+def upload_chunk_to_staging(runtime: ImportRouteRuntime, *, upload_id: str, index: int, total: int,
+                            relative_path: str, chunk) -> tuple[Dict[str, Any], int]:
+    """One piece of a browser upload. A reverse proxy in front of a docker
+    install commonly caps a request body at a megabyte or so, which would
+    refuse every whole-file upload; pieces of a few megabytes get through
+    anything. Pieces append to a part file under staging/.uploads; the last
+    one moves it into place. The part dir starts with a dot so the scanner
+    never mistakes a half-uploaded file for an album."""
+    try:
+        if not _UPLOAD_ID_RE.match(str(upload_id or "")):
+            return {"success": False, "error": "bad upload id"}, 400
+        try:
+            index = int(index)
+            total = int(total)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "bad chunk index"}, 400
+        if total < 1 or index < 0 or index >= total:
+            return {"success": False, "error": "bad chunk index"}, 400
+        rel = _safe_relative_path(relative_path)
+        if rel is None:
+            return {"success": False, "error": "bad path"}, 400
+        if os.path.splitext(rel)[1].lower() not in AUDIO_EXTENSIONS:
+            return {"success": False, "error": "not an audio file"}, 400
+
+        staging_path = runtime.get_staging_path()
+        os.makedirs(staging_path, exist_ok=True)
+        staging_root = os.path.realpath(staging_path)
+        target = _upload_target(staging_root, rel)
+        if target is None:
+            return {"success": False, "error": "outside the import folder"}, 400
+
+        part_dir = os.path.join(staging_root, UPLOAD_PART_DIR)
+        os.makedirs(part_dir, exist_ok=True)
+        part = os.path.join(part_dir, f"{upload_id}.part")
+        # the first piece starts the file over: a retried upload must not
+        # stack onto a stale part from the last try
+        mode = "wb" if index == 0 else "ab"
+        with open(part, mode) as handle:
+            chunk.save(handle)
+        size = os.path.getsize(part)
+        if size > UPLOAD_MAX_BYTES:
+            os.remove(part)
+            return {"success": False, "error": "over the 1 GB per-file limit"}, 413
+
+        if index < total - 1:
+            return {"success": True, "received": index + 1, "total": total}, 200
+
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        final = _unique_path(target)
+        os.replace(part, final)
+        invalidate_staging_scan_cache()
+        return {
+            "success": True,
+            "received": total,
+            "total": total,
+            "saved": {"file": os.path.relpath(final, staging_root), "size": os.path.getsize(final)},
+        }, 200
+    except Exception as exc:
+        runtime.logger.error("Error receiving upload chunk: %s", exc)
+        return {"success": False, "error": str(exc)}, 500
+
+
+# fingerprinting is a second a file plus a network call; three files say
+# who the artist is as well as thirty would
+FINGERPRINT_MAX_FILES = 3
+
+
+def fingerprint_files(runtime: ImportRouteRuntime, file_paths: list,
+                      *, client_factory=None) -> tuple[Dict[str, Any], int]:
+    """Identify staging files by AcoustID fingerprint, on demand. The worker
+    already tries this last on its own; here it is a button for the matcher,
+    for the folder whose tags and name say nothing. Returns what each file
+    was recognised as and a search query the matcher can run from it."""
+    try:
+        paths = [p for p in (file_paths or []) if isinstance(p, str)][:FINGERPRINT_MAX_FILES]
+        if not paths:
+            return {"success": False, "error": "file_paths is required"}, 400
+
+        if client_factory is None:
+            from core.acoustid_client import AcoustIDClient
+            client_factory = AcoustIDClient
+        try:
+            client = client_factory()
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"AcoustID is not available: {exc}"}, 503
+        available, reason = client.is_available()
+        if not available:
+            return {"success": False, "error": reason or "AcoustID is not set up", "code": "acoustid_unavailable"}, 503
+
+        results = []
+        for raw in paths:
+            resolved, error = _validate_import_file(runtime, raw)
+            if error:
+                results.append({"file": os.path.basename(str(raw)), "status": "error", "error": error})
+                continue
+            res = client.lookup_with_status(resolved)
+            best = (res.get("recordings") or [None])[0]
+            results.append({
+                "file": os.path.basename(resolved),
+                "status": res.get("status"),
+                "error": res.get("error"),
+                "title": best.get("title") if best else None,
+                "artist": best.get("artist") if best else None,
+                "mbid": best.get("mbid") if best else None,
+                "score": round(float(best.get("score") or 0), 3) if best else None,
+            })
+
+        artists = [r["artist"] for r in results if r.get("artist")]
+        artist = max(set(artists), key=artists.count) if artists else None
+        titles = [r["title"] for r in results if r.get("title")]
+        recognised = sum(1 for r in results if r.get("status") == "ok")
+        return {
+            "success": True,
+            "results": results,
+            "recognised": recognised,
+            "artist": artist,
+            "title": titles[0] if len(paths) == 1 and titles else None,
+        }, 200
+    except Exception as exc:
+        runtime.logger.error("Error fingerprinting import files: %s", exc)
+        return {"success": False, "error": str(exc)}, 500
+
+
+def album_preview(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
+    """What an album import WOULD do, per track: the destination path on the
+    user's template, and the tags the release will write against the tags the
+    file has now. Nothing is created (the path builder runs with
+    create_dirs=False, the reorganize dry run's seam). The pipeline still owns
+    the real answer; this is the same builders on the same context."""
+    try:
+        from core.imports.context import build_import_album_info, get_import_clean_title
+        from core.imports.paths import _extract_year_from_release_date, build_final_path_for_track
+        from core.imports.track_number import resolve_disc_for_track
+
+        data = data or {}
+        album = data.get("album") or {}
+        matches = data.get("matches") or []
+        source = str(album.get("source") or data.get("source") or "").strip().lower()
+        if not album or not matches:
+            return {"success": False, "error": "album and matches are required"}, 400
+
+        total_discs = max(
+            (int(m.get("track", {}).get("disc_number") or 1) for m in matches if m.get("track")),
+            default=1,
+        )
+        artist_context = runtime.resolve_album_artist_context(album, source=source)
+        rows = []
+        for match in matches:
+            staging_file = match.get("staging_file") or {}
+            track = match.get("track") or {}
+            if not staging_file or not track:
+                continue
+            full_path = staging_file.get("full_path", "")
+            ext = os.path.splitext(full_path)[1] or ".flac"
+            context = runtime.build_album_import_context(
+                album, track, artist_context=artist_context, total_discs=total_discs, source=source,
+            )
+            context["is_local_import"] = True
+            ctx_artist = context.get("artist") or artist_context or {}
+            album_info = build_import_album_info(context, force_album=True)
+            album_info["track_number"] = int(track.get("track_number") or 1)
+            album_info["clean_track_name"] = get_import_clean_title(
+                context, album_info=album_info, default=track.get("name") or "Unknown Track",
+            )
+            try:
+                album_info["disc_number"] = resolve_disc_for_track(
+                    context.get("original_search") or {}, album_info,
+                )
+            except Exception:  # noqa: BLE001 - disc is a nicety in a preview
+                album_info["disc_number"] = int(track.get("disc_number") or 1)
+
+            destination = None
+            path_error = None
+            try:
+                destination, _ = build_final_path_for_track(
+                    context, ctx_artist, album_info, ext, create_dirs=False,
+                )
+            except Exception as exc:  # noqa: BLE001 - say why, do not fail the preview
+                path_error = str(exc)
+
+            current = {}
+            try:
+                if full_path and os.path.isfile(full_path):
+                    current = runtime.read_staging_file_metadata(full_path, os.path.basename(full_path))
+            except Exception:  # noqa: BLE001
+                current = {}
+
+            artists = track.get("artists") or []
+            artist_names = [a.get("name") if isinstance(a, dict) else str(a) for a in artists]
+            artist_names = [a for a in artist_names if a]
+            after = {
+                "title": album_info.get("clean_track_name") or track.get("name") or "",
+                "artist": ", ".join(artist_names) or ctx_artist.get("name") or album.get("artist") or "",
+                "albumartist": ctx_artist.get("name") or album.get("artist") or "",
+                "album": album_info.get("album_name") or album.get("name") or "",
+                "track_number": album_info.get("track_number"),
+                "disc_number": album_info.get("disc_number"),
+                "year": _extract_year_from_release_date(album.get("release_date") or "") or "",
+            }
+            before = {
+                "title": current.get("title") or "",
+                "artist": current.get("artist") or "",
+                "albumartist": current.get("albumartist") or "",
+                "album": current.get("album") or "",
+                "track_number": current.get("track_number") or None,
+                "disc_number": current.get("disc_number") or None,
+                "year": "",
+            }
+            changed = [k for k in after if str(after[k] or "") != str(before.get(k) or "") and after[k] not in (None, "")]
+            rows.append({
+                "file": os.path.basename(full_path),
+                "full_path": full_path,
+                "destination": destination,
+                "path_error": path_error,
+                "before": before,
+                "after": after,
+                "changed": changed,
+            })
+
+        return {"success": True, "tracks": rows}, 200
+    except Exception as exc:
+        runtime.logger.error("Error previewing album import: %s", exc)
         return {"success": False, "error": str(exc)}, 500
 
 

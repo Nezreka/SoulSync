@@ -15,7 +15,6 @@ its phases share state-detection logic.
 from __future__ import annotations
 
 import os
-import shutil as _shutil
 from typing import Any, Dict
 
 from core.automation.deps import AutomationDeps
@@ -116,23 +115,9 @@ def auto_full_cleanup(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str,
 
     # --- 1. Clear quarantine ---
     deps.update_progress(automation_id, phase='Clearing quarantine...', progress=0)
-    quarantine_path = os.path.join(
-        deps.docker_resolve_path(deps.config_manager.get('soulseek.download_path', './downloads')),
-        'ss_quarantine',
-    )
-    q_removed = 0
-    if os.path.exists(quarantine_path):
-        for f in os.listdir(quarantine_path):
-            fp = os.path.join(quarantine_path, f)
-            try:
-                if os.path.isfile(fp):
-                    os.remove(fp)
-                    q_removed += 1
-                elif os.path.isdir(fp):
-                    _shutil.rmtree(fp)
-                    q_removed += 1
-            except Exception as e:  # noqa: BLE001 — best-effort purge
-                deps.logger.debug("quarantine entry purge failed: %s", e)
+    from core.library.cleanup import clear_quarantine_folder, quarantine_path as _qpath
+    q_removed = clear_quarantine_folder(_qpath(
+        deps.docker_resolve_path(deps.config_manager.get('soulseek.download_path', './downloads'))))['removed']
     steps.append(f'Quarantine: removed {q_removed} items')
     deps.update_progress(
         automation_id,

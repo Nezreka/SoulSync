@@ -72,26 +72,14 @@ bp = Blueprint('quarantine', __name__)
 @bp.route('/api/quarantine/clear', methods=['POST'])
 def clear_quarantine():
     """Delete all files and folders inside the ss_quarantine directory."""
-    import shutil
+    from core.library.cleanup import clear_quarantine_folder
     try:
-        download_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
-        quarantine_path = os.path.join(download_path, 'ss_quarantine')
-
-        if not os.path.isdir(quarantine_path):
+        result = clear_quarantine_folder(_get_quarantine_dir())
+        if not result["existed"]:
             return jsonify({"success": True, "message": "Quarantine folder is already empty."})
-
-        removed_files = 0
-        for entry in os.listdir(quarantine_path):
-            entry_path = os.path.join(quarantine_path, entry)
-            try:
-                if os.path.isfile(entry_path):
-                    os.remove(entry_path)
-                    removed_files += 1
-                elif os.path.isdir(entry_path):
-                    shutil.rmtree(entry_path)
-                    removed_files += 1
-            except Exception as e:
-                logger.error(f"[Quarantine] Failed to remove {entry}: {e}")
+        for err in result["errors"]:
+            logger.error(f"[Quarantine] Failed to remove {err['entry']}: {err['error']}")
+        removed_files = result["removed"]
 
         logger.info(f"[Quarantine] Cleared {removed_files} item(s) from quarantine folder")
         return jsonify({"success": True, "message": f"Quarantine cleared ({removed_files} item{'s' if removed_files != 1 else ''} removed)."})

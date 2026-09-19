@@ -1670,19 +1670,35 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
     let users = [];
     const currentLib = profileData || {};
 
+    // the ACTIVE server decides which card this is. it used to probe plex
+    // first and take it whenever plex was merely configured, so a jellyfin
+    // (or navidrome) install with a plex token still in settings always
+    // got the plex card here (#1265).
+    let activeServer = '';
     try {
-        // Try each server type to find the active one
-        const plexRes = await fetch('/api/plex/music-libraries');
-        if (plexRes.ok) {
-            const plexData = await plexRes.json();
-            if (plexData.libraries && plexData.libraries.length > 0) {
-                serverType = 'plex';
-                libraries = plexData.libraries;
-            }
+        const activeRes = await fetch('/api/profiles/me/active-sources');
+        if (activeRes.ok) {
+            const active = await activeRes.json();
+            activeServer = (active && active.server && active.server.active) || '';
         }
     } catch (e) { }
 
-    if (serverType === 'none') {
+    if (activeServer === 'navidrome') {
+        serverType = 'navidrome';
+    } else if (activeServer === 'plex' || activeServer === '') {
+        try {
+            const plexRes = await fetch('/api/plex/music-libraries');
+            if (plexRes.ok) {
+                const plexData = await plexRes.json();
+                if (plexData.libraries && plexData.libraries.length > 0) {
+                    serverType = 'plex';
+                    libraries = plexData.libraries;
+                }
+            }
+        } catch (e) { }
+    }
+
+    if (serverType === 'none' && (activeServer === 'jellyfin' || activeServer === 'emby' || activeServer === '')) {
         try {
             const jellyRes = await fetch('/api/jellyfin/music-libraries');
             if (jellyRes.ok) {
@@ -1705,6 +1721,32 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
                 <div class="ps-help-text">No media server connected. Ask your admin to configure Plex, Jellyfin, or Navidrome in Settings.</div>
             </div>
         `;
+    } else if (serverType === 'navidrome') {
+        const savedUser = currentLib.navidrome_username || '';
+        section.innerHTML = `
+            <div class="ps-section">
+                <div class="ps-section-header">
+                    <h4 class="ps-section-title">Navidrome</h4>
+                    <span class="ps-connection-badge ${savedUser ? 'connected' : 'disconnected'}">
+                        <span class="ps-connection-dot"></span>
+                        ${savedUser ? escapeHtml(savedUser) : 'App account'}
+                    </span>
+                </div>
+                <div class="ps-help-text" style="margin-bottom:12px;">Log in with your own Navidrome user and the playlists you sync will belong to you in Navidrome. Without a login they belong to the app's account.</div>
+                <div class="ps-form-group">
+                    <label>Navidrome username</label>
+                    <input type="text" id="ps-navidrome-username" value="${escapeHtml(savedUser)}" autocomplete="off">
+                </div>
+                <div class="ps-form-group">
+                    <label>Navidrome password</label>
+                    <input type="password" id="ps-navidrome-password" placeholder="${savedUser ? 'Saved' : ''}" autocomplete="new-password">
+                </div>
+                <div class="ps-actions">
+                    <button class="ps-btn ps-btn-primary" onclick="savePersonalNavidromeLogin()">Save</button>
+                    ${savedUser ? '<button class="ps-btn" onclick="clearPersonalNavidromeLogin()">Use app account</button>' : ''}
+                </div>
+            </div>
+        `;
     } else if (serverType === 'plex') {
         const selectedLib = currentLib.plex_library_id || '';
         const optionsHtml = libraries.map(lib => {
@@ -1713,7 +1755,46 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
             return `<option value="${escapeHtml(val)}" ${val === selectedLib ? 'selected' : ''}>${escapeHtml(val)}</option>`;
         }).join('');
 
+        // who this profile is on plex (#1265): the playlists it syncs belong
+        // to that plex home user. linking takes the user's plex profile pin
+        // once when they have one; it is used for that one switch, not kept.
+        const linkedUser = currentLib.plex_home_user_title || '';
+        let homeUsers = [];
+        try {
+            const huRes = await fetch('/api/profiles/me/plex-home-users');
+            if (huRes.ok) homeUsers = (await huRes.json()).users || [];
+        } catch (e) { }
+        const homeUserOpts = homeUsers.map(u =>
+            `<option value="${escapeHtml(u.id)}" data-protected="${u.protected ? '1' : '0'}" ${String(u.id) === String(currentLib.plex_home_user_id || '') ? 'selected' : ''}>${escapeHtml(u.title)}${u.protected ? ' (PIN)' : ''}</option>`
+        ).join('');
+
         section.innerHTML = `
+            <div class="ps-section">
+                <div class="ps-section-header">
+                    <h4 class="ps-section-title">Plex User</h4>
+                    <span class="ps-connection-badge ${linkedUser ? 'connected' : 'disconnected'}">
+                        <span class="ps-connection-dot"></span>
+                        ${linkedUser ? escapeHtml(linkedUser) : 'App account'}
+                    </span>
+                </div>
+                <div class="ps-help-text" style="margin-bottom:12px;">Pick who you are on Plex and the playlists you sync will belong to you there. Without a pick they belong to the app's account.</div>
+                ${homeUsers.length ? `
+                <div class="ps-form-group">
+                    <label>Plex Home user</label>
+                    <select id="ps-plex-home-user-select" onchange="onPersonalPlexHomeUserChange()">
+                        <option value="">Use app account</option>
+                        ${homeUserOpts}
+                    </select>
+                </div>
+                <div class="ps-form-group" id="ps-plex-home-pin-group" style="display:none;">
+                    <label>Plex profile PIN</label>
+                    <input type="password" id="ps-plex-home-pin" inputmode="numeric" autocomplete="off" placeholder="Used once to link, not saved">
+                </div>
+                <div class="ps-actions">
+                    <button class="ps-btn ps-btn-primary" onclick="linkPersonalPlexHomeUser()">Link</button>
+                    ${linkedUser ? '<button class="ps-btn" onclick="unlinkPersonalPlexHomeUser()">Use app account</button>' : ''}
+                </div>` : '<div class="ps-help-text">No Plex Home users found on this server.</div>'}
+            </div>
             <div class="ps-section">
                 <div class="ps-section-header">
                     <h4 class="ps-section-title">Plex Library</h4>
@@ -1735,6 +1816,7 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
                 </div>
             </div>
         `;
+        setTimeout(onPersonalPlexHomeUserChange, 0);
     } else if (serverType === 'jellyfin') {
         const selectedUser = currentLib.jellyfin_user_id || '';
         const selectedLib = currentLib.jellyfin_library_id || '';
@@ -1807,6 +1889,89 @@ async function savePersonalServerLibrary() {
         showToast('Server library settings saved', 'success');
     } catch (e) {
         showToast('Error saving settings', 'error');
+    }
+}
+
+function onPersonalPlexHomeUserChange() {
+    const select = document.getElementById('ps-plex-home-user-select');
+    const pinGroup = document.getElementById('ps-plex-home-pin-group');
+    if (!select || !pinGroup) return;
+    const opt = select.options[select.selectedIndex];
+    pinGroup.style.display = opt && opt.dataset.protected === '1' ? '' : 'none';
+}
+
+async function linkPersonalPlexHomeUser() {
+    const select = document.getElementById('ps-plex-home-user-select');
+    const userId = select ? select.value : '';
+    const pin = document.getElementById('ps-plex-home-pin')?.value || '';
+    if (!userId) {
+        showToast('Pick your Plex user first', 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/profiles/me/plex-home-user', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, pin })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(data.error || 'Could not link that Plex user', 'error');
+            return;
+        }
+        showToast(`Playlists you sync will belong to ${data.title} on Plex`, 'success');
+        openPersonalSettings(); // Reload
+    } catch (e) {
+        showToast('Error linking Plex user', 'error');
+    }
+}
+
+async function unlinkPersonalPlexHomeUser() {
+    try {
+        const res = await fetch('/api/profiles/me/plex-home-user', { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Plex user unlinked — using the app account', 'info');
+            openPersonalSettings(); // Reload
+        }
+    } catch (e) {
+        showToast('Error unlinking Plex user', 'error');
+    }
+}
+
+async function savePersonalNavidromeLogin() {
+    const username = (document.getElementById('ps-navidrome-username')?.value || '').trim();
+    const password = document.getElementById('ps-navidrome-password')?.value || '';
+    if (!username || !password) {
+        showToast('Enter your Navidrome username and password', 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/profiles/me/navidrome-login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(data.error || 'Navidrome refused the login', 'error');
+            return;
+        }
+        showToast(`Playlists you sync will belong to ${username} in Navidrome`, 'success');
+        openPersonalSettings(); // Reload
+    } catch (e) {
+        showToast('Error saving Navidrome login', 'error');
+    }
+}
+
+async function clearPersonalNavidromeLogin() {
+    try {
+        const res = await fetch('/api/profiles/me/navidrome-login', { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Navidrome login removed — using the app account', 'info');
+            openPersonalSettings(); // Reload
+        }
+    } catch (e) {
+        showToast('Error removing Navidrome login', 'error');
     }
 }
 

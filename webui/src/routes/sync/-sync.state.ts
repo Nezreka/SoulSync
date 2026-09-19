@@ -25,6 +25,8 @@ export interface SyncProgressSnapshot {
   total_tracks?: number;
   matched_tracks?: number;
   failed_tracks?: number;
+  /** matched entries folded into a library track already on the playlist */
+  duplicate_tracks?: number;
   current_step?: string;
   current_track?: string;
 }
@@ -171,8 +173,7 @@ export function applySyncStatus(
   }
   if (status === 'error' || status === 'cancelled' || payload.error) {
     const errorMsg =
-      payload.error ||
-      (status === 'cancelled' ? 'Sync cancelled' : 'Sync encountered an error');
+      payload.error || (status === 'cancelled' ? 'Sync cancelled' : 'Sync encountered an error');
     return {
       ...state,
       phase: 'discovered',
@@ -347,7 +348,9 @@ export function applyUnmatched(
     previous.status_class === 'found' ||
     Boolean(previous.spotify_data) ||
     Boolean(previous.spotify_track);
-  const spotifyMatches = wasFound ? Math.max(0, (state.spotifyMatches || 0) - 1) : state.spotifyMatches;
+  const spotifyMatches = wasFound
+    ? Math.max(0, (state.spotifyMatches || 0) - 1)
+    : state.spotifyMatches;
 
   const rawResults = state.rawResults.slice();
   rawResults[trackIndex] = {

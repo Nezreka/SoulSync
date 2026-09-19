@@ -33,6 +33,7 @@ from core.automation.handlers.maintenance import (
     auto_backup_database,
     auto_refresh_beatport_cache,
 )
+from core.automation.handlers.library_cleanup import auto_library_cleanup
 from core.automation.handlers.download_cleanup import (
     auto_clean_search_history,
     auto_clean_completed_downloads,
@@ -61,6 +62,7 @@ __all__ = [
     'auto_run_duplicate_cleaner',
     'auto_start_quality_scan',
     'auto_clear_quarantine',
+    'auto_library_cleanup',
     'auto_cleanup_wishlist',
     'auto_update_discovery_pool',
     'auto_backup_database',

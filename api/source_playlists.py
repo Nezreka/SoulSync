@@ -5275,10 +5275,17 @@ def _run_playlist_organize_download(mirrored_playlist_id, automation_id=None, pr
 @bp.route('/api/sync/start', methods=['POST'])
 def start_playlist_sync():
     """Starts a new sync process for a given playlist."""
+    return start_playlist_sync_from_payload(request.get_json() or {})
+
+
+def start_playlist_sync_from_payload(data):
+    """The sync start, given its body. The route above and the public v1
+    /playlists/<id>/sync both come through here; v1 used to forward itself
+    over http to a hardcoded port, which broke on any other port and lost
+    the profile."""
     request_start_time = time.time()
     logger.info(f"⏱️ [TIMING] Sync request received at {time.strftime('%H:%M:%S')}")
 
-    data = request.get_json()
     playlist_id = data.get('playlist_id')
     playlist_name = data.get('playlist_name')
     tracks_json = data.get('tracks') # Pass the full track list

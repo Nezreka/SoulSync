@@ -67,6 +67,22 @@ body {
     height: 100vh;
 }
 
+/* Native <select> menus (#1258). Every select on the page styles its closed
+   box white-on-dark, but the popup list is drawn by the browser in its own
+   scheme, and with no color-scheme set that scheme is light: white text
+   inherited from us on a white list the browser painted. Two halves because
+   the browsers split it: Chromium/Safari paint the popup from color-scheme,
+   Firefox paints it from the option rule. A dozen per-component "select
+   option" rules below were each one instance of this same bug. */
+select {
+    color-scheme: dark;
+}
+select option,
+select optgroup {
+    background-color: #1a1a1a;
+    color: #ffffff;
+}
+
 .hidden {
     display: none !important;
 }
@@ -3941,16 +3957,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     line-height: 1.4;
     margin-top: 5px;
     padding-left: 1px;
-}
-
-.form-group {
-    option {
-        color: black;
-
-        &:hover {
-            color: white;
-        }
-    }
 }
 
 .form-group label {
@@ -29621,13 +29627,16 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     gap: 20px;
 }
 
-/* Library Header */
+/* Library Header. The section above the cards used to stack four rows and
+   push the grid 435px down a 1280 viewport; the header, one toolbar row and
+   the alphabet strip is the whole budget now. */
 .library-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    gap: 10px;
+    padding: 12px 0 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .library-header-content {
@@ -29635,9 +29644,9 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .library-title {
-    font-size: 28px;
+    font-size: 26px;
     font-weight: 700;
-    margin: 0 0 8px 0;
+    margin: 0 0 4px 0;
     letter-spacing: -0.3px;
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
     display: flex;
@@ -29655,8 +29664,8 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .library-subtitle {
-    font-size: 16px;
-    color: rgba(255, 255, 255, 0.7);
+    font-size: 13.5px;
+    color: rgba(255, 255, 255, 0.5);
     margin: 0;
     font-weight: 500;
 }
@@ -29664,6 +29673,7 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 .library-stats {
     display: flex;
     gap: 24px;
+    margin-right: 6px;
 }
 
 .library-stat {
@@ -29765,64 +29775,115 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 .library-controls {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 4px;
+}
+
+/* One row: search, the watched pills, the source picker on the far side.
+   Every control is 36px tall on a 10px radius so the row reads as one bar. */
+.library-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
 /* Search Container */
 .library-search-container {
     position: relative;
-    max-width: 500px;
+    flex: 1 1 240px;
+    max-width: 420px;
+    min-width: 0;
 }
 
 .library-search-input {
     width: 100%;
-    padding: 14px 20px 14px 50px;
+    height: 36px;
+    padding: 0 34px 0 36px;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
+    border-radius: 10px;
     background: rgba(255, 255, 255, 0.05);
     color: #ffffff;
-    font-size: 15px;
+    font-size: 13.5px;
     font-weight: 500;
-    transition: all 0.3s ease;
+    font-family: inherit;
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
     outline: none;
 }
 
 .library-search-input:focus {
-    border-color: rgba(var(--accent-rgb), 0.6);
-    background: rgba(255, 255, 255, 0.08);
-    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.55);
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
 
 .library-search-input::placeholder {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.4);
 }
 
+/* A stroked glass, not the emoji: the emoji is a coloured glyph the theme has
+   no say over, and it sat on top of the text once the padding went. */
 .library-search-icon {
     position: absolute;
-    left: 16px;
+    left: 12px;
     top: 50%;
     transform: translateY(-50%);
-    font-size: 16px;
-    color: rgba(255, 255, 255, 0.6);
+    width: 15px;
+    height: 15px;
+    color: rgba(255, 255, 255, 0.45);
     pointer-events: none;
+    display: flex;
 }
 
-/* Alphabet Selector - Apple Style Design */
-/* Watchlist Filter */
+.library-search-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.library-search-container:focus-within .library-search-icon {
+    color: rgba(var(--accent-light-rgb), 0.9);
+}
+
+.library-search-clear-btn {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+}
+
+.library-search-clear-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Watchlist Filter: a segmented control, one pill on a shared track. */
 .watchlist-filter {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-start;
-    padding: 8px 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    height: 36px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
 }
 
 .library-source-filter {
     display: flex;
-    justify-content: flex-start;
-    padding: 0 0 4px;
+    margin-left: auto;
 }
 .library-source-filter-select {
-    padding: 6px 30px 6px 12px;
+    height: 36px;
+    padding: 0 30px 0 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(255, 255, 255, 0.05);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='rgba(255,255,255,0.35)' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
@@ -29835,7 +29896,7 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     font-size: 12px;
     font-weight: 500;
     font-family: inherit;
-    border-radius: 8px;
+    border-radius: 10px;
     cursor: pointer;
     transition: border-color 0.2s, color 0.2s;
     min-width: 140px;
@@ -29855,28 +29916,28 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 }
 
 .watchlist-filter-btn {
-    padding: 6px 16px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.05);
+    height: 28px;
+    padding: 0 13px;
+    border: 0;
+    background: transparent;
     color: rgba(255, 255, 255, 0.5);
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
     cursor: pointer;
-    border-radius: 20px;
-    transition: all 0.2s ease-out;
+    border-radius: 7px;
+    transition: color 0.15s ease-out, background 0.15s ease-out;
 }
 
 .watchlist-filter-btn:hover {
-    color: rgba(255, 255, 255, 0.8);
-    border-color: rgba(255, 255, 255, 0.2);
-    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.06);
 }
 
 .watchlist-filter-btn.active {
     color: #fff;
-    border-color: rgba(var(--accent-rgb), 0.5);
-    background: rgba(var(--accent-rgb), 0.15);
+    background: rgba(var(--accent-rgb), 0.22);
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.35);
 }
 
 .library-watchlist-all-btn {
@@ -30124,8 +30185,8 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 
 .alphabet-selector-inner {
     display: flex;
-    gap: 12px;
-    padding: 16px;
+    gap: 10px;
+    padding: 6px 4px;
     min-width: max-content;
     justify-content: flex-start;
     align-items: center;
@@ -30149,8 +30210,10 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     justify-content: center;
     transform: scale(1);
     text-shadow: none;
-    padding-top: 30px;
-    padding-bottom: 30px;
+    /* Room for the dock-style hover: the glyph grows 2.5x and the strip clips
+       vertically, so the button needs half the grown glyph either side. */
+    padding-top: 12px;
+    padding-bottom: 12px;
 }
 
 .alphabet-btn:hover {
@@ -30510,15 +30573,19 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
         gap: 16px;
     }
 
+    /* Title on its own line, then the count and the two buttons share one
+       row: a column put each of them on a line of its own. */
     .library-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 12px;
+        flex-wrap: wrap;
+        gap: 10px 12px;
+    }
+
+    .library-header-content {
+        flex: 1 1 100%;
     }
 
     .library-stats {
-        align-self: stretch;
-        justify-content: center;
+        margin-right: auto;
     }
 
     .library-artists-grid {
@@ -56752,7 +56819,7 @@ tr.tag-diff-same {
        screens, and the buttons sat below the fold (#1254) */
     flex: 1 1 auto;
     min-height: 0;
-    padding: 8px 16px 16px !important;
+    padding: 12px 24px 16px;
 }
 
 .tag-preview-modal {
@@ -56766,6 +56833,49 @@ tr.tag-diff-same {
     overflow-y: auto;
     flex: 1 1 auto;
     min-height: 0;
+    padding: 8px 24px 12px;
+}
+
+/* ── write-tags shell: header kicker, summary hint, pill options, footer ── */
+.tagw-header { align-items: flex-start; padding: 18px 24px 14px; }
+.tagw-title-wrap { min-width: 0; }
+.tagw-kicker {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: rgb(var(--accent-rgb)); margin-bottom: 4px;
+}
+.tagw-header h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tagw-summary { align-items: center; padding: 10px 24px; }
+.tagw-hint { margin-left: auto; font-size: 11.5px; color: rgba(255,255,255,0.35); white-space: nowrap; }
+.tagw-modal .batch-tag-track {
+    background: rgba(255,255,255,0.025);
+    border-color: rgba(255,255,255,0.07);
+    transition: border-color 0.15s ease;
+}
+.tagw-modal .batch-tag-track.expanded { border-color: rgba(var(--accent-rgb), 0.28); }
+.tagw-modal .batch-tag-track.error { border-color: rgba(255,80,80,0.2); }
+.tagw-modal .batch-tag-unchanged-group { background: rgba(255,255,255,0.015); }
+.tagw-footer { flex-wrap: wrap; align-items: center; gap: 10px; }
+.tagw-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.tagw-actions { display: flex; gap: 8px; margin-left: auto; }
+.tag-preview-option {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 12px 7px 10px; border-radius: 999px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    font-size: 12.5px; color: rgba(255,255,255,0.72); cursor: pointer; user-select: none;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.tag-preview-option:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.tag-preview-option:has(input:checked) {
+    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: #fff;
+}
+.tag-preview-option input[type="checkbox"] { accent-color: rgb(var(--accent-rgb)); margin: 0; cursor: pointer; }
+
+@media (max-width: 640px) {
+    .tagw-hint { display: none; }
+    .tagw-actions { width: 100%; }
+    .tagw-actions .btn { flex: 1 1 0; }
 }
 
 .batch-tag-summary {
@@ -83815,7 +83925,10 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     min-width: 0;
 }
 
-.library-search-input {
+/* Scoped under .library-search: the input class is shared with the music
+   library page's search, and unscoped these overrode its padding and put
+   the magnifier on top of the text (#1258 thread). */
+.library-search .library-search-input {
     width: 100%;
     padding: 7px 30px 7px 13px;
     border-radius: 100px;
@@ -83826,15 +83939,15 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     border: 1px solid rgba(255, 255, 255, 0.1);
     transition: border-color 0.16s, background 0.16s;
 }
-.library-search-input::placeholder { color: rgba(255, 255, 255, 0.32); }
-.library-search-input:focus {
+.library-search .library-search-input::placeholder { color: rgba(255, 255, 255, 0.32); }
+.library-search .library-search-input:focus {
     outline: none;
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(var(--accent-rgb), 0.5);
 }
 /* The UA's own clear affordance is a light-mode X that is invisible here, and
    it sits where ours goes. */
-.library-search-input::-webkit-search-cancel-button { display: none; }
+.library-search .library-search-input::-webkit-search-cancel-button { display: none; }
 
 .library-search-clear {
     position: absolute;

@@ -112,6 +112,11 @@ TRIGGERS: list[dict] = [
      "description": "When album/track import finishes", "available": True,
      "has_conditions": True, "condition_fields": ["artist", "album_name"],
      "variables": ["track_count", "album_name", "artist"]},
+    {"type": "import_needs_attention", "label": "Import Needs Attention", "icon": "upload",
+     "description": "When auto-import cannot finish a folder on its own (needs review, could not identify, or failed)",
+     "available": True,
+     "has_conditions": True, "condition_fields": ["status", "artist", "album_name"],
+     "variables": ["folder_name", "status", "reason", "album_name", "artist", "confidence", "track_count"]},
     {"type": "mirrored_playlist_created", "label": "Playlist Mirrored", "icon": "copy",
      "description": "When a new playlist is mirrored", "available": True,
      "has_conditions": True, "condition_fields": ["playlist_name", "source"],
@@ -293,6 +298,17 @@ ACTIONS: list[dict] = [
      "description": "Scan for and remove duplicate files", "available": True},
     {"type": "clear_quarantine", "label": "Clear Quarantine", "icon": "trash",
      "description": "Delete all quarantined files", "available": True},
+    {"type": "library_cleanup", "label": "Clear Quarantine + Empty Recycle Bin", "icon": "trash",
+     "description": "One sweep for both bins: delete the download quarantine, then empty the recycle bin "
+                    "(files deleted by the duplicate cleaner and repair tools). The recycle bin honours the keep "
+                    "window set on the Downloads page's Recycle Bin tab; with the window on 'keep forever' it "
+                    "empties the whole bin. Either half can be switched off. The seeded 'Weekly Cleanup' "
+                    "automation runs this and ships switched off.",
+     "available": True,
+     "config_fields": [
+         {"key": "quarantine", "type": "checkbox", "label": "Clear the download quarantine", "default": True},
+         {"key": "recycle_bin", "type": "checkbox", "label": "Empty the recycle bin", "default": True},
+     ]},
     {"type": "cleanup_wishlist", "label": "Clean Up Wishlist", "icon": "filter",
      "description": "Remove duplicate/owned tracks from wishlist", "available": True},
     {"type": "update_discovery_pool", "label": "Update Discovery", "icon": "compass",
