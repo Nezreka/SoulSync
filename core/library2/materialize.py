@@ -185,7 +185,8 @@ def materialize_wishlist_intent(
         # Library-v2 intent is global. Fail closed unless the caller proves
         # that the action belongs to the admin profile; a non-admin wishlist,
         # watchlist or playlist may only mutate its own legacy list.
-        if int(actor_profile_id or 0) != ADMIN_PROFILE_ID:
+        from core.profile_context import is_admin_profile
+        if not is_admin_profile(actor_profile_id):
             return None
         if int(profile_id) != ADMIN_PROFILE_ID:
             return None

@@ -43,7 +43,8 @@ def get_background_profile():
 
 
 __all__ = ["set_background_profile", "reset_background_profile", "get_background_profile",
-           "get_current_profile_id", "is_admin_request", "admin_only"]
+           "get_current_profile_id", "is_admin_profile", "is_admin_request",
+           "admin_only"]
 
 
 # ── request-side accessors ───────────────────────────────────────────────────
@@ -70,6 +71,33 @@ def get_current_profile_id() -> int:
     return pid if pid is not None else 1
 
 
+def is_admin_profile(profile_id) -> bool:
+    """Is THIS profile id an admin? The request-free half of the gate.
+
+    ``is_admin_request`` answers for the caller of the current request; this
+    answers for a profile id that was handed to a function as an argument.
+    Library v2 and the acquisition layer need the second form: their admin
+    checks take an ``actor_profile_id`` parameter and run on background
+    threads as well as in a request, so they cannot reach for ``g``. Both
+    forms have to agree, or a second admin passes the route gate and is
+    refused one layer down — which is exactly what a literal ``== 1`` did
+    to every one of them.
+
+    Profile 1 is always an admin; anything unreadable is not.
+    """
+    try:
+        pid = int(profile_id)
+    except (TypeError, ValueError):
+        return False
+    if pid == 1:
+        return True
+    try:
+        from database.music_database import get_database
+        return bool((get_database().get_profile(pid) or {}).get('is_admin', False))
+    except Exception:  # noqa: BLE001 - an unreadable profile is not an admin
+        return False
+
+
 def is_admin_request() -> bool:
     """Is the current request from an admin profile?
 
@@ -93,13 +121,7 @@ def is_admin_request() -> bool:
         cached = None
     if cached is not None:
         return bool(cached)
-    is_admin = False
-    try:
-        from database.music_database import get_database
-        profile = get_database().get_profile(pid)
-        is_admin = bool((profile or {}).get('is_admin', False))
-    except Exception:  # noqa: BLE001 - an unreadable profile is not an admin
-        is_admin = False
+    is_admin = is_admin_profile(pid)
     try:
         g.is_admin = is_admin
     except RuntimeError:

@@ -243,6 +243,7 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
     missing_scan_count INTEGER NOT NULL DEFAULT 0,
     legacy_track_id INTEGER,                          -- non-NULL only for legacy-import-owned files
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
+    owner_profile_id INTEGER,                         -- whose library this file belongs to; NULL = the shared library (every row today)
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (track_id) REFERENCES lib2_tracks(id) ON DELETE SET NULL,
@@ -270,6 +271,22 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_path ON lib2_track_files(path)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_mirror_outbox_status ON lib2_mirror_outbox(status)",
 )
+
+# --- Whose library a file belongs to -----------------------------------------
+# A directory IS a profile: `profiles.library_mode`/`library_root` say a profile
+# keeps its own library in its own folder, and every file under that folder
+# carries that profile in `lib2_track_files.owner_profile_id`. NULL is the
+# shared library, which is what every install has and every existing row is.
+# There is deliberately no separate library register and no grants table —
+# the profile row already is both.
+#
+# Equally deliberate: the owner sits on the FILE, never on lib2_artists /
+# lib2_albums / lib2_tracks. Those are metadata and stay shared and
+# deduplicated; two people owning the same album must not produce two
+# catalogue rows, two enrichment runs, two artwork fetches. Visibility of a
+# catalogue row is derived instead — a file in scope hangs off it, or the
+# profile has monitoring intent on it (lib2_monitor_rules / lib2_wanted_tracks,
+# both already keyed by profile).
 
 # Audit log: when a user manually downloads while skipping checks (AcoustID /
 # quality) that the quality profile would otherwise enforce, we record it so the
@@ -558,6 +575,11 @@ _ADDED_COLUMNS = (
     # the release column on its next run.
     ("lib2_albums", "musicbrainz_release_group_id",
      "ALTER TABLE lib2_albums ADD COLUMN musicbrainz_release_group_id TEXT"),
+    # Whose library the file belongs to. Nullable and unread for now: NULL on
+    # every existing row is the shared library, which is what an install
+    # without own-library profiles is.
+    ("lib2_track_files", "owner_profile_id",
+     "ALTER TABLE lib2_track_files ADD COLUMN owner_profile_id INTEGER"),
 )
 
 
@@ -993,6 +1015,17 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
             )
         except Exception as e:  # noqa: BLE001
             logger.debug("%s server-id index skipped: %s", table, e)
+    # Library ownership. Same rule as the server-id indexes above: it is over a
+    # column an old install only just received, so it cannot live in _INDEXES.
+    # Partial, because until a profile keeps its own library every row is NULL
+    # and a full index would be one entry per file for no reader.
+    try:
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_owner "
+            "ON lib2_track_files(owner_profile_id) WHERE owner_profile_id IS NOT NULL"
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("idx_lib2_track_files_owner create skipped: %s", e)
     # §40 alias registry index — runs AFTER the additive column migration
     # above so it also works on installs that predate canonical_artist_id.
     try:

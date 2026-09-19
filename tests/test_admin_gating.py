@@ -341,3 +341,49 @@ def test_quick_switch_editable_agrees_with_the_gate(client, nonadmin):
     db.update_profile(nonadmin, is_admin=1)
     assert client.get('/api/profiles/me/active-sources').get_json()['editable'] is True
 
+
+
+# ---------------------------------------------------------------------------
+# ...and a second admin is an admin on the LIBRARY V2 side too. ADR-01 gives v2
+# one authoritative intent, stored under ADMIN_PROFILE_ID — that is a row key
+# and stays 1. Who may write it is a separate question, and it was asked as a
+# literal `profile == 1`: after the upstream merge the shell offered a second
+# admin the Library page and every mutation behind it answered 403.
+# ---------------------------------------------------------------------------
+
+def test_second_admin_may_write_library_v2(client, second_admin):
+    assert client.get('/api/library/v2/enabled').get_json()['can_write'] is True
+
+
+def test_nonadmin_may_not_write_library_v2(client, nonadmin):
+    assert client.get('/api/library/v2/enabled').get_json()['can_write'] is False
+
+
+def test_second_admin_passes_the_library_v2_mutation_guard(client, second_admin):
+    # not 403 = the guard let them through; the body is rejected on its merits
+    assert client.post('/api/library/v2/acquisition/requests', json={}).status_code != 403
+
+
+def test_nonadmin_is_still_refused_by_the_library_v2_mutation_guard(client, nonadmin):
+    response = client.post('/api/library/v2/acquisition/requests', json={})
+    assert response.status_code == 403
+    assert 'admin' in response.get_json()['error'].lower()
+
+
+def test_second_admin_may_attach_library_v2_context_to_a_download(client, second_admin):
+    # the mirror of test_nonadmin_cannot_attach_library_v2_context: the /api/download
+    # lib2 gate reads the same predicate, so it must not answer "Admin access required"
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/song.flac',
+        'lib2_track_id': 1,
+    })
+
+    assert not (response.status_code == 403
+                and response.get_json().get('error') == 'Admin access required')
+
+
+def test_a_demoted_second_admin_loses_library_v2_write_access(client, second_admin):
+    assert client.get('/api/library/v2/enabled').get_json()['can_write'] is True
+    web_server.get_database().update_profile(second_admin, is_admin=0)
+    assert client.get('/api/library/v2/enabled').get_json()['can_write'] is False

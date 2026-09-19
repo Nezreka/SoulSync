@@ -14,6 +14,7 @@ from core.acquisition.history import (
     record_history_event,
 )
 from core.acquisition.requests import ADMIN_PROFILE_ID
+from core.profile_context import is_admin_profile
 
 
 BLOCKLIST_ID_PREFIX = "abl1-"
@@ -147,7 +148,7 @@ def block_candidate(
 ) -> Tuple[BlocklistEntry, bool]:
     """Block an exact candidate identity; repeated active blocks are idempotent."""
     ensure_release_blocklist_schema(conn)
-    if int(actor_profile_id) != ADMIN_PROFILE_ID:
+    if not is_admin_profile(actor_profile_id):
         raise ValueError("release blocklist is admin-profile only")
     candidate = get_candidate(conn, candidate_id)
     if candidate is None:
@@ -236,7 +237,7 @@ def unblock_candidate(
     message: Optional[str] = None,
 ) -> Tuple[BlocklistEntry, bool]:
     ensure_release_blocklist_schema(conn)
-    if int(actor_profile_id) != ADMIN_PROFILE_ID:
+    if not is_admin_profile(actor_profile_id):
         raise ValueError("release blocklist is admin-profile only")
     entry = _get_entry(conn, entry_id)
     if entry is None:

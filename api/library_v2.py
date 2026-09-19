@@ -286,7 +286,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # the admin's state and mirror into the wrong profile's wishlist
         # (audit P0-02). Other profiles keep read access.
         if request.method not in ("GET", "HEAD", "OPTIONS") \
-                and _profile() != ADMIN_PROFILE_ID:
+                and not _is_admin():
             return jsonify({
                 "success": False,
                 "error": "Library v2 changes require the admin profile",
@@ -348,6 +348,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception:
             return 1
 
+    def _is_admin() -> bool:
+        """Is the CALLER an admin? Not "is the caller profile 1".
+
+        ADR-01 gives Library v2 one authoritative intent, stored under
+        ADMIN_PROFILE_ID. That is a row key and stays 1. Who may *write* it is
+        a different question, and since upstream made a second profile a real
+        admin (profiles.is_admin) a literal `_profile() == 1` handed that
+        admin the page and a 403 behind every button.
+        """
+        try:
+            from core.profile_context import is_admin_profile
+            return is_admin_profile(_profile())
+        except Exception:  # noqa: BLE001 - an unreadable profile is not an admin
+            return _profile() == ADMIN_PROFILE_ID
+
     def _acquisition_search_adapters(criteria):
         if acquisition_search_adapters_getter:
             return tuple(acquisition_search_adapters_getter(criteria) or ())
@@ -383,7 +398,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # Library v2 is always enabled; what actually varies is whether
             # THIS profile may see the page.
             "enabled": _page_allowed(),
-            "can_write": _profile() == ADMIN_PROFILE_ID,
+            "can_write": _is_admin(),
         })
 
     # -- acquisition requests / decisions (Phase 4) -------------------------
@@ -3649,7 +3664,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        if _profile() != ADMIN_PROFILE_ID:
+        if not _is_admin():
             return jsonify({
                 "success": False,
                 "error": "Acquisition reconciliation requires the admin profile",
@@ -3676,7 +3691,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        if _profile() != ADMIN_PROFILE_ID:
+        if not _is_admin():
             return jsonify({
                 "success": False,
                 "error": "The integrity report requires the admin profile",

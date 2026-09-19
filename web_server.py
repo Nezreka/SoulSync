@@ -852,7 +852,7 @@ from api.mirrored_playlists import _owned_mirrored_playlist  # noqa: E402  (wiri
 # get_current_profile_id + admin_only live in core/profile_context.py now —
 # api/* blueprint modules need them at import time, and importing web_server
 # from there is circular. Same objects, one home.
-from core.profile_context import admin_only, get_current_profile_id  # noqa: E402
+from core.profile_context import admin_only, get_current_profile_id, is_admin_request  # noqa: E402
 
 
 def get_spotify_client_for_profile(profile_id=None):
@@ -6055,8 +6055,8 @@ def _prepare_manual_grab(username, search_result, lib2_ctx, batch_id=None):
     source family from the username (ADR-08).
     """
     try:
-        from core.library2 import ADMIN_PROFILE_ID
-        if get_current_profile_id() != ADMIN_PROFILE_ID:
+        from core.profile_context import is_admin_request
+        if not is_admin_request():
             return None
         spec = download_orchestrator.registry.get_spec(username) if username else None
         source = spec.name if spec else 'soulseek'
@@ -6076,8 +6076,8 @@ def _prepare_manual_grab(username, search_result, lib2_ctx, batch_id=None):
 def _manual_acquisition_preparation_required(username):
     """Whether this route dispatch is covered by the opt-in strict gate."""
     try:
-        from core.library2 import ADMIN_PROFILE_ID
-        if get_current_profile_id() != ADMIN_PROFILE_ID:
+        from core.profile_context import is_admin_request
+        if not is_admin_request():
             return False
         spec = download_orchestrator.registry.get_spec(username) if username else None
         source = spec.name if spec else 'soulseek'
@@ -6480,7 +6480,6 @@ def start_download():
         # lib2 track/album this grab acts for; existence and the effective
         # quality profile are resolved server-side. A named-but-invalid
         # entity fails the grab instead of degrading to a context-free one.
-        from core.library2 import ADMIN_PROFILE_ID
         from core.library2.grab_context import (
             build_lib2_import_pipeline_fields,
             build_lib2_track_info,
@@ -6488,8 +6487,7 @@ def start_download():
             resolve_lib2_grab_context,
         )
         from core.download_plugins.candidate_store import candidate_binding
-        if (names_lib2_entity(raw_data)
-                and get_current_profile_id() != ADMIN_PROFILE_ID):
+        if names_lib2_entity(raw_data) and not is_admin_request():
             return jsonify({
                 "success": False,
                 "error": "Admin access required",
@@ -16953,7 +16951,7 @@ def start_missing_tracks_process(playlist_id):
             materialize_confirmed_search_tracks,
         )
         _materialize_search = (
-            get_current_profile_id() == ADMIN_PROFILE_ID
+            is_admin_request()
             and is_confirmed_search_process(playlist_id)
         )
         if _materialize_search:
