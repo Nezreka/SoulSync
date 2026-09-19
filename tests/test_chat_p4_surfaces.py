@@ -94,3 +94,19 @@ def test_p4_review_catches_pinned():
     assert users_list.count("_roomEvents()") == 1
     user_btn = js[js.index("function _userBtn"):js.index("function renderUsers(")]
     assert "reduceTuned" not in user_btn
+
+
+def test_poll_dismissal_survives_refresh():
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available")
+    result = subprocess.run(
+        [node, "chat_poll_dismiss_harness.mjs"], cwd=_ROOT / "tests" / "js",
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
