@@ -817,3 +817,38 @@ def test_navidrome_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
     ds.run_sync_task('pND', 'PND', [_track()], profile_id=3,
                      playlist_image_url='https://img/z.png', deps=deps)
     assert nd2.image_calls == [('PND', 'https://img/z.png')] and nd2.views == []
+
+
+def test_plex_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
+    """same as navidrome (#1265): a profile linked to a plex home user owns
+    the playlist it synced, so the cover check and upload run as that user"""
+    class _PlexWithUsers(_FakePlex):
+        def __init__(self):
+            super().__init__()
+            self.views = []
+
+        def as_home_user(self, token, title=''):
+            view = _FakePlex()
+            view.acting_as = title
+            self.views.append(view)
+            return view
+
+    px = _PlexWithUsers()
+    patched_db.get_profile_plex_home_user = lambda pid: {'id': '1', 'title': 'Kids', 'token': 't'} if pid == 2 else None
+    cfg = _FakeConfig(server='plex')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, plex=px, config=cfg)
+
+    ds.run_sync_task('pPX', 'PPX', [_track()], profile_id=2,
+                     playlist_image_url='https://img/p.png', deps=deps)
+
+    assert px.image_calls == [], "the app account uploaded the cover"
+    assert [v.acting_as for v in px.views] == ['Kids', 'Kids']
+    assert px.views[-1].image_calls == [('PPX', 'https://img/p.png')]
+
+    px2 = _PlexWithUsers()
+    deps = _build_deps(sync_service=svc, plex=px2, config=cfg)
+    ds.run_sync_task('pPX', 'PPX', [_track()], profile_id=3,
+                     playlist_image_url='https://img/p.png', deps=deps)
+    assert px2.image_calls == [('PPX', 'https://img/p.png')] and px2.views == []

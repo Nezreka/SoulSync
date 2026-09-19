@@ -64,7 +64,101 @@ class PlexClient(MediaServerClient):
         self._is_connecting = False
         self._last_connection_check = 0  # Cache connection checks
         self._connection_check_interval = 30  # Check every 30 seconds max
-    
+        # per-user server connections for linked profiles (#1265), keyed by
+        # the user's server access token. one PlexServer per user, reused.
+        self._user_servers: Dict[str, PlexServer] = {}
+        self._user_servers_lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Plex Home users (#1265): a profile links itself to one of the Home
+    # users on this server so the playlists it syncs belong to that user.
+    # plex writes playlists as whoever the connection's token is, so the
+    # link is a per-user server access token minted once with the admin
+    # token (the Home admin can switch to any Home user; a user with a
+    # profile PIN needs it for that one switch, and the PIN is not kept).
+    # ------------------------------------------------------------------
+
+    def _account(self):
+        from plexapi.myplex import MyPlexAccount
+        token = config_manager.get_plex_config().get('token')
+        if not token:
+            raise RuntimeError("Plex token not configured")
+        return MyPlexAccount(token=token)
+
+    def list_home_users(self) -> List[Dict[str, Any]]:
+        """the Home users the admin token can switch to. names and ids only."""
+        account = self._account()
+        users = []
+        for u in account.users():
+            if not getattr(u, 'home', False):
+                continue
+            users.append({
+                'id': str(u.id),
+                'title': u.title,
+                'protected': bool(getattr(u, 'protected', False)),
+                'restricted': bool(getattr(u, 'restricted', False)),
+            })
+        return users
+
+    def mint_home_user_server_token(self, user_id: str, pin: Optional[str] = None) -> tuple:
+        """(server_access_token, user_title, error). one switch to the Home
+        user with the admin token, then the user's own access token for
+        THIS server from their resource list. the account token the switch
+        returns is not enough on its own: the server answers 401 to it."""
+        if not self.ensure_connection():
+            return None, None, "Plex is not connected"
+        try:
+            account = self._account()
+            user = next((u for u in account.users() if str(u.id) == str(user_id) and getattr(u, 'home', False)), None)
+            if user is None:
+                return None, None, "That Plex Home user was not found"
+            if getattr(user, 'protected', False) and not pin:
+                return None, user.title, "That Plex user has a PIN; enter it to link"
+            try:
+                switched = account.switchHomeUser(user, pin=pin or None)
+            except Exception as exc:  # noqa: BLE001 - plexapi raises BadRequest/Unauthorized on a wrong pin
+                logger.info(f"Plex Home switch refused for '{user.title}': {exc}")
+                return None, user.title, "Plex refused the PIN for that user"
+            machine = self.server.machineIdentifier
+            for resource in switched.resources():
+                provides = getattr(resource, 'provides', '') or ''
+                if 'server' in provides and resource.clientIdentifier == machine and resource.accessToken:
+                    return resource.accessToken, user.title, None
+            return None, user.title, "That Plex user cannot see this server"
+        except Exception as exc:  # noqa: BLE001 - surfaced to the settings page
+            logger.error(f"Plex Home user link failed: {exc}")
+            return None, None, str(exc)
+
+    def _user_server(self, token: str) -> Optional[PlexServer]:
+        """the cached PlexServer for a per-user token, connecting on first use."""
+        with self._user_servers_lock:
+            server = self._user_servers.get(token)
+        if server is not None:
+            return server
+        config = config_manager.get_plex_config()
+        if not config.get('base_url'):
+            return None
+        timeout = config_manager.get('plex.request_timeout_seconds', 30) or 30
+        try:
+            server = PlexServer(config['base_url'], token, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001 - a dead token is the caller's to report
+            logger.error(f"Plex per-user connection failed: {exc}")
+            return None
+        with self._user_servers_lock:
+            self._user_servers[token] = server
+        return server
+
+    def as_home_user(self, token: str, title: str = '') -> Optional['PlexUserView']:
+        """this client, connected as a Home user (see PlexUserView). None when
+        the user's connection cannot be made; the caller then stays on the
+        app account and says so."""
+        if not self.ensure_connection():
+            return None
+        server = self._user_server(token)
+        if server is None:
+            return None
+        return PlexUserView(self, server, title)
+
     def ensure_connection(self) -> bool:
         """Ensure connection to Plex server with lazy initialization."""
         # If we've successfully connected before and server object exists, return immediately
@@ -1771,3 +1865,69 @@ class PlexClient(MediaServerClient):
         
         # Return first result if no exact match
         return albums[0] if albums else None
+
+
+class PlexUserView(PlexClient):
+    """the shared PlexClient, connected as one Plex Home user.
+
+    plex writes playlists as whoever the connection's token is and lists a
+    user only their own playlists, so a profile's syncs land on their Home
+    user when the connection is theirs. this is a PlexClient of its own,
+    with its own PlexServer (the user's token) and its own music library
+    pick, so every method (create, reconcile, append, update, the finder's
+    fetchItem) runs unchanged on it. it shares the base client's scan and
+    retry settings and nothing else; nothing on the shared client changes.
+    """
+
+    def __init__(self, base: PlexClient, server: PlexServer, title: str = ''):
+        PlexClient.__init__(self)
+        self._base_client = base
+        self.acting_as = title
+        self.server = server
+        self._connection_attempted = True
+        self._scan_retries = getattr(base, '_scan_retries', 0)
+        # start on the same library the app account is on; the profile's own
+        # pick (set_music_library_by_name) replaces it on this view only
+        self._all_libraries_mode = bool(getattr(base, '_all_libraries_mode', False))
+        self.music_library = None
+        base_title = getattr(getattr(base, 'music_library', None), 'title', None)
+        if base_title and not self._all_libraries_mode:
+            self._pick_section(base_title)
+        if self.music_library is None and not self._all_libraries_mode:
+            self._find_music_library()
+
+    def _pick_section(self, library_name: str) -> bool:
+        try:
+            for section in self.server.library.sections():
+                if section.type == 'artist' and section.title == library_name:
+                    self.music_library = section
+                    self._all_libraries_mode = False
+                    return True
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"Plex per-user: could not list sections: {exc}")
+        return False
+
+    def ensure_connection(self) -> bool:
+        # the user's connection was made when the view was; a reconnect is
+        # the shared client's job, never a config re-read on this view
+        return self.server is not None
+
+    def reset_connection(self):
+        pass
+
+    def set_music_library_by_name(self, library_name: str) -> bool:
+        """the profile's library pick, on this view only. the base method
+        also writes the app-wide plex_music_library preference, which a
+        profile's pick must not touch."""
+        if not self.server:
+            return False
+        if library_name == ALL_LIBRARIES_SENTINEL:
+            self.music_library = None
+            self._all_libraries_mode = True
+            return True
+        if self._pick_section(library_name):
+            logger.info(f"Per-profile: Plex library '{library_name}' for '{self.acting_as}'")
+            return True
+        logger.warning(f"Music library '{library_name}' not found for '{self.acting_as}'")
+        return False
+

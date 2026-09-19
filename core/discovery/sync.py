@@ -557,6 +557,9 @@ def run_sync_task(
                     # the playlist is the profile's user's when they have a login (#1265)
                     from services.sync_service import navidrome_client_for_profile
                     _cover_client = navidrome_client_for_profile(profile_id, _cover_client)
+                elif _cover_server == 'plex' and _cover_client is not None:
+                    from services.sync_service import plex_client_for_profile
+                    _cover_client = plex_client_for_profile(profile_id, _cover_client)
                 if _cover_client is not None and hasattr(_cover_client, 'get_playlist_by_name'):
                     _playlist_preexisted = bool(_cover_client.get_playlist_by_name(playlist_name))
             except Exception as _pre_err:
@@ -632,7 +635,9 @@ def run_sync_task(
                 logger.info(f"[PLAYLIST IMAGE] active_server={active_server}")
                 _engine = deps.media_server_engine
                 if active_server == 'plex' and _engine and _engine.client('plex'):
-                    ok = _engine.client('plex').set_playlist_image(playlist_name, playlist_image_url)
+                    from services.sync_service import plex_client_for_profile
+                    _px = plex_client_for_profile(profile_id, _engine.client('plex'))
+                    ok = _px.set_playlist_image(playlist_name, playlist_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Plex upload result: {ok}")
                 elif active_server in ('jellyfin', 'emby') and _engine and _engine.client('jellyfin'):
                     ok = _engine.client('jellyfin').set_playlist_image(playlist_name, playlist_image_url)

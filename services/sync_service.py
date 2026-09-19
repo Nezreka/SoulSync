@@ -122,6 +122,33 @@ def navidrome_client_for_profile(profile_id, client):
     return client.as_user(*login)
 
 
+def plex_client_for_profile(profile_id, client):
+    """the plex client connected as the profile's linked Home user, when it
+    has one. plex writes playlists as the connection's token, so this is what
+    puts a profile's playlists on their own plex user (#1265). a view with
+    its own connection, never a change to the shared client. no link, no
+    profile, a db that will not answer, or a connection that cannot be made
+    = the client as-is (and the last case is logged: the sync then runs as
+    the app account rather than not at all)."""
+    if not profile_id or client is None or not hasattr(client, 'as_home_user'):
+        return client
+    try:
+        from database.music_database import MusicDatabase
+        link = MusicDatabase().get_profile_plex_home_user(profile_id)
+    except Exception as e:
+        logger.error(f"Per-profile: could not read plex home user for profile {profile_id}: {e}")
+        return client
+    if not link:
+        return client
+    view = client.as_home_user(link['token'], link.get('title') or '')
+    if view is None:
+        logger.error(f"Per-profile: could not connect to Plex as '{link.get('title')}' for profile {profile_id}; "
+                     f"syncing as the app account")
+        return client
+    logger.info(f"Per-profile: Plex playlist writes run as '{link.get('title')}' for profile {profile_id}")
+    return view
+
+
 def reresolve_manual_match_live_plex(cache_db, media_client, m, *, profile_id,
                                      source_track_id, server_source):
     """Re-resolve a manual match whose stored Plex ratingKey went stale.
@@ -319,6 +346,7 @@ class PlaylistSyncService:
             else:  # Default to Plex
                 client = self._media_client('plex')
                 if profile_id and client:
+                    client = plex_client_for_profile(profile_id, client)
                     self._apply_profile_library(profile_id, 'plex', client)
                 return client, "plex"
         except Exception as e:

@@ -1751,7 +1751,46 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
             return `<option value="${escapeHtml(val)}" ${val === selectedLib ? 'selected' : ''}>${escapeHtml(val)}</option>`;
         }).join('');
 
+        // who this profile is on plex (#1265): the playlists it syncs belong
+        // to that plex home user. linking takes the user's plex profile pin
+        // once when they have one; it is used for that one switch, not kept.
+        const linkedUser = currentLib.plex_home_user_title || '';
+        let homeUsers = [];
+        try {
+            const huRes = await fetch('/api/profiles/me/plex-home-users');
+            if (huRes.ok) homeUsers = (await huRes.json()).users || [];
+        } catch (e) { }
+        const homeUserOpts = homeUsers.map(u =>
+            `<option value="${escapeHtml(u.id)}" data-protected="${u.protected ? '1' : '0'}" ${String(u.id) === String(currentLib.plex_home_user_id || '') ? 'selected' : ''}>${escapeHtml(u.title)}${u.protected ? ' (PIN)' : ''}</option>`
+        ).join('');
+
         section.innerHTML = `
+            <div class="ps-section">
+                <div class="ps-section-header">
+                    <h4 class="ps-section-title">Plex User</h4>
+                    <span class="ps-connection-badge ${linkedUser ? 'connected' : 'disconnected'}">
+                        <span class="ps-connection-dot"></span>
+                        ${linkedUser ? escapeHtml(linkedUser) : 'App account'}
+                    </span>
+                </div>
+                <div class="ps-help-text" style="margin-bottom:12px;">Pick who you are on Plex and the playlists you sync will belong to you there. Without a pick they belong to the app's account.</div>
+                ${homeUsers.length ? `
+                <div class="ps-form-group">
+                    <label>Plex Home user</label>
+                    <select id="ps-plex-home-user-select" onchange="onPersonalPlexHomeUserChange()">
+                        <option value="">Use app account</option>
+                        ${homeUserOpts}
+                    </select>
+                </div>
+                <div class="ps-form-group" id="ps-plex-home-pin-group" style="display:none;">
+                    <label>Plex profile PIN</label>
+                    <input type="password" id="ps-plex-home-pin" inputmode="numeric" autocomplete="off" placeholder="Used once to link, not saved">
+                </div>
+                <div class="ps-actions">
+                    <button class="ps-btn ps-btn-primary" onclick="linkPersonalPlexHomeUser()">Link</button>
+                    ${linkedUser ? '<button class="ps-btn" onclick="unlinkPersonalPlexHomeUser()">Use app account</button>' : ''}
+                </div>` : '<div class="ps-help-text">No Plex Home users found on this server.</div>'}
+            </div>
             <div class="ps-section">
                 <div class="ps-section-header">
                     <h4 class="ps-section-title">Plex Library</h4>
@@ -1773,6 +1812,7 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
                 </div>
             </div>
         `;
+        setTimeout(onPersonalPlexHomeUserChange, 0);
     } else if (serverType === 'jellyfin') {
         const selectedUser = currentLib.jellyfin_user_id || '';
         const selectedLib = currentLib.jellyfin_library_id || '';
@@ -1845,6 +1885,52 @@ async function savePersonalServerLibrary() {
         showToast('Server library settings saved', 'success');
     } catch (e) {
         showToast('Error saving settings', 'error');
+    }
+}
+
+function onPersonalPlexHomeUserChange() {
+    const select = document.getElementById('ps-plex-home-user-select');
+    const pinGroup = document.getElementById('ps-plex-home-pin-group');
+    if (!select || !pinGroup) return;
+    const opt = select.options[select.selectedIndex];
+    pinGroup.style.display = opt && opt.dataset.protected === '1' ? '' : 'none';
+}
+
+async function linkPersonalPlexHomeUser() {
+    const select = document.getElementById('ps-plex-home-user-select');
+    const userId = select ? select.value : '';
+    const pin = document.getElementById('ps-plex-home-pin')?.value || '';
+    if (!userId) {
+        showToast('Pick your Plex user first', 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/profiles/me/plex-home-user', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, pin })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(data.error || 'Could not link that Plex user', 'error');
+            return;
+        }
+        showToast(`Playlists you sync will belong to ${data.title} on Plex`, 'success');
+        openPersonalSettings(); // Reload
+    } catch (e) {
+        showToast('Error linking Plex user', 'error');
+    }
+}
+
+async function unlinkPersonalPlexHomeUser() {
+    try {
+        const res = await fetch('/api/profiles/me/plex-home-user', { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Plex user unlinked — using the app account', 'info');
+            openPersonalSettings(); // Reload
+        }
+    } catch (e) {
+        showToast('Error unlinking Plex user', 'error');
     }
 }
 

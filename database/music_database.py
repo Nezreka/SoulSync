@@ -1075,6 +1075,7 @@ class MusicDatabase:
             self._add_profile_recovery_support(cursor)
             self._add_profile_service_credentials(cursor)
             self._add_profile_navidrome_login(cursor)
+            self._add_profile_plex_home_user(cursor)
             self._add_service_credential_sets(cursor)
             self._add_soul_id_columns(cursor)
             self._add_listening_history_table(cursor)
@@ -5695,6 +5696,62 @@ class MusicDatabase:
             logger.error(f"Error reading navidrome login for profile {profile_id}: {e}")
             return None
 
+    def _add_profile_plex_home_user(self, cursor):
+        """a plex home user per profile (#1265): who the profile is on the plex
+        server, and the per-user server access token minted for them. plex
+        writes playlists as the connection's token, so this is what puts a
+        profile's playlists on their own plex user. token is a fernet token."""
+        for sql in (
+            "ALTER TABLE profiles ADD COLUMN plex_home_user_id TEXT DEFAULT NULL",
+            "ALTER TABLE profiles ADD COLUMN plex_home_user_title TEXT DEFAULT NULL",
+            "ALTER TABLE profiles ADD COLUMN plex_home_user_token TEXT DEFAULT NULL",
+        ):
+            try:
+                cursor.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+    def set_profile_plex_home_user(self, profile_id: int, user_id: Optional[str], title: Optional[str],
+                                   token: Optional[str]) -> bool:
+        """link (or with empty values unlink) a profile's plex home user."""
+        try:
+            from core.settings import config_manager
+            user_id = (str(user_id) if user_id else '').strip() or None
+            enc = config_manager._encrypt_value(token) if (user_id and token) else None
+            if user_id and not enc:
+                return False
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET plex_home_user_id = ?, plex_home_user_title = ?, plex_home_user_token = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (user_id, (title or None) if user_id else None, enc, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving plex home user for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_plex_home_user(self, profile_id: int) -> Optional[Dict[str, str]]:
+        """{'id', 'title', 'token'} for the profile's linked plex home user,
+        or None when it has none (act as the app account, as always)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT plex_home_user_id, plex_home_user_title, plex_home_user_token "
+                               "FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+            if not row or not row[0] or not row[2]:
+                return None
+            from core.settings import config_manager
+            token = config_manager._decrypt_value(row[2])
+            if not isinstance(token, str) or not token:
+                return None
+            return {'id': row[0], 'title': row[1] or '', 'token': token}
+        except Exception as e:
+            logger.error(f"Error reading plex home user for profile {profile_id}: {e}")
+            return None
+
     def _add_service_credential_sets(self, cursor):
         """Named, switchable credential sets per auth service + each profile's
         selection of which set is active (Phase 0 foundation).
@@ -7288,7 +7345,7 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT plex_library_id, jellyfin_user_id, jellyfin_library_id, navidrome_library_id,
-                           navidrome_username
+                           navidrome_username, plex_home_user_id, plex_home_user_title
                     FROM profiles WHERE id = ?
                 """, (profile_id,))
                 row = cursor.fetchone()
@@ -7301,6 +7358,9 @@ class MusicDatabase:
                     'navidrome_library_id': row[3],
                     # the username only; the password never leaves the db
                     'navidrome_username': row[4],
+                    # who the profile is on plex; the token never leaves the db
+                    'plex_home_user_id': row[5],
+                    'plex_home_user_title': row[6],
                 }
         except Exception as e:
             logger.error(f"Error getting server library for profile {profile_id}: {e}")
