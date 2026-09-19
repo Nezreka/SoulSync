@@ -42,9 +42,12 @@ def verified_listing(obj, name: str) -> list:
 class DatabaseUpdateWorker:
     """Worker for updating SoulSync database with media server library data."""
     
-    def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex", force_sequential: bool = False):
+    def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex", force_sequential: bool = False, owner_profile_id=None):
         # Force sequential processing for web server mode to avoid threading issues
         self.force_sequential = force_sequential
+        # whose library this scan reads (#1199): None = the shared library,
+        # every row it writes and every row it may call stale carries this
+        self.owner_profile_id = owner_profile_id
         self.callbacks = {
             'progress_updated': [],
             'artist_processed': [],
@@ -236,7 +239,7 @@ class DatabaseUpdateWorker:
 
             if self.full_refresh:
                 logger.info(f"Performing full database refresh for {self.server_type} - clearing existing {self.server_type} data")
-                self.database.clear_server_data(self.server_type)
+                self.database.clear_server_data(self.server_type, owner_profile_id=self.owner_profile_id)
 
                 # Show cache preparation phase for Jellyfin and set up progress callback
                 if self.server_type == "jellyfin":
@@ -525,7 +528,7 @@ class DatabaseUpdateWorker:
 
             # Phase 3: Stale track removal
             self._emit_signal('phase_changed', "Deep scan: Checking for stale tracks...")
-            db_track_ids = self.database.get_all_track_ids_for_server(self.server_type)
+            db_track_ids = self.database.get_all_track_ids_for_server(self.server_type, owner_profile_id=self.owner_profile_id)
             stale = db_track_ids - seen_track_ids
             stale_removed = 0
 
@@ -1176,7 +1179,7 @@ class DatabaseUpdateWorker:
                     artist_name = getattr(artist, 'title', 'Unknown Artist')
                     
                     # Insert/update the artist
-                    artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type)
+                    artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
                     if artist_success:
                         total_processed_artists += 1
                         self._touched_artist_ids.add(artist_id)
@@ -1194,7 +1197,7 @@ class DatabaseUpdateWorker:
                                 album = album_tracks[0].album()  # Get album object
                                 if album:
                                     # Insert/update album
-                                    album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
+                                    album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
                                     if album_success:
                                         total_processed_albums += 1
                                         self._touched_album_ids.add(str(album_id))
@@ -1209,7 +1212,7 @@ class DatabaseUpdateWorker:
 
                                         try:
                                             self._seen_track_ids.add(str(track.ratingKey))
-                                            track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
+                                            track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
                                             if track_success:
                                                 total_processed_tracks += 1
                                                 if track_success == 'inserted':
@@ -1375,7 +1378,7 @@ class DatabaseUpdateWorker:
 
         # Get current DB counts for safety threshold
         try:
-            db_stats = self.database.get_statistics_for_server(self.server_type)
+            db_stats = self.database.get_statistics_for_server(self.server_type, owner_profile_id=self.owner_profile_id)
             db_artist_count = db_stats.get('artists', 0)
             db_album_count = db_stats.get('albums', 0)
         except Exception:
@@ -1444,8 +1447,8 @@ class DatabaseUpdateWorker:
 
         # Get stored IDs from database
         self._emit_signal('phase_changed', f"Comparing local database with {self.server_type}...")
-        db_artist_ids = self.database.get_all_artist_ids_for_server(self.server_type) if check_artists else set()
-        db_album_ids = self.database.get_all_album_ids_for_server(self.server_type) if check_albums else set()
+        db_artist_ids = self.database.get_all_artist_ids_for_server(self.server_type, owner_profile_id=self.owner_profile_id) if check_artists else set()
+        db_album_ids = self.database.get_all_album_ids_for_server(self.server_type, owner_profile_id=self.owner_profile_id) if check_albums else set()
 
         # Compute removal sets (only for types we have valid server data for)
         removed_artist_ids = (db_artist_ids - server_artist_ids) if check_artists else set()
@@ -1698,7 +1701,7 @@ class DatabaseUpdateWorker:
 
             # 1. Insert/update the artist using server-agnostic method
             artist_id = str(media_artist.ratingKey)
-            artist_success = self.database.insert_or_update_media_artist(media_artist, server_source=self.server_type)
+            artist_success = self.database.insert_or_update_media_artist(media_artist, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
             if not artist_success:
                 if seen_track_ids is not None:
                     # deep scan: nothing under this artist was looked at
@@ -1739,7 +1742,7 @@ class DatabaseUpdateWorker:
                     try:
                         # Insert/update album using server-agnostic method
                         album_id = str(album.ratingKey)
-                        album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
+                        album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
                         if not album_success and seen_track_ids is not None:
                             # deep scan: the album's tracks were never listed
                             self._unverified_album_ids.add(album_id)
@@ -1782,7 +1785,7 @@ class DatabaseUpdateWorker:
                                         # Deep scan: always call insert_or_update to refresh file_path
                                         # and other server-provided fields. UPDATE preserves enrichment.
                                         is_existing = skip_existing_tracks and self.database.track_exists_by_server(track_id_str, self.server_type)
-                                        track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type)
+                                        track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
                                         if is_existing:
                                             skipped_count += 1
                                         elif track_success:

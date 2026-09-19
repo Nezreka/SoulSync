@@ -660,6 +660,88 @@ def _run_soulsync_deep_scan():
         _db_update_error_callback(f"Deep scan failed: {e}")
 
 
+def _own_library_scan_clients(server_type):
+    """(profile, client) for every profile with a library of its own (#1199):
+    the media client connected as that profile, on that profile's server
+    library. plex and jellyfin only; navidrome has one music folder per
+    server, so an own library there is a second server and stays shared."""
+    db = get_database()
+    profiles = db.get_own_library_profiles()
+    if not profiles or server_type not in ('plex', 'jellyfin'):
+        return []
+    base = media_server_engine.client(server_type) if media_server_engine else None
+    if base is None:
+        return []
+    out = []
+    for prof in profiles:
+        pid = prof['id']
+        libs = db.get_profile_server_library(pid) or {}
+        try:
+            if server_type == 'jellyfin':
+                library_id = libs.get('jellyfin_library_id')
+                if not library_id:
+                    logger.warning(f"[Own Library] profile {prof['name']} has no Jellyfin library picked; skipping its scan")
+                    continue
+                client = base.as_user(libs.get('jellyfin_user_id') or base.user_id, library_id)
+            else:
+                library_name = libs.get('plex_library_id')
+                if not library_name:
+                    logger.warning(f"[Own Library] profile {prof['name']} has no Plex library picked; skipping its scan")
+                    continue
+                if not base.ensure_connection():
+                    continue
+                client = None
+                link = db.get_profile_plex_home_user(pid)
+                if link:
+                    client = base.as_home_user(link['token'], link.get('title') or prof['name'])
+                    if client is None:
+                        logger.warning(f"[Own Library] could not connect to Plex as '{link.get('title')}' for {prof['name']}; "
+                                       f"scanning their library with the app account")
+                if client is None:
+                    from core.plex_client import PlexUserView
+                    client = PlexUserView(base, base.server, prof['name'])
+                if not client.set_music_library_by_name(library_name):
+                    logger.warning(f"[Own Library] Plex library '{library_name}' not found for {prof['name']}; skipping its scan")
+                    continue
+        except Exception as e:
+            logger.error(f"[Own Library] could not build a client for profile {prof['name']}: {e}")
+            continue
+        out.append((prof, client))
+    return out
+
+
+def _run_own_library_scans(server_type, deep):
+    """scan every own-library profile's server library, rows stamped with the
+    profile. runs as the final phase of the shared scan (its post-scan hook)
+    so the status stays 'running' through it and one finished signal ends
+    the whole thing. a failure in one profile's scan never stops the rest."""
+    for prof, client in _own_library_scan_clients(server_type):
+        _db_update_phase_callback(f"Scanning {prof['name']}'s library...")
+        try:
+            worker = DatabaseUpdateWorker(
+                media_client=client, full_refresh=False, server_type=server_type,
+                force_sequential=True, owner_profile_id=prof['id'])
+            worker.connect_callback('phase_changed', _db_update_phase_callback)
+            worker.connect_callback('artist_processed', _db_update_artist_callback)
+            worker.connect_callback('error', lambda msg, _p=prof: logger.error(f"[Own Library] {_p['name']}: {msg}"))
+            if deep:
+                worker.run_deep_scan()
+            else:
+                worker.run()
+            logger.info(f"[Own Library] scanned {prof['name']}'s library: {worker.processed_artists} artists, "
+                        f"{worker.processed_tracks} new tracks")
+        except Exception as e:
+            logger.error(f"[Own Library] scan of {prof['name']}'s library failed: {e}")
+
+
+def _post_scan_hook_with_own_libraries(server_type, deep):
+    def hook(worker):
+        _run_own_library_scans(server_type, deep)
+        if _reconcile_after_scan:
+            _reconcile_after_scan(worker)
+    return hook
+
+
 def _run_db_update_task(full_refresh, server_type):
     """The actual function that runs in the background thread."""
     global db_update_worker
@@ -716,7 +798,8 @@ def _run_db_update_task(full_refresh, server_type):
     # Auto-reconcile runs as the FINAL scan phase (inside run(), before the
     # 'finished' signal) so status stays 'running' through it — automations,
     # the dashboard card, and the Tools page all treat it as part of the scan.
-    db_update_worker.post_scan_hook = _reconcile_after_scan
+    # the own-library profiles' scans ride the same hook (#1199).
+    db_update_worker.post_scan_hook = _post_scan_hook_with_own_libraries(server_type, deep=False)
 
     # This is a blocking call that runs the worker logic
     db_update_worker.run()
@@ -766,8 +849,9 @@ def _run_deep_scan_task(server_type):
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
 
-    # Auto-reconcile runs as the final scan phase (see _run_database_update_task).
-    db_update_worker.post_scan_hook = _reconcile_after_scan
+    # Auto-reconcile runs as the final scan phase (see _run_database_update_task),
+    # with the own-library profiles' deep scans ahead of it (#1199).
+    db_update_worker.post_scan_hook = _post_scan_hook_with_own_libraries(server_type, deep=True)
 
     # Run deep scan instead of normal run()
     db_update_worker.run_deep_scan()

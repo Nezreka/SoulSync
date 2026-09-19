@@ -223,6 +223,12 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
         download_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.download_path', './downloads'))
         transfer_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.transfer_path', './Transfer'))
+        # an own-library profile's batch lands in that profile's folder (#1199)
+        try:
+            from core.imports.paths import transfer_root_for_context
+            transfer_dir = transfer_root_for_context({'batch_id': batch_id})
+        except Exception as _root_err:  # noqa: BLE001 - the shared folder is the fallback
+            logger.debug(f"[Post-Processing] per-profile root lookup failed: {_root_err}")
 
         # Try to get context for generating the correct final filename
         task_basename = deps.extract_filename(task_filename)

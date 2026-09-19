@@ -2502,6 +2502,8 @@ async function loadProfileManageList() {
         editBtn.dataset.allowedPages = p.allowed_pages ? JSON.stringify(p.allowed_pages) : '';
         editBtn.dataset.canDownload = p.can_download !== false ? '1' : '0';
         editBtn.dataset.isAdmin = p.is_admin ? '1' : '0';
+        editBtn.dataset.libraryMode = p.library_mode || 'shared';
+        editBtn.dataset.libraryRoot = p.library_root || '';
         editBtn.title = 'Edit profile';
         editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
         actions.appendChild(editBtn);
@@ -2540,7 +2542,9 @@ async function loadProfileManageList() {
                 home_page: btn.dataset.homePage || '',
                 allowed_pages: btn.dataset.allowedPages ? JSON.parse(btn.dataset.allowedPages) : null,
                 can_download: btn.dataset.canDownload !== '0',
-                is_admin: btn.dataset.isAdmin === '1'
+                is_admin: btn.dataset.isAdmin === '1',
+                library_mode: btn.dataset.libraryMode || 'shared',
+                library_root: btn.dataset.libraryRoot || ''
             });
         };
     });
@@ -2737,6 +2741,8 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     // Admin-only settings: side access, allowed pages & can_download
     let pageCheckboxes = [];
     let canDlCheckbox = null;
+    let ownLibCheckbox = null;
+    let ownLibRootInput = null;
     let selectedSides = null;
     if (isAdmin && !isEditingAdmin) {
         // Side access — music | video | both, never nothing.
@@ -2797,6 +2803,34 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
         dlLabel.appendChild(canDlCheckbox);
         dlLabel.appendChild(document.createTextNode(' Can download (music, podcasts, audiobooks & video)'));
         form.appendChild(dlLabel);
+
+        // own library (#1199): this profile's downloads go to its own folder
+        // and the library it picked on the server, not the shared one
+        const olLabel = document.createElement('label');
+        olLabel.className = 'profile-checkbox-label';
+        ownLibCheckbox = document.createElement('input');
+        ownLibCheckbox.type = 'checkbox';
+        ownLibCheckbox.checked = profileSettings.library_mode === 'own';
+        olLabel.appendChild(ownLibCheckbox);
+        olLabel.appendChild(document.createTextNode(' Own library (separate output folder + their own server library)'));
+        form.appendChild(olLabel);
+
+        ownLibRootInput = document.createElement('input');
+        ownLibRootInput.type = 'text';
+        ownLibRootInput.className = 'profile-name-input';
+        ownLibRootInput.placeholder = 'Output folder for this profile, e.g. /music/thomas';
+        ownLibRootInput.value = profileSettings.library_root || '';
+        ownLibRootInput.style.display = ownLibCheckbox.checked ? '' : 'none';
+        form.appendChild(ownLibRootInput);
+        const olHelp = document.createElement('div');
+        olHelp.className = 'profile-settings-help';
+        olHelp.textContent = 'Point a second music library on your Plex or Jellyfin server at that folder, then have the profile pick it under My Settings.';
+        olHelp.style.display = ownLibCheckbox.checked ? '' : 'none';
+        form.appendChild(olHelp);
+        ownLibCheckbox.addEventListener('change', () => {
+            ownLibRootInput.style.display = ownLibCheckbox.checked ? '' : 'none';
+            olHelp.style.display = ownLibCheckbox.checked ? '' : 'none';
+        });
     }
 
     const btnRow = document.createElement('div');
@@ -2821,6 +2855,11 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
             payload.allowed_pages = allChecked ? null : editablePageCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
             payload.can_download = canDlCheckbox ? canDlCheckbox.checked : true;
             if (selectedSides) payload.allowed_sides = selectedSides;
+            if (ownLibCheckbox) {
+                payload.library_mode = ownLibCheckbox.checked ? 'own' : 'shared';
+                payload.library_root = ownLibCheckbox.checked ? (ownLibRootInput.value || '').trim() : '';
+                if (ownLibCheckbox.checked && !payload.library_root) { alert('An own library needs an output folder'); return; }
+            }
         }
 
         try {

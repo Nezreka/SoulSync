@@ -484,7 +484,26 @@ def update_profile(profile_id):
                 sides = data['allowed_sides']
                 kwargs['allowed_sides'] = sides if sides in ('music', 'video', 'both') else None
 
-        success = database.update_profile(profile_id, **kwargs)
+        # own library (#1199): admin only, never on the admin profile itself
+        library_result = None
+        if current['is_admin'] and ('library_mode' in data or 'library_root' in data):
+            if int(profile_id) == 1:
+                return jsonify({'success': False, 'error': 'The admin profile is the shared library'}), 400
+            mode = 'own' if data.get('library_mode') == 'own' else 'shared'
+            root = str(data.get('library_root') or '').strip()
+            if mode == 'own':
+                if not root:
+                    return jsonify({'success': False, 'error': 'An own library needs an output folder'}), 400
+                shared_root = str(config_manager.get('soulseek.transfer_path', '') or '').strip().rstrip('/\\')
+                if shared_root and root.rstrip('/\\') == shared_root:
+                    return jsonify({'success': False, 'error': 'That is the shared library folder; pick a different one'}), 400
+            library_result = database.set_profile_library(profile_id, mode, root or None)
+            from core.library_scope import invalidate_library_scope_cache
+            invalidate_library_scope_cache()
+
+        success = database.update_profile(profile_id, **kwargs) if kwargs else True
+        if library_result is False:
+            return jsonify({'success': False, 'error': 'Failed to save the library setting'}), 500
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

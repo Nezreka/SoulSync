@@ -291,6 +291,11 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
     # Copy the file to the transfer folder
     try:
         transfer_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.transfer_path', './Transfer'))
+        try:
+            from core.imports.paths import transfer_root_for_context
+            transfer_dir = transfer_root_for_context({'batch_id': batch_id})
+        except Exception as _root_err:  # noqa: BLE001
+            logger.debug(f"[Staging] per-profile root lookup failed: {_root_err}")
         dest_filename = os.path.basename(best_match['full_path'])
         dest_path = os.path.join(transfer_dir, dest_filename)
         os.makedirs(transfer_dir, exist_ok=True)

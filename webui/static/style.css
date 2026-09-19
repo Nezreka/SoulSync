@@ -50366,6 +50366,13 @@ div.artist-hero-badge {
     gap: 8px;
 }
 
+.profile-settings-help {
+    font-size: 12px;
+    color: var(--text-muted, #9ca3af);
+    margin: -4px 0 10px;
+    line-height: 1.4;
+}
+
 .profile-settings-label {
     color: #d1d5db;
     font-size: 12px;

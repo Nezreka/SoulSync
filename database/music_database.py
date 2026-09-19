@@ -1076,6 +1076,7 @@ class MusicDatabase:
             self._add_profile_service_credentials(cursor)
             self._add_profile_navidrome_login(cursor)
             self._add_profile_plex_home_user(cursor)
+            self._add_own_library_columns(cursor)
             self._add_service_credential_sets(cursor)
             self._add_soul_id_columns(cursor)
             self._add_listening_history_table(cursor)
@@ -5752,6 +5753,97 @@ class MusicDatabase:
             logger.error(f"Error reading plex home user for profile {profile_id}: {e}")
             return None
 
+    # ── own library per profile (#1199) ──────────────────────────────────
+    #
+    # a profile can have a library of its own: its own output folder and
+    # its own library on the media server. rows the scan of THAT library
+    # writes carry the profile as owner; rows of the shared library carry
+    # NULL, which is every row that existed before this. the shared client
+    # scans and reads as always; an own-library profile scans and reads its
+    # own rows, the admin sees everything.
+
+    def _add_own_library_columns(self, cursor):
+        for sql in (
+            "ALTER TABLE profiles ADD COLUMN library_mode TEXT DEFAULT 'shared'",
+            "ALTER TABLE profiles ADD COLUMN library_root TEXT DEFAULT NULL",
+            "ALTER TABLE tracks ADD COLUMN owner_profile_id INTEGER DEFAULT NULL",
+            "ALTER TABLE albums ADD COLUMN owner_profile_id INTEGER DEFAULT NULL",
+            "ALTER TABLE artists ADD COLUMN owner_profile_id INTEGER DEFAULT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_tracks_owner ON tracks (owner_profile_id)",
+            "CREATE INDEX IF NOT EXISTS idx_albums_owner ON albums (owner_profile_id)",
+            "CREATE INDEX IF NOT EXISTS idx_artists_owner ON artists (owner_profile_id)",
+        ):
+            try:
+                cursor.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # Column / index already exists
+
+    def set_profile_library(self, profile_id: int, mode: str, root: Optional[str]) -> bool:
+        """'shared' (the default, the one library everyone has always used) or
+        'own' with the profile's output folder."""
+        mode = 'own' if mode == 'own' else 'shared'
+        root = (root or '').strip() or None
+        if mode == 'own' and not root:
+            return False
+        if mode == 'shared':
+            root = None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE profiles SET library_mode = ?, library_root = ?, updated_at = CURRENT_TIMESTAMP "
+                               "WHERE id = ?", (mode, root, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving library mode for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_library(self, profile_id: int) -> Dict[str, Any]:
+        """{'mode': 'shared'|'own', 'root': str|None}. profile 1 is always shared."""
+        if not profile_id or int(profile_id) == 1:
+            return {'mode': 'shared', 'root': None}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT library_mode, library_root FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+            if not row or row[0] != 'own' or not row[1]:
+                return {'mode': 'shared', 'root': None}
+            return {'mode': 'own', 'root': row[1]}
+        except Exception as e:
+            logger.error(f"Error reading library mode for profile {profile_id}: {e}")
+            return {'mode': 'shared', 'root': None}
+
+    def get_own_library_profiles(self) -> List[Dict[str, Any]]:
+        """every profile with a library of its own: id, name, root."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, name, library_root FROM profiles "
+                               "WHERE library_mode = 'own' AND library_root IS NOT NULL AND library_root != '' "
+                               "ORDER BY id")
+                return [{'id': r[0], 'name': r[1], 'root': r[2]} for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error listing own-library profiles: {e}")
+            return []
+
+    @staticmethod
+    def _owner_scope_sql(scope, column: str = 'owner_profile_id') -> Tuple[str, list]:
+        """the WHERE fragment for a library scope from core.library_scope:
+        None = everything (admin), 'shared' = the rows with no owner, an int
+        = that profile's rows. always returns a fragment so callers can
+        append it with AND unconditionally."""
+        if scope is None:
+            return "1=1", []
+        if scope == 'shared':
+            return f"{column} IS NULL", []
+        return f"{column} = ?", [int(scope)]
+
+    def _current_scope_sql(self, column: str = 'owner_profile_id') -> Tuple[str, list]:
+        """the scope of the caller (request profile or background profile)."""
+        from core.library_scope import current_library_scope
+        return self._owner_scope_sql(current_library_scope(), column)
+
     def _add_service_credential_sets(self, cursor):
         """Named, switchable credential sets per auth service + each profile's
         selection of which set is active (Phase 0 foundation).
@@ -7844,6 +7936,8 @@ class MusicDatabase:
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
                         'has_listenbrainz': row['listenbrainz_token'] is not None if 'listenbrainz_token' in columns else False,
                         'listenbrainz_username': row['listenbrainz_username'] if 'listenbrainz_username' in columns else None,
+                        'library_mode': (row['library_mode'] if 'library_mode' in columns else None) or 'shared',
+                        'library_root': row['library_root'] if 'library_root' in columns else None,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                     })
@@ -7878,6 +7972,8 @@ class MusicDatabase:
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
                         'has_listenbrainz': row['listenbrainz_token'] is not None if 'listenbrainz_token' in columns else False,
                         'listenbrainz_username': row['listenbrainz_username'] if 'listenbrainz_username' in columns else None,
+                        'library_mode': (row['library_mode'] if 'library_mode' in columns else None) or 'shared',
+                        'library_root': row['library_root'] if 'library_root' in columns else None,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                     }
@@ -8194,7 +8290,9 @@ class MusicDatabase:
             logger.error(f"Error getting database statistics: {e}")
             return {'artists': 0, 'albums': 0, 'tracks': 0}
     
-    def get_statistics_for_server(self, server_source: str = None) -> Dict[str, int]:
+    _ANY_OWNER = object()   # "do not filter by library owner"
+
+    def get_statistics_for_server(self, server_source: str = None, owner_profile_id=_ANY_OWNER) -> Dict[str, int]:
         """Get database statistics filtered by server source"""
         try:
             with self._get_connection() as conn:
@@ -8202,23 +8300,25 @@ class MusicDatabase:
                 
                 if server_source:
                     # Get counts for specific server (deduplicate by name like general count)
-                    cursor.execute("SELECT COUNT(DISTINCT name) FROM artists WHERE server_source = ?", (server_source,))
+                    owner_sql, owner_params = ("", []) if owner_profile_id is self._ANY_OWNER else (" AND owner_profile_id IS ?", [owner_profile_id])
+                    cursor.execute(f"SELECT COUNT(DISTINCT name) FROM artists WHERE server_source = ?{owner_sql}", [server_source] + owner_params)
                     artist_count = cursor.fetchone()[0]
                     
-                    cursor.execute("SELECT COUNT(*) FROM albums WHERE server_source = ?", (server_source,))
+                    cursor.execute(f"SELECT COUNT(*) FROM albums WHERE server_source = ?{owner_sql}", [server_source] + owner_params)
                     album_count = cursor.fetchone()[0]
                     
-                    cursor.execute("SELECT COUNT(*) FROM tracks WHERE server_source = ?", (server_source,))
+                    cursor.execute(f"SELECT COUNT(*) FROM tracks WHERE server_source = ?{owner_sql}", [server_source] + owner_params)
                     track_count = cursor.fetchone()[0]
                 else:
-                    # Get total counts (all servers)
-                    cursor.execute("SELECT COUNT(*) FROM artists")
+                    # Get total counts (all servers), for the caller's library
+                    scope_sql, scope_params = self._current_scope_sql('owner_profile_id')
+                    cursor.execute(f"SELECT COUNT(*) FROM artists WHERE {scope_sql}", scope_params)
                     artist_count = cursor.fetchone()[0]
-                    
-                    cursor.execute("SELECT COUNT(*) FROM albums")
+
+                    cursor.execute(f"SELECT COUNT(*) FROM albums WHERE {scope_sql}", scope_params)
                     album_count = cursor.fetchone()[0]
-                    
-                    cursor.execute("SELECT COUNT(*) FROM tracks")
+
+                    cursor.execute(f"SELECT COUNT(*) FROM tracks WHERE {scope_sql}", scope_params)
                     track_count = cursor.fetchone()[0]
                 
                 return {
@@ -8266,22 +8366,27 @@ class MusicDatabase:
     def _is_transient_sqlite_io_error(exc: Exception) -> bool:
         return "disk i/o error" in str(exc).lower()
     
-    def clear_server_data(self, server_source: str):
-        """Clear data for specific server only (server-aware full refresh)"""
+    def clear_server_data(self, server_source: str, owner_profile_id=None):
+        """Clear data for specific server only (server-aware full refresh).
+        one library at a time: the shared library's rows (owner None) by
+        default; a profile's own rows when its id is given (#1199)."""
         for attempt in range(2):
             try:
                 with self._get_connection() as conn:
                     cursor = conn.cursor()
 
-                    # Delete only data from the specified server
+                    # Delete only data from the specified server and library owner
                     # Order matters: tracks -> albums -> artists (foreign key constraints)
-                    cursor.execute("DELETE FROM tracks WHERE server_source = ?", (server_source,))
+                    cursor.execute("DELETE FROM tracks WHERE server_source = ? AND owner_profile_id IS ?",
+                                   (server_source, owner_profile_id))
                     tracks_deleted = cursor.rowcount
 
-                    cursor.execute("DELETE FROM albums WHERE server_source = ?", (server_source,))
+                    cursor.execute("DELETE FROM albums WHERE server_source = ? AND owner_profile_id IS ?",
+                                   (server_source, owner_profile_id))
                     albums_deleted = cursor.rowcount
 
-                    cursor.execute("DELETE FROM artists WHERE server_source = ?", (server_source,))
+                    cursor.execute("DELETE FROM artists WHERE server_source = ? AND owner_profile_id IS ?",
+                                   (server_source, owner_profile_id))
                     artists_deleted = cursor.rowcount
 
                     # Stamp the rebuild. Wiping the library destroys every local
@@ -8434,11 +8539,13 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Find duplicate artist groups (same name + server_source, different IDs)
+                # Find duplicate artist groups (same name + server_source + library
+                # owner, different IDs). two profiles' own copies of one artist are
+                # two rows on purpose (#1199), never a duplicate to merge.
                 cursor.execute("""
                     SELECT name, server_source, GROUP_CONCAT(id) as ids, COUNT(*) as cnt
                     FROM artists
-                    GROUP BY name, server_source
+                    GROUP BY name, server_source, owner_profile_id
                     HAVING cnt > 1
                 """)
                 duplicate_groups = cursor.fetchall()
@@ -8543,12 +8650,14 @@ class MusicDatabase:
 
     # --- Removal detection helpers ---
 
-    def get_all_artist_ids_for_server(self, server_source: str) -> set:
-        """Get all artist IDs stored in the database for a specific server."""
+    def get_all_artist_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
+        """Get all artist IDs stored in the database for a specific server (and
+        library owner: None = the shared library's rows)."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id FROM artists WHERE server_source = ?", (server_source,))
+                cursor.execute("SELECT id FROM artists WHERE server_source = ? AND owner_profile_id IS ?",
+                               (server_source, owner_profile_id))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting artist IDs for {server_source}: {e}")
@@ -8590,23 +8699,27 @@ class MusicDatabase:
             logger.error(f"Error clearing phantom artist thumbs for {server_source}: {e}")
         return cleared
 
-    def get_all_album_ids_for_server(self, server_source: str) -> set:
-        """Get all album IDs stored in the database for a specific server."""
+    def get_all_album_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
+        """Get all album IDs stored in the database for a specific server (and
+        library owner: None = the shared library's rows)."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id FROM albums WHERE server_source = ?", (server_source,))
+                cursor.execute("SELECT id FROM albums WHERE server_source = ? AND owner_profile_id IS ?",
+                               (server_source, owner_profile_id))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting album IDs for {server_source}: {e}")
             return set()
 
-    def get_all_track_ids_for_server(self, server_source: str) -> set:
-        """Get all track IDs stored in the database for a specific server."""
+    def get_all_track_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
+        """Get all track IDs stored in the database for a specific server (and
+        library owner: None = the shared library's rows)."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id FROM tracks WHERE server_source = ?", (server_source,))
+                cursor.execute("SELECT id FROM tracks WHERE server_source = ? AND owner_profile_id IS ?",
+                               (server_source, owner_profile_id))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting track IDs for {server_source}: {e}")
@@ -8845,7 +8958,7 @@ class MusicDatabase:
         """Insert or update artist from Plex artist object - DEPRECATED: Use insert_or_update_media_artist instead"""
         return self.insert_or_update_media_artist(plex_artist, server_source='plex')
     
-    def insert_or_update_media_artist(self, artist_obj, server_source: str = 'plex') -> bool:
+    def insert_or_update_media_artist(self, artist_obj, server_source: str = 'plex', owner_profile_id=None) -> bool:
         """Insert or update artist from media server artist object (Plex or Jellyfin)"""
         try:
             with self._get_connection() as conn:
@@ -8916,7 +9029,10 @@ class MusicDatabase:
                 else:
                     # Before inserting, check if an artist with the same name already exists
                     # for this server source (ratingKey may have changed after a library rescan)
-                    cursor.execute("SELECT id FROM artists WHERE name = ? AND server_source = ?", (name, server_source))
+                    # within the same owner only (#1199): another profile's copy of
+                    # this artist is a different row, not this one with a new id
+                    cursor.execute("SELECT id FROM artists WHERE name = ? AND server_source = ? AND owner_profile_id IS ?",
+                                   (name, server_source, owner_profile_id))
                     existing_by_name = cursor.fetchone()
 
                     if existing_by_name:
@@ -8951,9 +9067,9 @@ class MusicDatabase:
                         # Insert new artist with fresh server metadata + preserved created_at
                         old_created = old_row['created_at'] if old_row else None
                         cursor.execute("""
-                            INSERT INTO artists (id, name, thumb_url, genres, summary, server_source, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        """, (artist_id, name, preserved_thumb_url, genres_json, summary, server_source, old_created))
+                            INSERT INTO artists (id, name, thumb_url, genres, summary, server_source, owner_profile_id, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """, (artist_id, name, preserved_thumb_url, genres_json, summary, server_source, owner_profile_id, old_created))
 
                         # Copy enrichment data from old record to new record
                         if old_row:
@@ -8994,9 +9110,9 @@ class MusicDatabase:
                     else:
                         # Genuinely new artist — insert fresh record
                         cursor.execute("""
-                            INSERT INTO artists (id, name, thumb_url, genres, summary, server_source)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        """, (artist_id, name, thumb_url, genres_json, summary, server_source))
+                            INSERT INTO artists (id, name, thumb_url, genres, summary, server_source, owner_profile_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (artist_id, name, thumb_url, genres_json, summary, server_source, owner_profile_id))
                         logger.debug(f"Inserted new {server_source} artist: {name} (ID: {artist_id})")
 
                 conn.commit()
@@ -9056,7 +9172,7 @@ class MusicDatabase:
         """Insert or update album from Plex album object - DEPRECATED: Use insert_or_update_media_album instead"""
         return self.insert_or_update_media_album(plex_album, artist_id, server_source='plex')
     
-    def insert_or_update_media_album(self, album_obj, artist_id: str, server_source: str = 'plex') -> bool:
+    def insert_or_update_media_album(self, album_obj, artist_id: str, server_source: str = 'plex', owner_profile_id=None) -> bool:
         """Insert or update album from media server album object (Plex or Jellyfin)"""
         try:
             conn = self._get_connection()
@@ -9112,8 +9228,8 @@ class MusicDatabase:
                 # Before inserting, check if an album with the same title already exists
                 # under this artist (ratingKey may have changed after a library rescan)
                 cursor.execute(
-                    "SELECT id FROM albums WHERE title = ? AND artist_id = ? AND server_source = ?",
-                    (title, artist_id, server_source))
+                    "SELECT id FROM albums WHERE title = ? AND artist_id = ? AND server_source = ? AND owner_profile_id IS ?",
+                    (title, artist_id, server_source, owner_profile_id))
                 existing_by_title = cursor.fetchone()
 
                 if existing_by_title:
@@ -9156,10 +9272,10 @@ class MusicDatabase:
                     old_created = old_row['created_at'] if old_row else None
                     cursor.execute("""
                         INSERT INTO albums (id, artist_id, title, year, thumb_url, genres,
-                                            track_count, duration, server_source, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                                            track_count, duration, server_source, owner_profile_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     """, (album_id, artist_id, title, year, preserved_thumb_url, genres_json,
-                          track_count, duration, server_source, old_created))
+                          track_count, duration, server_source, owner_profile_id, old_created))
 
                     # Copy enrichment data from old record to new record
                     if old_row:
@@ -9198,9 +9314,9 @@ class MusicDatabase:
                 else:
                     # Genuinely new album — insert fresh record
                     cursor.execute("""
-                        INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count, duration, server_source)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (album_id, artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source))
+                        INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count, duration, server_source, owner_profile_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (album_id, artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source, owner_profile_id))
 
             conn.commit()
             return True
@@ -9318,7 +9434,7 @@ class MusicDatabase:
         """Insert or update track from Plex track object - DEPRECATED: Use insert_or_update_media_track instead"""
         return self.insert_or_update_media_track(plex_track, album_id, artist_id, server_source='plex')
     
-    def insert_or_update_media_track(self, track_obj, album_id: str, artist_id: str, server_source: str = 'plex') -> bool:
+    def insert_or_update_media_track(self, track_obj, album_id: str, artist_id: str, server_source: str = 'plex', owner_profile_id=None) -> bool:
         """Insert or update track from media server track object (Plex or Jellyfin) with retry logic"""
         max_retries = 3
         retry_count = 0
@@ -9450,9 +9566,9 @@ class MusicDatabase:
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, title_norm, track_artist_norm, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, title_norm, track_artist_norm or ''))
+                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, title_norm, track_artist_norm, owner_profile_id, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, title_norm, track_artist_norm or '', owner_profile_id))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, and all other enrichment data. file_size uses
@@ -9737,20 +9853,21 @@ class MusicDatabase:
             norm_query = f"%{self._normalize_for_comparison(query)}%"
             name_expr = self._norm_expr(self._norm_ready(cursor), 'artists', 'name', 'name_norm').replace('artists.', '')
 
+            scope_sql, scope_params = self._current_scope_sql('owner_profile_id')
             if server_source:
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT * FROM artists
-                    WHERE {name_expr} LIKE ? AND server_source = ?
+                    WHERE {name_expr} LIKE ? AND server_source = ? AND {scope_sql}
                     ORDER BY name
                     LIMIT ?
-                """.format(name_expr=name_expr), (norm_query, server_source, limit))
+                """, (norm_query, server_source, *scope_params, limit))
             else:
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT * FROM artists
-                    WHERE {name_expr} LIKE ?
+                    WHERE {name_expr} LIKE ? AND {scope_sql}
                     ORDER BY name
                     LIMIT ?
-                """.format(name_expr=name_expr), (norm_query, limit))
+                """, (norm_query, *scope_params, limit))
             
             rows = cursor.fetchall()
             
@@ -9960,6 +10077,11 @@ class MusicDatabase:
         if not where_conditions:
             return []
 
+        # whose library the caller sees (#1199)
+        scope_sql, scope_params = self._current_scope_sql('tracks.owner_profile_id')
+        where_conditions.append(scope_sql)
+        params.extend(scope_params)
+
         where_clause = " AND ".join(where_conditions)
 
         # Relevance ordering. The old `ORDER BY tracks.title` was case-SENSITIVE
@@ -10087,6 +10209,9 @@ class MusicDatabase:
         if server_source:
             where_parts.append("tracks.server_source = ?")
             params.append(server_source)
+        scope_sql, scope_params = self._current_scope_sql('tracks.owner_profile_id')
+        where_parts.append(scope_sql)
+        params.extend(scope_params)
 
         where_clause = " AND ".join(where_parts)
         params.append(limit * 3)
@@ -10215,6 +10340,10 @@ class MusicDatabase:
                 # If no search criteria, return empty list
                 return []
 
+            scope_sql, scope_params = self._current_scope_sql('albums.owner_profile_id')
+            where_conditions.append(scope_sql)
+            params.extend(scope_params)
+
             where_clause = " AND ".join(where_conditions)
             params.append(limit)
 
@@ -10332,6 +10461,9 @@ class MusicDatabase:
         if server_source:
             sql += " AND tracks.server_source = ?"
             params.append(server_source)
+        scope_sql, scope_params = self._current_scope_sql('tracks.owner_profile_id')
+        sql += f" AND {scope_sql}"
+        params.extend(scope_params)
         sql += " LIMIT ?"
         params.append(limit)
         cursor.execute(sql, params)
@@ -10345,7 +10477,8 @@ class MusicDatabase:
         if not names:
             return False
         ph = ','.join('?' for _ in names)
-        cursor.execute(f"SELECT 1 FROM artists WHERE name_norm IN ({ph}) LIMIT 1", names)
+        scope_sql, scope_params = self._current_scope_sql('owner_profile_id')
+        cursor.execute(f"SELECT 1 FROM artists WHERE name_norm IN ({ph}) AND {scope_sql} LIMIT 1", names + scope_params)
         if cursor.fetchone():
             return True
         # punctuation-only differences ("ACDC" for "AC/DC") are the same
@@ -10355,13 +10488,15 @@ class MusicDatabase:
         keys = [k for k in keys if k]
         if keys:
             kph = ','.join('?' for _ in keys)
-            cursor.execute(f"SELECT 1 FROM artists WHERE name_key IN ({kph}) LIMIT 1", keys)
+            cursor.execute(f"SELECT 1 FROM artists WHERE name_key IN ({kph}) AND {scope_sql} LIMIT 1", keys + scope_params)
             if cursor.fetchone():
                 return True
-        cursor.execute(f"SELECT 1 FROM tracks WHERE track_artist_norm IN ({ph}) LIMIT 1", names)
+        cursor.execute(f"SELECT 1 FROM tracks WHERE track_artist_norm IN ({ph}) AND {scope_sql} LIMIT 1", names + scope_params)
         if cursor.fetchone():
             return True
-        cursor.execute(f"SELECT 1 FROM track_credits WHERE name_norm IN ({ph}) LIMIT 1", names)
+        cursor.execute(f"SELECT 1 FROM track_credits tc JOIN tracks ON tracks.id = tc.track_id "
+                       f"WHERE tc.name_norm IN ({ph}) AND {scope_sql.replace('owner_profile_id', 'tracks.owner_profile_id')} LIMIT 1",
+                       names + scope_params)
         return cursor.fetchone() is not None
 
     def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None) -> Tuple[Optional[DatabaseTrack], float]:
@@ -10873,12 +11008,14 @@ class MusicDatabase:
                     if server_source:
                         src = " AND albums.server_source = ?"
                         params.append(server_source)
+                    scope_sql, scope_params = self._current_scope_sql('albums.owner_profile_id')
+                    params.extend(scope_params)
                     params.append(limit)
                     cursor.execute(f"""
                         SELECT albums.*, artists.name as artist_name
                         FROM albums
                         JOIN artists ON albums.artist_id = artists.id
-                        WHERE albums.artist_id IN ({ph}){src}
+                        WHERE albums.artist_id IN ({ph}){src} AND {scope_sql}
                         ORDER BY albums.title, artists.name
                         LIMIT ?
                     """, params)
@@ -10967,13 +11104,14 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             placeholders = ','.join('?' for _ in album_ids)
+            scope_sql, scope_params = self._current_scope_sql('t.owner_profile_id')
             cursor.execute(f"""
                 SELECT t.*, a.name as artist_name, al.title as album_title, al.thumb_url as album_thumb_url
                 FROM tracks t
                 JOIN artists a ON a.id = t.artist_id
                 JOIN albums al ON al.id = t.album_id
-                WHERE t.album_id IN ({placeholders})
-            """, list(album_ids))
+                WHERE t.album_id IN ({placeholders}) AND {scope_sql}
+            """, list(album_ids) + scope_params)
             rows = cursor.fetchall()
             tracks: List[DatabaseTrack] = []
             for row in rows:
@@ -17198,6 +17336,11 @@ class MusicDatabase:
                 where_conditions.append("a.server_source = ?")
                 params.append(active_server)
 
+                # whose library this page shows (#1199)
+                scope_sql, scope_params = self._current_scope_sql('a.owner_profile_id')
+                where_conditions.append(scope_sql)
+                params.extend(scope_params)
+
                 where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
 
                 # Pre-fetch watchlist data for this profile (small table, single fast query)
@@ -17238,7 +17381,8 @@ class MusicDatabase:
                     FROM artists a
                     WHERE {where_clause}
                         AND a.id = (SELECT MIN(a2.id) FROM artists a2
-                                    WHERE a2.name = a.name AND a2.server_source = a.server_source)
+                                    WHERE a2.name = a.name AND a2.server_source = a.server_source
+                                      AND a2.owner_profile_id IS a.owner_profile_id)
                 """
                 cursor.execute(count_query, params)
                 total_count = cursor.fetchone()['total_count']
@@ -17267,7 +17411,8 @@ class MusicDatabase:
                     FROM artists a
                     WHERE {where_clause}
                         AND a.id = (SELECT MIN(a2.id) FROM artists a2
-                                    WHERE a2.name = a.name AND a2.server_source = a.server_source)
+                                    WHERE a2.name = a.name AND a2.server_source = a.server_source
+                                      AND a2.owner_profile_id IS a.owner_profile_id)
                     ORDER BY a.name COLLATE NOCASE
                     LIMIT ? OFFSET ?
                 """
@@ -20890,7 +21035,9 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute(f"SELECT * FROM {table} ORDER BY created_at DESC LIMIT ?", (limit,))
+            scope_sql, scope_params = self._current_scope_sql('owner_profile_id')
+            cursor.execute(f"SELECT * FROM {table} WHERE {scope_sql} ORDER BY created_at DESC LIMIT ?",
+                           (*scope_params, limit))
             return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"API: Error getting recently added {entity_type}: {e}")
@@ -20915,6 +21062,10 @@ class MusicDatabase:
             if year is not None:
                 where_parts.append("al.year = ?")
                 params.append(year)
+
+            scope_sql, scope_params = self._current_scope_sql('al.owner_profile_id')
+            where_parts.append(scope_sql)
+            params.extend(scope_params)
 
             where_clause = " AND ".join(where_parts) if where_parts else "1=1"
 

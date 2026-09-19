@@ -78,6 +78,8 @@ def _search(db, title, artist='', limit=15):
         # COALESCE(norm_text(...)) form exactly as a not-yet-backfilled library
         _norm_ready=lambda cursor: False,
         _norm_expr=lambda ready, table, raw, norm: MusicDatabase._norm_expr(None, ready, table, raw, norm),
+        # the admin's view: every library (#1199)
+        _current_scope_sql=lambda column='owner_profile_id': ("1=1", []),
     )
     rows = MusicDatabase._search_tracks_fuzzy_rows(
         stub, db.cursor(), title, artist, limit, None)
@@ -225,6 +227,8 @@ def test_a_comma_in_a_band_name_does_not_bury_it():
         # COALESCE(norm_text(...)) form exactly as a not-yet-backfilled library
         _norm_ready=lambda cursor: False,
         _norm_expr=lambda ready, table, raw, norm: MusicDatabase._norm_expr(None, ready, table, raw, norm),
+        # the admin's view: every library (#1199)
+        _current_scope_sql=lambda column='owner_profile_id': ("1=1", []),
     )
     rows = MusicDatabase._search_tracks_fuzzy_rows(
         stub, db.cursor(), '', "Crosby, Stills & Nash", 15, None)

@@ -363,8 +363,8 @@ def _maybe_stage_album_track(context, final_path):
                     logger.info("[Atomic Publish] Batch %s: NOT flagged as an album download "
                                 "— publishing directly (atomic only applies to album batches)", batch_id)
                 else:
-                    transfer_dir = docker_resolve_path(
-                        config_manager.get('soulseek.transfer_path', './Transfer'))
+                    from core.imports.paths import transfer_root_for_context
+                    transfer_dir = transfer_root_for_context({'batch_id': batch_id})
                     album_folder = os.path.dirname(final_path)
                     if album_folder_is_fresh(album_folder):
                         _staging_root = staging_root_for_batch(transfer_dir, batch_id)
