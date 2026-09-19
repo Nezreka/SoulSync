@@ -852,3 +852,37 @@ def test_plex_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
     ds.run_sync_task('pPX', 'PPX', [_track()], profile_id=3,
                      playlist_image_url='https://img/p.png', deps=deps)
     assert px2.image_calls == [('PPX', 'https://img/p.png')] and px2.views == []
+
+
+def test_jellyfin_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
+    """same as plex and navidrome (#1265)"""
+    class _JellyWithUsers(_FakeJellyfin):
+        def __init__(self):
+            super().__init__()
+            self.views = []
+
+        def as_user(self, user_id, library_id=None):
+            view = _FakeJellyfin()
+            view.acting_as = user_id
+            self.views.append(view)
+            return view
+
+    jf = _JellyWithUsers()
+    patched_db.get_profile_server_library = lambda pid: {'jellyfin_user_id': 'kid-uid'} if pid == 2 else {}
+    cfg = _FakeConfig(server='jellyfin')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, jellyfin=jf, config=cfg)
+
+    ds.run_sync_task('pJF', 'PJF', [_track()], profile_id=2,
+                     playlist_image_url='https://img/j.png', deps=deps)
+
+    assert jf.image_calls == [], "the app account uploaded the cover"
+    assert [v.acting_as for v in jf.views] == ['kid-uid', 'kid-uid']
+    assert jf.views[-1].image_calls == [('PJF', 'https://img/j.png')]
+
+    jf2 = _JellyWithUsers()
+    deps = _build_deps(sync_service=svc, jellyfin=jf2, config=cfg)
+    ds.run_sync_task('pJF', 'PJF', [_track()], profile_id=3,
+                     playlist_image_url='https://img/j.png', deps=deps)
+    assert jf2.image_calls == [('PJF', 'https://img/j.png')] and jf2.views == []

@@ -560,6 +560,9 @@ def run_sync_task(
                 elif _cover_server == 'plex' and _cover_client is not None:
                     from services.sync_service import plex_client_for_profile
                     _cover_client = plex_client_for_profile(profile_id, _cover_client)
+                elif _cover_server in ('jellyfin', 'emby') and _cover_client is not None:
+                    from services.sync_service import jellyfin_client_for_profile
+                    _cover_client = jellyfin_client_for_profile(profile_id, _cover_client)
                 if _cover_client is not None and hasattr(_cover_client, 'get_playlist_by_name'):
                     _playlist_preexisted = bool(_cover_client.get_playlist_by_name(playlist_name))
             except Exception as _pre_err:
@@ -640,7 +643,9 @@ def run_sync_task(
                     ok = _px.set_playlist_image(playlist_name, playlist_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Plex upload result: {ok}")
                 elif active_server in ('jellyfin', 'emby') and _engine and _engine.client('jellyfin'):
-                    ok = _engine.client('jellyfin').set_playlist_image(playlist_name, playlist_image_url)
+                    from services.sync_service import jellyfin_client_for_profile
+                    _jf = jellyfin_client_for_profile(profile_id, _engine.client('jellyfin'))
+                    ok = _jf.set_playlist_image(playlist_name, playlist_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Jellyfin upload result: {ok}")
                 elif active_server == 'navidrome' and _engine and _engine.client('navidrome'):
                     # Subsonic has no playlist-cover field, but Navidrome's native

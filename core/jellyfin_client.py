@@ -756,6 +756,10 @@ class JellyfinClient(MediaServerClient):
                 self.user_id is not None and 
                 self.music_library_id is not None)
     
+    def as_user(self, user_id: str, library_id: Optional[str] = None) -> 'JellyfinUserView':
+        """this client, acting as one jellyfin user (see JellyfinUserView)."""
+        return JellyfinUserView(self, user_id, library_id)
+
     def get_all_artists(self) -> List[JellyfinArtist]:
         """Get all artists from the music library - matches Plex interface"""
         # last_fetch_failed lets callers tell "library is genuinely empty"
@@ -2312,3 +2316,50 @@ def jellyfin_auth_headers(api_key) -> dict:
             f'Token="{token}"'
         ),
     }
+
+
+class JellyfinUserView(JellyfinClient):
+    """the shared JellyfinClient, acting as one jellyfin user.
+
+    the api key authenticates every call and the user is a parameter
+    (UserId on playlist creation, /Users/<id>/ on reads), so acting as a
+    user means using their id. the sync used to do that by assigning
+    client.user_id on the one shared client, which made every other caller
+    that user too until the next sync overwrote it (#1265). this is a
+    subclass whose user_id (and optionally music library) is its own and
+    whose every other attribute is read from the wrapped client, so every
+    method runs unchanged on it and nothing on the shared client changes.
+    """
+
+    def __init__(self, client: JellyfinClient, user_id: str, library_id: Optional[str] = None):
+        object.__setattr__(self, '_base_client', client)
+        object.__setattr__(self, '_view_user_id', str(user_id) if user_id else None)
+        object.__setattr__(self, '_view_library_id', str(library_id) if library_id else None)
+
+    def __getattr__(self, name):
+        # only reached when the view itself has no such attribute
+        return getattr(object.__getattribute__(self, '_base_client'), name)
+
+    @property
+    def acting_as(self) -> Optional[str]:
+        return self._view_user_id
+
+    @property
+    def user_id(self):
+        return self._view_user_id or object.__getattribute__(self, '_base_client').user_id
+
+    @property
+    def music_library_id(self):
+        return self._view_library_id or object.__getattribute__(self, '_base_client').music_library_id
+
+    def ensure_connection(self) -> bool:
+        # the connection (url, api key, default user) belongs to the shared
+        # client; a reconnect must set it up there, not on this view
+        return object.__getattribute__(self, '_base_client').ensure_connection()
+
+    def clear_cache(self):
+        object.__getattribute__(self, '_base_client').clear_cache()
+
+    def reload_config(self):
+        object.__getattribute__(self, '_base_client').reload_config()
+

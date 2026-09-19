@@ -122,6 +122,29 @@ def navidrome_client_for_profile(profile_id, client):
     return client.as_user(*login)
 
 
+def jellyfin_client_for_profile(profile_id, client):
+    """the jellyfin client acting as the profile's chosen jellyfin user and
+    library, when the profile chose one. a view, never a change to the
+    shared client: assigning client.user_id on the singleton made every
+    other caller that user until the next sync overwrote it (#1265). no
+    pick, no profile, or a db that will not answer = the client as-is."""
+    if not profile_id or client is None or not hasattr(client, 'as_user'):
+        return client
+    try:
+        from database.music_database import MusicDatabase
+        libs = MusicDatabase().get_profile_server_library(profile_id) or {}
+    except Exception as e:
+        logger.error(f"Per-profile: could not read jellyfin user for profile {profile_id}: {e}")
+        return client
+    user_id = libs.get('jellyfin_user_id')
+    library_id = libs.get('jellyfin_library_id')
+    if not user_id and not library_id:
+        return client
+    logger.info(f"Per-profile: Jellyfin runs as user '{user_id or 'default'}'"
+                f"{f' in library {library_id}' if library_id else ''} for profile {profile_id}")
+    return client.as_user(user_id, library_id)
+
+
 def plex_client_for_profile(profile_id, client):
     """the plex client connected as the profile's linked Home user, when it
     has one. plex writes playlists as the connection's token, so this is what
@@ -327,7 +350,7 @@ class PlaylistSyncService:
                     logger.error("Jellyfin client not provided to sync service")
                     return None, "jellyfin"
                 if profile_id:
-                    self._apply_profile_library(profile_id, 'jellyfin', client)
+                    client = jellyfin_client_for_profile(profile_id, client)
                 return client, "jellyfin"
             elif active_server == "navidrome":
                 client = self._media_client('navidrome')
@@ -370,13 +393,8 @@ class PlaylistSyncService:
                 if hasattr(client, 'set_music_library_by_name'):
                     client.set_music_library_by_name(lib_name)
                     logger.info(f"Per-profile: set Plex library to '{lib_name}' for profile {profile_id}")
-            elif server_type == 'jellyfin':
-                if libs.get('jellyfin_user_id') and hasattr(client, 'user_id'):
-                    client.user_id = libs['jellyfin_user_id']
-                    logger.info(f"Per-profile: set Jellyfin user to '{libs['jellyfin_user_id']}' for profile {profile_id}")
-                if libs.get('jellyfin_library_id') and hasattr(client, 'music_library_id'):
-                    client.music_library_id = libs['jellyfin_library_id']
-                    logger.info(f"Per-profile: set Jellyfin library to '{libs['jellyfin_library_id']}' for profile {profile_id}")
+            # jellyfin: jellyfin_client_for_profile, a view, never an assignment
+            # on the shared client
         except Exception as e:
             logger.debug(f"Error applying profile library for profile {profile_id}: {e}")
 
