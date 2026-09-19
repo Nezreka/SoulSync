@@ -626,9 +626,10 @@ def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, acti
             return 0
 
         # Manual match check — skip fuzzy search if user already linked this track.
-        if _mlm.get_match_for_track(music_database, profile_id, track, default_source='wishlist'):
+        manual_match = _mlm.get_match_for_track(music_database, profile_id, track, default_source='wishlist')
+        if manual_match and _mlm.match_is_live(music_database, manual_match):
             try:
-                removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+                removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True, profile_id=profile_id)
                 if removed:
                     cleanup_removed += 1
                     logger.info(f"{log_prefix} [Manual Match] Skipped already-matched track: '{track_name}'")
@@ -664,7 +665,7 @@ def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, acti
 
         if found_in_db:
             try:
-                removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+                removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True, profile_id=profile_id)
                 if removed:
                     cleanup_removed += 1
                     logger.info(f"{log_prefix} Removed already-owned track: '{track_name}' by {matched_artist_name or artist_name}")

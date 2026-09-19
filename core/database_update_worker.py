@@ -675,7 +675,7 @@ class DatabaseUpdateWorker:
             except Exception as e:
                 logger.error(f"Deep scan: Error processing artist {artist_name}: {e}")
                 # never got a full look at this artist, so nothing under it is stale
-                self._unverified_artist_ids.add(str(getattr(artist, 'ratingKey', '')))
+                self._unverified_artist_ids.add(self._library_artist_id(getattr(artist, 'ratingKey', '')))
                 with self.thread_lock:
                     self.failed_operations += 1
                 self._emit_signal('artist_processed', artist_name, False, f"Error: {str(e)}", 0, 0)
@@ -1182,7 +1182,7 @@ class DatabaseUpdateWorker:
                     artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
                     if artist_success:
                         total_processed_artists += 1
-                        self._touched_artist_ids.add(artist_id)
+                        self._touched_artist_ids.add(self._library_artist_id(artist_id))
                     
                     # Process albums for this artist  
                     artist_album_ids = albums_by_artist.get(artist_id, set())
@@ -1298,6 +1298,10 @@ class DatabaseUpdateWorker:
             logger.debug(f"Error checking for metadata changes: {e}")
             return False  # Assume no changes if we can't check
     
+    def _library_artist_id(self, artist_id):
+        from core.library_scope import library_artist_id
+        return library_artist_id(artist_id, self.server_type, self.owner_profile_id)
+
     def _clear_phantom_artist_thumbs(self):
         """null the server-built photo url of every artist the server says has
         no image. non-fatal, and a client that can't answer is left alone."""
@@ -1308,7 +1312,8 @@ class DatabaseUpdateWorker:
             without_image = getter()
             if not without_image:
                 return
-            cleared = self.database.clear_phantom_artist_thumbs(without_image, self.server_type)
+            cleared = self.database.clear_phantom_artist_thumbs(
+                {self._library_artist_id(i) for i in without_image}, self.server_type)
             if cleared:
                 logger.info(f"Cleared {cleared} phantom artist photo urls "
                             f"({self.server_type} has no image for them)")
@@ -1451,6 +1456,7 @@ class DatabaseUpdateWorker:
         db_album_ids = self.database.get_all_album_ids_for_server(self.server_type, owner_profile_id=self.owner_profile_id) if check_albums else set()
 
         # Compute removal sets (only for types we have valid server data for)
+        server_artist_ids = {self._library_artist_id(i) for i in server_artist_ids}
         removed_artist_ids = (db_artist_ids - server_artist_ids) if check_artists else set()
         removed_album_ids = (db_album_ids - server_album_ids) if check_albums else set()
 
@@ -1705,10 +1711,10 @@ class DatabaseUpdateWorker:
             if not artist_success:
                 if seen_track_ids is not None:
                     # deep scan: nothing under this artist was looked at
-                    self._unverified_artist_ids.add(artist_id)
+                    self._unverified_artist_ids.add(self._library_artist_id(artist_id))
                 return False, "Failed to update artist data", 0, 0
 
-            self._touched_artist_ids.add(artist_id)
+            self._touched_artist_ids.add(self._library_artist_id(artist_id))
 
             # 2. Get all albums for this artist (cached from aggressive pre-population)
             try:
@@ -1719,7 +1725,7 @@ class DatabaseUpdateWorker:
                     # deep scan: no answer means every track under this artist
                     # stays unverified. this used to return success with zero
                     # seen tracks, and the stale pass deleted all of them.
-                    self._unverified_artist_ids.add(artist_id)
+                    self._unverified_artist_ids.add(self._library_artist_id(artist_id))
                     return False, "Album listing failed, artist kept as-is", 0, 0
                 return True, "Artist updated (no albums accessible)", 0, 0
 
@@ -1814,7 +1820,7 @@ class DatabaseUpdateWorker:
         except Exception as e:
             logger.error(f"Error processing artist '{getattr(media_artist, 'title', 'Unknown')}': {e}")
             if seen_track_ids is not None:
-                self._unverified_artist_ids.add(str(getattr(media_artist, 'ratingKey', '')))
+                self._unverified_artist_ids.add(self._library_artist_id(getattr(media_artist, 'ratingKey', '')))
             return False, f"Processing error: {str(e)}", 0, 0
 
     def run_with_callback(self, completion_callback=None):

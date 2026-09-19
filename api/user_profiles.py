@@ -341,7 +341,8 @@ def list_profiles():
         return jsonify({'success': True, 'profiles': profiles,
                         # where an own-library folder goes on this install (#1199):
                         # a mount under /app in docker, anywhere otherwise
-                        'own_library_root_hint': _own_library_root_hint()})
+                        'own_library_root_hint': _own_library_root_hint(),
+                        'own_library_supported': config_manager.get_active_media_server() in ('plex', 'jellyfin')})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -495,6 +496,8 @@ def update_profile(profile_id):
             mode = 'own' if data.get('library_mode') == 'own' else 'shared'
             root = str(data.get('library_root') or '').strip()
             if mode == 'own':
+                if config_manager.get_active_media_server() not in ('plex', 'jellyfin'):
+                    return jsonify({'success': False, 'error': 'Own libraries require Plex or Jellyfin. Switch this profile to the shared library for Navidrome or Standalone.'}), 400
                 if not root:
                     return jsonify({'success': False, 'error': 'An own library needs an output folder'}), 400
                 shared_root = str(config_manager.get('soulseek.transfer_path', '') or '').strip().rstrip('/\\')

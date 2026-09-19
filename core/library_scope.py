@@ -56,10 +56,17 @@ def invalidate_library_scope_cache() -> None:
         _mode_cache.clear()
 
 
+def own_library_supported() -> bool:
+    from core.settings import config_manager
+    return config_manager.get_active_media_server() in ('plex', 'jellyfin')
+
+
 def library_scope_for_profile(profile_id: Optional[int]) -> Scope:
     """the scope a profile reads the library through."""
     if not profile_id or int(profile_id) == 1:
         return 'shared'          # profile 1 is always on the shared library
+    if not own_library_supported():
+        return 'shared'
     pid = int(profile_id)
     now = time.monotonic()
     with _mode_cache_lock:
@@ -85,3 +92,23 @@ def current_library_scope() -> Scope:
         return forced
     from core.profile_context import get_current_profile_id
     return library_scope_for_profile(get_current_profile_id())
+
+
+def library_artist_id(artist_id, server_source, owner_profile_id=None):
+    """Jellyfin artists are server-global; each own library needs its own parent row.
+    Album and track IDs remain native so playback and playlist writes are unchanged.
+    """
+    value = str(artist_id)
+    if server_source == 'jellyfin' and owner_profile_id is not None:
+        prefix = f'own-jellyfin:{int(owner_profile_id)}:'
+        if not value.startswith(prefix):
+            return prefix + native_jellyfin_artist_id(value)
+    return value
+
+
+def native_jellyfin_artist_id(artist_id):
+    value = str(artist_id)
+    parts = value.split(':', 2)
+    if len(parts) == 3 and parts[0] == 'own-jellyfin' and parts[1].isdigit():
+        return parts[2]
+    return value

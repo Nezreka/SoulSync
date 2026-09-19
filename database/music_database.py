@@ -1077,6 +1077,7 @@ class MusicDatabase:
             self._add_profile_navidrome_login(cursor)
             self._add_profile_plex_home_user(cursor)
             self._add_own_library_columns(cursor)
+            self._repair_own_jellyfin_artist_ids(cursor)
             self._add_service_credential_sets(cursor)
             self._add_soul_id_columns(cursor)
             self._add_listening_history_table(cursor)
@@ -5788,6 +5789,40 @@ class MusicDatabase:
             except sqlite3.OperationalError:
                 pass  # Column / index already exists
 
+    def _repair_own_jellyfin_artist_ids(self, cursor):
+        """Split legacy cross-library artist parents without losing enrichment or children."""
+        from core.library_scope import library_artist_id
+        cursor.execute("""
+            SELECT artist_id, owner_profile_id FROM albums
+            WHERE server_source = 'jellyfin' AND owner_profile_id IS NOT NULL
+            UNION SELECT artist_id, owner_profile_id FROM tracks
+            WHERE server_source = 'jellyfin' AND owner_profile_id IS NOT NULL
+            UNION SELECT id, owner_profile_id FROM artists
+            WHERE server_source = 'jellyfin' AND owner_profile_id IS NOT NULL
+        """)
+        rows = cursor.fetchall()
+        columns = [r[1] for r in cursor.execute('PRAGMA table_info(artists)').fetchall()]
+        quoted = ', '.join('"' + c + '"' for c in columns)
+        selection = ', '.join('?' if c in ('id', 'owner_profile_id') else '"' + c + '"' for c in columns)
+        for old_id, owner in rows:
+            new_id = library_artist_id(old_id, 'jellyfin', owner)
+            if new_id == old_id:
+                continue
+            values = [new_id if c == 'id' else owner for c in columns if c in ('id', 'owner_profile_id')]
+            cursor.execute(f'INSERT OR IGNORE INTO artists ({quoted}) SELECT {selection} FROM artists WHERE id = ?',
+                           [*values, old_id])
+            for table in ('albums', 'tracks'):
+                cursor.execute(f'UPDATE {table} SET artist_id = ? WHERE artist_id = ? AND owner_profile_id = ? AND server_source = ?',
+                               (new_id, old_id, owner, 'jellyfin'))
+            # Keep the native parent when the shared library references it.
+            cursor.execute("""UPDATE artists SET owner_profile_id = NULL WHERE id = ? AND (
+                EXISTS (SELECT 1 FROM albums WHERE artist_id = ? AND owner_profile_id IS NULL)
+                OR EXISTS (SELECT 1 FROM tracks WHERE artist_id = ? AND owner_profile_id IS NULL))""",
+                           (old_id, old_id, old_id))
+            cursor.execute("""DELETE FROM artists WHERE id = ? AND owner_profile_id = ?
+                AND NOT EXISTS (SELECT 1 FROM albums WHERE artist_id = ?)
+                AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = ?)""", (old_id, owner, old_id, old_id))
+
     def set_profile_library(self, profile_id: int, mode: str, root: Optional[str]) -> bool:
         """'shared' (the default, the one library everyone has always used) or
         'own' with the profile's output folder."""
@@ -7809,14 +7844,15 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT id FROM tracks WHERE file_path = ? LIMIT 1", (file_path,))
+            scope_sql, scope_params = self._current_scope_sql()
+            cursor.execute(f"SELECT id FROM tracks WHERE file_path = ? AND {scope_sql} LIMIT 1", (file_path, *scope_params))
             row = cursor.fetchone()
             if row:
                 return str(row[0])
             import os as _os
             fname = _os.path.basename(str(file_path).replace('\\', '/'))
             if fname:
-                cursor.execute("SELECT id FROM tracks WHERE file_path LIKE ? LIMIT 1", (f"%{fname}",))
+                cursor.execute(f"SELECT id FROM tracks WHERE file_path LIKE ? AND {scope_sql} LIMIT 1", (f"%{fname}", *scope_params))
                 row = cursor.fetchone()
                 if row:
                     return str(row[0])
@@ -8997,7 +9033,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 
                 # Convert artist ID to string (handles both Plex integer IDs and Jellyfin GUIDs)
-                artist_id = str(artist_obj.ratingKey)
+                from core.library_scope import library_artist_id
+                artist_id = library_artist_id(artist_obj.ratingKey, server_source, owner_profile_id)
                 raw_name = artist_obj.title
                 # Normalize artist name to handle quote variations and other inconsistencies
                 name = self._normalize_artist_name(raw_name)
@@ -9206,6 +9243,8 @@ class MusicDatabase:
     
     def insert_or_update_media_album(self, album_obj, artist_id: str, server_source: str = 'plex', owner_profile_id=None) -> bool:
         """Insert or update album from media server album object (Plex or Jellyfin)"""
+        from core.library_scope import library_artist_id
+        artist_id = library_artist_id(artist_id, server_source, owner_profile_id)
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -9229,8 +9268,12 @@ class MusicDatabase:
             genres_json = json.dumps(genres) if genres else None
             
             # Check if album exists with this ID (PRIMARY KEY check)
-            cursor.execute("SELECT id, server_source FROM albums WHERE id = ?", (album_id,))
+            cursor.execute("SELECT id, server_source, owner_profile_id FROM albums WHERE id = ?", (album_id,))
             existing = cursor.fetchone()
+
+            if existing and existing['owner_profile_id'] != owner_profile_id:
+                logger.error('Refusing to move album %s between library owners; check server library selections', album_id)
+                return False
 
             if existing:
                 # Album exists - update it (update server_source if different)
@@ -9468,6 +9511,8 @@ class MusicDatabase:
     
     def insert_or_update_media_track(self, track_obj, album_id: str, artist_id: str, server_source: str = 'plex', owner_profile_id=None) -> bool:
         """Insert or update track from media server track object (Plex or Jellyfin) with retry logic"""
+        from core.library_scope import library_artist_id
+        artist_id = library_artist_id(artist_id, server_source, owner_profile_id)
         max_retries = 3
         retry_count = 0
         
@@ -9586,8 +9631,12 @@ class MusicDatabase:
 
                 # Check if track already exists — UPDATE to preserve enrichment columns,
                 # INSERT only for genuinely new tracks
-                cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id,))
-                is_new_track = cursor.fetchone() is None
+                cursor.execute("SELECT owner_profile_id FROM tracks WHERE id = ? LIMIT 1", (track_id,))
+                existing = cursor.fetchone()
+                if existing is not None and existing['owner_profile_id'] != owner_profile_id:
+                    logger.error('Refusing to move track %s between library owners; check server library selections', track_id)
+                    return False
+                is_new_track = existing is None
 
                 # the scan is the bulk writer, so it fills the normalized
                 # columns itself instead of leaving a library-sized gap for the
@@ -9741,15 +9790,16 @@ class MusicDatabase:
             
             # Convert to string to handle both Plex integers and Jellyfin GUIDs
             track_id_str = str(track_id)
-            cursor.execute("""
+            scope_sql, scope_params = self._current_scope_sql('t.owner_profile_id')
+            cursor.execute(f"""
                 SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number, 
                        t.duration, t.created_at, t.updated_at,
                        a.name as artist_name, al.title as album_title
                 FROM tracks t
                 JOIN artists a ON t.artist_id = a.id
                 JOIN albums al ON t.album_id = al.id
-                WHERE t.id = ?
-            """, (track_id_str,))
+                WHERE t.id = ? AND {scope_sql}
+            """, (track_id_str, *scope_params))
             
             row = cursor.fetchone()
             if row:
@@ -11107,6 +11157,9 @@ class MusicDatabase:
             if server_source:
                 where += " AND t.server_source = ?"
                 params.append(server_source)
+            scope_sql, scope_params = self._current_scope_sql('t.owner_profile_id')
+            where += f' AND {scope_sql}'
+            params.extend(scope_params)
             params.append(limit)
 
             cursor.execute(f"""
@@ -17645,8 +17698,9 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
+                scope_sql, scope_params = self._current_scope_sql()
                 # Get artist information
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT
                         id, name, thumb_url, genres, server_source,
                         musicbrainz_id, deezer_id, audiodb_id, discogs_id,
@@ -17654,8 +17708,8 @@ class MusicDatabase:
                         tidal_id, qobuz_id, soul_id, amazon_id,
                         lastfm_listeners, lastfm_playcount, lastfm_tags, lastfm_bio
                     FROM artists
-                    WHERE id = ?
-                """, (artist_id,))
+                    WHERE id = ? AND {scope_sql}
+                """, (artist_id, *scope_params))
 
                 artist_row = cursor.fetchone()
 
@@ -17689,7 +17743,7 @@ class MusicDatabase:
                 # Include albums from ALL artists with the same name (fixes duplicate artist issue)
                 # Group by artist_id+title+year to merge Navidrome split albums (same artist,
                 # same album split into multiple DB entries) WITHOUT merging across different artists
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT
                         MIN(a.id) as id,
                         a.title,
@@ -17708,11 +17762,11 @@ class MusicDatabase:
                     WHERE a.artist_id IN (
                         SELECT id FROM artists
                         WHERE name = (SELECT name FROM artists WHERE id = ?)
-                        AND server_source = (SELECT server_source FROM artists WHERE id = ?)
+                        AND server_source = (SELECT server_source FROM artists WHERE id = ?) AND {scope_sql}
                     )
                     GROUP BY a.artist_id, a.title, a.year
                     ORDER BY a.year DESC, a.title
-                """, (artist_id, artist_id))
+                """, (artist_id, artist_id, *scope_params))
 
                 album_rows = cursor.fetchall()
 
@@ -17722,23 +17776,23 @@ class MusicDatabase:
                 singles = []
 
                 # Get total stats for the artist (including all artists with same name)
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT
                         COUNT(*) as album_count,
                         (SELECT COUNT(*) FROM tracks WHERE album_id IN (
                             SELECT id FROM albums WHERE artist_id IN (
                                 SELECT id FROM artists
                                 WHERE name = (SELECT name FROM artists WHERE id = ?)
-                                AND server_source = (SELECT server_source FROM artists WHERE id = ?)
+                                AND server_source = (SELECT server_source FROM artists WHERE id = ?) AND {scope_sql}
                             )
                         )) as track_count
                     FROM albums
                     WHERE artist_id IN (
                         SELECT id FROM artists
                         WHERE name = (SELECT name FROM artists WHERE id = ?)
-                        AND server_source = (SELECT server_source FROM artists WHERE id = ?)
+                        AND server_source = (SELECT server_source FROM artists WHERE id = ?) AND {scope_sql}
                     )
-                """, (artist_id, artist_id, artist_id, artist_id))
+                """, (artist_id, artist_id, *scope_params, artist_id, artist_id, *scope_params))
 
                 stats_row = cursor.fetchone()
                 album_count = stats_row['album_count'] if stats_row else 0
@@ -17849,8 +17903,9 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
+                scope_sql, scope_params = self._current_scope_sql()
                 # Get artist with all columns
-                cursor.execute("SELECT * FROM artists WHERE id = ?", (artist_id,))
+                cursor.execute(f"SELECT * FROM artists WHERE id = ? AND {scope_sql}", (artist_id, *scope_params))
                 artist_row = cursor.fetchone()
                 if not artist_row:
                     # `artist_id` may be a *source* ID (e.g. a MusicBrainz MBID
@@ -17866,8 +17921,8 @@ class MusicDatabase:
                     id_columns = list(dict.fromkeys(SOURCE_ID_FIELD.values()))
                     where = ' OR '.join(f"{col} = ?" for col in id_columns)
                     cursor.execute(
-                        f"SELECT * FROM artists WHERE {where} LIMIT 1",
-                        tuple(str(artist_id) for _ in id_columns),
+                        f"SELECT * FROM artists WHERE ({where}) AND {scope_sql} LIMIT 1",
+                        (*[str(artist_id) for _ in id_columns], *scope_params),
                     )
                     artist_row = cursor.fetchone()
                 if not artist_row:
@@ -17889,10 +17944,10 @@ class MusicDatabase:
                     artist_data['genres'] = []
 
                 # Get all album IDs for this artist (including same-name artists on same server)
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT id FROM artists
-                    WHERE name = ? AND server_source = ?
-                """, (artist_name, server_source))
+                    WHERE name = ? AND server_source = ? AND {scope_sql}
+                """, (artist_name, server_source, *scope_params))
                 artist_ids = [row['id'] for row in cursor.fetchall()]
 
                 # Get all albums with all columns
@@ -19810,13 +19865,14 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(track_ids))
+            scope_sql, scope_params = self._current_scope_sql('t.owner_profile_id')
             cursor.execute(f"""
                 SELECT t.*, a.name as artist_name, al.title as album_title
                 FROM tracks t
                 LEFT JOIN artists a ON t.artist_id = a.id
                 LEFT JOIN albums al ON t.album_id = al.id
-                WHERE t.id IN ({placeholders})
-            """, track_ids)
+                WHERE t.id IN ({placeholders}) AND {scope_sql}
+            """, [*track_ids, *scope_params])
             return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"API: Error getting tracks by IDs: {e}")

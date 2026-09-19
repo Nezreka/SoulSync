@@ -652,6 +652,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 if track_exists_in_playlist_folder_from_track_data(
                     effective_playlist_name,
                     track_data,
+                    profile_id=batch_profile_id,
                 ):
                     logger.info(
                         f"[Playlist Folder] '{track_name}' already on disk in playlist folder — skipping download"

@@ -170,6 +170,7 @@ def test_wishlist_cleanup_does_not_clear_an_own_library_profiles_entry_for_the_a
             return [track] if profile_id == kim else []
 
         def mark_track_download_result(self, tid, success, **kw):
+            assert kw.get('profile_id') == kim, 'cleanup must remove the owning profile entry'
             removed.append(tid)
             return True
     profiles = SimpleNamespace(get_all_profiles=lambda: [{'id': 1}, {'id': kim}])

@@ -959,6 +959,8 @@ class JellyfinClient(MediaServerClient):
         not connected, a page failed, an exception. an empty list with ok
         True is an artist with no albums. the deep scan must tell the two
         apart, it deletes what it does not see."""
+        from core.library_scope import native_jellyfin_artist_id
+        artist_id = native_jellyfin_artist_id(artist_id)
         # Use cache if available
         if artist_id in self._album_cache:
             return self._album_cache[artist_id], True
@@ -1033,6 +1035,8 @@ class JellyfinClient(MediaServerClient):
     
     def get_artist_by_id(self, artist_id: str) -> Optional[JellyfinArtist]:
         """Get a specific artist by ID"""
+        from core.library_scope import native_jellyfin_artist_id
+        artist_id = native_jellyfin_artist_id(artist_id)
         # Check cache first
         if artist_id in self._artist_cache:
             return self._artist_cache[artist_id]

@@ -2502,6 +2502,7 @@ async function loadProfileManageList() {
         editBtn.dataset.allowedPages = p.allowed_pages ? JSON.stringify(p.allowed_pages) : '';
         editBtn.dataset.canDownload = p.can_download !== false ? '1' : '0';
         editBtn.dataset.isAdmin = p.is_admin ? '1' : '0';
+        editBtn.dataset.librarySupported = data.own_library_supported === false ? '0' : '1';
         editBtn.dataset.libraryMode = p.library_mode || 'shared';
         editBtn.dataset.libraryRoot = p.library_root || '';
         editBtn.dataset.libraryHint = (data.own_library_root_hint || '').replace('<name>', (p.name || 'profile').toLowerCase().replace(/[^a-z0-9]+/g, '-'));
@@ -2544,6 +2545,7 @@ async function loadProfileManageList() {
                 allowed_pages: btn.dataset.allowedPages ? JSON.parse(btn.dataset.allowedPages) : null,
                 can_download: btn.dataset.canDownload !== '0',
                 is_admin: btn.dataset.isAdmin === '1',
+                library_supported: btn.dataset.librarySupported !== '0',
                 library_mode: btn.dataset.libraryMode || 'shared',
                 library_root: btn.dataset.libraryRoot || '',
                 library_hint: btn.dataset.libraryHint || ''
@@ -2813,8 +2815,11 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
         ownLibCheckbox = document.createElement('input');
         ownLibCheckbox.type = 'checkbox';
         ownLibCheckbox.checked = profileSettings.library_mode === 'own';
+        ownLibCheckbox.disabled = profileSettings.library_supported === false && !ownLibCheckbox.checked;
         olLabel.appendChild(ownLibCheckbox);
-        olLabel.appendChild(document.createTextNode(' Own library (separate output folder + their own server library)'));
+        olLabel.appendChild(document.createTextNode(profileSettings.library_supported === false
+            ? ' Own library (requires Plex or Jellyfin)'
+            : ' Own library (separate output folder + their own server library)'));
         form.appendChild(olLabel);
 
         // the folder: prefilled with the install's expected path (a mount

@@ -370,7 +370,7 @@ class PlaylistSyncService:
                 client = self._media_client('plex')
                 if profile_id and client:
                     client = plex_client_for_profile(profile_id, client)
-                    self._apply_profile_library(profile_id, 'plex', client)
+                    client = self._apply_profile_library(profile_id, 'plex', client) or client
                 return client, "plex"
         except Exception as e:
             logger.error(f"Error determining active media server: {e}")
@@ -390,11 +390,16 @@ class PlaylistSyncService:
 
             if server_type == 'plex' and libs.get('plex_library_id'):
                 lib_name = libs['plex_library_id']
+                from core.plex_client import PlexUserView
+                if not isinstance(client, PlexUserView):
+                    if not client.ensure_connection():
+                        return client
+                    client = PlexUserView(client, client.server, str(profile_id))
                 if hasattr(client, 'set_music_library_by_name'):
                     client.set_music_library_by_name(lib_name)
                     logger.info(f"Per-profile: set Plex library to '{lib_name}' for profile {profile_id}")
-            # jellyfin: jellyfin_client_for_profile, a view, never an assignment
-            # on the shared client
+            # Jellyfin uses jellyfin_client_for_profile; never mutate the shared client.
+            return client
         except Exception as e:
             logger.debug(f"Error applying profile library for profile {profile_id}: {e}")
 
@@ -981,7 +986,7 @@ class PlaylistSyncService:
                 #    Self-heals a stale library id via the stored file path.
                 try:
                     from core.artists.map import get_current_profile_id
-                    _profile_id = get_current_profile_id()
+                    _profile_id = _sync_profile_id.get() or get_current_profile_id()
                     m = cache_db.find_manual_library_match_by_source_track_id(
                         _profile_id, str(spotify_id), active_server)
                     if m:

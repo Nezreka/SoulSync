@@ -195,6 +195,9 @@ def library_root_for_profile(profile_id) -> Optional[str]:
     when the profile is on the shared library."""
     if not profile_id:
         return None
+    from core.library_scope import own_library_supported
+    if not own_library_supported():
+        return None
     try:
         from database.music_database import get_database
         lib = get_database().get_profile_library(int(profile_id))
