@@ -429,6 +429,10 @@ class MusicDatabase:
                 # writer waits politely instead of failing
                 connection.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
                 connection.execute("PRAGMA foreign_keys = ON")
+                # synchronous is per-connection, unlike journal_mode.
+                journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
+                if journal_mode and str(journal_mode[0]).lower() == "wal":
+                    connection.execute("PRAGMA synchronous = NORMAL")
                 # NOT `PRAGMA journal_mode = WAL` here. wal mode is persistent in
                 # the file and is set once per process in _ensure_wal_mode; the
                 # pragma takes a lock, and on an install with enrichment
