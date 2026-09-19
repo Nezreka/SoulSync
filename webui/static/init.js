@@ -1668,33 +1668,35 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
     let users = [];
     const currentLib = profileData || {};
 
-    // navidrome has no library pick, it has a login: playlists a profile
-    // syncs land on the navidrome user the profile logs in as (#1265). ask
-    // which server is active outright, the library probes below never
-    // answer for navidrome.
+    // the ACTIVE server decides which card this is. it used to probe plex
+    // first and take it whenever plex was merely configured, so a jellyfin
+    // (or navidrome) install with a plex token still in settings always
+    // got the plex card here (#1265).
+    let activeServer = '';
     try {
         const activeRes = await fetch('/api/profiles/me/active-sources');
         if (activeRes.ok) {
             const active = await activeRes.json();
-            if (active && active.server && active.server.active === 'navidrome') {
-                serverType = 'navidrome';
-            }
+            activeServer = (active && active.server && active.server.active) || '';
         }
     } catch (e) { }
 
-    try {
-        // Try each server type to find the active one
-        const plexRes = serverType === 'none' ? await fetch('/api/plex/music-libraries') : null;
-        if (plexRes && plexRes.ok) {
-            const plexData = await plexRes.json();
-            if (plexData.libraries && plexData.libraries.length > 0) {
-                serverType = 'plex';
-                libraries = plexData.libraries;
+    if (activeServer === 'navidrome') {
+        serverType = 'navidrome';
+    } else if (activeServer === 'plex' || activeServer === '') {
+        try {
+            const plexRes = await fetch('/api/plex/music-libraries');
+            if (plexRes.ok) {
+                const plexData = await plexRes.json();
+                if (plexData.libraries && plexData.libraries.length > 0) {
+                    serverType = 'plex';
+                    libraries = plexData.libraries;
+                }
             }
-        }
-    } catch (e) { }
+        } catch (e) { }
+    }
 
-    if (serverType === 'none') {
+    if (serverType === 'none' && (activeServer === 'jellyfin' || activeServer === 'emby' || activeServer === '')) {
         try {
             const jellyRes = await fetch('/api/jellyfin/music-libraries');
             if (jellyRes.ok) {
