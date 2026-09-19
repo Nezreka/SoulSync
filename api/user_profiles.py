@@ -993,12 +993,11 @@ def _is_docker() -> bool:
 
 
 def _own_library_root_hint(name: str = '<name>') -> str:
-    """the folder an own library is expected at. in docker that is a mount
-    the compose file has to provide (same rule as /app/Transfer); outside
-    docker any folder the app can write to."""
-    if _is_docker():
-        return f"/app/libraries/{name}"
-    return ''
+    """the folder an own library is prefilled with. in docker that is a mount
+    the compose file has to provide (same rule as /app/Transfer). outside
+    docker the same shape is prefilled and the admin corrects it to a real
+    folder; the save-time check refuses one that is not there."""
+    return f"/app/libraries/{name}"
 
 
 def _own_library_root_problem(root: str):

@@ -72,7 +72,5 @@ def test_an_own_library_folder_must_exist_and_be_writable(client, sam, tmp_path,
 
 
 def test_the_profiles_list_carries_the_docker_root_hint(client, monkeypatch):
-    import api.user_profiles as up
-    assert client.get('/api/profiles').get_json()['own_library_root_hint'] == ''
-    monkeypatch.setattr(up, '_is_docker', lambda: True)
+    # prefilled on every install; outside docker the admin corrects it
     assert client.get('/api/profiles').get_json()['own_library_root_hint'] == '/app/libraries/<name>'

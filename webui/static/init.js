@@ -2817,27 +2817,34 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
         olLabel.appendChild(document.createTextNode(' Own library (separate output folder + their own server library)'));
         form.appendChild(olLabel);
 
+        // the folder: prefilled with the install's expected path (a mount
+        // under /app/libraries/<name>, see docker-compose.yml); outside docker
+        // the admin corrects it, and a folder that is not there is refused on save
+        const olField = document.createElement('div');
+        olField.className = 'profile-folder-field';
+        olField.style.display = ownLibCheckbox.checked ? '' : 'none';
+        const olFieldLabel = document.createElement('label');
+        olFieldLabel.className = 'profile-settings-label';
+        olFieldLabel.textContent = 'Output folder';
+        olField.appendChild(olFieldLabel);
+        const olWrap = document.createElement('div');
+        olWrap.className = 'profile-folder-input';
+        olWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
         ownLibRootInput = document.createElement('input');
         ownLibRootInput.type = 'text';
-        ownLibRootInput.className = 'profile-name-input';
-        // in docker the folder is a mount under /app/libraries/<name> (see
-        // docker-compose.yml); the server says which, and it is filled in as
-        // the default so the compose line and the card agree
-        ownLibRootInput.placeholder = profileSettings.library_hint || 'Output folder for this profile, e.g. /music/thomas';
-        ownLibRootInput.value = profileSettings.library_root || '';
-        if (!ownLibRootInput.value && profileSettings.library_hint) ownLibRootInput.value = profileSettings.library_hint;
-        ownLibRootInput.style.display = ownLibCheckbox.checked ? '' : 'none';
-        form.appendChild(ownLibRootInput);
+        ownLibRootInput.spellcheck = false;
+        ownLibRootInput.autocomplete = 'off';
+        ownLibRootInput.placeholder = profileSettings.library_hint || '/app/libraries/name';
+        ownLibRootInput.value = profileSettings.library_root || profileSettings.library_hint || '';
+        olWrap.appendChild(ownLibRootInput);
+        olField.appendChild(olWrap);
         const olHelp = document.createElement('div');
         olHelp.className = 'profile-settings-help';
-        olHelp.textContent = (profileSettings.library_hint
-            ? 'Mount that folder in docker-compose.yml (see the Per-profile libraries example there), point a second music library on your Plex or Jellyfin server at it, then have the profile pick that library under My Settings.'
-            : 'Point a second music library on your Plex or Jellyfin server at that folder, then have the profile pick it under My Settings.');
-        olHelp.style.display = ownLibCheckbox.checked ? '' : 'none';
-        form.appendChild(olHelp);
+        olHelp.textContent = 'Docker: mount this folder in docker-compose.yml (see the Per-profile libraries example). Not Docker: change it to a real folder. Then point a second music library on your Plex or Jellyfin server at it and have the profile pick that library under My Settings.';
+        olField.appendChild(olHelp);
+        form.appendChild(olField);
         ownLibCheckbox.addEventListener('change', () => {
-            ownLibRootInput.style.display = ownLibCheckbox.checked ? '' : 'none';
-            olHelp.style.display = ownLibCheckbox.checked ? '' : 'none';
+            olField.style.display = ownLibCheckbox.checked ? '' : 'none';
         });
     }
 
