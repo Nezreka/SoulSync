@@ -150,3 +150,40 @@ def test_two_profiles_syncing_at_once_keep_their_own_jellyfin_user(jelly, monkey
     assert two.create_playlist('Chill', _tracks('t1')) and three.create_playlist('Chill', _tracks('t2'))
     assert sorted(p['user'] for p in jelly.playlists.values()) == ['annie-uid', 'kid-uid']
     assert two.user_id == 'kid-uid'          # untouched by three's sync
+
+
+# ── the users list ──────────────────────────────────────────────────────────
+
+def test_users_with_music_are_found_in_parallel_and_cached(monkeypatch):
+    """personal settings waited on one views request per user, in series"""
+    import threading
+    import time as _time
+    client = JellyfinClient()
+    client.base_url, client.api_key, client.user_id = 'http://jf', 'key', 'admin'
+    client._connection_attempted = True
+    calls = []
+    lock = threading.Lock()
+
+    def fake_request(self, endpoint, params=None, **kw):
+        with lock:
+            calls.append(endpoint)
+        if endpoint == '/Users':
+            return [{'Id': f'u{i}', 'Name': f'User {i}'} for i in range(8)]
+        _time.sleep(0.2)
+        uid = endpoint.split('/')[2]
+        return {'Items': [{'CollectionType': 'music' if uid != 'u3' else 'movies'}]}
+    monkeypatch.setattr(JellyfinClient, '_make_request', fake_request)
+
+    start = _time.monotonic()
+    users = client.get_available_users()
+    elapsed = _time.monotonic() - start
+    assert [u['id'] for u in users] == [f'u{i}' for i in range(8) if i != 3]
+    assert elapsed < 1.0, f"eight 0.2s views requests took {elapsed:.1f}s: they ran in series"
+    assert calls.count('/Users') == 1
+
+    # the second ask is answered from the cache
+    assert client.get_available_users() == users
+    assert calls.count('/Users') == 1
+    client.clear_cache()
+    client.get_available_users()
+    assert calls.count('/Users') == 2

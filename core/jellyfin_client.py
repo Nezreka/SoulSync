@@ -442,37 +442,46 @@ class JellyfinClient(MediaServerClient):
             logger.error(f"Error setting music library: {e}")
             return False
 
+    # the users list is one request per user (their views) and personal
+    # settings waits on it every open: 15 s on a server with a few users.
+    # the views are asked for in parallel and the answer kept for a while.
+    _USERS_CACHE_TTL_S = 600
+    _USERS_VIEW_WORKERS = 8
+
     def get_available_users(self) -> List[Dict[str, str]]:
         """Get list of users that have music libraries"""
         if not self.ensure_connection():
             return []
+
+        cached = getattr(self, '_users_cache', None)
+        if cached and (time.monotonic() - cached[0]) < self._USERS_CACHE_TTL_S:
+            return list(cached[1])
 
         try:
             users_response = self._make_request('/Users')
             if not users_response:
                 return []
 
-            users_with_music = []
-            for user in users_response:
+            def _has_music(user):
                 candidate_id = user['Id']
                 candidate_name = user.get('Name', 'Unknown')
-
                 try:
                     views_response = self._make_request(f'/Users/{candidate_id}/Views')
-                    if views_response:
-                        for view in views_response.get('Items', []):
-                            collection_type = (view.get('CollectionType') or '').lower()
-                            if collection_type == 'music':
-                                users_with_music.append({
-                                    'id': candidate_id,
-                                    'name': candidate_name
-                                })
-                                break
+                    for view in (views_response or {}).get('Items', []):
+                        if (view.get('CollectionType') or '').lower() == 'music':
+                            return {'id': candidate_id, 'name': candidate_name}
                 except Exception as e:
                     logger.debug(f"Skipping user {candidate_name} during enumeration: {e}")
-                    continue
+                return None
+
+            from concurrent.futures import ThreadPoolExecutor
+            users = [u for u in users_response if u.get('Id')]
+            with ThreadPoolExecutor(max_workers=min(self._USERS_VIEW_WORKERS, max(1, len(users)))) as pool:
+                found = list(pool.map(_has_music, users))
+            users_with_music = [u for u in found if u]
 
             logger.debug(f"Found {len(users_with_music)} users with music libraries")
+            self._users_cache = (time.monotonic(), list(users_with_music))
             return users_with_music
         except Exception as e:
             logger.error(f"Error getting available users: {e}")
@@ -1373,6 +1382,7 @@ class JellyfinClient(MediaServerClient):
 
     def clear_cache(self):
         """Clear all caches to force fresh data on next request"""
+        self._users_cache = None
         self._album_cache.clear()
         self._track_cache.clear()
         self._artist_cache.clear()
