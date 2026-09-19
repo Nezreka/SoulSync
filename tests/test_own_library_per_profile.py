@@ -6,7 +6,8 @@ library writes carry the profile as owner (owner_profile_id); every row
 that existed before carries none and is the shared library. the shared
 scan and every profile on the shared library behave exactly as before;
 an own-library profile downloads into its folder and asks "do i have
-this" of its own rows; the admin sees everything.
+this" of its own rows; the admin is a user of the shared library like
+anyone else, so a copy in someone's own library is not the admin's.
 
 hermetic: a real MusicDatabase on a temp file, the profile context set
 directly, the media server faked at the plexapi-object seam.
@@ -82,16 +83,16 @@ def test_an_own_library_needs_a_folder_and_the_admin_is_always_shared(db):
 
 # ── scope ───────────────────────────────────────────────────────────────────
 
-def test_scope_is_none_for_admin_shared_for_a_plain_profile_and_the_id_for_own(db):
+def test_scope_is_shared_for_the_admin_and_plain_profiles_and_the_id_for_own(db):
     sam = db.create_profile(name='sam')
     kim = db.create_profile(name='kim')
     db.set_profile_library(kim, 'own', '/music/kim')
-    assert library_scope_for_profile(1) is None
-    assert library_scope_for_profile(None) is None
+    assert library_scope_for_profile(1) == 'shared'
+    assert library_scope_for_profile(None) == 'shared'
     assert library_scope_for_profile(sam) == 'shared'
     assert library_scope_for_profile(kim) == kim
     second_admin = db.create_profile(name='boss', is_admin=True)
-    assert library_scope_for_profile(second_admin) is None
+    assert library_scope_for_profile(second_admin) == 'shared'
 
 
 def test_scope_follows_the_current_profile_and_an_explicit_override_wins(db, monkeypatch):
@@ -122,9 +123,13 @@ def test_scope_cache_is_dropped_when_the_mode_changes(db, monkeypatch):
 
 
 def test_scope_sql():
+    # the unary + keeps the owner column out of the planner's hands: the
+    # scope is a filter on the rows a query's real predicates found, never
+    # the index it walks (a plain IS NULL had sqlite walking every row of
+    # the library through the owner index, 2ms searches became 18s)
     assert MusicDatabase._owner_scope_sql(None) == ("1=1", [])
-    assert MusicDatabase._owner_scope_sql('shared', 't.owner_profile_id') == ("t.owner_profile_id IS NULL", [])
-    assert MusicDatabase._owner_scope_sql(7) == ("owner_profile_id = ?", [7])
+    assert MusicDatabase._owner_scope_sql('shared', 't.owner_profile_id') == ("+t.owner_profile_id IS NULL", [])
+    assert MusicDatabase._owner_scope_sql(7) == ("+owner_profile_id = ?", [7])
 
 
 # ── the scan writes owners, and never crosses them ─────────────────────────
@@ -195,15 +200,24 @@ def _readers(db):
     }
 
 
-def test_the_admin_sees_every_library(db, monkeypatch):
+def test_the_admin_sees_the_shared_library_and_not_a_profiles_own(db, monkeypatch):
+    """kim's own library is hers: it does not show up on the admin's library
+    page, and (below) the admin is not told they own her copy"""
     kim = db.create_profile(name='kim'); db.set_profile_library(kim, 'own', '/music/kim')
     _seed(db, None, 'shared'); _seed(db, kim, 'kim')
     monkeypatch.setattr('core.settings.config_manager.get_active_media_server', lambda: 'plex')
     _as_profile(monkeypatch, 1)
     r = _readers(db)
-    assert sorted(r['tracks']) == ['kim-t0', 'kim-t1', 'kim-t2', 'shared-t0', 'shared-t1', 'shared-t2']
-    assert sorted(r['albums']) == ['kim-al', 'shared-al'] and sorted(r['artists']) == ['kim-ar', 'shared-ar']
-    assert r['total'] == 6
+    assert sorted(r['tracks']) == ['shared-t0', 'shared-t1', 'shared-t2']
+    assert r['albums'] == ['shared-al'] and r['artists'] == ['shared-ar'] and r['recent'] == ['shared-al']
+    assert r['total'] == 3
+    # an explicit "everything" scope is still there for a job that needs it
+    token = set_library_scope(None)
+    try:
+        assert sorted(t.id for t in db.search_tracks(title='Song', artist='')) == \
+            ['kim-t0', 'kim-t1', 'kim-t2', 'shared-t0', 'shared-t1', 'shared-t2']
+    finally:
+        reset_library_scope(token)
 
 
 def test_a_shared_profile_sees_the_shared_library_only(db, monkeypatch):
@@ -241,6 +255,11 @@ def test_do_i_have_this_answers_per_library(db, monkeypatch):
         "an own-library profile was told it owns the admin's track"
     _seed(db, kim, 'kimcopy')
     assert db.check_track_exists('Song 0', 'Artist kimcopy', confidence_threshold=0.7)[0] is not None
+    # and kim's copy is not the admin's: the admin downloading it gets a copy
+    # of their own (two folders, two files, by design)
+    _as_profile(monkeypatch, 1)
+    assert db.check_track_exists('Song 0', 'Artist kimcopy', confidence_threshold=0.7)[0] is None, \
+        "the admin was told they own a track that only exists in kim's library"
 
 
 def test_candidate_fetchers_are_scoped(db, monkeypatch):
@@ -249,7 +268,7 @@ def test_candidate_fetchers_are_scoped(db, monkeypatch):
     _as_profile(monkeypatch, kim)
     assert [t.id for t in db.get_candidate_tracks_for_albums(['shared-al', 'kim-al'])] == ['kim-t0', 'kim-t1', 'kim-t2']
     _as_profile(monkeypatch, 1)
-    assert len(db.get_candidate_tracks_for_albums(['shared-al', 'kim-al'])) == 6
+    assert [t.id for t in db.get_candidate_tracks_for_albums(['shared-al', 'kim-al'])] == ['shared-t0', 'shared-t1', 'shared-t2']
 
 
 # ── downloads land in the profile's folder ────────────────────────────────
@@ -288,3 +307,73 @@ def test_the_final_path_builder_uses_the_profiles_root(db, monkeypatch, tmp_path
     context.pop('profile_id')
     dest, _ = paths.build_final_path_for_track(context, {'name': 'Artist'}, album_info, '.flac', create_dirs=False)
     assert str(dest).startswith(str(tmp_path / 'Transfer')), dest
+
+
+# ── the owner index and the planner ─────────────────────────────────────────
+#
+# on boulder's live db (308k tracks) the first cut's bare owner index made
+# sqlite walk the whole library through it for every "owner IS NULL" search:
+# 2ms became 18s for every profile on the shared library. the index is
+# (server_source, owner_profile_id, id) now, which the scan's per-library
+# listings read covering, and the scope predicate carries a unary + so the
+# planner can never take it as the index to walk.
+
+def _owner_indexes(db):
+    with db._get_connection() as conn:
+        return sorted(r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE '%owner%'").fetchall())
+
+
+def test_the_owner_index_is_per_server_and_a_bare_one_from_the_first_cut_is_dropped(tmp_path):
+    path = str(tmp_path / 'lib.db')
+    db = MusicDatabase(path)
+    assert _owner_indexes(db) == ['idx_albums_source_owner', 'idx_artists_source_owner', 'idx_tracks_source_owner']
+    # an install that ran the first cut has the bare index; the next start drops it
+    with db._get_connection() as conn:
+        for t in ('tracks', 'albums', 'artists'):
+            conn.execute(f"DROP INDEX idx_{t}_source_owner")
+            conn.execute(f"CREATE INDEX idx_{t}_owner ON {t} (owner_profile_id)")
+        conn.commit()
+    assert _owner_indexes(db) == ['idx_albums_owner', 'idx_artists_owner', 'idx_tracks_owner']
+    # migrations run once per path per process: the next start is a new process
+    import database.music_database as mdb
+    mdb._database_initialized_paths.discard(str(db.database_path))
+    mdb._database_initialized_paths.discard(path)
+    db = MusicDatabase(path)
+    assert _owner_indexes(db) == ['idx_albums_source_owner', 'idx_artists_source_owner', 'idx_tracks_source_owner']
+
+
+def test_the_scope_is_never_the_index_a_query_walks(db, monkeypatch):
+    """every scoped read, under both scopes: the plan never constrains on
+    owner_profile_id (the + keeps it a filter on the rows the real
+    predicates found), and the scan's per-library listings do use the
+    per-server index"""
+    kim = db.create_profile(name='kim'); db.set_profile_library(kim, 'own', '/music/kim')
+    _seed(db, None, 'shared'); _seed(db, kim, 'kim')
+    monkeypatch.setattr('core.settings.config_manager.get_active_media_server', lambda: 'plex')
+    statements = []
+    real_connect = db._get_connection
+
+    def traced():
+        conn = real_connect()
+        conn.set_trace_callback(lambda sql: statements.append(sql))
+        return conn
+    monkeypatch.setattr(db, '_get_connection', traced)
+    for pid in (1, kim):
+        _as_profile(monkeypatch, pid)
+        _readers(db)
+        db.check_track_exists('Song 0', 'Artist shared', confidence_threshold=0.7, server_source='plex')
+        db.get_candidate_albums_for_artist('Artist shared', server_source='plex')
+        db.get_candidate_tracks_for_albums(['shared-al'])
+        db.api_list_albums(search='Album')
+    scoped = [s for s in statements if s.lstrip().upper().startswith('SELECT') and 'owner_profile_id' in s]
+    assert len(scoped) >= 12, "the scoped reads were not exercised"
+    monkeypatch.setattr(db, '_get_connection', real_connect)
+    with db._get_connection() as conn:
+        for sql in scoped:
+            plan = [r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + sql).fetchall()]
+            assert not any('owner_profile_id' in line for line in plan), (sql, plan)
+        # the listings a scan makes are "this server, this owner", covering
+        plan = [r[3] for r in conn.execute(
+            "EXPLAIN QUERY PLAN SELECT id FROM tracks WHERE server_source = ? AND owner_profile_id IS ?", ('plex', None))]
+        assert any('COVERING INDEX idx_tracks_source_owner' in line for line in plan), plan

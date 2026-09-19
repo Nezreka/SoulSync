@@ -74,3 +74,59 @@ def test_an_own_library_folder_must_exist_and_be_writable(client, sam, tmp_path,
 def test_the_profiles_list_carries_the_docker_root_hint(client, monkeypatch):
     # prefilled on every install; outside docker the admin corrects it
     assert client.get('/api/profiles').get_json()['own_library_root_hint'] == '/app/libraries/<name>'
+
+
+def test_a_folder_overlapping_the_shared_one_or_another_profiles_is_refused(client, sam, tmp_path, monkeypatch):
+    shared = tmp_path / 'shared'; shared.mkdir()
+    inside = shared / 'sam'; inside.mkdir()
+    above = tmp_path                                  # holds the shared folder
+    monkeypatch.setattr(web_server.config_manager, 'get',
+                        lambda k, d=None: str(shared) if k == 'soulseek.transfer_path' else d)
+    for bad in (inside, above):
+        r = client.put(f'/api/profiles/{sam}', json={'library_mode': 'own', 'library_root': str(bad)})
+        assert r.status_code == 400 and 'overlaps' in r.get_json()['error'], (bad, r.data)
+    own = tmp_path / 'own'; own.mkdir()
+    assert client.put(f'/api/profiles/{sam}', json={'library_mode': 'own', 'library_root': str(own)}).status_code == 200
+    # another profile cannot take sam's folder, or a folder inside it
+    db = web_server.get_database()
+    kim = db.create_profile(name=f'kim_{os.urandom(3).hex()}')
+    nested = own / 'deeper'; nested.mkdir()
+    for bad in (own, nested):
+        r = client.put(f'/api/profiles/{kim}', json={'library_mode': 'own', 'library_root': str(bad)})
+        assert r.status_code == 400 and 'library' in r.get_json()['error'], (bad, r.data)
+    assert db.get_profile_library(kim)['mode'] == 'shared'
+    # sam re-saving their own folder is fine
+    assert client.put(f'/api/profiles/{sam}', json={'library_mode': 'own', 'library_root': str(own)}).status_code == 200
+
+
+def test_a_profiles_own_rows_go_when_it_is_shared_again_or_deleted(client, sam, tmp_path):
+    from types import SimpleNamespace
+    db = web_server.get_database()
+    own = tmp_path / 'own'; own.mkdir()
+    assert client.put(f'/api/profiles/{sam}', json={'library_mode': 'own', 'library_root': str(own)}).status_code == 200
+
+    def seed(owner, prefix):
+        db.insert_or_update_media_artist(SimpleNamespace(ratingKey=f'{prefix}-ar', title=f'Artist {prefix}', thumb=None, genres=[], summary=''),
+                                         server_source='plex', owner_profile_id=owner)
+        db.insert_or_update_media_album(SimpleNamespace(ratingKey=f'{prefix}-al', title=f'Album {prefix}', year=2020, thumb=None, genres=[]),
+                                        f'{prefix}-ar', server_source='plex', owner_profile_id=owner)
+        t = SimpleNamespace(ratingKey=f'{prefix}-t', title='Song', trackNumber=1, duration=1000, parentIndex=1,
+                            media=[SimpleNamespace(parts=[SimpleNamespace(file=f'/m/{prefix}.flac', size=1)], bitrate=1)])
+        db.insert_or_update_media_track(t, f'{prefix}-al', f'{prefix}-ar', server_source='plex', owner_profile_id=owner)
+
+    def owners():
+        with db._get_connection() as conn:
+            return {t: sorted((str(r[0]) for r in conn.execute(
+                        f"SELECT owner_profile_id FROM {t} WHERE id LIKE ? OR id LIKE ?", (f'own{sam}-%', f'sh{sam}-%')).fetchall()))
+                    for t in ('tracks', 'albums', 'artists')}
+    seed(sam, f'own{sam}'); seed(None, f'sh{sam}')
+    assert owners() == {t: sorted(['None', str(sam)]) for t in ('tracks', 'albums', 'artists')}
+    # back to shared: sam's rows go, the shared ones stay
+    assert client.put(f'/api/profiles/{sam}', json={'library_mode': 'shared'}).status_code == 200
+    assert owners() == {t: ['None'] for t in ('tracks', 'albums', 'artists')}
+    # and deleting an own-library profile takes its rows with it
+    assert client.put(f'/api/profiles/{sam}', json={'library_mode': 'own', 'library_root': str(own)}).status_code == 200
+    seed(sam, f'own{sam}')
+    assert owners()['tracks'] == sorted(['None', str(sam)])
+    assert client.delete(f'/api/profiles/{sam}').status_code == 200
+    assert owners() == {t: ['None'] for t in ('tracks', 'albums', 'artists')}

@@ -170,29 +170,37 @@ def _rebuild_one_from_db(db, config_manager, playlist: dict):
     # Resolve owned tracks to real paths IN PLAYLIST ORDER, keeping the metadata
     # so an optional custom filename template ($position/$artist/$title/...) can
     # be applied. $position is the playlist index, which is exactly this order.
+    # ownership is the playlist owner's library (#1199): this runs from batch
+    # completion threads and automations as well as requests, so the scope
+    # comes from the row, not from whoever happens to be calling
+    from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
     resolved: List[dict] = []
     seen = set()
-    for t in (db.get_mirrored_playlist_tracks(playlist["id"]) or []):
-        title = (t.get("track_name") or "").strip()
-        artist = (t.get("artist_name") or "").strip()
-        if not title:
-            continue
-        try:
-            db_track, conf = db.check_track_exists(title, artist, confidence_threshold=0.7)
-        except Exception:
-            continue
-        if db_track is None or conf < 0.7:
-            continue
-        real = resolve_library_file_path(getattr(db_track, "file_path", None), config_manager=config_manager)
-        if real and real not in seen:
-            seen.add(real)
-            resolved.append({
-                "real": real,
-                "title": title,
-                "artist": artist,
-                "album": (t.get("album_name") or t.get("album") or "").strip(),
-                "track": getattr(db_track, "track_number", None),
-            })
+    _scope_token = set_library_scope(library_scope_for_profile(playlist.get("profile_id")))
+    try:
+        for t in (db.get_mirrored_playlist_tracks(playlist["id"]) or []):
+            title = (t.get("track_name") or "").strip()
+            artist = (t.get("artist_name") or "").strip()
+            if not title:
+                continue
+            try:
+                db_track, conf = db.check_track_exists(title, artist, confidence_threshold=0.7)
+            except Exception:
+                continue
+            if db_track is None or conf < 0.7:
+                continue
+            real = resolve_library_file_path(getattr(db_track, "file_path", None), config_manager=config_manager)
+            if real and real not in seen:
+                seen.add(real)
+                resolved.append({
+                    "real": real,
+                    "title": title,
+                    "artist": artist,
+                    "album": (t.get("album_name") or t.get("album") or "").strip(),
+                    "track": getattr(db_track, "track_number", None),
+                })
+    finally:
+        reset_library_scope(_scope_token)
 
     real_paths: List[str] = [r["real"] for r in resolved]
 

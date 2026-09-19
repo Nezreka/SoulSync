@@ -4,10 +4,16 @@ a profile can have a library of its own (its own output folder, its own
 library on the media server). rows the scan of that library writes carry
 the profile as owner; the shared library's rows carry none. the scope is:
 
-  None      the admin: every row, every library
-  'shared'  a profile on the shared library: rows with no owner (today's
-            library, exactly as before)
+  'shared'  the shared library: rows with no owner (today's library,
+            exactly as before). the admin and every plain profile
   <int>     an own-library profile: its rows only
+  None      every row of every library. nobody's default; a job that
+            really needs all of it sets it explicitly
+
+the admin is a user of the shared library like anyone else: a track that
+only exists in someone's own library is not the admin's (a copy of their
+own is the answer, by design), and their library page shows nothing of
+another profile's.
 
 resolved from the current profile (request or background) with a short
 cache on the profile's mode so the db is not asked on every query. a
@@ -53,7 +59,7 @@ def invalidate_library_scope_cache() -> None:
 def library_scope_for_profile(profile_id: Optional[int]) -> Scope:
     """the scope a profile reads the library through."""
     if not profile_id or int(profile_id) == 1:
-        return None
+        return 'shared'          # profile 1 is always on the shared library
     pid = int(profile_id)
     now = time.monotonic()
     with _mode_cache_lock:
@@ -63,11 +69,7 @@ def library_scope_for_profile(profile_id: Optional[int]) -> Scope:
     scope: Scope = 'shared'
     try:
         from database.music_database import get_database
-        db = get_database()
-        profile = db.get_profile(pid) or {}
-        if profile.get('is_admin'):
-            scope = None
-        elif db.get_profile_library(pid).get('mode') == 'own':
+        if get_database().get_profile_library(pid).get('mode') == 'own':
             scope = pid
     except Exception:  # noqa: BLE001 - a db that will not answer reads as the shared library
         scope = 'shared'

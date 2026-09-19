@@ -974,6 +974,12 @@ class JellyfinClient(MediaServerClient):
                 'SortBy': 'ProductionYear,SortName',
                 'SortOrder': 'Ascending',
             }
+            # an artist is one item across every library on the server, so
+            # without the library this answered with their albums from all
+            # of them: a second music library's albums (a profile's own,
+            # #1199) landed in the shared scan through this fallback
+            if self.music_library_id:
+                params['ParentId'] = self.music_library_id
             items = self._fetch_all_items(params)
             if items is None:
                 return [], False

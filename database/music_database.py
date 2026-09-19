@@ -5760,7 +5760,14 @@ class MusicDatabase:
     # writes carry the profile as owner; rows of the shared library carry
     # NULL, which is every row that existed before this. the shared client
     # scans and reads as always; an own-library profile scans and reads its
-    # own rows, the admin sees everything.
+    # own rows. the admin is on the shared library like anyone else.
+    #
+    # the owner index is (server_source, owner_profile_id, id): the scan's
+    # per-library listings, counts and wipes are "this server, this owner"
+    # and read it covering. a bare owner index was worse than none: sqlite
+    # took it for "owner IS NULL" over the title and artist indexes and
+    # walked the whole library per search. an install that got that index
+    # has it dropped here.
 
     def _add_own_library_columns(self, cursor):
         for sql in (
@@ -5769,9 +5776,12 @@ class MusicDatabase:
             "ALTER TABLE tracks ADD COLUMN owner_profile_id INTEGER DEFAULT NULL",
             "ALTER TABLE albums ADD COLUMN owner_profile_id INTEGER DEFAULT NULL",
             "ALTER TABLE artists ADD COLUMN owner_profile_id INTEGER DEFAULT NULL",
-            "CREATE INDEX IF NOT EXISTS idx_tracks_owner ON tracks (owner_profile_id)",
-            "CREATE INDEX IF NOT EXISTS idx_albums_owner ON albums (owner_profile_id)",
-            "CREATE INDEX IF NOT EXISTS idx_artists_owner ON artists (owner_profile_id)",
+            "DROP INDEX IF EXISTS idx_tracks_owner",
+            "DROP INDEX IF EXISTS idx_albums_owner",
+            "DROP INDEX IF EXISTS idx_artists_owner",
+            "CREATE INDEX IF NOT EXISTS idx_tracks_source_owner ON tracks (server_source, owner_profile_id, id)",
+            "CREATE INDEX IF NOT EXISTS idx_albums_source_owner ON albums (server_source, owner_profile_id, id)",
+            "CREATE INDEX IF NOT EXISTS idx_artists_source_owner ON artists (server_source, owner_profile_id, id)",
         ):
             try:
                 cursor.execute(sql)
@@ -5792,11 +5802,25 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 cursor.execute("UPDATE profiles SET library_mode = ?, library_root = ?, updated_at = CURRENT_TIMESTAMP "
                                "WHERE id = ?", (mode, root, profile_id))
+                saved = cursor.rowcount > 0
+                if saved and mode == 'shared':
+                    # back on the shared library, the rows of its own are
+                    # nobody's: no scope reads them again. the next scan
+                    # rebuilds them if it is ever switched back
+                    self._delete_own_library_rows(cursor, profile_id)
                 conn.commit()
-                return cursor.rowcount > 0
+                return saved
         except Exception as e:
             logger.error(f"Error saving library mode for profile {profile_id}: {e}")
             return False
+
+    def _delete_own_library_rows(self, cursor, profile_id: int) -> None:
+        """drop a profile's own-library rows (tracks first: the credits
+        trigger and the album/artist order both want it that way)"""
+        for table in ('tracks', 'albums', 'artists'):
+            cursor.execute(f"DELETE FROM {table} WHERE owner_profile_id = ?", (int(profile_id),))   # noqa: S608
+            if cursor.rowcount:
+                logger.info("own library: removed %d %s row(s) of profile %s", cursor.rowcount, table, profile_id)
 
     def get_profile_library(self, profile_id: int) -> Dict[str, Any]:
         """{'mode': 'shared'|'own', 'root': str|None}. profile 1 is always shared."""
@@ -5830,14 +5854,20 @@ class MusicDatabase:
     @staticmethod
     def _owner_scope_sql(scope, column: str = 'owner_profile_id') -> Tuple[str, list]:
         """the WHERE fragment for a library scope from core.library_scope:
-        None = everything (admin), 'shared' = the rows with no owner, an int
-        = that profile's rows. always returns a fragment so callers can
-        append it with AND unconditionally."""
+        'shared' = the rows with no owner, an int = that profile's rows,
+        None = everything. always returns a fragment so callers can append
+        it with AND unconditionally.
+
+        the unary + on the column keeps the planner off it: the scope is a
+        filter on the rows a query's real predicates found, never the index
+        it walks. a plain "owner_profile_id IS NULL" had sqlite pick the
+        owner index over title/artist ones and walk every row of the
+        library for a search (2ms became 18s on a 300k-track db)."""
         if scope is None:
             return "1=1", []
         if scope == 'shared':
-            return f"{column} IS NULL", []
-        return f"{column} = ?", [int(scope)]
+            return f"+{column} IS NULL", []
+        return f"+{column} = ?", [int(scope)]
 
     def _current_scope_sql(self, column: str = 'owner_profile_id') -> Tuple[str, list]:
         """the scope of the caller (request profile or background profile)."""
@@ -8073,6 +8103,8 @@ class MusicDatabase:
                                             cursor.rowcount, table)
                     except Exception as e:
                         logger.debug("Failed to delete from %s for profile: %s", table, e)
+                # its own library's rows go with it (#1199)
+                self._delete_own_library_rows(cursor, profile_id)
                 cursor.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
                 conn.commit()
                 return cursor.rowcount > 0
@@ -17382,7 +17414,7 @@ class MusicDatabase:
                     WHERE {where_clause}
                         AND a.id = (SELECT MIN(a2.id) FROM artists a2
                                     WHERE a2.name = a.name AND a2.server_source = a.server_source
-                                      AND a2.owner_profile_id IS a.owner_profile_id)
+                                      AND +a2.owner_profile_id IS a.owner_profile_id)
                 """
                 cursor.execute(count_query, params)
                 total_count = cursor.fetchone()['total_count']
@@ -17412,7 +17444,7 @@ class MusicDatabase:
                     WHERE {where_clause}
                         AND a.id = (SELECT MIN(a2.id) FROM artists a2
                                     WHERE a2.name = a.name AND a2.server_source = a.server_source
-                                      AND a2.owner_profile_id IS a.owner_profile_id)
+                                      AND +a2.owner_profile_id IS a.owner_profile_id)
                     ORDER BY a.name COLLATE NOCASE
                     LIMIT ? OFFSET ?
                 """

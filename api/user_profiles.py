@@ -503,6 +503,9 @@ def update_profile(profile_id):
                 problem = _own_library_root_problem(root)
                 if problem:
                     return jsonify({'success': False, 'error': problem}), 400
+                problem = _own_library_root_overlap(root, shared_root, database, profile_id)
+                if problem:
+                    return jsonify({'success': False, 'error': problem}), 400
             library_result = database.set_profile_library(profile_id, mode, root or None)
             from core.library_scope import invalidate_library_scope_cache
             invalidate_library_scope_cache()
@@ -998,6 +1001,35 @@ def _own_library_root_hint(name: str = '<name>') -> str:
     docker the same shape is prefilled and the admin corrects it to a real
     folder; the save-time check refuses one that is not there."""
     return f"/app/libraries/{name}"
+
+
+def _same_or_inside(a: str, b: str) -> bool:
+    """a is b or lies under b, after both are resolved"""
+    try:
+        from core.imports.paths import config_root_path
+        ra = os.path.realpath(config_root_path(a))
+        rb = os.path.realpath(config_root_path(b))
+    except Exception:  # noqa: BLE001
+        ra, rb = os.path.realpath(a), os.path.realpath(b)
+    return ra == rb or ra.startswith(rb.rstrip(os.sep) + os.sep)
+
+
+def _own_library_root_overlap(root: str, shared_root: str, database, profile_id):
+    """None when the folder is nobody else's, else why not. a folder inside
+    the shared one (or holding it) is scanned into both libraries, and two
+    profiles on one folder write the same files and race each other's scan."""
+    if shared_root and (_same_or_inside(root, shared_root) or _same_or_inside(shared_root, root)):
+        return 'That folder overlaps the shared library folder; pick one outside it'
+    try:
+        others = database.get_own_library_profiles()
+    except Exception:  # noqa: BLE001
+        others = []
+    for other in others:
+        if int(other.get('id', 0)) == int(profile_id) or not other.get('root'):
+            continue
+        if _same_or_inside(root, other['root']) or _same_or_inside(other['root'], root):
+            return f"That folder is {other.get('name', 'another profile')}'s library; pick a different one"
+    return None
 
 
 def _own_library_root_problem(root: str):

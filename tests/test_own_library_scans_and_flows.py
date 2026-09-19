@@ -206,7 +206,7 @@ def test_the_sync_runs_inside_the_profiles_library_scope(db, monkeypatch):
     monkeypatch.setattr('core.profile_context.get_current_profile_id', lambda: 1)
     assert asyncio.run(svc.sync_playlist(SimpleNamespace(name='p', tracks=[]), profile_id=kim)) == 'done'
     assert seen['scope'] == kim
-    assert scope_mod.current_library_scope() is None                  # reset after
+    assert scope_mod.current_library_scope() == 'shared'              # reset after: the admin's own scope
 
 
 def test_the_download_analysis_runs_inside_the_batch_owners_scope(db, monkeypatch):
@@ -223,3 +223,101 @@ def test_the_download_analysis_runs_inside_the_batch_owners_scope(db, monkeypatc
     finally:
         download_batches.pop('b1', None)
     assert seen['scope'] == kim
+
+
+# ── background jobs that act for a profile carry its scope ─────────────────
+#
+# these run on threads with no request: the scheduled watchlist scan walks
+# every profile's artists in one list, the label phase wishlists for one
+# profile, a playlist folder is rebuilt from batch completion, and the
+# own-library scan runs on the shared scan's thread. each one answers
+# "do i have this" through the right library, not the thread's default.
+
+def _scan_state():
+    return {'cancel_requested': False, 'tracks_found_this_scan': 0, 'tracks_added_this_scan': 0,
+            'recent_wishlist_additions': [], 'scan_track_events': [], 'results': [], 'summary': {}}
+
+
+def test_the_watchlist_scan_asks_each_artists_owner_library(db, monkeypatch):
+    from datetime import datetime
+    from core.watchlist_scanner import WatchlistScanner
+    from database.music_database import WatchlistArtist
+    kim = db.create_profile(name='kim'); db.set_profile_library(kim, 'own', '/music/kim')
+    sam = db.create_profile(name='sam')
+    monkeypatch.setattr('core.profile_context.get_current_profile_id', lambda: 1)    # the scan thread runs as admin
+    scanner = WatchlistScanner.__new__(WatchlistScanner)
+    scanner._database = db
+    monkeypatch.setattr(scanner, '_watchlist_source_priority', lambda: [])
+    monkeypatch.setattr(scanner, '_get_lookback_period_setting', lambda: '30')
+    seen = []
+
+    def discography(artist, since):
+        # the "is this missing" checks run right here, inside the artist's scope
+        seen.append((artist.artist_name, scope_mod.current_library_scope()))
+        return None
+    monkeypatch.setattr(scanner, 'get_artist_discography_for_watchlist', discography)
+
+    def artist(n, pid):
+        return WatchlistArtist(id=n, spotify_artist_id=f"sp{n}", artist_name=f"A{n}", date_added=datetime.now(), profile_id=pid)
+    results = scanner.scan_watchlist_artists([artist(1, kim), artist(2, sam), artist(3, 1)], profile_id=1,
+                                             scan_state=_scan_state(), apply_global_overrides=False)
+    assert seen == [('A1', kim), ('A2', 'shared'), ('A3', 'shared')]
+    assert len(results) == 3 and not any(r.success for r in results)
+    assert scope_mod.current_library_scope() == 'shared'         # nothing leaks past the loop
+
+
+def test_the_label_phase_asks_the_wishlisting_profiles_library(db, monkeypatch):
+    from core.automation.handlers import scan_watchlist_labels as labels
+    kim = db.create_profile(name='kim'); db.set_profile_library(kim, 'own', '/music/kim')
+    monkeypatch.setattr('core.profile_context.get_current_profile_id', lambda: 1)
+    seen = {}
+    monkeypatch.setattr(labels, 'build_default_seams', lambda **kw: {})
+    monkeypatch.setattr(labels, 'run_label_watchlist_scan',
+                        lambda **kw: seen.setdefault('scope', scope_mod.current_library_scope()) and 'ran')
+    fake_db = SimpleNamespace(get_watchlist_labels=lambda: [{'id': 1, 'name': 'Warp'}])
+    labels.run_label_scan_phase(_scan_state(), database=fake_db, get_deezer=None, profile_id=kim)
+    assert seen['scope'] == kim
+    assert scope_mod.current_library_scope() == 'shared'
+
+
+def test_a_playlist_folder_is_rebuilt_from_its_owners_library(db, monkeypatch, tmp_path):
+    from core.playlists import materialize_service as ms
+    kim = db.create_profile(name='kim'); db.set_profile_library(kim, 'own', '/music/kim')
+    monkeypatch.setattr('core.profile_context.get_current_profile_id', lambda: 1)    # a batch completion thread
+    seen = []
+    fake_db = SimpleNamespace(
+        get_mirrored_playlist_tracks=lambda pid: [{'track_name': 'Song 0', 'artist_name': 'Artist kim'}],
+        check_track_exists=lambda *a, **k: (seen.append(scope_mod.current_library_scope()), (None, 0.0))[1])
+    cfg = SimpleNamespace(get=lambda k, d=None: str(tmp_path / 'Playlists') if k == 'playlists.materialize_path' else d)
+    monkeypatch.setattr(ms, 'rebuild_playlist_folder', lambda *a, **k: SimpleNamespace(), raising=False)
+    try:
+        ms._rebuild_one_from_db(fake_db, cfg, {'id': 9, 'name': 'Mix', 'profile_id': kim})
+    except Exception:
+        pass                                    # the folder build past the matching is not the point here
+    assert seen == [kim]
+    assert scope_mod.current_library_scope() == 'shared'
+
+
+def test_the_own_library_scan_runs_inside_the_profiles_scope(db, monkeypatch):
+    import api.database_admin as da
+    kim = db.create_profile(name='kim'); db.set_profile_library(kim, 'own', '/music/kim')
+    monkeypatch.setattr('core.profile_context.get_current_profile_id', lambda: 1)
+    monkeypatch.setattr(da, '_own_library_scan_clients', lambda server_type: [({'id': kim, 'name': 'kim'}, object())])
+    monkeypatch.setattr(da, '_db_update_phase_callback', lambda p: None)
+    monkeypatch.setattr(da, '_db_update_artist_callback', lambda *a: None)
+    seen = {}
+
+    class _Worker:
+        def __init__(self, **kw):
+            seen['owner'] = kw['owner_profile_id']
+            self.processed_artists = self.processed_tracks = 0
+
+        def connect_callback(self, *a):
+            pass
+
+        def run(self):
+            seen['scope'] = scope_mod.current_library_scope()
+    monkeypatch.setattr(da, 'DatabaseUpdateWorker', _Worker)
+    da._run_own_library_scans('plex', deep=False)
+    assert seen == {'owner': kim, 'scope': kim}
+    assert scope_mod.current_library_scope() == 'shared'

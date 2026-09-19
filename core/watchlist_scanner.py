@@ -13,6 +13,7 @@ from difflib import SequenceMatcher
 import requests
 from bs4 import BeautifulSoup
 from database.music_database import get_database, WatchlistArtist
+from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
 from core.spotify_client import SpotifyClient
 from core.metadata_service import (
     get_album_tracks_for_source,
@@ -1398,6 +1399,12 @@ class WatchlistScanner:
 
             source_artist_id, source_provider = watchlist_source_identity(artist)
 
+            # "is this track missing" is asked of the artist's owner's library
+            # (#1199): a scheduled scan walks every profile's artists on one
+            # thread, and without this an own-library profile was answered
+            # from the shared library, so anything the admin had was never
+            # wishlisted for them
+            _scope_token = set_library_scope(library_scope_for_profile(getattr(artist, 'profile_id', None) or profile_id))
             try:
                 discography_result = self.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
                 if discography_result is None:
@@ -1668,6 +1675,8 @@ class WatchlistScanner:
                     profile_id=profile_id,
                     error_message=str(e),
                 )
+            finally:
+                reset_library_scope(_scope_token)
 
         if scan_state is not None:
             successful_scans = [r for r in scan_results if r.success]

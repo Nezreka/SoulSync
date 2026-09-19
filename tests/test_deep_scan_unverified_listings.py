@@ -270,7 +270,9 @@ def _jellyfin(server: Server, *, bulk_fail_after_pages=None, bulk='ok'):
             return {'Items': [{'Id': ar, 'Name': f"Artist {ar}"} for ar in server.artists]}
         if endpoint == '/Users/u/Items':
             kind = params.get('IncludeItemTypes')
-            if params.get('ParentId') == 'lib':         # the bulk fetches
+            # the bulk fetches: the library, no artist named (a per-artist
+            # fetch names the library too, so a second library's albums stay out)
+            if params.get('ParentId') == 'lib' and not params.get('ArtistIds'):
                 if kind == 'Audio':
                     bulk_pages['tracks'] += 1
                     if bulk in ('tracks_fail', 'all_fail'):
@@ -316,7 +318,8 @@ def _run_jellyfin(seeded, server, monkeypatch=None, **client_kw):
 def _per_item_calls(server, kind):
     """the per-album ('Audio') or per-artist ('MusicAlbum') Items requests"""
     return [c for c in server.calls if c[0] == '/Users/u/Items'
-            and c[1].get('IncludeItemTypes') == kind and c[1].get('ParentId') != 'lib']
+            and c[1].get('IncludeItemTypes') == kind
+            and (c[1].get('ArtistIds') if kind == 'MusicAlbum' else c[1].get('ParentId') != 'lib')]
 
 
 def test_jellyfin_healthy_scan_keeps_everything(seeded):

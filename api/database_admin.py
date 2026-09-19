@@ -715,8 +715,14 @@ def _run_own_library_scans(server_type, deep):
     profile. runs as the final phase of the shared scan (its post-scan hook)
     so the status stays 'running' through it and one finished signal ends
     the whole thing. a failure in one profile's scan never stops the rest."""
+    from core.library_scope import reset_library_scope, set_library_scope
     for prof, client in _own_library_scan_clients(server_type):
         _db_update_phase_callback(f"Scanning {prof['name']}'s library...")
+        # the worker names its owner on every write and per-library read, so
+        # the scope is belt and braces: anything it asks the db through the
+        # caller's scope is answered from this profile's library, not the
+        # shared one the scan thread runs as
+        _scope_token = set_library_scope(prof['id'])
         try:
             worker = DatabaseUpdateWorker(
                 media_client=client, full_refresh=False, server_type=server_type,
@@ -732,6 +738,8 @@ def _run_own_library_scans(server_type, deep):
                         f"{worker.processed_tracks} new tracks")
         except Exception as e:
             logger.error(f"[Own Library] scan of {prof['name']}'s library failed: {e}")
+        finally:
+            reset_library_scope(_scope_token)
 
 
 def _post_scan_hook_with_own_libraries(server_type, deep):
