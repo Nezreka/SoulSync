@@ -2504,6 +2504,7 @@ async function loadProfileManageList() {
         editBtn.dataset.isAdmin = p.is_admin ? '1' : '0';
         editBtn.dataset.libraryMode = p.library_mode || 'shared';
         editBtn.dataset.libraryRoot = p.library_root || '';
+        editBtn.dataset.libraryHint = (data.own_library_root_hint || '').replace('<name>', (p.name || 'profile').toLowerCase().replace(/[^a-z0-9]+/g, '-'));
         editBtn.title = 'Edit profile';
         editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
         actions.appendChild(editBtn);
@@ -2544,7 +2545,8 @@ async function loadProfileManageList() {
                 can_download: btn.dataset.canDownload !== '0',
                 is_admin: btn.dataset.isAdmin === '1',
                 library_mode: btn.dataset.libraryMode || 'shared',
-                library_root: btn.dataset.libraryRoot || ''
+                library_root: btn.dataset.libraryRoot || '',
+                library_hint: btn.dataset.libraryHint || ''
             });
         };
     });
@@ -2818,13 +2820,19 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
         ownLibRootInput = document.createElement('input');
         ownLibRootInput.type = 'text';
         ownLibRootInput.className = 'profile-name-input';
-        ownLibRootInput.placeholder = 'Output folder for this profile, e.g. /music/thomas';
+        // in docker the folder is a mount under /app/libraries/<name> (see
+        // docker-compose.yml); the server says which, and it is filled in as
+        // the default so the compose line and the card agree
+        ownLibRootInput.placeholder = profileSettings.library_hint || 'Output folder for this profile, e.g. /music/thomas';
         ownLibRootInput.value = profileSettings.library_root || '';
+        if (!ownLibRootInput.value && profileSettings.library_hint) ownLibRootInput.value = profileSettings.library_hint;
         ownLibRootInput.style.display = ownLibCheckbox.checked ? '' : 'none';
         form.appendChild(ownLibRootInput);
         const olHelp = document.createElement('div');
         olHelp.className = 'profile-settings-help';
-        olHelp.textContent = 'Point a second music library on your Plex or Jellyfin server at that folder, then have the profile pick it under My Settings.';
+        olHelp.textContent = (profileSettings.library_hint
+            ? 'Mount that folder in docker-compose.yml (see the Per-profile libraries example there), point a second music library on your Plex or Jellyfin server at it, then have the profile pick that library under My Settings.'
+            : 'Point a second music library on your Plex or Jellyfin server at that folder, then have the profile pick it under My Settings.');
         olHelp.style.display = ownLibCheckbox.checked ? '' : 'none';
         form.appendChild(olHelp);
         ownLibCheckbox.addEventListener('change', () => {

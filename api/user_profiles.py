@@ -338,7 +338,10 @@ def list_profiles():
     try:
         database = get_database()
         profiles = database.get_all_profiles()
-        return jsonify({'success': True, 'profiles': profiles})
+        return jsonify({'success': True, 'profiles': profiles,
+                        # where an own-library folder goes on this install (#1199):
+                        # a mount under /app in docker, anywhere otherwise
+                        'own_library_root_hint': _own_library_root_hint()})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -497,6 +500,9 @@ def update_profile(profile_id):
                 shared_root = str(config_manager.get('soulseek.transfer_path', '') or '').strip().rstrip('/\\')
                 if shared_root and root.rstrip('/\\') == shared_root:
                     return jsonify({'success': False, 'error': 'That is the shared library folder; pick a different one'}), 400
+                problem = _own_library_root_problem(root)
+                if problem:
+                    return jsonify({'success': False, 'error': problem}), 400
             library_result = database.set_profile_library(profile_id, mode, root or None)
             from core.library_scope import invalidate_library_scope_cache
             invalidate_library_scope_cache()
@@ -980,6 +986,38 @@ def save_profile_server_library():
         return jsonify({'success': False, 'error': 'Failed to save library selection'}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _is_docker() -> bool:
+    return os.path.exists('/.dockerenv')
+
+
+def _own_library_root_hint(name: str = '<name>') -> str:
+    """the folder an own library is expected at. in docker that is a mount
+    the compose file has to provide (same rule as /app/Transfer); outside
+    docker any folder the app can write to."""
+    if _is_docker():
+        return f"/app/libraries/{name}"
+    return ''
+
+
+def _own_library_root_problem(root: str):
+    """None when the folder is usable, else the message to show. the folder
+    has to exist and be writable HERE, inside the container when there is
+    one: a path that only exists on the host is the usual mistake."""
+    try:
+        from core.imports.paths import config_root_path
+        resolved = config_root_path(root)
+    except Exception:  # noqa: BLE001
+        resolved = root
+    if not os.path.isdir(resolved):
+        if _is_docker():
+            return (f"{root} does not exist inside the container. Mount it in docker-compose.yml "
+                    f"(e.g. - /path/on/host:{root}) and restart, then save again.")
+        return f"{root} does not exist. Create the folder first."
+    if not os.access(resolved, os.W_OK):
+        return f"{root} is not writable by the app."
+    return None
 
 
 @bp.route('/api/profiles/me/navidrome-login', methods=['POST'])
