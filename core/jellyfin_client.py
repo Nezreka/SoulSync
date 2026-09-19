@@ -243,15 +243,31 @@ class JellyfinClient(MediaServerClient):
         self.clear_cache()
         logger.info("Jellyfin client config reset — will reconnect with new settings")
 
+    # a failed connection attempt used to latch: after the first try,
+    # ensure_connection only ever reported what that try left behind, so a
+    # jellyfin that was still starting when soulsync came up, or one blip,
+    # read as disconnected until someone pressed Test in the sidebar (which
+    # calls reload_config). navidrome's client already re-attempts after a
+    # throttle; this is the same rule.
+    _RECONNECT_THROTTLE_S = 20.0
+
     def ensure_connection(self) -> bool:
-        """Ensure connection to Jellyfin server with lazy initialization."""
-        if self._connection_attempted:
-            return self.base_url is not None and self.api_key is not None
-        
+        """Ensure connection to Jellyfin server with lazy initialization.
+
+        connected -> True at once. a failed attempt is retried once the
+        throttle has passed instead of being remembered for good."""
+        if self.base_url is not None and self.api_key is not None:
+            return True
+
         if self._is_connecting:
             return False
-        
+
+        if self._connection_attempted and \
+                (time.monotonic() - getattr(self, '_last_connect_attempt', 0.0)) < self._RECONNECT_THROTTLE_S:
+            return False
+
         self._is_connecting = True
+        self._last_connect_attempt = time.monotonic()
         try:
             self._setup_client()
             return self.base_url is not None and self.api_key is not None
@@ -757,7 +773,10 @@ class JellyfinClient(MediaServerClient):
     
     def is_connected(self) -> bool:
         """Check if connected to Jellyfin server"""
-        if not self._connection_attempted:
+        # not connected -> let ensure_connection decide whether it is time to
+        # try again (it throttles). it used to ask only when NO attempt had
+        # been made, so a failed first attempt was never retried from here
+        if self.base_url is None or self.api_key is None:
             if not self._is_connecting:
                 self.ensure_connection()
         return (self.base_url is not None and 
