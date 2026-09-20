@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping, Optional
 
 from core.library2.provider_attempts import DEFAULT_RETRY_AFTER_DAYS
-from core.library2.sql_util import owned_sql
+from core.library2.sql_util import ANY_OWNER, owned_sql
 
 ENTITY_ORDER = ("artist", "album", "track")
 
@@ -111,7 +111,7 @@ def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
     # v2 keeps a watched artist's discography and the wishlist in the same
     # tables, and without this every worker enriched those too — work legacy
     # never did, re-asked every retry window, and counted into the denominator.
-    owned = f"AND {owned_sql(entity_type, 'e')}"
+    owned = f"AND {owned_sql(entity_type, 'e', scope=ANY_OWNER)}"
     if phase == "new":
         return f"""
             {_sources(service)[entity_type]}
@@ -241,7 +241,7 @@ def status_counts(conn, service: str, entity_type: str, *,
     tables, and counting those reported pending work ``next_pending`` can never
     hand out, so the bar sat below 100% forever.
     """
-    predicates = [owned_sql(entity_type, "e")]
+    predicates = [owned_sql(entity_type, "e", scope=ANY_OWNER)]
     if require_provider_id:
         predicates.append(f"({_HAS_PROVIDER_ID})")
     universe = "WHERE " + " AND ".join(predicates)
@@ -283,11 +283,11 @@ def progress_breakdown(conn, service: str, *,
         row = conn.execute(
             f"""
             SELECT (SELECT COUNT(*) FROM {_TABLES[entity_type]} e
-                     WHERE {owned_sql(entity_type, "e")}) AS total,
+                     WHERE {owned_sql(entity_type, "e", scope=ANY_OWNER)}) AS total,
                    (SELECT COUNT(*) FROM lib2_provider_attempts a
                      JOIN {_TABLES[entity_type]} e ON e.id = a.entity_id
                     WHERE a.entity_type=:entity AND a.service=:service
-                      AND {owned_sql(entity_type, "e")}) AS processed
+                      AND {owned_sql(entity_type, "e", scope=ANY_OWNER)}) AS processed
             """,
             {"entity": entity_type, "service": key},
         ).fetchone()
@@ -368,7 +368,7 @@ def _batch_parent(conn, service: str, child: str) -> Optional[Any]:
                         ON ca.entity_type = :child_type AND ca.entity_id = c.id
                        AND ca.service = :service
                 WHERE {child_link} AND ca.entity_id IS NULL
-                  AND {owned_sql(child, "c")})
+                  AND {owned_sql(child, "c", scope=ANY_OWNER)})
          ORDER BY p.id LIMIT 1
         """,
         {"parent_type": spec["parent_type"], "child_type": child,
@@ -448,7 +448,7 @@ def pending_children(conn, service: str, parent_type: str, parent_id: Any, *,
                  ON a.entity_type = :child_type AND a.entity_id = e.id
                 AND a.service = :service
          WHERE {spec["parent_join"]} AND a.entity_id IS NULL
-           AND {owned_sql(child, "e")}
+           AND {owned_sql(child, "e", scope=ANY_OWNER)}
          ORDER BY e.id
         """,
         {"child_type": child, "service": str(service).strip().lower(),

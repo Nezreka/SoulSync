@@ -47,14 +47,21 @@ def _first_artist(name: str) -> str:
 #
 # **A path is a file row.** ``file_path`` comes from the primary active file
 # (ADR-03); a known, unfetched catalogue track is not reported as owned.
-_OWNED_ALBUMS_SQL = """
+_OWNED_ALBUMS_SQL_TEMPLATE = """
     SELECT al.title, ar.name
       FROM lib2_albums al
       JOIN lib2_artists ar ON ar.id = al.primary_artist_id
      WHERE EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
                    ON f.track_id=t.id WHERE t.album_id=al.id
-                   AND f.file_state='active' AND TRIM(f.path)<>'')
+                   AND f.file_state='active' AND TRIM(f.path)<>''{owner})
 """
+
+
+def _owned_albums_sql() -> str:
+    """The albums the CALLER owns. Built per call: the library scope is a
+    property of who is asking, and a module constant would freeze it."""
+    from core.library2.sql_util import owner_clause
+    return _OWNED_ALBUMS_SQL_TEMPLATE.format(owner=owner_clause(column="f.owner_profile_id"))
 
 # INT-03: ownership is keyed on the TRACK's artist. Joining only
 # ``lib2_albums.primary_artist_id`` meant a Muse track sitting on a Various
@@ -82,7 +89,7 @@ _TRACK_CREDIT_NAMES_SQL = """
      WHERE TRIM(COALESCE(ar.name, '')) <> ''
 """
 
-_OWNED_TRACKS_SQL = f"""
+_OWNED_TRACKS_SQL_TEMPLATE = f"""
     WITH track_credits AS ({_TRACK_CREDIT_NAMES_SQL})
     SELECT t.title, credit.name,
            COALESCE((SELECT m.server_id FROM lib2_media_server_mappings m
@@ -106,7 +113,7 @@ _OWNED_TRACKS_SQL = f"""
       JOIN lib2_albums al ON al.id = t.album_id
       JOIN track_credits credit ON credit.track_id = t.id
      WHERE EXISTS (SELECT 1 FROM lib2_track_files owned_f WHERE owned_f.track_id=t.id
-                   AND owned_f.file_state='active' AND TRIM(owned_f.path)<>'')
+                   AND owned_f.file_state='active' AND TRIM(owned_f.path)<>''{{owner}})
      ORDER BY (EXISTS (SELECT 1 FROM lib2_media_server_mappings active_m
                         WHERE active_m.entity_type='track'
                           AND active_m.entity_id=t.id
@@ -163,6 +170,14 @@ def _load_wishlist_keys(cursor, profile_id: int) -> set[str]:
     return _load_wishlist_keys_shared(cursor, profile_id)
 
 
+
+def _owned_tracks_sql() -> str:
+    """The tracks the CALLER owns, same reasoning as _owned_albums_sql."""
+    from core.library2.sql_util import owner_clause
+    return _OWNED_TRACKS_SQL_TEMPLATE.format(
+        owner=owner_clause(column="owned_f.owner_profile_id"))
+
+
 def check_library_presence(
     database,
     plex_client,
@@ -193,14 +208,14 @@ def check_library_presence(
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute(_OWNED_ALBUMS_SQL)
+        cursor.execute(_owned_albums_sql())
         owned_albums = {_presence_key(r[0], r[1]) for r in cursor.fetchall()}
 
         active_server = getattr(
             config_manager, 'get_active_media_server',
             lambda: config_manager.get('media_server.type', 'plex'))()
         cursor.execute(
-            _OWNED_TRACKS_SQL,
+            _owned_tracks_sql(),
             (active_server, active_server, active_server, active_server),
         )
         owned_tracks: dict[str, dict] = {}

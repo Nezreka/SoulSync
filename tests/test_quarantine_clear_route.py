@@ -33,6 +33,11 @@ def client(tmp_path):
         post_process_matched_download_with_verification=None,
         download_orchestrator_getter=lambda: None,
         matching_engine_getter=lambda: None,
+        # these three joined configure() after this test was written; the clear
+        # route touches none of them, so None is honest here
+        get_database_=lambda: None,
+        automation_engine_getter=lambda: None,
+        web_scan_manager_getter=lambda: None,
     )
     app = Flask(__name__)
     app.register_blueprint(q_api.bp)

@@ -28,8 +28,15 @@ _LIVE_FILE = ("COALESCE(f.file_state, 'active') = 'active' "
 # a track owned. Missing/wanted/provider-only tracks intentionally remain lib2
 # rows. One definition, shared with the enrichment queue — it had been
 # re-derived in four places, and the queue's copy was simply missing.
-_OWNED_TRACK = _owned_sql("track", "t")
-_OWNED_ARTIST = _owned_sql("artist", "a")
+# Functions, not constants: the ownership predicate now carries the caller's
+# library scope, and a constant would freeze whatever scope happened to be in
+# effect at import time.
+def _owned_track(alias: str = "t") -> str:
+    return _owned_sql("track", alias)
+
+
+def _owned_artist(alias: str = "a") -> str:
+    return _owned_sql("artist", alias)
 
 def _as_datetime(value):
     """A timestamp column as a datetime, or None. v2 stores ISO strings."""
@@ -5553,7 +5560,7 @@ class MusicDatabase:
                 FROM lib2_tracks t
                 JOIN lib2_albums al ON al.id = t.album_id
                 JOIN lib2_artists a ON a.id = al.primary_artist_id
-                WHERE {_OWNED_TRACK}
+                WHERE {_owned_track()}
                   AND a.genres IS NOT NULL AND a.genres != ''
                 GROUP BY a.genres
             """)
@@ -5620,7 +5627,7 @@ class MusicDatabase:
                 FROM lib2_albums al
                 JOIN lib2_tracks t ON t.album_id = al.id
                 JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                WHERE {_OWNED_TRACK}
+                WHERE {_owned_track()}
                 GROUP BY al.id
                 HAVING best_play_count = 0 AND tracks > 0
                 ORDER BY tracks DESC
@@ -5916,12 +5923,12 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t WHERE {_OWNED_TRACK}")
+            cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t WHERE {_owned_track()}")
             total_tracks = (cursor.fetchone() or [0])[0]
 
             cursor.execute(
                 "SELECT COUNT(*) FROM lib2_tracks t "
-                f"WHERE COALESCE(t.play_count, 0) = 0 AND {_OWNED_TRACK}")
+                f"WHERE COALESCE(t.play_count, 0) = 0 AND {_owned_track()}")
             unplayed = (cursor.fetchone() or [0])[0]
 
             # The labels are what the page renders, so the extension keeps
@@ -5952,7 +5959,7 @@ class MusicDatabase:
 
             cursor.execute(
                 "SELECT COALESCE(SUM(t.duration), 0) FROM lib2_tracks t "
-                f"WHERE {_OWNED_TRACK}")
+                f"WHERE {_owned_track()}")
             total_duration_ms = (cursor.fetchone() or [0])[0]
 
             # Enrichment coverage: how much of the catalogue each service has
@@ -5978,7 +5985,7 @@ class MusicDatabase:
                     "SELECT COUNT(*), "
                     + ", ".join(f"SUM(CASE WHEN {expr} THEN 1 ELSE 0 END)"
                                 for _service, expr in services)
-                    + f" FROM lib2_artists a WHERE {_OWNED_ARTIST}")
+                    + f" FROM lib2_artists a WHERE {_owned_artist()}")
                 counts = cursor.fetchone() or []
             except Exception:
                 counts = []
@@ -6107,7 +6114,7 @@ class MusicDatabase:
                 "  FROM (SELECT t.id, ("
                 "            SELECT COUNT(f.size) FROM lib2_track_files f "
                 f"            WHERE f.track_id = t.id AND {_LIVE_FILE}"
-                f"        ) AS sized FROM lib2_tracks t WHERE {_OWNED_TRACK}) t"
+                f"        ) AS sized FROM lib2_tracks t WHERE {_owned_track()}) t"
             )
             row = cursor.fetchone()
             tracks_with_size = int((row or [0, 0])[1] or 0)
@@ -7224,7 +7231,7 @@ class MusicDatabase:
                     "AND COALESCE(f.file_state,'active')='active')")
                 album_count = cursor.fetchone()[0]
 
-                cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t WHERE {_OWNED_TRACK}")
+                cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t WHERE {_owned_track()}")
                 track_count = cursor.fetchone()[0]
 
                 return {
@@ -7278,7 +7285,7 @@ class MusicDatabase:
                     cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t "
                                    f"WHERE (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
                                    f"WHERE m.entity_type='track' AND m.entity_id=t.id "
-                                   f"AND m.server_source=?) OR t.server_source=?) AND {_OWNED_TRACK}",
+                                   f"AND m.server_source=?) OR t.server_source=?) AND {_owned_track()}",
                                    (server_source, server_source))
                     track_count = cursor.fetchone()[0]
                 return {

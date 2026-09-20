@@ -27,26 +27,40 @@ from .track_files import primary_file_rows
 # same precedent as quality_upgrade.py/quality_upgrade_scanner.py's
 # duplicated `_config_fingerprint`). Missing must never list these — they'd
 # nag the user to redownload a duplicate they intentionally removed.
-_CONSOLIDATED_ELSEWHERE_SQL = """
+_CONSOLIDATED_ELSEWHERE_TEMPLATE = """
     EXISTS(
         SELECT 1 FROM lib2_tracks o
         JOIN lib2_track_files otf ON otf.track_id = o.id
              AND otf.path IS NOT NULL AND otf.path <> ''
              AND COALESCE(otf.file_state,'active')
-                 NOT IN ('missing_confirmed','deleted')
+                 NOT IN ('missing_confirmed','deleted'){otf_owner}
         WHERE o.id = t.canonical_track_id
            OR o.canonical_track_id = t.id
     )
 """
 
-_HAS_FILE_SQL = """
+_HAS_FILE_TEMPLATE = """
     EXISTS (
         SELECT 1 FROM lib2_track_files tf
          WHERE tf.track_id = t.id
            AND tf.path IS NOT NULL AND tf.path <> ''
-           AND COALESCE(tf.file_state,'active') NOT IN ('missing_confirmed','deleted')
+           AND COALESCE(tf.file_state,'active') NOT IN ('missing_confirmed','deleted'){tf_owner}
     )
 """
+
+
+def _has_file_sql() -> str:
+    """"there is a file for this track" -- in the CALLER's library. Built per
+    call because the scope belongs to whoever is asking (#1199)."""
+    from core.library2.sql_util import owner_clause
+    return _HAS_FILE_TEMPLATE.format(tf_owner=owner_clause(column="tf.owner_profile_id"))
+
+
+def _consolidated_elsewhere_sql() -> str:
+    """Same, for the duplicate a track was consolidated into."""
+    from core.library2.sql_util import owner_clause
+    return _CONSOLIDATED_ELSEWHERE_TEMPLATE.format(
+        otf_owner=owner_clause(column="otf.owner_profile_id"))
 
 _ROW_SELECT = """
     SELECT t.id AS track_id, t.title AS track_title,
@@ -105,7 +119,7 @@ def list_missing(conn: Any, *, search: str = "", page: int = 1, limit: int = 75,
     like_sql, like_params = _search_clause(search)
     where = (
         "WHERE w.profile_id = :profile_id AND w.wanted = 1 "
-        f"AND NOT ({_HAS_FILE_SQL}) AND NOT ({_CONSOLIDATED_ELSEWHERE_SQL})"
+        f"AND NOT ({_has_file_sql()}) AND NOT ({_consolidated_elsewhere_sql()})"
         # §49.6(c): the same audio may already be on disk under another
         # release. Listing it as missing would send the user to download a
         # second copy of a file they already have.
@@ -150,7 +164,7 @@ def list_cutoff_unmet(conn: Any, *, search: str = "", page: int = 1, limit: int 
     like_sql, like_params = _search_clause(search)
     where = (
         "WHERE w.profile_id = :profile_id AND w.wanted = 1 "
-        f"AND ({_HAS_FILE_SQL})"
+        f"AND ({_has_file_sql()})"
         + like_sql
     )
     params: Dict[str, Any] = {"profile_id": int(profile_id), **like_params}

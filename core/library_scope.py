@@ -65,6 +65,30 @@ def reset_library_scope(token) -> None:
         _explicit_scope.set(_UNSET)
 
 
+def carrying_scope(fn):
+    """Wrap ``fn`` so it runs under the scope in effect right now.
+
+    A ContextVar does not cross a thread start: a pool worker begins with an
+    empty context, so ``current_library_scope()`` there falls back to the
+    request-less default and answers "do we own this" from the shared library.
+    Anything handed to an executor from inside a scoped block has to carry the
+    scope with it explicitly, and this is how.
+    """
+    import functools
+
+    scope = current_library_scope()
+
+    @functools.wraps(fn)
+    def _run(*args, **kwargs):
+        token = set_library_scope(scope)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            reset_library_scope(token)
+
+    return _run
+
+
 def invalidate_library_scope_cache() -> None:
     with _mode_cache_lock:
         _mode_cache.clear()

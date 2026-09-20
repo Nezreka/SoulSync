@@ -241,3 +241,72 @@ class TestTheUpgradePath:
 
         assert stats["files"] > 0
         assert set(self._files(legacy_db).values()) == {None}
+
+
+class TestTheOwnershipPredicate:
+    """`owned_sql` is the one definition of "the caller owns this". The scope
+    rides on it so a query cannot accidentally be written without one."""
+
+    @staticmethod
+    def _owning_artist(conn, owner):
+        from tests.support.catalogue_seed import seed_library_track
+        track = seed_library_track(
+            conn, artist=f'A{owner}', album=f'Al{owner}', title=f'T{owner}',
+            artist_server_id=f'ar{owner}', album_server_id=f'al{owner}',
+            track_server_id=f'tr{owner}', file_path=f'/m/{owner}.flac')
+        conn.execute("UPDATE lib2_track_files SET owner_profile_id=? WHERE track_id=?",
+                     (owner, track))
+        return track
+
+    def test_parked_means_no_filter_at_all(self):
+        """The merge must not change a single query while the feature is off:
+        'shared' would already hide an upgraded install's owned rows."""
+        from core.library2.sql_util import owned_sql
+        assert "owner_profile_id" not in owned_sql("track", "t")
+
+    def test_an_explicit_scope_filters(self):
+        from core.library2.sql_util import owned_sql
+        assert "+owned_f.owner_profile_id IS NULL" in owned_sql("track", "t", scope="shared")
+        assert "+owned_f.owner_profile_id = 7" in owned_sql("album", "al", scope=7)
+
+    def test_any_owner_never_filters(self):
+        """What the enrichment workers pass: metadata is shared, so a row is
+        worth enriching whoever holds the file."""
+        from core.library2.sql_util import ANY_OWNER, owned_sql
+        assert "owner_profile_id" not in owned_sql("artist", "a", scope=ANY_OWNER)
+
+    def test_the_planner_guard_survives(self):
+        """The leading + keeps SQLite off the owner index. Losing it turned 2ms
+        into 18s on a 300k-track library upstream, and nothing else would fail."""
+        from core.library2.sql_util import owner_clause
+        assert owner_clause("shared").lstrip().startswith("AND +")
+        assert owner_clause(3).lstrip().startswith("AND +")
+
+    def test_a_profiles_row_is_theirs_and_not_the_shared_librarys(self, conn):
+        from core.library2.sql_util import ANY_OWNER, owned_sql
+
+        self._owning_artist(conn, 7)
+
+        def visible(scope):
+            return conn.execute(
+                "SELECT COUNT(*) FROM lib2_artists a WHERE "
+                + owned_sql("artist", "a", scope=scope)).fetchone()[0]
+
+        assert visible(7) == 1
+        assert visible("shared") == 0
+        assert visible(ANY_OWNER) == 1
+
+    def test_a_row_with_no_owner_belongs_to_the_shared_library(self, conn):
+        from core.library2.sql_util import owned_sql
+        from tests.support.catalogue_seed import seed_library_track
+
+        seed_library_track(conn, artist='Shared', album='Al', title='T',
+                           file_path='/m/shared.flac')
+
+        def visible(scope):
+            return conn.execute(
+                "SELECT COUNT(*) FROM lib2_artists a WHERE "
+                + owned_sql("artist", "a", scope=scope)).fetchone()[0]
+
+        assert visible("shared") == 1
+        assert visible(7) == 0

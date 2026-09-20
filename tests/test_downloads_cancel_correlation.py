@@ -7,22 +7,9 @@ import types
 from unittest.mock import patch
 
 
-def _install_flask_limiter_stub():
-    if "flask_limiter" in sys.modules:
-        return
-    stub = types.ModuleType("flask_limiter")
-    stub.Limiter = type("Limiter", (), {"__init__": lambda self, *a, **k: None})
-    sys.modules["flask_limiter"] = stub
-    util_stub = types.ModuleType("flask_limiter.util")
-    util_stub.get_remote_address = lambda: "127.0.0.1"
-    sys.modules["flask_limiter.util"] = util_stub
+from flask import Blueprint, Flask
 
-
-_install_flask_limiter_stub()
-
-from flask import Blueprint, Flask  # noqa: E402
-
-from api import downloads as downloads_mod  # noqa: E402
+from api import downloads as downloads_mod
 
 
 class _Orchestrator:

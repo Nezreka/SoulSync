@@ -1,7 +1,7 @@
 """Findings-based, additive genre enrichment."""
 import json
 from core.repair_jobs import register_job
-from core.library2.sql_util import owned_sql
+from core.library2.sql_util import ANY_OWNER, owned_sql
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from core.metadata.genre_enrichment import (collect_cached_candidates, collect_local_candidates,
     extract_provider_genres, parse_values, propose_genres, provider_ids_from_row,
@@ -55,9 +55,9 @@ class GenreEnrichmentJob(RepairJob):
         # on they also spend real provider requests.
         entity_specs = []
         if settings['include_artists']:
-            entity_specs.append(('artist', 'lib2_artists a', owned_sql('artist', 'a')))
+            entity_specs.append(('artist', 'lib2_artists a', owned_sql('artist', 'a', scope=ANY_OWNER)))
         if settings['include_albums']:
-            entity_specs.append(('album', 'lib2_albums al', owned_sql('album', 'al')))
+            entity_specs.append(('album', 'lib2_albums al', owned_sql('album', 'al', scope=ANY_OWNER)))
         total = 0
         for _, source, owned in entity_specs:
             count_row = conn.execute(

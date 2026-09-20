@@ -928,7 +928,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             # Handle auto-initiated wishlist completion even when no missing tracks
             if is_auto_batch and playlist_id == 'wishlist':
                 logger.warning("[Auto-Wishlist] No missing tracks found - calling auto-completion handler to toggle cycle and reschedule")
-                deps.missing_download_executor.submit(deps.process_failed_tracks_to_wishlist_exact_with_auto_completion, batch_id)
+                # the pool thread starts with an empty context, so the batch
+                # owner's scope has to travel with the callable (#1199)
+                from core.library_scope import carrying_scope
+                deps.missing_download_executor.submit(
+                    carrying_scope(deps.process_failed_tracks_to_wishlist_exact_with_auto_completion),
+                    batch_id)
 
             # Organize-by-playlist with NOTHING to download (every track already
             # owned): the batch never enters the download/lifecycle path, so build

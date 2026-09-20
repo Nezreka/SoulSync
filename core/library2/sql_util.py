@@ -59,7 +59,53 @@ def select_existing_ids(
 # "the library" has to say so now. Four places had re-derived this; they read the
 # same rule from here.
 _LIVE_FILE = ("owned_f.path IS NOT NULL AND TRIM(owned_f.path) <> '' "
-              "AND COALESCE(owned_f.file_state,'active') = 'active'")
+              "AND COALESCE(owned_f.file_state,'active') = 'active'{owner}")
+
+# "whose library" is a second question on top of "is there a live file", and the
+# two have to be asked together or a caller gets rows it does not own. The
+# answer is one of:
+#
+#   ANY_OWNER   every library. What the enrichment workers want: metadata is
+#               shared, so a row is worth enriching whoever has the file.
+#   'shared'    the shared library only (owner IS NULL).
+#   <int>       that profile's own library.
+#
+# Callers that leave `scope` alone get the AMBIENT scope: whoever is asking
+# right now. While core.library_scope.SCOPE_PARKED is true that resolves to
+# ANY_OWNER -- the feature is off, so nothing filters and every query is byte
+# for byte what it was. Flipping the switch turns scoping on everywhere at
+# once, which is the point of routing it through here.
+ANY_OWNER = object()
+_AMBIENT = object()
+
+
+def _resolve_scope(scope):
+    if scope is not _AMBIENT:
+        return scope
+    try:
+        from core.library_scope import SCOPE_PARKED, current_library_scope
+        return ANY_OWNER if SCOPE_PARKED else current_library_scope()
+    except Exception:  # noqa: BLE001 - unreadable scope means do not filter
+        return ANY_OWNER
+
+
+def owner_clause(scope=_AMBIENT, column: str = "owned_f.owner_profile_id") -> str:
+    """The owner half of the ownership predicate, ready to append.
+
+    The leading ``+`` keeps SQLite off the owner index: the scope filters the
+    rows a query's real predicates found, it is never the index to walk.
+    Upstream measured 2 ms becoming 18 s on a 300k-track library without it.
+    The profile id is an int we validate and inline, because `owned_sql`
+    returns a plain string and threading parameters through every call site
+    would be the only reason it could not.
+    """
+    resolved = _resolve_scope(scope)
+    if resolved is ANY_OWNER or resolved is None:
+        return ""
+    if resolved == "shared":
+        return f" AND +{column} IS NULL"
+    return f" AND +{column} = {int(resolved)}"
+
 
 _OWNED = {
     "track": ("EXISTS (SELECT 1 FROM lib2_track_files owned_f"
@@ -80,18 +126,20 @@ _OWNED = {
 }
 
 
-def owned_sql(entity_type: str, alias: str) -> str:
-    """SQL predicate: ``alias`` is a row the user actually owns.
+def owned_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
+    """SQL predicate: ``alias`` is a row the caller actually owns.
 
     ``alias`` is an internal literal like ``t`` or ``e``; validated as an
-    identifier because it is interpolated, same reasoning as above.
+    identifier because it is interpolated, same reasoning as above. ``scope``
+    says whose library counts -- see ANY_OWNER above; pass it explicitly from
+    anything that must see every library regardless of who is asking.
     """
     if not _VALID_IDENTIFIER.match(alias):
         raise ValueError(f"Invalid alias: {alias!r}")
     key = str(entity_type or "").strip().lower().rstrip("s")
     if key not in _OWNED:
         raise ValueError(f"Unknown entity type: {entity_type!r}")
-    return _OWNED[key].format(alias=alias)
+    return _OWNED[key].format(alias=alias, owner=owner_clause(scope))
 
 
-__all__ = ["owned_sql", "select_existing_ids"]
+__all__ = ["ANY_OWNER", "owned_sql", "owner_clause", "select_existing_ids"]

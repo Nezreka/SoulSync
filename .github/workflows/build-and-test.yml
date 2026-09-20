@@ -32,10 +32,14 @@ jobs:
       - name: Build app
         run: python -m compileall api core database services scripts web_server.py wsgi.py beatport_unified_scraper.py
 
+      # Chunked on purpose: one pytest process over the whole suite leaks
+      # background workers and a shared asyncio loop between files, and a single
+      # wedged file then takes the rest of the run with it. See the header of
+      # the script.
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m pytest
+        run: ./scripts/run_tests_chunked.sh
 
   webui:
     runs-on: ubuntu-latest
