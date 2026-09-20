@@ -3468,6 +3468,8 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
     '3.4.4': [
+        { date: 'Unreleased fixes' },
+        { title: 'MP3 quality upgrades replace the old copy', desc: 'Quality Upgrade Finder now replaces lower-bitrate MP3s with better MP3s under the assigned profile (#1270). Ordinary wishlist downloads stay protected, and upgrades keep integrity and length checks.', page: 'tools' },
         { date: 'September 2026 · 3.4.4' },
         { title: 'A library of your own', desc: 'Each profile can use its own music folder and server library (#1199). Downloads, scans, watchlists and ownership checks stay with that profile; the admin stays on the shared library.', page: 'settings' },
         { title: 'Folders checked before saving', desc: 'Personal-library folders are prefilled and validated. Overlaps with the shared library or another profile are refused, and Docker Compose includes a default mount path.', page: 'settings' },
@@ -3508,6 +3510,14 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: 'Unreleased: MP3 quality upgrades (#1270)',
+        description: 'Finder-approved wishlist downloads can replace a lower-bitrate MP3 without enabling blanket overwrites.',
+        features: [
+            'Replacement compares measured audio against the assigned quality profile, so MP3 320 can replace MP3 128 and an MP3-only profile does not accept a FLAC replacement.',
+            'Upgrades reuse the original library filename. Integrity and length guards still apply, and a different-format original is retired only after the better file is safely imported.',
+        ],
+    },
     {
         title: '3.4.4: personal libraries, safer scans and clearer sync',
         description: 'Separate music libraries and server accounts per profile, with scan protection and fixes for downloads, automations and chat.',

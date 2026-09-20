@@ -750,7 +750,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             source_info = json.loads(source_info)
         except (json.JSONDecodeError, TypeError):
             source_info = {}
-    if source_info.get("enhance") and source_info.get("original_file_path"):
+    if not isinstance(source_info, dict):
+        source_info = {}
+    replace_original = source_info.get("enhance") or source_info.get("job") == "quality_upgrade"
+    if replace_original and source_info.get("original_file_path"):
         original_file = _reachable_original_file(source_info["original_file_path"])
         if original_file:
             # Folder AND stem from the resolved file, swapping only the
