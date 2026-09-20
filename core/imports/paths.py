@@ -195,13 +195,7 @@ def library_root_for_profile(profile_id) -> Optional[str]:
     when the profile is on the shared library."""
     if not profile_id:
         return None
-    from core.library_scope import SCOPE_PARKED, own_library_supported
-    if SCOPE_PARKED:
-        # The read scope and the write target are one feature. While the
-        # catalogue cannot tell whose row is whose, routing a download into a
-        # private folder only produces a file the library then reports as
-        # shared. Both switch on together.
-        return None
+    from core.library_scope import own_library_supported
     if not own_library_supported():
         return None
     try:
@@ -220,9 +214,18 @@ def shared_transfer_root() -> str:
 
 
 def transfer_root_for_context(context) -> str:
-    """where this download/import's files go: the profile's own folder when
-    it has one, the configured transfer folder otherwise."""
-    return library_root_for_profile(import_profile_id(context)) or shared_transfer_root()
+    """Where this download's files go.
+
+    The SELECTED directory wins over the profile that started the download: an
+    admin who switched the library page to someone else's directory and grabbed
+    a track there meant that directory, and the file has to land where it was
+    put (E-04). Only with nothing selected does the download's own profile
+    decide, and with neither it is the configured transfer folder -- which is
+    every download on an install without own directories.
+    """
+    from core.library_scope import owner_for_new_file
+    owner = owner_for_new_file(import_profile_id(context))
+    return library_root_for_profile(owner) or shared_transfer_root()
 
 
 def build_simple_download_destination(context, file_path: str):

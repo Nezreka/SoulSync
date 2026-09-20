@@ -60,9 +60,6 @@ def test_a_non_admin_cannot_switch_their_own_library_mode(client, sam):
     assert web_server.get_database().get_profile_library(sam)['mode'] == 'shared', "a non-admin set their own library mode"
 
 
-@pytest.mark.skip(reason=(
-    "parked with the feature: the negative half of this test passes, but its final assertion is that a valid switch SUCCEEDS, and while core.library_scope.SCOPE_PARKED is true the endpoint refuses on purpose rather than half-applying it (docs/library-v2-dir-ownership.md, Stufe 3)"
-))
 def test_an_own_library_folder_must_exist_and_be_writable(client, sam, tmp_path, monkeypatch):
     import api.user_profiles as up
     r = client.put(f'/api/profiles/{sam}', json={'library_mode': 'own', 'library_root': str(tmp_path / 'missing')})
@@ -82,9 +79,6 @@ def test_the_profiles_list_carries_the_docker_root_hint(client, monkeypatch):
     assert client.get('/api/profiles').get_json()['own_library_root_hint'] == '/app/libraries/<name>'
 
 
-@pytest.mark.skip(reason=(
-    "parked with the feature: the negative half of this test passes, but its final assertion is that a valid switch SUCCEEDS, and while core.library_scope.SCOPE_PARKED is true the endpoint refuses on purpose rather than half-applying it (docs/library-v2-dir-ownership.md, Stufe 3)"
-))
 def test_a_folder_overlapping_the_shared_one_or_another_profiles_is_refused(client, sam, tmp_path, monkeypatch):
     shared = tmp_path / 'shared'; shared.mkdir()
     inside = shared / 'sam'; inside.mkdir()

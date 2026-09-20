@@ -42,6 +42,7 @@ import threading
 import time
 from typing import Any
 
+from core.library2.sql_util import intent_profile_id
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.artist_rollup")
@@ -88,13 +89,13 @@ _ALBUM_COUNTS = f"""
     ) x GROUP BY artist_id
 """
 
-_TRACK_COUNTS = """
+_TRACK_COUNTS_TEMPLATE = """
     SELECT COALESCE(m.canonical_artist_id, m.id) AS artist_id,
            COUNT(DISTINCT t.id) AS n
       FROM lib2_track_artists ta
       JOIN lib2_artists m ON m.id = ta.artist_id
       JOIN lib2_tracks t ON t.id = ta.track_id
-      LEFT JOIN lib2_wanted_tracks w ON w.track_id = t.id AND w.profile_id = 1
+      LEFT JOIN lib2_wanted_tracks w ON w.track_id = t.id AND w.profile_id = {intent}
      WHERE COALESCE(w.wanted, t.monitored) = 1 OR EXISTS (
                SELECT 1 FROM lib2_track_files tf
                 WHERE tf.track_id = t.id
@@ -143,8 +144,13 @@ def refresh_artist_rollup(conn: Any) -> int:
            SELECT id, 0, 0, :now FROM lib2_artists WHERE canonical_artist_id IS NULL""",
         {"now": started},
     )
+    # The rollup is a cache and stays UNSCOPED: it only supplies the sort key
+    # for two columns of the artist list, never a displayed number. What it does
+    # have to agree with is whose intent counts, so the wanted join follows the
+    # scope like every other one (#1199).
+    track_counts = _TRACK_COUNTS_TEMPLATE.format(intent=intent_profile_id())
     for column, aggregate in (("album_count", _ALBUM_COUNTS),
-                              ("track_count", _TRACK_COUNTS)):
+                              ("track_count", track_counts)):
         conn.execute("DROP TABLE IF EXISTS temp.lib2_rollup_stage")
         conn.execute(
             "CREATE TEMP TABLE lib2_rollup_stage("

@@ -2004,6 +2004,45 @@ export function libraryV2ImportStatusQueryOptions(refetchIntervalMs = 1000) {
   });
 }
 
+export type LibraryScopeOption = { id: string; name: string; root?: string | null };
+
+export type LibraryScopes = {
+  /** false unless the caller is an admin AND more than one directory exists */
+  switchable: boolean;
+  current: string;
+  options: LibraryScopeOption[];
+};
+
+async function fetchLibraryScopes(): Promise<LibraryScopes> {
+  const res = await fetch('/api/library/v2/scopes');
+  if (!res.ok) return { switchable: false, current: 'shared', options: [] };
+  const data = await res.json();
+  return {
+    switchable: data?.switchable === true,
+    current: typeof data?.current === 'string' ? data.current : 'shared',
+    options: Array.isArray(data?.options) ? data.options : [],
+  };
+}
+
+export function libraryScopesQueryOptions() {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'scopes'],
+    queryFn: fetchLibraryScopes,
+  });
+}
+
+/** Point this session at one directory. Everything the page then does -- what
+ *  it shows AND where a grab lands -- follows it, so the caller invalidates
+ *  the whole library query key afterwards. */
+export async function setLibraryScope(scope: string): Promise<boolean> {
+  const res = await fetch('/api/library/v2/scope', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope }),
+  });
+  return res.ok;
+}
+
 export function libraryV2EnabledQueryOptions() {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'enabled'],

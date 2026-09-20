@@ -282,10 +282,16 @@ class TestItIsActuallyWired:
         source = inspect.getsource(database_admin)
         starts = source.count("db_update_worker.run(")
         starts += source.count("db_update_worker.run_deep_scan(")
-        attached = source.count("db_update_worker.post_scan_hook = _reconcile_after_scan")
+        # The hook is composed now: each own-library profile is scanned and the
+        # reconcile runs after them (#1199). What still has to hold is that
+        # every scan entry point attaches a hook, and that the reconcile is
+        # inside it — a scan without it silently skips the gap-fill.
+        attached = source.count(
+            "db_update_worker.post_scan_hook = _post_scan_hook_with_own_libraries")
         assert starts == attached == 2, (
-            f"{starts} scan start(s), {attached} attaching the reconcile — a scan "
-            "without the hook silently skips the gap-fill")
+            f"{starts} scan start(s), {attached} attaching a post-scan hook")
+        assert "_reconcile_after_scan(worker)" in source, (
+            "the composed hook must still run the reconcile")
 
     def test_the_web_layer_hands_over_the_real_function(self):
         import web_server

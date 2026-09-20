@@ -512,15 +512,6 @@ def update_profile(profile_id):
                 problem = _own_library_root_overlap(root, shared_root, database, profile_id)
                 if problem:
                     return jsonify({'success': False, 'error': problem}), 400
-                from core.library_scope import SCOPE_PARKED
-                if SCOPE_PARKED:
-                    # Last, so a request still gets the specific answer about
-                    # its folder first. Refusing beats half-applying: with the
-                    # scope parked the catalogue is still shared, so a profile
-                    # switched to its own library would be shown the admin's
-                    # tracks as its own while its downloads went elsewhere.
-                    return jsonify({'success': False,
-                                    'error': 'Own libraries are not available in this build yet.'}), 400
             library_result = database.set_profile_library(profile_id, mode, root or None)
             from core.library_scope import invalidate_library_scope_cache
             invalidate_library_scope_cache()

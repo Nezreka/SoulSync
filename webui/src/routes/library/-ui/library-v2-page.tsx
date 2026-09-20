@@ -59,6 +59,8 @@ import {
   fetchLibraryV2TrackLyrics,
   LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
+  libraryScopesQueryOptions,
+  setLibraryScope,
   invalidateLibraryV2,
   isLibraryV2ImportAlreadyCompleted,
   libraryV2AlbumMatchStatusQueryOptions,
@@ -4611,6 +4613,7 @@ function ArtistIndexView() {
       <UnmatchedImportsBanner />
 
       <div className={styles.toolbar}>
+        <LibraryScopePicker />
         <LibrarySectionTabs />
         <input
           aria-label="Filter artists"
@@ -4784,6 +4787,42 @@ export function librarySectionSearch<T extends Record<string, unknown>>(
     album: undefined,
     page: 1,
   };
+}
+
+/** Which directory the page is showing.
+ *
+ *  Rendered only when the server says `switchable`, which means: an admin, and
+ *  more than one directory exists. On a single-library install -- every install
+ *  today -- nothing is drawn and the toolbar is exactly what it was.
+ *
+ *  It is not only a view filter. What is selected here is also where a grab
+ *  started from this page lands, so switching invalidates the whole library
+ *  query key rather than just the list.
+ */
+function LibraryScopePicker() {
+  const queryClient = useQueryClient();
+  const { data } = useQuery(libraryScopesQueryOptions());
+  if (!data?.switchable || data.options.length < 2) return null;
+  return (
+    <label className={styles.viewToggle} aria-label="Library directory">
+      <select
+        aria-label="Library directory"
+        value={data.current}
+        onChange={(event) => {
+          const next = event.target.value;
+          void setLibraryScope(next).then((ok) => {
+            if (ok) void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+          });
+        }}
+      >
+        {data.options.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function LibrarySectionTabs() {

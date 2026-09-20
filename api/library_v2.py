@@ -387,6 +387,74 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- read endpoints -------------------------------------------------------
 
+    @app.route("/api/library/v2/scopes")
+    def lib2_scopes():
+        """Which directories the caller may look at, and which one they are on.
+
+        `switchable` is what the page keys the control off: it is false unless
+        the caller is an admin AND there is more than one directory, so a
+        single-library install renders exactly what it rendered before and a
+        plain profile never sees a control it cannot use (E-05).
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library_scope import SCOPE_PARKED, current_library_scope
+
+        owners = []
+        if not SCOPE_PARKED:
+            try:
+                owners = get_database().get_own_library_profiles() or []
+            except Exception as exc:  # noqa: BLE001 - no list, no switcher
+                logger.debug("own-library profiles unavailable: %s", exc)
+        admin = _is_admin()
+        options = [{"id": "shared", "name": "Shared library"}]
+        options += [{"id": str(p["id"]), "name": p["name"], "root": p.get("root")}
+                    for p in owners]
+        if admin and owners:
+            options.append({"id": "all", "name": "All libraries"})
+        current = current_library_scope()
+        return jsonify({
+            "success": True,
+            "switchable": bool(admin and owners),
+            "current": ("all" if current is None
+                        else "shared" if current == "shared" else str(current)),
+            "options": options if (admin and owners) else [],
+        })
+
+    @app.route("/api/library/v2/scope", methods=["POST"])
+    def lib2_set_scope():
+        """Point this session's library page at one directory.
+
+        Admin only, and it is more than a view filter: what is selected is also
+        where a grab started from this page lands (E-04). Storing it in the
+        session rather than a query parameter keeps it out of shared links and
+        makes it survive the page changes a download goes through.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library_scope import SCOPE_PARKED, SESSION_KEY
+
+        if SCOPE_PARKED:
+            return jsonify({"success": False,
+                            "error": "Own libraries are not available in this build yet."}), 400
+        if not _is_admin():
+            return jsonify({"success": False,
+                            "error": "Switching libraries requires an admin profile"}), 403
+        body = request.get_json(silent=True) or {}
+        wanted = str(body.get("scope") or "").strip()
+        allowed = {"shared", "all"}
+        try:
+            allowed |= {str(p["id"]) for p in (get_database().get_own_library_profiles() or [])}
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("own-library profiles unavailable: %s", exc)
+        if wanted not in allowed:
+            return jsonify({"success": False, "error": "Unknown library"}), 400
+        from flask import session
+        session[SESSION_KEY] = wanted
+        return jsonify({"success": True, "scope": wanted})
+
     @app.route("/api/library/v2/enabled")
     def lib2_enabled():
         # iss29-C10: `_guard` rejects every mutating request from a non-admin

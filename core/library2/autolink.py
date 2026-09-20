@@ -593,14 +593,16 @@ def _link_companion_file(
         size = os.path.getsize(file_path)
     except OSError:
         size = None
+    from core.library_scope import owner_for_new_file
     cur = conn.execute(
         """INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate,
                bit_depth, format, quality_tier, source, import_status,
                file_role, derived_from_file_id, acquired_quality_json,
-               retention_json)
-           VALUES(?,?,?,?,?,?,?,?,'companion','imported','derivative',?,?,?)""",
+               retention_json, owner_profile_id)
+           VALUES(?,?,?,?,?,?,?,?,'companion','imported','derivative',?,?,?,?)""",
         (track_id, file_path, size, bitrate, sample_rate, bit_depth, fmt, tier,
-         derived_from_file_id, acquired_quality_json, retention_json),
+         derived_from_file_id, acquired_quality_json, retention_json,
+         owner_for_new_file()),
     )
     return cur.lastrowid
 
@@ -917,17 +919,20 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                         "path %s (was %s)",
                         file_id, file_path, existing["file_state"])
             else:
+                from core.imports.paths import import_profile_id
+                from core.library_scope import owner_for_new_file
                 cur = conn.execute(
                     """INSERT INTO lib2_track_files(track_id, path, size, bitrate,
                            sample_rate, bit_depth, format, quality_tier, source,
                            verification_status, acoustid_status, pipeline_result_json,
                            file_role, acquired_quality_json, retention_json,
-                           import_status)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'imported')""",
+                           owner_profile_id, import_status)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'imported')""",
                     (track_id, file_path, size, bitrate, sample_rate, bit_depth,
                      fmt, tier, source,
                      verification_status, acoustid_status, pipeline_result_json,
-                     main_file_role, acquired_quality_json, retention_json),
+                     main_file_role, acquired_quality_json, retention_json,
+                     owner_for_new_file(import_profile_id(context))),
                 )
                 file_id = cur.lastrowid
             # dd28-40: a retained lossless original next to a generated lossy

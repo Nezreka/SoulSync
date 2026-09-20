@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .metadata_overrides import project_metadata, project_metadata_many
 from .paths import library_relative_path
+from .sql_util import intent_profile_id, owner_clause, scope_visibility_sql
 from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier
 from .track_files import primary_order
 
@@ -446,6 +447,10 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     the artist table (default off), so the caller may switch it off and get
     ``total_size_bytes = 0`` for a value nothing renders.
     """
+    # whose library this page is (#1199). Built per call: the scope belongs
+    # to whoever is asking, and while SCOPE_PARKED is true it is empty, so
+    # every query here is byte for byte the one that ran before.
+    tf_owner = owner_clause(column="tf.owner_profile_id")
     page_join, page_order, outer_order, rollup_column = _artist_page_order(sort)
     if rollup_column:
         # Rebuilt only when missing or stale; a few minutes of drift moves an
@@ -459,6 +464,14 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     # §40: alias-member rows are folded into their canonical artist's entry
     # (get_artist merges their albums in) and never listed on their own.
     clauses, params = ["a.canonical_artist_id IS NULL"], {}
+    # ...and, once directories exist, only the ones this library may see: a
+    # file of ours hangs off it, or we have monitoring intent on it. Empty
+    # while the scope is every library, so an install without own directories
+    # -- and every install while SCOPE_PARKED is true -- lists what it listed
+    # before (E-03).
+    visible = scope_visibility_sql("artist", "a")
+    if visible:
+        clauses.append(visible)
     if search:
         # iss29-D04: spell the alias-membership test so an index can serve it.
         #
@@ -544,7 +557,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                    ) AS rank
               FROM page_tracks pt
               CROSS JOIN lib2_track_files tf ON tf.track_id=pt.track_id
-             WHERE COALESCE(tf.file_state, 'active') <> 'deleted'
+             WHERE COALESCE(tf.file_state, 'active') <> 'deleted'{tf_owner}
         ),
         artist_size AS (
             SELECT cm.canonical_id AS artist_id,
@@ -625,8 +638,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
               CROSS JOIN lib2_track_artists ta ON ta.artist_id=cm.member_id
               JOIN lib2_tracks t ON t.id=ta.track_id
               LEFT JOIN lib2_wanted_tracks w
-                     ON w.track_id=t.id AND w.profile_id=1
-              LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
+                     ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
+              LEFT JOIN lib2_track_files tf ON tf.track_id=t.id{tf_owner}
              GROUP BY cm.canonical_id
         ){size_cte}
         SELECT a.id, a.name, a.sort_name, a.image_url, a.genres,
@@ -788,8 +801,11 @@ def list_artist_playback_files(conn, artist_id: int, *, page: int = 1,
     two rows for ONE recording, and pagination would otherwise split the pair
     across pages where no client-side dedupe can see both.
     """
+    # whose library this page is (#1199). Built per call: the scope belongs
+    # to whoever is asking, and while SCOPE_PARKED is true it is empty, so
+    # every query here is byte for byte the one that ran before.
+    tf_owner = owner_clause(column="tf.owner_profile_id")
     from core.library2.artist_aliases import resolve_alias_group
-    from core.library2.track_files import primary_order
 
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
@@ -816,7 +832,7 @@ def list_artist_playback_files(conn, artist_id: int, *, page: int = 1,
               FROM scope_tracks s
               JOIN lib2_track_files tf ON tf.track_id = s.track_id
              WHERE COALESCE(tf.file_state, 'active') = 'active'
-               AND COALESCE(tf.path, '') <> ''
+               AND COALESCE(tf.path, '') <> ''{tf_owner}
         )"""
 
     total = conn.execute(
@@ -881,6 +897,11 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
     is reassigned); the header fields (bio/image/genres/...) always come from
     the CANONICAL row.
     """
+    # whose library this page is (#1199). Built per call: the scope belongs
+    # to whoever is asking, and while SCOPE_PARKED is true it is empty, so
+    # every query here is byte for byte the one that ran before.
+    tf_owner = owner_clause(column="tf.owner_profile_id")
+    f_owner = owner_clause(column="f.owner_profile_id")
     from core.library2.artist_aliases import resolve_alias_group
     group = resolve_alias_group(conn, artist_id)
     canonical_id = group[0]
@@ -928,7 +949,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
               FROM artist_albums aa2
               JOIN lib2_tracks t2 ON t2.album_id=aa2.album_id
               JOIN lib2_track_files tf ON tf.track_id=t2.id
-             WHERE COALESCE(tf.file_state, 'active') <> 'deleted'
+             WHERE COALESCE(tf.file_state, 'active') <> 'deleted'{tf_owner}
         ),
         -- I8: disk-space roll-up per album, computed separately from the
         -- files_present fan-out below (that join isn't restricted to one row
@@ -974,7 +995,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                        SELECT 1 FROM lib2_track_files f
                         WHERE f.track_id=t.id
                           AND COALESCE(f.file_state,'active')
-                              NOT IN ('missing_confirmed','deleted'))
+                              NOT IN ('missing_confirmed','deleted'){f_owner})
                     -- §49.6(c): and it is not already on disk under another
                     -- release. The album detail draws that row as present, so
                     -- counting it as a gap here would be the same disagreement
@@ -986,8 +1007,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         JOIN lib2_albums al ON al.id = aa.album_id
         JOIN lib2_artists pa ON pa.id=al.primary_artist_id
         LEFT JOIN lib2_tracks t ON t.album_id=al.id
-        LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
-        LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id=1
+        LEFT JOIN lib2_track_files tf ON tf.track_id=t.id{tf_owner}
+        LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
         LEFT JOIN album_size asz ON asz.album_id=al.id
         GROUP BY al.id
         ORDER BY al.year DESC, al.title COLLATE NOCASE
@@ -1667,8 +1688,9 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
             f"""SELECT track_id, COUNT(*) AS file_count
                   FROM lib2_track_files
                  WHERE track_id IN ({marks})
-                   AND COALESCE(file_state,'active')<>'deleted'
-                 GROUP BY track_id""",
+                   AND COALESCE(file_state,'active')<>'deleted'{{owner}}
+                 GROUP BY track_id""".replace(
+                     "{owner}", owner_clause(column="owner_profile_id")),
             tuple(track_ids),
         ).fetchall()
     }
@@ -1736,10 +1758,10 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         "SELECT id, name FROM lib2_artists WHERE id = ?", (al["primary_artist_id"],)
     ).fetchone()
     track_rows = conn.execute(
-        """SELECT t.*, COALESCE(w.wanted, t.monitored) AS effective_wanted
+        f"""SELECT t.*, COALESCE(w.wanted, t.monitored) AS effective_wanted
              FROM lib2_tracks t
              LEFT JOIN lib2_wanted_tracks w
-                    ON w.track_id=t.id AND w.profile_id=1
+                    ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
             WHERE t.album_id = ?
             ORDER BY t.disc_number, t.track_number, t.id""",
         (album_id,),
@@ -1908,10 +1930,10 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
 def get_track(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """Single-track detail incl. linked album + artists + file + status."""
     t = conn.execute(
-        """SELECT t.*, COALESCE(w.wanted, t.monitored) AS effective_wanted
+        f"""SELECT t.*, COALESCE(w.wanted, t.monitored) AS effective_wanted
              FROM lib2_tracks t
              LEFT JOIN lib2_wanted_tracks w
-                    ON w.track_id=t.id AND w.profile_id=1
+                    ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
             WHERE t.id = ?""",
         (track_id,),
     ).fetchone()

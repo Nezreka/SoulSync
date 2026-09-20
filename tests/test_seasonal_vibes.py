@@ -52,7 +52,11 @@ class FakeDb:
                     track_artist TEXT);
                 CREATE TABLE lib2_track_files (
                     id INTEGER PRIMARY KEY, track_id INTEGER, path TEXT,
-                    is_primary INTEGER DEFAULT 1, file_state TEXT DEFAULT 'active');
+                    is_primary INTEGER DEFAULT 1, file_state TEXT DEFAULT 'active',
+                    -- whose library the file is in; every ownership predicate
+                    -- names it, and without it these queries fail silently
+                    -- (caught, logged, empty result) rather than loudly
+                    owner_profile_id INTEGER);
                 CREATE TABLE discovery_pool (
                     id INTEGER PRIMARY KEY, source TEXT, spotify_track_id TEXT,
                     itunes_track_id TEXT, track_name TEXT, artist_name TEXT,

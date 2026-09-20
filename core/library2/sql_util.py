@@ -126,6 +126,65 @@ _OWNED = {
 }
 
 
+def scope_visibility_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
+    """Which rows of ``alias`` this scope may see at all, or "" for no filter.
+
+    Two halves, and both are needed (E-03). A row is visible when a file IN
+    SCOPE hangs off it -- otherwise a profile sees the whole house's catalogue
+    -- OR when this profile has monitoring intent on it, because a wanted album
+    with nothing downloaded yet has no file to be found by and hiding it would
+    remove exactly the rows the user is waiting for.
+
+    Empty string when the scope is every library, which is also what a parked
+    build gets: the page then filters nothing and shows what it always showed.
+    """
+    resolved = _resolve_scope(scope)
+    if resolved is ANY_OWNER or resolved is None:
+        return ""
+    entity = str(entity_type or "").strip().lower().rstrip("s")
+    if entity not in _OWNED:
+        raise ValueError(f"Unknown entity type: {entity_type!r}")
+    if not _VALID_IDENTIFIER.match(alias):
+        raise ValueError(f"Invalid alias: {alias!r}")
+    intent = intent_profile_id(resolved)
+    has_intent = (
+        f"EXISTS (SELECT 1 FROM lib2_monitor_rules mr"
+        f"         WHERE mr.entity_type='{entity}' AND mr.entity_id={alias}.id"
+        f"           AND mr.profile_id={intent} AND mr.monitored=1)"
+    )
+    mine = owned_sql(entity, alias, scope=resolved)
+    if resolved != "shared":
+        # An own library is an exception carved out of the house: it holds what
+        # its owner fetched, plus what they asked for and have not got yet.
+        return f"({mine} OR {has_intent})"
+    # The shared library is the default home, so it is defined by what it is
+    # NOT: only a row whose files all belong to someone else drops out. A row
+    # with no file at all -- a discography entry, a wishlist artist, anything
+    # the catalogue knows and nobody has fetched -- stays, which is the whole
+    # page on an install where nobody keeps a library of their own.
+    anyones = owned_sql(entity, alias, scope=ANY_OWNER)
+    return f"(NOT {anyones} OR {mine} OR {has_intent})"
+
+
+def intent_profile_id(scope=_AMBIENT) -> int:
+    """Whose monitoring/wanted state a query in this scope should read.
+
+    Ownership lives on the file, but INTENT -- monitored, wanted -- is already
+    keyed per profile in lib2_monitor_rules and lib2_wanted_tracks. The two
+    have to agree, or a scoped page shows one profile's files beside another
+    profile's "I want this".
+
+    'shared' is the admin profile, an own library is its own profile, and while
+    the feature is parked this is 1 whatever the scope says: every caller
+    joined `w.profile_id = 1` literally before, and a parked build must read
+    exactly the rows it read yesterday.
+    """
+    resolved = _resolve_scope(scope)
+    if resolved is ANY_OWNER or resolved is None or resolved == "shared":
+        return 1
+    return int(resolved)
+
+
 def owned_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
     """SQL predicate: ``alias`` is a row the caller actually owns.
 
@@ -142,4 +201,5 @@ def owned_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
     return _OWNED[key].format(alias=alias, owner=owner_clause(scope))
 
 
-__all__ = ["ANY_OWNER", "owned_sql", "owner_clause", "select_existing_ids"]
+__all__ = ["ANY_OWNER", "intent_profile_id", "owned_sql", "owner_clause",
+           "scope_visibility_sql", "select_existing_ids"]

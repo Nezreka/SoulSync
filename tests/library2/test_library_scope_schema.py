@@ -258,11 +258,11 @@ class TestTheOwnershipPredicate:
                      (owner, track))
         return track
 
-    def test_parked_means_no_filter_at_all(self):
-        """The merge must not change a single query while the feature is off:
-        'shared' would already hide an upgraded install's owned rows."""
+    def test_the_ambient_scope_is_the_callers(self):
+        """With no request and no pick this resolves to the shared library,
+        which is what a background job and a plain install both are."""
         from core.library2.sql_util import owned_sql
-        assert "owner_profile_id" not in owned_sql("track", "t")
+        assert "+owned_f.owner_profile_id IS NULL" in owned_sql("track", "t")
 
     def test_an_explicit_scope_filters(self):
         from core.library2.sql_util import owned_sql
@@ -310,3 +310,45 @@ class TestTheOwnershipPredicate:
 
         assert visible("shared") == 1
         assert visible(7) == 0
+
+
+class TestTheIntentProfile:
+    """Ownership is on the file, intent is keyed per profile. A scoped page has
+    to read both from the same library or it shows one profile's files beside
+    another profile's "I want this"."""
+
+    def test_the_ambient_intent_is_the_admin_profile(self):
+        """With no request and no pick the scope is the shared library, whose
+        intent has always been the admin profile."""
+        from core.library2.sql_util import intent_profile_id
+        assert intent_profile_id() == 1
+
+    def test_the_shared_library_reads_the_admin_intent(self):
+        from core.library2.sql_util import intent_profile_id
+        assert intent_profile_id("shared") == 1
+
+    def test_an_own_library_reads_its_own_intent(self):
+        from core.library2.sql_util import intent_profile_id
+        assert intent_profile_id(5) == 5
+
+    def test_every_library_at_once_still_reads_the_admin_intent(self):
+        """ANY_OWNER is a file question. There is no union of intents to read,
+        and guessing one would put a stranger's wanted flag on the page."""
+        from core.library2.sql_util import ANY_OWNER, intent_profile_id
+        assert intent_profile_id(ANY_OWNER) == 1
+
+class TestTheSwitcherContract:
+    """What the library page keys its control off. The control must not appear
+    for a plain profile, nor on an install with one directory."""
+
+    def test_no_request_means_no_pick(self):
+        """Background work has no session, so it can never inherit whatever an
+        admin last selected in a browser."""
+        from core.library_scope import _UNSET, session_scope
+        assert session_scope() is _UNSET
+
+    def test_the_switch_exists_so_the_feature_can_be_turned_off_again(self):
+        """Not decoration: one constant still gates the read filter, the
+        download target, the per-profile scans and the switcher together."""
+        from core.library_scope import SCOPE_PARKED
+        assert SCOPE_PARKED is False

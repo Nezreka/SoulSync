@@ -726,13 +726,6 @@ def _run_own_library_scans(server_type, deep):
             reset_library_scope(_scope_token)
 
 
-# NOT WIRED YET on this branch, and kept deliberately. Upstream hangs this off
-# post_scan_hook so a shared scan is followed by one scan per own-library
-# profile; here the worker underneath still writes the shared catalogue,
-# because ownership lives on lib2_track_files and nothing stamps it yet. The
-# orchestration above is the part that does not change when that lands, so it
-# waits here rather than being deleted and re-ported. See
-# docs/library-v2-dir-ownership.md, Stufe 3.
 def _post_scan_hook_with_own_libraries(server_type, deep):
     def hook(worker):
         _run_own_library_scans(server_type, deep)
@@ -797,7 +790,7 @@ def _run_db_update_task(full_refresh, server_type):
     # Auto-reconcile runs as the FINAL scan phase (inside the worker, before the
     # 'finished' signal) so status stays 'running' through it — automations, the
     # dashboard card and the Tools page all treat it as part of the scan.
-    db_update_worker.post_scan_hook = _reconcile_after_scan
+    db_update_worker.post_scan_hook = _post_scan_hook_with_own_libraries(server_type, deep=False)
 
     # This is a blocking call that runs the worker logic
     db_update_worker.run()
@@ -848,7 +841,7 @@ def _run_deep_scan_task(server_type):
             db_update_worker.connect_callback('error', _db_update_error_callback)
 
     # Auto-reconcile runs as the FINAL scan phase (see _run_database_update_task).
-    db_update_worker.post_scan_hook = _reconcile_after_scan
+    db_update_worker.post_scan_hook = _post_scan_hook_with_own_libraries(server_type, deep=True)
 
     # Run deep scan instead of normal run()
     db_update_worker.run_deep_scan()

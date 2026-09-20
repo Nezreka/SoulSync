@@ -38,18 +38,17 @@ _mode_cache_lock = threading.Lock()
 _MODE_CACHE_TTL_S = 30.0
 
 
-# Parked until the lib2 read path consumes a scope. Upstream keeps ownership on
-# the legacy artists/albums/tracks rows; here it is on lib2_track_files, and no
-# query filters on it yet — so resolving a profile's mode is work nobody reads.
-# It is also not free: the lookup opens and schema-initialises a MusicDatabase
-# for the process-default path, and every caller (watchlist scan, download
-# batch, playlist materialize, wishlist processing) is inside an open write
-# transaction when it asks, which deadlocks against the caller's own lock.
+# The one switch for per-directory libraries. False means: the read scope
+# filters, the download target follows the selected directory, the per-profile
+# scans run, and the admin gets the switcher. It was True for exactly as long
+# as any one of those was missing -- half of the feature is worse than none of
+# it, because a profile would be shown the admin's tracks as its own while its
+# downloads went somewhere else.
 #
-# Upstream's call sites are left exactly as they are so the next merge stays
-# clean; switching this to False is what turns the feature on.
-# See docs/library-v2-dir-ownership.md, Stufe 3.
-SCOPE_PARKED = True
+# Kept as a named constant rather than deleted: it is the single place to turn
+# the feature off again if a directory-shaped bug shows up in the wild, and
+# every piece still reads it.
+SCOPE_PARKED = False
 
 
 def set_library_scope(scope: Scope):
@@ -63,6 +62,28 @@ def reset_library_scope(token) -> None:
         _explicit_scope.reset(token)
     except Exception:  # noqa: BLE001 - token from another context
         _explicit_scope.set(_UNSET)
+
+
+def owner_for_new_file(profile_id=None):
+    """Whose library a file being written right now belongs to. None = shared.
+
+    The SELECTED scope wins over the profile that started the download: an
+    admin who switched the library page to someone else's directory and
+    grabbed a track there meant that directory, and the file has to end up
+    where it was put (E-04 in docs/library-v2-dir-ownership.md). Only when
+    nothing is selected does the download's own profile decide.
+
+    None while the feature is parked, whatever else is true -- that is the
+    NULL every existing row has, so a parked build writes what it wrote
+    yesterday.
+    """
+    if SCOPE_PARKED:
+        return None
+    for candidate in (current_library_scope(),
+                      library_scope_for_profile(profile_id) if profile_id else None):
+        if candidate is not None and not isinstance(candidate, str):
+            return int(candidate)
+    return None
 
 
 def carrying_scope(fn):
@@ -125,11 +146,47 @@ def library_scope_for_profile(profile_id: Optional[int]) -> Scope:
     return scope
 
 
+SESSION_KEY = "library_scope"
+
+
+def session_scope():
+    """The directory an ADMIN picked in the library page switcher, or _UNSET.
+
+    Admins are not confined to one library the way a profile is -- they manage
+    the instance, so they get to look at any of them, and what they pick is
+    also where their grabs land (E-04/E-07). The pick lives in the session, so
+    it survives a page change and cannot leak to anyone else. Non-admins never
+    have one: a profile's scope is its own library, full stop.
+    """
+    if SCOPE_PARKED:
+        return _UNSET
+    try:
+        from flask import session
+
+        from core.profile_context import is_admin_request
+        raw = session.get(SESSION_KEY)
+        if raw is None or not is_admin_request():
+            return _UNSET
+    except Exception:  # noqa: BLE001 - no request, no pick
+        return _UNSET
+    if raw == "all":
+        return None            # every library at once
+    if raw == "shared":
+        return "shared"
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return _UNSET
+
+
 def current_library_scope() -> Scope:
     """the scope of whoever is asking right now."""
     forced = _explicit_scope.get()
     if forced is not _UNSET:
         return forced
+    picked = session_scope()
+    if picked is not _UNSET:
+        return picked
     from core.profile_context import get_current_profile_id
     return library_scope_for_profile(get_current_profile_id())
 
