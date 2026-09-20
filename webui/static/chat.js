@@ -77,7 +77,7 @@
         typingTimer: null,       // pending expiry repaint
         pinsOpen: false,         // pin board expanded
         topicEditing: false,     // head shows the topic input (renderHead pauses)
-        pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
+        pollDismissals: Object.create(null), // fallback when browser storage is unavailable
         trivDismissedAt: null,   // locally-dismissed closed trivia (its ask ts)
         arcade: null,            // {game, sel, promo, flip} when the Arcade view is open
         watch: {                 // movie night (reduced from watch.* on the bus)
@@ -5860,7 +5860,8 @@
     // must use this — a file share and the GIF picker built their payloads by
     // hand, skipped the tags, and their messages folded into #general no matter
     // which channel they were sent from (kvkarlsson's uploads-in-the-wrong-
-    // channel report).
+    // channel report). Plain mode is only ever true in #general (_plainOn), so
+    // the early return below never drops a channel the user was standing in.
     // One control, not two. The room filter already says which world you are
     // in: "SoulSync only" means you are talking to SoulSync clients, so the
     // envelope earns its keep. "All messages" means you can SEE the vanilla
@@ -5868,8 +5869,19 @@
     // sending something they cannot read.
     //
     // A PM is already plaintext, so this is a ROOM idea only.
+    //
+    // And a #general idea only. Every other channel, and every thread, exists
+    // INSIDE the envelope: a vanilla client is never "in" #bugs, it only ever
+    // sees the flat room. So "talk plain so they can read it" means nothing
+    // there, and what plain mode actually did was strip the tag and refile the
+    // message into #general behind the sender's back (nanomite, Deathwing:
+    // "sent in bugs but it's showing up in general?!"). The channel you are
+    // standing in wins over the filter.
     function _plainOn() {
-        return state.view === 'room' && !state.ssOnly;
+        if (state.view !== 'room' || state.ssOnly) return false;
+        if (_chanRoom() && (state.thread ||
+                (state.channel || CHAT_DEFAULT_CHANNEL) !== CHAT_DEFAULT_CHANNEL)) return false;
+        return true;
     }
 
     function _syncModeBtn() {
@@ -6649,7 +6661,6 @@
             state.jukebox.lastRendered = '';
             state.jukebox.nowSeen = null;   // new room, new event stream, new clock base
             state.pinsOpen = false;
-            state.pollDismissedAt = null;
         }
         state.room = nextRoom;
         state.thread = null;         // threads are per-room (and home-room only)
@@ -7843,7 +7854,7 @@
             t = e.target.closest('[data-chat-poll-dismiss]');
             if (t) {
                 var pd = window.ChatProtocol ? window.ChatProtocol.reducePoll(_roomEvents()) : null;
-                state.pollDismissedAt = pd ? pd.at : null;
+                _dismissPoll(pd);
                 renderPoll();
                 return;
             }
@@ -9023,12 +9034,31 @@
     }
 
     // ── the room poll (poll.start / poll.vote / poll.end on the bus) ────
+    // Dismissal is local to this viewer and room, but survives history replay.
+    // Store the poll identity, not just a flag, so the next poll stays visible.
+    function _pollDismissalKey() {
+        return 'chat_poll_dismissed:' + JSON.stringify([state.selfName || '', state.room || '']);
+    }
+    function _pollIdentity(poll) {
+        return JSON.stringify([poll.at, poll.by, poll.q, poll.options]);
+    }
+    function _dismissPoll(poll) {
+        if (!poll || !poll.closed) return;
+        var key = _pollDismissalKey(), identity = _pollIdentity(poll);
+        state.pollDismissals[key] = identity;
+        try { localStorage.setItem(key, identity); } catch (e) { /* private mode */ }
+    }
+    function _pollDismissed(poll) {
+        var key = _pollDismissalKey(), identity = _pollIdentity(poll);
+        if (state.pollDismissals[key] === identity) return true;
+        try { return localStorage.getItem(key) === identity; } catch (e) { return false; }
+    }
     function renderPoll() {
         var host = q('[data-chat-poll]');
         if (!host) return;
         var CP = window.ChatProtocol;
         var poll = (CP && state.view === 'room') ? CP.reducePoll(_roomEvents()) : null;
-        if (!poll || (poll.closed && state.pollDismissedAt === poll.at)) {
+        if (!poll || (poll.closed && _pollDismissed(poll))) {
             host.hidden = true; host.innerHTML = ''; return;
         }
         host.hidden = false;
@@ -9076,7 +9106,6 @@
         [qEl].concat([1, 2, 3, 4].map(function (i2) { return q('[data-chat-poll-o' + i2 + ']'); }))
             .forEach(function (el) { if (el) el.value = ''; });
         togglePollPop(true);
-        state.pollDismissedAt = null;
     }
 
     // ── trivia (trv.ask / trv.guess / trv.end — the stream is the buzzer) ──
@@ -10460,6 +10489,9 @@
                         renderUserPanel: renderUserPanel, renderGuilds: renderGuilds,
                         openWebPreviewModal: openWebPreviewModal, closeWebPreviewModal: closeWebPreviewModal,
                         _testSetSelf: function (n) { state.selfName = n; },
+                        // send format: the filter/channel rules that decide
+                        // envelope vs plain (tests/js/chat_send_format_harness.mjs)
+                        _plainOn: _plainOn, _tagRoomPayload: _tagRoomPayload,
                         _testSetState: function (patch) {
                             Object.keys(patch || {}).forEach(function (k) { state[k] = patch[k]; });
                         } };

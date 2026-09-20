@@ -55,6 +55,7 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   start_database_update_hourly: '🗄️',
   run_duplicate_cleaner: '🗂️',
   clear_quarantine: '🗑️',
+  library_cleanup: '🗑️',
   cleanup_wishlist: '🧹',
   update_discovery_pool: '🧭',
   start_quality_scan: '📊',

@@ -51,6 +51,7 @@ def _seed(db):
             track_count INTEGER,
             duration INTEGER,
             server_source TEXT,
+            owner_profile_id INTEGER DEFAULT NULL,
             created_at TEXT,
             updated_at TEXT
         )

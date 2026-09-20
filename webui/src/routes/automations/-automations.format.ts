@@ -293,6 +293,7 @@ const ACTION_LABELS: Record<string, string> = {
   start_database_update_hourly: 'Update Database (Hourly)',
   run_duplicate_cleaner: 'Run Duplicate Cleaner',
   clear_quarantine: 'Clear Quarantine',
+  library_cleanup: 'Clear Quarantine + Empty Recycle Bin',
   cleanup_wishlist: 'Clean Up Wishlist',
   update_discovery_pool: 'Update Discovery',
   start_quality_scan: 'Run Quality Scan',

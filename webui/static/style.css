@@ -50366,6 +50366,62 @@ div.artist-hero-badge {
     gap: 8px;
 }
 
+/* own-library folder on the profile card (#1199): a path, so monospace, with
+   a folder mark and the same frame as .profile-input */
+.profile-folder-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.profile-folder-input {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.profile-folder-input:focus-within {
+    border-color: rgba(99, 102, 241, 0.7);
+    background: rgba(0, 0, 0, 0.38);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.profile-folder-input svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    color: rgba(165, 180, 252, 0.9);
+}
+
+.profile-folder-input input {
+    flex: 1;
+    min-width: 0;
+    padding: 11px 0;
+    background: transparent;
+    border: 0;
+    outline: none;
+    color: #e5e7eb;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    letter-spacing: 0.01em;
+}
+
+.profile-folder-input input::placeholder {
+    color: rgba(229, 231, 235, 0.35);
+}
+
+.profile-settings-help {
+    font-size: 12px;
+    color: var(--text-muted, #9ca3af);
+    margin: -4px 0 10px;
+    line-height: 1.4;
+}
+
 .profile-settings-label {
     color: #d1d5db;
     font-size: 12px;

@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.3"
+_SOULSYNC_BASE_VERSION = "3.4.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -4504,11 +4504,23 @@ def get_jellyfin_music_libraries():
                     current_library = lib['title']
                     break
 
+        # the jellyfin users a profile can sync as. personal settings has
+        # had a user dropdown keyed on this field since it was built, and
+        # nothing ever sent it, so the dropdown never appeared (#1265).
+        users = []
+        try:
+            users = [{'id': u.get('id'), 'name': u.get('name')}
+                     for u in (media_server_engine.client('jellyfin').get_available_users() or [])
+                     if u.get('id')]
+        except Exception as users_err:
+            logger.debug(f"Jellyfin users list failed: {users_err}")
+
         return jsonify({
             "success": True,
             "libraries": libraries,
             "selected": selected_library,
-            "current": current_library
+            "current": current_library,
+            "users": users,
         })
     except Exception as e:
         logger.error(f"Error getting Jellyfin music libraries: {e}")
@@ -16046,6 +16058,14 @@ def cancel_batch(batch_id):
                     if task['status'] not in ['completed', 'failed', 'not_found', 'cancelled']:
                         task['status'] = 'cancelled'
                         cancelled_count += 1
+
+            # close the sync history row with what finished before the cancel.
+            # nothing else ever will: a cancelled batch never reaches a
+            # completion check, and the row read "In progress" for good
+            try:
+                _record_sync_history_completion(batch_id, download_batches[batch_id])
+            except Exception as hist_err:
+                logger.warning(f"[Cancel Batch] Could not close sync history for {batch_id}: {hist_err}")
 
             # Add activity for batch cancellation
             playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')

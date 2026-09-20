@@ -1668,19 +1668,35 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
     let users = [];
     const currentLib = profileData || {};
 
+    // the ACTIVE server decides which card this is. it used to probe plex
+    // first and take it whenever plex was merely configured, so a jellyfin
+    // (or navidrome) install with a plex token still in settings always
+    // got the plex card here (#1265).
+    let activeServer = '';
     try {
-        // Try each server type to find the active one
-        const plexRes = await fetch('/api/plex/music-libraries');
-        if (plexRes.ok) {
-            const plexData = await plexRes.json();
-            if (plexData.libraries && plexData.libraries.length > 0) {
-                serverType = 'plex';
-                libraries = plexData.libraries;
-            }
+        const activeRes = await fetch('/api/profiles/me/active-sources');
+        if (activeRes.ok) {
+            const active = await activeRes.json();
+            activeServer = (active && active.server && active.server.active) || '';
         }
     } catch (e) { }
 
-    if (serverType === 'none') {
+    if (activeServer === 'navidrome') {
+        serverType = 'navidrome';
+    } else if (activeServer === 'plex' || activeServer === '') {
+        try {
+            const plexRes = await fetch('/api/plex/music-libraries');
+            if (plexRes.ok) {
+                const plexData = await plexRes.json();
+                if (plexData.libraries && plexData.libraries.length > 0) {
+                    serverType = 'plex';
+                    libraries = plexData.libraries;
+                }
+            }
+        } catch (e) { }
+    }
+
+    if (serverType === 'none' && (activeServer === 'jellyfin' || activeServer === 'emby' || activeServer === '')) {
         try {
             const jellyRes = await fetch('/api/jellyfin/music-libraries');
             if (jellyRes.ok) {
@@ -1703,6 +1719,32 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
                 <div class="ps-help-text">No media server connected. Ask your admin to configure Plex, Jellyfin, or Navidrome in Settings.</div>
             </div>
         `;
+    } else if (serverType === 'navidrome') {
+        const savedUser = currentLib.navidrome_username || '';
+        section.innerHTML = `
+            <div class="ps-section">
+                <div class="ps-section-header">
+                    <h4 class="ps-section-title">Navidrome</h4>
+                    <span class="ps-connection-badge ${savedUser ? 'connected' : 'disconnected'}">
+                        <span class="ps-connection-dot"></span>
+                        ${savedUser ? escapeHtml(savedUser) : 'App account'}
+                    </span>
+                </div>
+                <div class="ps-help-text" style="margin-bottom:12px;">Log in with your own Navidrome user and the playlists you sync will belong to you in Navidrome. Without a login they belong to the app's account.</div>
+                <div class="ps-form-group">
+                    <label>Navidrome username</label>
+                    <input type="text" id="ps-navidrome-username" value="${escapeHtml(savedUser)}" autocomplete="off">
+                </div>
+                <div class="ps-form-group">
+                    <label>Navidrome password</label>
+                    <input type="password" id="ps-navidrome-password" placeholder="${savedUser ? 'Saved' : ''}" autocomplete="new-password">
+                </div>
+                <div class="ps-actions">
+                    <button class="ps-btn ps-btn-primary" onclick="savePersonalNavidromeLogin()">Save</button>
+                    ${savedUser ? '<button class="ps-btn" onclick="clearPersonalNavidromeLogin()">Use app account</button>' : ''}
+                </div>
+            </div>
+        `;
     } else if (serverType === 'plex') {
         const selectedLib = currentLib.plex_library_id || '';
         const optionsHtml = libraries.map(lib => {
@@ -1711,7 +1753,46 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
             return `<option value="${escapeHtml(val)}" ${val === selectedLib ? 'selected' : ''}>${escapeHtml(val)}</option>`;
         }).join('');
 
+        // who this profile is on plex (#1265): the playlists it syncs belong
+        // to that plex home user. linking takes the user's plex profile pin
+        // once when they have one; it is used for that one switch, not kept.
+        const linkedUser = currentLib.plex_home_user_title || '';
+        let homeUsers = [];
+        try {
+            const huRes = await fetch('/api/profiles/me/plex-home-users');
+            if (huRes.ok) homeUsers = (await huRes.json()).users || [];
+        } catch (e) { }
+        const homeUserOpts = homeUsers.map(u =>
+            `<option value="${escapeHtml(u.id)}" data-protected="${u.protected ? '1' : '0'}" ${String(u.id) === String(currentLib.plex_home_user_id || '') ? 'selected' : ''}>${escapeHtml(u.title)}${u.protected ? ' (PIN)' : ''}</option>`
+        ).join('');
+
         section.innerHTML = `
+            <div class="ps-section">
+                <div class="ps-section-header">
+                    <h4 class="ps-section-title">Plex User</h4>
+                    <span class="ps-connection-badge ${linkedUser ? 'connected' : 'disconnected'}">
+                        <span class="ps-connection-dot"></span>
+                        ${linkedUser ? escapeHtml(linkedUser) : 'App account'}
+                    </span>
+                </div>
+                <div class="ps-help-text" style="margin-bottom:12px;">Pick who you are on Plex and the playlists you sync will belong to you there. Without a pick they belong to the app's account.</div>
+                ${homeUsers.length ? `
+                <div class="ps-form-group">
+                    <label>Plex Home user</label>
+                    <select id="ps-plex-home-user-select" onchange="onPersonalPlexHomeUserChange()">
+                        <option value="">Use app account</option>
+                        ${homeUserOpts}
+                    </select>
+                </div>
+                <div class="ps-form-group" id="ps-plex-home-pin-group" style="display:none;">
+                    <label>Plex profile PIN</label>
+                    <input type="password" id="ps-plex-home-pin" inputmode="numeric" autocomplete="off" placeholder="Used once to link, not saved">
+                </div>
+                <div class="ps-actions">
+                    <button class="ps-btn ps-btn-primary" onclick="linkPersonalPlexHomeUser()">Link</button>
+                    ${linkedUser ? '<button class="ps-btn" onclick="unlinkPersonalPlexHomeUser()">Use app account</button>' : ''}
+                </div>` : '<div class="ps-help-text">No Plex Home users found on this server.</div>'}
+            </div>
             <div class="ps-section">
                 <div class="ps-section-header">
                     <h4 class="ps-section-title">Plex Library</h4>
@@ -1733,6 +1814,7 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
                 </div>
             </div>
         `;
+        setTimeout(onPersonalPlexHomeUserChange, 0);
     } else if (serverType === 'jellyfin') {
         const selectedUser = currentLib.jellyfin_user_id || '';
         const selectedLib = currentLib.jellyfin_library_id || '';
@@ -1805,6 +1887,89 @@ async function savePersonalServerLibrary() {
         showToast('Server library settings saved', 'success');
     } catch (e) {
         showToast('Error saving settings', 'error');
+    }
+}
+
+function onPersonalPlexHomeUserChange() {
+    const select = document.getElementById('ps-plex-home-user-select');
+    const pinGroup = document.getElementById('ps-plex-home-pin-group');
+    if (!select || !pinGroup) return;
+    const opt = select.options[select.selectedIndex];
+    pinGroup.style.display = opt && opt.dataset.protected === '1' ? '' : 'none';
+}
+
+async function linkPersonalPlexHomeUser() {
+    const select = document.getElementById('ps-plex-home-user-select');
+    const userId = select ? select.value : '';
+    const pin = document.getElementById('ps-plex-home-pin')?.value || '';
+    if (!userId) {
+        showToast('Pick your Plex user first', 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/profiles/me/plex-home-user', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, pin })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(data.error || 'Could not link that Plex user', 'error');
+            return;
+        }
+        showToast(`Playlists you sync will belong to ${data.title} on Plex`, 'success');
+        openPersonalSettings(); // Reload
+    } catch (e) {
+        showToast('Error linking Plex user', 'error');
+    }
+}
+
+async function unlinkPersonalPlexHomeUser() {
+    try {
+        const res = await fetch('/api/profiles/me/plex-home-user', { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Plex user unlinked — using the app account', 'info');
+            openPersonalSettings(); // Reload
+        }
+    } catch (e) {
+        showToast('Error unlinking Plex user', 'error');
+    }
+}
+
+async function savePersonalNavidromeLogin() {
+    const username = (document.getElementById('ps-navidrome-username')?.value || '').trim();
+    const password = document.getElementById('ps-navidrome-password')?.value || '';
+    if (!username || !password) {
+        showToast('Enter your Navidrome username and password', 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/profiles/me/navidrome-login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(data.error || 'Navidrome refused the login', 'error');
+            return;
+        }
+        showToast(`Playlists you sync will belong to ${username} in Navidrome`, 'success');
+        openPersonalSettings(); // Reload
+    } catch (e) {
+        showToast('Error saving Navidrome login', 'error');
+    }
+}
+
+async function clearPersonalNavidromeLogin() {
+    try {
+        const res = await fetch('/api/profiles/me/navidrome-login', { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Navidrome login removed — using the app account', 'info');
+            openPersonalSettings(); // Reload
+        }
+    } catch (e) {
+        showToast('Error removing Navidrome login', 'error');
     }
 }
 
@@ -2337,6 +2502,10 @@ async function loadProfileManageList() {
         editBtn.dataset.allowedPages = p.allowed_pages ? JSON.stringify(p.allowed_pages) : '';
         editBtn.dataset.canDownload = p.can_download !== false ? '1' : '0';
         editBtn.dataset.isAdmin = p.is_admin ? '1' : '0';
+        editBtn.dataset.librarySupported = data.own_library_supported === false ? '0' : '1';
+        editBtn.dataset.libraryMode = p.library_mode || 'shared';
+        editBtn.dataset.libraryRoot = p.library_root || '';
+        editBtn.dataset.libraryHint = (data.own_library_root_hint || '').replace('<name>', (p.name || 'profile').toLowerCase().replace(/[^a-z0-9]+/g, '-'));
         editBtn.title = 'Edit profile';
         editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
         actions.appendChild(editBtn);
@@ -2375,7 +2544,11 @@ async function loadProfileManageList() {
                 home_page: btn.dataset.homePage || '',
                 allowed_pages: btn.dataset.allowedPages ? JSON.parse(btn.dataset.allowedPages) : null,
                 can_download: btn.dataset.canDownload !== '0',
-                is_admin: btn.dataset.isAdmin === '1'
+                is_admin: btn.dataset.isAdmin === '1',
+                library_supported: btn.dataset.librarySupported !== '0',
+                library_mode: btn.dataset.libraryMode || 'shared',
+                library_root: btn.dataset.libraryRoot || '',
+                library_hint: btn.dataset.libraryHint || ''
             });
         };
     });
@@ -2572,6 +2745,8 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     // Admin-only settings: side access, allowed pages & can_download
     let pageCheckboxes = [];
     let canDlCheckbox = null;
+    let ownLibCheckbox = null;
+    let ownLibRootInput = null;
     let selectedSides = null;
     if (isAdmin && !isEditingAdmin) {
         // Side access — music | video | both, never nothing.
@@ -2632,6 +2807,50 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
         dlLabel.appendChild(canDlCheckbox);
         dlLabel.appendChild(document.createTextNode(' Can download (music, podcasts, audiobooks & video)'));
         form.appendChild(dlLabel);
+
+        // own library (#1199): this profile's downloads go to its own folder
+        // and the library it picked on the server, not the shared one
+        const olLabel = document.createElement('label');
+        olLabel.className = 'profile-checkbox-label';
+        ownLibCheckbox = document.createElement('input');
+        ownLibCheckbox.type = 'checkbox';
+        ownLibCheckbox.checked = profileSettings.library_mode === 'own';
+        ownLibCheckbox.disabled = profileSettings.library_supported === false && !ownLibCheckbox.checked;
+        olLabel.appendChild(ownLibCheckbox);
+        olLabel.appendChild(document.createTextNode(profileSettings.library_supported === false
+            ? ' Own library (requires Plex or Jellyfin)'
+            : ' Own library (separate output folder + their own server library)'));
+        form.appendChild(olLabel);
+
+        // the folder: prefilled with the install's expected path (a mount
+        // under /app/libraries/<name>, see docker-compose.yml); outside docker
+        // the admin corrects it, and a folder that is not there is refused on save
+        const olField = document.createElement('div');
+        olField.className = 'profile-folder-field';
+        olField.style.display = ownLibCheckbox.checked ? '' : 'none';
+        const olFieldLabel = document.createElement('label');
+        olFieldLabel.className = 'profile-settings-label';
+        olFieldLabel.textContent = 'Output folder';
+        olField.appendChild(olFieldLabel);
+        const olWrap = document.createElement('div');
+        olWrap.className = 'profile-folder-input';
+        olWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+        ownLibRootInput = document.createElement('input');
+        ownLibRootInput.type = 'text';
+        ownLibRootInput.spellcheck = false;
+        ownLibRootInput.autocomplete = 'off';
+        ownLibRootInput.placeholder = profileSettings.library_hint || '/app/libraries/name';
+        ownLibRootInput.value = profileSettings.library_root || profileSettings.library_hint || '';
+        olWrap.appendChild(ownLibRootInput);
+        olField.appendChild(olWrap);
+        const olHelp = document.createElement('div');
+        olHelp.className = 'profile-settings-help';
+        olHelp.textContent = 'Docker: mount this folder in docker-compose.yml (see the Per-profile libraries example). Not Docker: change it to a real folder. Then point a second music library on your Plex or Jellyfin server at it and have the profile pick that library under My Settings.';
+        olField.appendChild(olHelp);
+        form.appendChild(olField);
+        ownLibCheckbox.addEventListener('change', () => {
+            olField.style.display = ownLibCheckbox.checked ? '' : 'none';
+        });
     }
 
     const btnRow = document.createElement('div');
@@ -2656,6 +2875,11 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
             payload.allowed_pages = allChecked ? null : editablePageCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
             payload.can_download = canDlCheckbox ? canDlCheckbox.checked : true;
             if (selectedSides) payload.allowed_sides = selectedSides;
+            if (ownLibCheckbox) {
+                payload.library_mode = ownLibCheckbox.checked ? 'own' : 'shared';
+                payload.library_root = ownLibCheckbox.checked ? (ownLibRootInput.value || '').trim() : '';
+                if (ownLibCheckbox.checked && !payload.library_root) { alert('An own library needs an output folder'); return; }
+            }
         }
 
         try {

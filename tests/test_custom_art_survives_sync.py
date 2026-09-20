@@ -336,6 +336,7 @@ def test_a_schema_without_the_column_still_syncs(tmp_path):
     conn.row_factory = sqlite3.Row
     conn.execute("""CREATE TABLE albums (id TEXT PRIMARY KEY, artist_id TEXT, title TEXT,
                     year INTEGER, thumb_url TEXT, genres TEXT, track_count INTEGER,
+                    owner_profile_id INTEGER DEFAULT NULL,
                     duration INTEGER, server_source TEXT, created_at TEXT, updated_at TEXT)""")
     conn.execute("INSERT INTO albums (id, artist_id, title, thumb_url, server_source) "
                  "VALUES ('al-123','ar-1','A Six Pack of Hits','http://old.jpg','navidrome')")
@@ -350,4 +351,3 @@ def test_a_schema_without_the_column_still_syncs(tmp_path):
     assert ok is True, "the upsert failed outright on a schema without art_locked"
     row = conn.execute("SELECT thumb_url FROM albums WHERE id='al-123'").fetchone()
     assert row['thumb_url'] == SERVER_PLACEHOLDER, "pre-lock behaviour must be preserved"
-

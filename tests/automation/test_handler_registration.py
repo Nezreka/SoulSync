@@ -50,6 +50,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'deep_scan_library',
     'run_duplicate_cleaner',
     'clear_quarantine',
+    'library_cleanup',
     'cleanup_wishlist',
     'update_discovery_pool',
     'start_quality_scan',

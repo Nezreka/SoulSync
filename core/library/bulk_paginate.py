@@ -41,6 +41,7 @@ def paginate_all_items(
     page_size: int = DEFAULT_PAGE_SIZE,
     min_page_size: int = DEFAULT_MIN_PAGE_SIZE,
     on_retry_wait: Optional[Callable[[], None]] = None,
+    outcome: Optional[dict] = None,
 ) -> List[Any]:
     """Page through ``fetch_page(start_index, limit)`` until the server is drained.
 
@@ -52,8 +53,16 @@ def paginate_all_items(
     Progress is reported after EVERY non-empty page (including the final/only one),
     so a no-progress watchdog is fed on a cadence set by ``page_size`` — never by
     the total library size. Returns every item gathered.
+
+    ``outcome`` (optional dict) gets ``complete=True`` when the server was
+    drained and ``complete=False`` when the fetch was abandoned at the floor:
+    the list returned then is a prefix of the library, and a caller that
+    compares it against what it already has (the deep scan) must not read
+    the missing tail as gone.
     """
     items: List[Any] = []
+    if outcome is not None:
+        outcome['complete'] = True
     start_index = 0
     limit = page_size
     consecutive_failures = 0
@@ -70,6 +79,8 @@ def paginate_all_items(
                 consecutive_failures = 0  # give the smaller batch a fair chance
                 continue
             if consecutive_failures >= 2:
+                if outcome is not None:
+                    outcome['complete'] = False
                 break  # struggling at the floor — stop with what we have
             continue
 

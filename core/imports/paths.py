@@ -6,7 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from utils.logging_config import get_logger
 
@@ -160,6 +160,65 @@ def config_root_path(path_str: Any, default: str = "") -> str:
     return docker_resolve_path(raw)
 
 
+# ── the library root a download lands in (#1199) ─────────────────────────────
+#
+# a profile with a library of its own has its own output folder. a download
+# knows its profile through the batch that made it (every batch carries
+# profile_id) or an explicit stamp on its context (imports from the page);
+# everything else, and every profile on the shared library, lands in the
+# configured transfer folder exactly as before.
+
+def import_profile_id(context) -> Optional[int]:
+    """the profile a download/import is for, or None when it has none."""
+    if not isinstance(context, dict):
+        return None
+    pid = context.get("profile_id")
+    if pid:
+        try:
+            return int(pid)
+        except (TypeError, ValueError):
+            pass
+    batch_id = context.get("batch_id")
+    if batch_id:
+        try:
+            from core.runtime_state import download_batches
+            batch = download_batches.get(batch_id) or {}
+            pid = batch.get("profile_id")
+            return int(pid) if pid else None
+        except Exception:  # noqa: BLE001 - runtime state not importable in a bare tool
+            return None
+    return None
+
+
+def library_root_for_profile(profile_id) -> Optional[str]:
+    """the own-library output folder of a profile (docker-resolved), or None
+    when the profile is on the shared library."""
+    if not profile_id:
+        return None
+    from core.library_scope import own_library_supported
+    if not own_library_supported():
+        return None
+    try:
+        from database.music_database import get_database
+        lib = get_database().get_profile_library(int(profile_id))
+    except Exception as exc:  # noqa: BLE001 - no db, no own library
+        logger.debug("own library lookup failed for profile %s: %s", profile_id, exc)
+        return None
+    if lib.get("mode") != "own" or not lib.get("root"):
+        return None
+    return config_root_path(lib["root"])
+
+
+def shared_transfer_root() -> str:
+    return config_root_path(_get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer")
+
+
+def transfer_root_for_context(context) -> str:
+    """where this download/import's files go: the profile's own folder when
+    it has one, the configured transfer folder otherwise."""
+    return library_root_for_profile(import_profile_id(context)) or shared_transfer_root()
+
+
 def build_simple_download_destination(context, file_path: str):
     """Build the destination path for a simple download into Transfer."""
     context = normalize_import_context(context)
@@ -167,8 +226,7 @@ def build_simple_download_destination(context, file_path: str):
     if not isinstance(search_result, dict):
         search_result = {}
 
-    transfer_dir = Path(config_root_path(
-        _get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer"))
+    transfer_dir = Path(transfer_root_for_context(context))
     album_name = None
     original_filename = search_result.get("filename", "")
     if "/" in original_filename or "\\" in original_filename:
@@ -678,9 +736,8 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         if create_dirs:
             _real_makedirs(path, exist_ok=True)
 
-    transfer_dir = config_root_path(
-        _get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer")
     context = normalize_import_context(context)
+    transfer_dir = transfer_root_for_context(context)
     track_info = get_import_track_info(context)
     original_search = get_import_original_search(context)
     album_context = get_import_context_album(context)

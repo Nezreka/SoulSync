@@ -80,3 +80,48 @@ def test_profile_scoped_wishlist_clear_not_overgated(client, nonadmin):
     # Clearing your OWN wishlist is profile-scoped data — a non-admin MUST still
     # be allowed. This is the guard against a blanket sweep.
     assert _call(client, 'POST', '/api/wishlist/clear').status_code != 403
+
+
+# ---------------------------------------------------------------------------
+# a second admin is an admin. the shell shows Settings to every is_admin
+# profile, the video gate and the newer music endpoints check the same flag,
+# but admin_only was "profile 1 only": a second admin got the page and a 403
+# behind every save.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def second_admin(client):
+    db = web_server.get_database()
+    pid = db.create_profile(name=f'admin2_{os.urandom(3).hex()}', is_admin=True)
+    assert pid != 1 and db.get_profile(pid)['is_admin']
+    with client.session_transaction() as sess:
+        sess['profile_id'] = pid
+    return pid
+
+
+def test_second_admin_passes_the_gate(client, second_admin):
+    assert client.get('/api/settings').status_code != 403
+
+
+def test_second_admin_passes_the_gate_on_a_path_the_profile_hook_skips(client, second_admin):
+    # /api/v1/* skips the before_request hook, so g.is_admin is never stashed
+    # there; the gate has to read the profile row itself
+    assert client.get('/api/v1/api-keys-internal').status_code != 403
+
+
+def test_a_demoted_second_admin_is_refused_again(client, second_admin):
+    assert client.get('/api/settings').status_code != 403
+    web_server.get_database().update_profile(second_admin, is_admin=0)
+    assert client.get('/api/settings').status_code == 403
+
+
+def test_nonadmin_still_refused_on_the_hook_skipped_path(client, nonadmin):
+    assert client.get('/api/v1/api-keys-internal').status_code == 403
+
+
+def test_quick_switch_editable_agrees_with_the_gate(client, nonadmin):
+    # the GET says whether the POST (admin_only) would be allowed
+    assert client.get('/api/profiles/me/active-sources').get_json()['editable'] is False
+    db = web_server.get_database()
+    db.update_profile(nonadmin, is_admin=1)
+    assert client.get('/api/profiles/me/active-sources').get_json()['editable'] is True

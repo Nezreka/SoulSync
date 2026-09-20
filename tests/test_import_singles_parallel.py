@@ -229,7 +229,7 @@ def test_route_processes_multiple_files_in_parallel(tmp_path) -> None:
 
     sleep_per_call = 0.3  # 6 files * 0.3s = 1.8s sequential, <0.7s with 3 workers
 
-    def fake_worker(file_info):
+    def fake_worker(file_info, profile_id=None):
         _time.sleep(sleep_per_call)
         return ("ok", file_info.get('title', '?'))
 
@@ -281,7 +281,7 @@ def test_route_aggregates_mixed_success_and_error_outcomes(tmp_path) -> None:
         for i, f in enumerate(audio_files)
     ]
 
-    def mixed_worker(file_info):
+    def mixed_worker(file_info, profile_id=None):
         # Files 0 and 2 succeed, 1 and 3 fail
         idx = int(file_info['filename'].split('_')[1].split('.')[0])
         if idx % 2 == 0:
@@ -322,7 +322,7 @@ def test_route_recovers_from_worker_crash(tmp_path) -> None:
 
     call_count = {'n': 0}
 
-    def crashing_worker(file_info):
+    def crashing_worker(file_info, profile_id=None):
         call_count['n'] += 1
         if call_count['n'] == 2:
             raise RuntimeError("worker boom")

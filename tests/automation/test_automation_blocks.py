@@ -144,3 +144,15 @@ def test_video_scan_library_block_shape():
     mode = next(f for f in action['config_fields'] if f['key'] == 'mode')
     assert {o['value'] for o in mode['options']} == {'full', 'incremental', 'deep'}
     assert mode['default'] == 'full'
+
+
+def test_library_cleanup_block_shape():
+    """The weekly sweep block: music-visible (no video scope), both halves as
+    checkboxes defaulting ON so a seeded row with an empty config does both."""
+    block = next(b for b in blocks.ACTIONS if b['type'] == 'library_cleanup')
+    assert block['available'] is True
+    assert block.get('scope') != 'video'
+    fields = {f['key']: f for f in block['config_fields']}
+    assert set(fields) == {'quarantine', 'recycle_bin'}
+    assert all(f['type'] == 'checkbox' and f['default'] is True for f in fields.values())
+    assert 'keep window' in block['description']

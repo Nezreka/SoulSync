@@ -202,3 +202,34 @@ def test_a_soulsync_client_renders_it_as_an_ordinary_message(chat_app):
     assert len(msgs) == 1
     assert msgs[0]["message"] == "anyone got the FLAC?"
     assert msgs[0].get("rich") is not True
+
+
+# ── newlines: the server drops them, so they never reach it ──────────────────
+# The Soulseek server silently rejects a chat message containing a newline
+# (Nicotine+ filters them for the same reason). slskd returns 201 anyway, so
+# a multi-line plain message or PM from the textarea composer looked sent,
+# never echoed, and vanished from the sender's screen 45s later.
+def test_a_multiline_plain_message_goes_out_on_one_line(chat_app):
+    http, state = chat_app
+    r = http.post("/api/chat/room/message",
+                  json={"message": "line one\r\nline two\nline three", "plain": True})
+    assert r.status_code == 200
+    wire = _wire(state)
+    assert "\n" not in wire and "\r" not in wire
+    assert wire == "line one line two line three"
+
+
+def test_a_multiline_pm_goes_out_on_one_line(chat_app):
+    http, state = chat_app
+    r = http.post("/api/chat/conversations/some pal", json={"message": "hi\nthere"})
+    assert r.status_code == 200
+    assert state["client"].sent_pm[-1][1] == "hi there"
+
+
+def test_the_envelope_keeps_its_newlines(chat_app):
+    """base64 carries no newline on the wire, so the rich text keeps them."""
+    http, state = chat_app
+    http.post("/api/chat/room/message", json={"message": "line one\nline two"})
+    wire = _wire(state)
+    assert "\n" not in wire
+    assert chat_codec.decode(wire)["t"] == "line one\nline two"

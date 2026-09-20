@@ -900,3 +900,159 @@ def test_completion_check_v2_also_refuses_a_failed_publish(monkeypatch):
 
     assert result is False
     assert download_batches['b1'].get('phase') != 'complete'
+
+
+# ---------------------------------------------------------------------------
+# both completion paths do the same bookkeeping, and the slow half runs with
+# the lock released
+# ---------------------------------------------------------------------------
+#
+# check_batch_completion_v2 (the cancel + batch-healing path) carried its own
+# copy of the completion block, and that copy never recorded sync history or
+# regenerated the m3u: a sync whose last track was cancelled sat in the sync
+# history as "In progress" forever. the album consistency pass (a rate-limited
+# musicbrainz search plus a tag rewrite of every file) also ran INSIDE
+# tasks_lock on both paths, so every status poll waited on it.
+
+def _cancelled_last_track_batch():
+    download_tasks['t1'] = {'status': 'completed', 'track_info': {'name': 'X', 'artists': ['A'], 'duration_ms': 1}}
+    download_tasks['t2'] = {'status': 'cancelled', 'track_info': {'name': 'Y', 'artists': [{'name': 'B'}]}}
+    download_batches['b1'] = {
+        'queue': ['t1', 't2'], 'queue_index': 2, 'active_count': 0,
+        'max_concurrent': 1, 'permanently_failed_tracks': [], 'cancelled_tracks': {1},
+        'playlist_name': 'PL',
+    }
+
+
+def _completion_recorder(monkeypatch, rec):
+    """what the completion bookkeeping touches, and whether tasks_lock was
+    held at the time. a non-reentrant lock answers acquire(blocking=False)
+    False from the thread that already holds it."""
+    def _held():
+        got = lc.tasks_lock.acquire(blocking=False)
+        if got:
+            lc.tasks_lock.release()
+        return not got
+
+    monkeypatch.setattr(lc, 'record_sync_history_completion',
+                        lambda db, bid, b: rec.append(('history', bid, _held())))
+
+    class _Mat:
+        playlist_dir, linked, copied, unchanged, removed_stale, fellback = 'd', 0, 0, 0, 0, False
+
+    import core.playlists.materialize_service as ms
+    monkeypatch.setattr(ms, 'reconcile_batch_playlists',
+                        lambda db, batch, tasks, cfg, **kw: (rec.append(('materialize', dict(tasks), _held())) or [('p', _Mat())]))
+    import core.album_consistency as ac
+    monkeypatch.setattr(ac, 'run_album_consistency',
+                        lambda **kw: (rec.append(('consistency', kw['file_infos'], _held())) or {'success': True, 'tags_written': 2, 'total_files': 2, 'release_mbid': 'x'}))
+    return rec
+
+
+def _album_deps(rec):
+    class _Repair:
+        def process_batch(self, bid):
+            rec.append(('repair', bid))
+    deps, calls = _build_deps(
+        repair=_Repair(),
+        config=_FakeConfig({'m3u_export.enabled': True, 'musicbrainz.embed_tags': True}),
+        submit_failed=lambda bid: rec.append(('wishlist', bid)),
+        process_failed=lambda bid: rec.append(('wishlist', bid)),
+    )
+    deps.mb_worker = type('MB', (), {'mb_service': object()})()
+    deps.regenerate_batch_m3u = lambda batch, tracks: rec.append(('m3u', tracks))
+    return deps
+
+
+def _album_batch_fields():
+    download_batches['b1'].update({
+        'is_album_download': True,
+        'album_context': {'name': 'Album', 'total_discs': 1},
+        'artist_context': {'name': 'Artist'},
+        '_consistency_files': [{'path': '/a/1.flac'}, {'path': '/a/2.flac'}],
+    })
+
+
+@pytest.mark.parametrize('path', ['primary', 'v2'])
+def test_both_completion_paths_record_history_and_regenerate_the_m3u(monkeypatch, path):
+    _cancelled_last_track_batch()
+    rec = _completion_recorder(monkeypatch, [])
+    deps = _album_deps(rec)
+    if path == 'primary':
+        download_batches['b1']['active_count'] = 1
+        lc.on_download_completed('b1', 't2', False, deps)
+    else:
+        assert lc.check_batch_completion_v2('b1', deps) is True
+    assert download_batches['b1']['phase'] == 'complete'
+    kinds = [r[0] for r in rec]
+    assert 'history' in kinds, f"{path}: sync history never closed"
+    assert 'm3u' in kinds, f"{path}: m3u never regenerated"
+    m3u = next(r[1] for r in rec if r[0] == 'm3u')
+    assert m3u == [{'name': 'X', 'artist': 'A', 'duration_ms': 1}]      # completed tracks only
+
+
+@pytest.mark.parametrize('path', ['primary', 'v2'])
+def test_the_slow_half_runs_with_the_lock_released(monkeypatch, path):
+    _cancelled_last_track_batch()
+    _album_batch_fields()
+    rec = _completion_recorder(monkeypatch, [])
+    deps = _album_deps(rec)
+    if path == 'primary':
+        download_batches['b1']['active_count'] = 1
+        lc.on_download_completed('b1', 't2', False, deps)
+    else:
+        lc.check_batch_completion_v2('b1', deps)
+    by_kind = {r[0]: r for r in rec}
+    assert by_kind['history'][2] is True, "history is bookkeeping, it stays under the lock"
+    assert by_kind['consistency'][2] is False, f"{path}: album consistency ran under tasks_lock"
+    assert by_kind['materialize'][2] is False, f"{path}: playlist materialize ran under tasks_lock"
+    assert by_kind['consistency'][1] == [{'path': '/a/1.flac'}, {'path': '/a/2.flac'}]
+    # the materialize reads a snapshot of this batch's tasks, not the live dict
+    assert set(by_kind['materialize'][1]) == {'t1', 't2'}
+    assert 'repair' in by_kind
+
+
+@pytest.mark.parametrize('path', ['primary', 'v2'])
+def test_side_effects_finish_before_the_wishlist_hand_off(monkeypatch, path):
+    """the order the old in-lock code had: consistency, then wishlist"""
+    _cancelled_last_track_batch()
+    _album_batch_fields()
+    rec = _completion_recorder(monkeypatch, [])
+    deps = _album_deps(rec)
+    if path == 'primary':
+        download_batches['b1']['active_count'] = 1
+        lc.on_download_completed('b1', 't2', False, deps)
+    else:
+        lc.check_batch_completion_v2('b1', deps)
+    kinds = [r[0] for r in rec]
+    assert kinds.index('consistency') < kinds.index('wishlist')
+    assert kinds.index('m3u') < kinds.index('wishlist')
+    assert download_batches['b1']['wishlist_processing_started'] is True
+
+
+@pytest.mark.parametrize('path', ['primary', 'v2'])
+def test_a_second_completion_call_does_not_repeat_the_side_effects(monkeypatch, path):
+    _cancelled_last_track_batch()
+    rec = _completion_recorder(monkeypatch, [])
+    deps = _album_deps(rec)
+    if path == 'primary':
+        download_batches['b1']['active_count'] = 1
+        lc.on_download_completed('b1', 't2', False, deps)
+        lc.on_download_completed('b1', 't2', False, deps)
+    else:
+        lc.check_batch_completion_v2('b1', deps)
+        assert lc.check_batch_completion_v2('b1', deps) is True
+    assert [r[0] for r in rec].count('history') == 1
+    assert [r[0] for r in rec].count('m3u') == 1
+
+
+def test_v2_non_music_batch_is_marked_wishlist_complete():
+    download_tasks['t1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+    download_batches['podcasts'] = {
+        'queue': ['t1'], 'queue_index': 1, 'active_count': 0,
+        'max_concurrent': 1, 'permanently_failed_tracks': [],
+    }
+    deps, rec = _build_deps()
+    assert lc.check_batch_completion_v2('podcasts', deps) is True
+    assert download_batches['podcasts']['wishlist_processing_complete'] is True
+    assert not any(c[0].startswith('process_failed') for c in rec.calls)

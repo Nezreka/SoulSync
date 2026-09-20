@@ -70,10 +70,11 @@ def find_library_artist_for_source(
     try:
         with database._get_connection() as conn:
             cursor = conn.cursor()
+            scope_sql, scope_params = database._current_scope_sql()
             # LIMIT 2 so we can tell a unique match from an ambiguous one.
             cursor.execute(
-                f"SELECT id FROM artists WHERE {column} = ? LIMIT 2",
-                (str(source_artist_id),),
+                f"SELECT id FROM artists WHERE {column} = ? AND {scope_sql} LIMIT 2",
+                (str(source_artist_id), *scope_params),
             )
             rows = cursor.fetchall()
             if len(rows) == 1:
@@ -91,8 +92,8 @@ def find_library_artist_for_source(
             if artist_name and active_server:
                 cursor.execute(
                     "SELECT id FROM artists "
-                    "WHERE LOWER(name) = LOWER(?) AND server_source = ? LIMIT 1",
-                    (artist_name, active_server),
+                    f"WHERE LOWER(name) = LOWER(?) AND server_source = ? AND {scope_sql} LIMIT 1",
+                    (artist_name, active_server, *scope_params),
                 )
                 row = cursor.fetchone()
                 if row:

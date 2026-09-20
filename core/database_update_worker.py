@@ -12,12 +12,42 @@ from core.settings import config_manager
 
 logger = get_logger("database_update_worker")
 
+
+class ListingUnavailable(Exception):
+    """the server gave no answer for a listing (albums of an artist, tracks of
+    an album). not the same as an empty answer, and the deep scan must never
+    read it as one."""
+
+
+def verified_listing(obj, name: str) -> list:
+    """``obj.albums()`` / ``obj.tracks()`` with the failure kept visible.
+
+    the jellyfin and navidrome wrappers answer ``[]`` for a failed request
+    and for an empty listing alike; they expose ``<name>_verified()`` which
+    returns ``(items, ok)`` so this can tell the two apart. plexapi raises on
+    its own. an answer the wrapper could not vouch for becomes
+    ListingUnavailable either way."""
+    fetch = getattr(obj, f'{name}_verified', None)
+    if callable(fetch):
+        items, ok = fetch()
+        if not ok:
+            raise ListingUnavailable(f"{name} listing got no answer")
+        return list(items or [])
+    try:
+        return list(getattr(obj, name)())
+    except Exception as exc:
+        raise ListingUnavailable(f"{name} listing failed: {exc}") from exc
+
+
 class DatabaseUpdateWorker:
     """Worker for updating SoulSync database with media server library data."""
     
-    def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex", force_sequential: bool = False):
+    def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex", force_sequential: bool = False, owner_profile_id=None):
         # Force sequential processing for web server mode to avoid threading issues
         self.force_sequential = force_sequential
+        # whose library this scan reads (#1199): None = the shared library,
+        # every row it writes and every row it may call stale carries this
+        self.owner_profile_id = owner_profile_id
         self.callbacks = {
             'progress_updated': [],
             'artist_processed': [],
@@ -62,6 +92,14 @@ class DatabaseUpdateWorker:
         # longer lists into the live row for the same file (#1257).
         self._seen_track_ids = set()
         self._trashed_skipped = 0
+
+        # scopes the deep scan asked about and got no answer for: an artist
+        # whose album listing failed, an album whose track listing failed. a
+        # missing answer is not "nothing there", and every row under one of
+        # these is kept out of the stale set. one timed-out getAlbum used to
+        # delete that album's rows, enrichment and all, on the weekly scan.
+        self._unverified_artist_ids = set()
+        self._unverified_album_ids = set()
 
         # Optional callback(worker) run as the FINAL scan phase, immediately
         # before the 'finished' signal — so the auto-reconcile is inside the
@@ -201,7 +239,7 @@ class DatabaseUpdateWorker:
 
             if self.full_refresh:
                 logger.info(f"Performing full database refresh for {self.server_type} - clearing existing {self.server_type} data")
-                self.database.clear_server_data(self.server_type)
+                self.database.clear_server_data(self.server_type, owner_profile_id=self.owner_profile_id)
 
                 # Show cache preparation phase for Jellyfin and set up progress callback
                 if self.server_type == "jellyfin":
@@ -490,13 +528,41 @@ class DatabaseUpdateWorker:
 
             # Phase 3: Stale track removal
             self._emit_signal('phase_changed', "Deep scan: Checking for stale tracks...")
-            db_track_ids = self.database.get_all_track_ids_for_server(self.server_type)
+            db_track_ids = self.database.get_all_track_ids_for_server(self.server_type, owner_profile_id=self.owner_profile_id)
             stale = db_track_ids - seen_track_ids
             stale_removed = 0
 
+            # a stopped scan never asked about the artists after the stop, so
+            # their tracks are unscanned, not gone. before this the 50% guard
+            # was the only thing between a Stop click and a hard delete of
+            # everything past it.
+            if stale and self.should_stop:
+                logger.warning("Skipping stale removal: the scan was stopped before it saw every artist, "
+                               "so %d unseen track(s) are unscanned, not gone", len(stale))
+                self._emit_signal('phase_changed', "Deep scan: stopped early, keeping every unscanned track")
+                stale = set()
             if stale and not identity_repair_ok:
                 logger.warning("Skipping stale removal: Navidrome identity repair could not complete")
                 stale = set()
+            # rows under an artist or album whose listing got no answer are
+            # fenced off: one timed-out getAlbum is not an album with no tracks
+            if stale and (self._unverified_artist_ids or self._unverified_album_ids):
+                fenced = self.database.get_track_ids_under_scopes(
+                    self.server_type, self._unverified_artist_ids, self._unverified_album_ids)
+                if fenced is None:
+                    logger.warning("Skipping stale removal: could not fence off the rows under %d artist(s) / "
+                                   "%d album(s) whose listings failed", len(self._unverified_artist_ids),
+                                   len(self._unverified_album_ids))
+                    stale = set()
+                else:
+                    kept = stale & fenced
+                    if kept:
+                        logger.warning("Deep scan: keeping %d track(s) under %d artist(s) / %d album(s) whose "
+                                       "listing failed this run (unverified, not stale)", len(kept),
+                                       len(self._unverified_artist_ids), len(self._unverified_album_ids))
+                        self._emit_signal('phase_changed',
+                                          f"Deep scan: {len(kept)} track(s) kept, their listing failed this run")
+                    stale -= fenced
             if stale:
                 # A fully-trusted scan may exceed the 50% threshold: the server
                 # answered (verified fetch), every artist processed cleanly, and
@@ -608,6 +674,10 @@ class DatabaseUpdateWorker:
 
             except Exception as e:
                 logger.error(f"Deep scan: Error processing artist {artist_name}: {e}")
+                # never got a full look at this artist, so nothing under it is stale
+                self._unverified_artist_ids.add(self._library_artist_id(getattr(artist, 'ratingKey', '')))
+                with self.thread_lock:
+                    self.failed_operations += 1
                 self._emit_signal('artist_processed', artist_name, False, f"Error: {str(e)}", 0, 0)
 
     def _clear_media_cache(self, when: str) -> None:
@@ -1109,10 +1179,10 @@ class DatabaseUpdateWorker:
                     artist_name = getattr(artist, 'title', 'Unknown Artist')
                     
                     # Insert/update the artist
-                    artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type)
+                    artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
                     if artist_success:
                         total_processed_artists += 1
-                        self._touched_artist_ids.add(artist_id)
+                        self._touched_artist_ids.add(self._library_artist_id(artist_id))
                     
                     # Process albums for this artist  
                     artist_album_ids = albums_by_artist.get(artist_id, set())
@@ -1127,7 +1197,7 @@ class DatabaseUpdateWorker:
                                 album = album_tracks[0].album()  # Get album object
                                 if album:
                                     # Insert/update album
-                                    album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
+                                    album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
                                     if album_success:
                                         total_processed_albums += 1
                                         self._touched_album_ids.add(str(album_id))
@@ -1142,7 +1212,7 @@ class DatabaseUpdateWorker:
 
                                         try:
                                             self._seen_track_ids.add(str(track.ratingKey))
-                                            track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
+                                            track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
                                             if track_success:
                                                 total_processed_tracks += 1
                                                 if track_success == 'inserted':
@@ -1228,6 +1298,10 @@ class DatabaseUpdateWorker:
             logger.debug(f"Error checking for metadata changes: {e}")
             return False  # Assume no changes if we can't check
     
+    def _library_artist_id(self, artist_id):
+        from core.library_scope import library_artist_id
+        return library_artist_id(artist_id, self.server_type, self.owner_profile_id)
+
     def _clear_phantom_artist_thumbs(self):
         """null the server-built photo url of every artist the server says has
         no image. non-fatal, and a client that can't answer is left alone."""
@@ -1238,7 +1312,8 @@ class DatabaseUpdateWorker:
             without_image = getter()
             if not without_image:
                 return
-            cleared = self.database.clear_phantom_artist_thumbs(without_image, self.server_type)
+            cleared = self.database.clear_phantom_artist_thumbs(
+                {self._library_artist_id(i) for i in without_image}, self.server_type)
             if cleared:
                 logger.info(f"Cleared {cleared} phantom artist photo urls "
                             f"({self.server_type} has no image for them)")
@@ -1308,7 +1383,7 @@ class DatabaseUpdateWorker:
 
         # Get current DB counts for safety threshold
         try:
-            db_stats = self.database.get_statistics_for_server(self.server_type)
+            db_stats = self.database.get_statistics_for_server(self.server_type, owner_profile_id=self.owner_profile_id)
             db_artist_count = db_stats.get('artists', 0)
             db_album_count = db_stats.get('albums', 0)
         except Exception:
@@ -1377,10 +1452,11 @@ class DatabaseUpdateWorker:
 
         # Get stored IDs from database
         self._emit_signal('phase_changed', f"Comparing local database with {self.server_type}...")
-        db_artist_ids = self.database.get_all_artist_ids_for_server(self.server_type) if check_artists else set()
-        db_album_ids = self.database.get_all_album_ids_for_server(self.server_type) if check_albums else set()
+        db_artist_ids = self.database.get_all_artist_ids_for_server(self.server_type, owner_profile_id=self.owner_profile_id) if check_artists else set()
+        db_album_ids = self.database.get_all_album_ids_for_server(self.server_type, owner_profile_id=self.owner_profile_id) if check_albums else set()
 
         # Compute removal sets (only for types we have valid server data for)
+        server_artist_ids = {self._library_artist_id(i) for i in server_artist_ids}
         removed_artist_ids = (db_artist_ids - server_artist_ids) if check_artists else set()
         removed_album_ids = (db_album_ids - server_album_ids) if check_albums else set()
 
@@ -1630,18 +1706,27 @@ class DatabaseUpdateWorker:
             artist_name = getattr(media_artist, 'title', 'Unknown Artist')
 
             # 1. Insert/update the artist using server-agnostic method
-            artist_success = self.database.insert_or_update_media_artist(media_artist, server_source=self.server_type)
+            artist_id = str(media_artist.ratingKey)
+            artist_success = self.database.insert_or_update_media_artist(media_artist, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
             if not artist_success:
+                if seen_track_ids is not None:
+                    # deep scan: nothing under this artist was looked at
+                    self._unverified_artist_ids.add(self._library_artist_id(artist_id))
                 return False, "Failed to update artist data", 0, 0
 
-            artist_id = str(media_artist.ratingKey)
-            self._touched_artist_ids.add(artist_id)
+            self._touched_artist_ids.add(self._library_artist_id(artist_id))
 
             # 2. Get all albums for this artist (cached from aggressive pre-population)
             try:
-                albums = list(media_artist.albums())
-            except Exception as e:
+                albums = verified_listing(media_artist, 'albums')
+            except ListingUnavailable as e:
                 logger.warning(f"Could not get albums for artist '{artist_name}': {e}")
+                if seen_track_ids is not None:
+                    # deep scan: no answer means every track under this artist
+                    # stays unverified. this used to return success with zero
+                    # seen tracks, and the stale pass deleted all of them.
+                    self._unverified_artist_ids.add(self._library_artist_id(artist_id))
+                    return False, "Album listing failed, artist kept as-is", 0, 0
                 return True, "Artist updated (no albums accessible)", 0, 0
 
             album_count = 0
@@ -1662,15 +1747,26 @@ class DatabaseUpdateWorker:
 
                     try:
                         # Insert/update album using server-agnostic method
-                        album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
+                        album_id = str(album.ratingKey)
+                        album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
+                        if not album_success and seen_track_ids is not None:
+                            # deep scan: the album's tracks were never listed
+                            self._unverified_album_ids.add(album_id)
                         if album_success:
                             album_count += 1
-                            album_id = str(album.ratingKey)
                             self._touched_album_ids.add(album_id)
 
                             # 4. Process tracks in this album (cached from aggressive pre-population)
                             try:
-                                tracks = list(album.tracks())
+                                try:
+                                    tracks = verified_listing(album, 'tracks')
+                                except ListingUnavailable as e:
+                                    logger.warning(f"Could not get tracks for album '{getattr(album, 'title', 'Unknown')}': {e}")
+                                    if seen_track_ids is not None:
+                                        # deep scan: the album answered nothing, so
+                                        # its rows are unverified, not stale
+                                        self._unverified_album_ids.add(album_id)
+                                    tracks = []
 
                                 # Batch insert tracks for better database performance
                                 track_batch = []
@@ -1695,7 +1791,7 @@ class DatabaseUpdateWorker:
                                         # Deep scan: always call insert_or_update to refresh file_path
                                         # and other server-provided fields. UPDATE preserves enrichment.
                                         is_existing = skip_existing_tracks and self.database.track_exists_by_server(track_id_str, self.server_type)
-                                        track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type)
+                                        track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
                                         if is_existing:
                                             skipped_count += 1
                                         elif track_success:
@@ -1707,9 +1803,13 @@ class DatabaseUpdateWorker:
 
                             except Exception as e:
                                 logger.warning(f"Could not get tracks for album '{getattr(album, 'title', 'Unknown')}': {e}")
+                                if seen_track_ids is not None:
+                                    self._unverified_album_ids.add(album_id)
 
                     except Exception as e:
                         logger.warning(f"Failed to process album '{getattr(album, 'title', 'Unknown')}': {e}")
+                        if seen_track_ids is not None:
+                            self._unverified_album_ids.add(str(getattr(album, 'ratingKey', '')))
 
             if skip_existing_tracks:
                 details = f"{album_count} albums, {track_count} new tracks ({skipped_count} existing updated)"
@@ -1719,6 +1819,8 @@ class DatabaseUpdateWorker:
             
         except Exception as e:
             logger.error(f"Error processing artist '{getattr(media_artist, 'title', 'Unknown')}': {e}")
+            if seen_track_ids is not None:
+                self._unverified_artist_ids.add(self._library_artist_id(getattr(media_artist, 'ratingKey', '')))
             return False, f"Processing error: {str(e)}", 0, 0
 
     def run_with_callback(self, completion_callback=None):
