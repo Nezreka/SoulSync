@@ -16,6 +16,7 @@ from contextlib import contextmanager
 import pytest
 
 from core.artist_source_lookup import sources_resolvable_in_library
+from database.music_database import MusicDatabase
 
 
 class _FakeDb:
@@ -23,6 +24,10 @@ class _FakeDb:
 
     def __init__(self, path):
         self._path = str(path)
+
+    def _current_scope_sql(self):
+        # Match the real database's shared-library visibility contract.
+        return MusicDatabase._owner_scope_sql('shared')
 
     @contextmanager
     def _get_connection(self):
@@ -42,6 +47,7 @@ def db(tmp_path):
                id INTEGER PRIMARY KEY,
                name TEXT,
                server_source TEXT,
+               owner_profile_id INTEGER DEFAULT NULL,
                spotify_artist_id TEXT,
                deezer_id TEXT,
                itunes_artist_id TEXT,
