@@ -48,7 +48,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   delete window.showToast;
-  delete window.showConfirmDialog;
+  delete (window as Partial<Window>).showConfirmDialog;
 });
 
 async function mountCard() {
@@ -289,7 +289,7 @@ describe('the quick access links', () => {
   });
 
   afterEach(() => {
-    delete window.navigateToPage;
+    delete (window as Partial<Window>).navigateToPage;
   });
 
   it.each([

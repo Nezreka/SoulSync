@@ -28,7 +28,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
-_ACTIVE_FILE = "COALESCE(f.file_state,'active') NOT IN ('missing_confirmed','deleted')"
+# "there is a live file" -- and, once directories exist, one THIS library has.
+# Unscoped it says a track is already on disk because someone ELSE has it, which
+# in the Missing view means a profile can never obtain a track it does not own.
+_ACTIVE_FILE_BASE = "COALESCE(f.file_state,'active') NOT IN ('missing_confirmed','deleted')"
+
+
+def _active_file() -> str:
+    from core.library2.sql_util import owner_clause
+    return _ACTIVE_FILE_BASE + owner_clause(column="f.owner_profile_id")
 
 _IN_CHUNK = 400
 
@@ -138,7 +146,7 @@ def reference_owners(conn: Any, track_ids: Iterable[int]) -> Dict[int, Dict[str,
               JOIN lib2_track_files f ON f.track_id = other.id
              WHERE me.id IN ({marks})
                AND {title_match}
-               AND {_ACTIVE_FILE}
+               AND {_active_file()}
                AND NOT EXISTS (
                    SELECT 1 FROM lib2_track_files own
                     WHERE own.track_id = me.id

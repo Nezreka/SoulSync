@@ -258,11 +258,12 @@ class TestTheOwnershipPredicate:
                      (owner, track))
         return track
 
-    def test_the_ambient_scope_is_the_callers(self):
-        """With no request and no pick this resolves to the shared library,
-        which is what a background job and a plain install both are."""
+    def test_an_install_with_no_own_directory_is_not_filtered_at_all(self):
+        """The rule, not a snapshot of one state: with nothing to separate,
+        the predicate has to be absent -- not merely true. A tautological
+        clause still costs two correlated EXISTS per row on every keystroke."""
         from core.library2.sql_util import owned_sql
-        assert "+owned_f.owner_profile_id IS NULL" in owned_sql("track", "t")
+        assert "owner_profile_id" not in owned_sql("track", "t")
 
     def test_an_explicit_scope_filters(self):
         from core.library2.sql_util import owned_sql
@@ -347,8 +348,60 @@ class TestTheSwitcherContract:
         from core.library_scope import _UNSET, session_scope
         assert session_scope() is _UNSET
 
-    def test_the_switch_exists_so_the_feature_can_be_turned_off_again(self):
-        """Not decoration: one constant still gates the read filter, the
-        download target, the per-profile scans and the switcher together."""
-        from core.library_scope import SCOPE_PARKED
-        assert SCOPE_PARKED is False
+    def test_every_consumer_still_reads_the_switch(self):
+        """The property worth pinning is that ONE constant still gates the read
+        filter, the write target, the per-profile scans and the switcher -- not
+        which way it currently points. Asserting the value made the emergency
+        rollback impossible to ship green, which is the opposite of what a kill
+        switch is for."""
+        import inspect
+
+        from core import library_scope
+        from core.library2 import sql_util
+
+        assert "SCOPE_PARKED" in inspect.getsource(sql_util._resolve_scope)
+        assert "SCOPE_PARKED" in inspect.getsource(library_scope.session_scope)
+        assert "SCOPE_PARKED" in inspect.getsource(library_scope.owner_for_new_file)
+        assert "SCOPE_PARKED" in inspect.getsource(library_scope.library_scope_for_profile)
+
+class TestTwoLibrariesOnOneServer:
+    """The column exists so one server can carry two libraries; these pin that
+    the runtime actually uses it, which is what was missing when it was added."""
+
+    def test_the_same_server_id_means_two_rows_in_two_libraries(self, conn):
+        from core.library2.media_mappings import resolve_mapping, upsert_mapping
+
+        cur = conn.cursor()
+        conn.execute("INSERT INTO lib2_artists(id, name) VALUES(1, 'A')")
+        conn.execute("INSERT INTO lib2_artists(id, name) VALUES(2, 'B')")
+        upsert_mapping(cur, "artist", 1, "jellyfin", "shared-id", "lib-a")
+        upsert_mapping(cur, "artist", 2, "jellyfin", "shared-id", "lib-b")
+
+        assert resolve_mapping(cur, "artist", "jellyfin", "shared-id", "lib-a") == 1
+        assert resolve_mapping(cur, "artist", "jellyfin", "shared-id", "lib-b") == 2
+
+    def test_a_rekey_inside_one_library_still_moves(self, conn):
+        from core.library2.media_mappings import resolve_mapping, upsert_mapping
+
+        cur = conn.cursor()
+        conn.execute("INSERT INTO lib2_artists(id, name) VALUES(1, 'A')")
+        conn.execute("INSERT INTO lib2_artists(id, name) VALUES(2, 'B')")
+        upsert_mapping(cur, "artist", 1, "jellyfin", "id-1", "lib-a")
+        upsert_mapping(cur, "artist", 2, "jellyfin", "id-1", "lib-a")
+
+        assert resolve_mapping(cur, "artist", "jellyfin", "id-1", "lib-a") == 2
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_media_server_mappings").fetchone()[0] == 1
+
+    def test_the_default_library_is_what_every_install_has(self, conn):
+        """No library argument is the empty string, not NULL -- SQLite counts
+        NULLs as distinct in a UNIQUE, which would switch the dedup off."""
+        from core.library2.media_mappings import resolve_mapping, upsert_mapping
+
+        cur = conn.cursor()
+        conn.execute("INSERT INTO lib2_artists(id, name) VALUES(1, 'A')")
+        upsert_mapping(cur, "artist", 1, "plex", "px-1")
+
+        assert conn.execute(
+            "SELECT server_library_id FROM lib2_media_server_mappings").fetchone()[0] == ""
+        assert resolve_mapping(cur, "artist", "plex", "px-1") == 1

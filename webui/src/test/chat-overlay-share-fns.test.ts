@@ -20,12 +20,9 @@ const BLOCK = JS.slice(
 );
 
 describe('the helpers it leans on are defined in chat.js', () => {
-  it.each(['postJSON', '_tagRoomPayload', 'toggleAttachPanel', '_ovToast'])(
-    '%s',
-    (name) => {
-      expect(JS.includes(`function ${name}(`), `${name} is not defined in chat.js`).toBe(true);
-    },
-  );
+  it.each(['postJSON', '_tagRoomPayload', 'toggleAttachPanel', '_ovToast'])('%s', (name) => {
+    expect(JS.includes(`function ${name}(`), `${name} is not defined in chat.js`).toBe(true);
+  });
 });
 
 /** The block with comment lines stripped. Several of the comments explain WHY a
@@ -115,8 +112,14 @@ describe('the overlay picker is a real modal', () => {
     '.chat-ovl-cardname',
     '.chat-ovl-empty',
   ])('%s is actually styled', (cls) => {
-    expect(CSS.includes(`${cls} `) || CSS.includes(`${cls},`) || CSS.includes(`${cls}.`) ||
-      CSS.includes(`${cls}:`) || CSS.includes(`${cls}\n`), `${cls} has no rule`).toBe(true);
+    expect(
+      CSS.includes(`${cls} `) ||
+        CSS.includes(`${cls},`) ||
+        CSS.includes(`${cls}.`) ||
+        CSS.includes(`${cls}:`) ||
+        CSS.includes(`${cls}\n`),
+      `${cls} has no rule`,
+    ).toBe(true);
   });
 
   it('shows a rendered example of each template, not just its name', () => {

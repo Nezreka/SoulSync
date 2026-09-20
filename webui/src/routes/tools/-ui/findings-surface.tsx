@@ -29,7 +29,6 @@
  * duplicate), so the backend refuses an action that spans more than one type.
  */
 
-import { FindingsAlbumGrid } from './findings-album-grid';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
@@ -79,6 +78,7 @@ import {
 import { safeFixablePending, visibleGroups } from '../-tools.groups';
 import { FindingDetail } from './finding-detail';
 import { useFindingPrompts } from './finding-prompts';
+import { FindingsAlbumGrid } from './findings-album-grid';
 import { FindingsInbox } from './findings-inbox';
 import { HealthHero } from './health-hero';
 
@@ -1001,11 +1001,13 @@ export function FindingsSurface({
      album card and mean nothing. */
   const viewSwitch = openType ? (
     <div className="repair-view-switch" role="group" aria-label="Group findings by">
-      {([
-        ['list', 'List'],
-        ['album', 'Albums'],
-        ['artist', 'Artists'],
-      ] as const).map(([value, label]) => (
+      {(
+        [
+          ['list', 'List'],
+          ['album', 'Albums'],
+          ['artist', 'Artists'],
+        ] as const
+      ).map(([value, label]) => (
         <button
           type="button"
           key={value}
@@ -1041,148 +1043,154 @@ export function FindingsSurface({
       {viewSwitch ? <div className="repair-findings-toolbar">{viewSwitch}</div> : null}
       {groupedView}
       {groupedView ? null : (
-    <>
-      {bar.showBar ? (
-        <div className="repair-findings-bulk" id="repair-findings-selection">
-          <span className="repair-bulk-count">{bar.countLabel}</span>
-          <button className="btn btn--sm btn--primary" type="button" onClick={() => void bulkFix()}>
-            Fix Selected
-          </button>
-          <button
-            className="btn btn--sm btn--secondary"
-            type="button"
-            onClick={() => void bulkDismiss()}
-          >
-            Dismiss Selected
-          </button>
-        </div>
-      ) : null}
+        <>
+          {bar.showBar ? (
+            <div className="repair-findings-bulk" id="repair-findings-selection">
+              <span className="repair-bulk-count">{bar.countLabel}</span>
+              <button
+                className="btn btn--sm btn--primary"
+                type="button"
+                onClick={() => void bulkFix()}
+              >
+                Fix Selected
+              </button>
+              <button
+                className="btn btn--sm btn--secondary"
+                type="button"
+                onClick={() => void bulkDismiss()}
+              >
+                Dismiss Selected
+              </button>
+            </div>
+          ) : null}
 
-      <div className="repair-list-controls">
-        <label className="repair-select-all" title="Select all on this page">
-          <input
-            type="checkbox"
-            id="repair-select-all-cb"
-            checked={bar.selectAllChecked}
-            ref={(node) => {
-              if (node) node.indeterminate = bar.selectAllIndeterminate;
-            }}
-            onChange={(event) => toggleSelectAll(event.target.checked)}
-          />
-          <span>Select all on this page</span>
-        </label>
-        <select
-          id="repair-findings-sort"
-          title="Sort"
-          value={sort}
-          onChange={(event) => {
-            setSort(event.target.value);
-            setPage(0);
-          }}
-        >
-          {SORT_OPTIONS.map((option) => (
-            <option value={option.value} key={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <select
-          id="repair-page-size-select"
-          title="Findings per page"
-          value={String(pageSize)}
-          onChange={(event) => changePageSize(event.target.value)}
-        >
-          {REPAIR_PAGE_SIZE_OPTIONS.map((size) => (
-            <option value={String(size)} key={size}>
-              {size} / page
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="repair-findings-list" id="repair-findings-list">
-        {loadError !== null ? (
-          <div className="repair-empty">
-            Error loading findings
-            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>{loadError}</div>
+          <div className="repair-list-controls">
+            <label className="repair-select-all" title="Select all on this page">
+              <input
+                type="checkbox"
+                id="repair-select-all-cb"
+                checked={bar.selectAllChecked}
+                ref={(node) => {
+                  if (node) node.indeterminate = bar.selectAllIndeterminate;
+                }}
+                onChange={(event) => toggleSelectAll(event.target.checked)}
+              />
+              <span>Select all on this page</span>
+            </label>
+            <select
+              id="repair-findings-sort"
+              title="Sort"
+              value={sort}
+              onChange={(event) => {
+                setSort(event.target.value);
+                setPage(0);
+              }}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option value={option.value} key={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              id="repair-page-size-select"
+              title="Findings per page"
+              value={String(pageSize)}
+              onChange={(event) => changePageSize(event.target.value)}
+            >
+              {REPAIR_PAGE_SIZE_OPTIONS.map((size) => (
+                <option value={String(size)} key={size}>
+                  {size} / page
+                </option>
+              ))}
+            </select>
           </div>
-        ) : items === null ? (
-          <div className="repair-loading">Loading findings...</div>
-        ) : items.length === 0 ? (
-          <div className="repair-empty">Nothing here matches your filters.</div>
-        ) : (
-          items.map((finding) => (
-            <FindingCard
-              finding={finding}
-              key={finding.id}
-              selected={selected.has(finding.id)}
-              expanded={expanded.has(finding.id)}
-              fixing={busyFix.has(finding.id)}
-              onToggleSelect={toggleSelect}
-              onToggleDetail={toggleDetail}
-              jobLabel={jobLabel}
-              onFix={fixOne}
-              onDismiss={dismissOne}
-              onReopen={reopenOne}
-              onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
-              onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
-            />
-          ))
-        )}
-      </div>
 
-      <div className="repair-findings-pagination" id="repair-findings-pagination">
-        {items && items.length > 0 && pagination.totalPages > 1 ? (
-          <>
-            {pagination.showPrev ? (
-              <button
-                className="repair-page-btn"
-                type="button"
-                onClick={() => setPage(serverPage - 1)}
-              >
-                &larr;
-              </button>
+          <div className="repair-findings-list" id="repair-findings-list">
+            {loadError !== null ? (
+              <div className="repair-empty">
+                Error loading findings
+                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>{loadError}</div>
+              </div>
+            ) : items === null ? (
+              <div className="repair-loading">Loading findings...</div>
+            ) : items.length === 0 ? (
+              <div className="repair-empty">Nothing here matches your filters.</div>
+            ) : (
+              items.map((finding) => (
+                <FindingCard
+                  finding={finding}
+                  key={finding.id}
+                  selected={selected.has(finding.id)}
+                  expanded={expanded.has(finding.id)}
+                  fixing={busyFix.has(finding.id)}
+                  onToggleSelect={toggleSelect}
+                  onToggleDetail={toggleDetail}
+                  jobLabel={jobLabel}
+                  onFix={fixOne}
+                  onDismiss={dismissOne}
+                  onReopen={reopenOne}
+                  onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
+                  onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="repair-findings-pagination" id="repair-findings-pagination">
+            {items && items.length > 0 && pagination.totalPages > 1 ? (
+              <>
+                {pagination.showPrev ? (
+                  <button
+                    className="repair-page-btn"
+                    type="button"
+                    onClick={() => setPage(serverPage - 1)}
+                  >
+                    &larr;
+                  </button>
+                ) : null}
+                {pagination.showFirst ? (
+                  <button className="repair-page-btn" type="button" onClick={() => setPage(0)}>
+                    1
+                  </button>
+                ) : null}
+                {pagination.showFirstEllipsis ? (
+                  <span className="repair-page-info">...</span>
+                ) : null}
+                {pagination.pages.map((index) => (
+                  <button
+                    className={`repair-page-btn ${index === serverPage ? 'active' : ''}`}
+                    type="button"
+                    key={index}
+                    onClick={() => setPage(index)}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
+                {pagination.showLastEllipsis ? <span className="repair-page-info">...</span> : null}
+                {pagination.showLast ? (
+                  <button
+                    className="repair-page-btn"
+                    type="button"
+                    onClick={() => setPage(pagination.totalPages - 1)}
+                  >
+                    {pagination.totalPages}
+                  </button>
+                ) : null}
+                {pagination.showNext ? (
+                  <button
+                    className="repair-page-btn"
+                    type="button"
+                    onClick={() => setPage(serverPage + 1)}
+                  >
+                    &rarr;
+                  </button>
+                ) : null}
+                <span className="repair-page-info">{total.toLocaleString()} total</span>
+              </>
             ) : null}
-            {pagination.showFirst ? (
-              <button className="repair-page-btn" type="button" onClick={() => setPage(0)}>
-                1
-              </button>
-            ) : null}
-            {pagination.showFirstEllipsis ? <span className="repair-page-info">...</span> : null}
-            {pagination.pages.map((index) => (
-              <button
-                className={`repair-page-btn ${index === serverPage ? 'active' : ''}`}
-                type="button"
-                key={index}
-                onClick={() => setPage(index)}
-              >
-                {index + 1}
-              </button>
-            ))}
-            {pagination.showLastEllipsis ? <span className="repair-page-info">...</span> : null}
-            {pagination.showLast ? (
-              <button
-                className="repair-page-btn"
-                type="button"
-                onClick={() => setPage(pagination.totalPages - 1)}
-              >
-                {pagination.totalPages}
-              </button>
-            ) : null}
-            {pagination.showNext ? (
-              <button
-                className="repair-page-btn"
-                type="button"
-                onClick={() => setPage(serverPage + 1)}
-              >
-                &rarr;
-              </button>
-            ) : null}
-            <span className="repair-page-info">{total.toLocaleString()} total</span>
-          </>
-        ) : null}
-      </div>
-    </>
+          </div>
+        </>
       )}
     </>
   );

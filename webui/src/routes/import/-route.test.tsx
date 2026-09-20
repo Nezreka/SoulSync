@@ -362,7 +362,6 @@ describe('import route', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       '/music/Staging/Locked (Permission denied)',
     );
-
   });
 
   it('shows scan progress while a large staging folder is still scanning (#947)', async () => {

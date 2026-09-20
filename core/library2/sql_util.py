@@ -83,8 +83,16 @@ def _resolve_scope(scope):
     if scope is not _AMBIENT:
         return scope
     try:
-        from core.library_scope import SCOPE_PARKED, current_library_scope
-        return ANY_OWNER if SCOPE_PARKED else current_library_scope()
+        from core.library_scope import (
+            SCOPE_PARKED, any_own_library_exists, current_library_scope,
+        )
+        # Two gates, and the second is the one that matters in practice.
+        # SCOPE_PARKED is the kill switch; `any_own_library_exists()` is every
+        # install where nobody keeps a second directory -- there is nothing to
+        # separate, so the predicate must be ABSENT and not merely true.
+        if SCOPE_PARKED or not any_own_library_exists():
+            return ANY_OWNER
+        return current_library_scope()
     except Exception:  # noqa: BLE001 - unreadable scope means do not filter
         return ANY_OWNER
 
@@ -147,11 +155,46 @@ def scope_visibility_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str
     if not _VALID_IDENTIFIER.match(alias):
         raise ValueError(f"Invalid alias: {alias!r}")
     intent = intent_profile_id(resolved)
-    has_intent = (
-        f"EXISTS (SELECT 1 FROM lib2_monitor_rules mr"
-        f"         WHERE mr.entity_type='{entity}' AND mr.entity_id={alias}.id"
-        f"           AND mr.profile_id={intent} AND mr.monitored=1)"
-    )
+    # Intent at ANY level below the row, from either table. An artist whose
+    # only claim is a monitored ALBUM, or a wanted TRACK, is exactly the row a
+    # user is waiting for -- checking the artist level alone hid it and made
+    # the album unreachable from the page.
+    if entity == "artist":
+        owns_track = ("SELECT 1 FROM lib2_tracks it"
+                      "  JOIN lib2_albums ial ON ial.id = it.album_id"
+                      f" WHERE ial.primary_artist_id = {alias}.id")
+        intent_sql = (
+            f"EXISTS (SELECT 1 FROM lib2_monitor_rules mr"
+            f"         WHERE mr.profile_id={intent} AND mr.monitored=1"
+            f"           AND ((mr.entity_type='artist' AND mr.entity_id={alias}.id)"
+            f"             OR (mr.entity_type='album' AND mr.entity_id IN ("
+            f"                   SELECT id FROM lib2_albums WHERE primary_artist_id={alias}.id))"
+            f"             OR (mr.entity_type='track' AND mr.entity_id IN ({owns_track}))))"
+            f" OR EXISTS (SELECT 1 FROM lib2_wanted_tracks wt"
+            f"             WHERE wt.profile_id={intent} AND wt.wanted=1"
+            f"               AND wt.track_id IN ({owns_track}))"
+        )
+    elif entity == "album":
+        owns_track = f"SELECT id FROM lib2_tracks WHERE album_id = {alias}.id"
+        intent_sql = (
+            f"EXISTS (SELECT 1 FROM lib2_monitor_rules mr"
+            f"         WHERE mr.profile_id={intent} AND mr.monitored=1"
+            f"           AND ((mr.entity_type='album' AND mr.entity_id={alias}.id)"
+            f"             OR (mr.entity_type='track' AND mr.entity_id IN ({owns_track}))))"
+            f" OR EXISTS (SELECT 1 FROM lib2_wanted_tracks wt"
+            f"             WHERE wt.profile_id={intent} AND wt.wanted=1"
+            f"               AND wt.track_id IN ({owns_track}))"
+        )
+    else:
+        intent_sql = (
+            f"EXISTS (SELECT 1 FROM lib2_monitor_rules mr"
+            f"         WHERE mr.entity_type='track' AND mr.entity_id={alias}.id"
+            f"           AND mr.profile_id={intent} AND mr.monitored=1)"
+            f" OR EXISTS (SELECT 1 FROM lib2_wanted_tracks wt"
+            f"             WHERE wt.track_id={alias}.id"
+            f"               AND wt.profile_id={intent} AND wt.wanted=1)"
+        )
+    has_intent = f"({intent_sql})"
     mine = owned_sql(entity, alias, scope=resolved)
     if resolved != "shared":
         # An own library is an exception carved out of the house: it holds what

@@ -6,3 +6,6 @@ ruff==0.15.12
 
 # Test runner
 pytest==9.0.3
+# required by the --timeout addopts in pyproject.toml: a hanging test has
+# to fail with a stack, not stall the run
+pytest-timeout==2.4.0

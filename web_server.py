@@ -6262,6 +6262,9 @@ def _start_playback_queue_prefetch(raw_tracks):
                     'permanently_failed_tracks': [],
                     'cancelled_tracks': set(),
                     'profile_id': get_current_profile_id(),
+                    # the selected directory, resolved while a request still exists;
+                    # every later stage reads it back off the batch (#1199)
+                    'library_owner_id': _selected_library_owner(),
                     'playback_prefetch': True,
                     'created_at': time.time(),
                 }
@@ -14671,7 +14674,10 @@ def start_playlist_missing_downloads(playlist_id):
                 'permanently_failed_tracks': [],
                 'cancelled_tracks': set(),
                 # Profile context for failed track wishlist re-adds
-                'profile_id': get_current_profile_id()
+                'profile_id': get_current_profile_id(),
+                # the selected directory, resolved while a request still exists;
+                # every later stage reads it back off the batch (#1199)
+                'library_owner_id': _selected_library_owner(),
             }
 
             for i, track_entry in enumerate(missing_tracks):
@@ -17000,6 +17006,9 @@ def start_missing_tracks_process(playlist_id):
             'analysis_total': len(tracks),
             # Profile context for failed track wishlist re-adds
             'profile_id': get_current_profile_id(),
+            # the selected directory, resolved while a request still exists;
+            # every later stage reads it back off the batch (#1199)
+            'library_owner_id': _selected_library_owner(),
             'analysis_processed': 0,
             'analysis_results': [],
             'force_download_all': force_download_all,  # Pass the force flag to the batch
@@ -17140,7 +17149,10 @@ def start_missing_downloads():
                 'permanently_failed_tracks': [],
                 'cancelled_tracks': set(),
                 # Profile context for failed track wishlist re-adds
-                'profile_id': get_current_profile_id()
+                'profile_id': get_current_profile_id(),
+                # the selected directory, resolved while a request still exists;
+                # every later stage reads it back off the batch (#1199)
+                'library_owner_id': _selected_library_owner(),
             }
 
             for track_index, track_data in enumerate(missing_tracks):
@@ -21750,6 +21762,20 @@ def _run_library_v2_integrity_report(*, max_findings=1000):
         raise
     finally:
         conn.close()
+
+
+def _selected_library_owner():
+    """The directory selected in this request, or None for the shared library.
+
+    Read while a request (and therefore a session) still exists, and stamped on
+    the download batch: by the time the file is organised and linked, the work
+    is on a pool thread where the session is gone.
+    """
+    try:
+        from core.library_scope import owner_for_new_file
+        return owner_for_new_file(get_current_profile_id())
+    except Exception:  # noqa: BLE001 - no scope, shared library
+        return None
 
 
 def _library_v2_profile_page_allowed(page_id):

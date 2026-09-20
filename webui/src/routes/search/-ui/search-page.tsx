@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { BasicAlbum, BasicTrack } from '../-basic.types';
-import type { SearchAlbum, SearchArtist, SearchLabel, SearchPlaylist, SearchTrack } from '../-search.types';
+import type {
+  SearchAlbum,
+  SearchArtist,
+  SearchLabel,
+  SearchPlaylist,
+  SearchTrack,
+} from '../-search.types';
 import type { LibraryCheckTrack } from '../-search.types';
-import { PlaylistPreviewModal } from './playlist-preview-modal';
 
 import {
   downloadAlbum,
@@ -44,19 +49,68 @@ import { useDismissOnOutsideClick } from '../-search.use-dismiss';
 import { useLibraryCheck } from '../-search.use-library-check';
 import { useVideoDownloads } from '../-search.use-video-downloads';
 import { BasicSearch } from './basic-search';
+import { PlaylistPreviewModal } from './playlist-preview-modal';
 import { SearchBar } from './search-bar';
 import { SearchResults } from './search-results';
 import { SourceRow } from './source-row';
 
 const EXPLORE_CATEGORIES = [
-  { id: 'trending', label: 'Top Trending', icon: '🔥', query: 'Trending', gradient: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)' },
-  { id: 'new_releases', label: 'New Releases', icon: '✨', query: 'New Releases', gradient: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' },
-  { id: 'electronic', label: 'Electronic & Dance', icon: '🎧', query: 'Electronic', gradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)' },
-  { id: 'rock', label: 'Rock & Alternative', icon: '🎸', query: 'Rock', gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' },
-  { id: 'hiphop', label: 'Hip-Hop & Rap', icon: '🎤', query: 'Hip Hop', gradient: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)' },
-  { id: 'chill', label: 'Lo-Fi & Chill', icon: '☕', query: 'Chill', gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' },
-  { id: 'jazz', label: 'Jazz & Soul', icon: '🎷', query: 'Jazz', gradient: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)' },
-  { id: 'soundtracks', label: 'Soundtracks & Score', icon: '🎬', query: 'Soundtrack', gradient: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' },
+  {
+    id: 'trending',
+    label: 'Top Trending',
+    icon: '🔥',
+    query: 'Trending',
+    gradient: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+  },
+  {
+    id: 'new_releases',
+    label: 'New Releases',
+    icon: '✨',
+    query: 'New Releases',
+    gradient: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+  },
+  {
+    id: 'electronic',
+    label: 'Electronic & Dance',
+    icon: '🎧',
+    query: 'Electronic',
+    gradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
+  },
+  {
+    id: 'rock',
+    label: 'Rock & Alternative',
+    icon: '🎸',
+    query: 'Rock',
+    gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+  },
+  {
+    id: 'hiphop',
+    label: 'Hip-Hop & Rap',
+    icon: '🎤',
+    query: 'Hip Hop',
+    gradient: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+  },
+  {
+    id: 'chill',
+    label: 'Lo-Fi & Chill',
+    icon: '☕',
+    query: 'Chill',
+    gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+  },
+  {
+    id: 'jazz',
+    label: 'Jazz & Soul',
+    icon: '🎷',
+    query: 'Jazz',
+    gradient: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)',
+  },
+  {
+    id: 'soundtracks',
+    label: 'Soundtracks & Score',
+    icon: '🎬',
+    query: 'Soundtrack',
+    gradient: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+  },
 ];
 
 /** Which of the dropdown's three bodies is showing. */
@@ -367,7 +421,9 @@ export function SearchPage() {
                             runSearch(entry);
                           }}
                         >
-                          <span className="enh-recent-chip-icon" aria-hidden="true">🕒</span>
+                          <span className="enh-recent-chip-icon" aria-hidden="true">
+                            🕒
+                          </span>
                           {entry}
                         </button>
                         <button
@@ -401,7 +457,9 @@ export function SearchPage() {
                       }}
                     >
                       <span className="enh-explore-label">{cat.label}</span>
-                      <span className="enh-explore-icon" aria-hidden="true">{cat.icon}</span>
+                      <span className="enh-explore-icon" aria-hidden="true">
+                        {cat.icon}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -458,7 +516,9 @@ export function SearchPage() {
                   {query.trim() ? `No matches found for "${query.trim()}".` : 'No results found.'}
                 </p>
                 <div className="enh-empty-tips">
-                  <span>💡 Tip: Check spelling, try broader keywords, or switch metadata sources above.</span>
+                  <span>
+                    💡 Tip: Check spelling, try broader keywords, or switch metadata sources above.
+                  </span>
                 </div>
               </div>
 
@@ -535,10 +595,7 @@ export function SearchPage() {
       </div>
 
       {previewPlaylist && (
-        <PlaylistPreviewModal
-          playlist={previewPlaylist}
-          onClose={() => setPreviewPlaylist(null)}
-        />
+        <PlaylistPreviewModal playlist={previewPlaylist} onClose={() => setPreviewPlaylist(null)} />
       )}
     </div>
   );

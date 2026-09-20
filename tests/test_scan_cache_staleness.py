@@ -84,7 +84,9 @@ def test_full_refresh_keeps_old_mappings_until_server_fetch_succeeds(dbpath, mon
     db = MusicDatabase(dbpath)
     monkeypatch.setattr("core.database_update_worker.get_database", lambda path=None: db)
     monkeypatch.setattr(
-        db, "clear_server_data", lambda source: events.append(("clear", source)))
+        db, "clear_server_data",
+        lambda source, owner_profile_id=None: events.append(
+            ("clear", source, owner_profile_id)))
     worker._process_all_artists = lambda artists: events.append(("process", len(artists)))
     worker._detect_and_remove_stale_content = lambda: {}
 
@@ -100,14 +102,16 @@ def test_full_refresh_detaches_only_after_two_verified_empty_reads(dbpath, monke
     db = MusicDatabase(dbpath)
     monkeypatch.setattr("core.database_update_worker.get_database", lambda path=None: db)
     monkeypatch.setattr(
-        db, "clear_server_data", lambda source: events.append(("clear", source)))
+        db, "clear_server_data",
+        lambda source, owner_profile_id=None: events.append(
+            ("clear", source, owner_profile_id)))
     worker._process_all_artists = lambda artists: events.append(("process", len(artists)))
     worker._detect_and_remove_stale_content = lambda: {}
 
     worker.run()
 
     assert client.calls.count("get_all_artists") == 2
-    assert events == [("clear", "navidrome"), ("process", 0)]
+    assert events == [("clear", "navidrome", None), ("process", 0)]
 
 
 def test_full_refresh_fetch_failure_never_detaches_mappings(dbpath, monkeypatch):
@@ -118,7 +122,9 @@ def test_full_refresh_fetch_failure_never_detaches_mappings(dbpath, monkeypatch)
     db = MusicDatabase(dbpath)
     monkeypatch.setattr("core.database_update_worker.get_database", lambda path=None: db)
     monkeypatch.setattr(
-        db, "clear_server_data", lambda source: events.append(("clear", source)))
+        db, "clear_server_data",
+        lambda source, owner_profile_id=None: events.append(
+            ("clear", source, owner_profile_id)))
     worker._process_all_artists = lambda artists: events.append(("process", len(artists)))
 
     worker.run()

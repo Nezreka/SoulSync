@@ -217,7 +217,10 @@
   font-size: 14px;
   font-weight: bold;
   letter-spacing: 1px;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .podcastMenuBtn:hover {
@@ -268,7 +271,9 @@
   cursor: pointer;
   text-align: left;
   width: 100%;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .podcastDropdownItem:hover {
@@ -419,7 +424,10 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
 }
 
 .retentionPresetBtn:hover {
@@ -501,4 +509,3 @@
   color: #9aa0aa;
   margin-top: 2px;
 }
-

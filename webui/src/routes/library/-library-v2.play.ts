@@ -59,11 +59,10 @@ function byPosition(
 ): number {
   // A payload arrives in whatever order the query produced. Unnumbered tracks
   // sort last rather than jumping to the front of the queue.
-  const disc = (a.disc_number ?? Number.MAX_SAFE_INTEGER) - (b.disc_number ?? Number.MAX_SAFE_INTEGER);
+  const disc =
+    (a.disc_number ?? Number.MAX_SAFE_INTEGER) - (b.disc_number ?? Number.MAX_SAFE_INTEGER);
   if (disc !== 0) return disc;
-  return (
-    (a.track_number ?? Number.MAX_SAFE_INTEGER) - (b.track_number ?? Number.MAX_SAFE_INTEGER)
-  );
+  return (a.track_number ?? Number.MAX_SAFE_INTEGER) - (b.track_number ?? Number.MAX_SAFE_INTEGER);
 }
 
 function primaryArtist(track: LibraryV2Track): { id: number; name: string } | null {
@@ -128,7 +127,7 @@ export function artistQueueRows(
   }
 
   return [...perTrack.values()]
-    .sort((a, b) => (a.album_id - b.album_id) || byPosition(a, b))
+    .sort((a, b) => a.album_id - b.album_id || byPosition(a, b))
     .map((file) => {
       const title = file.track_title || 'Unknown Track';
       return {

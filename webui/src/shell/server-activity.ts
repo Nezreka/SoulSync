@@ -60,8 +60,11 @@ let tab = 'activity';
 
 function esc(s: unknown): string {
   return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 function getJSON<T>(u: string): Promise<T | null> {
   return fetch(u, { headers: { Accept: 'application/json' } })
@@ -76,12 +79,17 @@ function mbps(kbps: number | undefined): string {
 }
 function fmtTime(ms: number | undefined): string {
   const t = Math.max(0, Math.floor((ms || 0) / 1000));
-  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
-  const mm = (h && m < 10 ? '0' : '') + m, ss = (s < 10 ? '0' : '') + s;
+  const h = Math.floor(t / 3600),
+    m = Math.floor((t % 3600) / 60),
+    s = t % 60;
+  const mm = (h && m < 10 ? '0' : '') + m,
+    ss = (s < 10 ? '0' : '') + s;
   return (h ? h + ':' : '') + mm + ':' + ss;
 }
 function initials(name: string | undefined): string {
-  const p = String(name || '?').trim().split(/\s+/);
+  const p = String(name || '?')
+    .trim()
+    .split(/\s+/);
   return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
 }
 const TYPE_IC: Record<string, string> = { movie: '🎬', episode: '📺', track: '🎵', clip: '🎞️' };
@@ -97,14 +105,15 @@ function ago(epoch: number | undefined): string {
 
 // ── one activity card ────────────────────────────────────────────────────────
 function actKey(s: SactSession): string {
-  return s.session_key || (s.user + '|' + s.title);
+  return s.session_key || s.user + '|' + s.title;
 }
 function stateIcon(state: string | undefined): string {
-  return state === 'paused' ? '❚❚' : (state === 'buffering' ? '◌' : '▶');
+  return state === 'paused' ? '❚❚' : state === 'buffering' ? '◌' : '▶';
 }
 function card(s: SactSession): string {
-  const st = s.stream || {}, method = st.method || 'Direct Play';
-  const mCls = method === 'Transcode' ? 'tc' : (method === 'Direct Stream' ? 'ds' : 'ok');
+  const st = s.stream || {},
+    method = st.method || 'Direct Play';
+  const mCls = method === 'Transcode' ? 'tc' : method === 'Direct Stream' ? 'ds' : 'ok';
   const artUrl = img(s.art || s.thumb);
   const poster = s.thumb ? img(s.thumb) : '';
   // transcode codec detail line (Tautulli signature)
@@ -120,52 +129,126 @@ function card(s: SactSession): string {
   let tags = '';
   if (st.resolution) tags += '<span class="sact-tag">' + esc(st.resolution) + '</span>';
   if (s.bandwidth_kbps) tags += '<span class="sact-tag">' + mbps(s.bandwidth_kbps) + '</span>';
-  if (s.location) tags += '<span class="sact-tag sact-tag--' + esc(s.location) + '">' + esc(s.location.toUpperCase()) + '</span>';
+  if (s.location)
+    tags +=
+      '<span class="sact-tag sact-tag--' +
+      esc(s.location) +
+      '">' +
+      esc(s.location.toUpperCase()) +
+      '</span>';
   const stop = s.session_key
-    ? '<button class="sact-stop" type="button" data-sact-stop="' + esc(s.session_key) +
-      '" data-sact-title="' + esc(s.title) + '" title="Stop this stream">' +
+    ? '<button class="sact-stop" type="button" data-sact-stop="' +
+      esc(s.session_key) +
+      '" data-sact-title="' +
+      esc(s.title) +
+      '" title="Stop this stream">' +
       '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg></button>'
     : '';
   // a live equalizer glyph for music (CSS-animated; paused via the card state)
-  const eq = (s.media_type === 'track')
-    ? '<span class="sact-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>' : '';
+  const eq =
+    s.media_type === 'track'
+      ? '<span class="sact-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'
+      : '';
   const pct = s.progress_pct || 0;
-  const remain = s.duration_ms ? ('-' + fmtTime(Math.max(0, s.duration_ms - (s.offset_ms || 0)))) : '';
+  const remain = s.duration_ms
+    ? '-' + fmtTime(Math.max(0, s.duration_ms - (s.offset_ms || 0)))
+    : '';
   const lc = s.link ? ' sact-card--link' : '';
-  const la = s.link ? ' data-link-kind="' + esc(s.link.kind) + '" data-link-id="' + esc(s.link.id) +
-    '" data-link-source="' + esc(s.link.source) + '"' : '';
+  const la = s.link
+    ? ' data-link-kind="' +
+      esc(s.link.kind) +
+      '" data-link-id="' +
+      esc(s.link.id) +
+      '" data-link-source="' +
+      esc(s.link.source) +
+      '"'
+    : '';
   const openIc = s.link ? '<span class="sact-open" title="Open in SoulSync"></span>' : '';
-  return '<div class="sact-card sact-st-' + esc(s.state) + lc + '" data-key="' + esc(actKey(s)) + '"' + la + '>' +
-    (artUrl ? '<div class="sact-art" style="background-image:url(\'' + artUrl + '\')"></div>' : '') +
-    '<div class="sact-scrim"></div>' + stop +
+  return (
+    '<div class="sact-card sact-st-' +
+    esc(s.state) +
+    lc +
+    '" data-key="' +
+    esc(actKey(s)) +
+    '"' +
+    la +
+    '>' +
+    (artUrl
+      ? '<div class="sact-art" style="background-image:url(\'' + artUrl + '\')"></div>'
+      : '') +
+    '<div class="sact-scrim"></div>' +
+    stop +
     '<div class="sact-row">' +
-      (poster
-        ? '<div class="sact-poster"><img src="' + poster + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' + eq + '</div>'
-        : '<div class="sact-poster sact-poster--none">' + (TYPE_IC[s.media_type || ''] || '🎬') + eq + '</div>') +
-      '<div class="sact-info">' +
-        '<div class="sact-title" title="' + esc(s.title) + '">' + esc(s.title) + openIc + '</div>' +
-        (s.subtitle ? '<div class="sact-sub">' + esc(s.subtitle) + '</div>' : '') +
-        '<div class="sact-meta"><span class="sact-ava">' + esc(initials(s.user)) + '</span>' +
-          '<span class="sact-uname">' + esc(s.user) + '</span>' +
-          (s.player && (s.player.product || s.player.device)
-            ? '<span class="sact-dot">&middot;</span><span class="sact-dev">' + esc(s.player.product || s.player.device) + '</span>' : '') +
-        '</div>' +
-        '<div class="sact-badges"><span class="sact-badge sact-badge--' + mCls + '">' + esc(method) + '</span>' + tags + '</div>' +
-        xline +
-      '</div>' +
+    (poster
+      ? '<div class="sact-poster"><img src="' +
+        poster +
+        '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' +
+        eq +
+        '</div>'
+      : '<div class="sact-poster sact-poster--none">' +
+        (TYPE_IC[s.media_type || ''] || '🎬') +
+        eq +
+        '</div>') +
+    '<div class="sact-info">' +
+    '<div class="sact-title" title="' +
+    esc(s.title) +
+    '">' +
+    esc(s.title) +
+    openIc +
     '</div>' +
-    '<div class="sact-prog"><div class="sact-prog-fill" data-sact-fill style="width:' + pct + '%"><span class="sact-head-dot"></span></div></div>' +
-    '<div class="sact-time"><span class="sact-elapsed" data-sact-elapsed>' + stateIcon(s.state) + ' ' + fmtTime(s.offset_ms) + '</span>' +
-      '<span class="sact-remain" data-sact-remain>' + remain + '</span></div>' +
-  '</div>';
+    (s.subtitle ? '<div class="sact-sub">' + esc(s.subtitle) + '</div>' : '') +
+    '<div class="sact-meta"><span class="sact-ava">' +
+    esc(initials(s.user)) +
+    '</span>' +
+    '<span class="sact-uname">' +
+    esc(s.user) +
+    '</span>' +
+    (s.player && (s.player.product || s.player.device)
+      ? '<span class="sact-dot">&middot;</span><span class="sact-dev">' +
+        esc(s.player.product || s.player.device) +
+        '</span>'
+      : '') +
+    '</div>' +
+    '<div class="sact-badges"><span class="sact-badge sact-badge--' +
+    mCls +
+    '">' +
+    esc(method) +
+    '</span>' +
+    tags +
+    '</div>' +
+    xline +
+    '</div>' +
+    '</div>' +
+    '<div class="sact-prog"><div class="sact-prog-fill" data-sact-fill style="width:' +
+    pct +
+    '%"><span class="sact-head-dot"></span></div></div>' +
+    '<div class="sact-time"><span class="sact-elapsed" data-sact-elapsed>' +
+    stateIcon(s.state) +
+    ' ' +
+    fmtTime(s.offset_ms) +
+    '</span>' +
+    '<span class="sact-remain" data-sact-remain>' +
+    remain +
+    '</span></div>' +
+    '</div>'
+  );
 }
 
 function summaryBar(d: SactPayload): string {
   const sm = d.summary || {};
-  let chips = '<span class="sact-chip sact-chip--hero"><strong>' + (sm.streams || 0) + '</strong> ' +
-    ((sm.streams === 1) ? 'stream' : 'streams') + '</span>';
-  if (sm.transcodes) chips += '<span class="sact-chip sact-chip--tc"><strong>' + sm.transcodes + '</strong> transcoding</span>';
-  if (sm.total_bandwidth_kbps) chips += '<span class="sact-chip">' + mbps(sm.total_bandwidth_kbps) + '</span>';
+  let chips =
+    '<span class="sact-chip sact-chip--hero"><strong>' +
+    (sm.streams || 0) +
+    '</strong> ' +
+    (sm.streams === 1 ? 'stream' : 'streams') +
+    '</span>';
+  if (sm.transcodes)
+    chips +=
+      '<span class="sact-chip sact-chip--tc"><strong>' +
+      sm.transcodes +
+      '</strong> transcoding</span>';
+  if (sm.total_bandwidth_kbps)
+    chips += '<span class="sact-chip">' + mbps(sm.total_bandwidth_kbps) + '</span>';
   if (sm.wan) chips += '<span class="sact-chip">' + sm.wan + ' remote</span>';
   return '<div class="sact-summary">' + chips + '</div>';
 }
@@ -174,9 +257,13 @@ function _body(): HTMLElement | null {
   return drawer && drawer.querySelector('[data-sact-body]');
 }
 function _noServer(d: SactPayload | null): string {
-  return '<div class="sact-empty"><div class="sact-empty-ic">🔌</div>' +
-    '<div class="sact-empty-t">' + esc((d && d.message) || 'Server unavailable') + '</div>' +
-    '<div class="sact-empty-s">Set your Plex server in Settings to see live activity.</div></div>';
+  return (
+    '<div class="sact-empty"><div class="sact-empty-ic">🔌</div>' +
+    '<div class="sact-empty-t">' +
+    esc((d && d.message) || 'Server unavailable') +
+    '</div>' +
+    '<div class="sact-empty-s">Set your Plex server in Settings to see live activity.</div></div>'
+  );
 }
 
 let _actData: SactPayload | null = null;
@@ -203,15 +290,19 @@ function renderActivity(d: SactPayload | null): void {
   }
   const sub = drawer!.querySelector('[data-sact-server]');
   if (sub) {
-    sub.textContent = (d.server && d.server.name)
-      ? (d.server.name + (d.server.version ? ' · ' + d.server.version : '')) : '';
+    sub.textContent =
+      d.server && d.server.name
+        ? d.server.name + (d.server.version ? ' · ' + d.server.version : '')
+        : '';
   }
   const sessions = d.sessions || [];
   _actData = d;
   _polledAt = Date.now();
   if (!sessions.length) {
     _actKeys = '';
-    body.innerHTML = summaryBar(d) + '<div class="sact-empty"><div class="sact-empty-ic">🌙</div>' +
+    body.innerHTML =
+      summaryBar(d) +
+      '<div class="sact-empty"><div class="sact-empty-ic">🌙</div>' +
       '<div class="sact-empty-t">Nothing playing right now</div>' +
       '<div class="sact-empty-s">Active streams show up here the moment someone hits play.</div></div>';
     return;
@@ -233,7 +324,9 @@ function renderActivity(d: SactPayload | null): void {
       const mb = el.querySelector('.sact-badge');
       if (mb) {
         const m = (s.stream || {}).method || 'Direct Play';
-        mb.className = 'sact-badge sact-badge--' + (m === 'Transcode' ? 'tc' : (m === 'Direct Stream' ? 'ds' : 'ok'));
+        mb.className =
+          'sact-badge sact-badge--' +
+          (m === 'Transcode' ? 'tc' : m === 'Direct Stream' ? 'ds' : 'ok');
         mb.textContent = m;
       }
     });
@@ -241,8 +334,13 @@ function renderActivity(d: SactPayload | null): void {
     return;
   }
   _actKeys = keys;
-  body.innerHTML = '<div data-sact-summary>' + summaryBar(d) + '</div>' +
-    '<div class="sact-list sact-enter" data-sact-list>' + sessions.map(card).join('') + '</div>';
+  body.innerHTML =
+    '<div data-sact-summary>' +
+    summaryBar(d) +
+    '</div>' +
+    '<div class="sact-list sact-enter" data-sact-list>' +
+    sessions.map(card).join('') +
+    '</div>';
   liveTick();
 }
 
@@ -251,13 +349,14 @@ function renderActivity(d: SactPayload | null): void {
 // it feel LIVE instead of stepping every few seconds.
 function liveTick(): void {
   if (!isOpen || tab !== 'activity' || !_actData) return;
-  const now = Date.now(), map = _cardMap();
+  const now = Date.now(),
+    map = _cardMap();
   (_actData.sessions || []).forEach((s) => {
     const el = map[actKey(s)];
     if (!el || !s.duration_ms) return;
-    let live = (s.offset_ms || 0) + (s.state === 'playing' ? (now - _polledAt) : 0);
+    let live = (s.offset_ms || 0) + (s.state === 'playing' ? now - _polledAt : 0);
     if (live > s.duration_ms) live = s.duration_ms;
-    const pct = 100 * live / s.duration_ms;
+    const pct = (100 * live) / s.duration_ms;
     const fill = el.querySelector('[data-sact-fill]') as HTMLElement | null;
     if (fill) fill.style.width = pct.toFixed(2) + '%';
     const ee = el.querySelector('[data-sact-elapsed]');
@@ -279,19 +378,37 @@ interface SactHistoryRow {
 }
 function historyRow(h: SactHistoryRow): string {
   const poster = h.thumb ? img(h.thumb) : '';
-  return '<div class="sact-hrow">' +
+  return (
+    '<div class="sact-hrow">' +
     (poster
-      ? '<div class="sact-hthumb"><img src="' + poster + '" alt="" loading="lazy" onerror="this.style.display=\'none\'"></div>'
-      : '<div class="sact-hthumb sact-hthumb--none">' + (TYPE_IC[h.media_type || ''] || '🎬') + '</div>') +
+      ? '<div class="sact-hthumb"><img src="' +
+        poster +
+        '" alt="" loading="lazy" onerror="this.style.display=\'none\'"></div>'
+      : '<div class="sact-hthumb sact-hthumb--none">' +
+        (TYPE_IC[h.media_type || ''] || '🎬') +
+        '</div>') +
     '<div class="sact-hinfo">' +
-      '<div class="sact-htitle" title="' + esc(h.title) + '">' + esc(h.title) + '</div>' +
-      (h.subtitle ? '<div class="sact-hsub">' + esc(h.subtitle) + '</div>' : '') +
-      '<div class="sact-hmeta"><span class="sact-ava">' + esc(initials(h.user)) + '</span>' +
-        '<span class="sact-uname">' + esc(h.user) + '</span>' +
-        (h.device ? '<span class="sact-dot">&middot;</span><span class="sact-dev">' + esc(h.device) + '</span>' : '') +
-      '</div>' +
+    '<div class="sact-htitle" title="' +
+    esc(h.title) +
+    '">' +
+    esc(h.title) +
     '</div>' +
-    '<div class="sact-hwhen">' + esc(ago(h.viewed_epoch)) + '</div></div>';
+    (h.subtitle ? '<div class="sact-hsub">' + esc(h.subtitle) + '</div>' : '') +
+    '<div class="sact-hmeta"><span class="sact-ava">' +
+    esc(initials(h.user)) +
+    '</span>' +
+    '<span class="sact-uname">' +
+    esc(h.user) +
+    '</span>' +
+    (h.device
+      ? '<span class="sact-dot">&middot;</span><span class="sact-dev">' + esc(h.device) + '</span>'
+      : '') +
+    '</div>' +
+    '</div>' +
+    '<div class="sact-hwhen">' +
+    esc(ago(h.viewed_epoch)) +
+    '</div></div>'
+  );
 }
 function renderHistory(d: (SactPayload & { history?: SactHistoryRow[] }) | null): void {
   const body = _body();
@@ -302,7 +419,8 @@ function renderHistory(d: (SactPayload & { history?: SactHistoryRow[] }) | null)
   }
   const rows = d.history || [];
   if (!rows.length) {
-    body.innerHTML = '<div class="sact-empty"><div class="sact-empty-ic">🕓</div>' +
+    body.innerHTML =
+      '<div class="sact-empty"><div class="sact-empty-ic">🕓</div>' +
       '<div class="sact-empty-t">No history yet</div>' +
       '<div class="sact-empty-s">Finished streams show up here.</div></div>';
     return;
@@ -329,43 +447,120 @@ interface SactStats extends SactPayload {
 function graph(series: SactStats['series']): string {
   const s = series || [];
   const max = Math.max(...s.map((p) => p.plays), 1);
-  const W = 416, H = 82, n = s.length || 1, gap = 4, bw = (W - (n - 1) * gap) / n;
-  const bars = s.map((p, i) => {
-    const h = Math.max(p.plays ? 4 : 2, Math.round((p.plays / max) * (H - 10)));
-    const x = i * (bw + gap), y = H - h;
-    const day = p.date.slice(5);
-    const peak = (p.plays === max && p.plays > 0) ? ' sact-bar--peak' : '';
-    const empty = p.plays ? '' : ' sact-bar--empty';
-    return '<rect x="' + x.toFixed(1) + '" y="' + y + '" width="' + bw.toFixed(1) + '" height="' + h +
-      '" rx="2.5" class="sact-bar' + peak + empty + '"><title>' + esc(day) + ': ' + p.plays + ' plays</title></rect>';
-  }).join('');
-  const first = (s[0] && s[0].date.slice(5)) || '', last = (s[n - 1] && s[n - 1].date.slice(5)) || '';
-  return '<svg class="sact-graph" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
-      '<defs><linearGradient id="sactBar" x1="0" y1="0" x2="0" y2="1">' +
-        '<stop offset="0" stop-color="#4ade80"/><stop offset="1" stop-color="#22c55e" stop-opacity="0.45"/>' +
-      '</linearGradient></defs>' + bars + '</svg>' +
-    '<div class="sact-graph-x"><span>' + esc(first) + '</span><span>peak ' + max + '</span><span>' + esc(last) + '</span></div>';
+  const W = 416,
+    H = 82,
+    n = s.length || 1,
+    gap = 4,
+    bw = (W - (n - 1) * gap) / n;
+  const bars = s
+    .map((p, i) => {
+      const h = Math.max(p.plays ? 4 : 2, Math.round((p.plays / max) * (H - 10)));
+      const x = i * (bw + gap),
+        y = H - h;
+      const day = p.date.slice(5);
+      const peak = p.plays === max && p.plays > 0 ? ' sact-bar--peak' : '';
+      const empty = p.plays ? '' : ' sact-bar--empty';
+      return (
+        '<rect x="' +
+        x.toFixed(1) +
+        '" y="' +
+        y +
+        '" width="' +
+        bw.toFixed(1) +
+        '" height="' +
+        h +
+        '" rx="2.5" class="sact-bar' +
+        peak +
+        empty +
+        '"><title>' +
+        esc(day) +
+        ': ' +
+        p.plays +
+        ' plays</title></rect>'
+      );
+    })
+    .join('');
+  const first = (s[0] && s[0].date.slice(5)) || '',
+    last = (s[n - 1] && s[n - 1].date.slice(5)) || '';
+  return (
+    '<svg class="sact-graph" viewBox="0 0 ' +
+    W +
+    ' ' +
+    H +
+    '" preserveAspectRatio="none">' +
+    '<defs><linearGradient id="sactBar" x1="0" y1="0" x2="0" y2="1">' +
+    '<stop offset="0" stop-color="#4ade80"/><stop offset="1" stop-color="#22c55e" stop-opacity="0.45"/>' +
+    '</linearGradient></defs>' +
+    bars +
+    '</svg>' +
+    '<div class="sact-graph-x"><span>' +
+    esc(first) +
+    '</span><span>peak ' +
+    max +
+    '</span><span>' +
+    esc(last) +
+    '</span></div>'
+  );
 }
-function rankList(items: Array<Record<string, unknown> & { plays: number }>, nameKey: string, cls: string): string {
+function rankList(
+  items: Array<Record<string, unknown> & { plays: number }>,
+  nameKey: string,
+  cls: string,
+): string {
   const max = Math.max(...items.map((i) => i.plays), 1);
-  return '<div class="sact-rank">' + items.map((it) => {
-    const av = (cls === 'user') ? '<span class="sact-ava">' + esc(initials(String(it[nameKey]))) + '</span>' : '';
-    return '<div class="sact-rank-row">' + av +
-      '<span class="sact-rank-name" title="' + esc(it[nameKey]) + '">' + esc(it[nameKey]) + '</span>' +
-      '<span class="sact-rank-bar"><span style="width:' + Math.round(100 * it.plays / max) + '%"></span></span>' +
-      '<span class="sact-rank-n">' + it.plays + '</span></div>';
-  }).join('') + '</div>';
+  return (
+    '<div class="sact-rank">' +
+    items
+      .map((it) => {
+        const av =
+          cls === 'user'
+            ? '<span class="sact-ava">' + esc(initials(String(it[nameKey]))) + '</span>'
+            : '';
+        return (
+          '<div class="sact-rank-row">' +
+          av +
+          '<span class="sact-rank-name" title="' +
+          esc(it[nameKey]) +
+          '">' +
+          esc(it[nameKey]) +
+          '</span>' +
+          '<span class="sact-rank-bar"><span style="width:' +
+          Math.round((100 * it.plays) / max) +
+          '%"></span></span>' +
+          '<span class="sact-rank-n">' +
+          it.plays +
+          '</span></div>'
+        );
+      })
+      .join('') +
+    '</div>'
+  );
 }
 function contentRow(c: NonNullable<SactStats['top_content']>[number]): string {
   const poster = c.thumb ? img(c.thumb) : '';
-  return '<div class="sact-cw">' +
-    (poster ? '<div class="sact-cw-th"><img src="' + poster + '" alt="" loading="lazy" onerror="this.style.display=\'none\'"></div>'
-      : '<div class="sact-cw-th sact-cw-th--none">' + (TYPE_IC[c.media_type || ''] || '🎬') + '</div>') +
-    '<div class="sact-cw-t" title="' + esc(c.title) + '">' + esc(c.title) + '</div>' +
-    '<div class="sact-cw-n">' + c.plays + '</div></div>';
+  return (
+    '<div class="sact-cw">' +
+    (poster
+      ? '<div class="sact-cw-th"><img src="' +
+        poster +
+        '" alt="" loading="lazy" onerror="this.style.display=\'none\'"></div>'
+      : '<div class="sact-cw-th sact-cw-th--none">' +
+        (TYPE_IC[c.media_type || ''] || '🎬') +
+        '</div>') +
+    '<div class="sact-cw-t" title="' +
+    esc(c.title) +
+    '">' +
+    esc(c.title) +
+    '</div>' +
+    '<div class="sact-cw-n">' +
+    c.plays +
+    '</div></div>'
+  );
 }
 function section(title: string, inner: string): string {
-  return '<div class="sact-sec"><div class="sact-sec-h">' + esc(title) + '</div>' + inner + '</div>';
+  return (
+    '<div class="sact-sec"><div class="sact-sec-h">' + esc(title) + '</div>' + inner + '</div>'
+  );
 }
 function renderStats(d: SactStats | null): void {
   const body = _body();
@@ -374,19 +569,33 @@ function renderStats(d: SactStats | null): void {
     body.innerHTML = _noServer(d);
     return;
   }
-  let html = '<div class="sact-summary">' +
-    '<span class="sact-chip sact-chip--hero"><strong>' + (d.total_plays || 0) + '</strong> plays</span>' +
-    '<span class="sact-chip"><strong>' + (d.unique_users || 0) + '</strong> users</span>' +
-    '<span class="sact-chip">last ' + (d.days || 30) + ' days</span></div>';
+  let html =
+    '<div class="sact-summary">' +
+    '<span class="sact-chip sact-chip--hero"><strong>' +
+    (d.total_plays || 0) +
+    '</strong> plays</span>' +
+    '<span class="sact-chip"><strong>' +
+    (d.unique_users || 0) +
+    '</strong> users</span>' +
+    '<span class="sact-chip">last ' +
+    (d.days || 30) +
+    ' days</span></div>';
   html += section('Plays over time', graph(d.series));
   if ((d.top_content || []).length)
-    html += section('Most watched', '<div class="sact-cwlist">' + d.top_content!.map(contentRow).join('') + '</div>');
+    html += section(
+      'Most watched',
+      '<div class="sact-cwlist">' + d.top_content!.map(contentRow).join('') + '</div>',
+    );
   if ((d.top_users || []).length)
     html += section('Most active users', rankList(d.top_users!, 'user', 'user'));
   if ((d.top_devices || []).length)
     html += section('Top devices', rankList(d.top_devices!, 'device', 'device'));
-  if (!(d.total_plays)) html = '<div class="sact-empty"><div class="sact-empty-ic">📊</div>' +
-    '<div class="sact-empty-t">No plays in the last ' + (d.days || 30) + ' days</div></div>';
+  if (!d.total_plays)
+    html =
+      '<div class="sact-empty"><div class="sact-empty-ic">📊</div>' +
+      '<div class="sact-empty-t">No plays in the last ' +
+      (d.days || 30) +
+      ' days</div></div>';
   body.innerHTML = html;
 }
 function loadStats(): void {
@@ -489,7 +698,8 @@ function setTab(t: string): void {
   }
   const body = _body();
   if (body) {
-    body.innerHTML = '<div class="sact-empty"><div class="sact-empty-ic">…</div>' +
+    body.innerHTML =
+      '<div class="sact-empty"><div class="sact-empty-ic">…</div>' +
       '<div class="sact-empty-t">Loading…</div></div>';
   }
   if (t === 'activity') {
@@ -509,14 +719,14 @@ function build(): void {
   drawer.className = 'sact-drawer';
   drawer.innerHTML =
     '<div class="sact-head">' +
-      '<div class="sact-head-t"><span class="sact-live-dot"></span>Server Activity' +
-        '<span class="sact-server" data-sact-server></span></div>' +
-      '<button class="sact-x" type="button" data-sact-close aria-label="Close">&times;</button>' +
+    '<div class="sact-head-t"><span class="sact-live-dot"></span>Server Activity' +
+    '<span class="sact-server" data-sact-server></span></div>' +
+    '<button class="sact-x" type="button" data-sact-close aria-label="Close">&times;</button>' +
     '</div>' +
     '<div class="sact-tabs">' +
-      '<button class="sact-tab sact-tab--on" type="button" data-sact-tab="activity">Activity</button>' +
-      '<button class="sact-tab" type="button" data-sact-tab="history">History</button>' +
-      '<button class="sact-tab" type="button" data-sact-tab="stats">Stats</button>' +
+    '<button class="sact-tab sact-tab--on" type="button" data-sact-tab="activity">Activity</button>' +
+    '<button class="sact-tab" type="button" data-sact-tab="history">History</button>' +
+    '<button class="sact-tab" type="button" data-sact-tab="stats">Stats</button>' +
     '</div>' +
     '<div class="sact-body" data-sact-body></div>';
   document.body.appendChild(drawer);
@@ -590,14 +800,16 @@ function openStop(key: string, title: string): void {
   ov.className = 'sact-stop-ov';
   ov.innerHTML =
     '<div class="sact-stop-modal">' +
-      '<div class="sact-stop-h">Stop stream</div>' +
-      '<div class="sact-stop-sub">' + esc(title || 'this stream') + '</div>' +
-      '<label class="sact-stop-lbl">Message shown to the viewer</label>' +
-      '<textarea class="sact-stop-msg" rows="2">The server administrator ended this stream.</textarea>' +
-      '<div class="sact-stop-foot">' +
-        '<button class="sact-stop-btn" type="button" data-stop-cancel>Cancel</button>' +
-        '<button class="sact-stop-btn sact-stop-btn--go" type="button" data-stop-go>Stop stream</button>' +
-      '</div>' +
+    '<div class="sact-stop-h">Stop stream</div>' +
+    '<div class="sact-stop-sub">' +
+    esc(title || 'this stream') +
+    '</div>' +
+    '<label class="sact-stop-lbl">Message shown to the viewer</label>' +
+    '<textarea class="sact-stop-msg" rows="2">The server administrator ended this stream.</textarea>' +
+    '<div class="sact-stop-foot">' +
+    '<button class="sact-stop-btn" type="button" data-stop-cancel>Cancel</button>' +
+    '<button class="sact-stop-btn sact-stop-btn--go" type="button" data-stop-go>Stop stream</button>' +
+    '</div>' +
     '</div>';
   document.body.appendChild(ov);
   const shut = () => ov.remove();
@@ -616,7 +828,8 @@ function openStop(key: string, title: string): void {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ session_key: key, message: msg }),
-      }).then((r) => r.json().then((b: { ok?: boolean; error?: string }) => ({ ok: r.ok, b })))
+      })
+        .then((r) => r.json().then((b: { ok?: boolean; error?: string }) => ({ ok: r.ok, b })))
         .then((res) => {
           shut();
           if (res.ok && res.b.ok) {
@@ -625,7 +838,8 @@ function openStop(key: string, title: string): void {
           } else {
             toast((res.b && res.b.error) || 'Could not stop the stream', 'error');
           }
-        }).catch(() => {
+        })
+        .catch(() => {
           shut();
           toast('Could not stop the stream', 'error');
         });
@@ -655,7 +869,10 @@ function startBadgePoll(): void {
 }
 
 window.ServerActivity = {
-  toggle, open, close, refresh,
+  toggle,
+  open,
+  close,
+  refresh,
   _onSocket: onSocket,
   _wantsLive: () => isOpen && tab === 'activity',
 };

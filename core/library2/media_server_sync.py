@@ -354,16 +354,25 @@ def _upsert_file(cursor, track_id: int, path: str, size, bitrate,
             (size, bitrate, fmt, server_source, source, int(row[0])))
         observed_id = int(row[0])
     else:
+        # Whose library the scan is reading (#1199). A scan driven for an
+        # own-library profile writes ITS rows; without this the private
+        # library comes back empty while its tracks show up in the shared one.
+        from core.library_scope import owner_for_new_file
         observed_id = int(cursor.execute(
             "INSERT INTO lib2_track_files(track_id, path, size, bitrate, format,"
-            " server_source, source, file_state, import_status)"
-            " VALUES(?,?,?,?,?,?,?,'active','imported')",
-            (track_id, path, size, bitrate, fmt, server_source, source)).lastrowid)
+            " server_source, source, owner_profile_id, file_state, import_status)"
+            " VALUES(?,?,?,?,?,?,?,?,'active','imported')",
+            (track_id, path, size, bitrate, fmt, server_source, source,
+             owner_for_new_file())).lastrowid)
+    from core.library2.sql_util import owner_clause
     cursor.execute(
         "UPDATE lib2_track_files SET file_state=CASE WHEN source IS NULL "
         "AND legacy_track_id IS NULL THEN 'deleted' ELSE file_state END,"
         " server_source=NULL, updated_at=CURRENT_TIMESTAMP"
-        " WHERE track_id=? AND id<>? AND server_source=?",
+        " WHERE track_id=? AND id<>? AND server_source=?"
+        # same library only: a scan of one directory must not retire the rows
+        # another directory holds for the same track
+        + owner_clause(column="owner_profile_id"),
         (track_id, observed_id, server_source))
     elect_primary_file(cursor, track_id)
 

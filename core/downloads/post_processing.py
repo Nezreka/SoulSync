@@ -226,8 +226,8 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
         # an own-library profile's batch lands in that profile's folder (#1199);
         # everyone else keeps the folder resolved above, untouched
         try:
-            from core.imports.paths import import_profile_id, library_root_for_profile
-            transfer_dir = library_root_for_profile(import_profile_id({'batch_id': batch_id})) or transfer_dir
+            from core.imports.paths import import_owner_id, library_root_for_profile
+            transfer_dir = library_root_for_profile(import_owner_id({'batch_id': batch_id})) or transfer_dir
         except Exception as _root_err:  # noqa: BLE001 - the shared folder is the fallback
             logger.debug(f"[Post-Processing] per-profile root lookup failed: {_root_err}")
 

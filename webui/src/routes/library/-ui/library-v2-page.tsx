@@ -4801,8 +4801,10 @@ export function librarySectionSearch<T extends Record<string, unknown>>(
  */
 function LibraryScopePicker() {
   const queryClient = useQueryClient();
-  const { data } = useQuery(libraryScopesQueryOptions());
-  if (!data?.switchable || data.options.length < 2) return null;
+  const { data, refetch } = useQuery(libraryScopesQueryOptions());
+  // `switchable` already means admin AND at least one own directory, so the
+  // server never sends fewer than two options when it is true.
+  if (!data?.switchable) return null;
   return (
     <label className={styles.viewToggle} aria-label="Library directory">
       <select
@@ -4811,7 +4813,16 @@ function LibraryScopePicker() {
         onChange={(event) => {
           const next = event.target.value;
           void setLibraryScope(next).then((ok) => {
-            if (ok) void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+            if (ok) {
+              void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+              return;
+            }
+            // Refused -- demoted mid-session, or the directory stopped being
+            // one between the GET and the POST. Without this the controlled
+            // value never changes, so React does not re-render and the DOM
+            // keeps a selection the server rejected while the page still
+            // shows (and writes to) the old one.
+            void refetch();
           });
         }}
       >
@@ -6710,7 +6721,9 @@ function DiscoveryAlbumView({
                             type="button"
                             className={`${styles.monitorBtn} ${trackMonitored ? styles.monitorOn : ''}`}
                             aria-label={
-                              trackMonitored ? `${trackTitle} is monitored` : `Monitor ${trackTitle}`
+                              trackMonitored
+                                ? `${trackTitle} is monitored`
+                                : `Monitor ${trackTitle}`
                             }
                             aria-pressed={trackMonitored}
                             title={trackMonitored ? 'Monitored' : 'Monitor this track'}
@@ -6726,8 +6739,10 @@ function DiscoveryAlbumView({
                       <td className={styles.colNum}>{track.track_number ?? index + 1}</td>
                       <td>{trackTitle || 'Unknown track'}</td>
                       <td>
-                        {track.artists?.map((entry) => entry.name).filter(Boolean).join(', ') ||
-                          artistName}
+                        {track.artists
+                          ?.map((entry) => entry.name)
+                          .filter(Boolean)
+                          .join(', ') || artistName}
                       </td>
                       <td>{formatDuration(track.duration_ms)}</td>
                     </tr>
@@ -6735,7 +6750,9 @@ function DiscoveryAlbumView({
                 })}
               </tbody>
             </table>
-            {tracks.length === 0 ? <div className={styles.emptyState}>No tracks available.</div> : null}
+            {tracks.length === 0 ? (
+              <div className={styles.emptyState}>No tracks available.</div>
+            ) : null}
           </div>
         </>
       )}
@@ -7847,8 +7864,8 @@ function ReleasesEmptyState({
         <>
           <p className={styles.releasesEmptyTitle}>No releases in your library yet</p>
           <p className={styles.releasesEmptyBody}>
-            Nothing here is owned or monitored. Check the full discography to pick releases
-            to monitor, or run Refresh &amp; Scan if the files are already on disk.
+            Nothing here is owned or monitored. Check the full discography to pick releases to
+            monitor, or run Refresh &amp; Scan if the files are already on disk.
           </p>
           <button type="button" className={styles.releasesEmptyAction} onClick={onShowAll}>
             Show all releases
@@ -7858,8 +7875,8 @@ function ReleasesEmptyState({
         <>
           <p className={styles.releasesEmptyTitle}>No releases match</p>
           <p className={styles.releasesEmptyBody}>
-            The discography is either empty for this artist or every release is filtered out.
-            Clear the release-type filters, or run Refresh &amp; Scan to fetch it again.
+            The discography is either empty for this artist or every release is filtered out. Clear
+            the release-type filters, or run Refresh &amp; Scan to fetch it again.
           </p>
         </>
       )}
@@ -10984,11 +11001,7 @@ function QueuePill({
  *  is happening lives on an album row, and album rows collapse — so an artist with a full queue
  *  behind a closed release looked completely idle. Built from the `tracks` map the header already
  *  polls, so it costs no extra request. */
-function ArtistQueueSummary({
-  tracks,
-}: {
-  tracks: Record<number, LibraryV2QueueStatusEntry>;
-}) {
+function ArtistQueueSummary({ tracks }: { tracks: Record<number, LibraryV2QueueStatusEntry> }) {
   const entries = Object.values(tracks);
   if (entries.length === 0) return null;
 

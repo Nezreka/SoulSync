@@ -768,8 +768,8 @@ def _maybe_stage_album_track(context, final_path):
                                 "— publishing directly (atomic only applies to album batches)", batch_id)
                 else:
                     # an own-library profile's batch stages under its folder (#1199)
-                    from core.imports.paths import library_root_for_profile
-                    transfer_dir = (library_root_for_profile(batch.get('profile_id'))
+                    from core.imports.paths import import_owner_id, library_root_for_profile
+                    transfer_dir = (library_root_for_profile(import_owner_id(batch))
                                     or docker_resolve_path(
                                         config_manager.get('soulseek.transfer_path', './Transfer')))
                     album_folder = os.path.dirname(final_path)

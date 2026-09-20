@@ -30,11 +30,7 @@ const URL_VALUED = new Set(['lastfm', 'genius', 'bandcamp']);
 export type ServiceEntity = 'artist' | 'album' | 'track';
 
 /** External link for one provider id, or null when that combination has none. */
-export function getServiceUrl(
-  service: string,
-  entityType: string,
-  id: unknown,
-): string | null {
+export function getServiceUrl(service: string, entityType: string, id: unknown): string | null {
   if (!id) return null;
   const key = String(service).trim().toLowerCase();
   const value = String(id).trim();

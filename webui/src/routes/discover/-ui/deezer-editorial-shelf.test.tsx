@@ -89,7 +89,9 @@ describe('DeezerEditorialShelf', () => {
     fireEvent.change(box, { target: { value: 'ro' } });
     fireEvent.change(box, { target: { value: 'rock' } });
 
-    expect(await screen.findByText('Found By Search', undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(
+      await screen.findByText('Found By Search', undefined, { timeout: 3000 }),
+    ).toBeInTheDocument();
     expect(asked.filter((a) => a.startsWith('search:'))).toEqual(['search:rock']);
   });
 });

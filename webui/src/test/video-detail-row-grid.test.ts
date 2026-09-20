@@ -24,7 +24,10 @@ function columns(selector: string): string[] {
   const decl = /grid-template-columns:\s*([^;]+);/.exec(rule);
   expect(decl, `${selector} declares no columns`).not.toBeNull();
   // minmax(a, b) holds a comma; collapse it so the split counts tracks.
-  return decl![1].replace(/minmax\([^)]*\)/g, 'minmax').trim().split(/\s+/);
+  return decl![1]
+    .replace(/minmax\([^)]*\)/g, 'minmax')
+    .trim()
+    .split(/\s+/);
 }
 
 /** Direct children the row builder emits for one episode shape. */
@@ -80,7 +83,8 @@ describe('the episode row grid fits every child it emits', () => {
 
   it('caps the text column so the actions stay beside the episode', () => {
     expect(columns('.vd-ep')).toContain('minmax');
-    expect(CSS.slice(CSS.indexOf('\n.vd-ep {'), CSS.indexOf('\n.vd-ep {') + 300))
-      .toContain('justify-content: start');
+    expect(CSS.slice(CSS.indexOf('\n.vd-ep {'), CSS.indexOf('\n.vd-ep {') + 300)).toContain(
+      'justify-content: start',
+    );
   });
 });

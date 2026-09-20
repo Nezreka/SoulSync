@@ -280,7 +280,8 @@ class DatabaseUpdateWorker:
                             "Full refresh: %s library verified empty twice; detaching mappings",
                             self.server_type,
                         )
-                        self.database.clear_server_data(self.server_type)
+                        self.database.clear_server_data(
+                            self.server_type, owner_profile_id=self.owner_profile_id)
                 logger.info(f"Full refresh: Found {len(artists_to_process)} artists in {self.server_type} library")
             else:
                 logger.info("Performing smart incremental update - checking recently added content")
@@ -531,7 +532,9 @@ class DatabaseUpdateWorker:
 
             # Phase 3: Stale track removal
             self._emit_signal('phase_changed', "Deep scan: Checking for stale tracks...")
-            db_track_ids = self.database.get_all_track_ids_for_server(self.server_type)
+            # the library this scan is reading, not every library (#1199)
+            db_track_ids = self.database.get_all_track_ids_for_server(
+                self.server_type, owner_profile_id=self.owner_profile_id)
             stale = db_track_ids - seen_track_ids
             stale_removed = 0
 
@@ -585,10 +588,13 @@ class DatabaseUpdateWorker:
                         logger.info(f"Deep scan: removing {len(stale)}/{len(db_track_ids)} tracks — allowed because "
                                     f"the scan is fully trusted (server answered, no per-artist failures, not stopped)")
                     logger.info(f"Deep scan: Removing {len(stale)} stale tracks from database")
-                    stale_removed = self.database.delete_stale_tracks(stale, self.server_type)
+                    stale_removed = self.database.delete_stale_tracks(
+                        stale, self.server_type,
+                        owner_profile_id=self.owner_profile_id)
 
             if not artists and getattr(self, '_artists_fetch_verified', False):
-                self.database.clear_server_data(self.server_type)
+                self.database.clear_server_data(
+                    self.server_type, owner_profile_id=self.owner_profile_id)
 
             # Phase 4: Cleanup
             self._emit_signal('phase_changed', "Deep scan: Cleaning up orphaned records...")

@@ -293,8 +293,8 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
         transfer_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.transfer_path', './Transfer'))
         # an own-library profile's batch lands in its folder (#1199)
         try:
-            from core.imports.paths import import_profile_id, library_root_for_profile
-            transfer_dir = library_root_for_profile(import_profile_id({'batch_id': batch_id})) or transfer_dir
+            from core.imports.paths import import_owner_id, library_root_for_profile
+            transfer_dir = library_root_for_profile(import_owner_id({'batch_id': batch_id})) or transfer_dir
         except Exception as _root_err:  # noqa: BLE001
             logger.debug(f"[Staging] per-profile root lookup failed: {_root_err}")
         dest_filename = os.path.basename(best_match['full_path'])

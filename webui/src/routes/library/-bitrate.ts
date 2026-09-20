@@ -46,7 +46,9 @@ const LOSSLESS_FORMAT_PATTERN =
   /flac|alac|wavpack|aiff|\baif\b|\bwave?\b|\bwv\b|\bape\b|\bpcm\b|dsd|\bdsf\b|\bdff\b/;
 
 function unitThreshold(format: string | null | undefined): number {
-  const f = String(format ?? '').trim().toLowerCase();
+  const f = String(format ?? '')
+    .trim()
+    .toLowerCase();
   if (f && LOSSLESS_FORMAT_PATTERN.test(f)) return LOSSLESS_BITS_PER_SECOND_THRESHOLD;
   return BITS_PER_SECOND_THRESHOLD;
 }
@@ -74,9 +76,7 @@ export function bitrateKbps(
  * property of the audio rather than a quality knob — marking those would put a
  * `~` on every FLAC in the library and tell the user nothing.
  */
-const VARIABLE_BITRATE_FORMATS = new Set([
-  'OPUS', 'OGG', 'VORBIS', 'AAC', 'M4A', 'MP4', 'WMA',
-]);
+const VARIABLE_BITRATE_FORMATS = new Set(['OPUS', 'OGG', 'VORBIS', 'AAC', 'M4A', 'MP4', 'WMA']);
 
 /**
  * Is this file's bitrate an average?

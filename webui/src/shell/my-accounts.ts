@@ -31,17 +31,24 @@ interface MaService {
 // a given profile id (popup); services are wired in over time.
 const _MA_SERVICES: MaService[] = [
   {
-    id: 'spotify', name: 'Spotify', brand: '#1db954',
+    id: 'spotify',
+    name: 'Spotify',
+    brand: '#1db954',
     logo: '/static/img/brands/spotify.png',
     connect: (pid) => `/auth/spotify?profile_id=${pid}`,
   },
   {
-    id: 'tidal', name: 'Tidal', brand: '#00cfe8',
+    id: 'tidal',
+    name: 'Tidal',
+    brand: '#00cfe8',
     logo: '/static/img/brands/tidal.png',
     connect: (pid) => `/auth/tidal?profile_id=${pid}`,
   },
   {
-    id: 'listenbrainz', name: 'ListenBrainz', brand: '#eb743b', dark: true,
+    id: 'listenbrainz',
+    name: 'ListenBrainz',
+    brand: '#eb743b',
+    dark: true,
     logo: '/static/img/brands/listenbrainz.png',
     type: 'token',
     saveUrl: '/api/profiles/me/listenbrainz',
@@ -123,38 +130,40 @@ function _maRender(body: HTMLElement | null, data: MaConnections): void {
   if (!body) return;
   const conns = data.connections || {};
   const isAdmin = !!data.is_admin;
-  const rows = _MA_SERVICES.map((svc) => {
-    const c = conns[svc.id] || {};
-    const connected = !!c.connected;
-    // Admin uses the global app account (set up in Settings) for every
-    // service — not a personal connection here.
-    const adminNote = isAdmin;
-    let action: string;
-    if (adminNote) {
-      action = `<span class="ma-note">Managed in Settings (app account)</span>`;
-    } else if (connected) {
-      action = `
+  const rows = _MA_SERVICES
+    .map((svc) => {
+      const c = conns[svc.id] || {};
+      const connected = !!c.connected;
+      // Admin uses the global app account (set up in Settings) for every
+      // service — not a personal connection here.
+      const adminNote = isAdmin;
+      let action: string;
+      if (adminNote) {
+        action = `<span class="ma-note">Managed in Settings (app account)</span>`;
+      } else if (connected) {
+        action = `
                 <span class="ma-account">${escapeHtml(c.account || 'Connected')}</span>
                 <button class="ma-btn ma-btn--ghost" onclick="disconnectMyAccount('${svc.id}')">Disconnect</button>`;
-    } else if (svc.type === 'token') {
-      action = `
+      } else if (svc.type === 'token') {
+        action = `
                 <input type="password" class="ma-token-input" id="ma-token-${svc.id}" placeholder="Paste token"
                        title="${escapeHtml(svc.hint || '')}">
                 <button class="ma-btn ma-btn--connect" onclick="saveMyAccountToken('${svc.id}')">Save</button>`;
-    } else {
-      action = `<button class="ma-btn ma-btn--connect" onclick="connectMyAccount('${svc.id}')">Connect</button>`;
-    }
-    return `
+      } else {
+        action = `<button class="ma-btn ma-btn--connect" onclick="connectMyAccount('${svc.id}')">Connect</button>`;
+      }
+      return `
             <div class="ma-row" style="--ma-brand:${svc.brand}">
                 <span class="ma-disc${svc.dark ? ' ma-disc--dark' : ''}"><img class="ma-logo" src="${svc.logo}" alt=""
                       onerror="this.style.display='none'"></span>
                 <div class="ma-row-info">
                     <div class="ma-row-name">${escapeHtml(svc.name)}</div>
-                    <div class="ma-row-status ${connected ? 'is-on' : ''}">${connected ? 'Connected' : (adminNote ? '' : 'Not connected')}</div>
+                    <div class="ma-row-status ${connected ? 'is-on' : ''}">${connected ? 'Connected' : adminNote ? '' : 'Not connected'}</div>
                 </div>
                 <div class="ma-row-action">${action}</div>
             </div>`;
-  }).join('');
+    })
+    .join('');
   body.innerHTML = rows || '<div class="ma-empty">No services available.</div>';
 }
 
@@ -164,8 +173,11 @@ export function connectMyAccount(serviceId: string): void {
   const svc = _MA_SERVICES.find((s) => s.id === serviceId);
   if (!svc || !svc.connect) return;
   const pid = _maProfileId();
-  const popup = window.open(svc.connect(pid), 'soulsync-connect-' + serviceId,
-    'width=560,height=720,menubar=no,toolbar=no');
+  const popup = window.open(
+    svc.connect(pid),
+    'soulsync-connect-' + serviceId,
+    'width=560,height=720,menubar=no,toolbar=no',
+  );
   // Poll for the popup closing, then refresh status.
   if (_maPollTimer) clearInterval(_maPollTimer);
   _maPollTimer = setInterval(() => {
@@ -188,7 +200,8 @@ export async function saveMyAccountToken(serviceId: string): Promise<void> {
   }
   try {
     const res = await fetch(svc.saveUrl, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
     });
     const data = (await res.json()) as { success?: boolean; error?: string };
@@ -206,7 +219,9 @@ export async function saveMyAccountToken(serviceId: string): Promise<void> {
 export async function disconnectMyAccount(serviceId: string): Promise<void> {
   if (!confirm(`Disconnect your ${serviceId} account from this profile?`)) return;
   try {
-    const res = await fetch(`/api/profiles/me/connections/${serviceId}/disconnect`, { method: 'POST' });
+    const res = await fetch(`/api/profiles/me/connections/${serviceId}/disconnect`, {
+      method: 'POST',
+    });
     const data = (await res.json()) as { success?: boolean; error?: string };
     if (data.success) {
       toast('Disconnected', 'success');

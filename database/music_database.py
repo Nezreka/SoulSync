@@ -7247,11 +7247,6 @@ class MusicDatabase:
 
     def get_statistics_for_server(self, server_source: str = None, owner_profile_id=_ANY_OWNER) -> Dict[str, int]:
         """Get database statistics filtered by server source"""
-        # `owner_profile_id` is accepted so upstream's call sites keep working
-        # and is NOT honoured yet: ownership lives on lib2_track_files here and
-        # nothing reads it while core.library_scope.SCOPE_PARKED is true. Scoping
-        # this is part of Stufe 3 (docs/library-v2-dir-ownership.md) -- until
-        # then a caller must not assume a narrower answer than it gets.
         if not server_source:
             return self.get_statistics()
         try:
@@ -7302,13 +7297,32 @@ class MusicDatabase:
         return "disk i/o error" in str(exc).lower()
 
     @staticmethod
-    def _detach_server_contribution(cursor, server_source: str, scope="all", ids=()):
-        """Detach one server without deleting shared catalogue/provider state."""
+    def _detach_server_contribution(cursor, server_source: str, scope="all", ids=(),
+                                    owner_profile_id=_ANY_OWNER):
+        """Detach one server without deleting shared catalogue/provider state.
+
+        ``owner_profile_id`` restricts it to one library: _ANY_OWNER keeps the
+        historical whole-server behaviour (a full refresh of a shared install),
+        None means the shared library, an int means that profile's. A scan of
+        one directory must never detach another directory's rows.
+        """
         source = str(server_source)
         # Second line of defence for the same trap: a blank id in an explicit
         # detach list is not a selector for one row, it matches every row that
         # never got a server id.
         ids = [str(value) for value in ids if str(value).strip()]
+        # Restrict every TRACK lookup below to the library being detached: a
+        # track belongs to it when a file of that library hangs off it. Artist
+        # and album rows are shared metadata and are detached by their mapping.
+        def owned_only(track_id_expr: str) -> str:
+            if owner_profile_id is MusicDatabase._ANY_OWNER:
+                return ""
+            from core.library2.sql_util import owner_clause
+            scope = "shared" if owner_profile_id is None else int(owner_profile_id)
+            return (f" AND EXISTS (SELECT 1 FROM lib2_track_files df"
+                    f"              WHERE df.track_id = {track_id_expr}"
+                    f"                AND COALESCE(df.file_state,'active') <> 'deleted'"
+                    + owner_clause(scope, column="df.owner_profile_id") + ")")
 
         def chunks(values, size=500):
             values = list(values)
@@ -7321,6 +7335,9 @@ class MusicDatabase:
             table = {'artist': 'lib2_artists', 'album': 'lib2_albums',
                      'track': 'lib2_tracks'}[entity_type]
             legacy_sql = f"SELECT id FROM {table} WHERE server_source=?"
+            if entity_type == 'track':
+                legacy_sql += owned_only(f"{table}.id")
+                sql += owned_only("lib2_media_server_mappings.entity_id")
             if server_ids is None:
                 found = {int(row[0]) for row in cursor.execute(
                     sql, [entity_type, source]).fetchall()}
@@ -7409,17 +7426,15 @@ class MusicDatabase:
         """Clear data for specific server only (server-aware full refresh).
         one library at a time: the shared library's rows (owner None) by
         default; a profile's own rows when its id is given (#1199)."""
-        # `owner_profile_id` is accepted so upstream's call sites keep working
-        # and is NOT honoured yet: ownership lives on lib2_track_files here and
-        # nothing reads it while core.library_scope.SCOPE_PARKED is true. Scoping
-        # this is part of Stufe 3 (docs/library-v2-dir-ownership.md) -- until
-        # then a caller must not assume a narrower answer than it gets.
         for attempt in range(2):
             try:
                 with self._get_connection() as conn:
                     cursor = conn.cursor()
 
-                    detached = self._detach_server_contribution(cursor, server_source)
+                    # the library named, not every library: a full refresh of
+                    # one profile's directory must leave the others alone
+                    detached = self._detach_server_contribution(
+                        cursor, server_source, owner_profile_id=owner_profile_id)
                     tracks_deleted = detached['tracks_removed']
                     albums_deleted = detached['albums_removed']
                     artists_deleted = detached['artists_removed']
@@ -7785,11 +7800,6 @@ class MusicDatabase:
     def get_all_artist_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
         """Get all artist IDs stored in the database for a specific server (and
         library owner: None = the shared library's rows)."""
-        # `owner_profile_id` is accepted so upstream's call sites keep working
-        # and is NOT honoured yet: ownership lives on lib2_track_files here and
-        # nothing reads it while core.library_scope.SCOPE_PARKED is true. Scoping
-        # this is part of Stufe 3 (docs/library-v2-dir-ownership.md) -- until
-        # then a caller must not assume a narrower answer than it gets.
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7858,11 +7868,6 @@ class MusicDatabase:
     def get_all_album_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
         """Get all album IDs stored in the database for a specific server (and
         library owner: None = the shared library's rows)."""
-        # `owner_profile_id` is accepted so upstream's call sites keep working
-        # and is NOT honoured yet: ownership lives on lib2_track_files here and
-        # nothing reads it while core.library_scope.SCOPE_PARKED is true. Scoping
-        # this is part of Stufe 3 (docs/library-v2-dir-ownership.md) -- until
-        # then a caller must not assume a narrower answer than it gets.
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7875,7 +7880,7 @@ class MusicDatabase:
             logger.error(f"Error getting album IDs for {server_source}: {e}")
             return set()
 
-    def get_all_track_ids_for_server(self, server_source: str) -> set:
+    def get_all_track_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
         """Get all server-side track IDs stored in the database for one server.
 
         Blank ids are excluded, and that is load-bearing. This used to return
@@ -7885,15 +7890,26 @@ class MusicDatabase:
         would always land in the stale set — and detaching by server id expands
         that one entry into every blank-id row of the source.
         """
+        # The scan that asks is reading ONE library. Left unscoped, its stale set
+        # holds every other library's rows and the cleanup that follows detaches
+        # them; a track is in scope when a file of that library hangs off it.
+        from core.library2.sql_util import owner_clause
+        scope = "shared" if owner_profile_id is None else int(owner_profile_id)
+        owned = (" AND EXISTS (SELECT 1 FROM lib2_track_files f"
+                 "              WHERE f.track_id = t.id"
+                 "                AND COALESCE(f.file_state,'active') <> 'deleted'"
+                 + owner_clause(scope, column="f.owner_profile_id") + ")")
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT server_id FROM lib2_media_server_mappings "
-                               "WHERE entity_type='track' AND server_source=? "
-                               "AND TRIM(server_id) <> '' UNION "
-                               "SELECT server_id FROM lib2_tracks WHERE server_source=? "
-                               "AND server_id IS NOT NULL AND TRIM(server_id) <> ''",
-                               (server_source, server_source))
+                cursor.execute(
+                    "SELECT m.server_id FROM lib2_media_server_mappings m "
+                    "  JOIN lib2_tracks t ON t.id = m.entity_id "
+                    " WHERE m.entity_type='track' AND m.server_source=? "
+                    "   AND TRIM(m.server_id) <> ''" + owned + " UNION "
+                    "SELECT t.server_id FROM lib2_tracks t WHERE t.server_source=? "
+                    "  AND t.server_id IS NOT NULL AND TRIM(t.server_id) <> ''" + owned,
+                    (server_source, server_source))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting track IDs for {server_source}: {e}")
@@ -7984,9 +8000,16 @@ class MusicDatabase:
             logger.error(f"Error getting scoped track IDs for {server_source}: {e}")
             return None
 
-    def delete_stale_tracks(self, stale_track_ids: set, server_source: str) -> int:
-        """Delete tracks by ID+server_source that no longer exist on the media server.
-        Processes in batches of 500 for database safety."""
+    def delete_stale_tracks(self, stale_track_ids: set, server_source: str,
+                            owner_profile_id=None) -> int:
+        """Detach tracks by ID+server_source that the media server no longer has.
+
+        ``owner_profile_id`` names the library the scan read. The ids were
+        already gathered inside it (``get_all_track_ids_for_server``), so this
+        is belt and braces -- but a stale set is the one place where being
+        wrong deletes something, and an id that exists in two libraries must
+        only be detached from the one that stopped listing it.
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7997,7 +8020,8 @@ class MusicDatabase:
                 for i in range(0, len(track_list), batch_size):
                     batch = track_list[i:i + batch_size]
                     tracks_removed += self._detach_server_contribution(
-                        cursor, server_source, "track", batch)['tracks_removed']
+                        cursor, server_source, "track", batch,
+                        owner_profile_id=owner_profile_id)['tracks_removed']
 
                 conn.commit()
 

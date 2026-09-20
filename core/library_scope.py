@@ -48,7 +48,7 @@ _MODE_CACHE_TTL_S = 30.0
 # Kept as a named constant rather than deleted: it is the single place to turn
 # the feature off again if a directory-shaped bug shows up in the wild, and
 # every piece still reads it.
-SCOPE_PARKED = False
+SCOPE_PARKED = True
 
 
 def set_library_scope(scope: Scope):
@@ -62,6 +62,39 @@ def reset_library_scope(token) -> None:
         _explicit_scope.reset(token)
     except Exception:  # noqa: BLE001 - token from another context
         _explicit_scope.set(_UNSET)
+
+
+_any_own_library: dict = {}
+
+
+def any_own_library_exists() -> bool:
+    """Does ANY profile keep a library of its own?
+
+    The real gate for the scope predicates. `SCOPE_PARKED` is the kill switch;
+    this is the far more common case: an install where nobody has a second
+    directory has nothing to separate, so the predicates must be ABSENT rather
+    than merely true. A tautological clause is not free -- it is two correlated
+    EXISTS over lib2_tracks/lib2_track_files per artist row, in both the COUNT
+    and the page query, with the deliberate `+` keeping SQLite off the owner
+    index. That is the shape the perf work measured at 21.7s.
+
+    Cached like the per-profile mode, and invalidated by the same call.
+    """
+    if SCOPE_PARKED:
+        return False
+    now = time.monotonic()
+    with _mode_cache_lock:
+        hit = _any_own_library.get("v")
+        if hit and now - hit[0] < _MODE_CACHE_TTL_S:
+            return hit[1]
+    try:
+        from database.music_database import get_database
+        exists = bool(get_database().get_own_library_profiles())
+    except Exception:  # noqa: BLE001 - unreadable means nothing to separate
+        exists = False
+    with _mode_cache_lock:
+        _any_own_library["v"] = (now, exists)
+    return exists
 
 
 def owner_for_new_file(profile_id=None):
@@ -79,11 +112,21 @@ def owner_for_new_file(profile_id=None):
     """
     if SCOPE_PARKED:
         return None
-    for candidate in (current_library_scope(),
-                      library_scope_for_profile(profile_id) if profile_id else None):
-        if candidate is not None and not isinstance(candidate, str):
-            return int(candidate)
-    return None
+    # A PICK is not the same as no pick, and 'shared' is a pick: an admin who
+    # selected the shared library and then triggers a download carrying another
+    # profile's id meant the shared library. Testing the session first, and
+    # only falling through when there is nothing selected, is what makes
+    # "the selected scope wins" true for every value and not just for ints.
+    picked = session_scope()
+    if picked is not _UNSET:
+        return int(picked) if not isinstance(picked, str) and picked is not None else None
+    if not profile_id:
+        return None
+    # Only now is the profile's own mode worth a database read. Evaluating it
+    # eagerly meant a cache miss opened a second connection from inside the
+    # caller's open write transaction.
+    scope = library_scope_for_profile(profile_id)
+    return int(scope) if not isinstance(scope, str) and scope is not None else None
 
 
 def carrying_scope(fn):
@@ -113,6 +156,7 @@ def carrying_scope(fn):
 def invalidate_library_scope_cache() -> None:
     with _mode_cache_lock:
         _mode_cache.clear()
+        _any_own_library.clear()
 
 
 def own_library_supported() -> bool:
@@ -174,9 +218,20 @@ def session_scope():
     if raw == "shared":
         return "shared"
     try:
-        return int(raw)
+        picked = int(raw)
     except (TypeError, ValueError):
         return _UNSET
+    # Re-checked on every read, not only when it was stored. A profile can stop
+    # keeping its own library, or be deleted, while the pick sits in a session:
+    # left unchecked the page then filters on an id nothing owns and comes back
+    # empty with no explanation, and a grab is stamped for a library whose
+    # folder no longer resolves -- a file on disk no scope can ever see.
+    try:
+        from database.music_database import get_database
+        live = {int(p["id"]) for p in (get_database().get_own_library_profiles() or [])}
+    except Exception:  # noqa: BLE001 - cannot verify, do not trust
+        return _UNSET
+    return picked if picked in live else _UNSET
 
 
 def current_library_scope() -> Scope:

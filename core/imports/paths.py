@@ -190,6 +190,38 @@ def import_profile_id(context) -> Optional[int]:
     return None
 
 
+def import_owner_id(context) -> Optional[int]:
+    """Which library this download belongs to, as decided ONCE at the start.
+
+    The selected directory lives in the Flask session, and by the time a
+    download is organised, post-processed and linked there is no request left
+    to read it from -- those stages run on worker threads. So the answer is
+    stamped on the batch when the download is created and every later stage
+    reads it back here, which is also what keeps the five transfer-root call
+    sites from disagreeing about where the file went.
+
+    Falls back to resolving it live, for a caller that predates the stamp.
+    """
+    if isinstance(context, dict):
+        for key in ("library_owner_id", "owner_profile_id"):
+            if key in context and context[key] is not None:
+                try:
+                    return int(context[key])
+                except (TypeError, ValueError):
+                    return None
+        batch_id = context.get("batch_id")
+        if batch_id:
+            try:
+                from core.runtime_state import download_batches
+                batch = download_batches.get(batch_id) or {}
+                if batch.get("library_owner_id") is not None:
+                    return int(batch["library_owner_id"])
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("batch %s has no library owner stamp: %s", batch_id, exc)
+    from core.library_scope import owner_for_new_file
+    return owner_for_new_file(import_profile_id(context))
+
+
 def library_root_for_profile(profile_id) -> Optional[str]:
     """the own-library output folder of a profile (docker-resolved), or None
     when the profile is on the shared library."""
@@ -223,9 +255,7 @@ def transfer_root_for_context(context) -> str:
     decide, and with neither it is the configured transfer folder -- which is
     every download on an install without own directories.
     """
-    from core.library_scope import owner_for_new_file
-    owner = owner_for_new_file(import_profile_id(context))
-    return library_root_for_profile(owner) or shared_transfer_root()
+    return library_root_for_profile(import_owner_id(context)) or shared_transfer_root()
 
 
 def build_simple_download_destination(context, file_path: str):

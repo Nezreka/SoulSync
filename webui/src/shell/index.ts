@@ -20,6 +20,23 @@ import {
   unblockEntry,
 } from './blocklist';
 import {
+  _handoffLibrarySearchToEnhancedSearch,
+  _updateSidebarLibraryBreadcrumb,
+  clearArtistDetailPageState,
+  navigateToArtistDetail,
+  playLibraryTrack,
+} from './library-globals';
+import {
+  _mlmClose,
+  _mlmDeleteMatch,
+  _mlmLibraryDebounce,
+  _mlmSaveMatch,
+  _mlmSelectLibrary,
+  _mlmSelectSource,
+  _mlmSourceDebounce,
+  openManualLibraryMatchTool,
+} from './manual-library-match';
+import {
   connectMyAccount,
   closeMyAccountsModal,
   disconnectMyAccount,
@@ -42,28 +59,8 @@ import {
   setDownloadMode,
   switchServiceSwitchTab,
 } from './service-switch';
-import {
-  _handoffLibrarySearchToEnhancedSearch,
-  _updateSidebarLibraryBreadcrumb,
-  clearArtistDetailPageState,
-  navigateToArtistDetail,
-  playLibraryTrack,
-} from './library-globals';
-import {
-  _mlmClose,
-  _mlmDeleteMatch,
-  _mlmLibraryDebounce,
-  _mlmSaveMatch,
-  _mlmSelectLibrary,
-  _mlmSelectSource,
-  _mlmSourceDebounce,
-  openManualLibraryMatchTool,
-} from './manual-library-match';
 import './server-activity';
-import {
-  closeTrackDetail,
-  openTrackDetail,
-} from './track-detail';
+import { closeTrackDetail, openTrackDetail } from './track-detail';
 import {
   closeWatchlistHistoryModal,
   openWatchlistHistoryModal,

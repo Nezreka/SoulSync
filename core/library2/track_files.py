@@ -113,7 +113,14 @@ _IN_CHUNK = 500
 
 def primary_file_rows(conn, track_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
     """Load each track's ADR-03 primary file, chunked so it cannot exceed the
-    SQLite bind-variable ceiling (perf-audit PERF-02)."""
+    SQLite bind-variable ceiling (perf-audit PERF-02).
+
+    Scoped: this row supplies the path, the quality and whether the track reads
+    as present. Unscoped it hands one library another's absolute path while the
+    file count beside it -- which IS scoped -- says zero.
+    """
+    from core.library2.sql_util import owner_clause
+    owner = owner_clause(column="tf.owner_profile_id")
     ids = sorted({int(track_id) for track_id in track_ids})
     if not ids:
         return {}
@@ -130,7 +137,7 @@ def primary_file_rows(conn, track_ids: Iterable[int]) -> Dict[int, Dict[str, Any
                            ) AS lib2_primary_rank
                       FROM lib2_track_files tf
                      WHERE tf.track_id IN ({marks})
-                       AND COALESCE(tf.file_state,'active')<>'deleted'
+                       AND COALESCE(tf.file_state,'active')<>'deleted'{owner}
                 ) ranked
                 WHERE lib2_primary_rank=1""",
             chunk,

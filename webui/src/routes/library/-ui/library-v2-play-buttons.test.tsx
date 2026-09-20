@@ -97,10 +97,13 @@ describe('AlbumPlayButton', () => {
       'fetch',
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ success: true, album: { id: 5, title: 'A', tracks: [] } }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          }),
+          new Response(
+            JSON.stringify({ success: true, album: { id: 5, title: 'A', tracks: [] } }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
       ),
     );
     renderWithQuery(
@@ -200,10 +203,7 @@ describe('ArtistPlayButton', () => {
     renderWithQuery(<ArtistPlayButton artistId={7} artistName="Aphex Twin" />);
     fireEvent.click(screen.getByTitle('Play everything by Aphex Twin'));
     await waitFor(() =>
-      expect(window.showToast).toHaveBeenCalledWith(
-        'Nothing by Aphex Twin is on disk yet',
-        'info',
-      ),
+      expect(window.showToast).toHaveBeenCalledWith('Nothing by Aphex Twin is on disk yet', 'info'),
     );
     expect(window.playTrackList).not.toHaveBeenCalled();
   });

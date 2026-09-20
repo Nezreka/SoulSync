@@ -151,7 +151,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     await screen.findByRole('heading', { name: 'Portishead' });
     expect(searches).not.toHaveBeenCalled();
     expect(screen.queryByRole('heading', { name: 'Music Videos' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Music Videos', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: /^Music Videos$/ }));
     await screen.findByText('No music videos found for this artist.');
     expect(searches).toHaveBeenCalledTimes(1);
     expect(router.state.location.search).toMatchObject({

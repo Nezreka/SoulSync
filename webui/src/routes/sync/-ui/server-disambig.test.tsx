@@ -47,6 +47,7 @@ function show(candidates: MirroredMatch[], onPick = vi.fn()) {
       playlistName="Road Trip"
       candidates={candidates}
       onPick={onPick}
+      now={Date.now()}
       onClose={vi.fn()}
     />,
   );
@@ -132,6 +133,7 @@ describe('the modal', () => {
         playlistName="Road Trip"
         candidates={four}
         onPick={vi.fn()}
+        now={Date.now()}
         onClose={vi.fn()}
       />,
     );
@@ -154,6 +156,7 @@ describe('the modal', () => {
           { ...base, id: 2, source: 'spotify' },
         ]}
         onPick={vi.fn()}
+        now={Date.now()}
         onClose={vi.fn()}
       />,
     );

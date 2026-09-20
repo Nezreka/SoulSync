@@ -286,6 +286,14 @@ def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all"
     offset = (page - 1) * limit
 
     clauses = ["a.canonical_artist_id IS NULL", "a.legacy_artist_id IS NOT NULL"]
+    # Same rule as list_artists: a client on the legacy surface must not be
+    # handed the whole house's catalogue either (E-03).
+    _visible = scope_visibility_sql("artist", "va")
+    if _visible:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM lib2_artists va"
+            "  WHERE COALESCE(va.canonical_artist_id, va.id) = a.id"
+            f"   AND {_visible})")
     params: Dict[str, Any] = {}
     if search_query:
         clauses.append("a.name LIKE :like ESCAPE '\\'")
@@ -451,6 +459,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     # to whoever is asking, and while SCOPE_PARKED is true it is empty, so
     # every query here is byte for byte the one that ran before.
     tf_owner = owner_clause(column="tf.owner_profile_id")
+    album_visible = scope_visibility_sql("album", "al") or "1=1"
     page_join, page_order, outer_order, rollup_column = _artist_page_order(sort)
     if rollup_column:
         # Rebuilt only when missing or stale; a few minutes of drift moves an
@@ -469,9 +478,17 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     # while the scope is every library, so an install without own directories
     # -- and every install while SCOPE_PARKED is true -- lists what it listed
     # before (E-03).
-    visible = scope_visibility_sql("artist", "a")
+    visible = scope_visibility_sql("artist", "va")
     if visible:
-        clauses.append(visible)
+        # Across the ALIAS GROUP, not just the canonical row. §40 folds member
+        # rows into their canonical entry and get_artist merges their albums in
+        # afterwards, so a canonical artist whose owned files all hang off an
+        # alias would otherwise be judged fileless and dropped from its owner's
+        # own list.
+        clauses.append(
+            "EXISTS (SELECT 1 FROM lib2_artists va"
+            "  WHERE COALESCE(va.canonical_artist_id, va.id) = a.id"
+            f"   AND {visible})")
     if search:
         # iss29-D04: spell the alias-membership test so an index can serve it.
         #
@@ -622,6 +639,9 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                        THEN al.id END) AS single_count
               FROM artist_albums aa
               JOIN lib2_albums al ON al.id=aa.album_id
+             -- the same library as the track counters beside them, or the row
+             -- reads "41 albums, 1 track present" from two different scopes
+             WHERE {album_visible}
              GROUP BY aa.artist_id
         ),
         track_stats AS (
@@ -715,7 +735,13 @@ def list_artist_track_files(conn, artist_id: int, *, search: str = "",
 
     artist_ids = resolve_alias_group(conn, artist_id)
     artist_marks = ",".join(f":artist_id_{i}" for i in range(len(artist_ids)))
+    # The file ids this returns are exactly what the ADR-05 preview/execute
+    # endpoints accept, so an unscoped list is a way to select -- and destroy --
+    # another library's files. The clause has to match _scope_snapshot's.
     clauses = [f"al.primary_artist_id IN ({artist_marks})", "tf.file_state <> 'deleted'"]
+    _owner = owner_clause(column="tf.owner_profile_id")
+    if _owner:
+        clauses.append(_owner.replace(" AND ", "", 1))
     params: Dict[str, Any] = {
         f"artist_id_{i}": value for i, value in enumerate(artist_ids)
     }
@@ -1489,7 +1515,7 @@ def _serialize_track(
     else:
         wanted_row = conn.execute(
             "SELECT wanted FROM lib2_wanted_tracks "
-            "WHERE profile_id=1 AND track_id=?",
+            f"WHERE profile_id={intent_profile_id()} AND track_id=?",
             (t["id"],),
         ).fetchone()
         wanted = bool(wanted_row["wanted"]) if wanted_row else bool(t["monitored"])

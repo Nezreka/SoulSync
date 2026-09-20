@@ -593,7 +593,18 @@ def _link_companion_file(
         size = os.path.getsize(file_path)
     except OSError:
         size = None
-    from core.library_scope import owner_for_new_file
+    # The derivative inherits its parent's library. A companion job usually runs
+    # with no request and no scope, so asking the ambient scope would drop a
+    # profile's transcode into the shared library and split the pair across two
+    # of them -- with derived_from_file_id pointing at a row the other side
+    # cannot see.
+    owner = None
+    if derived_from_file_id is not None:
+        parent = conn.execute(
+            "SELECT owner_profile_id FROM lib2_track_files WHERE id=?",
+            (derived_from_file_id,)).fetchone()
+        if parent is not None:
+            owner = parent[0]
     cur = conn.execute(
         """INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate,
                bit_depth, format, quality_tier, source, import_status,
@@ -601,8 +612,7 @@ def _link_companion_file(
                retention_json, owner_profile_id)
            VALUES(?,?,?,?,?,?,?,?,'companion','imported','derivative',?,?,?,?)""",
         (track_id, file_path, size, bitrate, sample_rate, bit_depth, fmt, tier,
-         derived_from_file_id, acquired_quality_json, retention_json,
-         owner_for_new_file()),
+         derived_from_file_id, acquired_quality_json, retention_json, owner),
     )
     return cur.lastrowid
 

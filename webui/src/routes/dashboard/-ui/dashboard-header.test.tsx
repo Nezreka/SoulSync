@@ -99,7 +99,7 @@ afterEach(() => {
   delete window.openWishlistFromHero;
   delete window.isJiosaavnExperimentalEnabled;
   delete window.SoulSyncWebRouter;
-  delete window.navigateToPage;
+  delete (window as Partial<Window>).navigateToPage;
 });
 
 async function mountHeader() {

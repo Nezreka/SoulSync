@@ -192,10 +192,12 @@ def repair_rekeyed_tracks(db, songs):
                     conn.execute(
                         f'UPDATE {table} SET {column}=? WHERE {column}=? AND server_source=?',
                         (new_id, old_id, 'navidrome'))
-                except Exception:
+                except Exception as exc:  # noqa: BLE001
                     # these two are caches; a schema that predates either of
                     # them must not abort the repair
-                    pass
+                    from utils.logging_config import get_logger
+                    get_logger('navidrome_identity').debug(
+                        "identity repoint skipped for %s.%s: %s", table, column, exc)
             live_ids.add(new_id)
             repaired += 1
         conn.commit()

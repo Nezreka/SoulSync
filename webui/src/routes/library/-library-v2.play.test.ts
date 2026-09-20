@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import type { LibraryV2ArtistPlaybackFile } from './-library-v2.api';
-import { albumQueueRows, artistQueueRows } from './-library-v2.play';
 import type { LibraryV2AlbumDetail, LibraryV2Track } from './-library-v2.types';
+
+import { albumQueueRows, artistQueueRows } from './-library-v2.play';
 
 /**
  * Why Library v2 does NOT need the ownership round-trip upstream added.
@@ -177,9 +178,7 @@ describe('albumQueueRows', () => {
 });
 
 describe('artistQueueRows', () => {
-  const file = (
-    over: Partial<LibraryV2ArtistPlaybackFile> = {},
-  ): LibraryV2ArtistPlaybackFile => ({
+  const file = (over: Partial<LibraryV2ArtistPlaybackFile> = {}): LibraryV2ArtistPlaybackFile => ({
     file_id: 1,
     track_id: 100,
     track_title: 'Xtal',
@@ -262,10 +261,7 @@ describe('artistQueueRows', () => {
   });
 
   it('falls back to the page artist when a row carries no credit', () => {
-    const [row] = artistQueueRows(
-      [file({ artist_id: null, artist_name: null })],
-      'Aphex Twin',
-    );
+    const [row] = artistQueueRows([file({ artist_id: null, artist_name: null })], 'Aphex Twin');
     expect(row.artist).toBe('Aphex Twin');
     expect(row.lib2_artist_id).toBeNull();
   });

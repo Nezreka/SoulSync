@@ -35,7 +35,7 @@ beforeEach(() => {
 afterEach(() => {
   delete window.showToast;
   delete window.openMatchingModal;
-  delete window.startStream;
+  delete (window as Partial<Window>).startStream;
   delete window.getFileExtension;
   delete window.isAudioFormatSupported;
   vi.restoreAllMocks();

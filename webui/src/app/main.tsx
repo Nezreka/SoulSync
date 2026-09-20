@@ -23,10 +23,16 @@ if (typeof Node === 'function' && Node.prototype) {
     return originalRemoveChild.call(this, child) as T;
   };
   const originalInsertBefore = Node.prototype.insertBefore;
-  Node.prototype.insertBefore = function <T extends Node>(newNode: T, referenceNode: Node | null): T {
+  Node.prototype.insertBefore = function <T extends Node>(
+    newNode: T,
+    referenceNode: Node | null,
+  ): T {
     if (referenceNode && referenceNode.parentNode !== this) {
       if (typeof console !== 'undefined' && console.warn) {
-        console.warn('Cannot insert before: reference node is not a child of this node', referenceNode);
+        console.warn(
+          'Cannot insert before: reference node is not a child of this node',
+          referenceNode,
+        );
       }
       return newNode;
     }

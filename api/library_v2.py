@@ -348,6 +348,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception:
             return 1
 
+    def _intent_profile() -> int:
+        """The profile whose intent a mutation on this page writes.
+
+        Reads on this page resolve intent through the selected scope
+        (`intent_profile_id`), so writes have to use the same answer. Writing
+        under `_profile()` instead meant a monitor toggle made while viewing
+        another directory was stored against the shared library and
+        disappeared on the next refresh.
+        """
+        try:
+            from core.library2.sql_util import intent_profile_id
+            return int(intent_profile_id())
+        except Exception:  # noqa: BLE001 - fall back to the caller
+            return _profile()
+
     def _is_admin() -> bool:
         """Is the CALLER an admin? Not "is the caller profile 1".
 
@@ -1451,7 +1466,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = _conn()
         try:
             from core.library2.wanted import wanted_projection_status
-            status = wanted_projection_status(conn, profile_id=ADMIN_PROFILE_ID)
+            status = wanted_projection_status(conn, profile_id=_intent_profile())
             return jsonify({"success": True, **status})
         finally:
             conn.close()
@@ -1485,7 +1500,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             lister = WV.list_missing if kind == "missing" else WV.list_cutoff_unmet
             rows, total = lister(conn, search=search, page=page, limit=limit,
-                                 profile_id=ADMIN_PROFILE_ID)
+                                 profile_id=_intent_profile())
         finally:
             conn.close()
         total_pages = (total + limit - 1) // limit if limit else 0
@@ -1604,13 +1619,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (artist_id,))
                 from core.library2.monitor_rules import PROVENANCE_USER, record_rule
                 record_rule(conn, "artist", artist_id, True, PROVENANCE_USER,
-                            profile_id=_profile())
+                            profile_id=_intent_profile())
                 from core.library2.wanted import recompute_wanted_for_entity
                 recompute_wanted_for_entity(conn, "artists", artist_id,
-                                            profile_id=_profile())
+                                            profile_id=_intent_profile())
                 from core.library2.mirror_outbox import enqueue_artist_watchlist
                 outbox_ids = enqueue_artist_watchlist(
-                    conn, artist_id, True, profile_id=_profile())
+                    conn, artist_id, True, profile_id=_intent_profile())
             if create:
                 conn.commit()
         finally:
@@ -1686,20 +1701,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.library2.monitor_rules import (
                 PROVENANCE_CASCADE, PROVENANCE_USER, record_rule, record_rules)
             record_rule(conn, "album", album_id, True, PROVENANCE_USER,
-                        profile_id=_profile())
+                        profile_id=_intent_profile())
             track_ids = [r[0] for r in conn.execute(
                 "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,))]
             if track_ids:
                 conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?", (album_id,))
                 record_rules(conn, "track", track_ids, True, PROVENANCE_CASCADE,
-                             profile_id=_profile())
+                             profile_id=_intent_profile())
             from core.library2.wanted import recompute_wanted_for_entity
             recompute_wanted_for_entity(conn, "albums", album_id,
-                                        profile_id=_profile())
+                                        profile_id=_intent_profile())
             if track_ids:
                 from core.library2.mirror_outbox import enqueue_projected_tracks
                 outbox_ids = enqueue_projected_tracks(
-                    conn, track_ids, profile_id=_profile(), user_initiated=False)
+                    conn, track_ids, profile_id=_intent_profile(), user_initiated=False)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1863,13 +1878,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (track_id,))
                 from core.library2.monitor_rules import PROVENANCE_USER, record_rule
                 record_rule(conn, "track", track_id, True, PROVENANCE_USER,
-                            profile_id=_profile())
+                            profile_id=_intent_profile())
                 from core.library2.wanted import recompute_wanted_for_entity
                 recompute_wanted_for_entity(conn, "tracks", track_id,
-                                            profile_id=_profile())
+                                            profile_id=_intent_profile())
                 from core.library2.mirror_outbox import enqueue_projected_tracks
                 outbox_ids = enqueue_projected_tracks(
-                    conn, [track_id], profile_id=_profile(), user_initiated=True)
+                    conn, [track_id], profile_id=_intent_profile(), user_initiated=True)
             conn.commit()
         finally:
             conn.close()
@@ -3221,7 +3236,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # user deliberately (un)monitored keeps its state; re-deciding
                 # it takes another direct action on the track itself.
                 explicit = explicit_track_rules_for_album(conn, eid,
-                                                          profile_id=_profile())
+                                                          profile_id=_intent_profile())
                 all_ids = [r["id"] for r in conn.execute(
                     "SELECT id FROM lib2_tracks WHERE album_id=?", (eid,))]
                 preserved_track_ids = [t for t in all_ids
@@ -3244,7 +3259,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 record_rules(conn, "track",
                              [t for t in track_ids if t not in explicit],
                              monitored, PROVENANCE_CASCADE,
-                             profile_id=_profile())
+                             profile_id=_intent_profile())
             elif entity == "tracks":
                 track_ids = [eid]
             # Transactional outbox (audit P0-04): the mirror intents commit in
@@ -3428,7 +3443,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     record_rules(
                         conn, "track", auto_monitor_track_ids, True,
                         PROVENANCE_USER if entity == "tracks" else PROVENANCE_CASCADE,
-                        profile_id=_profile())
+                        profile_id=_intent_profile())
             # Recompute and mirror every descendant now. Otherwise the changed
             # projection marker is consumed here while an existing Wishlist row
             # keeps its old profile forever.
@@ -4296,7 +4311,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # the route drains the outbox after committing (audit P0-04).
         from core.library2.mirror_outbox import enqueue_tracks
         unmirrored = len(enqueue_tracks(conn, track_ids, False,
-                                        profile_id=_profile())) if track_ids else 0
+                                        profile_id=_intent_profile())) if track_ids else 0
         removed_albums = 0
         for aid_ in album_ids:
             conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (aid_,))

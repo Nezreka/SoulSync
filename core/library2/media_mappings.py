@@ -115,43 +115,56 @@ def is_media_server_source(server_source: Any) -> bool:
 
 
 def resolve_mapping(cursor: Any, entity_type: str, server_source: Any,
-                    server_id: Any) -> Optional[int]:
+                    server_id: Any, server_library_id: Any = "") -> Optional[int]:
+    """Which catalogue row this server id names, inside one server library.
+
+    The library has to be part of the question: the same server id means
+    different rows in two libraries of one server, and without it this returns
+    whichever row SQLite happens to yield first.
+    """
     row = cursor.execute(
         "SELECT entity_id FROM lib2_media_server_mappings "
-        "WHERE entity_type=? AND server_source=? AND server_id=?",
-        (entity_type, str(server_source), str(server_id)),
+        "WHERE entity_type=? AND server_source=? AND server_library_id=? AND server_id=?",
+        (entity_type, str(server_source), str(server_library_id or ""), str(server_id)),
     ).fetchone()
     return int(row[0]) if row else None
 
 
 def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
-                   server_source: Any, server_id: Any) -> None:
-    """Record one positive recognition, safely handling a server re-key."""
+                   server_source: Any, server_id: Any,
+                   server_library_id: Any = "") -> None:
+    """Record one positive recognition, safely handling a server re-key.
+
+    Everything here is scoped to ONE server library. Without that, mapping an
+    entity in a server's second library deleted the row that mapped the same
+    server id in its first -- which is the collision the column was added to
+    end, and it stayed live because the value was never written.
+    """
     source = str(server_source or "").strip().lower()
     sid = str(server_id or "").strip()
+    library = str(server_library_id or "")
     if not source or not sid or not is_media_server_source(source):
         return
-    # The same server id cannot truthfully identify two catalogue rows.  A
-    # re-match moves it; the entity/source uniqueness below handles a re-key.
+    # The same server id cannot truthfully identify two catalogue rows IN ONE
+    # LIBRARY. A re-match moves it; the entity/source uniqueness below handles
+    # a re-key. In another library the same id is a different row and must
+    # survive.
     cursor.execute(
         "DELETE FROM lib2_media_server_mappings "
-        "WHERE entity_type=? AND server_source=? AND server_id=? AND entity_id<>?",
-        (entity_type, source, sid, int(entity_id)),
+        "WHERE entity_type=? AND server_source=? AND server_library_id=? "
+        "  AND server_id=? AND entity_id<>?",
+        (entity_type, source, library, sid, int(entity_id)),
     )
-    # The conflict target has to name a real unique constraint, so it carries
-    # server_library_id with it. The insert leaves that column at its ''
-    # default, which is the one library every install has today — the upsert
-    # therefore matches exactly the rows it always matched.
     cursor.execute(
         """INSERT INTO lib2_media_server_mappings(
-               entity_type,entity_id,server_source,server_id,match_status)
-           VALUES(?,?,?,?,'recognized')
+               entity_type,entity_id,server_source,server_library_id,server_id,match_status)
+           VALUES(?,?,?,?,?,'recognized')
            ON CONFLICT(entity_type,entity_id,server_source,server_library_id)
            DO UPDATE SET
                server_id=excluded.server_id,
                match_status='recognized',
                last_seen_at=CURRENT_TIMESTAMP""",
-        (entity_type, int(entity_id), source, sid),
+        (entity_type, int(entity_id), source, library, sid),
     )
     # Compatibility only.  New code reads the mapping table, so replacing this
     # snapshot cannot erase another server's durable mapping.

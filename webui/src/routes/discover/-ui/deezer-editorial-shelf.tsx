@@ -70,12 +70,7 @@ function PlaylistCard({
     >
       <div className="ya-card-img">
         {!failed && playlist.image_url && (
-          <img
-            src={playlist.image_url}
-            alt=""
-            loading="lazy"
-            onError={() => setFailed(true)}
-          />
+          <img src={playlist.image_url} alt="" loading="lazy" onError={() => setFailed(true)} />
         )}
         {(failed || !playlist.image_url) && <div className="ya-card-placeholder">♫</div>}
       </div>
@@ -83,9 +78,7 @@ function PlaylistCard({
       <div className="ya-card-info">
         <div className="ya-card-name">{playlist.title}</div>
         <div className="ya-card-sub">
-          {busy
-            ? handoffLabel(stage)
-            : `${playlist.creator}${tracks ? ` · ${tracks} tracks` : ''}`}
+          {busy ? handoffLabel(stage) : `${playlist.creator}${tracks ? ` · ${tracks} tracks` : ''}`}
         </div>
         {busy && (
           <div className="dz-ed-progress" role="progressbar" aria-label="Adding to Sync">
@@ -176,24 +169,24 @@ export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) 
             onChange={(event) => setQuery(event.target.value)}
           />
           {genres.length > 0 ? (
-          <div className="dz-ed-genres" role="tablist" aria-label="Deezer genres">
-            {genres.map((g) => (
-              <button
-                key={g.id}
-                type="button"
-                role="tab"
-                aria-selected={!searching && g.id === genreId}
-                className={`dz-ed-genre${!searching && g.id === genreId ? ' is-active' : ''}`}
-                onClick={() => {
-                  // picking a genre leaves a search; they are two ways of
-                  // asking the same row a question, not two rows
-                  setQuery('');
-                  setGenreId(g.id);
-                }}
-              >
-                {g.name}
-              </button>
-            ))}
+            <div className="dz-ed-genres" role="tablist" aria-label="Deezer genres">
+              {genres.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={!searching && g.id === genreId}
+                  className={`dz-ed-genre${!searching && g.id === genreId ? ' is-active' : ''}`}
+                  onClick={() => {
+                    // picking a genre leaves a search; they are two ways of
+                    // asking the same row a question, not two rows
+                    setQuery('');
+                    setGenreId(g.id);
+                  }}
+                >
+                  {g.name}
+                </button>
+              ))}
             </div>
           ) : null}
         </div>

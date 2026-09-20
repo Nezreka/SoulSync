@@ -639,7 +639,12 @@ export async function monitorLibraryV2DiscoveryArtist(input: {
 }): Promise<number> {
   const payload = await readJson<{ success: boolean; artist_id: number; error?: string }>(
     apiClient.post('library/v2/discovery/artist', {
-      json: { source: input.source, provider_id: input.providerId, name: input.name, monitored: true },
+      json: {
+        source: input.source,
+        provider_id: input.providerId,
+        name: input.name,
+        monitored: true,
+      },
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Could not monitor this artist');
