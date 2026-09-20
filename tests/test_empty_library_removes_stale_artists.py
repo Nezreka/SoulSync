@@ -83,6 +83,7 @@ def _worker(client, database=None):
     worker.database_path = ':memory:'
     worker.full_refresh = True
     worker.force_sequential = True
+    worker.owner_profile_id = None       # the shared library
     worker.should_stop = False
     worker.post_scan_hook = None
     worker._new_track_ids = set()
@@ -121,13 +122,13 @@ class _DB:
         self._stats = {'artists': artists, 'albums': albums}
         self.removed = None
 
-    def get_statistics_for_server(self, server_type):
+    def get_statistics_for_server(self, server_type, owner_profile_id=None):
         return dict(self._stats)
 
-    def get_all_artist_ids_for_server(self, server_type):
+    def get_all_artist_ids_for_server(self, server_type, owner_profile_id=None):
         return {'a1', 'a2'}
 
-    def get_all_album_ids_for_server(self, server_type):
+    def get_all_album_ids_for_server(self, server_type, owner_profile_id=None):
         return {'b1'}
 
     def delete_removed_content(self, artist_ids, album_ids, server_type):

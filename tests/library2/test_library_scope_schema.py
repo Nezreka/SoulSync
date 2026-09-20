@@ -186,3 +186,58 @@ class TestTheMediaMappingRebuild:
         assert resolve_mapping(cursor, "track", "navidrome", "nd-old") is None
         assert conn.execute(
             "SELECT COUNT(*) FROM lib2_media_server_mappings").fetchone()[0] == 1
+
+
+class TestTheUpgradePath:
+    """Whose library a file is in has to survive the one-shot legacy import,
+    or an install upgrading from upstream — where the owner sits on the legacy
+    track row — silently hands every private library back to the shared one."""
+
+    @staticmethod
+    def _files(shim):
+        connection = sqlite3.connect(shim.path)
+        connection.row_factory = sqlite3.Row
+        try:
+            return {r["path"]: r["owner_profile_id"] for r in connection.execute(
+                "SELECT path, owner_profile_id FROM lib2_track_files")}
+        finally:
+            connection.close()
+
+    def test_a_legacy_owner_lands_on_the_file(self, legacy_db):
+        from core.library2.importer import import_legacy_library
+
+        connection = sqlite3.connect(legacy_db.path)
+        connection.execute("ALTER TABLE tracks ADD COLUMN owner_profile_id INTEGER")
+        owned = connection.execute(
+            "SELECT id, file_path FROM tracks WHERE file_path IS NOT NULL "
+            "AND TRIM(file_path) <> '' LIMIT 1").fetchone()
+        assert owned, "the fixture needs at least one track with a file"
+        connection.execute("UPDATE tracks SET owner_profile_id = 4 WHERE id = ?", (owned[0],))
+        connection.commit()
+        connection.close()
+
+        import_legacy_library(legacy_db)
+
+        assert self._files(legacy_db)[owned[1]] == 4
+
+    def test_a_legacy_row_without_an_owner_is_the_shared_library(self, legacy_db):
+        from core.library2.importer import import_legacy_library
+
+        connection = sqlite3.connect(legacy_db.path)
+        connection.execute("ALTER TABLE tracks ADD COLUMN owner_profile_id INTEGER")
+        connection.commit()
+        connection.close()
+
+        import_legacy_library(legacy_db)
+
+        assert set(self._files(legacy_db).values()) == {None}
+
+    def test_an_install_that_never_had_own_libraries_imports_unchanged(self, legacy_db):
+        """No such column at all — the overwhelmingly common upgrade. The
+        importer must not care, and every file must read as shared."""
+        from core.library2.importer import import_legacy_library
+
+        stats = import_legacy_library(legacy_db)
+
+        assert stats["files"] > 0
+        assert set(self._files(legacy_db).values()) == {None}

@@ -29,7 +29,15 @@ ignore = [
 # so the default run (and CI's `python -m pytest`) filters them out here. Run them
 # explicitly with `pytest -m soundcloud_live` / `pytest -m youtube_live`
 # (the command-line -m overrides this default).
-addopts = "-m 'not soundcloud_live and not youtube_live'"
+# --timeout: a test that hangs must fail, not stall the run. The suite starts
+# real background workers (metadata, artwork, video repair) and a shared async
+# loop, and state one file leaves behind has twice wedged a later file that
+# passes on its own -- each time costing a full run with no output and no
+# summary. 180s is far above the slowest honest test here. The SIGNAL method on
+# purpose: --timeout-method=thread dumps the stacks and then kills the process,
+# so the run ends with no summary at all; signal raises inside the test and the
+# rest still runs.
+addopts = "-m 'not soundcloud_live and not youtube_live' --timeout=180 --timeout-method=signal"
 markers = [
     "soundcloud_live: live SoundCloud integration test (network-dependent, run with -m soundcloud_live)",
     "youtube_live: live YouTube probe/download test (network-dependent, run with -m youtube_live)",

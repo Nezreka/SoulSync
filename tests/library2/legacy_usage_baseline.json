@@ -1,10 +1,8 @@
 {
-  "_note": "Runtime legacy access is the media-server mirror's own hygiene, nothing else. The resumable upgrade importer is isolated and separately pinned until legacy upgrades are retired.",
-  "_runtime_holders": {
-    "database/music_database.py": "get_track_ids_under_scopes (deep-scan fence) and absorb_superseded_tracks/_absorb_track_row (fold a re-ided row back into the live one, #1257). Both maintain the legacy media-server MIRROR that lib2 still bootstraps and reconciles from; they carry no catalogue logic. Arrived with upstream 3.4.3+. Do not raise this for lib2-era code."
-  },
-  "reads": 3,
-  "writes": 2,
-  "upgrade_reads": 5,
-  "upgrade_writes": 0
+  "_note": "Zero means no site this counter can SEE. It matches literal table names only: interpolated SQL (DELETE FROM {table}) is invisible to it, which is how a legacy DELETE shipped in the 3.4.4 merge. Treat a change here as a signal, never as proof.",
+  "_upgrade_note": "Migrations that only ever run against a database created before the cutover are marked in place with the legacy-upgrade-only markers and counted with the resumable importer; they go when the legacy tables do.",
+  "reads": 0,
+  "writes": 0,
+  "upgrade_reads": 13,
+  "upgrade_writes": 3
 }

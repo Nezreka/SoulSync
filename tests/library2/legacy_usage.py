@@ -8,6 +8,11 @@ only useful if the number is reproducible: one SQL keyword pairing per match.
 It undercounts dynamically built SQL and f-string table names, and it does not
 try to guess. What it must never do is drift, so that a change in the figure
 always means a change in the code.
+
+That undercount is not theoretical. ``DELETE FROM {table}`` over a tuple of
+legacy names reads as zero here, and a function doing exactly that arrived
+with the 3.4.4 merge and broke profile deletion on every install. A zero in
+this file means "no site this counter can see", never "no legacy access".
 """
 
 from __future__ import annotations
@@ -28,6 +33,16 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _TREES: Tuple[str, ...] = ("core", "database", "api", "utils", "services")
 _ROOT_FILES: Tuple[str, ...] = ("web_server.py", "dev.py")
 UPGRADE_ONLY_FILES: Tuple[str, ...] = ("core/library2/importer.py",)
+
+# A whole file is the coarse unit; these markers are the fine one. Code between
+# them is counted into the UPGRADE bucket rather than the runtime one, for the
+# same reason importer.py is: it exists to bring a database created before the
+# cutover forward, it never runs against a catalogue this branch created, and
+# it will be deleted with the legacy tables. Paired and explicit on purpose —
+# a marker that guessed its own extent (to the next def, say) would silently
+# widen as code moved under it.
+UPGRADE_BEGIN = "# legacy-upgrade-only-begin"
+UPGRADE_END = "# legacy-upgrade-only-end"
 
 _SKIP_PARTS = frozenset({
     "__pycache__", ".venv", "node_modules", "webui", "tests", "docs",
@@ -122,25 +137,57 @@ def _production_files() -> Iterable[pathlib.Path]:
                 yield path
 
 
+def split_upgrade_regions(source: str) -> Tuple[str, str]:
+    """``(runtime, upgrade)`` halves of one file, split on the marker pair.
+
+    An unclosed BEGIN runs to the end of the file: the alternative is to
+    silently drop the rest, and a marker someone forgot to close should
+    over-report the upgrade bucket, not under-report the runtime one — the
+    ratchet's whole job is to be loud when the runtime figure moves.
+    """
+    runtime: list = []
+    upgrade: list = []
+    target = runtime
+    for line in source.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith(UPGRADE_BEGIN):
+            target = upgrade
+            continue
+        if stripped.startswith(UPGRADE_END):
+            target = runtime
+            continue
+        target.append(line)
+    return "".join(runtime), "".join(upgrade)
+
+
 def scan_production_tree() -> TreeUsage:
     total = Usage()
     upgrade_total = Usage()
     by_file: Dict[str, Usage] = {}
     upgrade_by_file: Dict[str, Usage] = {}
     for path in _production_files():
-        usage = count_legacy_usage(path.read_text(encoding="utf-8", errors="replace"))
-        if usage:
-            relative = str(path.relative_to(_ROOT))
-            if relative in UPGRADE_ONLY_FILES:
+        source = path.read_text(encoding="utf-8", errors="replace")
+        relative = str(path.relative_to(_ROOT))
+        if relative in UPGRADE_ONLY_FILES:
+            usage = count_legacy_usage(source)
+            if usage:
                 upgrade_by_file[relative] = usage
                 upgrade_total = upgrade_total + usage
-            else:
-                by_file[relative] = usage
-                total = total + usage
+            continue
+        runtime_src, upgrade_src = split_upgrade_regions(source)
+        usage = count_legacy_usage(runtime_src)
+        if usage:
+            by_file[relative] = usage
+            total = total + usage
+        marked = count_legacy_usage(upgrade_src)
+        if marked:
+            upgrade_by_file[relative] = upgrade_by_file.get(relative, Usage()) + marked
+            upgrade_total = upgrade_total + marked
     return TreeUsage(total, by_file, upgrade_total, upgrade_by_file)
 
 
 __all__ = [
-    "LEGACY_TABLES", "UPGRADE_ONLY_FILES", "TreeUsage", "Usage", "count_legacy_usage",
+    "LEGACY_TABLES", "UPGRADE_ONLY_FILES", "UPGRADE_BEGIN", "UPGRADE_END",
+    "TreeUsage", "Usage", "count_legacy_usage", "split_upgrade_regions",
     "scan_production_tree",
 ]

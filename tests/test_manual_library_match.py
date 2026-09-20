@@ -334,7 +334,7 @@ def test_wishlist_skips_manual_matched_track():
         )
 
     assert removed == 1
-    mock_wishlist_svc.mark_track_download_result.assert_called_once_with("spotify-track-123", success=True)
+    mock_wishlist_svc.mark_track_download_result.assert_called_once_with("spotify-track-123", success=True, profile_id=1)
     mock_music_db.check_track_exists.assert_not_called()
 
 

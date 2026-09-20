@@ -71,7 +71,7 @@ def get_current_profile_id() -> int:
     return pid if pid is not None else 1
 
 
-def is_admin_profile(profile_id) -> bool:
+def is_admin_profile(profile_id, *, database=None) -> bool:
     """Is THIS profile id an admin? The request-free half of the gate.
 
     ``is_admin_request`` answers for the caller of the current request; this
@@ -84,6 +84,13 @@ def is_admin_profile(profile_id) -> bool:
     to every one of them.
 
     Profile 1 is always an admin; anything unreadable is not.
+
+    ``database`` lets a caller that already holds one hand it in. That is not
+    a convenience: api/library_v2 is wired with an injected ``get_database``
+    precisely so its routes never touch the app-wide singleton, and reaching
+    for the singleton from inside it opened (and schema-initialised) a second,
+    unrelated database — in the test harness the real one, which then blocked
+    on the write lock the caller was already holding.
     """
     try:
         pid = int(profile_id)
@@ -92,8 +99,11 @@ def is_admin_profile(profile_id) -> bool:
     if pid == 1:
         return True
     try:
-        from database.music_database import get_database
-        return bool((get_database().get_profile(pid) or {}).get('is_admin', False))
+        db = database
+        if db is None:
+            from database.music_database import get_database
+            db = get_database()
+        return bool((db.get_profile(pid) or {}).get('is_admin', False))
     except Exception:  # noqa: BLE001 - an unreadable profile is not an admin
         return False
 

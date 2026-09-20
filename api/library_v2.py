@@ -359,7 +359,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """
         try:
             from core.profile_context import is_admin_profile
-            return is_admin_profile(_profile())
+            # the INJECTED database, never the app-wide singleton: these routes
+            # are wired with one on purpose, and the tests wire a different one
+            return is_admin_profile(_profile(), database=get_database())
         except Exception:  # noqa: BLE001 - an unreadable profile is not an admin
             return _profile() == ADMIN_PROFILE_ID
 

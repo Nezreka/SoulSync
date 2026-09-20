@@ -415,6 +415,20 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
     1. Runs the analysis.
     2. If missing tracks are found, it automatically queues them for download.
     """
+    # the analysis asks "do we already have this" through the batch owner's
+    # library (#1199); this runs on a pool thread with no request context
+    from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
+    with tasks_lock:
+        _batch_profile = (download_batches.get(batch_id) or {}).get('profile_id')
+    _scope_token = set_library_scope(library_scope_for_profile(_batch_profile))
+    try:
+        return _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps, serialize)
+    finally:
+        reset_library_scope(_scope_token)
+
+
+def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: MasterDeps,
+                                     serialize: bool = False):
     try:
         # PHASE 1: ANALYSIS
         with tasks_lock:
@@ -638,6 +652,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 if track_exists_in_playlist_folder_from_track_data(
                     effective_playlist_name,
                     track_data,
+                    profile_id=batch_profile_id,
                 ):
                     logger.info(
                         f"[Playlist Folder] '{track_name}' already on disk in playlist folder — skipping download"

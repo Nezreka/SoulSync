@@ -252,7 +252,8 @@ def test_a_link_whose_connection_fails_falls_back_to_the_app_account(plex, monke
     assert svc._get_active_media_client(profile_id=2)[0] is plex.client
 
 
-def test_the_profiles_library_pick_lands_on_the_view(plex, monkeypatch):
+@pytest.mark.parametrize('linked', [False, True])
+def test_the_profiles_library_pick_lands_on_the_view(plex, monkeypatch, linked):
     from services import sync_service as ss
     svc = ss.PlaylistSyncService.__new__(ss.PlaylistSyncService)
     svc._media_client = lambda name: plex.client
@@ -260,7 +261,7 @@ def test_the_profiles_library_pick_lands_on_the_view(plex, monkeypatch):
 
     class _DB:
         def get_profile_plex_home_user(self, pid):
-            return {'id': '1', 'title': 'Kids', 'token': 'srvtoken-Kids'}
+            return {'id': '1', 'title': 'Kids', 'token': 'srvtoken-Kids'} if linked else None
 
         def get_profile_server_library(self, pid):
             return {'plex_library_id': 'Kids Music'}

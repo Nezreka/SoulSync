@@ -25,6 +25,10 @@ class _FakeDb:
     def __init__(self, path):
         self._path = str(path)
 
+    def _current_scope_sql(self):
+        # Match the real database's shared-library visibility contract.
+        return MusicDatabase._owner_scope_sql('shared')
+
     @contextmanager
     def _get_connection(self):
         conn = sqlite3.connect(self._path)

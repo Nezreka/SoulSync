@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from core.acquisition.candidates import redact_payload, redact_sensitive_text
-from core.acquisition.requests import ADMIN_PROFILE_ID
-from core.profile_context import is_admin_profile
+from core.acquisition.requests import ADMIN_PROFILE_ID, actor_is_admin
 
 
 HISTORY_ID_PREFIX = "ahe1-"
@@ -201,7 +200,7 @@ def record_history_event(
     event_type = str(event_type or "").strip().lower()
     if event_type not in EVENT_TYPES:
         raise ValueError(f"invalid acquisition history event: {event_type!r}")
-    if not is_admin_profile(actor_profile_id):
+    if not actor_is_admin(conn, actor_profile_id):
         raise ValueError("acquisition history is admin-profile only")
     if not any((request_id, candidate_id, download_id)):
         raise ValueError("acquisition history event requires a business correlation id")

@@ -1163,6 +1163,8 @@ class MusicDatabase:
             self._add_profile_service_credentials(cursor)
             self._add_profile_navidrome_login(cursor)
             self._add_profile_plex_home_user(cursor)
+            self._add_own_library_columns(cursor)
+            self._repair_own_jellyfin_artist_ids(cursor)
             self._add_service_credential_sets(cursor)
             self._add_listening_history_table(cursor)
 
@@ -4513,6 +4515,199 @@ class MusicDatabase:
             logger.error(f"Error reading plex home user for profile {profile_id}: {e}")
             return None
 
+    # ── own library per profile (#1199) ──────────────────────────────────
+    #
+    # a profile can have a library of its own: its own output folder and
+    # its own library on the media server. rows the scan of THAT library
+    # writes carry the profile as owner; rows of the shared library carry
+    # NULL, which is every row that existed before this. the shared client
+    # scans and reads as always; an own-library profile scans and reads its
+    # own rows. the admin is on the shared library like anyone else.
+    #
+    # the owner index is (server_source, owner_profile_id, id): the scan's
+    # per-library listings, counts and wipes are "this server, this owner"
+    # and read it covering. a bare owner index was worse than none: sqlite
+    # took it for "owner IS NULL" over the title and artist indexes and
+    # walked the whole library per search. an install that got that index
+    # has it dropped here.
+
+    def _add_own_library_columns(self, cursor):
+        for sql in (
+            "ALTER TABLE profiles ADD COLUMN library_mode TEXT DEFAULT 'shared'",
+            "ALTER TABLE profiles ADD COLUMN library_root TEXT DEFAULT NULL",
+            "ALTER TABLE tracks ADD COLUMN owner_profile_id INTEGER DEFAULT NULL",
+            "ALTER TABLE albums ADD COLUMN owner_profile_id INTEGER DEFAULT NULL",
+            "ALTER TABLE artists ADD COLUMN owner_profile_id INTEGER DEFAULT NULL",
+            "DROP INDEX IF EXISTS idx_tracks_owner",
+            "DROP INDEX IF EXISTS idx_albums_owner",
+            "DROP INDEX IF EXISTS idx_artists_owner",
+            "CREATE INDEX IF NOT EXISTS idx_tracks_source_owner ON tracks (server_source, owner_profile_id, id)",
+            "CREATE INDEX IF NOT EXISTS idx_albums_source_owner ON albums (server_source, owner_profile_id, id)",
+            "CREATE INDEX IF NOT EXISTS idx_artists_source_owner ON artists (server_source, owner_profile_id, id)",
+        ):
+            try:
+                cursor.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # Column / index already exists
+
+    # legacy-upgrade-only-begin
+    # Only an install that predates the cutover has artists/albums/tracks at
+    # all; the guard below returns immediately on one created here. It goes
+    # when the legacy tables do.
+    def _repair_own_jellyfin_artist_ids(self, cursor):
+        """Split legacy cross-library artist parents without losing enrichment or children.
+
+        Guarded, because this branch retired the legacy catalogue: on an install
+        created here `albums`/`tracks`/`artists` do not exist and the first
+        SELECT raises. It used to raise straight out of `_initialize_database`,
+        which then never recorded the path as initialised — so every later
+        `get_database()` ran the whole schema init again, and the one that
+        landed inside an open write transaction deadlocked against it. An
+        install upgraded from before the cutover still has the tables and is
+        still repaired.
+        """
+        from core.library_scope import library_artist_id
+        present = {r[0] for r in cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name IN ('artists','albums','tracks')").fetchall()}
+        if len(present) < 3:
+            return
+        cursor.execute("""
+            SELECT artist_id, owner_profile_id FROM albums
+            WHERE server_source = 'jellyfin' AND owner_profile_id IS NOT NULL
+            UNION SELECT artist_id, owner_profile_id FROM tracks
+            WHERE server_source = 'jellyfin' AND owner_profile_id IS NOT NULL
+            UNION SELECT id, owner_profile_id FROM artists
+            WHERE server_source = 'jellyfin' AND owner_profile_id IS NOT NULL
+        """)
+        rows = cursor.fetchall()
+        columns = [r[1] for r in cursor.execute('PRAGMA table_info(artists)').fetchall()]
+        quoted = ', '.join('"' + c + '"' for c in columns)
+        selection = ', '.join('?' if c in ('id', 'owner_profile_id') else '"' + c + '"' for c in columns)
+        for old_id, owner in rows:
+            new_id = library_artist_id(old_id, 'jellyfin', owner)
+            if new_id == old_id:
+                continue
+            values = [new_id if c == 'id' else owner for c in columns if c in ('id', 'owner_profile_id')]
+            cursor.execute(f'INSERT OR IGNORE INTO artists ({quoted}) SELECT {selection} FROM artists WHERE id = ?',
+                           [*values, old_id])
+            for table in ('albums', 'tracks'):
+                cursor.execute(f'UPDATE {table} SET artist_id = ? WHERE artist_id = ? AND owner_profile_id = ? AND server_source = ?',
+                               (new_id, old_id, owner, 'jellyfin'))
+            # Keep the native parent when the shared library references it.
+            cursor.execute("""UPDATE artists SET owner_profile_id = NULL WHERE id = ? AND (
+                EXISTS (SELECT 1 FROM albums WHERE artist_id = ? AND owner_profile_id IS NULL)
+                OR EXISTS (SELECT 1 FROM tracks WHERE artist_id = ? AND owner_profile_id IS NULL))""",
+                           (old_id, old_id, old_id))
+            cursor.execute("""DELETE FROM artists WHERE id = ? AND owner_profile_id = ?
+                AND NOT EXISTS (SELECT 1 FROM albums WHERE artist_id = ?)
+                AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = ?)""", (old_id, owner, old_id, old_id))
+    # legacy-upgrade-only-end
+
+    def set_profile_library(self, profile_id: int, mode: str, root: Optional[str]) -> bool:
+        """'shared' (the default, the one library everyone has always used) or
+        'own' with the profile's output folder."""
+        mode = 'own' if mode == 'own' else 'shared'
+        root = (root or '').strip() or None
+        if mode == 'own' and not root:
+            return False
+        if mode == 'shared':
+            root = None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE profiles SET library_mode = ?, library_root = ?, updated_at = CURRENT_TIMESTAMP "
+                               "WHERE id = ?", (mode, root, profile_id))
+                saved = cursor.rowcount > 0
+                if saved and mode == 'shared':
+                    # back on the shared library, the rows of its own are
+                    # nobody's: no scope reads them again. the next scan
+                    # rebuilds them if it is ever switched back
+                    self._release_own_library_rows(cursor, profile_id)
+                conn.commit()
+                return saved
+        except Exception as e:
+            logger.error(f"Error saving library mode for profile {profile_id}: {e}")
+            return False
+
+    def _release_own_library_rows(self, cursor, profile_id: int) -> None:
+        """Release a profile's own-library files back to the shared library.
+
+        Upstream DELETEs the catalogue rows here, because there a row IS the
+        library entry — one per server item per owner, so dropping the owner's
+        rows drops exactly their library. That does not translate: this
+        catalogue is shared metadata and the owner is on the FILE, so deleting
+        would remove entries for files still sitting on disk, and deleting
+        legacy `tracks`/`albums`/`artists` rows (which is what the ported
+        version did) raises "no such table" on any database created here — it
+        took profile deletion and every admin edit of a non-admin profile down
+        with it.
+
+        Clearing the owner is the honest analogue and the same thing
+        "switched back to shared" already means. Whether a deleted profile's
+        files should instead disappear from the catalogue is a product
+        question that belongs with the switch, not with this merge.
+        """
+        cursor.execute(
+            "UPDATE lib2_track_files SET owner_profile_id = NULL, "
+            "updated_at = CURRENT_TIMESTAMP WHERE owner_profile_id = ?",
+            (int(profile_id),))
+        if cursor.rowcount:
+            logger.info("own library: released %d file row(s) of profile %s to the "
+                        "shared library", cursor.rowcount, profile_id)
+
+    def get_profile_library(self, profile_id: int) -> Dict[str, Any]:
+        """{'mode': 'shared'|'own', 'root': str|None}. profile 1 is always shared."""
+        if not profile_id or int(profile_id) == 1:
+            return {'mode': 'shared', 'root': None}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT library_mode, library_root FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+            if not row or row[0] != 'own' or not row[1]:
+                return {'mode': 'shared', 'root': None}
+            return {'mode': 'own', 'root': row[1]}
+        except Exception as e:
+            logger.error(f"Error reading library mode for profile {profile_id}: {e}")
+            return {'mode': 'shared', 'root': None}
+
+    def get_own_library_profiles(self) -> List[Dict[str, Any]]:
+        """every profile with a library of its own: id, name, root."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, name, library_root FROM profiles "
+                               "WHERE library_mode = 'own' AND library_root IS NOT NULL AND library_root != '' "
+                               "ORDER BY id")
+                return [{'id': r[0], 'name': r[1], 'root': r[2]} for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error listing own-library profiles: {e}")
+            return []
+
+    @staticmethod
+    def _owner_scope_sql(scope, column: str = 'owner_profile_id') -> Tuple[str, list]:
+        """the WHERE fragment for a library scope from core.library_scope:
+        'shared' = the rows with no owner, an int = that profile's rows,
+        None = everything. always returns a fragment so callers can append
+        it with AND unconditionally.
+
+        the unary + on the column keeps the planner off it: the scope is a
+        filter on the rows a query's real predicates found, never the index
+        it walks. a plain "owner_profile_id IS NULL" had sqlite pick the
+        owner index over title/artist ones and walk every row of the
+        library for a search (2ms became 18s on a 300k-track db)."""
+        if scope is None:
+            return "1=1", []
+        if scope == 'shared':
+            return f"+{column} IS NULL", []
+        return f"+{column} = ?", [int(scope)]
+
+    def _current_scope_sql(self, column: str = 'owner_profile_id') -> Tuple[str, list]:
+        """the scope of the caller (request profile or background profile)."""
+        from core.library_scope import current_library_scope
+        return self._owner_scope_sql(current_library_scope(), column)
+
     def _add_service_credential_sets(self, cursor):
         """Named, switchable credential sets per auth service + each profile's
         selection of which set is active (Phase 0 foundation).
@@ -6662,6 +6857,8 @@ class MusicDatabase:
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
                         'has_listenbrainz': row['listenbrainz_token'] is not None if 'listenbrainz_token' in columns else False,
                         'listenbrainz_username': row['listenbrainz_username'] if 'listenbrainz_username' in columns else None,
+                        'library_mode': (row['library_mode'] if 'library_mode' in columns else None) or 'shared',
+                        'library_root': row['library_root'] if 'library_root' in columns else None,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                     })
@@ -6696,6 +6893,8 @@ class MusicDatabase:
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
                         'has_listenbrainz': row['listenbrainz_token'] is not None if 'listenbrainz_token' in columns else False,
                         'listenbrainz_username': row['listenbrainz_username'] if 'listenbrainz_username' in columns else None,
+                        'library_mode': (row['library_mode'] if 'library_mode' in columns else None) or 'shared',
+                        'library_root': row['library_root'] if 'library_root' in columns else None,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                     }
@@ -6795,6 +6994,8 @@ class MusicDatabase:
                                             cursor.rowcount, table)
                     except Exception as e:
                         logger.debug("Failed to delete from %s for profile: %s", table, e)
+                # its own library's rows go with it (#1199)
+                self._release_own_library_rows(cursor, profile_id)
                 cursor.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
                 conn.commit()
                 return cursor.rowcount > 0
@@ -7035,8 +7236,15 @@ class MusicDatabase:
             logger.error(f"Error getting database statistics: {e}")
             return {'artists': 0, 'albums': 0, 'tracks': 0}
     
-    def get_statistics_for_server(self, server_source: str = None) -> Dict[str, int]:
+    _ANY_OWNER = object()   # "do not filter by library owner"
+
+    def get_statistics_for_server(self, server_source: str = None, owner_profile_id=_ANY_OWNER) -> Dict[str, int]:
         """Get database statistics filtered by server source"""
+        # `owner_profile_id` is accepted so upstream's call sites keep working
+        # and is NOT honoured yet: ownership lives on lib2_track_files here and
+        # nothing reads it while core.library_scope.SCOPE_PARKED is true. Scoping
+        # this is part of Stufe 3 (docs/library-v2-dir-ownership.md) -- until
+        # then a caller must not assume a narrower answer than it gets.
         if not server_source:
             return self.get_statistics()
         try:
@@ -7190,8 +7398,15 @@ class MusicDatabase:
         return {'artists_removed': artists, 'albums_removed': albums,
                 'tracks_removed': tracks}
     
-    def clear_server_data(self, server_source: str):
-        """Clear data for specific server only (server-aware full refresh)"""
+    def clear_server_data(self, server_source: str, owner_profile_id=None):
+        """Clear data for specific server only (server-aware full refresh).
+        one library at a time: the shared library's rows (owner None) by
+        default; a profile's own rows when its id is given (#1199)."""
+        # `owner_profile_id` is accepted so upstream's call sites keep working
+        # and is NOT honoured yet: ownership lives on lib2_track_files here and
+        # nothing reads it while core.library_scope.SCOPE_PARKED is true. Scoping
+        # this is part of Stufe 3 (docs/library-v2-dir-ownership.md) -- until
+        # then a caller must not assume a narrower answer than it gets.
         for attempt in range(2):
             try:
                 with self._get_connection() as conn:
@@ -7560,8 +7775,14 @@ class MusicDatabase:
 
     # --- Removal detection helpers ---
 
-    def get_all_artist_ids_for_server(self, server_source: str) -> set:
-        """Get all artist IDs stored in the database for a specific server."""
+    def get_all_artist_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
+        """Get all artist IDs stored in the database for a specific server (and
+        library owner: None = the shared library's rows)."""
+        # `owner_profile_id` is accepted so upstream's call sites keep working
+        # and is NOT honoured yet: ownership lives on lib2_track_files here and
+        # nothing reads it while core.library_scope.SCOPE_PARKED is true. Scoping
+        # this is part of Stufe 3 (docs/library-v2-dir-ownership.md) -- until
+        # then a caller must not assume a narrower answer than it gets.
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7627,8 +7848,14 @@ class MusicDatabase:
             logger.error(f"Error clearing phantom artist thumbs for {server_source}: {e}")
         return cleared
 
-    def get_all_album_ids_for_server(self, server_source: str) -> set:
-        """Get all album IDs stored in the database for a specific server."""
+    def get_all_album_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
+        """Get all album IDs stored in the database for a specific server (and
+        library owner: None = the shared library's rows)."""
+        # `owner_profile_id` is accepted so upstream's call sites keep working
+        # and is NOT honoured yet: ownership lives on lib2_track_files here and
+        # nothing reads it while core.library_scope.SCOPE_PARKED is true. Scoping
+        # this is part of Stufe 3 (docs/library-v2-dir-ownership.md) -- until
+        # then a caller must not assume a narrower answer than it gets.
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7665,32 +7892,90 @@ class MusicDatabase:
             logger.error(f"Error getting track IDs for {server_source}: {e}")
             return set()
 
-    def get_track_ids_under_scopes(self, server_source: str, artist_ids: set, album_ids: set) -> Optional[set]:
-        """ids of this server's tracks that live under any of the given artists
-        or albums. the deep scan uses it to fence off the rows it could not
-        verify (an artist whose album listing failed, an album whose track
-        listing failed) so they never count as stale. None when the query
-        itself failed: a fence that might be missing rows is no fence, and
-        the caller has to skip removal rather than trust a partial one."""
+    # The deep scan's fence and the removal it protects both speak SERVER ids;
+    # the catalogue keys on its own integers and keeps the server's id in
+    # lib2_media_server_mappings, with lib2_*.server_source/server_id as the
+    # compatibility projection. Every lookup below therefore unions the two,
+    # exactly like get_all_track_ids_for_server, or a row mapped one way and
+    # not the other would fall outside the fence and be called stale.
+    _SCOPE_CHUNK = 500
+
+    @staticmethod
+    def _catalogue_ids_for_server_ids(cursor, entity_type: str, server_source: str,
+                                      server_ids) -> set:
+        """Catalogue ids for the given SERVER ids of one entity type."""
+        table = {"artist": "lib2_artists", "album": "lib2_albums",
+                 "track": "lib2_tracks"}[entity_type]
+        wanted = [str(i) for i in (server_ids or ()) if i is not None and str(i).strip()]
+        found: set = set()
+        for start in range(0, len(wanted), MusicDatabase._SCOPE_CHUNK):
+            batch = wanted[start:start + MusicDatabase._SCOPE_CHUNK]
+            marks = ",".join("?" * len(batch))
+            cursor.execute(
+                f"""SELECT entity_id FROM lib2_media_server_mappings
+                     WHERE entity_type=? AND server_source=? AND server_id IN ({marks})
+                    UNION
+                    SELECT id FROM {table}
+                     WHERE server_source=? AND server_id IN ({marks})""",  # noqa: S608
+                [entity_type, server_source, *batch, server_source, *batch])
+            found.update(int(r[0]) for r in cursor.fetchall())
+        return found
+
+    def get_track_ids_under_scopes(self, server_source: str, artist_ids: set,
+                                   album_ids: set) -> Optional[set]:
+        """server ids of this server's tracks that live under any of the given
+        artists or albums, named by THEIR server ids. the deep scan uses it to
+        fence off the rows it could not verify (an artist whose album listing
+        failed, an album whose track listing failed) so they never count as
+        stale. None when the query itself failed: a fence that might be missing
+        rows is no fence, and the caller has to skip removal rather than trust
+        a partial one."""
         if not artist_ids and not album_ids:
             return set()
-        found: set = set()
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                for column, ids in (("artist_id", artist_ids), ("album_id", album_ids)):
-                    id_list = [str(i) for i in (ids or ()) if i is not None]
-                    for start in range(0, len(id_list), 500):
-                        batch = id_list[start:start + 500]
-                        placeholders = ','.join('?' * len(batch))
+                albums = self._catalogue_ids_for_server_ids(
+                    cursor, "album", server_source, album_ids)
+                artists = self._catalogue_ids_for_server_ids(
+                    cursor, "artist", server_source, artist_ids)
+                ordered = sorted(artists)
+                for start in range(0, len(ordered), self._SCOPE_CHUNK):
+                    batch = ordered[start:start + self._SCOPE_CHUNK]
+                    marks = ",".join("?" * len(batch))
+                    cursor.execute(
+                        f"SELECT id FROM lib2_albums WHERE primary_artist_id IN ({marks})",  # noqa: S608
+                        batch)
+                    albums.update(int(r[0]) for r in cursor.fetchall())
+                found: set = set()
+                # Under an album, AND credited to the artist. Both are needed:
+                # an unverified artist's track on a Various Artists release
+                # hangs off an album whose primary artist is someone else, so
+                # the album pass alone leaves it outside the fence and the
+                # scan calls it stale — the exact loss this fence exists to
+                # prevent. The legacy query reached it through tracks.artist_id.
+                for where, ids in (("t.album_id IN ({marks})", sorted(albums)),
+                                   ("EXISTS (SELECT 1 FROM lib2_track_artists ta "
+                                    "WHERE ta.track_id = t.id AND ta.artist_id IN ({marks}))",
+                                    sorted(artists))):
+                    for start in range(0, len(ids), self._SCOPE_CHUNK):
+                        batch = ids[start:start + self._SCOPE_CHUNK]
+                        clause = where.format(marks=",".join("?" * len(batch)))
                         cursor.execute(
-                            f"SELECT id FROM tracks WHERE server_source = ? AND {column} IN ({placeholders})",
-                            [server_source] + batch)
-                        found.update(row[0] for row in cursor.fetchall())
+                            f"""SELECT m.server_id FROM lib2_media_server_mappings m
+                                  JOIN lib2_tracks t ON t.id = m.entity_id
+                                 WHERE m.entity_type='track' AND m.server_source=?
+                                   AND TRIM(m.server_id) <> '' AND {clause}
+                                UNION
+                                SELECT t.server_id FROM lib2_tracks t
+                                 WHERE t.server_source=? AND t.server_id IS NOT NULL
+                                   AND TRIM(t.server_id) <> '' AND {clause}""",  # noqa: S608
+                            [server_source, *batch, server_source, *batch])
+                        found.update(r[0] for r in cursor.fetchall())
+                return found
         except Exception as e:
             logger.error(f"Error getting scoped track IDs for {server_source}: {e}")
             return None
-        return found
 
     def delete_stale_tracks(self, stale_track_ids: set, server_source: str) -> int:
         """Delete tracks by ID+server_source that no longer exist on the media server.
@@ -7729,80 +8014,6 @@ class MusicDatabase:
     })
 
     @staticmethod
-    def _track_file_key(row) -> tuple:
-        """same album, same disc, same file name, same length = the same file.
-        the path itself is not compared: a reorganize stores the local form
-        and the server reports its own, so they differ on any mapped setup."""
-        path = str(row['file_path'] or '')
-        name = path.replace('\\', '/').rsplit('/', 1)[-1].lower()
-        duration = row['duration'] or 0
-        return (row['album_id'], row['disc_number'] or 1, name, int(duration // 1000))
-
-    def absorb_superseded_tracks(self, album_ids, seen_track_ids, server_source: str) -> int:
-        """fold rows the server no longer lists into the live row for the same file.
-
-        after a move the server trashes the old item and mints a new one, so
-        the album carries two rows for one file: the old id (repointed by the
-        reorganize) and the new. the live row keeps its id, takes every
-        enrichment column the old row had that it lacks, inherits the old
-        row's play history, and the old row goes. only rows whose id this
-        scan did NOT see are absorbed, and only into a row it did, so two
-        items the server genuinely lists are never merged (#1257)."""
-        if not album_ids or not seen_track_ids:
-            return 0
-        absorbed = 0
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                columns = [c[1] for c in cursor.execute("PRAGMA table_info(tracks)").fetchall()]
-                carry = [c for c in columns if c not in self._TRACK_SERVER_COLUMNS]
-                album_list = list(album_ids)
-                for i in range(0, len(album_list), 400):
-                    batch = album_list[i:i + 400]
-                    placeholders = ','.join('?' * len(batch))
-                    rows = cursor.execute(
-                        f"""SELECT id, album_id, disc_number, file_path, duration FROM tracks
-                            WHERE album_id IN ({placeholders}) AND server_source = ?
-                              AND file_path IS NOT NULL AND file_path != ''""",
-                        [str(a) for a in batch] + [server_source]).fetchall()
-                    groups: Dict[tuple, list] = {}
-                    for row in rows:
-                        groups.setdefault(self._track_file_key(row), []).append(str(row['id']))
-                    for ids in groups.values():
-                        if len(ids) < 2:
-                            continue
-                        live = [t for t in ids if t in seen_track_ids]
-                        gone = [t for t in ids if t not in seen_track_ids]
-                        if not live or not gone:
-                            continue
-                        keeper = live[0]
-                        for old_id in gone:
-                            self._absorb_track_row(cursor, old_id, keeper, carry)
-                            absorbed += 1
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Superseded track pass failed for {server_source}: {e}")
-            return absorbed
-        if absorbed:
-            logger.info(f"Superseded track rows folded for {server_source}: {absorbed}")
-        return absorbed
-
-    def _absorb_track_row(self, cursor, old_id: str, keeper_id: str, carry: list) -> None:
-        """move what the old row knew onto the keeper, then drop the old row."""
-        if carry:
-            sets = ', '.join(
-                f"{c} = COALESCE({c}, (SELECT {c} FROM tracks WHERE id = ?))" for c in carry)
-            cursor.execute(f"UPDATE tracks SET {sets} WHERE id = ?",
-                           [old_id] * len(carry) + [keeper_id])
-        try:
-            cursor.execute("UPDATE listening_history SET db_track_id = ? WHERE db_track_id = ?",
-                           (keeper_id, old_id))
-        except Exception as e:
-            logger.debug("listening_history repoint skipped: %s", e)
-        cursor.execute("DELETE FROM track_credits WHERE track_id = ?", (old_id,))
-        cursor.execute("DELETE FROM tracks WHERE id = ?", (old_id,))
-        logger.debug(f"Track row {old_id} folded into {keeper_id}")
-
     def delete_removed_content(self, removed_artist_ids: set, removed_album_ids: set,
                                server_source: str):
         """Detach artists/albums removed from a server, preserving shared state."""

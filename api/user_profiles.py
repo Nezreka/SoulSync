@@ -338,7 +338,14 @@ def list_profiles():
     try:
         database = get_database()
         profiles = database.get_all_profiles()
-        return jsonify({'success': True, 'profiles': profiles})
+        return jsonify({'success': True, 'profiles': profiles,
+                        # where an own-library folder goes on this install (#1199):
+                        # a mount under /app in docker, anywhere otherwise
+                        'own_library_root_hint': _own_library_root_hint(),
+                        'own_library_supported': config_manager.get_active_media_server() in ('plex', 'jellyfin'),
+                        # supported != available: the server may be right and the
+                        # feature still parked, and the UI must say which
+                        'own_library_available': not _own_library_parked()})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -484,7 +491,43 @@ def update_profile(profile_id):
                 sides = data['allowed_sides']
                 kwargs['allowed_sides'] = sides if sides in ('music', 'video', 'both') else None
 
-        success = database.update_profile(profile_id, **kwargs)
+        # own library (#1199): admin only, never on the admin profile itself
+        library_result = None
+        if current['is_admin'] and ('library_mode' in data or 'library_root' in data):
+            if int(profile_id) == 1:
+                return jsonify({'success': False, 'error': 'The admin profile is the shared library'}), 400
+            mode = 'own' if data.get('library_mode') == 'own' else 'shared'
+            root = str(data.get('library_root') or '').strip()
+            if mode == 'own':
+                if config_manager.get_active_media_server() not in ('plex', 'jellyfin'):
+                    return jsonify({'success': False, 'error': 'Own libraries require Plex or Jellyfin. Switch this profile to the shared library for Navidrome or Standalone.'}), 400
+                if not root:
+                    return jsonify({'success': False, 'error': 'An own library needs an output folder'}), 400
+                shared_root = str(config_manager.get('soulseek.transfer_path', '') or '').strip().rstrip('/\\')
+                if shared_root and root.rstrip('/\\') == shared_root:
+                    return jsonify({'success': False, 'error': 'That is the shared library folder; pick a different one'}), 400
+                problem = _own_library_root_problem(root)
+                if problem:
+                    return jsonify({'success': False, 'error': problem}), 400
+                problem = _own_library_root_overlap(root, shared_root, database, profile_id)
+                if problem:
+                    return jsonify({'success': False, 'error': problem}), 400
+                from core.library_scope import SCOPE_PARKED
+                if SCOPE_PARKED:
+                    # Last, so a request still gets the specific answer about
+                    # its folder first. Refusing beats half-applying: with the
+                    # scope parked the catalogue is still shared, so a profile
+                    # switched to its own library would be shown the admin's
+                    # tracks as its own while its downloads went elsewhere.
+                    return jsonify({'success': False,
+                                    'error': 'Own libraries are not available in this build yet.'}), 400
+            library_result = database.set_profile_library(profile_id, mode, root or None)
+            from core.library_scope import invalidate_library_scope_cache
+            invalidate_library_scope_cache()
+
+        success = database.update_profile(profile_id, **kwargs) if kwargs else True
+        if library_result is False:
+            return jsonify({'success': False, 'error': 'Failed to save the library setting'}), 500
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -961,6 +1004,75 @@ def save_profile_server_library():
         return jsonify({'success': False, 'error': 'Failed to save library selection'}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _is_docker() -> bool:
+    return os.path.exists('/.dockerenv')
+
+
+def _own_library_parked() -> bool:
+    """Whether own libraries are switched off in this build (SCOPE_PARKED)."""
+    try:
+        from core.library_scope import SCOPE_PARKED
+        return bool(SCOPE_PARKED)
+    except Exception:  # noqa: BLE001 - unreadable means treat it as off
+        return True
+
+
+def _own_library_root_hint(name: str = '<name>') -> str:
+    """the folder an own library is prefilled with. in docker that is a mount
+    the compose file has to provide (same rule as /app/Transfer). outside
+    docker the same shape is prefilled and the admin corrects it to a real
+    folder; the save-time check refuses one that is not there."""
+    return f"/app/libraries/{name}"
+
+
+def _same_or_inside(a: str, b: str) -> bool:
+    """a is b or lies under b, after both are resolved"""
+    try:
+        from core.imports.paths import config_root_path
+        ra = os.path.realpath(config_root_path(a))
+        rb = os.path.realpath(config_root_path(b))
+    except Exception:  # noqa: BLE001
+        ra, rb = os.path.realpath(a), os.path.realpath(b)
+    return ra == rb or ra.startswith(rb.rstrip(os.sep) + os.sep)
+
+
+def _own_library_root_overlap(root: str, shared_root: str, database, profile_id):
+    """None when the folder is nobody else's, else why not. a folder inside
+    the shared one (or holding it) is scanned into both libraries, and two
+    profiles on one folder write the same files and race each other's scan."""
+    if shared_root and (_same_or_inside(root, shared_root) or _same_or_inside(shared_root, root)):
+        return 'That folder overlaps the shared library folder; pick one outside it'
+    try:
+        others = database.get_own_library_profiles()
+    except Exception:  # noqa: BLE001
+        others = []
+    for other in others:
+        if int(other.get('id', 0)) == int(profile_id) or not other.get('root'):
+            continue
+        if _same_or_inside(root, other['root']) or _same_or_inside(other['root'], root):
+            return f"That folder is {other.get('name', 'another profile')}'s library; pick a different one"
+    return None
+
+
+def _own_library_root_problem(root: str):
+    """None when the folder is usable, else the message to show. the folder
+    has to exist and be writable HERE, inside the container when there is
+    one: a path that only exists on the host is the usual mistake."""
+    try:
+        from core.imports.paths import config_root_path
+        resolved = config_root_path(root)
+    except Exception:  # noqa: BLE001
+        resolved = root
+    if not os.path.isdir(resolved):
+        if _is_docker():
+            return (f"{root} does not exist inside the container. Mount it in docker-compose.yml "
+                    f"(e.g. - /path/on/host:{root}) and restart, then save again.")
+        return f"{root} does not exist. Create the folder first."
+    if not os.access(resolved, os.W_OK):
+        return f"{root} is not writable by the app."
+    return None
 
 
 @bp.route('/api/profiles/me/navidrome-login', methods=['POST'])

@@ -172,13 +172,13 @@ class _FakeDb:
     def __init__(self):
         self.tracks = []
 
-    def insert_or_update_media_artist(self, artist, server_source=None):
+    def insert_or_update_media_artist(self, artist, server_source=None, owner_profile_id=None):
         return True
 
-    def insert_or_update_media_album(self, album, artist_id, server_source=None):
+    def insert_or_update_media_album(self, album, artist_id, server_source=None, owner_profile_id=None):
         return True
 
-    def insert_or_update_media_track(self, track, album_id, artist_id, server_source=None):
+    def insert_or_update_media_track(self, track, album_id, artist_id, server_source=None, owner_profile_id=None):
         self.tracks.append(str(track.ratingKey))
         return 'inserted'
 

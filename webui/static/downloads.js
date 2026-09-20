@@ -4786,6 +4786,7 @@ let _musicSyncPulse = null;
 let _musicSyncClearTimer = null;
 let _lastfmImportTask = null;
 let _lastfmImportClearTimer = null;
+let _lastfmImportCompletion = null;
 
 function _taskClampPct(value, fallback = 0) {
     let pct = Number(value);
@@ -5133,12 +5134,35 @@ function _musicSyncActiveHTML() {
 function updateLastfmListeningImportTask(data) {
     if (!data) return;
     if (_lastfmImportClearTimer) { clearTimeout(_lastfmImportClearTimer); _lastfmImportClearTimer = null; }
-    const active = data.running === true;
+    const terminal = ['complete', 'error', 'cancelled'].includes(data.status);
+    const active = !terminal && (data.running === true || data.status === 'running');
     if (active) {
+        _lastfmImportCompletion = null;
         _lastfmImportTask = { ...data, updated_at: Date.now() };
-    } else if (_lastfmImportTask || data.status === 'complete' || data.status === 'error' || data.status === 'cancelled') {
-        _lastfmImportTask = { ...data, updated_at: Date.now() };
-        _lastfmImportClearTimer = setTimeout(() => { _lastfmImportTask = null; _updateOverlayBell(); _patchOverlayActive(); }, 10000);
+    } else if (terminal || _lastfmImportTask) {
+        // Status snapshots are persisted indefinitely and reloaded on panel open.
+        // Replays must not restart the grace period or resurrect an expired card.
+        const key = JSON.stringify([data.username, data.started_at, data.finished_at, data.status]);
+        if (!_lastfmImportCompletion || _lastfmImportCompletion.key !== key) {
+            // The importer writes naive UTC timestamps, not browser-local time.
+            let stamp = String(data.finished_at || '').replace(' ', 'T');
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(stamp)) stamp += 'Z';
+            const finished = Date.parse(stamp);
+            _lastfmImportCompletion = {
+                key,
+                expiresAt: Math.min(Date.now(), Number.isFinite(finished) ? finished : Date.now()) + 10000,
+            };
+        }
+        const remaining = _lastfmImportCompletion.expiresAt - Date.now();
+        _lastfmImportTask = remaining > 0 ? { ...data, running: false, updated_at: Date.now() } : null;
+        if (remaining > 0) {
+            _lastfmImportClearTimer = setTimeout(() => {
+                _lastfmImportClearTimer = null;
+                _lastfmImportTask = null;
+                _updateOverlayBell();
+                _patchOverlayActive();
+            }, remaining);
+        }
     }
     _updateOverlayBell();
     _patchOverlayActive();

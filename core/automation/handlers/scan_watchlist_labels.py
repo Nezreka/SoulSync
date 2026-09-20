@@ -352,8 +352,14 @@ def run_label_scan_phase(scan_state: dict, *, database, get_deezer: Optional[Cal
 
     seams = build_default_seams(database=database, get_deezer=get_deezer,
                                 profile_id=profile_id, on_add=_on_add)
-    result = run_label_watchlist_scan(
-        **seams, on_progress=_progress,
-        cancel_check=cancel_check or (lambda: scan_state.get('cancel_requested', False)))
+    # the album ownership gate asks the wishlisting profile's library (#1199)
+    from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
+    _scope_token = set_library_scope(library_scope_for_profile(profile_id))
+    try:
+        result = run_label_watchlist_scan(
+            **seams, on_progress=_progress,
+            cancel_check=cancel_check or (lambda: scan_state.get('cancel_requested', False)))
+    finally:
+        reset_library_scope(_scope_token)
     logger.info("Label watchlist phase: %s", result)
     return counts['tracks']

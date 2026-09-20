@@ -370,17 +370,31 @@ def test_nonadmin_is_still_refused_by_the_library_v2_mutation_guard(client, nona
     assert 'admin' in response.get_json()['error'].lower()
 
 
-def test_second_admin_may_attach_library_v2_context_to_a_download(client, second_admin):
-    # the mirror of test_nonadmin_cannot_attach_library_v2_context: the /api/download
-    # lib2 gate reads the same predicate, so it must not answer "Admin access required"
-    response = client.post('/api/download', json={
-        'username': 'user',
-        'filename': 'folder/song.flac',
-        'lib2_track_id': 1,
-    })
+def test_the_download_lib2_gate_tells_a_second_admin_from_a_non_admin(client, nonadmin):
+    """Asserted as a CONTRAST, on one payload, because either half alone is
+    hollow: "a second admin gets 400" also holds if the gate never ran, and
+    "a non-admin gets 403" also holds if the gate refuses everyone. Only the
+    pair pins that the gate ran AND told them apart.
 
-    assert not (response.status_code == 403
-                and response.get_json().get('error') == 'Admin access required')
+    The payload is deliberately incomplete. The gate sits before the
+    username/filename check, so whoever passes it stops at a 400 — a complete
+    one would be dispatched for real (no orchestrator stub, a live slskd
+    lookup, worker threads), and the first version of this test hung the whole
+    suite on exactly that.
+    """
+    payload = {'lib2_track_id': 1}
+    refused = client.post('/api/download', json=payload)
+    assert refused.status_code == 403
+    assert refused.get_json()['error'] == 'Admin access required'
+
+    database = web_server.get_database()
+    second = database.create_profile(name=f'admin2_{os.urandom(3).hex()}', is_admin=True)
+    with client.session_transaction() as sess:
+        sess['profile_id'] = second
+
+    allowed = client.post('/api/download', json=payload)
+    assert allowed.status_code == 400
+    assert allowed.get_json()['error'] == 'Missing username or filename.'
 
 
 def test_a_demoted_second_admin_loses_library_v2_write_access(client, second_admin):

@@ -17,6 +17,29 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 REQUEST_ID_PREFIX = "arq1-"
 ADMIN_PROFILE_ID = 1
 
+
+def actor_is_admin(conn: Any, actor_profile_id: Any) -> bool:
+    """Is this actor an admin? Answered on the caller's OWN connection.
+
+    Every caller of this is already inside a transaction on `conn`, so the
+    request-side `core.profile_context.is_admin_profile` is the wrong tool
+    here: with no database handed to it, it opens and schema-initialises a
+    fresh one, which then waits on the write lock the caller is holding.
+    Reading `profiles` through `conn` costs nothing and still lets a second
+    admin (profiles.is_admin, upstream 86d5e4682) through.
+    """
+    try:
+        pid = int(actor_profile_id or 0)
+    except (TypeError, ValueError):
+        return False
+    if pid == ADMIN_PROFILE_ID:
+        return True
+    try:
+        row = conn.execute("SELECT is_admin FROM profiles WHERE id=?", (pid,)).fetchone()
+    except Exception:  # noqa: BLE001 - an unreadable profile is not an admin
+        return False
+    return bool(row and row[0])
+
 SCOPES = frozenset({
     "recording",
     "release_group",

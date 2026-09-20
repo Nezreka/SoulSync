@@ -187,3 +187,19 @@ def test_users_with_music_are_found_in_parallel_and_cached(monkeypatch):
     client.clear_cache()
     client.get_available_users()
     assert calls.count('/Users') == 2
+
+
+# ── the per-artist album fetch stays inside the library ────────────────────
+
+def test_albums_for_an_artist_are_asked_within_the_library(jelly):
+    """an artist is one item across every library on the server; the
+    fallback fetch of their albums has to name the library or a second
+    music library's albums come back with it"""
+    jelly.client.get_albums_for_artist_verified('artist-1')
+    asks = [r for r in jelly.seen if r[0] == 'GET' and (r[2] or {}).get('ArtistIds') == 'artist-1']
+    assert asks and asks[0][2]['ParentId'] == 'lib-admin'
+    # and through a profile's view it is that profile's library
+    jelly.client.clear_cache()
+    jelly.client.as_user('kid-uid', 'lib-kids').get_albums_for_artist_verified('artist-1')
+    asks = [r for r in jelly.seen if r[0] == 'GET' and (r[2] or {}).get('ArtistIds') == 'artist-1']
+    assert asks[-1][2]['ParentId'] == 'lib-kids' and asks[-1][1] == '/Users/kid-uid/Items'

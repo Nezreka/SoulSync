@@ -370,7 +370,7 @@ class PlaylistSyncService:
                 client = self._media_client('plex')
                 if profile_id and client:
                     client = plex_client_for_profile(profile_id, client)
-                    self._apply_profile_library(profile_id, 'plex', client)
+                    client = self._apply_profile_library(profile_id, 'plex', client) or client
                 return client, "plex"
         except Exception as e:
             logger.error(f"Error determining active media server: {e}")
@@ -390,11 +390,16 @@ class PlaylistSyncService:
 
             if server_type == 'plex' and libs.get('plex_library_id'):
                 lib_name = libs['plex_library_id']
+                from core.plex_client import PlexUserView
+                if not isinstance(client, PlexUserView):
+                    if not client.ensure_connection():
+                        return client
+                    client = PlexUserView(client, client.server, str(profile_id))
                 if hasattr(client, 'set_music_library_by_name'):
                     client.set_music_library_by_name(lib_name)
                     logger.info(f"Per-profile: set Plex library to '{lib_name}' for profile {profile_id}")
-            # jellyfin: jellyfin_client_for_profile, a view, never an assignment
-            # on the shared client
+            # Jellyfin uses jellyfin_client_for_profile; never mutate the shared client.
+            return client
         except Exception as e:
             logger.debug(f"Error applying profile library for profile {profile_id}: {e}")
 
@@ -484,11 +489,16 @@ class PlaylistSyncService:
         return client.update_playlist(playlist_name, tracks)
 
     async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace') -> SyncResult:
-        # scoped to this task, not the shared instance (see _sync_profile_id)
+        # scoped to this task, not the shared instance (see _sync_profile_id).
+        # the library scope rides along: "do we own this" is answered through
+        # the profile's library, not the app account's (#1199)
+        from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
         _profile_token = _sync_profile_id.set(profile_id)
+        _scope_token = set_library_scope(library_scope_for_profile(profile_id))
         try:
             return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode)
         finally:
+            reset_library_scope(_scope_token)
             _sync_profile_id.reset(_profile_token)
 
     async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str) -> SyncResult:
@@ -983,7 +993,7 @@ class PlaylistSyncService:
                 #    Self-heals a stale library id via the stored file path.
                 try:
                     from core.artists.map import get_current_profile_id
-                    _profile_id = get_current_profile_id()
+                    _profile_id = _sync_profile_id.get() or get_current_profile_id()
                     m = cache_db.find_manual_library_match_by_source_track_id(
                         _profile_id, str(spotify_id), active_server)
                     if m:

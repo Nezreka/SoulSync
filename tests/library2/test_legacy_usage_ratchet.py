@@ -13,7 +13,8 @@ import pathlib
 import pytest
 
 from tests.library2.legacy_usage import (
-    LEGACY_TABLES, UPGRADE_ONLY_FILES, count_legacy_usage, scan_production_tree,
+    LEGACY_TABLES, UPGRADE_BEGIN, UPGRADE_END, UPGRADE_ONLY_FILES,
+    count_legacy_usage, scan_production_tree, split_upgrade_regions,
 )
 
 _BASELINE = pathlib.Path(__file__).with_name("legacy_usage_baseline.json")
@@ -99,6 +100,40 @@ class TestTheCounter:
             assert usage.writes == 1, table
 
 
+class TestTheUpgradeMarkers:
+    """A migration that only ever touches a pre-cutover database is not runtime
+    legacy use. Marking it in place beats raising the whole figure, which is
+    what hides the next real regression."""
+
+    def test_a_marked_region_leaves_the_runtime_half(self):
+        runtime, upgrade = split_upgrade_regions(
+            "cur.execute('SELECT id FROM artists')\n"
+            f"{UPGRADE_BEGIN}\n"
+            "cur.execute('DELETE FROM tracks')\n"
+            f"{UPGRADE_END}\n"
+            "cur.execute('SELECT id FROM albums')\n"
+        )
+        assert count_legacy_usage(runtime) == count_legacy_usage(
+            "cur.execute('SELECT id FROM artists')\ncur.execute('SELECT id FROM albums')\n")
+        assert count_legacy_usage(upgrade).writes == 1
+
+    def test_an_unclosed_marker_runs_to_the_end_rather_than_eating_the_rest(self):
+        """It over-reports the upgrade bucket. The opposite mistake would let a
+        forgotten marker hide every later runtime query in the file."""
+        runtime, upgrade = split_upgrade_regions(
+            f"{UPGRADE_BEGIN}\n"
+            "cur.execute('DELETE FROM tracks')\n"
+            "cur.execute('SELECT id FROM albums')\n"
+        )
+        assert not count_legacy_usage(runtime)
+        assert count_legacy_usage(upgrade) == count_legacy_usage(
+            "cur.execute('DELETE FROM tracks')\ncur.execute('SELECT id FROM albums')\n")
+
+    def test_the_markers_are_not_counted_themselves(self):
+        _, upgrade = split_upgrade_regions(f"{UPGRADE_BEGIN}\nx = 1\n{UPGRADE_END}\n")
+        assert UPGRADE_BEGIN not in upgrade and UPGRADE_END not in upgrade
+
+
 class TestTheRatchet:
     """The measured state of the tree, pinned."""
 
@@ -118,7 +153,9 @@ class TestTheRatchet:
 
     def test_upgrade_reader_is_pinned_separately(self, measured):
         baseline = json.loads(_BASELINE.read_text())
-        assert set(measured.upgrade_by_file) == set(UPGRADE_ONLY_FILES)
+        # UPGRADE_ONLY_FILES are whole files; a file may also join the bucket by
+        # marking one migration in place, which is how music_database.py is in it.
+        assert set(UPGRADE_ONLY_FILES) <= set(measured.upgrade_by_file)
         assert measured.upgrade_total.reads == baseline["upgrade_reads"]
         assert measured.upgrade_total.writes == baseline["upgrade_writes"]
 

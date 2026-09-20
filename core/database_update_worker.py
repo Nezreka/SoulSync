@@ -42,9 +42,12 @@ def verified_listing(obj, name: str) -> list:
 class DatabaseUpdateWorker:
     """Map media-server identities onto imported Library-v2 rows."""
     
-    def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex", force_sequential: bool = False):
+    def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex", force_sequential: bool = False, owner_profile_id=None):
         # Force sequential processing for web server mode to avoid threading issues
         self.force_sequential = force_sequential
+        # whose library this scan reads (#1199): None = the shared library,
+        # every row it writes and every row it may call stale carries this
+        self.owner_profile_id = owner_profile_id
         self.callbacks = {
             'progress_updated': [],
             'artist_processed': [],
@@ -147,31 +150,19 @@ class DatabaseUpdateWorker:
         attrib = getattr(data, 'attrib', None)
         return bool(attrib and attrib.get('deletedAt'))
 
-    def _absorb_superseded_tracks(self):
-        """fold rows this run did not see into the live row for the same file.
+    def _log_trashed_skipped(self):
+        """Say how many trashed server items this run ignored.
 
-        a reorganize repoints a row at the new path; the server then trashes
-        that item and mints a new one for the same file, so the next scan
-        inserts a second row and the album lists every track twice. only the
-        deep scan removed the old row, and its 50% safety skipped exactly the
-        libraries that had this the worst. runs after every scan, over the
-        albums this run touched, and never touches a row the server still
-        lists."""
-        # getattr: tests build workers through __new__ without the run state
-        touched = getattr(self, '_touched_album_ids', None)
-        seen = getattr(self, '_seen_track_ids', None)
-        if not self.database or not touched or not seen:
-            return 0
-        try:
-            absorbed = self.database.absorb_superseded_tracks(touched, seen, self.server_type)
-        except Exception as e:
-            logger.warning(f"Superseded track pass failed (non-fatal): {e}")
-            return 0
-        if absorbed:
-            logger.info(f"Folded {absorbed} superseded track rows into their live rows")
+        Upstream pairs this with a pass that folds a re-ided file's old row
+        into its live one (#1257). That pass is a legacy-mirror repair: it
+        rewrites `tracks` rows keyed by server id, and one file appearing
+        twice is a shape this catalogue cannot take — a file is a
+        lib2_track_files row, its identity is the path and content hash, and
+        a server re-id moves a mapping in lib2_media_server_mappings rather
+        than minting a second track. So only the reporting half applies here.
+        """
         if getattr(self, '_trashed_skipped', 0):
             logger.info(f"Skipped {self._trashed_skipped} trashed {self.server_type} items")
-        return absorbed
 
     def _emit_signal(self, signal_name: str, *args):
         """Emit a signal through the callback registry."""
@@ -355,7 +346,7 @@ class DatabaseUpdateWorker:
             
             self._repair_navidrome_identities()
 
-            self._absorb_superseded_tracks()
+            self._log_trashed_skipped()
 
             # Detect and remove content deleted from the media server
             # Only run on full refreshes — fetching the entire catalog on every
@@ -536,10 +527,7 @@ class DatabaseUpdateWorker:
 
             identity_repair_ok = self._repair_navidrome_identities()
 
-            # superseded rows go first: they are certain, and they must not
-            # count toward the 50% safety below (a reorganized library is
-            # nearly half superseded rows, which is what kept tripping it)
-            self._absorb_superseded_tracks()
+            self._log_trashed_skipped()
 
             # Phase 3: Stale track removal
             self._emit_signal('phase_changed', "Deep scan: Checking for stale tracks...")
@@ -693,7 +681,7 @@ class DatabaseUpdateWorker:
             except Exception as e:
                 logger.error(f"Deep scan: Error processing artist {artist_name}: {e}")
                 # never got a full look at this artist, so nothing under it is stale
-                self._unverified_artist_ids.add(str(getattr(artist, 'ratingKey', '')))
+                self._unverified_artist_ids.add(self._library_artist_id(getattr(artist, 'ratingKey', '')))
                 with self.thread_lock:
                     self.failed_operations += 1
                 self._emit_signal('artist_processed', artist_name, False, f"Error: {str(e)}", 0, 0)
@@ -1200,7 +1188,7 @@ class DatabaseUpdateWorker:
                     artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type)
                     if artist_success:
                         total_processed_artists += 1
-                        self._touched_artist_ids.add(artist_id)
+                        self._touched_artist_ids.add(self._library_artist_id(artist_id))
                     
                     # Process albums for this artist  
                     artist_album_ids = albums_by_artist.get(artist_id, set())
@@ -1319,6 +1307,10 @@ class DatabaseUpdateWorker:
             logger.debug(f"Error checking for metadata changes: {e}")
             return False  # Assume no changes if we can't check
     
+    def _library_artist_id(self, artist_id):
+        from core.library_scope import library_artist_id
+        return library_artist_id(artist_id, self.server_type, self.owner_profile_id)
+
     def _clear_phantom_artist_thumbs(self):
         """null the server-built photo url of every artist the server says has
         no image. non-fatal, and a client that can't answer is left alone."""
@@ -1329,7 +1321,8 @@ class DatabaseUpdateWorker:
             without_image = getter()
             if not without_image:
                 return
-            cleared = self.database.clear_phantom_artist_thumbs(without_image, self.server_type)
+            cleared = self.database.clear_phantom_artist_thumbs(
+                {self._library_artist_id(i) for i in without_image}, self.server_type)
             if cleared:
                 logger.info(f"Cleared {cleared} phantom artist photo urls "
                             f"({self.server_type} has no image for them)")
@@ -1385,7 +1378,7 @@ class DatabaseUpdateWorker:
 
         # Get current DB counts for safety threshold
         try:
-            db_stats = self.database.get_statistics_for_server(self.server_type)
+            db_stats = self.database.get_statistics_for_server(self.server_type, owner_profile_id=self.owner_profile_id)
             db_artist_count = db_stats.get('artists', 0)
             db_album_count = db_stats.get('albums', 0)
         except Exception:
@@ -1425,10 +1418,11 @@ class DatabaseUpdateWorker:
 
         # Get stored IDs from database
         self._emit_signal('phase_changed', f"Comparing local database with {self.server_type}...")
-        db_artist_ids = self.database.get_all_artist_ids_for_server(self.server_type) if check_artists else set()
-        db_album_ids = self.database.get_all_album_ids_for_server(self.server_type) if check_albums else set()
+        db_artist_ids = self.database.get_all_artist_ids_for_server(self.server_type, owner_profile_id=self.owner_profile_id) if check_artists else set()
+        db_album_ids = self.database.get_all_album_ids_for_server(self.server_type, owner_profile_id=self.owner_profile_id) if check_albums else set()
 
         # Compute removal sets (only for types we have valid server data for)
+        server_artist_ids = {self._library_artist_id(i) for i in server_artist_ids}
         removed_artist_ids = (db_artist_ids - server_artist_ids) if check_artists else set()
         removed_album_ids = (db_album_ids - server_album_ids) if check_albums else set()
 
@@ -1692,10 +1686,10 @@ class DatabaseUpdateWorker:
             if not artist_success:
                 if seen_track_ids is not None:
                     # deep scan: nothing under this artist was looked at
-                    self._unverified_artist_ids.add(artist_id)
+                    self._unverified_artist_ids.add(self._library_artist_id(artist_id))
                 return False, "Failed to update artist data", 0, 0
 
-            self._touched_artist_ids.add(artist_id)
+            self._touched_artist_ids.add(self._library_artist_id(artist_id))
 
             # 2. Get all albums for this artist (cached from aggressive pre-population)
             try:
@@ -1706,7 +1700,7 @@ class DatabaseUpdateWorker:
                     # deep scan: no answer means every track under this artist
                     # stays unverified. this used to return success with zero
                     # seen tracks, and the stale pass deleted all of them.
-                    self._unverified_artist_ids.add(artist_id)
+                    self._unverified_artist_ids.add(self._library_artist_id(artist_id))
                     return False, "Album listing failed, artist kept as-is", 0, 0
                 return True, "Artist updated (no albums accessible)", 0, 0
 
@@ -1801,7 +1795,7 @@ class DatabaseUpdateWorker:
         except Exception as e:
             logger.error(f"Error processing artist '{getattr(media_artist, 'title', 'Unknown')}': {e}")
             if seen_track_ids is not None:
-                self._unverified_artist_ids.add(str(getattr(media_artist, 'ratingKey', '')))
+                self._unverified_artist_ids.add(self._library_artist_id(getattr(media_artist, 'ratingKey', '')))
             return False, f"Processing error: {str(e)}", 0, 0
 
     def run_with_callback(self, completion_callback=None):

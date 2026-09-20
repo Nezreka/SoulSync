@@ -1634,6 +1634,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "artist_id", "track_artist", "file_size", "bitrate",
                 "sample_rate", "bit_depth", "verification_status",
                 "server_source", "created_at",
+                # only an install upgrading from upstream has it; optional, so
+                # one that never did simply projects nothing here (#1199)
+                "owner_profile_id",
                 *_enrichment_columns("track"),
                 *_provider_id_columns("track"),
             ),
@@ -1841,14 +1844,20 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
                 file_key = (int(track_id), str(file_path))
                 file_id = existing_files.get(file_key)
+                # Whose library the file is in travels with it (#1199). An
+                # install upgrading from upstream has the owner on the legacy
+                # track row; one that never had own libraries has no such
+                # column and `_pick` answers None, which is the shared
+                # library — the right answer for every row it has.
+                owner = _pick(row, "owner_profile_id")
                 if file_id is None:
                     cursor.execute(
                         "INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate, "
-                        "bit_depth, format, verification_status, import_status, legacy_track_id, "
-                        "legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?, 'imported',?,?)",
+                        "bit_depth, format, verification_status, import_status, owner_profile_id, "
+                        "legacy_track_id, legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?, 'imported',?,?,?)",
                         (track_id, file_path, _pick(row, "file_size"), _pick(row, "bitrate"),
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
-                         _pick(row, "verification_status"), row["id"], run_id),
+                         _pick(row, "verification_status"), owner, row["id"], run_id),
                     )
                     existing_files[file_key] = int(cursor.lastrowid)
                     stats["files"] += 1
@@ -1858,12 +1867,14 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     cursor.execute(
                         """UPDATE lib2_track_files
                               SET size=?, bitrate=?, sample_rate=?, bit_depth=?, format=?,
-                                  verification_status=?, legacy_track_id=?,
+                                  verification_status=?,
+                                  owner_profile_id=COALESCE(?, owner_profile_id),
+                                  legacy_track_id=?,
                                   legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP
                             WHERE id=?""",
                         (_pick(row, "file_size"), _pick(row, "bitrate"),
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
-                         _pick(row, "verification_status"), row["id"], run_id, file_id),
+                         _pick(row, "verification_status"), owner, row["id"], run_id, file_id),
                     )
             if (i + 1) % IMPORT_BATCH_SIZE == 0:
                 _rebuild_album_artist_credits(cursor, dirty_credit_album_ids)

@@ -185,8 +185,14 @@ def materialize_wishlist_intent(
         # Library-v2 intent is global. Fail closed unless the caller proves
         # that the action belongs to the admin profile; a non-admin wishlist,
         # watchlist or playlist may only mutate its own legacy list.
-        from core.profile_context import is_admin_profile
-        if not is_admin_profile(actor_profile_id):
+        # Arithmetic on purpose: this runs inside a caller's open write
+        # transaction, and a profile lookup here would build and
+        # schema-initialise a second MusicDatabase, which then waits on
+        # the write lock the caller is holding. A second admin loses
+        # nothing by it — the `profile_id` check below already requires
+        # the admin profile, so a non-admin's own wishlist add is
+        # refused on the row key whatever the actor turns out to be.
+        if int(actor_profile_id or 0) != ADMIN_PROFILE_ID:
             return None
         if int(profile_id) != ADMIN_PROFILE_ID:
             return None

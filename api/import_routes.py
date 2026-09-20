@@ -70,9 +70,24 @@ def _build_import_route_runtime():
         dev_mode_enabled=_dev_mode_enabled(),
         import_singles_executor=import_singles_executor,
         build_album_import_match_payload=build_album_import_match_payload,
-        process_single_import_file=lambda runtime, file_info: _process_single_import_file(file_info),
+        # the singles executor runs outside the request: carry the request's
+        # profile along instead of resolving it again on the worker thread
+        process_single_import_file=lambda runtime, file_info: _process_single_import_file(
+            file_info, profile_id=runtime.profile_id),
         logger=logger,
+        profile_id=_request_profile_id(),
     )
+
+
+def _request_profile_id():
+    """the importing profile, when there is a request to read it from."""
+    try:
+        from flask import has_request_context
+        if not has_request_context():
+            return None
+        return int(get_current_profile_id())
+    except Exception:  # noqa: BLE001
+        return None
 
 
 @bp.route('/api/import/staging/files', methods=['GET'])
@@ -312,8 +327,11 @@ def import_search_tracks():
     return jsonify(payload), status
 
 
-def _process_single_import_file(file_info):
-    return _import_process_single_import_file(_build_import_route_runtime(), file_info)
+def _process_single_import_file(file_info, profile_id=None):
+    runtime = _build_import_route_runtime()
+    if profile_id and not runtime.profile_id:
+        runtime.profile_id = profile_id
+    return _import_process_single_import_file(runtime, file_info)
 
 
 @bp.route('/api/import/singles/process', methods=['POST'])
