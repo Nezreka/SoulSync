@@ -182,6 +182,18 @@ def test_main_title_word_live_is_not_a_marker(svc):
     assert result is not None
 
 
+def test_artist_dash_title_query_still_matches_the_plain_recording(svc):
+    # A query in "Artist - Title" shape whose title opens with a marker word:
+    # the dash tail is a title, not a version qualifier, so the bare
+    # recording must still match. Long base so the pre-existing similarity
+    # floor clears (sim("live forever tonight...", "band - live forever
+    # tonight...") ≈ 0.9) and the assertion depends on the gate alone.
+    title = "Live Forever Tonight And Always Until The End Of Time"
+    svc.mb_client.search_recording = _fake_search([(title, 100)])
+    result = svc.match_recording(f"Band - {title}")
+    assert result is not None
+
+
 def test_main_title_word_live_still_gates_a_real_live_tag(svc):
     # sim=0.774, conf-with-artist-bonus=88 -> gate-dependent (see _fake_search).
     svc.mb_client.search_recording = _fake_search(
@@ -251,6 +263,20 @@ def test_katakana_tv_size_matches_ascii_tv_size(svc):
         ("Song Title (Special Edition)", frozenset()),
         # ...but a genuine performance marker alongside one still counts.
         ("Song Title (Live) (Explicit)", frozenset({"live"})),
+        # A dash tail is only a qualifier when is_trailing_version_qualifier
+        # says so — a dash also separates artist from title, and real titles
+        # open with marker words. (Same guard PR #1121's review demanded of
+        # the normaliser: "Queen - Radio Ga Ga" must not lose "Radio Ga Ga".)
+        ("Oasis - Live Forever", frozenset()),
+        ("Billy Joel - Piano Man", frozenset()),
+        ("Song Title - Live", frozenset({"live"})),
+        ("Song Title ~Acoustic Ver.~", frozenset({"acoustic"})),
+        ("曲名 ~ライブ~", frozenset({"live"})),
+        # Distinct-track qualifiers name a different TRACK, not a version of
+        # the same one: MusicBrainz spells them "Song, Pt. 2" (no marker), so
+        # treating "pt" as a marker would only reject the right recording.
+        ("Song Title (Pt. 2)", frozenset()),
+        ("Song Title - Pt. 2", frozenset()),
     ],
 )
 def test_recording_version_markers_extraction(title, expected):

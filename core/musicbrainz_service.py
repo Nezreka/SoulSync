@@ -514,7 +514,8 @@ class MusicBrainzService:
             # Find best match
             best_match = None
             best_confidence = 0
-            
+            query_markers = recording_version_markers(track_name)
+
             for result in results:
                 mb_title = result.get('title', '')
                 mb_score = result.get('score', 0)
@@ -537,7 +538,6 @@ class MusicBrainzService:
                 # ("Firewater" vs "Firewater (Acoustic)" scores ~0.76 and
                 # sails past 0.6). Same marker set in both directions
                 # (including both empty) passes; any asymmetry is rejected.
-                query_markers = recording_version_markers(track_name)
                 candidate_markers = recording_version_markers(mb_title)
                 if query_markers != candidate_markers:
                     logger.debug(
