@@ -727,8 +727,9 @@ class SoulseekClient(DownloadSourcePlugin):
 
                 # slskd exposes GET searches/{id} state. A completed search
                 # still gets one response poll after its final additions;
-                # missing/unknown state uses the bounded quiet-period fallback.
-                if responses_by_peer and poll_count >= 15 and poll_count - last_new_poll >= 2:
+                # missing/unknown state uses the bounded quiet-period fallback,
+                # which needs at least one response to judge quiet against.
+                if poll_count >= 15 and poll_count - last_new_poll >= 2:
                     try:
                         search_state = await self._make_request('GET', f'searches/{search_id}')
                     except Exception as exc:
@@ -740,7 +741,7 @@ class SoulseekClient(DownloadSourcePlugin):
                     has_search_state = isinstance(search_state, dict) and bool(
                         search_state.get('state') or search_state.get('status')
                     )
-                    if not has_search_state and poll_count - last_new_poll >= 5:
+                    if responses_by_peer and not has_search_state and poll_count - last_new_poll >= 5:
                         logger.info("Soulseek search quiet for five polls after %d peers", len(responses_by_peer))
                         break
                 

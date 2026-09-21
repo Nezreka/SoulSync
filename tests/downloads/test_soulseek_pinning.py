@@ -1290,6 +1290,30 @@ def test_search_uses_terminal_state_after_initial_collection_grace(terminal_payl
     assert counts['status'] == 1
 
 
+def test_search_with_no_responses_still_stops_at_terminal_state():
+    client = _search_ready_client()
+    counts = {'responses': 0}
+
+    async def fake_request(method, endpoint, **kwargs):
+        if method == 'POST':
+            return {'id': 'search-1'}
+        if endpoint.endswith('/responses'):
+            counts['responses'] += 1
+            return []
+        if endpoint == 'searches/search-1':
+            return {'state': 'Completed, TimedOut'}
+        raise AssertionError(endpoint)
+
+    with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
+         patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
+         patch.object(client, '_make_request', side_effect=fake_request), \
+         patch('core.soulseek_client.asyncio.sleep', AsyncMock()):
+        tracks, _ = _run_async(client.search('Nothing Here', timeout=30))
+
+    assert tracks == []
+    assert counts['responses'] < 30
+
+
 def test_search_keeps_polling_an_active_search_through_a_quiet_period():
     client = _search_ready_client()
     counts = {'responses': 0}
