@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from core.downloads.track_metadata_backfill import hydrate_download_metadata
-from core.downloads.peer_observation import HEALTHY_PEER_BPS, peer_speed
+from core.downloads.peer_observation import peer_availability_key, peer_speed
 from core.runtime_state import (
     download_tasks,
     matched_context_lock,
@@ -247,22 +247,13 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
                     and leader - (getattr(row, 'confidence', 0) or 0) <= 0.08]
             band_ids = {id(row) for row in band}
             remaining = [row for row in remaining if id(row) not in band_ids]
-            def availability(row):
-                observed = peer_speeds.get(row.username)
-                return (
-                    # Unknown peers stay ahead of a known crawler, but below
-                    # a peer with measured healthy throughput.
-                    1 if observed is None else (2 if observed >= HEALTHY_PEER_BPS else 0),
-                    observed or 0,
-                    getattr(row, 'free_upload_slots', 0) or 0,
-                    -(getattr(row, 'queue_length', 0) or 0),
-                    -peer_occupancy.get(row.username, 0),
-                    getattr(row, 'upload_speed', 0) or 0,
-                    getattr(row, 'quality_score', 0) or 0,
-                    getattr(row, 'confidence', 0) or 0,
-                )
-
-            band.sort(key=availability, reverse=True)
+            band.sort(key=lambda row: peer_availability_key(
+                row, peer_speeds.get(row.username),
+                occupancy=peer_occupancy.get(row.username, 0),
+            ) + (
+                getattr(row, 'quality_score', 0) or 0,
+                getattr(row, 'confidence', 0) or 0,
+            ), reverse=True)
             by_peer = {}
             for row in band:
                 by_peer.setdefault(row.username, []).append(row)

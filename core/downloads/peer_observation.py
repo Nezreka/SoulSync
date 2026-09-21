@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from typing import Any
 
 
 _TTL_SECONDS = 3600
@@ -47,6 +48,24 @@ def observe_peer(username: str, bytes_per_second: float, sample_seconds: float) 
             )
             previous.updated_at = now
             previous.sample_count += 1
+
+
+def peer_availability_key(peer: Any, observed_bps: float | None, *, occupancy: int = 0) -> tuple:
+    """Sort key (higher is better) for how quickly a peer would likely serve us.
+
+    Measured throughput outranks anything the peer advertises: a peer with a
+    healthy measurement first, then peers never measured, then known
+    crawlers. ``occupancy`` is how many of our own transfers the peer is
+    already serving. Callers append their own tie-breakers.
+    """
+    return (
+        1 if observed_bps is None else (2 if observed_bps >= HEALTHY_PEER_BPS else 0),
+        observed_bps or 0,
+        getattr(peer, 'free_upload_slots', 0) or 0,
+        -(getattr(peer, 'queue_length', 0) or 0),
+        -occupancy,
+        getattr(peer, 'upload_speed', 0) or 0,
+    )
 
 
 def peer_speed(username: str) -> float | None:

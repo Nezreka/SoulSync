@@ -1219,21 +1219,11 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                         f'{row[0].album_title} {row[0].album_path}',
                                     ) == leader_variant]
                             if len(band) > 1:
-                                from core.downloads.peer_observation import HEALTHY_PEER_BPS, peer_speed
+                                from core.downloads.peer_observation import peer_availability_key, peer_speed
 
-                                def album_availability(row):
-                                    album = row[0]
-                                    observed = peer_speed(album.username)
-                                    return (
-                                        1 if observed is None else (2 if observed >= HEALTHY_PEER_BPS else 0),
-                                        observed or 0,
-                                        getattr(album, 'free_upload_slots', 0) or 0,
-                                        -(getattr(album, 'queue_length', 0) or 0),
-                                        getattr(album, 'upload_speed', 0) or 0,
-                                        row[2], album.username,
-                                    )
-
-                                band.sort(key=album_availability, reverse=True)
+                                band.sort(key=lambda row: peer_availability_key(
+                                    row[0], peer_speed(row[0].username),
+                                ) + (row[2], row[0].username), reverse=True)
                                 band_ids = {id(row) for row in band}
                                 scored_albums = band + [row for row in scored_albums
                                                          if id(row) not in band_ids]
