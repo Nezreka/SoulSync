@@ -559,59 +559,52 @@ class MusicBrainzService:
 
         Deliberately conservative: this MBID gets pinned onto a recording
         search and the result cached, so a wrong resolution here is a wrong
-        recording match cached for the row's TTL. Accepted only when the top
-        result's own MB relevance score is >= 90 AND either no other result
-        is within 10 points of it, or the top result's name/alias already
-        equals the query outright (so even a close runner-up cannot be the
-        "right" one instead).
+        recording match cached for the row's TTL. Accepted only when exactly
+        ONE result's name or alias equals the query (case-insensitive) and
+        that result scores >= 90. Neither a relevance gap nor the top score
+        alone is evidence: MusicBrainz scales the best hit of any bare query
+        to 100, so a name it has never heard of still comes back as
+        `[unknown]` at 100 with a 78-point runner-up — and `[unknown]` has
+        dozens of recordings called "Yesterday" to pin a wrong title onto.
+        The same rule refuses a name several artists share outright (four
+        MB artists are literally "Nirvana"); the plain search has to settle
+        those, and it already does when the credit matches.
 
         Cached under its own entity_type so this costs one round trip per
         artist name, not one per track — but ONLY when MusicBrainz actually
         answered. `search_artist` is fail-soft by default and collapses a
         transient timeout/5xx into the same `[]` it returns for a genuine
-        "nobody by that name" (client 256-260); caching that as a negative
-        would silence this whole fallback for the row's TTL off the back of
-        one outage. `raise_on_error=True` tells the two apart, and a raise
-        is deliberately left uncached below.
+        "nobody by that name"; caching that as a negative would silence this
+        whole fallback for the row's TTL off the back of one outage.
+        `raise_on_error=True` tells the two apart, and the raise is left to
+        propagate: `match_recording`'s own except branch returns None
+        without writing a cache row of any kind.
         """
         cached = self._check_cache('artist_recording_pin', artist_name)
         if cached is not None:
             return cached.get('musicbrainz_id')
 
-        try:
-            results = self.mb_client.search_artist(
-                artist_name, limit=5, strict=False, raise_on_error=True)
-        except Exception as e:
-            logger.debug("artist pin resolution for %r raised: %s", artist_name, e)
-            return None
+        results = self.mb_client.search_artist(
+            artist_name, limit=5, strict=False, raise_on_error=True)
 
         if not results:
             self._save_to_cache('artist_recording_pin', artist_name, None, None, None, 0)
             return None
 
-        top = results[0]
-        top_score = top.get('score', 0) or 0
-        second_score = (results[1].get('score', 0) or 0) if len(results) > 1 else 0
-        gap_ok = (top_score - second_score) >= 10
-        name_matches = self._artist_name_or_alias_matches(top, artist_name)
-        # A tie on the exact name (three MB artists literally called
-        # "Nirvana") means the query alone cannot single one out even
-        # though it matches the top result's name/alias — that escape hatch
-        # only holds when exactly one candidate carries the name.
-        exact_name_matches = sum(
-            1 for r in results if self._artist_name_or_alias_matches(r, artist_name))
-        name_matches = name_matches and exact_name_matches <= 1
-
-        if top_score >= 90 and (gap_ok or name_matches):
-            mbid = top.get('id')
-            self._save_to_cache('artist_recording_pin', artist_name, None, mbid, top, top_score)
+        exact = [r for r in results if self._artist_name_or_alias_matches(r, artist_name)]
+        if len(exact) == 1 and (exact[0].get('score', 0) or 0) >= 90:
+            hit = exact[0]
+            mbid = hit.get('id')
+            self._save_to_cache('artist_recording_pin', artist_name, None, mbid, hit, hit.get('score', 0))
             return mbid
 
+        top = results[0]
         logger.debug(
-            "artist pin resolution for %r is ambiguous (top=%s, second=%s) — "
-            "no pin", artist_name, top_score, second_score,
+            "artist pin resolution for %r is ambiguous (top=%r score=%s, "
+            "exact name/alias hits=%d) — no pin",
+            artist_name, top.get('name'), top.get('score'), len(exact),
         )
-        self._save_to_cache('artist_recording_pin', artist_name, None, None, top, top_score)
+        self._save_to_cache('artist_recording_pin', artist_name, None, None, top, top.get('score', 0) or 0)
         return None
 
     def _match_recording_by_artist_pin(self, track_name: str, artist_name: str) -> tuple:
@@ -620,26 +613,21 @@ class MusicBrainzService:
         alias-aware artist search and retries the recording search pinned to
         that identity (`arid:<mbid>`) instead of the printed credit text.
 
-        Fail-soft by design — any exception here must never propagate out of
-        `match_recording` and reach `export_sources.musicbrainz_recording_mbid`.
-        Returns (best_match, best_confidence), (None, 0) on no pin / no result.
+        A transport failure in either request propagates: `match_recording`
+        catches it, returns None and — unlike its "no results" branch — writes
+        nothing to the cache, so an outage is not remembered as a miss for
+        30 days. Returns (best_match, best_confidence), (None, 0) on no pin /
+        no result.
         """
-        try:
-            artist_mbid = self._resolve_unambiguous_artist_mbid(artist_name)
-            if not artist_mbid:
-                return None, 0
-            results = self.mb_client.search_recording_by_artist_mbid(
-                track_name, artist_mbid, limit=5)
-            if not results:
-                return None, 0
-            return self._score_recording_candidates(
-                track_name, artist_name, results, artist_pinned=True)
-        except Exception as e:  # noqa: BLE001 — fail-soft, see docstring
-            logger.debug(
-                "artist-pinned recording fallback for '%s' / '%s' failed: %s",
-                track_name, artist_name, e,
-            )
+        artist_mbid = self._resolve_unambiguous_artist_mbid(artist_name)
+        if not artist_mbid:
             return None, 0
+        results = self.mb_client.search_recording_by_artist_mbid(
+            track_name, artist_mbid, limit=5, raise_on_error=True)
+        if not results:
+            return None, 0
+        return self._score_recording_candidates(
+            track_name, artist_name, results, artist_pinned=True)
 
     def match_recording(self, track_name: str, artist_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """

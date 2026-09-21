@@ -57,7 +57,7 @@ def test_a_cross_script_artist_is_pinned_and_matched(service):
     service.mb_client.search_artist.assert_called_once_with(
         "Tatsuro Yamashita", limit=5, strict=False, raise_on_error=True)
     service.mb_client.search_recording_by_artist_mbid.assert_called_once_with(
-        "Sparkle", "mbid-yamashita", limit=5)
+        "Sparkle", "mbid-yamashita", limit=5, raise_on_error=True)
 
     # The positive result lands in the SAME (track, artist) cache key the
     # plain path uses, so `_check_cache` still short-circuits it next time.
@@ -118,10 +118,11 @@ def test_d_a_normal_strict_hit_never_touches_artist_resolution(service):
     service.mb_client.search_recording_by_artist_mbid.assert_not_called()
 
 
-def test_e_a_raising_fallback_fails_soft_and_caches_nothing_positive(service):
+def test_e_a_raising_fallback_returns_none_and_caches_nothing(service):
     service.mb_client.search_recording.return_value = []
-    # Any exception anywhere in the fallback must not propagate and must not
-    # be mistaken for a positive result.
+    # An exception in the fallback must not escape match_recording, must not
+    # be mistaken for a positive result — and must not be written down as a
+    # miss either: it is an outage, not an answer.
     service._resolve_unambiguous_artist_mbid = MagicMock(
         side_effect=RuntimeError("musicbrainz is down"))
 
@@ -129,13 +130,23 @@ def test_e_a_raising_fallback_fails_soft_and_caches_nothing_positive(service):
 
     assert out is None
     service.mb_client.search_recording_by_artist_mbid.assert_not_called()
-    # The cache row written for this miss must not carry a musicbrainz id.
-    recording_calls = [
-        c for c in service._save_to_cache.call_args_list
-        if c.args[0] == "recording"
+    service._save_to_cache.assert_not_called()
+
+
+def test_e2_a_transient_pinned_search_failure_is_not_cached_as_a_miss(service):
+    service.mb_client.search_recording.return_value = []
+    service.mb_client.search_artist.return_value = [
+        {"id": "mbid-yamashita", "name": "Tatsuro Yamashita", "score": 100},
     ]
-    assert recording_calls
-    assert recording_calls[-1].args[3] is None
+    service.mb_client.search_recording_by_artist_mbid.side_effect = RuntimeError("503")
+
+    assert service.match_recording("Sparkle", "Tatsuro Yamashita") is None
+    service.mb_client.search_recording_by_artist_mbid.assert_called_once_with(
+        "Sparkle", "mbid-yamashita", limit=5, raise_on_error=True)
+    # The artist pin itself was a real answer and may be cached; the
+    # recording must not be.
+    assert not [c for c in service._save_to_cache.call_args_list
+                if c.args[0] == "recording"]
 
 
 def test_f_a_transient_search_artist_failure_is_not_cached_as_ambiguous(service):
@@ -152,29 +163,71 @@ def test_f_a_transient_search_artist_failure_is_not_cached_as_ambiguous(service)
     assert out is None
     service.mb_client.search_artist.assert_called_once_with(
         "Tatsuro Yamashita", limit=5, strict=False, raise_on_error=True)
-    pin_cache_calls = [
-        c for c in service._save_to_cache.call_args_list
-        if c.args[0] == "artist_recording_pin"
-    ]
-    assert pin_cache_calls == []
+    service._save_to_cache.assert_not_called()
 
 
-def test_g_a_tied_exact_name_match_is_refused(service):
-    # Three MB artists literally named "Nirvana", scores within 10 of each
-    # other. The top result's name equalling the query is only a rescue when
-    # it is the ONLY candidate that ties on the exact name — here it is not,
-    # so the tie must not be pinned.
+def test_g_a_shared_exact_name_is_refused_whatever_the_score_gap(service):
+    # Live shape of a bare "Nirvana" query: MusicBrainz scales the best hit
+    # to 100 and the other same-named artists trail by 19+ points. A score
+    # gap is not evidence of which Nirvana the caller meant, so the name
+    # being shared refuses the pin outright.
     service.mb_client.search_recording.return_value = []
     service.mb_client.search_artist.return_value = [
-        {"id": "mbid-1", "name": "Nirvana", "score": 95},
-        {"id": "mbid-2", "name": "Nirvana", "score": 92},
-        {"id": "mbid-3", "name": "Nirvana", "score": 90},
+        {"id": "mbid-1", "name": "Nirvana", "score": 100},
+        {"id": "mbid-2", "name": "Nirvana", "score": 81},
+        {"id": "mbid-3", "name": "Approaching Nirvana", "score": 75},
+        {"id": "mbid-4", "name": "Nirvana", "score": 70},
     ]
 
     out = service.match_recording("Sparkle", "Nirvana")
 
     assert out is None
     service.mb_client.search_recording_by_artist_mbid.assert_not_called()
+
+
+def test_g2_an_unknown_name_is_not_pinned_to_the_top_scoring_stranger(service):
+    # Live shape of a bare query for a name MusicBrainz has never heard of:
+    # the special-purpose "[unknown]" artist at 100 with a 78-point
+    # runner-up. Pinning would then run `arid:[unknown] AND recording:"..."`,
+    # and [unknown] has dozens of recordings under common titles.
+    service.mb_client.search_recording.return_value = []
+    service.mb_client.search_artist.return_value = [
+        {"id": "mbid-unknown", "name": "[unknown]", "score": 100},
+        {"id": "mbid-2", "name": "Some Shitty Cover Band", "score": 78},
+        {"id": "mbid-3", "name": "Cover Band", "score": 71},
+    ]
+
+    out = service.match_recording("Yesterday", "Some Unknown Cover Band")
+
+    assert out is None
+    service.mb_client.search_recording_by_artist_mbid.assert_not_called()
+    # ...and the refusal is remembered per artist, so the next track by the
+    # same name does not pay the artist search again.
+    service._save_to_cache.assert_any_call(
+        "artist_recording_pin", "Some Unknown Cover Band", None, None,
+        {"id": "mbid-unknown", "name": "[unknown]", "score": 100}, 100)
+
+
+def test_g3_an_exact_alias_hit_pins_the_native_script_entity(service):
+    # The motivating case as MusicBrainz actually returns it: the entity is
+    # named in kanji, the romanised query appears only in its alias list.
+    service.mb_client.search_recording.return_value = []
+    service.mb_client.search_artist.return_value = [
+        {"id": "mbid-yamashita", "name": "山下達郎", "score": 100,
+         "aliases": [{"name": "Tatsu Yamashita"}, {"name": "Tatsuro Yamashita"}]},
+        {"id": "mbid-2", "name": "tatsuro", "score": 56},
+        {"id": "mbid-3", "name": "鈴木達郎", "score": 52,
+         "aliases": [{"name": "Tatsuro Suzuki"}]},
+    ]
+    service.mb_client.search_recording_by_artist_mbid.return_value = [
+        {"id": "rec-sparkle", "title": "Sparkle", "score": 100},
+    ]
+
+    out = service.match_recording("Sparkle", "Tatsuro Yamashita")
+
+    assert out is not None and out["mbid"] == "rec-sparkle"
+    service.mb_client.search_recording_by_artist_mbid.assert_called_once_with(
+        "Sparkle", "mbid-yamashita", limit=5, raise_on_error=True)
 
 
 def test_h_pinned_candidates_failing_the_title_gate_still_return_none(service):

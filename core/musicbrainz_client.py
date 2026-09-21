@@ -381,7 +381,8 @@ class MusicBrainzClient:
             return []
 
     def search_recording_by_artist_mbid(self, track_name: str, artist_mbid: str,
-                                        limit: int = 5) -> List[Dict[str, Any]]:
+                                        limit: int = 5,
+                                        raise_on_error: bool = False) -> List[Dict[str, Any]]:
         """Search recordings by exact title, pinned to a resolved artist MBID.
 
         The ``artist``/``artistname``/``creditname`` fields on a /recording
@@ -396,6 +397,10 @@ class MusicBrainzClient:
         printed credit text, sidestepping that mismatch entirely. Callers are
         expected to have resolved ``artist_mbid`` through an alias-aware path
         (e.g. `search_artist(strict=False)`) first.
+
+        ``raise_on_error`` re-raises a transport failure instead of folding it
+        into ``[]`` — same contract as `search_artist`, for callers that
+        would otherwise cache the empty list as "no such recording".
         """
         try:
             safe_track = track_name.replace('\\', '\\\\').replace('"', '\\"')
@@ -418,6 +423,8 @@ class MusicBrainzClient:
 
         except Exception as e:
             logger.error(f"Error searching recordings for artist {artist_mbid}, track '{track_name}': {e}")
+            if raise_on_error:
+                raise
             return []
 
     def browse_artist_release_groups(self, artist_mbid: str,
