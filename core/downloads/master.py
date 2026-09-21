@@ -272,9 +272,14 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
         str(getattr(album_result, 'album_title', '') or ''),
         str(getattr(album_result, 'album_path', '') or ''),
     )
+    # Artist/(Year) Album/ layouts carry the artist one directory up, so
+    # compare against each path segment rather than the whole path.
+    album_path = str(getattr(album_result, 'album_path', '') or '')
     artist_score = max(
         _similarity(expected_artist, getattr(album_result, 'artist', '')),
-        _similarity(expected_artist, getattr(album_result, 'album_path', '')),
+        *(_similarity(expected_artist, segment)
+          for segment in re.split(r'[\\/]+', album_path) if segment.strip()),
+        0.0,
     )
     if expected_album and album_score < 0.65:
         return 0.0

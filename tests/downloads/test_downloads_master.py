@@ -848,6 +848,25 @@ def test_soulseek_album_score_accepts_complete_artistless_folder():
     ) >= 0.62
 
 
+def test_soulseek_album_score_reads_artist_from_a_parent_directory():
+    from core.downloads.master import _score_album_folder
+
+    expected = [
+        {'name': f'Track {number}', 'artists': ['Doves'], 'track_number': number}
+        for number in range(1, 4)
+    ]
+    tracks = [_slsk_track(f'Track {number}', number, folder='Doves/(2000) Lost Souls')
+              for number in range(1, 4)]
+    with_parent = _album_result('peer', 'Doves/(2000) Lost Souls', 'Lost Souls', tracks,
+                                artist='', year='2000')
+    without = _album_result('peer', 'Shared/(2000) Lost Souls', 'Lost Souls', tracks,
+                            artist='', year='2000')
+    context = ({'name': 'Lost Souls', 'total_tracks': 3}, {'name': 'Doves'})
+
+    assert _score_album_folder(with_parent, *context, expected, tracks) > \
+        _score_album_folder(without, *context, expected, tracks)
+
+
 def test_soulseek_album_title_similarity_keeps_existing_baseline():
     from core.downloads.master import _album_title_similarity, _similarity
 

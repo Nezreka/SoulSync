@@ -551,7 +551,7 @@ class SoulseekClient(DownloadSourcePlugin):
         
         # Try to extract from path
         import re
-        album_dir = album_path.split('/')[-1]
+        album_dir = album_path.replace('\\', '/').split('/')[-1]
         
         # Look for "Artist - Album" pattern
         artist_match = re.match(r'^(.+?)\s*[-–]\s*(.+)$', album_dir)
@@ -559,14 +559,6 @@ class SoulseekClient(DownloadSourcePlugin):
             potential_artist = artist_match.group(1).strip()
             if len(potential_artist) > 1:
                 return potential_artist
-
-        # A distinct parent directory often supplies the artist when filenames
-        # only contain track numbers and titles (Artist/(Year) Album/01 Song).
-        parts = album_path.replace('\\', '/').split('/')
-        if len(parts) >= 2:
-            parent = parts[-2].strip()
-            if parent and parent.lower() not in {'music', 'audio', 'albums', 'downloads', 'flac', 'mp3'}:
-                return parent
         
         return None
     

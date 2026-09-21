@@ -171,7 +171,10 @@ def test_year_prefixed_album_and_artist_parent_are_preserved():
     client = object.__new__(SoulseekClient)
     path = 'Doves/(2000) Lost Souls'
     assert client._extract_album_title(path) == 'Lost Souls'
-    assert client._determine_album_artist([], path) == 'Doves'
+    # A parent directory is not necessarily the artist ("Rock/", "Complete/"),
+    # so it never becomes the label; the scorers read it from the path.
+    assert client._determine_album_artist([], path) is None
+    assert client._determine_album_artist([], r'Music\Doves - Lost Souls') == 'Doves'
     identity = match_track(
         {'name': 'Rise', 'artists': ['Doves'], 'album': 'Lost Souls'},
         _file('Doves/(2000) Lost Souls/05 - Rise.flac'),
