@@ -259,7 +259,6 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                 logger.info(f"[Post-Processing] Sample of existing keys: {sample_keys}")
 
         expected_final_path = (context or {}).get('_final_processed_path')
-        expected_final_filename = os.path.basename(expected_final_path) if expected_final_path else None
 
         # RESILIENT FILE-FINDING LOOP: Try up to 3 times with delays
         found_file = None
@@ -385,10 +384,10 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
             logger.warning(f"[Post-Processing] Attempt {retry_count + 1}/{_file_search_max_retries} to find file")
             logger.info(f"[Post-Processing] Original filename: {task_basename}")
-            if expected_final_filename:
-                logger.info(f"[Post-Processing] Expected final filename: {expected_final_filename}")
+            if expected_final_path:
+                logger.info(f"[Post-Processing] Recorded import destination: {expected_final_path}")
             else:
-                logger.warning("[Post-Processing] No expected final filename available")
+                logger.warning("[Post-Processing] No recorded import destination available")
 
             # Strategy 1: Try with original filename in both downloads and transfer
             logger.info("[Post-Processing] Strategy 1: Searching with original filename...")
@@ -400,23 +399,22 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             else:
                 logger.error("[Post-Processing] Strategy 1 FAILED: Original filename not found in either location")
 
-            # Strategy 2: Prefer the exact destination recorded by the importer.
-            if not found_file and expected_final_path and os.path.isfile(expected_final_path):
-                found_file, file_location = _reject_non_audio_found_file(expected_final_path, 'transfer')
-            if not found_file and expected_final_filename:
-                logger.info("[Post-Processing] Strategy 2: Searching transfer folder with expected final filename...")
-                found_result = deps.find_completed_file(transfer_dir, expected_final_filename)
-                if found_result and found_result[0]:
-                    found_file, file_location = found_result[0], 'transfer'
-                    found_file, file_location = _reject_non_audio_found_file(found_file, file_location)
+            # Strategy 2: the exact destination the importer recorded. A
+            # transfer-folder hit from Strategy 1's fuzzy basename search only
+            # counts if it IS that file — under heavy concurrency the finder
+            # can pair this task with a neighbour's already-imported track.
+            if not found_file and expected_final_path:
+                logger.info("[Post-Processing] Strategy 2: Checking recorded import destination...")
+                if os.path.isfile(expected_final_path):
+                    found_file, file_location = _reject_non_audio_found_file(expected_final_path, 'transfer')
                     if found_file:
-                        logger.info(f"[Post-Processing] Strategy 2 SUCCESS: Found file with expected final filename: {found_file}")
+                        logger.info(f"[Post-Processing] Strategy 2 SUCCESS: Found recorded import: {found_file}")
                     else:
-                        logger.error("[Post-Processing] Strategy 2 FAILED: Expected final filename resolved to a non-audio file")
+                        logger.error("[Post-Processing] Strategy 2 FAILED: Recorded import is not an audio file")
                 else:
-                    logger.error("[Post-Processing] Strategy 2 FAILED: Expected final filename not found in transfer folder")
-            elif not expected_final_filename:
-                logger.warning("[Post-Processing] Strategy 2 SKIPPED: No expected final filename available")
+                    logger.error("[Post-Processing] Strategy 2 FAILED: Recorded import destination does not exist yet")
+            elif not found_file:
+                logger.warning("[Post-Processing] Strategy 2 SKIPPED: No recorded import destination available")
 
             if (found_file and file_location == 'transfer'
                     and not _found_file_matches_expected(found_file, expected_final_path)):
