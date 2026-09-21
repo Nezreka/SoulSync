@@ -15,6 +15,7 @@ for that version.
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -28,11 +29,20 @@ from core.text.track_prefix import parse_track_prefix
 _YEAR = re.compile(r'(?<!\d)[\[(]?((?:19|20)\d{2})[\])]?')
 _DISC_DIR = re.compile(r'^(?:disc|disk|cd)\s*[-._ ]*(\d{1,2})$', re.IGNORECASE)
 _AUDIO_EXTENSION = re.compile(r'\.[a-z0-9]{2,5}$', re.IGNORECASE)
+# slskd renames a colliding download "<name>_<ticks>"; scene rips append a
+# short hex release hash. Neither is part of the title.
+_FILENAME_SUFFIX = re.compile(r'(?:_\d{15,}|[-_][0-9a-f]{8})$', re.IGNORECASE)
 _TECHNICAL_TAG = re.compile(r'\s*[\[(](?:flac|mp3|320kbps|v0|lossless|24bit|16bit|hi res)[\])]\s*', re.IGNORECASE)
 _REMASTER_TAG = re.compile(r'\s*[\[(](?:\d{4}\s+)?remaster(?:ed)?(?:\s+\d{4})?[\])]\s*', re.IGNORECASE)
 _REMASTER_SUFFIX = re.compile(r'\s*[-–]\s*(?:(?:\d{4}\s+)?remaster(?:ed)?(?:\s+\d{4})?)\s*$', re.IGNORECASE)
 _FEAT_TAG = re.compile(r'\s*[\[(](?:feat\.?|ft\.?|featuring)\s+[^\])]+[\])]\s*', re.IGNORECASE)
 _CLEAN_TAG = re.compile(r'\s*[\[(](?:explicit|clean)[\])]\s*', re.IGNORECASE)
+# "(Original Mix)" is the plain recording on dance releases; "Acoustic
+# Version" and "Acoustic" name the same one. Trailing unbracketed credits
+# are credits, as the bracketed form above already is.
+_ORIGINAL_MIX_TAG = re.compile(r'\s*(?:[\[(]|[-–]\s*|\s)original (?:mix|version)[\])]?\s*$', re.IGNORECASE)
+_VERSION_WORD_TAG = re.compile(r'\b(?:version|ver\.?)\b', re.IGNORECASE)
+_TRAILING_FEAT = re.compile(r'\s+(?:feat\.?|ft\.?|featuring)\s+.+$', re.IGNORECASE)
 # A requested version ("Extended Mix") appended to the requested title.
 _VERSION_WORD = re.compile(
     r'\b(?:live|remix|mix|acoustic|instrumental|extended|demo|karaoke|radio edit|single edit)\b'
@@ -42,18 +52,26 @@ _WEAK_TITLE_SIMILARITY = 0.80
 
 
 def normalize(text: Any) -> str:
-    """Shared accent-aware comparison, retaining word boundaries."""
-    folded = normalize_for_comparison(str(text or ''))
+    """Shared accent-aware comparison, retaining word boundaries.
+
+    An apostrophe inside a word is dropped rather than split ("I'm" and
+    "im" are the same word on Soulseek) and "&" reads as "and".
+    """
+    text = re.sub(r"(?<=\w)['’](?=\w)", '', str(text or '')).replace('&', ' and ')
+    folded = normalize_for_comparison(text)
     return re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9]+', ' ', folded)).strip()
 
 
 def _title_key(text: str) -> str:
     """Ignore mastering/credit decorations, never recording versions."""
+    text = html.unescape(text)
     text = _REMASTER_TAG.sub(' ', text)
     text = _REMASTER_SUFFIX.sub(' ', text)
+    text = _ORIGINAL_MIX_TAG.sub(' ', text)
     text = _FEAT_TAG.sub(' ', text)
+    text = _TRAILING_FEAT.sub(' ', text)
     text = _CLEAN_TAG.sub(' ', text)
-    text = re.sub(r"(?<=\w)['’](?=\w)", '', text)
+    text = _VERSION_WORD_TAG.sub(' ', text)
     return normalize(text)
 
 
@@ -92,7 +110,7 @@ def title_interpretations(filename: str, artist: str = '', album: str = '') -> t
     segments = [part.strip() for part in str(filename or '').replace('\\', '/').split('/') if part.strip()]
     if not segments:
         return ()
-    stem = _AUDIO_EXTENSION.sub('', segments[-1]).strip()
+    stem = _FILENAME_SUFFIX.sub('', _AUDIO_EXTENSION.sub('', segments[-1])).strip()
     disc = None
     for segment in reversed(segments[:-1]):
         found = _DISC_DIR.fullmatch(segment)
@@ -114,6 +132,7 @@ def title_interpretations(filename: str, artist: str = '', album: str = '') -> t
             variants.append(TitleEvidence(key, source, parsed_number, disc))
 
     base = prefix.remainder.strip(' -_.')
+    normalized_artist = normalize(artist)
     # A number followed only by whitespace can be part of the actual title
     # ("7 rings"), so the unstripped stem stays a candidate.
     if re.match(r'^\s*\d+\s+[A-Za-z]', cleaned_stem):
@@ -138,6 +157,11 @@ def title_interpretations(filename: str, artist: str = '', album: str = '') -> t
             found_prefix = featured_prefix.match(base) or plain_prefix.match(base)
             if found_prefix:
                 add(found_prefix.group(1), 'artist-prefix')
+        # The same after normalization, which forgives "*NSYNC" vs "_NSYNC",
+        # "I'm With Her" vs "im_with_her" and "(philip glass) title".
+        normalized_base = normalize(base)
+        if normalized_base.startswith(f'{normalized_artist} '):
+            add(normalized_base[len(normalized_artist) + 1:], 'artist-prefix')
 
     # Numeric fields inside a scene-style name are strong track delimiters:
     # Artist - Album - 02 - Title, Album - 02 - Title, or Disc 1 - 02 - Title.
@@ -145,8 +169,14 @@ def title_interpretations(filename: str, artist: str = '', album: str = '') -> t
     for index, part in enumerate(parts[:-1]):
         if re.fullmatch(r'\d{1,3}', part) and index + 1 < len(parts):
             add(' - '.join(parts[index + 1:]), 'embedded-number', int(part))
-    if len(parts) >= 2 and artist and normalize(parts[0]) == normalize(artist):
-        add(' - '.join(parts[1:]), 'artist-segment')
+    if len(parts) >= 2 and artist:
+        # A collaborator list ("A, B - Title", "A; B - Title", "A with B -
+        # Title") still opens with the artist; "Title - Artist" closes with it.
+        leading = normalize(parts[0])
+        if leading == normalized_artist or leading.startswith(f'{normalized_artist} '):
+            add(' - '.join(parts[1:]), 'artist-segment')
+        if normalize(parts[-1]) == normalized_artist:
+            add(' - '.join(parts[:-1]), 'artist-suffix')
     if len(parts) >= 2 and album and normalize(_without_year(parts[0])) == normalize(_without_year(album)):
         add(' - '.join(parts[1:]), 'album-segment')
 

@@ -131,11 +131,38 @@ def test_unrecognized_layout_and_sibling_title_are_inconclusive():
     assert not sibling.matches and sibling.reason == 'parsed-title-mismatch'
 
 
+@pytest.mark.parametrize(('title', 'artist', 'album', 'filename'), [
+    # slskd's collision rename and scene release hashes are not title text.
+    ('Cry All Day', 'Wilco', 'Album', '03 - Wilco - Cry All Day_639249191278221237.flac'),
+    ('Scatterbrain', 'Split Chain', 'Album', '14-split_chain-scatterbrain-3b92e63f.mp3'),
+    # Collaborator lists open with the artist; "Title - Artist" closes with it.
+    ('Leave You', 'Einmusik', 'Album', '06 - Einmusik, Lexer, Jyll - Leave You.flac'),
+    ('Hamburgers - Instrumental', 'Elliott Smith', 'Album', '05 - Elliott Smith; Neil Gust - Hamburgers (Instrumental).flac'),
+    ('Prélude in E minor, Op. 28, No. 4', 'Frédéric Chopin', 'Album', '07. Prélude in E minor, Op. 28, No. 4 - Frédéric Chopin.flac'),
+    # Artist spelled with symbols, underscores, apostrophes or parentheses.
+    ('Bye Bye Bye', '*NSYNC', 'Album', '1-09 _NSYNC - Bye Bye Bye.flac'),
+    ("If I'm Not the One", '*NSYNC', 'Album', '114-nsync-if_im_not_the_one.flac'),
+    ('Hundred Miles', "I'm With Her", 'Album', '12-im_with_her-hundred_miles.flac'),
+    ('Fine', "Dustin O'Halloran", 'Album', '12-dustin_ohalloran-fine.flac'),
+    ('Dreaming of Fiji', 'Philip Glass', 'Album', '04-(philip glass) dreaming of fiji.flac'),
+    # Same recording, differently decorated.
+    ('Duvet - Acoustic', 'bôa', 'Album', '12. Duvet (acoustic version).flac'),
+    ('Son Of Sam - Acoustic Version', 'Elliott Smith', 'Album', '16 - Elliott Smith - Son Of Sam (Acoustic).flac'),
+    ('Black Ice', 'Artist', 'Album', '05 - Black Ice (original mix).flac'),
+    ('SFB - Original Mix', 'Cristoph', 'SFB', 'Cristoph_SFB_02_SFB (original mix).flac'),
+    ('Chop Me Up (feat. Timbaland & Three-6 Mafia)', 'Justin Timberlake', 'Album',
+     'Justin Timberlake - Chop Me Up featuring Timbaland and Three-6-Mafia.mp3'),
+    ('Hell & Consequences', 'Stone Sour', 'Album', '03-stone_sour-hell_and_consequences.mp3'),
+    ("Where'd All the Time Go?", 'Dr. Dog', 'Album', "05. Dr. Dog - Where'd All the Time Go&#x3f;.flac"),
+])
+def test_download_history_layouts_match(title, artist, album, filename):
+    """Layouts taken from real completed Soulseek downloads."""
+    assert match_track({'name': title, 'artists': [artist], 'album': album}, _file(filename)).matches
+
+
 @pytest.mark.parametrize(('title', 'filename'), [
-    ('Duvet - Acoustic', '12. Duvet (acoustic version).flac'),
-    ('Black Ice', '05 - Black Ice (original mix).flac'),
-    ('Where\'d All the Time Go?', "05. Dr. Dog - Where'd All the Time Go&#x3f;.flac"),
-    ('Scatterbrain', '14-split_chain-scatterbrain-3b92e63f.mp3'),
+    ('No Fun', '23. Lane 8 - No Fun (Mixed).flac'),
+    ('Fortune', '01 Fortune (Alternative Version).flac'),
     ('Bring On The Night - Remastered 2003',
      '10 - Bring On The Night (Remastered 2003.mp3'),
 ])
