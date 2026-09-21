@@ -13,31 +13,16 @@ network or database. The returned ``resolved`` list feeds straight into ``jspf_e
 
 from __future__ import annotations
 
-import inspect
-
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.exports.mbid_resolver import normalize_key
 
-# resolve_fn(artist, title) -> (recording_mbid|None, source_label|None)
-# May optionally accept a third `track` argument (the full mirrored-playlist row) — see
-# `_resolve_fn_wants_track` below. Existing 2-arg resolve_fns are unaffected.
-ResolveFn = Callable[..., Tuple[Optional[str], Optional[str]]]
+# resolve_fn(artist, title, track) -> (recording_mbid|None, source_label|None)
+# ``track`` is the full playlist row (the same dict ``tracks`` holds), so a source that
+# needs more than the artist/title text — the ISRC rung reads discovery's ``extra_data`` —
+# can get at it. Resolvers that only need the text simply ignore it.
+ResolveFn = Callable[[str, str, Dict[str, Any]], Tuple[Optional[str], Optional[str]]]
 ProgressFn = Callable[[int, int, Dict[str, Any]], None]
-
-
-def _resolve_fn_wants_track(resolve_fn: Callable[..., Any]) -> bool:
-    """Whether ``resolve_fn`` accepts a third (``track``) argument, so callers that
-    still define ``resolve_fn(artist, title)`` — every pre-existing test and the
-    service-export resolver — keep being called exactly as before."""
-    try:
-        params = list(inspect.signature(resolve_fn).parameters.values())
-    except (TypeError, ValueError):
-        return False
-    if any(p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD) for p in params):
-        return True
-    positional = [p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
-    return len(positional) >= 3
 
 
 def _field(track: Dict[str, Any], *names: str) -> str:
@@ -58,7 +43,7 @@ def resolve_playlist_tracks(
 ) -> Dict[str, Any]:
     """Resolve every track to an ID and build the export pseudo-playlist.
 
-    ``resolve_fn(artist, title) -> (id, source)`` returns whatever ID the target needs —
+    ``resolve_fn(artist, title, track) -> (id, source)`` returns whatever ID the target needs —
     a MusicBrainz recording MBID for ListenBrainz/JSPF (the default), or a Spotify/Deezer
     track ID for service export. ``id_key`` names the field that ID lands under in each
     resolved entry (defaults to ``recording_mbid`` so existing LB/JSPF callers are
@@ -81,7 +66,6 @@ def resolve_playlist_tracks(
     stats: Dict[str, Any] = {
         "total": total, "resolved": 0, "unmatched": 0, "deduped": 0, "by_source": {},
     }
-    wants_track = _resolve_fn_wants_track(resolve_fn)
 
     for i, t in enumerate(tracks or []):
         if not isinstance(t, dict):
@@ -96,7 +80,7 @@ def resolve_playlist_tracks(
             stats["deduped"] += 1
             fresh = False
         else:
-            mbid, source = resolve_fn(artist, title, t) if wants_track else resolve_fn(artist, title)
+            mbid, source = resolve_fn(artist, title, t)
             memo[key] = (mbid, source)
             fresh = True
 

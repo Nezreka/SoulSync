@@ -16,7 +16,7 @@ MBID2 = "8f3471b5-7e6a-4c1f-9c1a-2b2b2b2b2b2b"
 
 def test_resolves_and_keeps_order_and_unmatched():
     table = {("A", "T1"): (MBID, "db"), ("A", "T2"): (None, None)}
-    rf = lambda a, t: table.get((a, t), (None, None))
+    rf = lambda a, t, track: table.get((a, t), (None, None))
     out = resolve_playlist_tracks(
         [{"artist": "A", "title": "T1"}, {"artist": "A", "title": "T2"}], rf
     )
@@ -31,7 +31,7 @@ def test_resolves_and_keeps_order_and_unmatched():
 
 def test_dedup_resolves_repeated_song_once():
     calls = {"n": 0}
-    def rf(a, t):
+    def rf(a, t, track):
         calls["n"] += 1
         return (MBID, "musicbrainz")
     tracks = [{"artist": "A", "title": "Song"}, {"artist": "a", "title": "song"},  # same (normalized)
@@ -45,7 +45,7 @@ def test_dedup_resolves_repeated_song_once():
 
 
 def test_accepts_alternate_field_names():
-    rf = lambda a, t: (MBID, "db") if (a, t) == ("Artist", "Track") else (None, None)
+    rf = lambda a, t, track: (MBID, "db") if (a, t) == ("Artist", "Track") else (None, None)
     out = resolve_playlist_tracks(
         [{"artist_name": "Artist", "track_name": "Track", "album_name": "Alb"}], rf
     )
@@ -61,7 +61,7 @@ def test_progress_called_per_track_and_safe_when_throwing():
         raise RuntimeError("display blew up")
     out = resolve_playlist_tracks(
         [{"artist": "A", "title": "x"}, {"artist": "B", "title": "y"}],
-        lambda a, t: (MBID, "db"),
+        lambda a, t, track: (MBID, "db"),
         on_progress=prog,
     )
     assert seen == [(1, 2), (2, 2)]              # called each track despite raising
@@ -69,7 +69,7 @@ def test_progress_called_per_track_and_safe_when_throwing():
 
 
 def test_empty_playlist():
-    out = resolve_playlist_tracks([], lambda a, t: (None, None))
+    out = resolve_playlist_tracks([], lambda a, t, track: (None, None))
     assert out["resolved"] == []
     assert out["stats"]["total"] == 0
 
@@ -80,7 +80,7 @@ from core.exports.playlist_export import resolve_playlist_tracks as _rpt
 
 
 def _const_resolver(mapping):
-    return lambda artist, title: mapping.get((artist, title), (None, None))
+    return lambda artist, title, track: mapping.get((artist, title), (None, None))
 
 
 def test_default_id_key_is_recording_mbid_unchanged():
@@ -102,13 +102,13 @@ def test_custom_id_key_carries_service_id():
     assert out['stats']['resolved'] == 1 and out['stats']['unmatched'] == 1
 
 
-# ── track-aware resolve_fn (#903 review: ISRC rung needs the full row's extra_data) ──
+# ── track-aware resolve_fn (the ISRC rung needs the full row's extra_data) ──
 
-def test_resolve_fn_receives_full_track_dict_when_it_accepts_one():
-    """A resolve_fn(artist, title, track) — the ISRC-rung shape build_resolve_fn returns —
-    must get the ORIGINAL track dict for each row, not just its artist/title strings."""
+def test_resolve_fn_receives_full_track_dict():
+    """resolve_fn(artist, title, track) must get the ORIGINAL track dict for each row,
+    not just its artist/title strings."""
     seen = []
-    def rf(artist, title, track=None):
+    def rf(artist, title, track):
         seen.append(track)
         return (MBID, 'isrc') if track and track.get('extra_data') else (None, None)
 
@@ -121,21 +121,12 @@ def test_resolve_fn_receives_full_track_dict_when_it_accepts_one():
     assert out['resolved'][1]['recording_mbid'] is None
 
 
-def test_two_arg_resolve_fn_is_never_called_with_a_third_positional():
-    """A plain 2-param resolve_fn (every existing caller) must keep being called with
-    exactly (artist, title) — passing a 3rd positional would raise TypeError."""
-    def rf(artist, title):
-        return (MBID, 'db')
-    out = resolve_playlist_tracks([{'artist': 'A', 'title': 'X', 'extra_data': '{}'}], rf)
-    assert out['resolved'][0]['recording_mbid'] == MBID
-
-
 def test_track_aware_resolve_fn_dedup_still_uses_artist_title_memo():
     """Two rows with the same artist+title text but different extra_data (e.g. different
     source ISRCs) are still the same song for playlist purposes: resolve_fn is called
     once, and the SECOND row's own extra_data is never even looked at."""
     calls = []
-    def rf(artist, title, track=None):
+    def rf(artist, title, track):
         calls.append(track)
         return (MBID, 'isrc')
     track1 = {'artist': 'A', 'title': 'Song', 'extra_data': '{"isrc": "AAA"}'}

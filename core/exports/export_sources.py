@@ -118,11 +118,12 @@ def db_service_track_id(artist: str, title: str, service: str) -> Optional[str]:
         return None
 
 
-def build_service_resolve_fn(service: str) -> Callable[[str, str], Tuple[Optional[str], Optional[str]]]:
-    """resolve_fn for service-playlist export: ``(artist, title) -> (service_track_id, 'library')``.
-    Plugs into ``resolve_playlist_tracks(..., id_key='service_track_id')`` exactly like the
-    MBID resolver plugs in for ListenBrainz."""
-    def resolve_fn(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+def build_service_resolve_fn(service: str) -> Callable[..., Tuple[Optional[str], Optional[str]]]:
+    """resolve_fn for service-playlist export: ``(artist, title, track=None) ->
+    (service_track_id, 'library')``. Plugs into ``resolve_playlist_tracks(...,
+    id_key='service_track_id')`` exactly like the MBID resolver plugs in for ListenBrainz;
+    the row itself is not needed here."""
+    def resolve_fn(artist: str, title: str, track: Optional[Dict[str, Any]] = None) -> Tuple[Optional[str], Optional[str]]:
         tid = db_service_track_id(artist, title, service)
         return (tid, "library" if tid else None)
     return resolve_fn
@@ -451,12 +452,10 @@ def build_resolve_fn(
     back to the persistent cache. All sources are injectable so the wiring is
     unit-testable; defaults use the real cache module.
 
-    The returned ``resolve_fn`` keeps working with the old 2-arg call
-    (``resolve_fn(artist, title)``, as every existing test/caller does) — ``track`` is an
-    optional third argument only ``resolve_playlist_tracks`` passes, carrying the full
-    mirrored-playlist row so the ISRC rung can read its ``extra_data`` (discovery's own
-    matched id). Without a ``track``, the ISRC rung has nothing to key off and is
-    skipped, same as any other miss.
+    ``track`` is the full mirrored-playlist row ``resolve_playlist_tracks`` passes, so the
+    ISRC rung can read its ``extra_data`` (discovery's own matched id). It is optional so
+    the 2-arg call (``resolve_fn(artist, title)``) still works; without a ``track`` the
+    ISRC rung has nothing to key off and is skipped, same as any other miss.
     """
     if cache_lookup is None or cache_record is None:
         from core.exports import recording_mbid_cache as _cache
