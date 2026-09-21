@@ -1856,6 +1856,17 @@ def validate_and_heal_batch_states():
                     if _new_orphans or stuck_post_processing:
                         batches_needing_completion_check.append(batch_id)
 
+                    # A failed publish has no new orphan on the next pass. Keep
+                    # retrying it until lifecycle succeeds or exhausts its budget.
+                    _publish_pending = (
+                        0 < batch_data.get('_atomic_publish_attempts', 0)
+                        < _downloads_lifecycle._ATOMIC_PUBLISH_MAX_ATTEMPTS
+                        and actually_active == 0
+                        and batch_data.get('queue_index', 0) >= len(queue)
+                    )
+                    if _publish_pending and batch_id not in batches_needing_completion_check:
+                        batches_needing_completion_check.append(batch_id)
+
                     # STUCK-NO-WORKERS EMERGENCY HEAL (#1277): If all tasks have
                     # been dispatched (queue_index >= len(queue)), no workers are
                     # active, and no completion_time has been recorded for >10
@@ -1868,7 +1879,8 @@ def validate_and_heal_batch_states():
                     # lifecycle.py (_ATOMIC_PUBLISH_MAX_ATTEMPTS).
                     _all_dispatched = batch_data.get('queue_index', 0) >= len(queue)
                     _no_workers = actually_active == 0
-                    if _all_dispatched and _no_workers and not batch_data.get('completion_time'):
+                    if (_all_dispatched and _no_workers and not batch_data.get('completion_time')
+                            and not _publish_pending):
                         _first_seen = batch_data.get('_heal_stuck_detected_at')
                         if _first_seen is None:
                             import time as _time
@@ -1903,7 +1915,15 @@ def validate_and_heal_batch_states():
                 # (no-op for normal batches and for atomic batches that already
                 # published — their staging was pruned at publish).
                 _cleanup_batch = download_batches[batch_id]
-                if _cleanup_batch.get('_atomic_active') and _cleanup_batch.get('_atomic_staging_root'):
+                _preserve_failed_publish = (
+                    _cleanup_batch.get('phase') == 'error'
+                    and _cleanup_batch.get('_atomic_publish_attempts', 0) > 0
+                )
+                if _preserve_failed_publish:
+                    logger.warning("[Atomic Publish] Keeping failed publish staging for manual recovery: %s",
+                                   _cleanup_batch.get('_atomic_staging_root'))
+                if (_cleanup_batch.get('_atomic_active') and _cleanup_batch.get('_atomic_staging_root')
+                        and not _preserve_failed_publish):
                     try:
                         from core.downloads.atomic_album_publish import discard_staging_root
                         if discard_staging_root(_cleanup_batch.get('_atomic_staging_root')):

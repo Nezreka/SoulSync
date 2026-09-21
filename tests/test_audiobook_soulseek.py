@@ -425,3 +425,26 @@ def test_filename_refs_track_live_chapters_only_from_the_selected_peer():
     assert result["progress"] == 50
     assert result["finished"] == 1
     assert result["total"] == 3
+
+
+@pytest.mark.parametrize("unknown", [None, 0])
+def test_partial_chapter_durations_do_not_reject_a_complete_release(unknown):
+    from core.audiobook_release_search import rank_releases
+    album = _album()
+    for index, track in enumerate(album.tracks):
+        track.duration = 60 * 60 * 1000 if index < 2 else unknown
+    release = album_to_release(album, BOOK)
+    assert release.duration_seconds is None
+    assert rank_releases([release], BOOK, 0.0, "any") == [release]
+    assert release.duration_verdict != "severely_short"
+
+
+def test_all_known_short_chapter_durations_still_reject_incomplete_release():
+    from core.audiobook_release_search import rank_releases
+    album = _album()
+    for track in album.tracks:
+        track.duration = 10 * 60 * 1000
+    release = album_to_release(album, BOOK)
+    assert release.duration_seconds == 60 * 60
+    assert rank_releases([release], BOOK, 0.0, "any") == []
+    assert release.duration_verdict == "severely_short"

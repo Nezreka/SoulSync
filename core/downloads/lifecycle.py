@@ -1035,8 +1035,8 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
             # Check if this is an auto-initiated batch
             is_auto_batch = batch.get('auto_initiated', False)
 
-            # FIXED: Ensure batch is not already marked as complete to prevent duplicate processing
-            if batch.get('phase') != 'complete':
+            # Terminal batches must not publish again after exhaustion or cancellation.
+            if batch.get('phase') not in ('complete', 'error', 'cancelled', 'failed'):
                 # #999 atomic album publish (opt-in, no-op unless staged): move
                 # the staged album into the live library BEFORE anything is
                 # marked complete, so Plex sees the whole album at once.
@@ -1171,8 +1171,8 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
             is_auto_batch = False
             completion = None
             if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
-                # FIXED: Ensure batch is not already marked as complete to prevent duplicate processing
-                if batch.get('phase') != 'complete':
+                # Terminal batches must not publish again after exhaustion or cancellation.
+                if batch.get('phase') not in ('complete', 'error', 'cancelled', 'failed'):
                     logger.info(f"[Completion Check V2] Batch {batch_id} is complete - marking as finished")
 
                     # Check if this is an auto-initiated batch
@@ -1212,8 +1212,8 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                         batch_id, batch, deps, queue=queue, finished_count=finished_count,
                         tag='[Completion Check V2]')
                 else:
-                    logger.warning(f"[Completion Check V2] Batch {batch_id} already marked complete - skipping duplicate processing")
-                    return True  # Already complete
+                    logger.debug("[Completion Check V2] Batch %s already terminal (%s)", batch_id, batch.get("phase"))
+                    return batch.get("phase") == "complete"
 
         # Process wishlist outside of the lock to prevent threading issues
         if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:

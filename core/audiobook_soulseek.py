@@ -169,7 +169,12 @@ def album_to_release(album: Any, book: Dict[str, Any]) -> Optional[Any]:
     name = folder_name(album)
     size = sum(int(entry.get("size") or 0) for entry in files)
     durations = [entry["duration"] for entry in files if entry.get("duration") is not None]
-    total_duration_sec = sum(durations) if durations else None
+    # Missing/zero chapter lengths are unknown, not silence. A partial sum is
+    # not a release runtime and must not drive the ranker's hard shortness gate.
+    total_duration_sec = (
+        sum(durations) if len(durations) == len(files) and all(d > 0 for d in durations)
+        else None
+    )
 
     wanted_narrators = book.get("narrator_names") or book.get("narrators") or []
 

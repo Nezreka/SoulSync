@@ -1107,3 +1107,69 @@ def test_v2_non_music_batch_is_marked_wishlist_complete():
     assert lc.check_batch_completion_v2('podcasts', deps) is True
     assert download_batches['podcasts']['wishlist_processing_complete'] is True
     assert not any(c[0].startswith('process_failed') for c in rec.calls)
+
+
+@pytest.fixture
+def real_batch_healer():
+    """Execute the production healer with isolated dependencies, without server startup."""
+    import ast
+    from pathlib import Path
+    from unittest.mock import Mock
+    tree = ast.parse(Path("web_server.py").read_text(encoding="utf-8"))
+    fn = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+              and node.name == "validate_and_heal_batch_states")
+    namespace = {
+        "tasks_lock": threading.Lock(), "download_batches": download_batches,
+        "download_tasks": download_tasks, "logger": Mock(),
+        "_downloads_lifecycle": lc, "_POST_PROCESSING_STUCK_TIMEOUT": lc._POST_PROCESSING_STUCK_TIMEOUT,
+        "_get_global_max_concurrent": lambda: None,
+        "_start_next_batch_of_downloads": Mock(), "_check_batch_completion_v2": Mock(),
+    }
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "web_server.py", "exec"), namespace)
+    return namespace
+
+
+@pytest.mark.parametrize("recovers", [True, False])
+def test_real_healing_passes_retry_publish_to_success_or_exhaustion(monkeypatch, real_batch_healer, recovers):
+    from unittest.mock import Mock
+    _one_task_batch()
+    batch = download_batches['b1']
+    batch['phase'] = 'downloading'
+    publish = Mock(side_effect=[False, False, recovers])
+    monkeypatch.setattr(lc, '_publish_atomic_album', publish)
+    deps, _ = _build_deps()
+    real_batch_healer['_check_batch_completion_v2'] = lambda bid: lc.check_batch_completion_v2(bid, deps)
+    lc.on_download_completed('b1', 't1', True, deps)
+    assert publish.call_count == 1
+    # Old emergency-healer timestamps must not preempt the remaining attempts.
+    import time
+    batch['_heal_stuck_detected_at'] = time.time() - 700
+    real_batch_healer['validate_and_heal_batch_states']()
+    assert publish.call_count == 2
+    # No new orphan on this pass: pending publish must still be retried.
+    real_batch_healer['validate_and_heal_batch_states']()
+    assert publish.call_count == 3
+    assert batch['phase'] == ('complete' if recovers else 'error')
+    assert batch.get('completion_time') is not None
+    real_batch_healer['validate_and_heal_batch_states']()
+    lc.on_download_completed('b1', 't1', True, deps)
+    lc.check_batch_completion_v2('b1', deps)
+    assert publish.call_count == 3
+
+
+@pytest.mark.parametrize("failed_publish", [True, False])
+def test_auto_cleanup_preserves_failed_publish_files(tmp_path, real_batch_healer, failed_publish):
+    import time
+    root = tmp_path / '.soulsync_atomic_staging' / 'b1'
+    root.mkdir(parents=True)
+    audio = root / 'track.flac'
+    audio.write_bytes(b'recoverable audio')
+    download_batches['b1'] = {
+        'queue': [], 'active_count': 0, 'phase': 'error' if failed_publish else 'cancelled',
+        'completion_time': time.time() - 301,
+        '_atomic_active': True, '_atomic_staging_root': str(root),
+        '_atomic_publish_attempts': 3 if failed_publish else 0,
+    }
+    real_batch_healer['validate_and_heal_batch_states']()
+    assert 'b1' not in download_batches
+    assert audio.exists() is failed_publish

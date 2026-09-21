@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -944,41 +943,15 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
 
                 logger.info(f"[Auto-Wishlist] Found {count} tracks in wishlist, starting automatic processing...")
 
-                # Check if wishlist processing is already active (auto or manual).
-                # STALENESS GUARD (#1277): a batch stuck in a non-terminal phase
-                # with no completion_time for > 1 hour is a phantom — it will never
-                # self-complete (e.g. atomic album publish repeatedly failed). Force
-                # it to 'error' so we don't block wishlist automation forever.
-                _WISHLIST_BATCH_STALE_SECONDS = 3600  # 1 hour
+                # Age alone does not prove a download is dead. The batch healer
+                # owns recovery using task/worker state; keep blocking while the
+                # batch is non-terminal, including slow downloads and held queues.
                 playlist_id = "wishlist"
                 with runtime.tasks_lock:
                     for _batch_id, batch_data in runtime.download_batches.items():
                         batch_playlist_id = batch_data.get('playlist_id')
-                        # Check for both auto ('wishlist') and manual ('wishlist_manual') batches
                         if (batch_playlist_id in ['wishlist', 'wishlist_manual'] and
-                                batch_data.get('phase') not in ['complete', 'error', 'cancelled']):
-                            # Phantom detection: if the batch has no completion_time and
-                            # has been around for longer than the staleness window, it
-                            # will never transition on its own — heal it now.
-                            if not batch_data.get('completion_time'):
-                                _detected = batch_data.get('_stale_detected_at')
-                                if _detected is None:
-                                    # First time we're seeing this — stamp it, don't skip yet
-                                    batch_data['_stale_detected_at'] = time.time()
-                                    logger.warning(
-                                        f"[Wishlist Guard] Batch {_batch_id} stuck in phase={batch_data.get('phase')} with no "
-                                        f"completion_time — marking as potentially stale. Will "
-                                        f"force-error if still stuck in {_WISHLIST_BATCH_STALE_SECONDS}s."
-                                    )
-                                elif time.time() - _detected > _WISHLIST_BATCH_STALE_SECONDS:
-                                    logger.error(
-                                        f"[Wishlist Guard] Batch {_batch_id} has been stuck in phase={batch_data.get('phase')} "
-                                        f"for >{_WISHLIST_BATCH_STALE_SECONDS}s with no completion_time — forcing 'error' to "
-                                        f"unblock wishlist automation (#1277)."
-                                    )
-                                    batch_data['phase'] = 'error'
-                                    batch_data['completion_time'] = time.time()
-                                    continue  # This batch is now terminal, don't block
+                                batch_data.get('phase') not in ['complete', 'error', 'cancelled', 'failed']):
                             logger.info(
                                 f"Wishlist processing already active in another batch "
                                 f"({batch_playlist_id}), skipping automatic start"
