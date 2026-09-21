@@ -325,6 +325,137 @@ def is_trailing_version_qualifier(text: str) -> bool:
     return False
 
 
+# ── Recording-level version guard (MusicBrainzService.match_recording) ──────
+#
+# match_recording's MusicBrainz search runs a bare phrase query with no
+# version awareness (unlike match_release, which has _extract_version_qualifier
+# for album editions). A query for "Firewater" happily returns a recording
+# titled "Firewater (Acoustic)" or "Firewater (Live)" at ~0.6-0.7 title
+# similarity, and the artist bonus + mb_score walk it past the 70-confidence
+# gate — a different PERFORMANCE of the same song, not the same recording.
+# This reuses _VERSION_MARKER_TOKENS (already vetted against a 13k-track
+# library) to extract a comparable marker set from each side's qualifier
+# text, so match_recording can require it to match exactly in both
+# directions.
+
+# Words that only restate "this is the plain single/album cut" and must NOT
+# by themselves flag a version mismatch: "Album Version", "Original Mix",
+# "Radio Edit", "Single Version", "2011 Remaster" are all the SAME recording
+# as the bare title. ("album" and "original" aren't in _VERSION_MARKER_TOKENS
+# at all, so subtracting them here is a no-op — listed anyway for the reader,
+# since they're exactly the kind of word someone would expect to find there.)
+#
+# "edition"/"bonus"/"mono"/"stereo"/"explicit"/"clean" are PACKAGE/FORMAT
+# metadata, not a different performance: "(Deluxe Edition)", "(Bonus
+# Track)", "(Mono)", "(Stereo)", "(Explicit)", "(Clean)" are all the same
+# recording as the bare title, so a bare-title query must still match them.
+# "deluxe"/"track"/"anniversary"/"expanded"/"special" are album-EDITION
+# words from match_release's _VERSION_QUALIFIERS, never added to
+# _VERSION_MARKER_TOKENS in the first place — listed here too (as no-ops,
+# like "album"/"original" above) so nobody re-adds them as recording
+# markers later without re-reading this comment.
+_RECORDING_NOISE_TOKENS = frozenset({
+    "remaster", "remastered", "single", "radio", "album", "edit", "mix",
+    "version", "versions", "ver", "original",
+    "edition", "deluxe", "bonus", "track", "mono", "stereo", "explicit",
+    "clean", "anniversary", "expanded", "special",
+})
+
+# Markers _VERSION_MARKER_TOKENS doesn't carry: bare language qualifiers
+# ("(English Version)", "(English)" — a language name alone names a
+# different translated performance) and re-recordings ("Rerecorded" as one
+# word — a hyphenated "re-recorded" already flags via the plain "recorded"
+# marker above, since the apostrophe/hyphen tokenizer splits it off).
+# "Taylor's Version" is handled separately below: "taylor" alone is too
+# common a featured-artist name ("feat. Taylor Swift") to list as a bare
+# marker, so it only counts paired with "version".
+_RECORDING_EXTRA_MARKER_TOKENS = frozenset({
+    "english", "japanese", "german", "french", "spanish", "italian",
+    "korean", "chinese",
+    "rerecorded", "rerecord",
+})
+
+# Built on _VERSION_TAIL_MARKERS rather than the full _VERSION_MARKER_TOKENS:
+# the _DISTINCT_TRACK_TOKENS it leaves out ("Pt. 2", "Interlude") name a
+# different TRACK, which the digit/title check already separates — as
+# markers they would only reject "Song (Pt. 2)" against MusicBrainz's own
+# "Song, Pt. 2" spelling, whose comma form carries no marker.
+_RECORDING_MARKER_TOKENS = (
+    (_VERSION_TAIL_MARKERS - _RECORDING_NOISE_TOKENS)
+    | _RECORDING_EXTRA_MARKER_TOKENS
+)
+
+# Katakana version tags mapped to the SAME canonical marker name their ASCII
+# equivalent produces, so "(Live)" and "(ライブ)" compare equal. Matched by
+# substring, not whole-segment equality (unlike _CJK_VERSION_TAGS above),
+# because a qualifier can mix scripts with no separator: "TVサイズ" is ASCII
+# "TV" glued to katakana "サイズ".
+_RECORDING_KATAKANA_MARKERS = {
+    "ライブ": "live", "ライヴ": "live",
+    "アコースティック": "acoustic",
+    "カバー": "cover",
+    "リミックス": "remix",
+    "インストゥルメンタル": "instrumental", "インスト": "instrumental",
+    "サイズ": "size",
+}
+
+# Qualifier segment boundaries: bracketed/braced text, Japanese corner
+# brackets, and the tail after the FIRST ' - ' / ' – ' / '~' separator — the
+# same "first separator only" convention as base_title_before_dash, so a
+# hyphen inside a real title ('Rock-A-Bye', no surrounding spaces) is never
+# mistaken for a qualifier boundary. A dash tail only counts when
+# is_trailing_version_qualifier says it IS a version tail: a dash also
+# separates artist from title ("Billy Joel - Piano Man", "Oasis - Live
+# Forever"), and reading those tails as qualifiers would reject the plain
+# recording for exactly the marker words real titles open with.
+_RECORDING_QUALIFIER_RE = re.compile(r"[(\[{「]([^)\]}」]*)[)\]}」]")
+_RECORDING_DASH_TAIL_RE = re.compile(r"\s[-–]\s|~")
+
+
+def _recording_qualifier_segments(title: str) -> list[str]:
+    """The bracketed/dashed qualifier substrings of a title, main title excluded."""
+    if not title:
+        return []
+    segments = _RECORDING_QUALIFIER_RE.findall(title)
+    m = _RECORDING_DASH_TAIL_RE.search(title)
+    if m:
+        tail = title[m.end():].strip()
+        if tail and is_trailing_version_qualifier(tail):
+            segments.append(tail)
+    return segments
+
+
+def recording_version_markers(title: str) -> frozenset[str]:
+    """Version markers found in ``title``'s qualifier text (brackets/dash tail).
+
+    Only qualifier segments are examined, never the main title — a song
+    literally called "Live Forever" or "Demo Lition" must not be flagged.
+    Two titles carrying the SAME marker set (including both empty) are
+    treated as the same performance; any asymmetry is not. Used by
+    :meth:`MusicBrainzService.match_recording` as a hard, symmetric gate
+    alongside the existing title-similarity floor — a bare query and a
+    "(Live)"/"(Acoustic)"/"(English Version)" result must never both clear
+    it. "feat"/"ft"/"featuring" are deliberately NOT markers: a featured
+    guest is still the same recording.
+    """
+    markers: set[str] = set()
+    for seg in _recording_qualifier_segments(title):
+        folded = _fold(seg)
+        seg_tokens = _TOKEN_RE.findall(folded)
+        for tok in seg_tokens:
+            if tok in _RECORDING_MARKER_TOKENS:
+                markers.add(tok)
+        # "Taylor's Version" only counts paired with "version" — "taylor"
+        # alone is a common featured-artist name ("feat. Taylor Swift").
+        if "taylor" in seg_tokens and "version" in seg_tokens:
+            markers.add("taylors_version")
+        nfkc = unicodedata.normalize("NFKC", seg)
+        for kana, marker in _RECORDING_KATAKANA_MARKERS.items():
+            if kana in nfkc:
+                markers.add(marker)
+    return frozenset(markers)
+
+
 def strip_subtitle_qualifiers(title: str, other_title: str) -> str:
     """Remove bracketed qualifiers that are SUBTITLES, not version markers.
 
@@ -457,4 +588,5 @@ __all__ = [
     "numeric_tokens_differ",
     "base_title_before_dash",
     "choose_best_title_candidate",
+    "recording_version_markers",
 ]
