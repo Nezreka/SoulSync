@@ -321,6 +321,53 @@ describe('reducePoll — one active poll, latest start wins', () => {
         assert.equal(P.reducePoll([ev('op', { k: 'poll.start', q: '', o1: 'a', o2: 'b' })]), null);
         assert.equal(P.reducePoll([]), null);
     });
+
+    test('supports up to 8 options and rejects option 9', () => {
+        const poll = P.reducePoll([
+            ev('op', {
+                k: 'poll.start', q: 'Pick a number 1-8',
+                o1: '1', o2: '2', o3: '3', o4: '4',
+                o5: '5', o6: '6', o7: '7', o8: '8'
+            }),
+            ev('u1', { k: 'poll.vote', o: '7' }),
+            ev('u2', { k: 'poll.vote', o: '8' }),
+            ev('u3', { k: 'poll.vote', o: '9' }), // out of range
+        ]);
+        assert.equal(poll.options.length, 8);
+        assert.equal(poll.tally.counts['7'], 1);
+        assert.equal(poll.tally.counts['8'], 1);
+        assert.equal(poll.tally.total, 2);
+    });
+
+    test('timed polls calculate endsAt and preserve duration', () => {
+        const poll = P.reducePoll([
+            ev('op', { k: 'poll.start', q: 'Quick question?', o1: 'yes', o2: 'no', dur: 300 }, '2026-09-20T20:00:00.000Z'),
+        ]);
+        assert.equal(poll.dur, 300);
+        assert.equal(typeof poll.endsAt, 'number');
+        assert.ok(poll.endsAt > 0);
+    });
+
+    test('show-voters populates tally.voters attribution map', () => {
+        const poll = P.reducePoll([
+            ev('op', { k: 'poll.start', q: 'Who is coming?', o1: 'yes', o2: 'no', sv: 1 }),
+            ev('alice', { k: 'poll.vote', o: '1' }),
+            ev('bob', { k: 'poll.vote', o: '1' }),
+            ev('carol', { k: 'poll.vote', o: '2' }),
+        ]);
+        assert.equal(poll.sv, true);
+        shapeEqual(poll.tally.voters['1'], ['alice', 'bob']);
+        shapeEqual(poll.tally.voters['2'], ['carol']);
+    });
+
+    test('moderator can close poll even if not starter', () => {
+        const poll = P.reducePoll([
+            ev('regular_user', { k: 'poll.start', q: 'should we kick?', o1: 'yes', o2: 'no' }),
+            ev('voter', { k: 'poll.vote', o: '1' }),
+            ev('boulderbadgedad', { k: 'poll.end' }), // lead dev / mod
+        ]);
+        assert.equal(poll.closed, true);
+    });
 });
 
 describe('reduceTopic + reduceTuned', () => {
@@ -602,5 +649,61 @@ describe('reduceTrivia — the stream is the buzzer', () => {
         const mod = P.reduceTrivia([...base,
             ev('boulderbadgedad', { k: 'trv.end', id: 'quiz0001', ans: '' })], sha);
         assert.equal(mod.closed, true);
+    });
+});
+
+describe('extractFileFromText — non-SoulSync attachment parsing', () => {
+    test('parses direct filepost cdn link', () => {
+        const res = P.extractFileFromText('https://cdn.filepost.dev/files/song.flac');
+        assert.ok(res);
+        assert.equal(res.n, 'song.flac');
+        assert.equal(res.m, 'audio/flac');
+        assert.equal(res.url, 'https://cdn.filepost.dev/files/song.flac');
+        assert.equal(res.textLead, '');
+    });
+
+    test('parses filepost link with lead text', () => {
+        const res = P.extractFileFromText('Check out this track: https://filepost.dev/d/abc123/my_track.mp3');
+        assert.ok(res);
+        assert.equal(res.n, 'my_track.mp3');
+        assert.equal(res.m, 'audio/mpeg');
+        assert.equal(res.url, 'https://filepost.dev/d/abc123/my_track.mp3');
+        assert.equal(res.textLead, 'Check out this track');
+    });
+
+    test('parses colon-prefixed filename with filepost link', () => {
+        const res = P.extractFileFromText('heavy_bass.wav: https://filepost.dev/d/xyz890');
+        assert.ok(res);
+        assert.equal(res.n, 'heavy_bass.wav');
+        assert.equal(res.m, 'audio/wav');
+        assert.equal(res.url, 'https://filepost.dev/d/xyz890');
+        assert.equal(res.textLead, '');
+    });
+
+    test('parses direct media URL with audio or video extension', () => {
+        const audio = P.extractFileFromText('https://music.archive.org/download/live.opus');
+        assert.ok(audio);
+        assert.equal(audio.n, 'live.opus');
+        assert.equal(audio.m, 'audio/opus');
+
+        const video = P.extractFileFromText('https://video.archive.org/clip.mp4?dl=1');
+        assert.ok(video);
+        assert.equal(video.n, 'clip.mp4');
+        assert.equal(video.m, 'video/mp4');
+    });
+
+    test('bare filepost link without filename defaults safely', () => {
+        const res = P.extractFileFromText('https://filepost.dev/d/987654');
+        assert.ok(res);
+        assert.equal(res.n, 'shared-file');
+        assert.equal(res.url, 'https://filepost.dev/d/987654');
+    });
+
+    test('non-media and non-filepost links return null', () => {
+        assert.equal(P.extractFileFromText('https://en.wikipedia.org/wiki/Soulseek'), null);
+        assert.equal(P.extractFileFromText('Check this out: https://github.com/'), null);
+        assert.equal(P.extractFileFromText('just some plain text chatting'), null);
+        assert.equal(P.extractFileFromText(''), null);
+        assert.equal(P.extractFileFromText(null), null);
     });
 });

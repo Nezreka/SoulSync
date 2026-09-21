@@ -4416,4 +4416,389 @@
     background: #fff;
 }
 
+/* ── 12. CHAT FEATURE OVERHAUL (EMOJIS, POLLS, REPLIES, SEARCH) ────────── */
 
+/* Categorized Emoji Picker */
+.chat-emoji-picker {
+    width: 340px;
+    max-width: calc(100vw - 32px);
+    max-height: 400px;
+    padding: 12px;
+    background: rgba(18, 24, 38, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 100;
+}
+
+.chat-emoji-search {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+    transition: all 0.16s ease;
+}
+
+.chat-emoji-search:focus {
+    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.7);
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 0 10px rgba(var(--accent-rgb, 29, 185, 84), 0.25);
+}
+
+.chat-emoji-recent {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    min-height: 30px;
+    align-items: center;
+}
+
+.chat-emoji-hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    font-style: italic;
+    padding: 2px 4px;
+}
+
+.chat-emoji-tabs {
+    display: flex;
+    gap: 3px;
+    overflow-x: auto;
+    padding-bottom: 5px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    scrollbar-width: none;
+}
+
+.chat-emoji-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.chat-emoji-tab {
+    background: none;
+    border: none;
+    font-size: 16px;
+    padding: 4px 7px;
+    border-radius: 6px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.chat-emoji-tab:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.chat-emoji-tab--active {
+    opacity: 1;
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.25);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb, 29, 185, 84), 0.35);
+}
+
+.chat-emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+    gap: 3px;
+    max-height: 210px;
+    overflow-y: auto;
+    padding: 4px 2px;
+}
+
+.chat-emoji {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    transition: transform 0.1s ease, background 0.12s ease;
+}
+
+.chat-emoji:hover {
+    background: rgba(255, 255, 255, 0.16);
+    transform: scale(1.18);
+}
+
+/* Reactions Expansion */
+.chat-react-more {
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.7);
+    border: 1px dashed rgba(255, 255, 255, 0.3);
+    border-radius: 6px;
+}
+
+.chat-react-pick {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: rgba(18, 24, 38, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+    padding: 3px 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.chat-react-full-picker {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    max-height: 320px;
+    z-index: 110;
+    background: rgba(18, 24, 38, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 12px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+}
+
+/* Enhanced Polls */
+.chat-poll-pop {
+    width: 330px;
+    max-width: calc(100vw - 32px);
+}
+
+.chat-poll-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 6px 0;
+}
+
+.chat-poll-ctrl-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+}
+
+.chat-poll-add-opt {
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 6px;
+}
+
+.chat-poll-dur {
+    flex: 1;
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #fff;
+    cursor: pointer;
+    outline: none;
+}
+
+.chat-poll-dur option {
+    background: #1a2234;
+    color: #fff;
+}
+
+.chat-poll-check-lbl {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+    margin: 4px 0 8px;
+    user-select: none;
+}
+
+.chat-poll-opt--mine {
+    outline: 1.5px solid rgba(var(--accent-rgb, 29, 185, 84), 0.75) !important;
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.12) !important;
+    box-shadow: 0 0 10px rgba(var(--accent-rgb, 29, 185, 84), 0.2);
+}
+
+.chat-poll-check {
+    color: #10b981;
+    font-weight: 800;
+    margin-right: 3px;
+}
+
+.chat-poll-countdown {
+    color: #f59e0b;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    animation: pollClockGlow 2s ease-in-out infinite alternate;
+}
+
+@keyframes pollClockGlow {
+    0% { opacity: 0.85; }
+    100% { opacity: 1; text-shadow: 0 0 6px rgba(245, 158, 11, 0.5); }
+}
+
+.chat-poll-voters {
+    display: block;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-top: 3px;
+    cursor: help;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Interactive Reply Cards & Message Jump Flash */
+.chat-reply-ref {
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.15s ease;
+    user-select: none;
+}
+
+.chat-reply-ref:hover {
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateX(2px);
+}
+
+.chat-line--highlighted {
+    animation: chatLineFlash 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes chatLineFlash {
+    0% {
+        background: rgba(var(--accent-rgb, 29, 185, 84), 0.38);
+        outline: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.7);
+        border-radius: 6px;
+    }
+    70% {
+        background: rgba(var(--accent-rgb, 29, 185, 84), 0.16);
+    }
+    100% {
+        background: transparent;
+        outline: 1px solid transparent;
+    }
+}
+
+/* Search Banner Navigation */
+.chat-search-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 10px;
+}
+
+.chat-search-nav-btn {
+    padding: 2px 7px;
+    font-size: 11px;
+    line-height: 1;
+    border-radius: 4px;
+}
+
+.chat-search-pos {
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.8);
+    font-variant-numeric: tabular-nums;
+    padding: 0 4px;
+}
+
+/* ── 16. ANIMATED EMOJIS & JUMBOJI ───────────────────────────────────────── */
+.chat-anim-emoji {
+    width: 24px;
+    height: 24px;
+    vertical-align: -5px;
+    display: inline-block;
+    object-fit: contain;
+    user-select: none;
+}
+
+.chat-anim-emoji--jumbo {
+    width: 52px;
+    height: 52px;
+    vertical-align: middle;
+    margin: 4px 3px;
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+    transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.chat-anim-emoji--jumbo:hover {
+    transform: scale(1.18);
+}
+
+.chat-unicode-jumbo {
+    font-size: 40px;
+    line-height: 1.25;
+    vertical-align: middle;
+    display: inline-block;
+    margin: 2px 3px;
+    transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.chat-unicode-jumbo:hover {
+    transform: scale(1.18);
+}
+
+.chat-anim-preview {
+    width: 26px;
+    height: 26px;
+    object-fit: contain;
+    pointer-events: none;
+    display: block;
+    margin: auto;
+}
+
+.chat-anim-chip-emoji {
+    width: 18px;
+    height: 18px;
+    vertical-align: -3px;
+    margin-right: 4px;
+    object-fit: contain;
+    pointer-events: none;
+}
+
+.chat-emoji--anim {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    border-radius: 8px;
+    transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.chat-emoji--anim:hover {
+    transform: scale(1.22);
+    background: rgba(255, 255, 255, 0.14) !important;
+}
+
+.chat-react-chip--anim {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* ── Inline file card lead text (for non-SoulSync attachment messages) ── */
+.chat-file-lead {
+    margin-bottom: 5px;
+    font-size: 13.5px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.9);
+}
