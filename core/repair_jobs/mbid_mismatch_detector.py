@@ -9,13 +9,10 @@ SoulSync shows them correctly.
 
 import os
 from collections import Counter, defaultdict
+from difflib import SequenceMatcher
 from typing import Optional
 
 from core.library.path_resolver import resolve_library_file_path
-# Re-exported: TITLE_SIMILARITY_THRESHOLD is not used directly in this module anymore
-# (moved into title_matches' default), but kept importable here for anything that
-# still references core.repair_jobs.mbid_mismatch_detector.TITLE_SIMILARITY_THRESHOLD.
-from core.metadata.mbid_title_check import TITLE_SIMILARITY_THRESHOLD, title_matches as _title_matches  # noqa: F401
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -40,6 +37,34 @@ _ALBUM_MBID_TAG_KEYS = {
     'vorbis': 'MUSICBRAINZ_ALBUMID',                    # FLAC/OGG vorbis comment
     'mp4': '----:com.apple.iTunes:MusicBrainz Album Id',
 }
+
+TITLE_SIMILARITY_THRESHOLD = 0.55
+
+
+def _normalize(s):
+    """Lowercase, strip whitespace and common suffixes for comparison."""
+    if not s:
+        return ''
+    import re
+    s = s.lower().strip()
+    # Strip parentheticals like (Live), (Remastered), (feat. X)
+    s = re.sub(r'\s*\(.*?\)\s*', ' ', s)
+    # Strip brackets like [Deluxe Edition]
+    s = re.sub(r'\s*\[.*?\]\s*', ' ', s)
+    return s.strip()
+
+
+def _title_matches(file_title, mb_title):
+    """Check if two titles are similar enough to be the same track."""
+    a = _normalize(file_title)
+    b = _normalize(mb_title)
+    if not a or not b:
+        return True  # Can't compare, assume OK
+    if a == b:
+        return True
+    ratio = SequenceMatcher(None, a, b).ratio()
+    return ratio >= TITLE_SIMILARITY_THRESHOLD
+
 
 def _read_file_tags(file_path):
     """Read the MusicBrainz recording MBID and embedded title from an audio file's tags.

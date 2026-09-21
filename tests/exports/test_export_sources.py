@@ -14,11 +14,11 @@ from core.exports.mbid_resolver import SRC_CACHE, SRC_DB, SRC_MUSICBRAINZ
 MBID = "e8f9b188-f819-4e43-ab0f-4bd26ce9ff56"
 
 
-def _wire(db=None, file=None, mb=None, cache=None, flagged=None, verify=None, track_lookup=None):
-    """Wire a resolve_fn from fakes. ``flagged``/``verify``/``track_lookup`` default to
-    "nothing is flagged, everything verifies, no track identity" so the existing
-    waterfall-order tests below don't have to know about the #903-follow-up gates at all —
-    only the gate-specific tests pass non-default fakes for them.
+def _wire(db=None, file=None, mb=None, cache=None, flagged=None, track_lookup=None):
+    """Wire a resolve_fn from fakes. ``flagged``/``track_lookup`` default to "nothing is
+    flagged, no track identity" so the existing waterfall-order tests below don't have to
+    know about the repair-finding gate at all — only the gate-specific tests pass
+    non-default fakes for them.
 
     ``flagged`` is ``(track_id, file_path) -> bool`` (matching the real
     ``mbid_flagged_fn`` contract) — ``track_lookup`` is what supplies those ids, keeping
@@ -33,7 +33,6 @@ def _wire(db=None, file=None, mb=None, cache=None, flagged=None, verify=None, tr
         cache_lookup=lambda k: store.get(k),
         cache_record=lambda k, m: recorded.__setitem__(k, m) or True,
         mbid_flagged_fn=flagged if flagged is not None else (lambda tid, fp: False),
-        verify_fn=verify if verify is not None else (lambda m, t: True),
         track_lookup_fn=track_lookup if track_lookup is not None else (lambda a, t: (None, None)),
     )
     return fn, recorded
@@ -71,9 +70,9 @@ def test_all_miss_returns_none_and_no_write():
     assert recorded == {}
 
 
-# ── #903 follow-up: DB/file rungs are gated by the mbid_mismatch repair job's pending
-# findings, plus a live MusicBrainz title cross-check — either gate failing makes the
-# rung a miss so the waterfall falls through instead of exporting the wrong recording ──
+# ── DB/file rungs are gated by the mbid_mismatch repair job's pending findings — a
+# flagged MBID makes the rung a miss so the waterfall falls through instead of exporting
+# the wrong recording ──
 
 OTHER_MBID = "11111111-2222-3333-4444-555555555555"
 
@@ -120,8 +119,7 @@ def test_flagged_fn_called_once_across_db_and_file_rung_for_same_track():
     """Both the DB and file rungs resolve to (different) MBIDs for the same track, and
     both get rejected by the flagged predicate -> the per-run memo means BOTH the track
     lookup and the flagged predicate are only actually invoked once for ('A', 'T'), not
-    once per rung (#903 follow-up MINOR-4 — the flagged check used to re-query the track
-    on top of what db_fn/file_fn already resolved)."""
+    once per rung ."""
     lookup_calls = []
     flagged_calls = []
 
@@ -140,47 +138,12 @@ def test_flagged_fn_called_once_across_db_and_file_rung_for_same_track():
     assert flagged_calls == [("tid-1", "/music/t.mp3")]
 
 
-def test_verify_fn_mismatch_falls_through_to_next_rung():
-    fn, _ = _wire(
-        db={("A", "T"): MBID},
-        mb={("A", "T"): OTHER_MBID},
-        verify=lambda m, t: False,
-    )
-    assert fn("A", "T") == (OTHER_MBID, SRC_MUSICBRAINZ)
-
-
-def test_verify_fn_match_accepts_the_rung():
-    fn, _ = _wire(db={("A", "T"): MBID}, verify=lambda m, t: True)
-    assert fn("A", "T") == (MBID, SRC_DB)
-
-
-def test_verify_fn_exception_fails_open_and_accepts_the_rung():
-    """Network trouble in the verifier must never degrade the export -> accept."""
-    def boom(m, t):
-        raise RuntimeError("musicbrainz flaked")
-    fn, _ = _wire(db={("A", "T"): MBID}, verify=boom)
-    assert fn("A", "T") == (MBID, SRC_DB)
-
-
-def test_verify_fn_memoized_at_most_once_per_mbid_title_pair():
-    calls = []
-
-    def verify(m, t):
-        calls.append((m, t))
-        return True
-
-    fn, _ = _wire(db={("A", "T"): MBID}, verify=verify)
-    fn("A", "T")
-    fn("A", "T")
-    assert calls == [(MBID, "T")]
-
-
 def test_mbid_flagged_by_repair_finding_real_sql(tmp_path, monkeypatch):
     """Run the ACTUAL query against a real (temp) repair_findings schema — a pending
     mbid_mismatch finding keyed on the track's id (or file path) must flag it; a resolved
     one, a finding for a different track, or no id/path at all, must not. Signature is
     (track_id, file_path) — the caller (build_resolve_fn) resolves those once and passes
-    them in; this function no longer does its own track lookup (#903 follow-up MINOR-4)."""
+    them in."""
     import sqlite3
     import types
     import core.exports.export_sources as es
@@ -236,168 +199,7 @@ def test_default_track_lookup_real_sql(tmp_path, monkeypatch):
     assert es._default_track_lookup("Fall Out Boy", "Unknown Song") == (None, None)
 
 
-class _FakeMBService:
-    """Stand-in for MusicBrainzService exposing only what verify_recording_title uses:
-    ``mb_client.get_recording`` plus the ``_check_cache``/``_save_to_cache`` pair it shares
-    with the real service's persistent ``musicbrainz_cache`` table (#903 follow-up
-    MAJOR-2)."""
-    def __init__(self, client):
-        self.mb_client = client
-        self._store = {}
-        self.save_calls = []
-
-    def _check_cache(self, entity_type, entity_name, artist_name=None):
-        return self._store.get((entity_type, entity_name, artist_name))
-
-    def _save_to_cache(self, entity_type, entity_name, artist_name, musicbrainz_id, metadata, confidence):
-        self.save_calls.append((entity_type, entity_name, artist_name, musicbrainz_id, metadata, confidence))
-        self._store[(entity_type, entity_name, artist_name)] = {
-            'musicbrainz_id': musicbrainz_id, 'metadata': metadata, 'confidence': confidence,
-        }
-
-
-def _client(*, title=None, exc=None):
-    """A fake MusicBrainzClient.get_recording. ``exc`` is only raised when
-    raise_on_error=True is passed (mirrors the real client's contract), matching how
-    verify_recording_title calls it."""
-    def get_recording(mbid, includes=None, raise_on_error=False):
-        if exc is not None:
-            if raise_on_error:
-                raise exc
-            return None
-        return {"title": title} if title is not None else None
-    import types
-    return types.SimpleNamespace(get_recording=get_recording)
-
-
-def test_verify_recording_title_no_client_accepts(monkeypatch):
-    import core.exports.export_sources as es
-    monkeypatch.setattr(es, "_get_mb_service", lambda: None)
-    assert es.verify_recording_title(MBID, "Anything") is True
-
-
-def test_verify_recording_title_matches_and_mismatches(monkeypatch):
-    import core.exports.export_sources as es
-
-    svc = _FakeMBService(_client(title="Thnks fr th Mmrs"))
-    monkeypatch.setattr(es, "_get_mb_service", lambda: svc)
-    assert es.verify_recording_title(MBID, "Thnks Fr Th Mmrs") is True   # case-insensitive match
-
-    svc2 = _FakeMBService(_client(title="Don't You Know Who I Think I Am?"))
-    monkeypatch.setattr(es, "_get_mb_service", lambda: svc2)
-    assert es.verify_recording_title("22222222-3333-4444-5555-666666666666", "Thnks fr th Mmrs") is False  # real mis-tag case (#903)
-
-
-def test_verify_recording_title_recording_not_found_is_a_mismatch_and_is_cached(monkeypatch):
-    """A confirmed 404 (get_recording returns None without raising) is a real mismatch,
-    not a transport failure — and IS cached (it's a definitive answer)."""
-    import core.exports.export_sources as es
-    svc = _FakeMBService(_client(title=None))
-    monkeypatch.setattr(es, "_get_mb_service", lambda: svc)
-    assert es.verify_recording_title(MBID, "Anything") is False
-    assert svc.save_calls and svc.save_calls[0][3] is None   # cached musicbrainz_id=None
-
-
-# ── #903 follow-up MAJOR-1: a transport failure (timeout/5xx/connection error) must fail
-# OPEN, not collapse into "mismatch" the way a 404 legitimately does ──
-
-def test_verify_recording_title_transport_failure_propagates_uncaught(monkeypatch):
-    """verify_recording_title must NOT swallow a transport failure into False — it has to
-    reach build_resolve_fn's fail-open wrapper. Requesting raise_on_error=True on the
-    client call is how that's arranged."""
-    import core.exports.export_sources as es
-    svc = _FakeMBService(_client(exc=TimeoutError("musicbrainz timed out")))
-    monkeypatch.setattr(es, "_get_mb_service", lambda: svc)
-
-    import pytest
-    with pytest.raises(TimeoutError):
-        es.verify_recording_title(MBID, "Anything")
-    assert svc.save_calls == []   # a transport failure is never cached — there's no verdict
-
-
-def test_build_resolve_fn_transport_failure_in_default_verify_fails_open(monkeypatch):
-    """End-to-end through build_resolve_fn with the REAL default verify_fn wired (no
-    verify= override): a MusicBrainz outage must not turn the DB rung's MBID into a
-    rejection — regression check for the MAJOR-1 bug (get_recording used to swallow
-    every failure into None, which verify_recording_title then read as 'mismatch')."""
-    import core.exports.export_sources as es
-    svc = _FakeMBService(_client(exc=ConnectionError("mb unreachable")))
-    monkeypatch.setattr(es, "_get_mb_service", lambda: svc)
-
-    fn = es.build_resolve_fn(
-        db_fn=lambda a, t: MBID,
-        file_fn=lambda a, t: None,
-        mb_fn=lambda a, t: None,
-        cache_lookup=lambda k: None,
-        cache_record=lambda k, m: True,
-        mbid_flagged_fn=lambda tid, fp: False,
-        track_lookup_fn=lambda a, t: (None, None),
-    )
-    assert fn("A", "T") == (MBID, SRC_DB)
-
-
-# ── #903 follow-up MAJOR-2: verify_recording_title's verdict must persist across runs
-# (separate build_resolve_fn()/resolve_fn instances), not just within one ──
-
-def test_verify_recording_title_persists_across_calls():
-    import types
-    import core.exports.export_sources as es
-
-    client_calls = []
-
-    def get_recording(mbid, includes=None, raise_on_error=False):
-        client_calls.append(mbid)
-        return {"title": "Thnks fr th Mmrs"}
-
-    svc = _FakeMBService(types.SimpleNamespace(get_recording=get_recording))
-
-    import unittest.mock
-    with unittest.mock.patch.object(es, "_get_mb_service", lambda: svc):
-        assert es.verify_recording_title(MBID, "Thnks fr th Mmrs") is True
-        assert len(client_calls) == 1
-        # A second, wholly separate call for the SAME (mbid, title) — not memoized by any
-        # build_resolve_fn wrapper — must hit the persisted cache, not the client again.
-        assert es.verify_recording_title(MBID, "Thnks fr th Mmrs") is True
-        assert len(client_calls) == 1
-
-
-def test_second_resolve_fn_instance_does_not_re_hit_live_verifier(monkeypatch):
-    """Two SEPARATE export runs (two build_resolve_fn() calls, i.e. two independent
-    per-run memo scopes) sharing the same persistent MB cache: the second run's DB rung
-    must be verified from the cache, not a fresh live call — the literal MAJOR-2 ask."""
-    import core.exports.export_sources as es
-
-    import types
-    client_calls = []
-
-    def get_recording(mbid, includes=None, raise_on_error=False):
-        client_calls.append(mbid)
-        return {"title": "T"}
-
-    svc = _FakeMBService(types.SimpleNamespace(get_recording=get_recording))
-    monkeypatch.setattr(es, "_get_mb_service", lambda: svc)
-
-    def make_run():
-        return es.build_resolve_fn(
-            db_fn=lambda a, t: MBID,
-            file_fn=lambda a, t: None,
-            mb_fn=lambda a, t: None,
-            cache_lookup=lambda k: None,
-            cache_record=lambda k, m: True,
-            mbid_flagged_fn=lambda tid, fp: False,
-            track_lookup_fn=lambda a, t: (None, None),
-        )
-
-    run1 = make_run()
-    assert run1("A", "T") == (MBID, SRC_DB)
-    assert len(client_calls) == 1
-
-    run2 = make_run()   # a brand-new resolve_fn / per-run memo scope
-    assert run2("A", "T") == (MBID, SRC_DB)
-    assert len(client_calls) == 1   # served from the persistent cache, not the live client
-
-
-# ── #903 follow-up MINOR-7: build_resolve_fn() with no kwargs wires the REAL defaults ──
+# ── build_resolve_fn() with no kwargs wires the REAL default gate ──
 
 def test_build_resolve_fn_no_kwargs_wires_real_default_gates(monkeypatch):
     import core.exports.export_sources as es
@@ -405,23 +207,16 @@ def test_build_resolve_fn_no_kwargs_wires_real_default_gates(monkeypatch):
     monkeypatch.setattr(es, "_db_match", lambda a, t: (MBID, "/music/track.mp3", "tid-1"))
 
     flagged_calls = []
-    verify_calls = []
 
     def fake_flagged(track_id, file_path):
         flagged_calls.append((track_id, file_path))
         return False
 
-    def fake_verify(mbid, title):
-        verify_calls.append((mbid, title))
-        return True
-
     monkeypatch.setattr(es, "mbid_flagged_by_repair_finding", fake_flagged)
-    monkeypatch.setattr(es, "verify_recording_title", fake_verify)
 
-    fn = es.build_resolve_fn()   # no kwargs at all -> real db_fn/file_fn/mb_fn AND real gates
+    fn = es.build_resolve_fn()   # no kwargs at all -> real db_fn/file_fn/mb_fn AND real gate
     assert fn("A", "T") == (MBID, SRC_DB)
     assert flagged_calls == [("tid-1", "/music/track.mp3")]
-    assert verify_calls == [(MBID, "T")]
 
 
 # ── service track-id resolver (#945 export to Spotify/Deezer) ──

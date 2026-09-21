@@ -1,4 +1,4 @@
-"""_fix_mbid_mismatch (#903 follow-up): stripping the bad MBID off the file must also
+"""_fix_mbid_mismatch: stripping the bad MBID off the file must also
 clear tracks.musicbrainz_recording_id when it still holds that SAME bad value — otherwise
 the export MBID waterfall's DB rung (core/exports/export_sources.py) keeps resolving the
 wrong recording straight out of the DB even after the file itself was cleaned up.
@@ -94,7 +94,7 @@ def test_does_not_touch_db_when_tag_removal_finds_nothing(tmp_path, monkeypatch)
     assert fake_db.current_mbid == BAD_MBID
 
 
-# ── #903 follow-up MAJOR-3: side_effects.py lowercases the MBID on import, but a
+# ── side_effects.py lowercases the MBID on import, but a
 # finding's details['mbid'] carries the raw file-tag case — the clear must not compare
 # with a case-sensitive `=` or it silently matches 0 rows ──
 

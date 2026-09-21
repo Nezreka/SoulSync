@@ -610,25 +610,14 @@ class MusicBrainzClient:
             logger.error(f"Error fetching release-group {mbid}: {e}")
             return None
 
-    def get_recording(self, mbid: str, includes: Optional[List[str]] = None,
-                      raise_on_error: bool = False) -> Optional[Dict[str, Any]]:
+    def get_recording(self, mbid: str, includes: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
         """
         Get full recording details by MusicBrainz ID
-
+        
         Args:
             mbid: MusicBrainz ID of the recording
             includes: Optional list of additional data to include
-            raise_on_error: Re-raise a TRANSPORT failure (timeout, connection error,
-                5xx, ...) instead of reporting it as "not found". The default is the
-                historical fail-soft behaviour, which suits callers that only want a
-                best-effort lookup. A genuine 404 (the MBID really doesn't exist) is
-                NOT affected by this flag — it always returns None, since that's a
-                real answer, not a failure. This distinction matters for a caller
-                that WRITES the answer down (see the export MBID-verification path
-                in ``core/exports/export_sources.py``): a MusicBrainz outage and "no
-                such recording" must not be treated the same, or an outage would look
-                identical to every embedded MBID suddenly being wrong.
-
+            
         Returns:
             Recording data or None if not found
         """
@@ -636,21 +625,12 @@ class MusicBrainzClient:
             params = {'fmt': 'json'}
             if includes:
                 params['inc'] = '+'.join(includes)
-
+            
             response = self._get(f"/recording/{mbid}", params=params)
+            response.raise_for_status()
+            
             return response.json()
-
-        except requests.HTTPError as e:
-            status = e.response.status_code if e.response is not None else None
-            if status == 404:
-                logger.debug(f"Recording {mbid} not found in MusicBrainz")
-                return None
-            logger.error(f"Error fetching recording {mbid}: {e}")
-            if raise_on_error:
-                raise
-            return None
+            
         except Exception as e:
             logger.error(f"Error fetching recording {mbid}: {e}")
-            if raise_on_error:
-                raise
             return None
