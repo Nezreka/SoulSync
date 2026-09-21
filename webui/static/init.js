@@ -2822,6 +2822,15 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
             : ' Own library (separate output folder + their own server library)'));
         form.appendChild(olLabel);
 
+        let olWarn = null;
+        if (profileSettings.library_supported === false && ownLibCheckbox.checked) {
+            olWarn = document.createElement('div');
+            olWarn.className = 'profile-own-library-inactive-warning';
+            olWarn.style.cssText = 'margin: 6px 0 10px 0; padding: 8px 12px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; font-size: 12px; color: #f59e0b; line-height: 1.4;';
+            olWarn.innerHTML = '⚠️ <strong>Inactive on current media server:</strong> Own libraries require Plex or Jellyfin. While Navidrome or Standalone is active, downloads for this profile will route to the shared library folder.';
+            form.appendChild(olWarn);
+        }
+
         // the folder: prefilled with the install's expected path (a mount
         // under /app/libraries/<name>, see docker-compose.yml); outside docker
         // the admin corrects it, and a folder that is not there is refused on save
@@ -2850,6 +2859,10 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
         form.appendChild(olField);
         ownLibCheckbox.addEventListener('change', () => {
             olField.style.display = ownLibCheckbox.checked ? '' : 'none';
+            if (olWarn) olWarn.style.display = ownLibCheckbox.checked ? '' : 'none';
+            if (profileSettings.library_supported === false && !ownLibCheckbox.checked) {
+                ownLibCheckbox.disabled = true;
+            }
         });
     }
 

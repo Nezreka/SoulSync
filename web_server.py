@@ -3614,8 +3614,37 @@ def handle_settings():
             if _primary_err:
                 return jsonify({"success": False, "error": _primary_err}), 400
 
+            settings_warnings = []
             if 'active_media_server' in new_settings:
-                config_manager.set_active_media_server(new_settings['active_media_server'])
+                old_server = config_manager.get_active_media_server()
+                new_server = new_settings['active_media_server']
+                if old_server != new_server:
+                    config_manager.set_active_media_server(new_server)
+                    try:
+                        from core.library_scope import invalidate_library_scope_cache
+                        invalidate_library_scope_cache()
+                        from core.imports.paths import reset_own_library_fallback_notifications
+                        reset_own_library_fallback_notifications()
+                    except Exception as _inv_err:
+                        logger.debug("scope cache invalidation failed: %s", _inv_err)
+                    if new_server not in ('plex', 'jellyfin'):
+                        try:
+                            own_profs = get_database().get_own_library_profiles()
+                            if own_profs:
+                                names = ", ".join(p.get('name', f"Profile {p.get('id')}") for p in own_profs)
+                                logger.warning(
+                                    "[Media Server] Switched active server to '%s'. Own-library isolation is not supported by '%s'. "
+                                    "Profiles [%s] will fall back to the shared library for downloads and scans.",
+                                    new_server, new_server, names
+                                )
+                                server_display = (new_server or 'this server').capitalize()
+                                settings_warnings.append(
+                                    f"Switching to {server_display} disables own-library isolation for profiles: {names}. "
+                                    "Their downloads will route to the shared library folder."
+                                )
+                        except Exception as _ms_err:
+                            logger.debug("Error checking own-library profiles on server switch: %s", _ms_err)
+
 
             # ONE database write for the whole page save. Per-leaf saves were
             # hundreds of encrypt+serialize+commit cycles per click — enough
@@ -3713,8 +3742,10 @@ def handle_settings():
                 )
             # Invalidate status cache so next poll reflects new settings (e.g. fallback source change)
             invalidate_metadata_status_caches()
-            logger.info("Service clients re-initialized with new settings.")
-            return jsonify({"success": True, "message": "Settings saved successfully."})
+            resp_data = {"success": True, "message": "Settings saved successfully."}
+            if settings_warnings:
+                resp_data["warnings"] = settings_warnings
+            return jsonify(resp_data)
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
     else:  # GET request

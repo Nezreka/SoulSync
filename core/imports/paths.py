@@ -190,13 +190,18 @@ def import_profile_id(context) -> Optional[int]:
     return None
 
 
+_notified_own_lib_fallback: set[int] = set()
+
+
+def reset_own_library_fallback_notifications() -> None:
+    """Clear notification throttle state (useful for tests and server switches)."""
+    _notified_own_lib_fallback.clear()
+
+
 def library_root_for_profile(profile_id) -> Optional[str]:
     """the own-library output folder of a profile (docker-resolved), or None
     when the profile is on the shared library."""
     if not profile_id:
-        return None
-    from core.library_scope import own_library_supported
-    if not own_library_supported():
         return None
     try:
         from database.music_database import get_database
@@ -206,7 +211,35 @@ def library_root_for_profile(profile_id) -> Optional[str]:
         return None
     if lib.get("mode") != "own" or not lib.get("root"):
         return None
+
+    from core.library_scope import own_library_supported
+    if not own_library_supported():
+        pid = int(profile_id)
+        active_server = _get_config_manager().get_active_media_server()
+        shared_root = shared_transfer_root()
+        logger.warning(
+            "[Own Library] Profile %s has an own library configured (%s), "
+            "but active media server '%s' does not support own-library isolation. "
+            "Routing download to shared folder: %s",
+            pid, lib.get("root"), active_server, shared_root
+        )
+        if pid not in _notified_own_lib_fallback:
+            _notified_own_lib_fallback.add(pid)
+            try:
+                server_display = (active_server or 'this media server').capitalize()
+                get_database().add_notifications([{
+                    'type': 'warning',
+                    'message': (
+                        f"Own library is inactive on {server_display}. "
+                        f"Downloads for this profile will route to the shared library folder ({shared_root})."
+                    ),
+                }], profile_id=pid)
+            except Exception as notif_err:  # noqa: BLE001
+                logger.debug("failed to dispatch own library fallback notification: %s", notif_err)
+        return None
+
     return config_root_path(lib["root"])
+
 
 
 def shared_transfer_root() -> str:
