@@ -162,7 +162,10 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
             continue
         remaining.append(c)
 
-    if slow_fallback is not None:
+    # The hybrid chain may have moved on from Soulseek altogether since the
+    # slow source was retained; an exhausted source is not a last resort.
+    if slow_fallback is not None and _resolve_worker_source(
+            _cand_user_file(slow_fallback)[0]).lower() not in exhausted:
         remaining.append(slow_fallback)
 
     if not remaining:
