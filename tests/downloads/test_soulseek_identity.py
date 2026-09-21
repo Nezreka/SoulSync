@@ -63,7 +63,10 @@ def test_disc_evidence_rejects_same_title_on_another_disc():
 def test_fractional_track_number_still_rejects_wrong_number():
     target = _track('Intro', '1/12')
     assert match_track(target, _file('01 - Intro.flac')).matches
-    assert not match_track(target, _file('02 - Intro.flac')).matches
+    mismatch = match_track(target, _file('02 - Intro.flac'))
+    assert not mismatch.matches
+    assert mismatch.contradicts
+    assert mismatch.reason == 'number-or-disc-mismatch'
 
 
 @pytest.mark.parametrize(('title', 'artist', 'album', 'number', 'filename'), [
@@ -84,12 +87,30 @@ def test_real_world_filename_layouts_match(title, artist, album, number, filenam
     assert not result.contradicts
 
 
-def test_unrecognized_layout_is_inconclusive_but_sibling_title_conflicts():
+def test_unrecognized_layout_and_sibling_title_are_inconclusive():
     target = {'name': 'Rise', 'artists': ['Doves'], 'album': 'Lost Souls'}
     unknown = match_track(target, _file('05-d0ves__rise.flac'))
     sibling = match_track(target, _file('Doves/Lost Souls/05 - Doves - Sea Song.flac'))
     assert not unknown.matches and not unknown.contradicts
-    assert not sibling.matches and sibling.contradicts
+    assert not sibling.matches and not sibling.contradicts
+    assert sibling.reason == 'parsed-title-mismatch'
+
+
+@pytest.mark.parametrize(('title', 'filename'), [
+    ('Duvet - Acoustic', '12. Duvet (acoustic version).flac'),
+    ('Black Ice', '05 - Black Ice (original mix).flac'),
+    ('Where\'d All the Time Go?', "05. Dr. Dog - Where'd All the Time Go&#x3f;.flac"),
+    ('Scatterbrain', '14-split_chain-scatterbrain-3b92e63f.mp3'),
+    ('Bring On The Night - Remastered 2003',
+     '10 - Bring On The Night (Remastered 2003.mp3'),
+])
+def test_completed_history_title_variants_are_not_hard_contradictions(title, filename):
+    result = match_track(
+        {'name': title, 'artists': ['Artist'], 'album': 'Album'},
+        _file(filename),
+    )
+
+    assert not result.contradicts
 
 
 def test_assignment_does_not_count_one_file_twice():

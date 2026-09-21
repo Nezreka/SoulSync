@@ -218,20 +218,14 @@ def match_track(target: Any, candidate: Any, *, album: str = '') -> IdentityResu
                               album_evidence)
     if conflicting_number:
         return IdentityResult(False, 'number-or-disc-mismatch', contradicts=True)
-    structured_title = any(variant.source in {
-        'artist-prefix', 'artist-segment', 'album-segment',
-        'artist-album-number', 'album-number', 'embedded-number',
-    } for variant in variants)
-    basename = variants[0] if variants else None
-    stem = _AUDIO_EXTENSION.sub('', str(filename or '').replace('\\', '/').split('/')[-1])
-    after_number = _PACKED_DISC_NUMBER.sub('', stem, count=1)
-    after_number = _LEADING_NUMBER.sub('', after_number, count=1)
-    simple_numbered_title = bool(
-        basename and basename.source == 'basename' and basename.number
-        and not re.search(r'\s+[-–]\s+|_|(?<=[a-z])-(?=[a-z])', after_number, re.IGNORECASE)
-    )
-    if structured_title or simple_numbered_title:
-        return IdentityResult(False, 'different-parsed-title', contradicts=True)
+    # A plausible parse that does not exactly equal the requested title is not
+    # proof that this is a different recording. Soulseek names commonly append
+    # release hashes, mix labels, session dates, or other useful metadata, and
+    # equivalent titles can use different punctuation. Keep those rows open to
+    # the existing confidence/artist/quality gates. Only concrete number/disc
+    # conflicts above are authoritative negative evidence.
+    if variants:
+        return IdentityResult(False, 'parsed-title-mismatch')
     return IdentityResult(False, 'unrecognized-layout')
 
 

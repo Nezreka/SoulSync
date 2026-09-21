@@ -49,7 +49,7 @@ def source_reuse_title_matches(expected_track, candidate) -> bool:
     if expected_track is None or candidate is None:
         return False
     identity = match_track(expected_track, candidate)
-    return identity.matches or identity.reason == 'unrecognized-layout'
+    return not identity.contradicts and identity.reason != 'missing-requested-title'
 
 
 def _youtube_probe_targets(profile_id=None):
@@ -573,8 +573,9 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
     if not initial_candidates:
         return []
 
-    # Reject clear sibling titles or number conflicts, but leave unfamiliar
-    # layouts to the matching engine's existing confidence and quality gates.
+    # Reject concrete number/disc conflicts, but leave ordinary title-shape
+    # disagreements to the matching engine's existing confidence and quality
+    # gates. A parsed title is evidence, not authoritative metadata.
     identity_checked = []
     for candidate in initial_candidates:
         if getattr(candidate, 'username', None) in _STREAMING_USERNAMES:

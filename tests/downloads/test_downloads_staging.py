@@ -44,6 +44,12 @@ class _FakeMatchingEngine:
     def normalize_string(s):
         return (s or '').lower().strip()
 
+    @staticmethod
+    def detect_version_type(title):
+        from core.matching_engine import MusicMatchingEngine
+
+        return MusicMatchingEngine().detect_version_type(title)
+
 
 class _FakeConfig:
     def __init__(self, transfer_path):
@@ -516,6 +522,32 @@ def test_staging_title_match_keeps_wrong_versions_separate(tmp_path):
 
     assert result is False
     assert 'staging_t_wrong_version' not in matched_downloads_context
+
+
+def test_staging_title_match_accepts_equivalent_version_formatting(tmp_path):
+    src_file = tmp_path / 'staging' / '12. Duvet (Acoustic Version).flac'
+    src_file.parent.mkdir()
+    src_file.touch()
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[{
+            'full_path': str(src_file),
+            'title': 'Duvet (Acoustic Version)',
+            'artist': 'bôa',
+            'track_number': 12,
+        }],
+    )
+    _seed_task('t_equivalent_version')
+
+    result = ds.try_staging_match(
+        't_equivalent_version', 'b1',
+        _Track(name='Duvet - Acoustic', artists=['bôa']),
+        deps,
+    )
+
+    assert result is True
+    assert 'staging_t_equivalent_version' in matched_downloads_context
 
 
 def test_staging_title_match_handles_untagged_release_filename(tmp_path):

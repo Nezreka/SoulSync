@@ -51,7 +51,7 @@ class _BareTitleEngine:
         return engine.base_title_of(text, artist, from_filename=from_filename)
 
 
-def test_source_reuse_requires_same_bare_title(monkeypatch):
+def test_source_reuse_leaves_parsed_title_disagreement_to_confidence(monkeypatch):
     monkeypatch.setattr(validation, 'matching_engine', _BareTitleEngine())
     expected = _Track(duration_ms=240_000, name='Lost Souls', artists=('Doves',))
 
@@ -65,7 +65,7 @@ def test_source_reuse_requires_same_bare_title(monkeypatch):
     )
 
     assert source_reuse_title_matches(expected, matching) is True
-    assert source_reuse_title_matches(expected, sibling) is False
+    assert source_reuse_title_matches(expected, sibling) is True
 
 
 def test_source_reuse_recognizes_embedded_album_and_track_number(monkeypatch):
@@ -99,6 +99,20 @@ def test_source_reuse_leaves_unknown_filename_layout_to_confidence_gate():
     )
 
     assert source_reuse_title_matches(expected, candidate) is True
+
+
+def test_source_reuse_rejects_concrete_track_number_conflict():
+    expected = {
+        'name': 'Intro',
+        'artists': ['Artist'],
+        'track_number': 1,
+    }
+    candidate = _Candidate(
+        username='peer', duration=240_000,
+        filename=r'music\Artist\Album\02 - Intro.flac',
+    )
+
+    assert source_reuse_title_matches(expected, candidate) is False
 
 
 def test_drops_soundcloud_30s_preview_when_expected_long():
