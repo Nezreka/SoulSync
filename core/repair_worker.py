@@ -4164,6 +4164,23 @@ class RepairWorker:
                 mbid = details.get('mbid', 'unknown')
                 mb_title = details.get('mb_title', 'unknown')
                 title = details.get('title', 'unknown')
+
+                # The same bad MBID was also copied verbatim into
+                # tracks.musicbrainz_recording_id at import (core/imports/side_effects.py),
+                # and the export MBID waterfall's DB rung (core/exports/export_sources.py)
+                # reads that column directly — stripping only the file tag would leave
+                # exports still resolving the wrong recording. Clear it too, but only if it
+                # still holds this SAME bad value (guarded in the DB helper).
+                bad_mbid = details.get('mbid')
+                if bad_mbid and bad_mbid != 'unknown' and entity_type == 'track' and entity_id:
+                    try:
+                        self.db.clear_track_recording_mbid_if_matches(entity_id, bad_mbid)
+                    except Exception as e:
+                        logger.debug(
+                            "Could not clear tracks.musicbrainz_recording_id for track %s: %s",
+                            entity_id, e,
+                        )
+
                 return {
                     'success': True,
                     'action': 'removed_mbid',
