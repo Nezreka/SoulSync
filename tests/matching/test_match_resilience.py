@@ -35,11 +35,21 @@ def service():
     return svc
 
 
+def _transient(*_args, raise_on_error=False, **_kwargs):
+    """Stand-in for the real client's contract: a transport failure is folded
+    into `[]` unless the caller asked to be told about it. So a `match_*` that
+    forgets `raise_on_error=True` sees a genuine-looking empty result here and
+    negative-caches it — which is exactly the defect these tests pin."""
+    if raise_on_error:
+        raise TimeoutError("read timed out")
+    return []
+
+
 # --- match_recording ---------------------------------------------------------
 
 
 def test_match_recording_transient_failure_is_not_cached(service):
-    service.mb_client.search_recording.side_effect = TimeoutError("read timed out")
+    service.mb_client.search_recording.side_effect = _transient
 
     assert service.match_recording("Some Song", "Some Artist") is None
     service._save_to_cache.assert_not_called()
@@ -66,7 +76,7 @@ def test_match_recording_passes_raise_on_error(service):
 
 
 def test_match_artist_transient_failure_is_not_cached(service):
-    service.mb_client.search_artist.side_effect = TimeoutError("read timed out")
+    service.mb_client.search_artist.side_effect = _transient
 
     assert service.match_artist("Some Artist") is None
     service._save_to_cache.assert_not_called()
@@ -111,7 +121,7 @@ def test_match_artist_non_strict_fallback_also_passes_raise_on_error(service):
 
 
 def test_match_release_transient_failure_is_not_cached(service):
-    service.mb_client.search_release.side_effect = TimeoutError("read timed out")
+    service.mb_client.search_release.side_effect = _transient
 
     assert service.match_release("Some Album", "Some Artist") is None
     service._save_to_cache.assert_not_called()
