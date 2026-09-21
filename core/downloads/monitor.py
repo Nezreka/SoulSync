@@ -549,14 +549,10 @@ class WebUIDownloadMonitor:
                         ):
                             tracker = task.pop('_observed_speed_tracker', None)
                             if (isinstance(tracker, ObservedSpeedTracker)
-                                    and len(tracker.samples) >= 2
                                     and _resolve_download_source(task.get('username')) == 'soulseek'):
-                                start_at, start_bytes = tracker.samples[0]
-                                end_at, end_bytes = tracker.samples[-1]
-                                if end_at > start_at and end_bytes > start_bytes:
-                                    observe_peer(task.get('username'),
-                                                 (end_bytes - start_bytes) / (end_at - start_at),
-                                                 end_at - start_at)
+                                speed_bps, sample_seconds = tracker.window_speed()
+                                if speed_bps:
+                                    observe_peer(task.get('username'), speed_bps, sample_seconds)
                             task.pop('_incomplete_warned', None)
                             # CRITICAL FIX: Transition to 'post_processing' HERE so downloads
                             # don't depend on browser polling to trigger post-processing.
@@ -1218,11 +1214,17 @@ class WebUIDownloadMonitor:
         except (TypeError, ValueError):
             minimum_kbps = 250.0
 
-        is_active = 'InProgress' in str(state_str or '')
+        state_str = str(state_str or '')
+        is_active = 'InProgress' in state_str
         if (not is_active
                 or _resolve_download_source(task.get('username')) != 'soulseek'
                 or task.get('_user_manual_pick')):
-            task.pop('_observed_speed_tracker', None)
+            # A transfer that just finished keeps its samples: the completion
+            # branch in _check_all_downloads runs AFTER this and records the
+            # peer's throughput from them. Everything else (queued, errored,
+            # non-Soulseek) starts over.
+            if 'Completed' not in state_str and 'Succeeded' not in state_str:
+                task.pop('_observed_speed_tracker', None)
             return False
 
         retry_enabled = (

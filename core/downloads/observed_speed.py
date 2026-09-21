@@ -26,6 +26,21 @@ class ObservedSpeedTracker:
         self.samples.clear()
         self.low_since = None
 
+    def window_speed(self) -> tuple[Optional[float], float]:
+        """Average bytes/second across the retained samples, and their span.
+
+        ``None`` when fewer than two samples exist or no bytes moved, so a
+        caller can tell "not measured" apart from "measured at zero".
+        """
+        if len(self.samples) < 2:
+            return None, 0.0
+        first_at, first_bytes = self.samples[0]
+        last_at, last_bytes = self.samples[-1]
+        span = last_at - first_at
+        if span <= 0 or last_bytes <= first_bytes:
+            return None, span
+        return (last_bytes - first_bytes) / span, span
+
     def observe(self, now: float, transferred: int, minimum_bps: float) -> tuple[Optional[float], bool]:
         transferred = max(0, int(transferred or 0))
         minimum_bps = max(0.0, float(minimum_bps or 0))

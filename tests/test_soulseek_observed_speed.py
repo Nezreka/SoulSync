@@ -202,6 +202,30 @@ def test_fallback_disabled_by_default(monitor, monkeypatch):
     assert len(task['_observed_speed_tracker'].samples) >= 2
 
 
+def test_completed_transfer_keeps_samples_for_peer_observation(monitor, monkeypatch):
+    """_should_retry_task runs before the completion branch; a healthy
+    transfer's samples must survive it so the peer's speed gets recorded."""
+    recorded = []
+    monkeypatch.setattr(dm, 'observe_peer', lambda *args: recorded.append(args))
+    monkeypatch.setattr(dm, '_resolve_download_source', lambda username: 'soulseek')
+    task = _task()
+
+    for now in (0, 20, 40):
+        assert _observe(monitor, task, now, now * 2_000_000)[0] is False
+    handled, ops = _observe(monitor, task, 41, 100_000_000, state='Completed, Succeeded')
+
+    assert (handled, ops) == (False, [])
+    tracker = task['_observed_speed_tracker']
+    assert isinstance(tracker, ObservedSpeedTracker)
+    speed_bps, sample_seconds = tracker.window_speed()
+    assert speed_bps == pytest.approx(2_000_000)
+    assert sample_seconds == 40
+
+    # Any other inactive state drops the samples.
+    _observe(monitor, task, 42, 0, state='Queued, Remotely')
+    assert '_observed_speed_tracker' not in task
+
+
 def test_manual_and_non_soulseek_downloads_are_untouched(monitor):
     manual = _task(_user_manual_pick=True)
     streaming = _task(username='tidal')

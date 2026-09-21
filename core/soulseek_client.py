@@ -2049,19 +2049,9 @@ class SoulseekClient(DownloadSourcePlugin):
         if not config_manager.get('soulseek.observed_speed_fallback_enabled', False):
             minimum_bps = 0.0
 
-        def moving_snapshot():
-            if len(speed_tracker.samples) < 2:
-                return None, 0.0
-            first_at, first_bytes = speed_tracker.samples[0]
-            last_at, last_bytes = speed_tracker.samples[-1]
-            sample_seconds = last_at - first_at
-            if sample_seconds <= 0 or last_bytes <= first_bytes:
-                return None, sample_seconds
-            return (last_bytes - first_bytes) / sample_seconds, sample_seconds
-
         def finish(reason):
             if return_detail:
-                measured_speed, sample_seconds = moving_snapshot()
+                measured_speed, sample_seconds = speed_tracker.window_speed()
                 return {'completed': dict(completed_paths), 'reason': reason,
                         'pending': [key for key in transfer_keys
                                     if key not in completed_paths and key not in failed_states],
@@ -2168,7 +2158,7 @@ class SoulseekClient(DownloadSourcePlugin):
             if not active_transfers and any(
                 key not in completed_paths and key not in failed_states for key in transfer_keys
             ):
-                measured_speed, sample_seconds = moving_snapshot()
+                measured_speed, sample_seconds = speed_tracker.window_speed()
                 if measured_speed is not None:
                     last_moving_speed_bps = measured_speed
                     last_moving_sample_seconds = sample_seconds
