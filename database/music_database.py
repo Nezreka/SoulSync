@@ -9614,17 +9614,22 @@ class MusicDatabase:
                             or jf_track_artist != jf_album_artist
                         ):
                             track_artist = jf_track_artist
-                # Navidrome/Subsonic: artist attribute is per-track
-                if not track_artist and hasattr(track_obj, 'artist') and isinstance(getattr(track_obj, 'artist', None), str):
-                    nav_artist = getattr(track_obj, 'artist', '').strip()
-                    # Compare against album artist name to only store when different
-                    try:
-                        artist_row = cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,)).fetchone()
-                        album_artist_name = artist_row[0] if artist_row else ''
-                        if nav_artist and nav_artist.lower() != album_artist_name.lower():
-                            track_artist = nav_artist
-                    except Exception as e:
-                        logger.debug("Failed to load album artist for track_artist comparison: %s", e)
+                if not track_artist:
+                    raw_artist = ''
+                    for _payload_attr in ('_data', '_tags'):
+                        _payload = getattr(track_obj, _payload_attr, None)
+                        if isinstance(_payload, dict):
+                            raw_artist = (_payload.get('artist') or '').strip()
+                            if raw_artist:
+                                break
+                    if raw_artist:
+                        try:
+                            artist_row = cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,)).fetchone()
+                            album_artist_name = (artist_row[0] or '') if artist_row else ''
+                            if raw_artist.lower() != album_artist_name.lower():
+                                track_artist = raw_artist
+                        except Exception as e:
+                            logger.debug("Failed to load album artist for track_artist comparison: %s", e)
 
                 # Extract MusicBrainz recording ID from server if available (Navidrome provides this)
                 mbid = getattr(track_obj, 'musicBrainzId', None) or None
