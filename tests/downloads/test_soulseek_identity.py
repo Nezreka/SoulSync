@@ -183,7 +183,7 @@ def test_year_prefixed_album_and_artist_parent_are_preserved():
     assert identity.album_path_evidence
 
 
-def test_direct_album_picker_uses_distinct_requested_titles():
+def test_direct_album_ranking_uses_distinct_requested_titles():
     client = object.__new__(SoulseekClient)
     client.filter_results_by_quality_preference = lambda tracks, profile_id=None: tracks
     expected = [
@@ -202,13 +202,13 @@ def test_direct_album_picker_uses_distinct_requested_titles():
         tracks=[_file('Artist/Album/01 - First.flac'),
                 _file('Artist/Album/02 - Second.flac')],
     )
-    picked = client._pick_album_bundle_folder(
+    ranked = client._rank_album_bundle_folders(
         [wrong, correct], 'Album', 'Artist', expected_tracks=expected,
     )
-    assert picked is correct
+    assert ranked == [correct]
 
 
-def test_direct_album_picker_accepts_complete_compilation_without_artist_in_path():
+def test_direct_album_ranking_accepts_complete_compilation_without_artist_in_path():
     client = object.__new__(SoulseekClient)
     client.filter_results_by_quality_preference = lambda tracks, profile_id=None: tracks
     expected = [
@@ -222,9 +222,9 @@ def test_direct_album_picker_accepts_complete_compilation_without_artist_in_path
                 for number in range(1, 4)],
     )
 
-    assert client._pick_album_bundle_folder(
+    assert client._rank_album_bundle_folders(
         [album], 'Now 50', 'Various Artists', expected_tracks=expected,
-    ) is album
+    ) == [album]
 
 
 @pytest.mark.parametrize(('title', 'path', 'matches'), [

@@ -1630,35 +1630,32 @@ class SoulseekClient(DownloadSourcePlugin):
                 result['error'] = 'No complete Soulseek album folders found'
                 return result
 
-            picked = self._pick_album_bundle_folder(
+            ranked = self._rank_album_bundle_folders(
                 albums,
                 album_name,
                 artist_name,
                 quality_profile_id=quality_profile_id,
                 expected_tracks=expected_tracks,
             )
-            if picked is None:
+            if not ranked:
                 result['error'] = 'No suitable Soulseek album folder after filtering'
                 return result
 
+            picked = ranked[0]
             folder_path = getattr(picked, 'album_path', '') or ''
             username = getattr(picked, 'username', '') or ''
-            if expected_tracks and preferred_alternatives is None:
+            if preferred_alternatives is None:
                 preferred_alternatives = [
                     {'username': album.username, 'folder_path': album.album_path,
                      'tracks': album.tracks}
-                    for album in albums if album is not picked
-                    and max(
-                        self._bundle_similarity(album_name, album.album_title),
-                        self._bundle_similarity(album_name, album.album_path),
-                    ) >= 0.65
-                ][:4]
+                    for album in ranked[1:5]
+                ]
         if not username or not folder_path:
             result['error'] = 'No suitable Soulseek album folder after filtering'
             return result
 
         # On the preflight-reuse path ``picked`` is None — the master
-        # already selected the folder so we never call _pick_album_bundle_folder.
+        # already selected the folder so we never call _rank_album_bundle_folders.
         # Read the track count off the preferred_tracks list in that
         # case so the log line doesn't misleadingly report "0 tracks".
         _log_track_count = (
@@ -1709,154 +1706,80 @@ class SoulseekClient(DownloadSourcePlugin):
         from core.downloads.soulseek_identity import assign_album_tracks
         from core.downloads.peer_observation import observe_peer
 
+        # Enqueue only the files that answer requested tracks. ``by_expected``
+        # maps each enqueued transfer back to its request so a partial
+        # result and a folder switch both know exactly what is still owed.
         expected_tracks = list(expected_tracks or [])
-        initial_assignment = assign_album_tracks(expected_tracks, folder_tracks, album=album_name)
+        assignment = assign_album_tracks(expected_tracks, folder_tracks, album=album_name)
+        by_expected: Dict[tuple, int] = {}
         if expected_tracks:
-            folder_tracks = [folder_tracks[file_index] for _, file_index in initial_assignment.pairs]
+            by_expected = {
+                (folder_tracks[file_index].username, folder_tracks[file_index].filename): expected_index
+                for expected_index, file_index in assignment.pairs
+            }
+            folder_tracks = [folder_tracks[file_index] for _, file_index in assignment.pairs]
             if not folder_tracks:
                 result['error'] = 'Selected Soulseek album folder has no matching requested tracks'
                 return result
-        source_options = list(preferred_alternatives or [])[:4]
-        key_to_expected = {}
-        if expected_tracks:
-            for kept, (expected_index, _) in zip(folder_tracks, initial_assignment.pairs, strict=True):
-                key_to_expected[(kept.username, kept.filename)] = expected_index
 
-        transfer_keys: Dict[tuple, TrackResult] = {}
         _emit(
             'downloading',
             release=getattr(picked, 'album_title', folder_path) if picked else folder_path,
             count=len(folder_tracks),
         )
-        for track in folder_tracks:
-            try:
-                download_id = run_async(self.download(track.username, track.filename, track.size))
-            except Exception as exc:
-                logger.warning("[Soulseek album] Failed to enqueue %s: %s", track.filename, exc)
-                continue
-            if download_id:
-                transfer_keys[(track.username, track.filename)] = track
-
+        transfer_keys = self._enqueue_album_tracks(folder_tracks)
         if not transfer_keys:
             result['error'] = 'No Soulseek album files could be enqueued'
             return result
 
         result['fallback'] = False
         deadline = time.monotonic() + get_poll_timeout()
-        switch_possible = False
-        if expected_tracks and initial_assignment.coverage >= 0.8:
-            for option in source_options:
-                advertised_tracks = list(option.get('tracks') or [])
-                if advertised_tracks:
-                    eligible = self.filter_results_by_quality_preference(
-                        advertised_tracks, profile_id=quality_profile_id)
-                    option['_eligible_tracks'] = eligible
-                    if assign_album_tracks(expected_tracks, eligible, album=album_name).coverage == 1.0:
-                        switch_possible = True
-        poll_result = self._poll_album_bundle_downloads(
-            transfer_keys, _emit, deadline=deadline, return_detail=True,
-            switch_on_crawl=switch_possible,
+        alternatives = self._album_alternatives(
+            list(preferred_alternatives or []), expected_tracks, album_name, quality_profile_id,
+        ) if expected_tracks else []
+        # Abandon a crawling folder only when another one can supply every
+        # requested track; otherwise the slow folder is still the best offer.
+        switch_possible = assignment.coverage >= 0.8 and any(
+            assign_album_tracks(expected_tracks, tracks, album=album_name).coverage == 1.0
+            for _, tracks in alternatives
         )
+        poll = self._poll_album_bundle_downloads(
+            transfer_keys, _emit, deadline=deadline, switch_on_crawl=switch_possible,
+        )
+        if poll['speed_bps']:
+            observe_peer(username, poll['speed_bps'], poll['sample_seconds'])
         completed_by_expected = {
-            key_to_expected[key]: path for key, path in poll_result['completed'].items()
-            if key in key_to_expected
+            by_expected[key]: path for key, path in poll['completed'].items() if key in by_expected
         }
-        completed = list(poll_result['completed'].values())
-        if poll_result['speed_bps'] and poll_result['speed_bps'] > 0:
-            observe_peer(username, poll_result['speed_bps'], poll_result['sample_seconds'])
+        completed = list(poll['completed'].values())
 
-        if expected_tracks and source_options and time.monotonic() < deadline:
-            safe_to_retry_original = True
-            if poll_result['pending']:
-                if not self._cancel_album_pending(poll_result['pending'], transfer_keys):
-                    logger.warning('[Soulseek album] Cancellation unconfirmed; keeping current folder')
-                    resumed = self._poll_album_bundle_downloads(
-                        transfer_keys, _emit, deadline=deadline, return_detail=True,
-                        initial_completed=poll_result['completed'],
-                    )
-                    completed = list(resumed['completed'].values())
-                    completed_by_expected = {
-                        key_to_expected[key]: path for key, path in resumed['completed'].items()
-                        if key in key_to_expected
-                    }
-                    source_options = []
-            for option_index, option in enumerate(source_options):
-                remaining = [index for index in range(len(expected_tracks))
-                             if index not in completed_by_expected]
-                if not remaining or time.monotonic() >= deadline:
-                    break
-                option_tracks = list(option.get('_eligible_tracks') or option.get('tracks') or [])
-                if not option_tracks:
-                    try:
-                        browsed = run_async(self.browse_user_directory(
-                            option['username'], option['folder_path']))
-                        option_tracks = self.parse_browse_results_to_tracks(
-                            option['username'], browsed or [], directory=option['folder_path'])
-                    except Exception as exc:
-                        logger.warning('[Soulseek album] Alternative browse failed: %s', exc)
-                        continue
-                option_tracks = self.filter_results_by_quality_preference(
-                    option_tracks, profile_id=quality_profile_id)
-                subset = [expected_tracks[index] for index in remaining]
-                assignment = assign_album_tracks(subset, option_tracks, album=album_name)
-                if assignment.coverage < 1.0:
-                    continue
-                alt_keys = {}
-                alt_expected = {}
-                for relative_index, file_index in assignment.pairs:
-                    track = option_tracks[file_index]
-                    key = (track.username, track.filename)
-                    try:
-                        queued = run_async(self.download(track.username, track.filename, track.size))
-                    except Exception as exc:
-                        logger.warning('[Soulseek album] Alternative enqueue failed: %s', exc)
-                        continue
-                    if queued:
-                        alt_keys[key] = track
-                        alt_expected[key] = remaining[relative_index]
-                if not alt_keys:
-                    continue
-                alt_result = self._poll_album_bundle_downloads(
-                    alt_keys, _emit, deadline=deadline, return_detail=True,
-                    switch_on_crawl=option_index < len(source_options) - 1,
+        if expected_tracks and alternatives and poll['reason'] != 'unresolved':
+            switched = poll['reason'] == 'crawling'
+            if switched and not self._cancel_album_pending(poll['pending'], transfer_keys):
+                # The crawler could not be confirmed stopped; a second folder
+                # would compete with it, so ride it out instead.
+                logger.warning('[Soulseek album] Cancellation unconfirmed; keeping current folder')
+                poll = self._poll_album_bundle_downloads(
+                    transfer_keys, _emit, deadline=deadline, initial_completed=poll['completed'],
                 )
-                for key, path in alt_result['completed'].items():
-                    completed_by_expected[alt_expected[key]] = path
-                if alt_result['speed_bps'] and alt_result['speed_bps'] > 0:
-                    observe_peer(option['username'], alt_result['speed_bps'], alt_result['sample_seconds'])
-                if alt_result['reason'] == 'crawling' and not self._cancel_album_pending(
-                        alt_result['pending'], alt_keys):
-                    safe_to_retry_original = False
-                    resumed = self._poll_album_bundle_downloads(
-                        alt_keys, _emit, deadline=deadline, return_detail=True,
-                        initial_completed=alt_result['completed'],
-                    )
-                    for key, path in resumed['completed'].items():
-                        completed_by_expected[alt_expected[key]] = path
-                    break
-            # The original accepted crawler remains a failsafe. If every
-            # replacement failed outright, retry only its unresolved tracks
-            # once without another speed-driven switch.
-            if (safe_to_retry_original and poll_result['reason'] == 'crawling' and source_options
-                    and len(completed_by_expected) < len(expected_tracks)
-                    and time.monotonic() < deadline):
-                retry_keys = {
-                    key: track for key, track in transfer_keys.items()
-                    if key_to_expected[key] not in completed_by_expected
+                completed_by_expected = {
+                    by_expected[key]: path for key, path in poll['completed'].items()
                 }
-                queued_retry = {}
-                for key, track in retry_keys.items():
-                    try:
-                        if run_async(self.download(track.username, track.filename, track.size)):
-                            queued_retry[key] = track
-                    except Exception as exc:
-                        logger.warning('[Soulseek album] Slow fallback enqueue failed: %s', exc)
-                if queued_retry:
-                    retry_result = self._poll_album_bundle_downloads(
-                        queued_retry, _emit, deadline=deadline, return_detail=True,
-                    )
-                    for key, path in retry_result['completed'].items():
-                        completed_by_expected[key_to_expected[key]] = path
+            else:
+                completed_by_expected, retry_original = self._download_album_from_alternatives(
+                    expected_tracks, completed_by_expected, alternatives, album_name, _emit, deadline,
+                )
+                # The abandoned crawler is the failsafe: if no replacement
+                # produced a file, ask it again for whatever is still owed.
+                if switched and retry_original and len(completed_by_expected) < len(expected_tracks):
+                    retry = self._enqueue_album_tracks([
+                        track for key, track in transfer_keys.items()
+                        if by_expected[key] not in completed_by_expected
+                    ])
+                    if retry:
+                        for key, path in self._poll_album_bundle_downloads(
+                                retry, _emit, deadline=deadline)['completed'].items():
+                            completed_by_expected[by_expected[key]] = path
             completed = list(completed_by_expected.values())
         if not completed:
             # No folder yielded a usable track. The per-track worker retains
@@ -1893,6 +1816,83 @@ class SoulseekClient(DownloadSourcePlugin):
         result['expected_count'] = expected_count
         result['completed_count'] = len(copied)
         return result
+
+    def _enqueue_album_tracks(self, tracks: List[TrackResult]) -> Dict[tuple, TrackResult]:
+        """Enqueue each track with slskd; return the ones it accepted, keyed for polling."""
+        transfer_keys: Dict[tuple, TrackResult] = {}
+        for track in tracks:
+            try:
+                download_id = run_async(self.download(track.username, track.filename, track.size))
+            except Exception as exc:
+                logger.warning("[Soulseek album] Failed to enqueue %s: %s", track.filename, exc)
+                continue
+            if download_id:
+                transfer_keys[(track.username, track.filename)] = track
+        return transfer_keys
+
+    def _album_alternatives(self, options, expected_tracks, album_name, quality_profile_id):
+        """Narrow alternative folders to ``(option, eligible_tracks)`` pairs.
+
+        Options carry the tracks the search already returned, so this costs
+        no network. Folders that cannot supply a single requested track are
+        dropped so the switch decision and the retry walk see only real
+        candidates.
+        """
+        from core.downloads.soulseek_identity import assign_album_tracks
+
+        resolved = []
+        for option in options[:4]:
+            tracks = self.filter_results_by_quality_preference(
+                list(option.get('tracks') or []), profile_id=quality_profile_id)
+            if tracks and assign_album_tracks(expected_tracks, tracks, album=album_name).pairs:
+                resolved.append((option, tracks))
+        return resolved
+
+    def _download_album_from_alternatives(self, expected_tracks, completed_by_expected,
+                                          alternatives, album_name, emit, deadline):
+        """Walk alternative folders for the requested tracks still owed.
+
+        Each folder must cover every remaining track. A folder that crawls is
+        cancelled and the next one tried; if that cancellation cannot be
+        confirmed the walk stops on it. Returns the updated
+        ``completed_by_expected`` and whether the caller may safely re-queue
+        the original folder (False once an unconfirmed transfer is live).
+        """
+        from core.downloads.peer_observation import observe_peer
+        from core.downloads.soulseek_identity import assign_album_tracks
+
+        completed_by_expected = dict(completed_by_expected)
+        for index, (option, tracks) in enumerate(alternatives):
+            remaining = [i for i in range(len(expected_tracks)) if i not in completed_by_expected]
+            if not remaining or time.monotonic() >= deadline:
+                break
+            assignment = assign_album_tracks(
+                [expected_tracks[i] for i in remaining], tracks, album=album_name)
+            if assignment.coverage < 1.0:
+                continue
+            chosen = {
+                (tracks[file_index].username, tracks[file_index].filename): remaining[relative_index]
+                for relative_index, file_index in assignment.pairs
+            }
+            transfer_keys = self._enqueue_album_tracks([tracks[f] for _, f in assignment.pairs])
+            if not transfer_keys:
+                continue
+            poll = self._poll_album_bundle_downloads(
+                transfer_keys, emit, deadline=deadline,
+                switch_on_crawl=index < len(alternatives) - 1,
+            )
+            for key, path in poll['completed'].items():
+                completed_by_expected[chosen[key]] = path
+            if poll['speed_bps']:
+                observe_peer(option['username'], poll['speed_bps'], poll['sample_seconds'])
+            if poll['reason'] == 'crawling' and not self._cancel_album_pending(poll['pending'], transfer_keys):
+                poll = self._poll_album_bundle_downloads(
+                    transfer_keys, emit, deadline=deadline, initial_completed=poll['completed'],
+                )
+                for key, path in poll['completed'].items():
+                    completed_by_expected[chosen[key]] = path
+                return completed_by_expected, False
+        return completed_by_expected, True
 
     def _cancel_album_pending(self, pending, transfer_keys) -> bool:
         """Confirm unfinished transfers stopped before another peer is queued."""
@@ -1942,14 +1942,15 @@ class SoulseekClient(DownloadSourcePlugin):
         logger.warning('[Soulseek album] Pending cancellation did not reach a terminal state')
         return False
 
-    def _pick_album_bundle_folder(
+    def _rank_album_bundle_folders(
         self,
         albums: List[AlbumResult],
         album_name: str,
         artist_name: str,
         quality_profile_id=None,
         expected_tracks=None,
-    ) -> Optional[AlbumResult]:
+    ) -> List[AlbumResult]:
+        """Folders that could be this release, best first; empty if none qualifies."""
         from core.downloads.soulseek_identity import assign_album_tracks
 
         scored = []
@@ -1991,13 +1992,12 @@ class SoulseekClient(DownloadSourcePlugin):
             )
             scored.append((score, len(tracks), album))
         if not scored:
-            return None
+            return []
         scored.sort(key=lambda row: (row[0], row[1], getattr(row[2], 'quality_score', 0.0)), reverse=True)
-        best_score, _, best = scored[0]
-        if best_score < 0.58:
-            logger.warning("[Soulseek album] Best folder score %.3f below threshold", best_score)
-            return None
-        return best
+        if scored[0][0] < 0.58:
+            logger.warning("[Soulseek album] Best folder score %.3f below threshold", scored[0][0])
+            return []
+        return [album for score, _, album in scored if score >= 0.58]
 
     @staticmethod
     def _bundle_similarity(expected: Any, actual: Any) -> float:
@@ -2020,8 +2020,17 @@ class SoulseekClient(DownloadSourcePlugin):
         return SequenceMatcher(None, left, right).ratio()
 
     def _poll_album_bundle_downloads(self, transfer_keys: Dict[tuple, TrackResult], emit, *,
-                                     deadline=None, return_detail=False, switch_on_crawl=False,
-                                     initial_completed=None):
+                                     deadline=None, switch_on_crawl=False,
+                                     initial_completed=None) -> Dict[str, Any]:
+        """Wait for the enqueued transfers and report how the wait ended.
+
+        Returns ``completed`` (key → local path), ``pending`` (keys neither
+        completed nor failed), ``reason`` (``complete``, ``partial``,
+        ``failed``, ``unresolved``, ``timeout`` or — only with
+        ``switch_on_crawl`` — ``crawling``) and the aggregate ``speed_bps``
+        over ``sample_seconds`` of the last window in which bytes moved, or
+        ``None`` if none did.
+        """
         from core.downloads.observed_speed import ObservedSpeedTracker
         from core.settings import config_manager
 
@@ -2042,14 +2051,12 @@ class SoulseekClient(DownloadSourcePlugin):
             minimum_bps = 0.0
 
         def finish(reason):
-            if return_detail:
-                measured_speed, sample_seconds = speed_tracker.window_speed()
-                return {'completed': dict(completed_paths), 'reason': reason,
-                        'pending': [key for key in transfer_keys
-                                    if key not in completed_paths and key not in failed_states],
-                        'speed_bps': measured_speed or last_moving_speed_bps,
-                        'sample_seconds': sample_seconds or last_moving_sample_seconds}
-            return list(completed_paths.values())
+            measured_speed, sample_seconds = speed_tracker.window_speed()
+            return {'completed': dict(completed_paths), 'reason': reason,
+                    'pending': [key for key in transfer_keys
+                                if key not in completed_paths and key not in failed_states],
+                    'speed_bps': measured_speed or last_moving_speed_bps,
+                    'sample_seconds': sample_seconds or last_moving_sample_seconds}
         # Track keys where slskd reports the transfer Completed /
         # Succeeded but the local file finder can't yet locate the
         # file on disk. Usually transient (slskd writes the file
@@ -2126,6 +2133,10 @@ class SoulseekClient(DownloadSourcePlugin):
                 if dl and ('Completed' in state or 'Succeeded' in state):
                     if dl.size and dl.transferred and dl.transferred < dl.size:
                         continue
+                    # Credit the whole file to the throughput window; the
+                    # last InProgress poll saw only part of it.
+                    aggregate_bytes[key] = max(aggregate_bytes.get(key, 0),
+                                               int(dl.transferred or dl.size or 0))
                     path = self._resolve_downloaded_album_file(track.filename)
                     if path:
                         completed_paths[key] = path
@@ -2265,6 +2276,13 @@ class SoulseekClient(DownloadSourcePlugin):
             logger.warning(
                 "[Soulseek album] Timed out with partial album: %d completed, %d failed, %d pending",
                 len(completed_paths),
+                len(failed_states),
+                pending,
+            )
+        else:
+            logger.error(
+                "[Soulseek album] Timed out waiting for %d album files (%d failed, %d pending)",
+                len(transfer_keys),
                 len(failed_states),
                 pending,
             )

@@ -231,6 +231,67 @@ def test_album_bundle_does_not_overlap_when_cancellation_fails(configured_client
     enqueue.assert_awaited_once_with('peer', slow.filename, slow.size)
 
 
+def test_album_bundle_leaves_unresolved_transfers_alone(configured_client, tmp_path):
+    """slskd says Completed but no local file resolved (#715 path mismatch):
+    another peer would hit the same resolver, so nothing is cancelled or re-queued."""
+    song = _track(filename='Artist/Album/01 - Song.flac')
+    alternative = _track(username='other', filename='Artist/Album/01 - Song.flac')
+    polls = [
+        {'completed': {}, 'pending': [('peer', song.filename)], 'reason': 'unresolved',
+         'speed_bps': None, 'sample_seconds': 0},
+    ]
+    with patch('core.soulseek_client.run_async', side_effect=_run_async), \
+         patch.object(configured_client, 'filter_results_by_quality_preference',
+                      side_effect=lambda tracks, profile_id=None: tracks), \
+         patch.object(configured_client, 'download', AsyncMock(return_value='queued')) as enqueue, \
+         patch.object(configured_client, '_poll_album_bundle_downloads', side_effect=polls), \
+         patch.object(configured_client, 'cancel_download', AsyncMock()) as cancel:
+        result = configured_client.download_album_to_staging(
+            'Album', 'Artist', str(tmp_path / 'staging'),
+            preferred_source={'username': 'peer', 'folder_path': 'Artist/Album'},
+            preferred_tracks=[song],
+            preferred_alternatives=[{'username': 'other', 'folder_path': 'Artist/Album',
+                                     'tracks': [alternative]}],
+            expected_tracks=[{'name': 'Song', 'artists': ['Artist'], 'track_number': 1}],
+        )
+
+    assert result['fallback'] is True
+    enqueue.assert_awaited_once_with('peer', song.filename, song.size)
+    cancel.assert_not_awaited()
+
+
+def test_album_bundle_replaces_a_dead_folder_from_an_alternative(configured_client, tmp_path):
+    song = _track(filename='Artist/Album/01 - Song.flac')
+    alternative = _track(username='other', filename='Artist/Album/01 - Song.flac')
+    local = tmp_path / 'song.flac'
+    local.write_bytes(b'audio')
+    polls = [
+        {'completed': {}, 'pending': [], 'reason': 'failed', 'speed_bps': None, 'sample_seconds': 0},
+        {'completed': {('other', alternative.filename): local}, 'pending': [], 'reason': 'complete',
+         'speed_bps': 2_000_000, 'sample_seconds': 20},
+    ]
+    with patch('core.soulseek_client.run_async', side_effect=_run_async), \
+         patch.object(configured_client, 'filter_results_by_quality_preference',
+                      side_effect=lambda tracks, profile_id=None: tracks), \
+         patch.object(configured_client, 'download', AsyncMock(return_value='queued')) as enqueue, \
+         patch.object(configured_client, '_poll_album_bundle_downloads', side_effect=polls), \
+         patch.object(configured_client, 'cancel_download', AsyncMock()) as cancel, \
+         patch('core.soulseek_client.copy_audio_files_atomically',
+               side_effect=lambda paths, staging, remove_source: list(paths)):
+        result = configured_client.download_album_to_staging(
+            'Album', 'Artist', str(tmp_path / 'staging'),
+            preferred_source={'username': 'peer', 'folder_path': 'Artist/Album'},
+            preferred_tracks=[song],
+            preferred_alternatives=[{'username': 'other', 'folder_path': 'Artist/Album',
+                                     'tracks': [alternative]}],
+            expected_tracks=[{'name': 'Song', 'artists': ['Artist'], 'track_number': 1}],
+        )
+
+    assert result['success'] is True and result['partial'] is False
+    assert enqueue.await_count == 2
+    cancel.assert_not_awaited()
+
+
 def test_album_bundle_measures_aggregate_peer_speed_not_queued_siblings(configured_client):
     moving = _track(filename='Artist/Album/01 - First.flac', title='First', number=1,
                     size=100_000_000)
@@ -267,7 +328,7 @@ def test_album_bundle_measures_aggregate_peer_speed_not_queued_siblings(configur
         outcome = configured_client._poll_album_bundle_downloads(
             {('peer', moving.filename): moving, ('peer', queued.filename): queued},
             lambda state, **kwargs: None,
-            return_detail=True, switch_on_crawl=True,
+            switch_on_crawl=True,
         )
 
     assert outcome['reason'] == 'crawling'
@@ -302,7 +363,7 @@ def test_queued_album_bundle_is_not_measured_as_a_slow_peer(configured_client):
          patch('core.settings.config_manager.get', return_value=500):
         outcome = configured_client._poll_album_bundle_downloads(
             {('peer', track.filename): track}, lambda state, **kwargs: None,
-            return_detail=True, switch_on_crawl=True,
+            switch_on_crawl=True,
         )
 
     assert outcome['reason'] == 'timeout'
@@ -345,7 +406,7 @@ def test_album_bundle_still_measures_speed_when_fallback_is_disabled(configured_
          patch('core.settings.config_manager.get', side_effect=setting):
         outcome = configured_client._poll_album_bundle_downloads(
             {('peer', track.filename): track}, lambda state, **kwargs: None,
-            return_detail=True, switch_on_crawl=True,
+            switch_on_crawl=True,
         )
 
     assert outcome['reason'] == 'timeout'

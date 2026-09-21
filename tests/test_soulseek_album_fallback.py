@@ -42,9 +42,10 @@ class _Stub:
     def download(self, username, filename, size):
         return f"dl-{filename}"          # truthy id; run_async patched to identity
 
+    _enqueue_album_tracks = SoulseekClient._enqueue_album_tracks
+
     def _poll_album_bundle_downloads(self, transfer_keys, emit, *, deadline=None,
-                                     return_detail=False, switch_on_crawl=False,
-                                     initial_completed=None):
+                                     switch_on_crawl=False, initial_completed=None):
         completed = {
             key: path for key, path in zip(transfer_keys, self._poll_result)
         }
