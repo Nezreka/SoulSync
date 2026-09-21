@@ -42,6 +42,11 @@ logger = get_logger("downloads.master")
 
 
 _ALBUM_PREFLIGHT_MIN_SCORE = 0.62
+# Folders this close to the best-scored one (and this close in requested-track
+# coverage) are the same release as far as scoring can tell; peer
+# availability picks between them.
+_ALBUM_PREFLIGHT_BAND_WIDTH = 0.06
+_ALBUM_PREFLIGHT_COVERAGE_TOLERANCE = 0.05
 _EDITION_WORDS = {
     'deluxe', 'expanded', 'anniversary', 'special', 'platinum', 'bonus',
     'remaster', 'remastered', 'edition', 'version',
@@ -1212,8 +1217,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                 f'{leader[0].album_title} {leader[0].album_path}',
                             )
                             band = [row for row in scored_albums if
-                                    leader[2] - row[2] <= 0.06
-                                    and abs(leader[3] - row[3]) <= 0.05
+                                    leader[2] - row[2] <= _ALBUM_PREFLIGHT_BAND_WIDTH
+                                    and abs(leader[3] - row[3]) <= _ALBUM_PREFLIGHT_COVERAGE_TOLERANCE
                                     and _folder_variant_penalty(
                                         str((batch_album_context or {}).get('name') or ''),
                                         f'{row[0].album_title} {row[0].album_path}',

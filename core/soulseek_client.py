@@ -67,6 +67,25 @@ from core import slskd_throttle
 _DEFAULT_MIN_DELAY_SECONDS = 0  # 0 = disabled (preserves prior behavior)
 
 
+def _index_transfers(downloads) -> Dict[tuple, DownloadStatus]:
+    """Key slskd transfers by (username, filename) and (username, basename).
+
+    slskd sometimes reports a path spelled differently from the one we
+    enqueued; the basename key lets ``_find_transfer`` still pair them.
+    """
+    by_key: Dict[tuple, DownloadStatus] = {}
+    for dl in downloads:
+        by_key[(dl.username, dl.filename)] = dl
+        by_key.setdefault(
+            (dl.username, os.path.basename((dl.filename or '').replace('\\', '/'))), dl)
+    return by_key
+
+
+def _find_transfer(by_key: Dict[tuple, DownloadStatus], key: tuple) -> Optional[DownloadStatus]:
+    return by_key.get(key) or by_key.get(
+        (key[0], os.path.basename((key[1] or '').replace('\\', '/'))))
+
+
 class SoulseekClient(DownloadSourcePlugin):
     def __init__(self):
         self.base_url: Optional[str] = None
@@ -1904,14 +1923,9 @@ class SoulseekClient(DownloadSourcePlugin):
         except Exception as exc:
             logger.warning('[Soulseek album] Cannot inspect pending transfers: %s', exc)
             return False
-        by_key = {(row.username, row.filename): row for row in downloads}
-        for row in downloads:
-            by_key.setdefault((row.username, os.path.basename(
-                (row.filename or '').replace('\\', '/'))), row)
+        by_key = _index_transfers(downloads)
         for key in pending:
-            row = by_key.get(key) or by_key.get((
-                key[0], os.path.basename((key[1] or '').replace('\\', '/')),
-            ))
+            row = _find_transfer(by_key, key)
             if row is None:
                 continue
             try:
@@ -1922,22 +1936,15 @@ class SoulseekClient(DownloadSourcePlugin):
             if not cancelled:
                 logger.warning('[Soulseek album] Cancellation rejected for %s', transfer_keys[key].filename)
                 return False
-        terminal = ('Completed', 'Succeeded', 'Failed', 'Errored', 'Cancelled', 'Aborted', 'Rejected')
+        # slskd reports every finished transfer as "Completed, <outcome>".
         for _ in range(3):
             try:
                 rows = run_async(self.get_all_downloads())
             except Exception:
                 return False
-            active = [row for row in rows if not any(
-                token in (row.state or '') for token in terminal)]
-            if not any(
-                row.username == key[0] and (
-                    row.filename == key[1]
-                    or os.path.basename((row.filename or '').replace('\\', '/'))
-                    == os.path.basename((key[1] or '').replace('\\', '/'))
-                )
-                for row in active for key in pending
-            ):
+            active = _index_transfers(
+                row for row in rows if 'Completed' not in (row.state or ''))
+            if not any(_find_transfer(active, key) for key in pending):
                 return True
             time.sleep(min(1.0, get_poll_interval()))
         logger.warning('[Soulseek album] Pending cancellation did not reach a terminal state')
@@ -2094,23 +2101,12 @@ class SoulseekClient(DownloadSourcePlugin):
                 logger.warning("[Soulseek album] Poll error: %s", exc)
                 downloads = []
 
-            by_key = {}
-            for dl in downloads:
-                exact_key = (dl.username, dl.filename)
-                by_key[exact_key] = dl
-                basename_key = (
-                    dl.username,
-                    os.path.basename((dl.filename or '').replace('\\', '/')),
-                )
-                by_key.setdefault(basename_key, dl)
+            by_key = _index_transfers(downloads)
             active_transfers = False
             for key, track in transfer_keys.items():
                 if key in completed_paths or key in failed_states:
                     continue
-                dl = by_key.get(key) or by_key.get((
-                    key[0],
-                    os.path.basename((key[1] or '').replace('\\', '/')),
-                ))
+                dl = _find_transfer(by_key, key)
                 state = (getattr(dl, 'state', '') or '') if dl else ''
                 if dl and 'InProgress' in state:
                     active_transfers = True
@@ -2192,9 +2188,7 @@ class SoulseekClient(DownloadSourcePlugin):
             ]
             pending_bytes = 0
             for k in stall_pending:
-                dl = by_key.get(k) or by_key.get((
-                    k[0], os.path.basename((k[1] or '').replace('\\', '/')),
-                ))
+                dl = _find_transfer(by_key, k)
                 pending_bytes += (getattr(dl, 'transferred', 0) or 0) if dl else 0
             marker = (len(completed_paths) + len(failed_states), pending_bytes)
             if marker != _last_progress_marker:
@@ -2219,9 +2213,7 @@ class SoulseekClient(DownloadSourcePlugin):
                     # the same peer+file collides with the zombie enqueue
                     # instead of issuing a fresh request. remove=True, same as
                     # the monitor's retry path.
-                    dl = by_key.get(k) or by_key.get((
-                        k[0], os.path.basename((k[1] or '').replace('\\', '/')),
-                    ))
+                    dl = _find_transfer(by_key, k)
                     dl_id = getattr(dl, 'id', None) if dl else None
                     if dl_id:
                         try:

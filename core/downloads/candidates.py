@@ -105,6 +105,11 @@ def _preferred_version_hit(r):
 # peers use the sharing username, so they are everything else. Keep this list
 # in sync with ``core.downloads.validation._STREAMING_USERNAMES`` — imported
 # lazily would cycle (validation → candidates).
+# Soulseek candidates whose confidence is within this of the band leader are
+# equally likely to be the right file; a normal pathname's noise (a year, a
+# format tag) moves the score more than this.
+_CONFIDENCE_BAND_WIDTH = 0.08
+
 _STREAMING_USERNAMES = frozenset({
     'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'soundcloud',
     'amazon', 'torrent', 'usenet', 'lidarr',
@@ -181,6 +186,20 @@ def _quality_first_sort_key(r, targets, source_order=None):
     return (-target_idx, -src, tier) + _priority_sort_key(r)
 
 
+def _interleave_by_peer(rows):
+    """Round-robin *rows* (already best-first) across their usernames."""
+    by_peer = {}
+    for row in rows:
+        by_peer.setdefault(row.username, []).append(row)
+    ordered = []
+    while by_peer:
+        for peer in list(by_peer):
+            ordered.append(by_peer[peer].pop(0))
+            if not by_peer[peer]:
+                del by_peer[peer]
+    return ordered
+
+
 def order_candidates(candidates, *, quality_first=False, targets=None,
                      source_order=None, peer_speeds=None, peer_occupancy=None):
     """Return *candidates* ordered best-first for the download walk.
@@ -235,7 +254,8 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
     if all_soulseek and not use_quality:
         # Confidence differences smaller than a normal pathname's noise do
         # not justify ignoring a much better peer. Keep correctness bands in
-        # order, then interleave peers within each band.
+        # order, then interleave peers within each band so one uploader with
+        # many hits cannot monopolise the retry walk.
         ordered = []
         remaining = sorted(rows, key=lambda row: (
             _preferred_version_hit(row), getattr(row, 'confidence', 0) or 0,
@@ -244,7 +264,7 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
             leader = getattr(remaining[0], 'confidence', 0) or 0
             preferred = _preferred_version_hit(remaining[0])
             band = [row for row in remaining if _preferred_version_hit(row) == preferred
-                    and leader - (getattr(row, 'confidence', 0) or 0) <= 0.08]
+                    and leader - (getattr(row, 'confidence', 0) or 0) <= _CONFIDENCE_BAND_WIDTH]
             band_ids = {id(row) for row in band}
             remaining = [row for row in remaining if id(row) not in band_ids]
             band.sort(key=lambda row: peer_availability_key(
@@ -254,14 +274,7 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
                 getattr(row, 'quality_score', 0) or 0,
                 getattr(row, 'confidence', 0) or 0,
             ), reverse=True)
-            by_peer = {}
-            for row in band:
-                by_peer.setdefault(row.username, []).append(row)
-            while by_peer:
-                for peer in list(by_peer):
-                    ordered.append(by_peer[peer].pop(0))
-                    if not by_peer[peer]:
-                        del by_peer[peer]
+            ordered.extend(_interleave_by_peer(band))
         return ordered
     if use_quality:
         key = lambda r: (

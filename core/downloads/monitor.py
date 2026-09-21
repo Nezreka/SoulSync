@@ -127,15 +127,14 @@ def _replace_slow_download(task_id, batch_id, download_id, username, filename,
         cancelled = False
 
     if cancelled:
+        # slskd reports every finished transfer as "Completed, <outcome>";
+        # anything else is still holding the peer's slot.
         try:
             for _ in range(3):
                 rows = run_async(download_orchestrator.get_all_downloads())
                 still_active = any(
                     row.username == username and row.id == download_id
-                    and not any(token in (row.state or '') for token in (
-                        'Completed', 'Succeeded', 'Failed', 'Errored',
-                        'Cancelled', 'Aborted', 'Rejected',
-                    ))
+                    and 'Completed' not in (row.state or '')
                     for row in rows
                 )
                 if not still_active:
