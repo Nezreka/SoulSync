@@ -266,9 +266,14 @@ class MusicBrainzService:
                 }
             logger.debug(f"Cached MB match for '{artist_name}' has no owned-catalog overlap — re-resolving")
         
-        # Search MusicBrainz
+        # Search MusicBrainz. `raise_on_error=True` matters here the same way
+        # it does in `_search_and_score_artists`: without it a transient
+        # failure (timeout / 429 / 503, or MusicBrainz's 200-status "busy"
+        # body) comes back as `[]` — the exact value used below for "no such
+        # artist" — and gets negative-cached for the same 30 days.
         try:
-            results = self.mb_client.search_artist(artist_name, limit=5)
+            results = self.mb_client.search_artist(
+                artist_name, limit=5, raise_on_error=True)
             # Issue #586, which was fixed for the alias lookup and not for this:
             # a strict query hits the `artist` field alone and skips the alias
             # and sortname indexes — which is exactly where the romanised
@@ -276,7 +281,7 @@ class MusicBrainzService:
             # too when strict comes back empty.
             if not results:
                 results = self.mb_client.search_artist(
-                    artist_name, limit=5, strict=False)
+                    artist_name, limit=5, strict=False, raise_on_error=True)
 
             if not results:
                 logger.info(f"No MusicBrainz results for artist '{artist_name}'")
@@ -352,7 +357,12 @@ class MusicBrainzService:
             return None
 
         except Exception as e:
-            logger.error(f"Error matching artist '{artist_name}': {e}")
+            # Includes a transient MusicBrainz failure re-raised by
+            # `search_artist(raise_on_error=True)` above — expected under
+            # normal outages/rate-limiting, not an application bug, so this
+            # stays at warning rather than error-log spam. Deliberately NOT
+            # cached: see `match_recording`'s except branch for why.
+            logger.warning(f"Error matching artist '{artist_name}': {e}")
             return None
     
     # Version qualifiers that distinguish releases (Deluxe, Remastered, etc.)
@@ -385,9 +395,12 @@ class MusicBrainzService:
                 'cached': True
             }
 
-        # Search MusicBrainz
+        # Search MusicBrainz. raise_on_error=True: see match_artist above —
+        # a transient failure must not be indistinguishable from "no results"
+        # here, or it gets negative-cached for 30 days like a genuine miss.
         try:
-            results = self.mb_client.search_release(album_name, artist_name, limit=5)
+            results = self.mb_client.search_release(
+                album_name, artist_name, limit=5, raise_on_error=True)
 
             if not results:
                 logger.info(f"No MusicBrainz results for release '{album_name}'")
@@ -481,7 +494,9 @@ class MusicBrainzService:
                 return None
                 
         except Exception as e:
-            logger.error(f"Error matching release '{album_name}': {e}")
+            # See match_artist's except branch: a raised transient MB failure
+            # lands here rather than being folded into "no results" above.
+            logger.warning(f"Error matching release '{album_name}': {e}")
             return None
     
     def match_recording(self, track_name: str, artist_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -502,10 +517,13 @@ class MusicBrainzService:
                 'cached': True
             }
         
-        # Search MusicBrainz
+        # Search MusicBrainz. raise_on_error=True: see match_artist above —
+        # a transient failure must not be indistinguishable from "no results"
+        # here, or it gets negative-cached for 30 days like a genuine miss.
         try:
-            results = self.mb_client.search_recording(track_name, artist_name, limit=5)
-            
+            results = self.mb_client.search_recording(
+                track_name, artist_name, limit=5, raise_on_error=True)
+
             if not results:
                 logger.info(f"No MusicBrainz results for recording '{track_name}'")
                 self._save_to_cache('recording', track_name, artist_name, None, None, 0)
@@ -588,7 +606,11 @@ class MusicBrainzService:
                 return None
                 
         except Exception as e:
-            logger.error(f"Error matching recording '{track_name}': {e}")
+            # See match_artist's except branch: a raised transient MB failure
+            # (this is the fix for the outage that used to be negative-cached
+            # for 30 days, mirroring the earlier lookup_artist_aliases fix)
+            # lands here rather than being folded into "no results" above.
+            logger.warning(f"Error matching recording '{track_name}': {e}")
             return None
     
     def lookup_artist_aliases(self, artist_name: str) -> list:

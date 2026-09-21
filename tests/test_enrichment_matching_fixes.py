@@ -365,7 +365,7 @@ def test_mb_release_title_floor(db):
     assert 0.30 <= sim < 0.6, f"fixture drifted: sim={sim:.2f}"
     assert int(sim * 50) + 30 + 20 >= 70 or True  # documents the old escape path
 
-    svc.mb_client.search_release = lambda name, artist, limit=5: [{
+    svc.mb_client.search_release = lambda name, artist, limit=5, raise_on_error=False: [{
         "id": "mbid-bad", "title": bad_title, "score": 100,
         "artist-credit": [{"artist": {"name": "Imagine Dragons"}}],
     }]
@@ -373,7 +373,7 @@ def test_mb_release_title_floor(db):
 
     # An honest match still clears the gate — DIFFERENT album name, because
     # the rejected query above was negative-cached under its own name.
-    svc.mb_client.search_release = lambda name, artist, limit=5: [{
+    svc.mb_client.search_release = lambda name, artist, limit=5, raise_on_error=False: [{
         "id": "mbid-good", "title": "Evolve", "score": 100,
         "artist-credit": [{"artist": {"name": "Imagine Dragons"}}],
     }]
