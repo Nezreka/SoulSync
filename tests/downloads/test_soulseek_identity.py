@@ -52,21 +52,59 @@ def test_explicitly_preferred_version_survives_identity_gate():
     assert not match_track(target, wrong_sibling).matches
 
 
-def test_disc_evidence_rejects_same_title_on_another_disc():
+def test_disc_and_number_evidence_grade_rather_than_reject():
     target = {'name': 'Intro', 'artists': ['Artist'], 'disc_number': 2,
               'track_number': 1}
-    assert not match_track(target, _file('Artist/Album/CD1/01 - Intro.flac')).matches
-    assert match_track(target, _file('Artist/Album/CD2/01 - Intro.flac')).matches
-    assert not match_track(target, _file('Artist/Album/1-01 - Intro.flac')).matches
+    other_disc = match_track(target, _file('Artist/Album/CD1/01 - Intro.flac'))
+    same_disc = match_track(target, _file('Artist/Album/CD2/01 - Intro.flac'))
+    unnumbered = match_track(target, _file('Artist/Album/Intro.flac'))
+    assert other_disc.matches and other_disc.number_agrees is False
+    assert same_disc.matches and same_disc.number_agrees is True
+    assert unnumbered.matches and unnumbered.number_agrees is None
+    assert match_track(target, _file('Artist/Album/1-01 - Intro.flac')).number_agrees is False
 
 
-def test_fractional_track_number_still_rejects_wrong_number():
+def test_fractional_track_number_is_compared():
     target = _track('Intro', '1/12')
-    assert match_track(target, _file('01 - Intro.flac')).matches
-    mismatch = match_track(target, _file('02 - Intro.flac'))
-    assert not mismatch.matches
-    assert mismatch.contradicts
-    assert mismatch.reason == 'number-or-disc-mismatch'
+    assert match_track(target, _file('01 - Intro.flac')).number_agrees is True
+    assert match_track(target, _file('02 - Intro.flac')).number_agrees is False
+
+
+def test_assignment_prefers_agreeing_number_but_still_covers_renumbered_editions():
+    expected = [_track('Intro', 1), _track('Outro', 2)]
+    # Two "Intro" files: the one whose number agrees wins the request.
+    assignment = assign_album_tracks(expected, [
+        _file('05 - Intro.flac'), _file('01 - Intro.flac'), _file('02 - Outro.flac'),
+    ])
+    assert assignment.pairs == ((0, 1), (1, 2))
+    # A reissue numbers every track differently; coverage is unaffected.
+    assignment = assign_album_tracks(expected, [_file('03 - Intro.flac'), _file('04 - Outro.flac')])
+    assert assignment.coverage == 1.0
+
+
+@pytest.mark.parametrize('layout', [
+    '{n:02d} - {t}.flac', '{n:02d}. {t}.flac', '{n:02d} {t}.flac', '{n:02d}_{t}.flac',
+    '({n:02d}) {t}.flac', '[{n:02d}] {t}.flac', 'Track {n:02d} - {t}.flac',
+    'A{n} - {t}.flac', '1-{n:02d} - {t}.flac', '01{n:02d} - {t}.flac',
+    'Weezer - {n:02d} - {t}.flac', '{n:02d} - Weezer - {t}.flac', 'Weezer - {t}.flac', '{t}.flac',
+])
+def test_common_folder_layouts_reach_full_coverage(layout):
+    titles = ['Buddy Holly', 'Undone - The Sweater Song', "Say It Ain't So"]
+    expected = [{'name': title, 'artists': ['Weezer'], 'track_number': index + 1}
+                for index, title in enumerate(titles)]
+    candidates = [_file('Weezer/Weezer (1994)/' + layout.format(n=index + 1, t=title))
+                  for index, title in enumerate(titles)]
+    assert assign_album_tracks(expected, candidates, album='Weezer').coverage == 1.0
+
+
+def test_near_miss_title_is_a_weak_edge_and_never_outranks_an_exact_one():
+    expected = [{'name': 'Buddy Holly', 'artists': ['Weezer'], 'track_number': 4}]
+    typo = _file('Weezer/Weezer/04 - Buddy Holy.flac')
+    assert assign_album_tracks(expected, [typo]).coverage == 1.0
+    assert assign_album_tracks(expected, [typo, _file('Weezer/Weezer/04 - Buddy Holly.flac')]).pairs == ((0, 1),)
+    # Extra words are not a near miss: they may name another recording.
+    assert assign_album_tracks(expected, [_file('Weezer/Weezer/04 - Buddy Holly (album version).flac')]).coverage == 0.0
+    assert assign_album_tracks(expected, [_file('Weezer/Weezer/04 - Undone.flac')]).coverage == 0.0
 
 
 @pytest.mark.parametrize(('title', 'artist', 'album', 'number', 'filename'), [
@@ -82,18 +120,15 @@ def test_fractional_track_number_still_rejects_wrong_number():
 ])
 def test_real_world_filename_layouts_match(title, artist, album, number, filename):
     target = {'name': title, 'artists': [artist], 'album': album, 'track_number': number}
-    result = match_track(target, _file(filename))
-    assert result.matches
-    assert not result.contradicts
+    assert match_track(target, _file(filename)).matches
 
 
 def test_unrecognized_layout_and_sibling_title_are_inconclusive():
     target = {'name': 'Rise', 'artists': ['Doves'], 'album': 'Lost Souls'}
     unknown = match_track(target, _file('05-d0ves__rise.flac'))
     sibling = match_track(target, _file('Doves/Lost Souls/05 - Doves - Sea Song.flac'))
-    assert not unknown.matches and not unknown.contradicts
-    assert not sibling.matches and not sibling.contradicts
-    assert sibling.reason == 'parsed-title-mismatch'
+    assert not unknown.matches and unknown.reason == 'parsed-title-mismatch'
+    assert not sibling.matches and sibling.reason == 'parsed-title-mismatch'
 
 
 @pytest.mark.parametrize(('title', 'filename'), [
@@ -104,13 +139,15 @@ def test_unrecognized_layout_and_sibling_title_are_inconclusive():
     ('Bring On The Night - Remastered 2003',
      '10 - Bring On The Night (Remastered 2003.mp3'),
 ])
-def test_completed_history_title_variants_are_not_hard_contradictions(title, filename):
+def test_completed_history_title_variants_stay_open(title, filename):
+    """Real completed downloads whose names the parser cannot pin down must
+    be left to the confidence gates, never rejected here."""
     result = match_track(
         {'name': title, 'artists': ['Artist'], 'album': 'Album'},
         _file(filename),
     )
 
-    assert not result.contradicts
+    assert result.matches or result.reason == 'parsed-title-mismatch'
 
 
 def test_assignment_does_not_count_one_file_twice():

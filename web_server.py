@@ -14504,7 +14504,6 @@ def stop_duplicate_cleaner():
 from core.downloads.validation import (
     get_valid_candidates,
     init as _init_download_validation,
-    source_reuse_title_matches,
 )
 
 def _recover_worker_slot(batch_id, task_id):
@@ -15130,9 +15129,6 @@ def _try_source_reuse(task_id, batch_id, track):
     # Score each folder track against current track
     candidates = []
     for folder_track in source_tracks:
-        if not source_reuse_title_matches(track, folder_track):
-            _sr.info(f"  Reject '{folder_track.filename}' — title identity mismatch")
-            continue
         confidence = matching_engine.calculate_slskd_match_confidence(track, folder_track)
         _sr.info(f"  Match '{track.name}' vs '{folder_track.filename}' → confidence={confidence:.3f}")
         if confidence >= 0.70:

@@ -40,18 +40,6 @@ def init(matching_engine_obj, download_orchestrator_obj):
     download_orchestrator = download_orchestrator_obj
 
 
-def source_reuse_title_matches(expected_track, candidate) -> bool:
-    """Reject only a clear title contradiction before the existing score gate.
-
-    Source reuse still requires its separate confidence threshold. Unfamiliar
-    Soulseek naming conventions should not be treated as a different song.
-    """
-    if expected_track is None or candidate is None:
-        return False
-    identity = match_track(expected_track, candidate)
-    return not identity.contradicts and identity.reason != 'missing-requested-title'
-
-
 def _youtube_probe_targets(profile_id=None):
     """Profile targets for YouTube itag probing. None if the DB is unavailable."""
     try:
@@ -552,9 +540,12 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
     _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
     initial_candidates = matching_engine.find_best_slskd_matches_enhanced(spotify_track, results, max_peer_queue=_max_q)
     # The generic path scorer can put a structurally unusual but exact title
-    # below its 0.58 threshold. It has already scored and version-checked all
-    # rows; recover only positive-confidence, exact-identity Soulseek files.
-    # Keep the configured queue gate's all-filtered fallback semantics.
+    # below its 0.58 threshold. It has already scored and version-checked
+    # every row (a version reject scores 0.0), so recover Soulseek files that
+    # still have positive confidence, an exact-title interpretation, and the
+    # artist in their path — the last so the recovery cannot undo the
+    # engine's short-title guard for a fuzzy-artist folder. Keep the
+    # configured queue gate's all-filtered fallback semantics.
     if results and all(getattr(row, 'username', None) not in _STREAMING_USERNAMES
                        for row in results):
         eligible = list(results)
@@ -564,31 +555,23 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
             if within_queue:
                 eligible = within_queue
         accepted_ids = {id(row) for row in initial_candidates}
-        initial_candidates.extend(
-            row for row in eligible
-            if id(row) not in accepted_ids
-            and (getattr(row, 'confidence', 0) or 0) > 0
-            and match_track(spotify_track, row).matches
-        )
+        for row in eligible:
+            if id(row) in accepted_ids or (getattr(row, 'confidence', 0) or 0) <= 0:
+                continue
+            identity = match_track(spotify_track, row)
+            if identity.matches and identity.artist_path_evidence:
+                initial_candidates.append(row)
     if not initial_candidates:
         return []
 
-    # Reject concrete number/disc conflicts, but leave ordinary title-shape
-    # disagreements to the matching engine's existing confidence and quality
-    # gates. A parsed title is evidence, not authoritative metadata.
-    identity_checked = []
+    # Identity is evidence for logging/ordering, never a rejection: a parsed
+    # title is not authoritative metadata.
     for candidate in initial_candidates:
         if getattr(candidate, 'username', None) in _STREAMING_USERNAMES:
-            identity_checked.append(candidate)
             continue
         identity = match_track(spotify_track, candidate)
-        if not identity.contradicts:
-            if identity.matches:
-                candidate.soulseek_match_evidence = identity
-            identity_checked.append(candidate)
-    initial_candidates = identity_checked
-    if not initial_candidates:
-        return []
+        if identity.matches:
+            candidate.soulseek_match_evidence = identity
 
     # Skip quality filtering for streaming source results that somehow got here
     is_streaming_source = initial_candidates[0].username in _STREAMING_USERNAMES if initial_candidates else False

@@ -3,32 +3,42 @@
 The generic filename parser has to choose one title without knowing what was
 requested. Soulseek paths are too varied for that choice to be authoritative;
 keep a small set of plausible titles and compare them to the requested track.
+
+Evidence is graded, never binary. An exact title with an agreeing track
+number is the strongest; an exact title whose number disagrees is still the
+same song on a differently-numbered edition (deluxe, reissue, regional); a
+layout nothing here recognizes is left open for the confidence scorer rather
+than rejected. Version detection ("Live", "Remix") stays with the matching
+engine; this module only recognizes a version suffix when the user asked
+for that version.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Any, Sequence
 
 from core.text.normalize import normalize_for_comparison
+from core.text.track_prefix import parse_track_prefix
 
 
 _YEAR = re.compile(r'(?<!\d)[\[(]?((?:19|20)\d{2})[\])]?')
 _DISC_DIR = re.compile(r'^(?:disc|disk|cd)\s*[-._ ]*(\d{1,2})$', re.IGNORECASE)
-_LEADING_DISC_NUMBER = re.compile(r'^\s*(\d{1,2})[-.](\d{1,2})\s*[-._ ]+')
-_PACKED_DISC_NUMBER = re.compile(r'^\s*(0[1-9])(\d{2})\s*[-._ ]+')
-_LEADING_NUMBER = re.compile(r'^\s*(?:\d{1,2}[-.]\d{1,2}|\d{1,3})\s*[-._ ]+\s*')
 _AUDIO_EXTENSION = re.compile(r'\.[a-z0-9]{2,5}$', re.IGNORECASE)
 _TECHNICAL_TAG = re.compile(r'\s*[\[(](?:flac|mp3|320kbps|v0|lossless|24bit|16bit|hi res)[\])]\s*', re.IGNORECASE)
 _REMASTER_TAG = re.compile(r'\s*[\[(](?:\d{4}\s+)?remaster(?:ed)?(?:\s+\d{4})?[\])]\s*', re.IGNORECASE)
 _REMASTER_SUFFIX = re.compile(r'\s*[-–]\s*(?:(?:\d{4}\s+)?remaster(?:ed)?(?:\s+\d{4})?)\s*$', re.IGNORECASE)
 _FEAT_TAG = re.compile(r'\s*[\[(](?:feat\.?|ft\.?|featuring)\s+[^\])]+[\])]\s*', re.IGNORECASE)
 _CLEAN_TAG = re.compile(r'\s*[\[(](?:explicit|clean)[\])]\s*', re.IGNORECASE)
-_PREFERRED_VERSION_WORD = re.compile(
+# A requested version ("Extended Mix") appended to the requested title.
+_VERSION_WORD = re.compile(
     r'\b(?:live|remix|mix|acoustic|instrumental|extended|demo|karaoke|radio edit|single edit)\b'
 )
+# A weak edge in release assignment needs this much title similarity.
+_WEAK_TITLE_SIMILARITY = 0.80
 
 
 def normalize(text: Any) -> str:
@@ -69,7 +79,11 @@ class IdentityResult:
     disc: int | None = None
     artist_path_evidence: bool = False
     album_path_evidence: bool = False
-    contradicts: bool = False
+    # None when either side has no number/disc to compare.
+    number_agrees: bool | None = None
+    # Best fuzzy ratio between the requested title and any interpretation;
+    # only meaningful when ``matches`` is False.
+    title_similarity: float = 0.0
 
 
 @lru_cache(maxsize=16384)
@@ -85,17 +99,11 @@ def title_interpretations(filename: str, artist: str = '', album: str = '') -> t
         if found:
             disc = int(found.group(1))
             break
-    packed_number = _PACKED_DISC_NUMBER.match(stem)
-    leading_disc = _LEADING_DISC_NUMBER.match(stem) or packed_number
-    if leading_disc:
-        disc = int(leading_disc.group(1))
-    number_match = packed_number or _LEADING_NUMBER.match(stem)
-    number = None
-    if packed_number:
-        number = int(packed_number.group(2))
-    elif number_match:
-        digits = re.findall(r'\d+', number_match.group())
-        number = int(digits[-1]) if digits else None
+    cleaned_stem = _TECHNICAL_TAG.sub(' ', stem)
+    prefix = parse_track_prefix(cleaned_stem)
+    if prefix.disc is not None:
+        disc = prefix.disc
+    number = prefix.number
     variants: list[TitleEvidence] = []
     seen: set[str] = set()
 
@@ -105,15 +113,17 @@ def title_interpretations(filename: str, artist: str = '', album: str = '') -> t
             seen.add(key)
             variants.append(TitleEvidence(key, source, parsed_number, disc))
 
-    cleaned_stem = _TECHNICAL_TAG.sub(' ', stem)
-    base = (_PACKED_DISC_NUMBER.sub('', cleaned_stem, count=1)
-            if _PACKED_DISC_NUMBER.match(cleaned_stem)
-            else _LEADING_NUMBER.sub('', cleaned_stem, count=1)).strip(' -_.')
-    # A number followed only by whitespace can be part of the actual title.
+    base = prefix.remainder.strip(' -_.')
+    # A number followed only by whitespace can be part of the actual title
+    # ("7 rings"), so the unstripped stem stays a candidate.
     if re.match(r'^\s*\d+\s+[A-Za-z]', cleaned_stem):
         add(cleaned_stem, 'literal-leading-number', None)
     add(base, 'basename')
     if artist:
+        # Scene-style names join words with underscores and drop the spaces
+        # around the separator ("fountains_of_wayne-stacys_mom"), which the
+        # whitespace-flanked separator in core.text.strip_artist_prefix is
+        # built to leave alone.
         artist_words = [re.escape(word) for word in re.split(r'[\s_-]+', artist) if word]
         if artist_words:
             artist_prefix = r'^' + r'[\s_-]+'.join(artist_words)
@@ -142,12 +152,12 @@ def title_interpretations(filename: str, artist: str = '', album: str = '') -> t
 
     normalized_base = normalize(base)
     normalized_album = normalize(album)
-    for prefix, source in (
+    for leading, source in (
         (f'{normalize(artist)} {normalized_album}', 'artist-album-number'),
         (normalized_album, 'album-number'),
     ):
-        if prefix and normalized_base.startswith(f'{prefix} '):
-            remainder = normalized_base[len(prefix) + 1:]
+        if leading and normalized_base.startswith(f'{leading} '):
+            remainder = normalized_base[len(leading) + 1:]
             numbered_title = re.match(r'^(\d{1,3})\s+(.+)$', remainder)
             if numbered_title:
                 add(numbered_title.group(2), source, int(numbered_title.group(1)))
@@ -169,8 +179,20 @@ def _track_number(value: Any) -> int | None:
         return None
 
 
+def _expected_position(target: Any) -> tuple[int | None, int | None]:
+    number = _track_number(
+        _field(target, 'track_number', None) or _field(target, 'trackNumber', None)
+    )
+    disc = _field(target, 'disc_number', None) or _field(target, 'discNumber', None)
+    try:
+        disc = int(disc) if disc else None
+    except (TypeError, ValueError):
+        disc = None
+    return number, disc
+
+
 def match_track(target: Any, candidate: Any, *, album: str = '') -> IdentityResult:
-    """Identify exact matches and clear contradictions; leave unknown layouts open."""
+    """Grade how well one Soulseek file answers one requested track."""
     wanted = _title_key(_field(target, 'name', '') or _field(target, 'title', ''))
     if not wanted:
         return IdentityResult(False, 'missing-requested-title')
@@ -187,45 +209,39 @@ def match_track(target: Any, candidate: Any, *, album: str = '') -> IdentityResu
                str(filename or '').replace('\\', '/').split('/')[:-1]]
     artist_evidence = bool(artist and normalize(artist) in parents)
     album_evidence = bool(album and normalize(_without_year(str(album))) in parents)
-    expected_number = _track_number(
-        _field(target, 'track_number', None) or _field(target, 'trackNumber', None)
-    )
-    expected_disc = _field(target, 'disc_number', None) or _field(target, 'discNumber', None)
-    try:
-        expected_disc = int(expected_disc) if expected_disc else None
-    except (TypeError, ValueError):
-        expected_disc = None
-    conflicting_number = False
+    expected_number, expected_disc = _expected_position(target)
+    preferred_version = bool(_field(candidate, 'preferred_version_hit', False))
+
+    best_similarity = 0.0
     for variant in variants:
         exact_title = variant.title == wanted
-        preferred_version_title = (
+        versioned_title = (
             not exact_title
-            and bool(_field(candidate, 'preferred_version_hit', False))
+            and preferred_version
             and variant.title.startswith(f'{wanted} ')
-            and bool(_PREFERRED_VERSION_WORD.search(variant.title[len(wanted):]))
+            and bool(_VERSION_WORD.search(variant.title[len(wanted):]))
         )
-        if not exact_title and not preferred_version_title:
+        if not exact_title and not versioned_title:
+            best_similarity = max(
+                best_similarity, SequenceMatcher(None, wanted, variant.title).ratio(),
+            )
             continue
-        if expected_number and variant.number and expected_number != variant.number:
-            conflicting_number = True
-            continue
-        if expected_disc and variant.disc and expected_disc != variant.disc:
-            conflicting_number = True
-            continue
-        return IdentityResult(True, 'preferred-version-title' if preferred_version_title else 'title-match',
-                              variant.title, variant.source,
-                              variant.number, variant.disc, artist_evidence,
-                              album_evidence)
-    if conflicting_number:
-        return IdentityResult(False, 'number-or-disc-mismatch', contradicts=True)
+        number_agrees = None
+        if expected_number and variant.number:
+            number_agrees = expected_number == variant.number
+        if expected_disc and variant.disc:
+            number_agrees = (number_agrees is not False) and expected_disc == variant.disc
+        return IdentityResult(
+            True, 'preferred-version-title' if versioned_title else 'title-match',
+            variant.title, variant.source, variant.number, variant.disc,
+            artist_evidence, album_evidence, number_agrees=number_agrees,
+        )
     # A plausible parse that does not exactly equal the requested title is not
-    # proof that this is a different recording. Soulseek names commonly append
-    # release hashes, mix labels, session dates, or other useful metadata, and
-    # equivalent titles can use different punctuation. Keep those rows open to
-    # the existing confidence/artist/quality gates. Only concrete number/disc
-    # conflicts above are authoritative negative evidence.
+    # proof of a different recording: Soulseek names append release hashes,
+    # session dates and other decoration, and equivalent titles differ in
+    # punctuation. Leave the row to the confidence/artist/quality gates.
     if variants:
-        return IdentityResult(False, 'parsed-title-mismatch')
+        return IdentityResult(False, 'parsed-title-mismatch', title_similarity=best_similarity)
     return IdentityResult(False, 'unrecognized-layout')
 
 
@@ -240,18 +256,30 @@ class AlbumAssignment:
         return len(self.pairs) / self.expected_count if self.expected_count else 0.0
 
 
+def _edge_rank(result: IdentityResult) -> int | None:
+    """Lower is stronger; None is no edge."""
+    if result.matches:
+        return {True: 0, None: 1, False: 2}[result.number_agrees]
+    if result.title_similarity >= _WEAK_TITLE_SIMILARITY:
+        return 3
+    return None
+
+
 def assign_album_tracks(expected: Sequence[Any], candidates: Sequence[Any], *, album: str = '') -> AlbumAssignment:
-    """Maximum one-to-one coverage with stable number-aware tie ordering."""
-    edges: list[list[tuple[bool, int]]] = [[] for _ in expected]
+    """Maximum one-to-one coverage, preferring the strongest evidence per pair.
+
+    Every requested track gets at most one file and every file serves at
+    most one request. Edges are ranked (agreeing number, unknown number,
+    disagreeing number, fuzzy title) so a renumbered edition or an
+    unfamiliar layout still counts toward coverage while an exact,
+    numbered match always wins the file when both exist.
+    """
+    edges: list[list[tuple[int, int]]] = [[] for _ in expected]
     for expected_index, target in enumerate(expected):
         for candidate_index, candidate in enumerate(candidates):
-            result = match_track(target, candidate, album=album)
-            if result.matches:
-                number = _track_number(
-                    _field(target, 'track_number', None) or _field(target, 'trackNumber', None)
-                )
-                number_agrees = bool(number and result.number and number == result.number)
-                edges[expected_index].append((not number_agrees, candidate_index))
+            rank = _edge_rank(match_track(target, candidate, album=album))
+            if rank is not None:
+                edges[expected_index].append((rank, candidate_index))
     owner: dict[int, int] = {}
 
     def augment(expected_index: int, seen: set[int]) -> bool:
