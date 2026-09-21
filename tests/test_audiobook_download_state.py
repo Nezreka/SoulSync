@@ -22,14 +22,18 @@ from core.runtime_state import download_batches, download_tasks
 
 @pytest.fixture(autouse=True)
 def clean_runtime_state():
-    """Leave the process-wide download state exactly as it was found."""
+    """Leave the process-wide download state exactly as it was found, running each test with clean state."""
     tasks_before = dict(download_tasks)
     batches_before = dict(download_batches)
-    yield
     download_tasks.clear()
-    download_tasks.update(tasks_before)
     download_batches.clear()
-    download_batches.update(batches_before)
+    try:
+        yield
+    finally:
+        download_tasks.clear()
+        download_tasks.update(tasks_before)
+        download_batches.clear()
+        download_batches.update(batches_before)
 
 
 def _register(task_id="hash-1", **overrides):

@@ -18,9 +18,11 @@ Endpoints:
 Acquisition (all scoped to the audiobook subsystem):
   - GET    /api/audiobooks/wishlist:          what is wanted, with counts and worker state.
   - POST   /api/audiobooks/wishlist:          want a book by ASIN.
+  - DELETE /api/audiobooks/wishlist:          clear the entire wishlist.
   - PATCH  /api/audiobooks/wishlist/<asin>:   change its narrator strictness.
   - DELETE /api/audiobooks/wishlist/<asin>:   stop wanting it.
   - POST   /api/audiobooks/wishlist/search:   run a wishlist pass now.
+  - POST   /api/audiobooks/wishlist/<asin>/search: search and grab one book now.
   - GET    /api/audiobooks/releases/<asin>:   what the indexers actually have.
   - POST   /api/audiobooks/grab:              send one release to the download client.
   - GET    /api/audiobooks/downloads:         what is downloading or has finished.
@@ -619,6 +621,12 @@ def create_audiobooks_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": f"{asin} is not on the wishlist"}), 404
         return jsonify({"success": True, "narrator_mode": narrator_mode})
 
+    @bp.route("/wishlist", methods=["DELETE"])
+    def wishlist_clear():
+        """Clear all books from the wishlist for this profile."""
+        cleared = get_audiobook_db().clear_wishlist(_profile())
+        return jsonify({"success": True, "cleared": cleared, "wishlisted": False})
+
     @bp.route("/wishlist/<asin>", methods=["DELETE"])
     def wishlist_remove(asin: str):
         """Stop wanting a book."""
@@ -630,9 +638,9 @@ def create_audiobooks_blueprint() -> Blueprint:
         """Run a wishlist pass right now.
 
         The same code path the background worker runs, so the manual button and
-        the timer cannot drift apart. It still honours each book's own backoff —
-        pressing it repeatedly does not re-search anything recently tried, which
-        is what stops it becoming a way to hammer the indexers by hand.
+        the timer cannot drift apart. By default, manual searches pass force=True
+        (due_only=False) to ensure items are checked even if within the 6-hour
+        retry backoff.
         """
         from core.audiobook_wishlist_worker import run_pass
 
@@ -641,12 +649,34 @@ def create_audiobooks_blueprint() -> Blueprint:
         if denied is not None:
             return denied
 
+        body = request.get_json(silent=True) or {}
+        # If "force" is explicitly specified as False, honour backoff; otherwise default manual search to force=True
+        force = bool(body.get("force", True))
+
         try:
-            summary = run_pass()
+            summary = run_pass(due_only=not force)
         except Exception as exc:                            # noqa: BLE001
             logger.warning("Manual audiobook wishlist pass failed: %s", exc, exc_info=True)
             return jsonify({"success": False, "error": str(exc)}), 500
         return jsonify({"success": True, "summary": summary})
+
+    @bp.route("/wishlist/<asin>/search", methods=["POST"])
+    def wishlist_search_book(asin: str):
+        """Search and attempt to grab one specific wishlisted book immediately."""
+        from core.audiobook_wishlist_worker import search_single_book
+
+        denied = _download_denied()
+        if denied is not None:
+            return denied
+
+        try:
+            res = search_single_book(asin, profile_id=_profile())
+            if not res.get("ok"):
+                return jsonify({"success": False, "error": res.get("error", "Search failed")}), 404
+            return jsonify({"success": True, "outcome": res.get("outcome")})
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("Targeted search for %s failed: %s", asin, exc, exc_info=True)
+            return jsonify({"success": False, "error": str(exc)}), 500
 
     # ------------------------------------------------------------------
     # Watchlist — followed authors

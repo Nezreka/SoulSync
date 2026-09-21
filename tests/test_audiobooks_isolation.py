@@ -200,7 +200,7 @@ def test_only_the_acquisition_routes_write_anything():
     # A write appearing anywhere else means state landed somewhere that is
     # supposed to be read-only.
     allowed_writers = {"/api/audiobooks/wishlist", "/api/audiobooks/wishlist/<asin>",
-                       "/api/audiobooks/wishlist/search", "/api/audiobooks/grab",
+                       "/api/audiobooks/wishlist/search", "/api/audiobooks/wishlist/<asin>/search", "/api/audiobooks/grab",
                        # Following an author is acquisition too: it is what
                        # feeds the wishlist without the user asking again.
                        "/api/audiobooks/watchlist", "/api/audiobooks/watchlist/<path:name>",

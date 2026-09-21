@@ -400,11 +400,38 @@ export async function setNarratorMode(
   }
 }
 
+export async function clearAudiobookWishlist(): Promise<boolean> {
+  try {
+    const data = await readJson<MutationResponse>(
+      audiobookClient.delete('audiobooks/wishlist'),
+    );
+    return Boolean(data?.success);
+  } catch (err) {
+    console.error('Failed to clear audiobook wishlist:', err);
+    return false;
+  }
+}
+
+export async function searchWishlistBook(
+  asin: string,
+): Promise<{ success: boolean; outcome?: any; error?: string }> {
+  if (!asin) return { success: false, error: 'No ASIN provided' };
+  try {
+    const data = await readJson<{ success?: boolean; outcome?: any; error?: string }>(
+      audiobookClient.post(`audiobooks/wishlist/${encodeURIComponent(asin)}/search`, { json: {} }),
+    );
+    return { success: Boolean(data?.success), outcome: data?.outcome, error: data?.error };
+  } catch (err: any) {
+    console.error(`Failed to search wishlist book ${asin}:`, err);
+    return { success: false, error: err?.message || 'Search failed' };
+  }
+}
+
 /** Run a wishlist pass now instead of waiting for the timer. */
-export async function runWishlistPass(): Promise<Record<string, number> | null> {
+export async function runWishlistPass(force = true): Promise<Record<string, number> | null> {
   try {
     const data = await readJson<{ success?: boolean; summary?: Record<string, number> }>(
-      audiobookClient.post('audiobooks/wishlist/search', { json: {} }),
+      audiobookClient.post('audiobooks/wishlist/search', { json: { force } }),
     );
     return data?.success ? (data.summary ?? null) : null;
   } catch (err) {

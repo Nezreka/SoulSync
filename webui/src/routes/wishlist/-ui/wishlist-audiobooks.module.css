@@ -92,6 +92,65 @@
   border: 1px solid rgba(var(--accent-rgb), 0.3);
 }
 
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.searchBar {
+  position: relative;
+  max-width: 480px;
+  width: 100%;
+}
+
+.searchInput {
+  width: 100%;
+  height: 38px;
+  padding: 0 34px 0 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.searchInput:focus {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.searchInput::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.searchClear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  padding: 4px 6px;
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.searchClear:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;
@@ -229,6 +288,11 @@
   min-width: 0;
 }
 
+.coverContainer {
+  position: relative;
+  display: block;
+}
+
 .coverLink {
   display: block;
   border-radius: 12px;
@@ -237,6 +301,46 @@
 .coverLink:focus-visible {
   outline: 2px solid rgba(var(--accent-rgb), 0.9);
   outline-offset: 3px;
+}
+
+.quickRemove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(18, 18, 22, 0.75);
+  color: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease, color 0.15s ease;
+}
+
+.card:hover .quickRemove,
+.card:focus-within .quickRemove {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .quickRemove {
+    opacity: 1;
+  }
+}
+
+.quickRemove:hover {
+  background: rgba(239, 68, 68, 0.9);
+  border-color: transparent;
+  color: #fff;
+  transform: scale(1.1);
 }
 
 .art {
@@ -376,7 +480,7 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
-  opacity: 0;
+  opacity: 0.85;
   transition: opacity 0.18s ease;
 }
 
@@ -414,6 +518,17 @@
 .action:hover {
   background: rgba(255, 255, 255, 0.09);
   color: #fff;
+}
+
+.actionPrimary {
+  background: rgba(var(--accent-rgb), 0.18);
+  border-color: rgba(var(--accent-rgb), 0.38);
+  color: #fff;
+}
+
+.actionPrimary:hover {
+  background: rgba(var(--accent-rgb), 0.35);
+  border-color: rgba(var(--accent-rgb), 0.55);
 }
 
 .actionDanger:hover {

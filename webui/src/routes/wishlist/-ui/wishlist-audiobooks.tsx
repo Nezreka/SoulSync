@@ -14,6 +14,7 @@ import {
   removeFromWishlist,
   retryWishlistEntry,
   runWishlistPass,
+  searchWishlistBook,
   setNarratorMode,
 } from '@/routes/audiobooks/-audiobooks.api';
 import { AudiobookReleasesModal } from '@/routes/audiobooks/-ui/audiobook-releases-modal';
@@ -61,13 +62,19 @@ function relativeTime(seconds: number): string {
  * looked for and when it was last tried; without that, "nothing found yet" and
  * "nothing is happening" look identical, and only one of them is a bug.
  */
-export function WishlistAudiobooks() {
+export function WishlistAudiobooks({
+  onCountChange,
+}: {
+  onCountChange?: (count: number) => void;
+} = {}) {
   const [items, setItems] = useState<AudiobookWishlistEntry[]>([]);
   const [counts, setCounts] = useState<AudiobookWishlistCounts | null>(null);
   const [worker, setWorker] = useState<AudiobookWishlistSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<AudiobookWishlistStatus | 'all'>('all');
+  const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
+  const [searchingAsin, setSearchingAsin] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [releasesFor, setReleasesFor] = useState<AudiobookWishlistEntry | null>(null);
 
@@ -77,7 +84,8 @@ export function WishlistAudiobooks() {
     setCounts(view.counts);
     setWorker(view.worker);
     setLoading(false);
-  }, []);
+    onCountChange?.(view.counts?.total ?? view.items.length);
+  }, [onCountChange]);
 
   useEffect(() => {
     void load();
@@ -85,10 +93,28 @@ export function WishlistAudiobooks() {
     return () => window.clearInterval(timer);
   }, [load]);
 
-  const shown = useMemo(
-    () => (filter === 'all' ? items : items.filter((item) => item.status === filter)),
-    [items, filter],
-  );
+  const shown = useMemo(() => {
+    let list = items;
+    if (filter !== 'all') {
+      list = list.filter((item) => item.status === filter);
+    }
+    const q = query.trim().toLowerCase();
+    if (q) {
+      list = list.filter((item) => {
+        const title = (item.title || '').toLowerCase();
+        const authors = (item.authors || []).join(' ').toLowerCase();
+        const narrators = (item.narrators || []).join(' ').toLowerCase();
+        const series = (item.series_title || '').toLowerCase();
+        return (
+          title.includes(q) ||
+          authors.includes(q) ||
+          narrators.includes(q) ||
+          series.includes(q)
+        );
+      });
+    }
+    return list;
+  }, [items, filter, query]);
 
   const searchNow = async () => {
     setSearching(true);
@@ -104,6 +130,23 @@ export function WishlistAudiobooks() {
           ? 'Nothing was due for another look yet.'
           : `Checked ${checked}, sent ${summary.grabbed ?? 0} to downloads.`,
       );
+    }
+    await load();
+  };
+
+  const searchBook = async (asin: string) => {
+    setSearchingAsin(asin);
+    setNotice('');
+    const res = await searchWishlistBook(asin);
+    setSearchingAsin(null);
+    if (!res.success) {
+      setNotice(`Search failed for ${asin}: ${res.error || 'Unknown error'}`);
+    } else if (res.outcome?.grabbed) {
+      setNotice('Found and sent to downloads!');
+    } else if (res.outcome?.found && res.outcome.found > 0) {
+      setNotice(`Found ${res.outcome.found} releases (not grabbed).`);
+    } else {
+      setNotice('No releases found for this title yet.');
     }
     await load();
   };
@@ -179,84 +222,141 @@ export function WishlistAudiobooks() {
 
       {notice && <p className={styles.notice}>{notice}</p>}
 
-      {counts && counts.total > 0 && (
-        <nav className={styles.filters} aria-label="Filter by status">
-          {FILTERS.map((entry) => {
-            const total = entry.key === 'all' ? counts.total : (counts[entry.key] ?? 0);
-            if (entry.key !== 'all' && total === 0) return null;
-            return (
-              <button
-                key={entry.key}
-                type="button"
-                className={`${styles.filter} ${filter === entry.key ? styles.filterOn : ''}`}
-                onClick={() => setFilter(entry.key)}
-              >
-                {entry.label}
-                <span className={styles.filterCount}>{total}</span>
-              </button>
-            );
-          })}
-        </nav>
-      )}
+      <div className={styles.toolbar}>
+        <div className={styles.searchBar}>
+          <input
+            type="text"
+            className={styles.searchInput}
+            placeholder="Filter wishlist by title, author, narrator, series…"
+            aria-label="Filter audiobook wishlist"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {query && (
+            <button
+              type="button"
+              className={styles.searchClear}
+              onClick={() => setQuery('')}
+              title="Clear filter"
+              aria-label="Clear filter"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {counts && counts.total > 0 && (
+          <nav className={styles.filters} aria-label="Filter by status">
+            {FILTERS.map((entry) => {
+              const total = entry.key === 'all' ? counts.total : (counts[entry.key] ?? 0);
+              if (entry.key !== 'all' && total === 0) return null;
+              return (
+                <button
+                  key={entry.key}
+                  type="button"
+                  className={`${styles.filter} ${filter === entry.key ? styles.filterOn : ''}`}
+                  onClick={() => setFilter(entry.key)}
+                >
+                  {entry.label}
+                  <span className={styles.filterCount}>{total}</span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
+      </div>
 
       {loading ? (
         <div className={styles.skeleton} aria-hidden="true" />
       ) : shown.length === 0 ? (
         <div className={styles.empty}>
-          <h3>{items.length === 0 ? 'No audiobooks wanted yet' : 'Nothing in this state'}</h3>
+          <h3>
+            {items.length === 0
+              ? 'No audiobooks wanted yet'
+              : query
+                ? `No audiobooks matching "${query}"`
+                : 'Nothing in this state'}
+          </h3>
           <p>
             {items.length === 0
               ? 'Add a book from anywhere in the catalogue and it will keep looking until it turns up.'
-              : 'Try another filter.'}
+              : query
+                ? 'Try clearing or changing your search term.'
+                : 'Try another filter.'}
           </p>
-          <Link to="/audiobooks" className={styles.browseLink}>
-            Browse audiobooks
-          </Link>
+          {items.length === 0 ? (
+            <Link to="/audiobooks" className={styles.browseLink}>
+              Browse audiobooks
+            </Link>
+          ) : query ? (
+            <button
+              type="button"
+              className={styles.browseLink}
+              onClick={() => setQuery('')}
+            >
+              Clear filter
+            </button>
+          ) : null}
         </div>
       ) : (
         <ul className={styles.grid}>
           {shown.map((item) => (
             <li className={styles.card} key={item.asin}>
-              <Link
-                to="/audiobooks/$asin"
-                params={{ asin: item.asin }}
-                className={styles.coverLink}
-                aria-label={item.title}
-              >
-                <div className={styles.art}>
-                  {item.cover_url ? (
-                    <img className={styles.cover} src={item.cover_url} alt="" loading="lazy" />
-                  ) : (
-                    <span className={styles.coverBlank} aria-hidden="true">
-                      &#9835;
+              <div className={styles.coverContainer}>
+                <Link
+                  to="/audiobooks/$asin"
+                  params={{ asin: item.asin }}
+                  className={styles.coverLink}
+                  aria-label={item.title}
+                >
+                  <div className={styles.art}>
+                    {item.cover_url ? (
+                      <img className={styles.cover} src={item.cover_url} alt="" loading="lazy" />
+                    ) : (
+                      <span className={styles.coverBlank} aria-hidden="true">
+                        &#9835;
+                      </span>
+                    )}
+                    <span className={styles.scrim} aria-hidden="true" />
+                    <span
+                      className={`${styles.badge} ${
+                        item.status === 'done'
+                          ? styles.badgeDone
+                          : item.status === 'grabbed'
+                            ? styles.badgeActive
+                            : item.status === 'failed'
+                              ? styles.badgeFailed
+                              : ''
+                      }`}
+                    >
+                      {item.status === 'grabbed'
+                        ? {
+                            downloading: 'Downloading',
+                            queued: 'Queued',
+                            paused: 'Paused',
+                            unavailable: 'Waiting for client',
+                            staged: 'Checking files',
+                            importing: 'Importing',
+                            cancelled: 'Cancelled',
+                          }[item.download_status || ''] || 'Waiting for client'
+                        : (STATUS_LABELS[item.status] ?? item.status)}
                     </span>
-                  )}
-                  <span className={styles.scrim} aria-hidden="true" />
-                  <span
-                    className={`${styles.badge} ${
-                      item.status === 'done'
-                        ? styles.badgeDone
-                        : item.status === 'grabbed'
-                          ? styles.badgeActive
-                          : item.status === 'failed'
-                            ? styles.badgeFailed
-                            : ''
-                    }`}
-                  >
-                    {item.status === 'grabbed'
-                      ? {
-                          downloading: 'Downloading',
-                          queued: 'Queued',
-                          paused: 'Paused',
-                          unavailable: 'Waiting for client',
-                          staged: 'Checking files',
-                          importing: 'Importing',
-                          cancelled: 'Cancelled',
-                        }[item.download_status || ''] || 'Waiting for client'
-                      : (STATUS_LABELS[item.status] ?? item.status)}
-                  </span>
-                </div>
-              </Link>
+                  </div>
+                </Link>
+                <button
+                  type="button"
+                  className={styles.quickRemove}
+                  title="Remove from wishlist"
+                  aria-label={`Remove ${item.title} from wishlist`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void remove(item.asin);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
 
               <div className={styles.info}>
                 <Link to="/audiobooks/$asin" params={{ asin: item.asin }} className={styles.title}>
@@ -279,7 +379,21 @@ export function WishlistAudiobooks() {
 
               {/* the controls stay off the artwork and appear on hover, the way
                   the video wishlist keeps its poster clean */}
-              <div className={styles.actions}>
+              <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className={`${styles.action} ${styles.actionPrimary}`}
+                  title="Search indexers and grab now"
+                  aria-label={`Search for ${item.title} now`}
+                  disabled={searchingAsin === item.asin}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void searchBook(item.asin);
+                  }}
+                >
+                  {searchingAsin === item.asin ? 'Searching…' : 'Search'}
+                </button>
                 {item.narrators.length > 0 && (
                   <button
                     type="button"
@@ -289,12 +403,14 @@ export function WishlistAudiobooks() {
                         ? `Only ${item.narrators[0]}'s reading will do \u2014 click to accept any narrator`
                         : 'Any narrator will do \u2014 click to hold out for the one you picked'
                     }
-                    onClick={() =>
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
                       void changeNarratorMode(
                         item.asin,
                         item.narrator_mode === 'exact' ? 'any' : 'exact',
-                      )
-                    }
+                      );
+                    }}
                   >
                     {item.narrator_mode === 'exact' ? 'Narrator locked' : 'Any narrator'}
                   </button>
@@ -308,7 +424,11 @@ export function WishlistAudiobooks() {
                         ? 'Cancelled downloads are never retried on their own \u2014 want it again'
                         : 'Skip the wait and look on the next pass'
                     }
-                    onClick={() => void lookAgain(item.asin)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void lookAgain(item.asin);
+                    }}
                   >
                     Look again
                   </button>
@@ -316,14 +436,22 @@ export function WishlistAudiobooks() {
                 <button
                   type="button"
                   className={styles.action}
-                  onClick={() => setReleasesFor(item)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setReleasesFor(item);
+                  }}
                 >
                   Find releases
                 </button>
                 <button
                   type="button"
                   className={`${styles.action} ${styles.actionDanger}`}
-                  onClick={() => void remove(item.asin)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void remove(item.asin);
+                  }}
                 >
                   Remove
                 </button>

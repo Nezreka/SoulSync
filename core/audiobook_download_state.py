@@ -74,11 +74,12 @@ def register_download(
     protocol: str = "",
     size_bytes: int = 0,
     only_if_missing: bool = False,
+    status: str = "queued",
 ) -> bool:
-    """Put one grabbed audiobook on the Downloads page.
+    """Put one grabbed or searching audiobook on the Downloads page.
 
     ``task_id`` is the download client's own reference (a qBittorrent info-hash,
-    a SABnzbd nzo_id) so the card and the thing being polled are the same row.
+    a SABnzbd nzo_id) or a temporary ASIN-derived id while searching.
 
     The track_info shape is the music one because the existing cards read it —
     title, artist, album, artwork. For a book that reads as title / author /
@@ -97,7 +98,7 @@ def register_download(
         batch["phase"] = "downloading"
 
         download_tasks[task_id] = {
-            "status": "queued",
+            "status": status,
             "track_info": {
                 "title": title,
                 "name": title,
@@ -121,7 +122,43 @@ def register_download(
             "cancel_requested": False,
             "error_message": None,
         }
-    logger.info("Audiobook download on the downloads page: %s (%s)", title, task_id)
+    logger.info("Audiobook download on the downloads page: %s (%s, status=%s)", title, task_id, status)
+    return True
+
+
+def promote_search_task(
+    temp_task_id: str,
+    real_task_id: str,
+    protocol: str = "",
+    size_bytes: int = 0,
+) -> bool:
+    """Transition a searching task to a grabbed client handle."""
+    temp_task_id = str(temp_task_id or "").strip()
+    real_task_id = str(real_task_id or "").strip()
+    if not temp_task_id or not real_task_id:
+        return False
+    with tasks_lock:
+        task = download_tasks.get(temp_task_id)
+        if not task:
+            return False
+        if temp_task_id != real_task_id:
+            download_tasks.pop(temp_task_id, None)
+            download_tasks[real_task_id] = task
+            batch = download_batches.get(BATCH_ID)
+            if batch and "queue" in batch:
+                if temp_task_id in batch["queue"]:
+                    idx = batch["queue"].index(temp_task_id)
+                    batch["queue"][idx] = real_task_id
+                elif real_task_id not in batch["queue"]:
+                    batch["queue"].append(real_task_id)
+        task["status"] = "queued"
+        task["task_id"] = real_task_id
+        if protocol:
+            task["download_source"] = f"Audiobook ({protocol})"
+            task["quality"] = protocol
+        if size_bytes:
+            task["size"] = int(size_bytes)
+        task["status_change_time"] = time.time()
     return True
 
 
