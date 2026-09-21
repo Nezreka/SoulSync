@@ -12,6 +12,9 @@ def test_observation_requires_moving_sample_and_expires(monkeypatch):
     observations.observe_peer(peer, 20_000, 5)
     assert observations.peer_speed(peer) is None
 
+    observations.observe_peer(peer, 0, 60)
+    assert observations.peer_speed(peer) is None
+
     observations.observe_peer(peer, 20_000, 60)
     assert observations.peer_speed(peer) == 20_000
     observations.observe_peer(peer, 1_000_000, 60)

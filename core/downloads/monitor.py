@@ -1219,12 +1219,17 @@ class WebUIDownloadMonitor:
             minimum_kbps = 250.0
 
         is_active = 'InProgress' in str(state_str or '')
-        if (not config_manager.get('soulseek.observed_speed_fallback_enabled', False)
-                or minimum_kbps <= 0 or not is_active
+        if (not is_active
                 or _resolve_download_source(task.get('username')) != 'soulseek'
-                or task.get('_user_manual_pick') or task.get('_observed_speed_exempt')):
+                or task.get('_user_manual_pick')):
             task.pop('_observed_speed_tracker', None)
             return False
+
+        retry_enabled = (
+            config_manager.get('soulseek.observed_speed_fallback_enabled', False)
+            and minimum_kbps > 0
+            and not task.get('_observed_speed_exempt')
+        )
 
         tracker = task.get('_observed_speed_tracker')
         if not isinstance(tracker, ObservedSpeedTracker):
@@ -1234,9 +1239,9 @@ class WebUIDownloadMonitor:
         average_bps, should_retry = tracker.observe(
             current_time,
             live_info.get('bytesTransferred', 0),
-            minimum_kbps * 1000,
+            minimum_kbps * 1000 if retry_enabled else 0,
         )
-        if not should_retry:
+        if not retry_enabled or not should_retry:
             return False
 
         username = task.get('username')

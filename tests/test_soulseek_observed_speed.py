@@ -185,7 +185,7 @@ def test_zero_threshold_disables_observed_speed_retry(monitor, monkeypatch):
         assert handled is False
         assert ops == []
 
-    assert '_observed_speed_tracker' not in task
+    assert len(task['_observed_speed_tracker'].samples) >= 2
 
 
 def test_fallback_disabled_by_default(monitor, monkeypatch):
@@ -199,7 +199,7 @@ def test_fallback_disabled_by_default(monitor, monkeypatch):
 
     for now in (0, 30, 60, 90):
         assert _observe(monitor, task, now, now * 100_000) == (False, [])
-    assert '_observed_speed_tracker' not in task
+    assert len(task['_observed_speed_tracker'].samples) >= 2
 
 
 def test_manual_and_non_soulseek_downloads_are_untouched(monitor):

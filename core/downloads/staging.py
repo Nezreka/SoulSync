@@ -222,9 +222,9 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
         if soulseek_bundle:
             from core.downloads.soulseek_identity import match_track
             from types import SimpleNamespace
-            if not os.path.exists(sf['full_path']) or not match_track(
+            if not os.path.exists(sf['full_path']) or match_track(
                 track, SimpleNamespace(filename=sf['full_path']),
-            ).matches:
+            ).contradicts:
                 continue
         sf_title_variants = _staging_title_variants(sf['title'], normalize)
         sf_norm_artist = normalize(sf['artist'])

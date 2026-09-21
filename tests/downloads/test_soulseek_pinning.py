@@ -275,6 +275,84 @@ def test_album_bundle_measures_aggregate_peer_speed_not_queued_siblings(configur
     assert clock.now >= 60
 
 
+def test_queued_album_bundle_is_not_measured_as_a_slow_peer(configured_client):
+    track = _track(filename='Artist/Album/01 - Song.flac', size=100_000_000)
+
+    class Clock:
+        now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+    clock = Clock()
+
+    async def downloads():
+        return [DownloadStatus(id='queued', username='peer', filename=track.filename,
+                               state='Queued, Remotely', progress=0, size=track.size,
+                               transferred=0, speed=0)]
+
+    with patch('core.soulseek_client.time', clock), \
+         patch('core.soulseek_client.run_async', side_effect=_run_async), \
+         patch.object(configured_client, 'get_all_downloads', side_effect=downloads), \
+         patch('core.soulseek_client.get_poll_timeout', return_value=80), \
+         patch('core.soulseek_client.get_poll_interval', return_value=1), \
+         patch('core.settings.config_manager.get', return_value=500):
+        outcome = configured_client._poll_album_bundle_downloads(
+            {('peer', track.filename): track}, lambda state, **kwargs: None,
+            return_detail=True, switch_on_crawl=True,
+        )
+
+    assert outcome['reason'] == 'timeout'
+    assert outcome['speed_bps'] is None
+
+
+def test_album_bundle_still_measures_speed_when_fallback_is_disabled(configured_client):
+    track = _track(filename='Artist/Album/01 - Song.flac', size=100_000_000)
+
+    class Clock:
+        now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+    clock = Clock()
+
+    async def downloads():
+        return [DownloadStatus(
+            id='moving', username='peer', filename=track.filename,
+            state='InProgress', progress=1, size=track.size,
+            transferred=int(clock.now * 750_000), speed=750_000,
+        )]
+
+    def setting(key, default=None):
+        if key == 'soulseek.observed_speed_fallback_enabled':
+            return False
+        if key == 'soulseek.min_observed_download_speed_kbps':
+            return 500
+        return default
+
+    with patch('core.soulseek_client.time', clock), \
+         patch('core.soulseek_client.run_async', side_effect=_run_async), \
+         patch.object(configured_client, 'get_all_downloads', side_effect=downloads), \
+         patch('core.soulseek_client.get_poll_timeout', return_value=40), \
+         patch('core.soulseek_client.get_poll_interval', return_value=1), \
+         patch('core.settings.config_manager.get', side_effect=setting):
+        outcome = configured_client._poll_album_bundle_downloads(
+            {('peer', track.filename): track}, lambda state, **kwargs: None,
+            return_detail=True, switch_on_crawl=True,
+        )
+
+    assert outcome['reason'] == 'timeout'
+    assert outcome['speed_bps'] == pytest.approx(750_000)
+    assert outcome['sample_seconds'] >= 30
+
+
 def test_album_bundle_stages_one_selected_soulseek_folder(configured_client, tmp_path):
     configured_client.download_path = tmp_path
     local_file = tmp_path / '01 - Song.flac'
@@ -1115,7 +1193,14 @@ def test_search_keeps_more_than_thirty_peers_and_merges_late_files():
     assert len(tracks) == 34
 
 
-def test_search_uses_terminal_state_after_initial_collection_grace():
+@pytest.mark.parametrize('terminal_payload', [
+    {'state': 'Completed'},
+    {'state': 'Completed, TimedOut'},
+    {'state': 'Completed, ResponseLimitReached'},
+    {'state': 'Completed, ResponseLimitReached', 'isComplete': False},
+    {'state': 'InProgress', 'isComplete': True},
+])
+def test_search_uses_terminal_state_after_initial_collection_grace(terminal_payload):
     client = _search_ready_client()
     counts = {'responses': 0, 'status': 0}
 
@@ -1129,7 +1214,7 @@ def test_search_uses_terminal_state_after_initial_collection_grace():
             ]}]
         if endpoint == 'searches/search-1':
             counts['status'] += 1
-            return {'state': 'Completed'}
+            return terminal_payload
         raise AssertionError(endpoint)
 
     with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \

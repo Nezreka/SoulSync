@@ -18,10 +18,12 @@ from core.text.normalize import normalize_for_comparison
 _YEAR = re.compile(r'(?<!\d)[\[(]?((?:19|20)\d{2})[\])]?')
 _DISC_DIR = re.compile(r'^(?:disc|disk|cd)\s*[-._ ]*(\d{1,2})$', re.IGNORECASE)
 _LEADING_DISC_NUMBER = re.compile(r'^\s*(\d{1,2})[-.](\d{1,2})\s*[-._ ]+')
+_PACKED_DISC_NUMBER = re.compile(r'^\s*(0[1-9])(\d{2})\s*[-._ ]+')
 _LEADING_NUMBER = re.compile(r'^\s*(?:\d{1,2}[-.]\d{1,2}|\d{1,3})\s*[-._ ]+\s*')
 _AUDIO_EXTENSION = re.compile(r'\.[a-z0-9]{2,5}$', re.IGNORECASE)
 _TECHNICAL_TAG = re.compile(r'\s*[\[(](?:flac|mp3|320kbps|v0|lossless|24bit|16bit|hi res)[\])]\s*', re.IGNORECASE)
 _REMASTER_TAG = re.compile(r'\s*[\[(](?:\d{4}\s+)?remaster(?:ed)?(?:\s+\d{4})?[\])]\s*', re.IGNORECASE)
+_REMASTER_SUFFIX = re.compile(r'\s*[-–]\s*(?:(?:\d{4}\s+)?remaster(?:ed)?(?:\s+\d{4})?)\s*$', re.IGNORECASE)
 _FEAT_TAG = re.compile(r'\s*[\[(](?:feat\.?|ft\.?|featuring)\s+[^\])]+[\])]\s*', re.IGNORECASE)
 _CLEAN_TAG = re.compile(r'\s*[\[(](?:explicit|clean)[\])]\s*', re.IGNORECASE)
 _PREFERRED_VERSION_WORD = re.compile(
@@ -38,8 +40,10 @@ def normalize(text: Any) -> str:
 def _title_key(text: str) -> str:
     """Ignore mastering/credit decorations, never recording versions."""
     text = _REMASTER_TAG.sub(' ', text)
+    text = _REMASTER_SUFFIX.sub(' ', text)
     text = _FEAT_TAG.sub(' ', text)
     text = _CLEAN_TAG.sub(' ', text)
+    text = re.sub(r"(?<=\w)['’](?=\w)", '', text)
     return normalize(text)
 
 
@@ -65,6 +69,7 @@ class IdentityResult:
     disc: int | None = None
     artist_path_evidence: bool = False
     album_path_evidence: bool = False
+    contradicts: bool = False
 
 
 @lru_cache(maxsize=16384)
@@ -80,12 +85,15 @@ def title_interpretations(filename: str, artist: str = '', album: str = '') -> t
         if found:
             disc = int(found.group(1))
             break
-    leading_disc = _LEADING_DISC_NUMBER.match(stem)
+    packed_number = _PACKED_DISC_NUMBER.match(stem)
+    leading_disc = _LEADING_DISC_NUMBER.match(stem) or packed_number
     if leading_disc:
         disc = int(leading_disc.group(1))
-    number_match = _LEADING_NUMBER.match(stem)
+    number_match = packed_number or _LEADING_NUMBER.match(stem)
     number = None
-    if number_match:
+    if packed_number:
+        number = int(packed_number.group(2))
+    elif number_match:
         digits = re.findall(r'\d+', number_match.group())
         number = int(digits[-1]) if digits else None
     variants: list[TitleEvidence] = []
@@ -97,13 +105,29 @@ def title_interpretations(filename: str, artist: str = '', album: str = '') -> t
             seen.add(key)
             variants.append(TitleEvidence(key, source, parsed_number, disc))
 
-    base = _LEADING_NUMBER.sub('', _TECHNICAL_TAG.sub(' ', stem), count=1).strip(' -_.')
+    cleaned_stem = _TECHNICAL_TAG.sub(' ', stem)
+    base = (_PACKED_DISC_NUMBER.sub('', cleaned_stem, count=1)
+            if _PACKED_DISC_NUMBER.match(cleaned_stem)
+            else _LEADING_NUMBER.sub('', cleaned_stem, count=1)).strip(' -_.')
+    # A number followed only by whitespace can be part of the actual title.
+    if re.match(r'^\s*\d+\s+[A-Za-z]', cleaned_stem):
+        add(cleaned_stem, 'literal-leading-number', None)
     add(base, 'basename')
     if artist:
-        prefix = re.compile(r'^' + re.escape(artist) + r'\s*[-–:]\s*', re.IGNORECASE)
-        stripped = prefix.sub('', base, count=1)
-        if stripped != base:
-            add(stripped, 'artist-prefix')
+        artist_words = [re.escape(word) for word in re.split(r'[\s_-]+', artist) if word]
+        if artist_words:
+            artist_prefix = r'^' + r'[\s_-]+'.join(artist_words)
+            featured_prefix = re.compile(
+                artist_prefix
+                + r'\s+(?:feat\.?|ft\.?|featuring)\s+.+?\s+[-–:]\s+(.+)$',
+                re.IGNORECASE,
+            )
+            plain_prefix = re.compile(
+                artist_prefix + r'\s*[-–:_]\s*(.+)$', re.IGNORECASE,
+            )
+            found_prefix = featured_prefix.match(base) or plain_prefix.match(base)
+            if found_prefix:
+                add(found_prefix.group(1), 'artist-prefix')
 
     # Numeric fields inside a scene-style name are strong track delimiters:
     # Artist - Album - 02 - Title, Album - 02 - Title, or Disc 1 - 02 - Title.
@@ -115,6 +139,18 @@ def title_interpretations(filename: str, artist: str = '', album: str = '') -> t
         add(' - '.join(parts[1:]), 'artist-segment')
     if len(parts) >= 2 and album and normalize(_without_year(parts[0])) == normalize(_without_year(album)):
         add(' - '.join(parts[1:]), 'album-segment')
+
+    normalized_base = normalize(base)
+    normalized_album = normalize(album)
+    for prefix, source in (
+        (f'{normalize(artist)} {normalized_album}', 'artist-album-number'),
+        (normalized_album, 'album-number'),
+    ):
+        if prefix and normalized_base.startswith(f'{prefix} '):
+            remainder = normalized_base[len(prefix) + 1:]
+            numbered_title = re.match(r'^(\d{1,3})\s+(.+)$', remainder)
+            if numbered_title:
+                add(numbered_title.group(2), source, int(numbered_title.group(1)))
 
     # Parent directories corroborate album/artist, but never become the song
     # title. Skip disc directories when selecting the album parent.
@@ -134,7 +170,7 @@ def _track_number(value: Any) -> int | None:
 
 
 def match_track(target: Any, candidate: Any, *, album: str = '') -> IdentityResult:
-    """Require an interpreted title; unknown layouts fail closed."""
+    """Identify exact matches and clear contradictions; leave unknown layouts open."""
     wanted = _title_key(_field(target, 'name', '') or _field(target, 'title', ''))
     if not wanted:
         return IdentityResult(False, 'missing-requested-title')
@@ -159,6 +195,7 @@ def match_track(target: Any, candidate: Any, *, album: str = '') -> IdentityResu
         expected_disc = int(expected_disc) if expected_disc else None
     except (TypeError, ValueError):
         expected_disc = None
+    conflicting_number = False
     for variant in variants:
         exact_title = variant.title == wanted
         preferred_version_title = (
@@ -170,14 +207,32 @@ def match_track(target: Any, candidate: Any, *, album: str = '') -> IdentityResu
         if not exact_title and not preferred_version_title:
             continue
         if expected_number and variant.number and expected_number != variant.number:
+            conflicting_number = True
             continue
         if expected_disc and variant.disc and expected_disc != variant.disc:
+            conflicting_number = True
             continue
         return IdentityResult(True, 'preferred-version-title' if preferred_version_title else 'title-match',
                               variant.title, variant.source,
                               variant.number, variant.disc, artist_evidence,
                               album_evidence)
-    return IdentityResult(False, 'title-or-number-mismatch')
+    if conflicting_number:
+        return IdentityResult(False, 'number-or-disc-mismatch', contradicts=True)
+    structured_title = any(variant.source in {
+        'artist-prefix', 'artist-segment', 'album-segment',
+        'artist-album-number', 'album-number', 'embedded-number',
+    } for variant in variants)
+    basename = variants[0] if variants else None
+    stem = _AUDIO_EXTENSION.sub('', str(filename or '').replace('\\', '/').split('/')[-1])
+    after_number = _PACKED_DISC_NUMBER.sub('', stem, count=1)
+    after_number = _LEADING_NUMBER.sub('', after_number, count=1)
+    simple_numbered_title = bool(
+        basename and basename.source == 'basename' and basename.number
+        and not re.search(r'\s+[-–]\s+|_|(?<=[a-z])-(?=[a-z])', after_number, re.IGNORECASE)
+    )
+    if structured_title or simple_numbered_title:
+        return IdentityResult(False, 'different-parsed-title', contradicts=True)
+    return IdentityResult(False, 'unrecognized-layout')
 
 
 @dataclass(frozen=True)

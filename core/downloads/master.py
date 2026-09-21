@@ -276,7 +276,7 @@ def _score_album_folder(album_result: Any, album_context: dict, artist_context: 
         _similarity(expected_artist, getattr(album_result, 'artist', '')),
         _similarity(expected_artist, getattr(album_result, 'album_path', '')),
     )
-    if (expected_album and album_score < 0.65) or (expected_artist and artist_score < 0.65):
+    if expected_album and album_score < 0.65:
         return 0.0
 
     actual_count = int(getattr(album_result, 'track_count', 0) or len(getattr(album_result, 'tracks', []) or []))

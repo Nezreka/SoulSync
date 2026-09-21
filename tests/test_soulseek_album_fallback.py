@@ -42,8 +42,15 @@ class _Stub:
     def download(self, username, filename, size):
         return f"dl-{filename}"          # truthy id; run_async patched to identity
 
-    def _poll_album_bundle_downloads(self, transfer_keys, emit):
-        return self._poll_result
+    def _poll_album_bundle_downloads(self, transfer_keys, emit, *, deadline=None,
+                                     return_detail=False, switch_on_crawl=False,
+                                     initial_completed=None):
+        completed = {
+            key: path for key, path in zip(transfer_keys, self._poll_result)
+        }
+        completed.update(initial_completed or {})
+        return {'completed': completed, 'pending': [], 'reason': 'complete',
+                'speed_bps': None, 'sample_seconds': 0}
 
 
 def _track(name):

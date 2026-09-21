@@ -41,15 +41,15 @@ def init(matching_engine_obj, download_orchestrator_obj):
 
 
 def source_reuse_title_matches(expected_track, candidate) -> bool:
-    """Whether a browsed folder file is unambiguously the requested track.
+    """Reject only a clear title contradiction before the existing score gate.
 
-    Source reuse is only an optimization: rejecting an unfamiliar filename
-    falls through to normal search, while accepting a sibling song imports the
-    wrong recording. Use the same target-aware path identity gate as search.
+    Source reuse still requires its separate confidence threshold. Unfamiliar
+    Soulseek naming conventions should not be treated as a different song.
     """
     if expected_track is None or candidate is None:
         return False
-    return match_track(expected_track, candidate).matches
+    identity = match_track(expected_track, candidate)
+    return identity.matches or identity.reason == 'unrecognized-layout'
 
 
 def _youtube_probe_targets(profile_id=None):
@@ -573,17 +573,17 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
     if not initial_candidates:
         return []
 
-    # Fuzzy confidence can be lifted by artist/album/duration even when the
-    # file is a sibling song. Soulseek filenames have no structured title, so
-    # require an interpreted identity before quality and peer ranking.
+    # Reject clear sibling titles or number conflicts, but leave unfamiliar
+    # layouts to the matching engine's existing confidence and quality gates.
     identity_checked = []
     for candidate in initial_candidates:
         if getattr(candidate, 'username', None) in _STREAMING_USERNAMES:
             identity_checked.append(candidate)
             continue
         identity = match_track(spotify_track, candidate)
-        if identity.matches:
-            candidate.soulseek_match_evidence = identity
+        if not identity.contradicts:
+            if identity.matches:
+                candidate.soulseek_match_evidence = identity
             identity_checked.append(candidate)
     initial_candidates = identity_checked
     if not initial_candidates:

@@ -354,8 +354,12 @@ class SoulseekClient(DownloadSourcePlugin):
         """Use slskd's search state only when it is explicitly terminal."""
         if not isinstance(payload, dict):
             return False
+        if payload.get('isComplete') is True:
+            return True
         state = str(payload.get('state') or payload.get('status') or '').lower()
-        return state in {'completed', 'cancelled', 'failed', 'errored', 'timedout', 'timed out'}
+        return any(flag.strip() in {
+            'completed', 'cancelled', 'failed', 'errored', 'timedout', 'timed out',
+        } for flag in state.split(','))
 
     def _process_search_responses(self, responses_data: List[Dict[str, Any]]) -> tuple[List[TrackResult], List[AlbumResult]]:
         """Process search response data into TrackResult and AlbumResult objects"""
@@ -1652,8 +1656,10 @@ class SoulseekClient(DownloadSourcePlugin):
                     {'username': album.username, 'folder_path': album.album_path,
                      'tracks': album.tracks}
                     for album in albums if album is not picked
-                    and self._bundle_similarity(album_name, album.album_path) >= 0.65
-                    and self._bundle_similarity(artist_name, album.album_path) >= 0.65
+                    and max(
+                        self._bundle_similarity(album_name, album.album_title),
+                        self._bundle_similarity(album_name, album.album_path),
+                    ) >= 0.65
                 ][:4]
         if not username or not folder_path:
             result['error'] = 'No suitable Soulseek album folder after filtering'
@@ -1764,7 +1770,7 @@ class SoulseekClient(DownloadSourcePlugin):
             if key in key_to_expected
         }
         completed = list(poll_result['completed'].values())
-        if poll_result['speed_bps'] is not None:
+        if poll_result['speed_bps'] and poll_result['speed_bps'] > 0:
             observe_peer(username, poll_result['speed_bps'], poll_result['sample_seconds'])
 
         if expected_tracks and source_options and time.monotonic() < deadline:
@@ -1824,7 +1830,7 @@ class SoulseekClient(DownloadSourcePlugin):
                 )
                 for key, path in alt_result['completed'].items():
                     completed_by_expected[alt_expected[key]] = path
-                if alt_result['speed_bps'] is not None:
+                if alt_result['speed_bps'] and alt_result['speed_bps'] > 0:
                     observe_peer(option['username'], alt_result['speed_bps'], alt_result['sample_seconds'])
                 if alt_result['reason'] == 'crawling' and not self._cancel_album_pending(
                         alt_result['pending'], alt_keys):
@@ -1971,11 +1977,15 @@ class SoulseekClient(DownloadSourcePlugin):
                 coverage = assign_album_tracks(expected_tracks, tracks, album=album_name).coverage
                 if coverage < 0.8:
                     continue
-            album_text = f"{getattr(album, 'album_title', '')} {getattr(album, 'album_path', '')}"
-            artist_text = f"{getattr(album, 'artist', '')} {getattr(album, 'album_path', '')}"
-            album_score = self._bundle_similarity(album_name, album_text)
-            artist_score = self._bundle_similarity(artist_name, artist_text)
-            if expected_tracks and (album_score < 0.65 or artist_score < 0.65):
+            album_score = max(
+                self._bundle_similarity(album_name, getattr(album, 'album_title', '')),
+                self._bundle_similarity(album_name, getattr(album, 'album_path', '')),
+            )
+            artist_score = max(
+                self._bundle_similarity(artist_name, getattr(album, 'artist', '')),
+                self._bundle_similarity(artist_name, getattr(album, 'album_path', '')),
+            )
+            if expected_tracks and album_score < 0.65:
                 continue
             track_count = int(getattr(album, 'track_count', 0) or len(tracks))
             count_score = 1.0 if track_count >= 3 else 0.35
@@ -2029,6 +2039,8 @@ class SoulseekClient(DownloadSourcePlugin):
         failed_states: Dict[tuple, str] = {}
         aggregate_bytes: Dict[tuple, int] = {}
         speed_tracker = ObservedSpeedTracker()
+        last_moving_speed_bps = None
+        last_moving_sample_seconds = 0.0
         try:
             minimum_bps = max(0.0, float(config_manager.get(
                 'soulseek.min_observed_download_speed_kbps', 250) or 0) * 1000)
@@ -2037,18 +2049,24 @@ class SoulseekClient(DownloadSourcePlugin):
         if not config_manager.get('soulseek.observed_speed_fallback_enabled', False):
             minimum_bps = 0.0
 
+        def moving_snapshot():
+            if len(speed_tracker.samples) < 2:
+                return None, 0.0
+            first_at, first_bytes = speed_tracker.samples[0]
+            last_at, last_bytes = speed_tracker.samples[-1]
+            sample_seconds = last_at - first_at
+            if sample_seconds <= 0 or last_bytes <= first_bytes:
+                return None, sample_seconds
+            return (last_bytes - first_bytes) / sample_seconds, sample_seconds
+
         def finish(reason):
             if return_detail:
-                sample_seconds = (
-                    speed_tracker.samples[-1][0] - speed_tracker.samples[0][0]
-                    if len(speed_tracker.samples) >= 2 else 0
-                )
+                measured_speed, sample_seconds = moving_snapshot()
                 return {'completed': dict(completed_paths), 'reason': reason,
                         'pending': [key for key in transfer_keys
                                     if key not in completed_paths and key not in failed_states],
-                        'speed_bps': speed_tracker.observe(
-                            time.monotonic(), sum(aggregate_bytes.values()), 0,
-                        )[0], 'sample_seconds': sample_seconds}
+                        'speed_bps': measured_speed or last_moving_speed_bps,
+                        'sample_seconds': sample_seconds or last_moving_sample_seconds}
             return list(completed_paths.values())
         # Track keys where slskd reports the transfer Completed /
         # Succeeded but the local file finder can't yet locate the
@@ -2095,6 +2113,7 @@ class SoulseekClient(DownloadSourcePlugin):
                     os.path.basename((dl.filename or '').replace('\\', '/')),
                 )
                 by_key.setdefault(basename_key, dl)
+            active_transfers = False
             for key, track in transfer_keys.items():
                 if key in completed_paths or key in failed_states:
                     continue
@@ -2102,10 +2121,11 @@ class SoulseekClient(DownloadSourcePlugin):
                     key[0],
                     os.path.basename((key[1] or '').replace('\\', '/')),
                 ))
-                if dl:
+                state = (getattr(dl, 'state', '') or '') if dl else ''
+                if dl and 'InProgress' in state:
+                    active_transfers = True
                     aggregate_bytes[key] = max(aggregate_bytes.get(key, 0),
                                                int(getattr(dl, 'transferred', 0) or 0))
-                state = (getattr(dl, 'state', '') or '') if dl else ''
                 # NOTE: check failure tokens BEFORE the 'Completed' branch — slskd
                 # reports terminal failures as "Completed, <reason>" (e.g.
                 # "Completed, Aborted" / "Completed, Cancelled" when a peer accepts
@@ -2145,7 +2165,15 @@ class SoulseekClient(DownloadSourcePlugin):
                 failed=len(failed_states),
             )
 
-            if minimum_bps > 0 and aggregate_bytes:
+            if not active_transfers and any(
+                key not in completed_paths and key not in failed_states for key in transfer_keys
+            ):
+                measured_speed, sample_seconds = moving_snapshot()
+                if measured_speed is not None:
+                    last_moving_speed_bps = measured_speed
+                    last_moving_sample_seconds = sample_seconds
+                speed_tracker.reset()
+            elif active_transfers:
                 observed_bps, crawling = speed_tracker.observe(
                     time.monotonic(), sum(aggregate_bytes.values()), minimum_bps,
                 )

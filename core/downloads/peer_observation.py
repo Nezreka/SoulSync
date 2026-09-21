@@ -26,7 +26,7 @@ _observations: dict[str, _Observation] = {}
 
 def observe_peer(username: str, bytes_per_second: float, sample_seconds: float) -> None:
     """Record only a meaningful moving transfer; never store an IP or path."""
-    if not username or sample_seconds < 10 or bytes_per_second < 0:
+    if not username or sample_seconds < 10 or bytes_per_second <= 0:
         return
     now = time.monotonic()
     weight = min(0.7, max(0.15, sample_seconds / 120))

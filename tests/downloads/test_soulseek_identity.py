@@ -66,6 +66,32 @@ def test_fractional_track_number_still_rejects_wrong_number():
     assert not match_track(target, _file('02 - Intro.flac')).matches
 
 
+@pytest.mark.parametrize(('title', 'artist', 'album', 'number', 'filename'), [
+    ('Superman', 'Eminem', 'The Eminem Show', 13, '13 - Eminem feat. Dina Rae - Superman.flac'),
+    ('Superman', 'Eminem', 'The Eminem Show', 13,
+     '13 - Eminem feat. Dina-Rae - Superman.flac'),
+    ("Stacy's Mom", 'Fountains of Wayne', 'Welcome Interstate Managers',
+     3, '03-fountains_of_wayne-stacys_mom.flac'),
+    ('Peacock', 'Katy Perry', 'Teenage Dream', 13, '0113 - Katy Perry - Peacock.flac'),
+    ('Title', 'Artist', 'Album', 1, 'Artist_Album_01_Title.flac'),
+    ('7 rings', 'Ariana Grande', 'thank u, next', None, '7 rings.flac'),
+    ('Song - Remastered 2011', 'Artist', 'Album', 1, '01 - Song.flac'),
+])
+def test_real_world_filename_layouts_match(title, artist, album, number, filename):
+    target = {'name': title, 'artists': [artist], 'album': album, 'track_number': number}
+    result = match_track(target, _file(filename))
+    assert result.matches
+    assert not result.contradicts
+
+
+def test_unrecognized_layout_is_inconclusive_but_sibling_title_conflicts():
+    target = {'name': 'Rise', 'artists': ['Doves'], 'album': 'Lost Souls'}
+    unknown = match_track(target, _file('05-d0ves__rise.flac'))
+    sibling = match_track(target, _file('Doves/Lost Souls/05 - Doves - Sea Song.flac'))
+    assert not unknown.matches and not unknown.contradicts
+    assert not sibling.matches and sibling.contradicts
+
+
 def test_assignment_does_not_count_one_file_twice():
     expected = [_track('SexyBack', 2), _track('SexyBack', 2), _track('My Love', 3)]
     candidates = [
@@ -119,6 +145,25 @@ def test_direct_album_picker_uses_distinct_requested_titles():
         [wrong, correct], 'Album', 'Artist', expected_tracks=expected,
     )
     assert picked is correct
+
+
+def test_direct_album_picker_accepts_complete_compilation_without_artist_in_path():
+    client = object.__new__(SoulseekClient)
+    client.filter_results_by_quality_preference = lambda tracks, profile_id=None: tracks
+    expected = [
+        {'name': f'Track {number}', 'artists': [f'Artist {number}'], 'track_number': number}
+        for number in range(1, 4)
+    ]
+    album = SimpleNamespace(
+        album_title='Now 50', album_path='Music/Various Artists/Now 50',
+        artist='Kylie Minogue', track_count=3, quality_score=0.8,
+        tracks=[_file(f'Music/Various Artists/Now 50/{number:02d} - Track {number}.flac')
+                for number in range(1, 4)],
+    )
+
+    assert client._pick_album_bundle_folder(
+        [album], 'Now 50', 'Various Artists', expected_tracks=expected,
+    ) is album
 
 
 @pytest.mark.parametrize(('title', 'path', 'matches'), [

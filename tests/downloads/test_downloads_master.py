@@ -830,6 +830,24 @@ def test_soulseek_album_score_rejects_partial_folder_despite_good_metadata():
     ) == 0.0
 
 
+def test_soulseek_album_score_accepts_complete_artistless_folder():
+    from core.downloads.master import _score_album_folder
+
+    expected = [
+        {'name': f'Track {number}', 'artists': ['Queen'], 'track_number': number}
+        for number in range(1, 4)
+    ]
+    tracks = [_slsk_track(f'Track {number}', number, folder='Music/A Night at the Opera (1975) [FLAC]')
+              for number in range(1, 4)]
+    album = _album_result('peer', 'Music/A Night at the Opera (1975) [FLAC]',
+                          'A Night at the Opera', tracks, artist='', year='1975')
+
+    assert _score_album_folder(
+        album, {'name': 'A Night at the Opera', 'total_tracks': 3}, {'name': 'Queen'},
+        expected, tracks,
+    ) >= 0.62
+
+
 def test_soulseek_album_title_similarity_keeps_existing_baseline():
     from core.downloads.master import _album_title_similarity, _similarity
 

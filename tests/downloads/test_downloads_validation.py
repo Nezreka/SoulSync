@@ -81,6 +81,26 @@ def test_source_reuse_recognizes_embedded_album_and_track_number(monkeypatch):
     assert source_reuse_title_matches(expected, candidate) is True
 
 
+def test_source_reuse_does_not_admit_a_target_without_a_title():
+    expected = _Track(duration_ms=240_000, name='', artists=('Artist',))
+    candidate = _Candidate(
+        username='peer', duration=240_000,
+        filename=r'music\Artist\Album\01 - Song.flac',
+    )
+
+    assert source_reuse_title_matches(expected, candidate) is False
+
+
+def test_source_reuse_leaves_unknown_filename_layout_to_confidence_gate():
+    expected = _Track(duration_ms=240_000, name='Rise', artists=('Doves',))
+    candidate = _Candidate(
+        username='peer', duration=240_000,
+        filename=r'music\Doves\Lost Souls\05-d0ves__rise.flac',
+    )
+
+    assert source_reuse_title_matches(expected, candidate) is True
+
+
 def test_drops_soundcloud_30s_preview_when_expected_long():
     """A 30s SC candidate against a 5-minute expected track is the
     canonical preview-snippet case — must be dropped."""
