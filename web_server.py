@@ -1446,6 +1446,7 @@ def _register_automation_handlers():
         record_progress_history=_auto_progress.record_history,
         build_personalized_manager=_build_personalized_manager,
         lastfm_import_worker=lastfm_import_worker,
+        listenbrainz_import_worker=listenbrainz_import_worker,
     )
     _register_extracted_handlers(_automation_deps)
 
@@ -20460,6 +20461,28 @@ except Exception as e:
     logger.error(f"Last.fm listening import worker initialization failed: {e}")
     lastfm_import_worker = None
 
+listenbrainz_import_worker = None
+try:
+    from core.listening_import.listenbrainz import ListenBrainzListeningImportWorker
+
+    def _emit_listenbrainz_import_progress(state):
+        try:
+            socketio.emit('listenbrainz:import-progress', state or {})
+        except Exception as e:
+            logger.debug("listenbrainz import progress emit failed: %s", e)
+
+    listenbrainz_import_db = MusicDatabase()
+    listenbrainz_import_worker = ListenBrainzListeningImportWorker(
+        database=listenbrainz_import_db,
+        config_manager=config_manager,
+        cache_builder=(listening_stats_worker._build_stats_cache if listening_stats_worker else None),
+        progress_callback=_emit_listenbrainz_import_progress,
+    )
+    logger.info("ListenBrainz listening import worker initialized")
+except Exception as e:
+    logger.error(f"ListenBrainz listening import worker initialization failed: {e}")
+    listenbrainz_import_worker = None
+
 # --- Stats API Endpoints ---
 # Lifted to api/stats.py (wired near the other internal blueprints below).
 # ===================================================================
@@ -21384,7 +21407,8 @@ _configure_stats_api(get_database=get_database, config_manager=config_manager,
                      fix_artist_image_url=fix_artist_image_url,
                      _automation_engine=lambda: automation_engine,
                      listening_stats_worker_getter=lambda: listening_stats_worker,
-                     lastfm_import_worker_getter=lambda: lastfm_import_worker)
+                     lastfm_import_worker_getter=lambda: lastfm_import_worker,
+                     listenbrainz_import_worker_getter=lambda: listenbrainz_import_worker)
 app.register_blueprint(_create_stats_blueprint())
 
 # Quality profiles / auto-import watcher / metadata-cache browser - three

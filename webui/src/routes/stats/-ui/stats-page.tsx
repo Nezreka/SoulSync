@@ -20,6 +20,7 @@ import { useReactPageShell, useShellStatus } from '@/platform/shell/route-contro
 
 import type {
   LastfmListeningImportStatus,
+  ListenbrainzListeningImportStatus,
   StatsAlbumRow,
   StatsArtistRow,
   StatsClock,
@@ -41,9 +42,11 @@ import {
   fetchStatsListeningEvents,
   invalidateStatsQueries,
   lastfmListeningImportStatusQueryOptions,
+  listenbrainzListeningImportStatusQueryOptions,
   listeningStatsStatusQueryOptions,
   resolveStatsTrack,
   runLastfmListeningImport,
+  runListenbrainzListeningImport,
   statsCachedQueryOptions,
   statsDbStorageQueryOptions,
   statsLibraryDiskUsageQueryOptions,
@@ -103,8 +106,6 @@ export function StatsPage() {
   const { range, tab, story } = Route.useSearch();
   const syncTimeoutRef = useRef<number | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [lastfmUsername, setLastfmUsername] = useState('');
-  const lastfmUsernameEdited = useRef(false);
   const [listeningDetailFilter, setListeningDetailFilter] =
     useState<StatsListeningEventsFilter | null>(null);
 
@@ -116,6 +117,10 @@ export function StatsPage() {
   });
   const lastfmImportQuery = useQuery({
     ...lastfmListeningImportStatusQueryOptions(),
+    refetchInterval: (query) => (query.state.data?.running ? 3000 : 60000),
+  });
+  const listenbrainzImportQuery = useQuery({
+    ...listenbrainzListeningImportStatusQueryOptions(),
     refetchInterval: (query) => (query.state.data?.running ? 3000 : 60000),
   });
   const dbStorageQuery = useQuery({
@@ -163,7 +168,7 @@ export function StatsPage() {
   });
 
   const lastfmMutation = useMutation({
-    mutationFn: () => runLastfmListeningImport(lastfmUsername),
+    mutationFn: () => runLastfmListeningImport(),
     onSuccess: () => {
       window.showToast?.('Last.fm listening import started', 'info');
       void lastfmImportQuery.refetch();
@@ -173,10 +178,19 @@ export function StatsPage() {
     },
   });
 
-  useEffect(() => {
-    const username = lastfmImportQuery.data?.username;
-    if (!lastfmUsernameEdited.current) setLastfmUsername(username || '');
-  }, [lastfmImportQuery.data?.username]);
+  const listenbrainzMutation = useMutation({
+    mutationFn: () => runListenbrainzListeningImport(),
+    onSuccess: () => {
+      window.showToast?.('ListenBrainz listening import started', 'info');
+      void listenbrainzImportQuery.refetch();
+    },
+    onError: (error) => {
+      window.showToast?.(
+        error instanceof Error ? error.message : 'ListenBrainz import failed',
+        'error',
+      );
+    },
+  });
 
   useEffect(() => {
     const onProgress = () => {
@@ -186,6 +200,15 @@ export function StatsPage() {
     window.addEventListener('ss:lastfm-import-progress', onProgress);
     return () => window.removeEventListener('ss:lastfm-import-progress', onProgress);
   }, [lastfmImportQuery, queryClient]);
+
+  useEffect(() => {
+    const onProgress = () => {
+      void listenbrainzImportQuery.refetch();
+      void invalidateStatsQueries(queryClient);
+    };
+    window.addEventListener('ss:listenbrainz-import-progress', onProgress);
+    return () => window.removeEventListener('ss:listenbrainz-import-progress', onProgress);
+  }, [listenbrainzImportQuery, queryClient]);
 
   const cachedStats = cachedStatsQuery.data;
   const overview = cachedStats?.overview ?? EMPTY_STATS_OVERVIEW;
@@ -285,13 +308,13 @@ export function StatsPage() {
             <div className={styles.statsSyncControls}>
               <LastfmImportControl
                 status={lastfmImportQuery.data}
-                username={lastfmUsername}
-                onUsernameChange={(value) => {
-                  lastfmUsernameEdited.current = true;
-                  setLastfmUsername(value);
-                }}
                 onRun={() => lastfmMutation.mutate()}
                 running={lastfmMutation.isPending}
+              />
+              <ListenbrainzImportControl
+                status={listenbrainzImportQuery.data}
+                onRun={() => listenbrainzMutation.mutate()}
+                running={listenbrainzMutation.isPending}
               />
               {isStandalone ? (
                 <span
@@ -447,105 +470,118 @@ const PREVIOUS_PERIOD_LABEL: Partial<Record<StatsRange, string>> = {
   '12m': 'vs previous 12 months',
 };
 
-export function LastfmImportControl({
-  onRun,
-  onUsernameChange,
-  running,
-  status,
-  username,
-}: {
+type HistoryImportControlProps = {
   onRun: () => void;
-  onUsernameChange: (username: string) => void;
   running: boolean;
-  status: LastfmListeningImportStatus | undefined;
-  username: string;
+};
+
+export function LastfmImportControl({
+  status,
+  ...props
+}: HistoryImportControlProps & { status: LastfmListeningImportStatus | undefined }) {
+  return (
+    <HistoryImportControl
+      {...props}
+      service="Last.fm"
+      status={status}
+      configured={
+        !!status?.api_key_configured && !!(status.username || status.authenticated_user_available)
+      }
+    />
+  );
+}
+
+export function ListenbrainzImportControl({
+  status,
+  ...props
+}: HistoryImportControlProps & { status: ListenbrainzListeningImportStatus | undefined }) {
+  return (
+    <HistoryImportControl
+      {...props}
+      service="ListenBrainz"
+      status={status}
+      configured={!!status?.token_configured}
+    />
+  );
+}
+
+function HistoryImportControl({
+  service,
+  status,
+  configured,
+  running,
+  onRun,
+}: HistoryImportControlProps & {
+  service: string;
+  status: LastfmListeningImportStatus | ListenbrainzListeningImportStatus | undefined;
+  configured: boolean;
 }) {
-  const active = !!status?.running;
-  const pct = clampProgress(status?.progress);
-  const canUseAuthenticatedUser = !!status?.authenticated_user_available;
-  const needsUsername = !username.trim() && !canUseAuthenticatedUser;
-  const disabled = running || active || !status?.api_key_configured || needsUsername;
-  const subline = lastfmImportSubline(status);
+  const active = running || !!status?.running;
+  const progress = clampProgress(status?.progress);
+  const needsResume = status?.status === 'partial' || status?.status === 'cancelled';
+  const failed = status?.status === 'error';
+  const label = !status
+    ? 'Checking settings…'
+    : !configured
+      ? 'Configure in Settings'
+      : active
+        ? `Syncing${progress == null ? '…' : ` · ${progress}%`}`
+        : failed
+          ? 'Sync failed'
+          : needsResume
+            ? 'Sync paused'
+            : status.last_success_at
+              ? 'Up to date'
+              : 'Ready to sync';
+  const detail = active
+    ? `${status?.phase || 'Starting sync'} · ${formatCompactNumber(status?.inserted || 0)} added`
+    : failed
+      ? status?.error || 'Check your account in Settings and retry.'
+      : status?.last_success_at
+        ? `Last synced ${status.last_success_at}${status.next_run_in_seconds ? ` · next check in ${formatShortDuration(status.next_run_in_seconds)}` : ''}`
+        : 'Uses your account from Settings. Sync once to enable hourly updates.';
 
   return (
     <div
-      className={`${styles.lastfmImportControl} ${active ? styles.lastfmImportControlActive : ''}`}
-      title={subline}
+      className={styles.historyImportControl}
+      role="group"
+      aria-label={`${service} history sync`}
     >
-      <div className={styles.lastfmImportMain}>
-        <span className={styles.lastfmImportBrand}>Last.fm</span>
-        <span className={styles.lastfmImportStatus}>{lastfmImportLabel(status)}</span>
+      <div className={styles.historyImportInfo}>
+        <span className={styles.historyImportService}>{service}</span>
+        <span className={styles.historyImportAccount} title="Manage this account in Settings">
+          {status?.username || 'Account from Settings'}
+        </span>
+        <span className={styles.historyImportStatus} role="status" title={detail}>
+          {label}
+        </span>
       </div>
-      <div className={styles.lastfmImportBar} aria-hidden="true">
-        <div
-          className={styles.lastfmImportFill}
-          style={{
-            width:
-              pct != null && (active || status?.status === 'partial')
-                ? `${pct}%`
-                : status?.status === 'complete'
-                  ? '100%'
-                  : '0%',
-          }}
-        />
-      </div>
-      <input
-        className={styles.lastfmImportInput}
-        value={username}
-        onChange={(event) => onUsernameChange(event.target.value)}
-        placeholder="Last.fm username"
-        aria-label="Last.fm username"
-        disabled={running || active}
-      />
       <button
         type="button"
-        className={styles.lastfmImportRun}
+        className={styles.historyImportButton}
         onClick={onRun}
-        disabled={disabled}
-        title={
-          status?.api_key_configured
-            ? 'Sync Last.fm listening now'
-            : 'Configure Last.fm API key first'
-        }
+        disabled={active || !configured || !status?.success}
+        aria-label={`${active ? 'Syncing' : needsResume ? 'Resume' : failed ? 'Retry' : 'Sync'} ${service} history`}
+        aria-busy={active}
+        title={configured ? detail : `Configure ${service} in Settings`}
       >
-        {active ? 'Running' : 'Run'}
+        <span aria-hidden="true">↻</span>
+        {active ? 'Syncing…' : needsResume ? 'Resume sync' : failed ? 'Retry sync' : 'Sync now'}
       </button>
+      {active || needsResume ? (
+        <progress
+          className={styles.historyImportProgress}
+          aria-label={`${service} sync progress`}
+          max={100}
+          value={progress ?? undefined}
+        />
+      ) : null}
     </div>
   );
 }
 
-function lastfmImportLabel(status: LastfmListeningImportStatus | undefined): string {
-  if (!status?.api_key_configured) return 'not configured';
-  if (status.running) return `${clampProgress(status.progress) ?? 0}%`;
-  if (status.status === 'error') return 'needs attention';
-  if (status.status === 'partial') return 'resume needed';
-  if (status.last_success_at) return 'up to date';
-  return 'ready';
-}
-
-function lastfmImportSubline(status: LastfmListeningImportStatus | undefined): string {
-  if (!status?.api_key_configured) return 'Configure Last.fm API credentials in Settings.';
-  if (status.running) {
-    const inserted = formatCompactNumber(status.inserted || 0);
-    const duplicates = formatCompactNumber(status.duplicates || 0);
-    return `${status.phase || 'Importing'} · ${inserted} added · ${duplicates} skipped`;
-  }
-  if (status.status === 'error') return status.error || 'Last.fm import failed';
-  if (status.status === 'partial')
-    return 'Previous import stopped before the backfill finished. Run to continue.';
-  if (!status.username && status.authenticated_user_available) {
-    return 'Uses the Last.fm account authorized in Settings.';
-  }
-  if (status.last_success_at) {
-    const next = status.next_run_in_seconds
-      ? ` · next check in ${formatShortDuration(status.next_run_in_seconds)}`
-      : '';
-    return `Last checked ${status.last_success_at}${next}`;
-  }
-  return 'Run once to start hourly Last.fm listening sync.';
-}
-
 function clampProgress(value: unknown): number | null {
+  if (value == null) return null;
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
   return Math.max(0, Math.min(100, Math.round(n)));

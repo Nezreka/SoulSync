@@ -1,45 +1,45 @@
-"""Last.fm listening-history importer.
+"""ListenBrainz listening-history importer.
 
 This is account-history ingestion, not metadata enrichment. It shares the
-Last.fm client/config but writes canonical rows into ``listening_history`` so
+ListenBrainz client/config but writes canonical rows into ``listening_history`` so
 Stats, discovery, and Year in Listening keep reading one source of truth.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from core.lastfm_client import LastFMClient
+from core.listenbrainz_client import ListenBrainzClient
 from core.listening_import.dedup import insert_import_events
 from utils.logging_config import get_logger
 
-logger = get_logger("lastfm_import")
+logger = get_logger("listenbrainz_import")
 
-STATE_KEY = "lastfm_listening_import_state"
-SOURCE = "lastfm"
-PAGE_LIMIT = 200
+STATE_KEY = "listenbrainz_listening_import_state"
+SOURCE = "listenbrainz"
+PAGE_LIMIT = 100
 RECENT_OVERLAP_SECONDS = 24 * 60 * 60
-STOP_AFTER_DUPLICATE_PAGES = 3
 TRANSIENT_PAGE_RETRIES = 4
 TRANSIENT_PAGE_RETRY_BASE_SECONDS = 5
 
 
 def _safe_error_message(error: Exception) -> str:
-    return re.sub(r"([?&]api_key=)[^&\s]+", r"\1REDACTED", str(error))
+    return re.sub(r"(Token\s+)[^\s]+", r"\1REDACTED", str(error))
 
 
-class LastFMListeningImportWorker:
-    """Imports Last.fm scrobbles into ``listening_history``.
+class ListenBrainzListeningImportWorker:
+    """Imports ListenBrainz scrobbles into ``listening_history``.
 
-    The worker is intentionally small and single-flight. Automations, manual
-    run buttons, and future settings toggles can all call ``start_import``; if
+    The worker is single-flight and thread-safe. Automations, manual
+    run buttons, and settings can all call ``start_import``; if
     a run is already active they get a skipped response instead of creating a
-    second paginated crawl.
+    second crawl.
     """
 
     def __init__(
@@ -69,14 +69,14 @@ class LastFMListeningImportWorker:
         if not running and state.get("status") == "running":
             state.update(
                 status="partial",
-                phase="Last.fm import needs to resume",
+                phase="ListenBrainz import needs to resume",
                 progress=_progress(_int(state.get("page")), _int(state.get("total_pages"))),
                 last_success_at=None,
             )
         elif not running and state.get("status") == "complete" and _is_incomplete_backfill_state(state):
             state.update(
                 status="partial",
-                phase="Last.fm import needs to resume",
+                phase="ListenBrainz import needs to resume",
                 progress=_progress(_int(state.get("page")), _int(state.get("total_pages"))),
                 last_success_at=None,
             )
@@ -88,21 +88,20 @@ class LastFMListeningImportWorker:
     def start_import(self, username: Optional[str] = None, *, full: bool = False) -> Dict[str, Any]:
         with self._lock:
             if self.is_running():
-                return {"status": "skipped", "reason": "Last.fm import already running", **self.status()}
+                return {"status": "skipped", "reason": "ListenBrainz import already running", **self.status()}
             self._cancel.clear()
             target = self._resolve_username(username)
+            token = self.config_manager.get("listenbrainz.token", "")
             if not target:
-                state = self._set_state(status="error", error="Last.fm username not configured")
-                return {"status": "error", "error": state["error"], **state}
-            if not self.config_manager.get("lastfm.api_key", ""):
-                state = self._set_state(status="error", error="Last.fm API key not configured")
+                err = "ListenBrainz user token not configured" if not token else "ListenBrainz username not configured"
+                state = self._set_state(status="error", error=err)
                 return {"status": "error", "error": state["error"], **state}
 
             self._thread = threading.Thread(
                 target=self._run,
                 args=(target, full),
                 daemon=True,
-                name="lastfm-listening-import",
+                name="listenbrainz-listening-import",
             )
             self._thread.start()
             return {"status": "started", "username": target}
@@ -125,83 +124,87 @@ class LastFMListeningImportWorker:
         if previous.get("username") and str(previous["username"]).casefold() != username.casefold():
             previous = {}
             self._state = {}
-        previous_page = _int(previous.get("page"))
-        previous_total_pages = _int(previous.get("total_pages"))
+
         previous_complete_is_suspect = _is_incomplete_backfill_state(previous)
         backfill_complete = bool(previous.get("backfill_complete")) and not previous_complete_is_suspect
         looks_like_interrupted_backfill = (
             not full
-            and previous_total_pages > 0
-            and 0 < previous_page < previous_total_pages
             and not backfill_complete
+            and _int(previous.get("pending_max_ts")) > 0
         )
         use_incremental = not full and backfill_complete
         last_cursor = _int(previous.get("last_imported_ts")) if use_incremental else 0
-        from_ts = max(0, last_cursor - RECENT_OVERLAP_SECONDS) if last_cursor else None
-        start_page = 1 if use_incremental or full else max(1, previous_page + 1 if looks_like_interrupted_backfill else 1)
-        client = LastFMClient(
-            api_key=self.config_manager.get("lastfm.api_key", ""),
-            api_secret=self.config_manager.get("lastfm.api_secret", ""),
-            session_key=self.config_manager.get("lastfm.session_key", ""),
+        min_ts = max(0, last_cursor - RECENT_OVERLAP_SECONDS) if last_cursor else None
+
+        client = ListenBrainzClient(
+            token=self.config_manager.get("listenbrainz.token", ""),
+            base_url=self.config_manager.get("listenbrainz.base_url", "") or None,
         )
+
+        total_scrobbles = client.get_user_listen_count(username) if not use_incremental else None
+        total_pages = max(1, math.ceil(total_scrobbles / PAGE_LIMIT)) if total_scrobbles else None
+
+        start_page = 1 if use_incremental or full else max(1, _int(previous.get("page")) + 1 if looks_like_interrupted_backfill else 1)
+        current_max_ts = _int(previous.get("pending_max_ts")) if looks_like_interrupted_backfill else None
 
         self._set_state(
             status="running",
             username=username,
-            phase="Starting Last.fm import" if start_page == 1 else f"Resuming Last.fm import at page {start_page}",
+            phase="Starting ListenBrainz import" if start_page == 1 else f"Resuming ListenBrainz import at page {start_page}",
             started_at=_now_iso(),
             finished_at=None,
             error=None,
-            imported=0,
-            inserted=0,
-            duplicates=0,
+            imported=0 if not looks_like_interrupted_backfill else _int(previous.get("imported")),
+            inserted=0 if not looks_like_interrupted_backfill else _int(previous.get("inserted")),
+            duplicates=0 if not looks_like_interrupted_backfill else _int(previous.get("duplicates")),
             page=start_page - 1,
-            total_pages=None,
-            total_scrobbles=None,
-            progress=0,
+            total_pages=total_pages,
+            total_scrobbles=total_scrobbles,
+            progress=0 if not looks_like_interrupted_backfill else _progress(start_page - 1, total_pages),
             backfill_complete=backfill_complete if not full else False,
         )
 
-        inserted_total = 0
-        duplicate_total = 0
-        imported_total = 0
+        inserted_total = _int(previous.get("inserted")) if looks_like_interrupted_backfill else 0
+        duplicate_total = _int(previous.get("duplicates")) if looks_like_interrupted_backfill else 0
+        imported_total = _int(previous.get("imported")) if looks_like_interrupted_backfill else 0
         highest_ts = last_cursor if use_incremental else _int(previous.get("pending_last_imported_ts"))
-        duplicate_pages = 0
         page = start_page
-        total_pages = None
-        total_scrobbles = None
         completed_backfill = False
 
         try:
             while not self._cancel.is_set():
-                data = self._get_recent_tracks_page(client, username, page, from_ts)
+                data = self._get_user_listens_page(
+                    client=client,
+                    username=username,
+                    min_ts=None,  # Crawl newest-first; apply the overlap floor locally.
+                    max_ts=current_max_ts,
+                    page_num=page,
+                )
                 if data is None:
                     break
-                recent = (data or {}).get("recenttracks") or {}
-                attr = recent.get("@attr") or {}
-                total_pages = _int(attr.get("totalPages"), total_pages or 1)
-                total_scrobbles = _int(attr.get("total"), total_scrobbles or 0)
-                tracks = recent.get("track") or []
-                if isinstance(tracks, dict):
-                    tracks = [tracks]
-                tracks = [t for t in tracks if not (t.get("@attr") or {}).get("nowplaying")]
-                if not tracks:
-                    completed_backfill = from_ts is None
+
+                payload = (data or {}).get("payload") or {}
+                listens = payload.get("listens") or []
+                if not listens:
+                    completed_backfill = not use_incremental
                     break
 
-                events = [ev for ev in (normalize_lastfm_scrobble(t) for t in tracks) if ev]
+                timestamps = [_int(item.get("listened_at")) for item in listens]
+                if any(ts <= 0 for ts in timestamps):
+                    raise ValueError("History page contains an invalid listened_at timestamp")
+                oldest_in_batch = min(timestamps)
+                if current_max_ts is not None and oldest_in_batch >= current_max_ts:
+                    raise ValueError("History API pagination cursor did not advance")
+                events = [ev for ev in (normalize_listenbrainz_listen(item) for item in listens)
+                          if ev and (min_ts is None or _played_at_ts(ev["played_at"]) > min_ts)]
+
                 self._resolve_db_track_ids(events)
                 inserted = self._insert_events_deduped(events)
                 imported_total += len(events)
                 inserted_total += inserted
                 duplicate_total += max(0, len(events) - inserted)
-                if inserted == 0:
-                    duplicate_pages += 1
-                else:
-                    duplicate_pages = 0
-
-                for ev in events:
-                    highest_ts = max(highest_ts, _played_at_ts(ev.get("played_at")))
+                highest_ts = max(highest_ts, max(timestamps))
+                current_max_ts = oldest_in_batch
 
                 checkpoint = {
                     "status": "running",
@@ -215,15 +218,13 @@ class LastFMListeningImportWorker:
                     "progress": _progress(page, total_pages),
                     "error": None,
                 }
-                if use_incremental:
-                    checkpoint.update(
-                        last_imported_ts=highest_ts or last_cursor,
-                        last_imported_at=_iso_from_ts(highest_ts) if highest_ts else previous.get("last_imported_at"),
-                    )
-                else:
+
+                # Commit the incremental high-water mark only after the whole
+                # window succeeds. Errors/cancellation replay safely through dedup.
+                if not use_incremental:
                     checkpoint.update(
                         backfill_complete=False,
-                        backfill_next_page=page + 1,
+                        pending_max_ts=current_max_ts,
                         pending_last_imported_ts=highest_ts or _int(previous.get("pending_last_imported_ts")),
                         pending_last_imported_at=(
                             _iso_from_ts(highest_ts)
@@ -233,19 +234,23 @@ class LastFMListeningImportWorker:
                     )
                 self._set_state(**checkpoint)
 
-                if use_incremental and duplicate_pages >= STOP_AFTER_DUPLICATE_PAGES:
+                if use_incremental and min_ts is not None and oldest_in_batch <= min_ts:
                     break
-                if total_pages and page >= total_pages:
-                    completed_backfill = from_ts is None
+
+                # If batch is smaller than limit, we've reached the end of history
+                if len(listens) < PAGE_LIMIT:
+                    completed_backfill = not use_incremental
                     break
+
                 page += 1
+                time.sleep(1)
 
             cancelled = self._cancel.is_set()
             status = "cancelled" if cancelled else "complete"
             final_progress = _progress(page, total_pages)
             final_updates = {
                 "status": status,
-                "phase": "Last.fm import cancelled" if cancelled else "Last.fm is up to date",
+                "phase": "ListenBrainz import cancelled" if cancelled else "ListenBrainz is up to date",
                 "finished_at": _now_iso(),
                 "last_success_at": _now_iso() if status == "complete" else previous.get("last_success_at"),
                 "imported": imported_total,
@@ -255,10 +260,11 @@ class LastFMListeningImportWorker:
                 "progress": 100 if status == "complete" else final_progress,
                 "error": None,
             }
-            if use_incremental or completed_backfill:
+
+            if (use_incremental and not cancelled) or completed_backfill:
                 final_updates.update(
                     backfill_complete=True,
-                    backfill_next_page=None,
+                    pending_max_ts=None,
                     pending_last_imported_ts=None,
                     pending_last_imported_at=None,
                     last_imported_ts=highest_ts or _int(previous.get("pending_last_imported_ts")) or last_cursor,
@@ -270,8 +276,8 @@ class LastFMListeningImportWorker:
                 )
             else:
                 final_updates.update(
-                    backfill_complete=False,
-                    backfill_next_page=page,
+                    backfill_complete=backfill_complete if use_incremental else False,
+                    pending_max_ts=None if use_incremental else current_max_ts,
                     pending_last_imported_ts=highest_ts or _int(previous.get("pending_last_imported_ts")),
                     pending_last_imported_at=(
                         _iso_from_ts(highest_ts)
@@ -286,34 +292,45 @@ class LastFMListeningImportWorker:
                 try:
                     self._set_state(phase="Rebuilding stats cache")
                     self.cache_builder()
-                    self._set_state(phase="Last.fm is up to date")
+                    self._set_state(phase="ListenBrainz is up to date")
                 except Exception as e:
-                    logger.warning("Last.fm import finished but stats cache rebuild failed: %s", e)
+                    logger.warning("ListenBrainz import finished but stats cache rebuild failed: %s", e)
         except Exception as e:
             safe_error = _safe_error_message(e)
-            logger.error("Last.fm listening import failed: %s", safe_error, exc_info=True)
+            logger.error("ListenBrainz listening import failed: %s", safe_error, exc_info=True)
             self._set_state(
                 status="error",
-                phase="Last.fm import failed",
+                phase="ListenBrainz import failed",
                 error=safe_error,
                 finished_at=_now_iso(),
                 progress=_progress(max(page - 1, 0), total_pages),
                 backfill_complete=backfill_complete if use_incremental else False,
-                backfill_next_page=page if not use_incremental else None,
+                pending_max_ts=current_max_ts if not use_incremental else None,
             )
 
-    def _get_recent_tracks_page(self, client: LastFMClient, username: str, page: int, from_ts: Optional[int]) -> Optional[Dict[str, Any]]:
+    def _get_user_listens_page(
+        self,
+        client: ListenBrainzClient,
+        username: str,
+        min_ts: Optional[int],
+        max_ts: Optional[int],
+        page_num: int,
+    ) -> Optional[Dict[str, Any]]:
         for attempt in range(1, TRANSIENT_PAGE_RETRIES + 1):
             try:
-                return client.get_user_recent_tracks(username, page=page, limit=PAGE_LIMIT, from_ts=from_ts)
+                data = client.get_user_listens(username, min_ts=min_ts, max_ts=max_ts, count=PAGE_LIMIT)
+                payload = data.get("payload") if isinstance(data, dict) and not data.get("error") else None
+                if not isinstance(payload, dict) or not isinstance(payload.get("listens"), list):
+                    raise ValueError("History API returned an invalid listens response")
+                return data
             except Exception as e:
                 if attempt >= TRANSIENT_PAGE_RETRIES:
                     raise
                 delay = min(60, TRANSIENT_PAGE_RETRY_BASE_SECONDS * attempt)
                 self._set_state(
                     status="running",
-                    phase=f"Last.fm API hiccup on page {page}; retrying in {delay}s",
-                    page=page - 1,
+                    phase=f"ListenBrainz API hiccup on page {page_num}; retrying in {delay}s",
+                    page=page_num - 1,
                     error=_safe_error_message(e),
                 )
                 if not self._sleep_retry(delay):
@@ -328,22 +345,20 @@ class LastFMListeningImportWorker:
         return not self._cancel.is_set()
 
     def _resolve_username(self, username: Optional[str]) -> str:
-        configured = username or self.config_manager.get("lastfm.username", "")
+        configured = username or self.config_manager.get("listenbrainz.username", "")
         if configured:
             return str(configured).strip()
-        api_secret = self.config_manager.get("lastfm.api_secret", "")
-        session_key = self.config_manager.get("lastfm.session_key", "")
-        if not api_secret or not session_key:
+        token = self.config_manager.get("listenbrainz.token", "")
+        if not token:
             return ""
         try:
-            client = LastFMClient(
-                api_key=self.config_manager.get("lastfm.api_key", ""),
-                api_secret=api_secret,
-                session_key=session_key,
+            client = ListenBrainzClient(
+                token=token,
+                base_url=self.config_manager.get("listenbrainz.base_url", "") or None,
             )
             found = client.get_authenticated_username() or ""
             if found:
-                self.config_manager.set("lastfm.username", found)
+                self.config_manager.set("listenbrainz.username", found)
             return found
         except Exception:
             return ""
@@ -395,42 +410,45 @@ class LastFMListeningImportWorker:
         try:
             self.db.set_metadata(STATE_KEY, json.dumps(state))
         except Exception as e:
-            logger.debug("Could not persist Last.fm import state: %s", e)
+            logger.debug("Could not persist ListenBrainz import state: %s", e)
         if self.progress_callback:
             try:
                 self.progress_callback(self.status())
             except Exception as e:
-                logger.debug("Last.fm import progress callback failed: %s", e)
+                logger.debug("ListenBrainz import progress callback failed: %s", e)
         return state
 
 
-def normalize_lastfm_scrobble(track: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    date = track.get("date") or {}
-    uts = _int(date.get("uts"))
-    if not uts:
+def normalize_listenbrainz_listen(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    listened_at = _int(item.get("listened_at"))
+    if not listened_at:
         return None
-    artist = _text(track.get("artist"))
-    title = (track.get("name") or "").strip()
+    track_metadata = item.get("track_metadata") or {}
+    title = str(track_metadata.get("track_name") or "").strip()
     if not title:
         return None
-    album = _text(track.get("album"))
-    mbid = (track.get("mbid") or "").strip()
+    artist = str(track_metadata.get("artist_name") or "").strip()
+    album = str(track_metadata.get("release_name") or "").strip()
+    additional_info = track_metadata.get("additional_info") or {}
+    recording_mbid = str(additional_info.get("recording_mbid") or "").strip()
+    recording_msid = str(item.get("recording_msid") or "").strip()
+
+    duration_ms = _int(additional_info.get("duration_ms"))
+    if not duration_ms and additional_info.get("duration"):
+        duration_ms = _int(additional_info.get("duration")) * 1000
+
+    track_id = recording_mbid or recording_msid or f"listenbrainz:{artist.lower()}:{title.lower()}:{listened_at}"
+
     return {
-        "track_id": mbid or f"lastfm:{artist.lower()}:{title.lower()}:{uts}",
+        "track_id": track_id,
         "title": title,
         "artist": artist,
         "album": album,
-        "played_at": _iso_from_ts(uts),
-        "duration_ms": _int(track.get("duration"), 0),
+        "played_at": _iso_from_ts(listened_at),
+        "duration_ms": duration_ms,
         "server_source": SOURCE,
         "db_track_id": None,
     }
-
-
-def _text(value: Any) -> str:
-    if isinstance(value, dict):
-        return str(value.get("#text") or value.get("name") or "").strip()
-    return str(value or "").strip()
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -460,6 +478,8 @@ def _now_iso() -> str:
 
 
 def _is_incomplete_backfill_state(state: Dict[str, Any]) -> bool:
+    if state.get("backfill_complete") is True:
+        return False
     page = _int(state.get("page"))
     total_pages = _int(state.get("total_pages"))
     total_scrobbles = _int(state.get("total_scrobbles"))
@@ -475,4 +495,3 @@ def _progress(page: int, total_pages: Optional[int]) -> int:
     if not total_pages:
         return 0
     return max(0, min(99, round((page / max(total_pages, 1)) * 100)))
-

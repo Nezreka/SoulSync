@@ -2904,6 +2904,8 @@ async function loadSettingsData() {
         // Populate ListenBrainz settings
         document.getElementById('listenbrainz-base-url').value = settings.listenbrainz?.base_url || '';
         document.getElementById('listenbrainz-token').value = settings.listenbrainz?.token || '';
+        const _lbUser = document.getElementById('listenbrainz-username');
+        if (_lbUser) _lbUser.value = settings.listenbrainz?.username || '';
 
         // Populate AcoustID settings
         document.getElementById('acoustid-api-key').value = settings.acoustid?.api_key || '';
@@ -6045,6 +6047,7 @@ async function saveSettings(quiet = false) {
         listenbrainz: {
             base_url: document.getElementById('listenbrainz-base-url').value,
             token: document.getElementById('listenbrainz-token').value,
+            username: _cfgStr('listenbrainz-username', { trim: true }),
             scrobble_enabled: document.getElementById('listenbrainz-scrobble-enabled').checked,
         },
         acoustid: {

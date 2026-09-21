@@ -22,6 +22,7 @@ from core.automation.handlers.discover_playlist import auto_discover_playlist
 from core.automation.handlers.playlist_pipeline import auto_playlist_pipeline
 from core.automation.handlers.personalized_pipeline import auto_personalized_pipeline
 from core.automation.handlers.lastfm_import import auto_import_lastfm_listening
+from core.automation.handlers.listenbrainz_import import auto_import_listenbrainz_listening
 from core.automation.handlers.library_cleanup import auto_library_cleanup
 from core.automation.handlers.database_update import (
     auto_start_database_update, auto_deep_scan_library,
@@ -162,6 +163,11 @@ def register_all(deps: AutomationDeps) -> None:
         'import_lastfm_listening',
         lambda config: auto_import_lastfm_listening(config, deps),
         lambda: bool(deps.lastfm_import_worker and deps.lastfm_import_worker.is_running()),
+    )
+    engine.register_action_handler(
+        'import_listenbrainz_listening',
+        lambda config: auto_import_listenbrainz_listening(config, deps),
+        lambda: bool(deps.listenbrainz_import_worker and deps.listenbrainz_import_worker.is_running()),
     )
 
     # Database update + deep scan share the db_update_state guard —

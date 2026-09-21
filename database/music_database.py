@@ -6254,42 +6254,19 @@ class MusicDatabase:
             logger.error(f"Error creating listening_history table: {e}")
 
     def insert_listening_events(self, events):
-        """Bulk insert listening events, skipping duplicates."""
-        if not events:
-            return 0
-        conn = None
+        """Insert server/player events through the same matcher as history imports."""
+        from core.listening_import.dedup import insert_import_events
+
+        grouped = {}
+        for event in events or []:
+            grouped.setdefault(event.get('server_source') or '', []).append(event)
         inserted = 0
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            for event in events:
-                try:
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO listening_history
-                            (track_id, title, artist, album, played_at, duration_ms, server_source, db_track_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        event.get('track_id'),
-                        event.get('title', ''),
-                        event.get('artist', ''),
-                        event.get('album', ''),
-                        event.get('played_at'),
-                        event.get('duration_ms', 0),
-                        event.get('server_source', ''),
-                        event.get('db_track_id'),
-                    ))
-                    if cursor.rowcount > 0:
-                        inserted += 1
-                except Exception as e:
-                    logger.debug("Failed to insert listening event: %s", e)
-            conn.commit()
-            return inserted
-        except Exception as e:
-            logger.error(f"Error inserting listening events: {e}")
-            return 0
-        finally:
-            if conn:
-                conn.close()
+        for source, batch in grouped.items():
+            try:
+                inserted += insert_import_events(self, batch, source)
+            except Exception as e:
+                logger.error(f"Error inserting listening events: {e}")
+        return inserted
 
     def record_web_player_play(self, event):
         """Record a single SoulSync web-player play: insert the listening_history

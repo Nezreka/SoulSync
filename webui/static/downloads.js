@@ -4787,6 +4787,9 @@ let _musicSyncClearTimer = null;
 let _lastfmImportTask = null;
 let _lastfmImportClearTimer = null;
 let _lastfmImportCompletion = null;
+let _listenbrainzImportTask = null;
+let _listenbrainzImportClearTimer = null;
+let _listenbrainzImportCompletion = null;
 
 function _taskClampPct(value, fallback = 0) {
     let pct = Number(value);
@@ -5193,15 +5196,74 @@ function _lastfmImportActiveHTML() {
     return _taskCardHTML('Importing Last.fm listening', pct, line, cls, _notifActionHTML('Open Stats', 'stats'));
 }
 
+function updateListenbrainzListeningImportTask(data) {
+    if (!data) return;
+    if (_listenbrainzImportClearTimer) { clearTimeout(_listenbrainzImportClearTimer); _listenbrainzImportClearTimer = null; }
+    const terminal = ['complete', 'error', 'cancelled'].includes(data.status);
+    const active = !terminal && (data.running === true || data.status === 'running');
+    if (active) {
+        _listenbrainzImportCompletion = null;
+        _listenbrainzImportTask = { ...data, updated_at: Date.now() };
+    } else if (terminal || _listenbrainzImportTask) {
+        const key = JSON.stringify([data.username, data.started_at, data.finished_at, data.status]);
+        if (!_listenbrainzImportCompletion || _listenbrainzImportCompletion.key !== key) {
+            let stamp = String(data.finished_at || '').replace(' ', 'T');
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(stamp)) stamp += 'Z';
+            const finished = Date.parse(stamp);
+            _listenbrainzImportCompletion = {
+                key,
+                expiresAt: Math.min(Date.now(), Number.isFinite(finished) ? finished : Date.now()) + 10000,
+            };
+        }
+        const remaining = _listenbrainzImportCompletion.expiresAt - Date.now();
+        _listenbrainzImportTask = remaining > 0 ? { ...data, running: false, updated_at: Date.now() } : null;
+        if (remaining > 0) {
+            _listenbrainzImportClearTimer = setTimeout(() => {
+                _listenbrainzImportClearTimer = null;
+                _listenbrainzImportTask = null;
+                _updateOverlayBell();
+                _patchOverlayActive();
+            }, remaining);
+        }
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _listenbrainzImportActive() {
+    return !!(_listenbrainzImportTask && (_listenbrainzImportTask.running || _listenbrainzImportTask.status === 'running'));
+}
+
+function _listenbrainzImportActiveHTML() {
+    const t = _listenbrainzImportTask;
+    if (!t) return '';
+    const active = _listenbrainzImportActive();
+    const hasProgress = _taskHasPct(t.progress);
+    const pct = active
+        ? (hasProgress ? _taskClampPct(t.progress) : null)
+        : (t.status === 'complete' ? 100 : (hasProgress ? _taskClampPct(t.progress) : null));
+    const cls = t.status === 'error' ? 'error' : (!active ? 'done' : '');
+    const inserted = Number(t.inserted || 0);
+    const duplicates = Number(t.duplicates || 0);
+    const total = Number(t.total_scrobbles || t.total_listens || 0);
+    const page = Number(t.page || 0);
+    const totalPages = Number(t.total_pages || 0);
+    const pageLine = page && totalPages ? ` · page ${page.toLocaleString()}/${totalPages.toLocaleString()}` : '';
+    const line = active
+        ? `${inserted.toLocaleString()} added${duplicates ? `, ${duplicates.toLocaleString()} skipped` : ''}${total ? ` · ${total.toLocaleString()} total` : ''}${pageLine}`
+        : (t.status === 'error' ? _escToast(t.error || 'ListenBrainz import failed') : _escToast(t.phase || 'ListenBrainz listening is up to date'));
+    return _taskCardHTML('Importing ListenBrainz listening', pct, line, cls, _notifActionHTML('Open Stats', 'stats'));
+}
+
 function _musicTasksActive() {
     return _musicAutomationActive() || _musicRepairActive() || _musicWatchlistActive()
         || _musicMediaScanActive() || _musicWishlistActive() || _musicSyncActive()
-        || _lastfmImportActive();
+        || _lastfmImportActive() || _listenbrainzImportActive();
 }
 
 function _musicActiveHTML() {
     return _musicAutomationActiveHTML() + _musicSyncActiveHTML() + _musicWishlistActiveHTML()
-        + _lastfmImportActiveHTML() + _musicWatchlistActiveHTML() + _musicMediaScanActiveHTML() + _musicRepairActiveHTML();
+        + _lastfmImportActiveHTML() + _listenbrainzImportActiveHTML() + _musicWatchlistActiveHTML() + _musicMediaScanActiveHTML() + _musicRepairActiveHTML();
 }
 
 function _seedMusicAutomationTask() {
@@ -5243,6 +5305,13 @@ function _seedLastfmImportTask() {
         .catch(() => {});
 }
 
+function _seedListenbrainzImportTask() {
+    fetch('/api/listenbrainz/listening-import/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s && s.success) updateListenbrainzListeningImportTask(s); })
+        .catch(() => {});
+}
+
 function _updateOverlayBell() {
     const btn = document.getElementById('notif-bell-btn');
     if (btn) btn.classList.toggle('notif-bell-working',
@@ -5267,6 +5336,7 @@ function _ensureTaskPolling() {
             _seedMusicRepairTask();
             _seedMusicMediaScanTask();
             _seedLastfmImportTask();
+            _seedListenbrainzImportTask();
         }, 12000);
     } else if (!active && _taskPollTimer) {
         clearInterval(_taskPollTimer);
