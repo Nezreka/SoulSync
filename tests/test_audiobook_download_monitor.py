@@ -515,6 +515,7 @@ def test_a_staged_book_is_not_shown_as_an_error(db, clean_runtime_state):
 
     assert summary["staged"] == 1
     assert tasks["hash-1"]["status"] == "importing"
+    assert tasks["hash-1"]["held_reason"] == "about 180 minutes short"
     assert not tasks["hash-1"]["error_message"]
     # The reason is kept where the audiobook UI can read it.
     assert "180 minutes short" in db.get_downloads()[0]["completeness"]
@@ -899,6 +900,19 @@ def test_monitor_reattaches_after_restart_and_recovers_old_watchdog_failure(db, 
     assert tasks['book-live']['status'] == 'downloading'
     assert tasks['book-live']['progress'] == 50
     assert tasks['book-live']['error_message'] is None
+
+
+def test_soulseek_task_attaches_peer_and_release_title_to_card(db, clean_runtime_state):
+    import json
+    from core.audiobook_download_monitor import _SoulseekStatus
+    tasks, _ = clean_runtime_state
+    client_id = json.dumps({"username": "SKYLiGHT", "refs": ["ref-1"], "folder": "En_La_Niebla"})
+    db.record_download("book-slsk", "B1", "Infortunio", "soulseek", client_id=client_id, release_title="En_La_Niebla")
+    live = _SoulseekStatus({"state": "downloading", "progress": 10, "size": 1000, "transferred": 100, "speed": 50, "total": 1, "finished": 0})
+    with patch("core.audiobook_download_monitor._get_status", return_value=live):
+        tick(db=db)
+    assert tasks["book-slsk"]["username"] == "SKYLiGHT"
+    assert tasks["book-slsk"]["release_title"] == "En_La_Niebla"
 
 
 @pytest.mark.parametrize("client_state", ["queued", "paused", "downloading", "unavailable"])

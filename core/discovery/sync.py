@@ -553,6 +553,16 @@ def run_sync_task(
                 _cover_server = deps.config_manager.get_active_media_server()
                 _cover_engine = deps.media_server_engine
                 _cover_client = _cover_engine.client(_cover_server) if _cover_engine else None
+                if _cover_server == 'navidrome' and _cover_client is not None:
+                    # the playlist is the profile's user's when they have a login (#1265)
+                    from services.sync_service import navidrome_client_for_profile
+                    _cover_client = navidrome_client_for_profile(profile_id, _cover_client)
+                elif _cover_server == 'plex' and _cover_client is not None:
+                    from services.sync_service import plex_client_for_profile
+                    _cover_client = plex_client_for_profile(profile_id, _cover_client)
+                elif _cover_server in ('jellyfin', 'emby') and _cover_client is not None:
+                    from services.sync_service import jellyfin_client_for_profile
+                    _cover_client = jellyfin_client_for_profile(profile_id, _cover_client)
                 if _cover_client is not None and hasattr(_cover_client, 'get_playlist_by_name'):
                     _playlist_preexisted = bool(_cover_client.get_playlist_by_name(playlist_name))
             except Exception as _pre_err:
@@ -628,16 +638,22 @@ def run_sync_task(
                 logger.info(f"[PLAYLIST IMAGE] active_server={active_server}")
                 _engine = deps.media_server_engine
                 if active_server == 'plex' and _engine and _engine.client('plex'):
-                    ok = _engine.client('plex').set_playlist_image(playlist_name, playlist_image_url)
+                    from services.sync_service import plex_client_for_profile
+                    _px = plex_client_for_profile(profile_id, _engine.client('plex'))
+                    ok = _px.set_playlist_image(playlist_name, playlist_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Plex upload result: {ok}")
                 elif active_server in ('jellyfin', 'emby') and _engine and _engine.client('jellyfin'):
-                    ok = _engine.client('jellyfin').set_playlist_image(playlist_name, playlist_image_url)
+                    from services.sync_service import jellyfin_client_for_profile
+                    _jf = jellyfin_client_for_profile(profile_id, _engine.client('jellyfin'))
+                    ok = _jf.set_playlist_image(playlist_name, playlist_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Jellyfin upload result: {ok}")
                 elif active_server == 'navidrome' and _engine and _engine.client('navidrome'):
                     # Subsonic has no playlist-cover field, but Navidrome's native
                     # API accepts a multipart upload (same creds). See
                     # NavidromeClient.set_playlist_image.
-                    ok = _engine.client('navidrome').set_playlist_image(playlist_name, playlist_image_url)
+                    from services.sync_service import navidrome_client_for_profile
+                    _nd = navidrome_client_for_profile(profile_id, _engine.client('navidrome'))
+                    ok = _nd.set_playlist_image(playlist_name, playlist_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Navidrome upload result: {ok}")
             except Exception as img_err:
                 logger.error(f"[PLAYLIST IMAGE] Exception: {img_err}")

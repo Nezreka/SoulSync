@@ -139,6 +139,7 @@ def _worker(client, db):
     w.media_client = client
     w.database = db
     w.server_type = 'jellyfin'
+    w.owner_profile_id = None
     return w
 
 

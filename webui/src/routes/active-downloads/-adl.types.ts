@@ -111,6 +111,8 @@ export interface AdlLiveDetail {
   speed?: number;
   size?: number;
   bytes?: number;
+  held_reason?: string;
+  release_title?: string;
 }
 
 /** GET /api/downloads/task/<id>/detail — the terminal-row expansion data. */
@@ -339,8 +341,8 @@ export interface AdlDeletedList {
  * every cancelled row out of the Failed pill.
  */
 export const ADL_FILTER_STATUSES: Record<string, readonly string[]> = {
-  active: ['downloading', 'searching', 'post_processing'],
-  queued: ['queued'],
+  active: ['downloading', 'searching', 'post_processing', 'importing', 'staged'],
+  queued: ['queued', 'unavailable'],
   completed: ['completed', 'skipped', 'already_owned'],
   failed: ['failed', 'not_found', 'cancelled'],
 };

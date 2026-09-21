@@ -42,7 +42,8 @@ def get_background_profile():
     return _background_profile_id.get()
 
 
-__all__ = ["set_background_profile", "reset_background_profile", "get_background_profile"]
+__all__ = ["set_background_profile", "reset_background_profile", "get_background_profile",
+           "get_current_profile_id", "is_admin_request", "admin_only"]
 
 
 # ── request-side accessors ───────────────────────────────────────────────────
@@ -69,8 +70,45 @@ def get_current_profile_id() -> int:
     return pid if pid is not None else 1
 
 
+def is_admin_request() -> bool:
+    """Is the current request from an admin profile?
+
+    profile 1 always is. any other profile is an admin when its is_admin
+    flag says so: the before_request hook stashes that on g.is_admin, and
+    when the hook skipped this path (/api/profiles, /api/v1, static) the
+    flag is read from the profile row once and cached on g. the shell shows
+    Settings and the other admin surfaces to every is_admin profile, the
+    video gate and the newer music endpoints check the same flag; this
+    gate used to be profile 1 only, so a second admin got the page and a
+    403 behind it.
+    """
+    from flask import g
+
+    pid = get_current_profile_id()
+    if pid == 1:
+        return True
+    try:
+        cached = getattr(g, 'is_admin', None)
+    except RuntimeError:
+        cached = None
+    if cached is not None:
+        return bool(cached)
+    is_admin = False
+    try:
+        from database.music_database import get_database
+        profile = get_database().get_profile(pid)
+        is_admin = bool((profile or {}).get('is_admin', False))
+    except Exception:  # noqa: BLE001 - an unreadable profile is not an admin
+        is_admin = False
+    try:
+        g.is_admin = is_admin
+    except RuntimeError:
+        pass
+    return is_admin
+
+
 def admin_only(view_fn):
-    """Restrict a Flask view to the admin profile (profile_id == 1).
+    """Restrict a Flask view to admin profiles (see is_admin_request).
 
     Settings-class endpoints expose / mutate service tokens, OAuth secrets and
     API keys; non-admin profiles must not see them. NOTE on the auth model:
@@ -85,7 +123,7 @@ def admin_only(view_fn):
 
     @functools.wraps(view_fn)
     def wrapper(*args, **kwargs):
-        if get_current_profile_id() != 1:
+        if not is_admin_request():
             return jsonify({
                 "success": False,
                 "error": "Admin access required",

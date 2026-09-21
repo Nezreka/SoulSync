@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.lastfm_client import LastFMClient
+from core.listening_import.dedup import insert_import_events
 from utils.logging_config import get_logger
 
 logger = get_logger("lastfm_import")
@@ -379,69 +380,7 @@ class LastFMListeningImportWorker:
             conn.close()
 
     def _insert_events_deduped(self, events: Iterable[Dict[str, Any]]) -> int:
-        clean = [ev for ev in events if ev.get("title") and ev.get("played_at")]
-        if not clean:
-            return 0
-        conn = self.db._get_connection()
-        try:
-            cursor = conn.cursor()
-            duplicates = self._probable_duplicate_keys(cursor, clean)
-            inserted = 0
-            for ev in clean:
-                if _event_key(ev) in duplicates:
-                    continue
-                cursor.execute(
-                    """
-                    INSERT OR IGNORE INTO listening_history
-                        (track_id, title, artist, album, played_at, duration_ms, server_source, db_track_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        ev.get("track_id"),
-                        ev.get("title", ""),
-                        ev.get("artist", ""),
-                        ev.get("album", ""),
-                        ev.get("played_at"),
-                        ev.get("duration_ms", 0),
-                        SOURCE,
-                        ev.get("db_track_id"),
-                    ),
-                )
-                inserted += 1 if cursor.rowcount > 0 else 0
-            conn.commit()
-            return inserted
-        finally:
-            conn.close()
-
-    @staticmethod
-    def _probable_duplicate_keys(cursor, events: List[Dict[str, Any]]) -> set[tuple[str, str, int]]:
-        windows = [(_event_key(ev), _played_at_ts(ev.get("played_at"))) for ev in events]
-        windows = [(key, ts) for key, ts in windows if ts > 0]
-        if not windows:
-            return set()
-        min_ts = min(ts for _key, ts in windows) - 120
-        max_ts = max(ts for _key, ts in windows) + 120
-        cursor.execute(
-            """
-            SELECT LOWER(title), LOWER(COALESCE(artist, '')), strftime('%s', played_at)
-            FROM listening_history
-            WHERE played_at >= datetime(?, 'unixepoch')
-              AND played_at <= datetime(?, 'unixepoch')
-            """,
-            (min_ts, max_ts),
-        )
-        existing = []
-        for title_l, artist_l, played_ts in cursor.fetchall():
-            try:
-                existing.append((title_l or "", artist_l or "", int(played_ts)))
-            except (TypeError, ValueError):
-                continue
-        duplicates = set()
-        for key, ts in windows:
-            title_l, artist_l, _ = key
-            if any(title_l == ex_title and artist_l == ex_artist and abs(ex_ts - ts) <= 120 for ex_title, ex_artist, ex_ts in existing):
-                duplicates.add(key)
-        return duplicates
+        return insert_import_events(self.db, events, SOURCE)
 
     def _load_state(self) -> Dict[str, Any]:
         try:
@@ -486,14 +425,6 @@ def normalize_lastfm_scrobble(track: Dict[str, Any]) -> Optional[Dict[str, Any]]
         "server_source": SOURCE,
         "db_track_id": None,
     }
-
-
-def _event_key(ev: Dict[str, Any]) -> tuple[str, str, int]:
-    return (
-        (ev.get("title") or "").strip().lower(),
-        (ev.get("artist") or "").strip().lower(),
-        _played_at_ts(ev.get("played_at")),
-    )
 
 
 def _text(value: Any) -> str:

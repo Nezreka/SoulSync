@@ -974,6 +974,10 @@ function initializeWebSocket() {
         window.dispatchEvent(new CustomEvent('ss:lastfm-import-progress', { detail: data }));
         if (typeof updateLastfmListeningImportTask === 'function') updateLastfmListeningImportTask(data);
     });
+    socket.on('listenbrainz:import-progress', (data) => {
+        window.dispatchEvent(new CustomEvent('ss:listenbrainz-import-progress', { detail: data }));
+        if (typeof updateListenbrainzListeningImportTask === 'function') updateListenbrainzListeningImportTask(data);
+    });
     // Phase 6: Automation progress
     socket.on('automation:progress', (data) => {
         qaSignal('auto');

@@ -287,6 +287,13 @@ ACTIONS: list[dict] = [
          {"key": "username", "type": "text", "label": "Username", "placeholder": "Blank = authorized Last.fm user"},
          {"key": "full", "type": "checkbox", "label": "Force full backfill", "default": False},
      ]},
+    {"type": "import_listenbrainz_listening", "label": "Import ListenBrainz Listening", "icon": "activity",
+     "description": "Pull ListenBrainz / Maloja listens into SoulSync listening history so Stats and discovery stay current.",
+     "available": True,
+     "config_fields": [
+         {"key": "username", "type": "text", "label": "Username", "placeholder": "Blank = authorized user or token user"},
+         {"key": "full", "type": "checkbox", "label": "Force full backfill", "default": False},
+     ]},
     {"type": "notify_only", "label": "Notify Only", "icon": "bell", "scope": "both", "description": "No action — just send notification", "available": True},
     # Phase 3 actions
     {"type": "start_database_update", "label": "Update Database", "icon": "database",
@@ -298,6 +305,17 @@ ACTIONS: list[dict] = [
      "description": "Scan for and remove duplicate files", "available": True},
     {"type": "clear_quarantine", "label": "Clear Quarantine", "icon": "trash",
      "description": "Delete all quarantined files", "available": True},
+    {"type": "library_cleanup", "label": "Clear Quarantine + Empty Recycle Bin", "icon": "trash",
+     "description": "One sweep for both bins: delete the download quarantine, then empty the recycle bin "
+                    "(files deleted by the duplicate cleaner and repair tools). The recycle bin honours the keep "
+                    "window set on the Downloads page's Recycle Bin tab; with the window on 'keep forever' it "
+                    "empties the whole bin. Either half can be switched off. The seeded 'Weekly Cleanup' "
+                    "automation runs this and ships switched off.",
+     "available": True,
+     "config_fields": [
+         {"key": "quarantine", "type": "checkbox", "label": "Clear the download quarantine", "default": True},
+         {"key": "recycle_bin", "type": "checkbox", "label": "Empty the recycle bin", "default": True},
+     ]},
     {"type": "cleanup_wishlist", "label": "Clean Up Wishlist", "icon": "filter",
      "description": "Remove duplicate/owned tracks from wishlist", "available": True},
     {"type": "update_discovery_pool", "label": "Update Discovery", "icon": "compass",

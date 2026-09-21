@@ -96,6 +96,11 @@ export interface PhaseDisplay {
  */
 export function phaseDisplay(batch: AdlBatch): PhaseDisplay {
   const total = batch.total || 1;
+  const isAudiobook =
+    batch.playlist_id === 'audiobooks' ||
+    batch.batch_id === 'audiobooks' ||
+    (batch as any).batch_type === 'audiobook';
+  const unit = isAudiobook ? (total === 1 ? 'book' : 'books') : 'tracks';
   switch (batch.phase) {
     case 'queued':
       return { text: 'Queued', icon: 'hourglass' };
@@ -105,12 +110,12 @@ export function phaseDisplay(batch: AdlBatch): PhaseDisplay {
       return { text: bundleProgressText(batch.album_bundle), icon: 'spinner' };
     case 'downloading':
       return {
-        text: `${batch.completed}/${total} tracks`,
+        text: `${batch.completed}/${total} ${unit}`,
         // No spinner when nothing is actually in flight.
         icon: batch.active > 0 ? 'spinner' : null,
       };
     case 'complete':
-      return { text: `Done — ${batch.completed} tracks`, icon: 'check' };
+      return { text: `Done — ${batch.completed} ${unit}`, icon: 'check' };
     case 'cancelled':
       return { text: 'Cancelled', icon: null };
     case 'error':

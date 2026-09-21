@@ -51,6 +51,14 @@ services:
 
       # - ./Transfer:/app/Transfer
 
+      # ─── Per-profile libraries (OUTPUT) — optional ──────────────────────────
+      # A profile the admin switches to "Own library" (Manage Profiles) downloads
+      # into its own folder and syncs against its own Plex/Jellyfin library. Each
+      # such folder needs a mount under /app/libraries/<name>; that is the path to
+      # enter on the profile card, and the path to point the second Plex/Jellyfin
+      # music library at (on the host side, left of the colon).
+      # - ./libraries/thomas:/app/libraries/thomas
+
       # ─── Podcast library (OUTPUT) — optional: uncomment + set your path ───
       # Downloaded podcast episodes are saved here. UNCOMMENT the line below, point
       # the host side (left of the colon) at your podcasts folder, then set

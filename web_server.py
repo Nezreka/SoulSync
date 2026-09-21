@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.3"
+_SOULSYNC_BASE_VERSION = "3.4.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -425,19 +425,16 @@ def _initial_appearance_context():
 
 @app.context_processor
 def _inject_static_cache_bust():
-    static_v = _STATIC_CACHE_BUST
-    if DEV_STATIC_NO_CACHE:
-        try:
-            static_dir = Path(app.static_folder)
-            mtimes = [
-                p.stat().st_mtime_ns
-                for p in static_dir.rglob('*')
-                if p.is_file() and p.suffix.lower() in {'.css', '.js'}
-            ]
-            if mtimes:
-                static_v = str(max(mtimes))
-        except Exception:
-            static_v = _STATIC_CACHE_BUST
+    try:
+        static_dir = Path(app.static_folder)
+        mtimes = [
+            p.stat().st_mtime_ns
+            for p in static_dir.rglob('*')
+            if p.is_file() and p.suffix.lower() in {'.css', '.js'}
+        ]
+        static_v = str(max(mtimes)) if mtimes else _STATIC_CACHE_BUST
+    except Exception:
+        static_v = _STATIC_CACHE_BUST
     return {'static_v': static_v, **_initial_appearance_context()}
 
 
@@ -1449,6 +1446,7 @@ def _register_automation_handlers():
         record_progress_history=_auto_progress.record_history,
         build_personalized_manager=_build_personalized_manager,
         lastfm_import_worker=lastfm_import_worker,
+        listenbrainz_import_worker=listenbrainz_import_worker,
     )
     _register_extracted_handlers(_automation_deps)
 
@@ -1857,6 +1855,47 @@ def validate_and_heal_batch_states():
                             f"{batch_id} — forcing a completion check")
                     if _new_orphans or stuck_post_processing:
                         batches_needing_completion_check.append(batch_id)
+
+                    # STUCK-NO-WORKERS EMERGENCY HEAL (#1277): If all tasks have
+                    # been dispatched (queue_index >= len(queue)), no workers are
+                    # active, and no completion_time has been recorded for >10
+                    # minutes, the batch is permanently stuck (most likely because
+                    # _publish_atomic_album failed and the early-return path never
+                    # set completion_time). Force it to 'error' so:
+                    #   1. The 5-minute auto-cleanup at the top of this loop fires.
+                    #   2. The wishlist concurrency guard stops treating it as active.
+                    # This is a last-resort safety net; the primary fix is in
+                    # lifecycle.py (_ATOMIC_PUBLISH_MAX_ATTEMPTS).
+                    _all_dispatched = batch_data.get('queue_index', 0) >= len(queue)
+                    _no_workers = actually_active == 0
+                    if _all_dispatched and _no_workers and not batch_data.get('completion_time'):
+                        _first_seen = batch_data.get('_heal_stuck_detected_at')
+                        if _first_seen is None:
+                            import time as _time
+                            batch_data['_heal_stuck_detected_at'] = _time.time()
+                            logger.warning(
+                                "[Batch Healing] Batch %s: all tasks dispatched, no workers, "
+                                "no completion_time — possibly stuck. Will force-error if still "
+                                "stuck in 600s.", batch_id)
+                        else:
+                            import time as _time
+                            if _time.time() - _first_seen > 600:  # 10 minutes
+                                logger.error(
+                                    "[Batch Healing] Batch %s has been stuck in 'downloading' "
+                                    "with no workers for >600s and no completion_time — "
+                                    "forcing 'error' to unblock wishlist (#1277).", batch_id)
+                                batch_data['phase'] = 'error'
+                                batch_data['completion_time'] = _time.time()
+                                try:
+                                    from core.downloads.history import record_sync_history_completion
+                                    from database.music_database import MusicDatabase
+                                    record_sync_history_completion(MusicDatabase(), batch_id, batch_data)
+                                except Exception as _hist_err:
+                                    logger.warning(
+                                        "[Batch Healing] Could not write sync history for "
+                                        "stuck batch %s: %s", batch_id, _hist_err)
+                    else:
+                        batch_data.pop('_heal_stuck_detected_at', None)
 
             # Cleanup stale batches inside the lock (safe - just dict mutations)
             for batch_id in batches_to_cleanup:
@@ -4504,11 +4543,23 @@ def get_jellyfin_music_libraries():
                     current_library = lib['title']
                     break
 
+        # the jellyfin users a profile can sync as. personal settings has
+        # had a user dropdown keyed on this field since it was built, and
+        # nothing ever sent it, so the dropdown never appeared (#1265).
+        users = []
+        try:
+            users = [{'id': u.get('id'), 'name': u.get('name')}
+                     for u in (media_server_engine.client('jellyfin').get_available_users() or [])
+                     if u.get('id')]
+        except Exception as users_err:
+            logger.debug(f"Jellyfin users list failed: {users_err}")
+
         return jsonify({
             "success": True,
             "libraries": libraries,
             "selected": selected_library,
-            "current": current_library
+            "current": current_library,
+            "users": users,
         })
     except Exception as e:
         logger.error(f"Error getting Jellyfin music libraries: {e}")
@@ -16047,6 +16098,14 @@ def cancel_batch(batch_id):
                         task['status'] = 'cancelled'
                         cancelled_count += 1
 
+            # close the sync history row with what finished before the cancel.
+            # nothing else ever will: a cancelled batch never reaches a
+            # completion check, and the row read "In progress" for good
+            try:
+                _record_sync_history_completion(batch_id, download_batches[batch_id])
+            except Exception as hist_err:
+                logger.warning(f"[Cancel Batch] Could not close sync history for {batch_id}: {hist_err}")
+
             # Add activity for batch cancellation
             playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')
             add_activity_item("", "Batch Cancelled", f"'{playlist_name}' - {cancelled_count} downloads cancelled", "Now")
@@ -20443,6 +20502,28 @@ except Exception as e:
     logger.error(f"Last.fm listening import worker initialization failed: {e}")
     lastfm_import_worker = None
 
+listenbrainz_import_worker = None
+try:
+    from core.listening_import.listenbrainz import ListenBrainzListeningImportWorker
+
+    def _emit_listenbrainz_import_progress(state):
+        try:
+            socketio.emit('listenbrainz:import-progress', state or {})
+        except Exception as e:
+            logger.debug("listenbrainz import progress emit failed: %s", e)
+
+    listenbrainz_import_db = MusicDatabase()
+    listenbrainz_import_worker = ListenBrainzListeningImportWorker(
+        database=listenbrainz_import_db,
+        config_manager=config_manager,
+        cache_builder=(listening_stats_worker._build_stats_cache if listening_stats_worker else None),
+        progress_callback=_emit_listenbrainz_import_progress,
+    )
+    logger.info("ListenBrainz listening import worker initialized")
+except Exception as e:
+    logger.error(f"ListenBrainz listening import worker initialization failed: {e}")
+    listenbrainz_import_worker = None
+
 # --- Stats API Endpoints ---
 # Lifted to api/stats.py (wired near the other internal blueprints below).
 # ===================================================================
@@ -21367,7 +21448,8 @@ _configure_stats_api(get_database=get_database, config_manager=config_manager,
                      fix_artist_image_url=fix_artist_image_url,
                      _automation_engine=lambda: automation_engine,
                      listening_stats_worker_getter=lambda: listening_stats_worker,
-                     lastfm_import_worker_getter=lambda: lastfm_import_worker)
+                     lastfm_import_worker_getter=lambda: lastfm_import_worker,
+                     listenbrainz_import_worker_getter=lambda: listenbrainz_import_worker)
 app.register_blueprint(_create_stats_blueprint())
 
 # Quality profiles / auto-import watcher / metadata-cache browser - three

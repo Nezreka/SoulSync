@@ -6,7 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from utils.logging_config import get_logger
 
@@ -160,6 +160,65 @@ def config_root_path(path_str: Any, default: str = "") -> str:
     return docker_resolve_path(raw)
 
 
+# ── the library root a download lands in (#1199) ─────────────────────────────
+#
+# a profile with a library of its own has its own output folder. a download
+# knows its profile through the batch that made it (every batch carries
+# profile_id) or an explicit stamp on its context (imports from the page);
+# everything else, and every profile on the shared library, lands in the
+# configured transfer folder exactly as before.
+
+def import_profile_id(context) -> Optional[int]:
+    """the profile a download/import is for, or None when it has none."""
+    if not isinstance(context, dict):
+        return None
+    pid = context.get("profile_id")
+    if pid:
+        try:
+            return int(pid)
+        except (TypeError, ValueError):
+            pass
+    batch_id = context.get("batch_id")
+    if batch_id:
+        try:
+            from core.runtime_state import download_batches
+            batch = download_batches.get(batch_id) or {}
+            pid = batch.get("profile_id")
+            return int(pid) if pid else None
+        except Exception:  # noqa: BLE001 - runtime state not importable in a bare tool
+            return None
+    return None
+
+
+def library_root_for_profile(profile_id) -> Optional[str]:
+    """the own-library output folder of a profile (docker-resolved), or None
+    when the profile is on the shared library."""
+    if not profile_id:
+        return None
+    from core.library_scope import own_library_supported
+    if not own_library_supported():
+        return None
+    try:
+        from database.music_database import get_database
+        lib = get_database().get_profile_library(int(profile_id))
+    except Exception as exc:  # noqa: BLE001 - no db, no own library
+        logger.debug("own library lookup failed for profile %s: %s", profile_id, exc)
+        return None
+    if lib.get("mode") != "own" or not lib.get("root"):
+        return None
+    return config_root_path(lib["root"])
+
+
+def shared_transfer_root() -> str:
+    return config_root_path(_get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer")
+
+
+def transfer_root_for_context(context) -> str:
+    """where this download/import's files go: the profile's own folder when
+    it has one, the configured transfer folder otherwise."""
+    return library_root_for_profile(import_profile_id(context)) or shared_transfer_root()
+
+
 def build_simple_download_destination(context, file_path: str):
     """Build the destination path for a simple download into Transfer."""
     context = normalize_import_context(context)
@@ -167,8 +226,7 @@ def build_simple_download_destination(context, file_path: str):
     if not isinstance(search_result, dict):
         search_result = {}
 
-    transfer_dir = Path(config_root_path(
-        _get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer"))
+    transfer_dir = Path(transfer_root_for_context(context))
     album_name = None
     original_filename = search_result.get("filename", "")
     if "/" in original_filename or "\\" in original_filename:
@@ -683,9 +741,8 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         if create_dirs:
             _real_makedirs(path, exist_ok=True)
 
-    transfer_dir = config_root_path(
-        _get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer")
     context = normalize_import_context(context)
+    transfer_dir = transfer_root_for_context(context)
     track_info = get_import_track_info(context)
     original_search = get_import_original_search(context)
     album_context = get_import_context_album(context)
@@ -698,7 +755,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             source_info = json.loads(source_info)
         except (json.JSONDecodeError, TypeError):
             source_info = {}
-    if source_info.get("enhance") and source_info.get("original_file_path"):
+    if not isinstance(source_info, dict):
+        source_info = {}
+    replace_original = source_info.get("enhance") or source_info.get("job") == "quality_upgrade"
+    if replace_original and source_info.get("original_file_path"):
         original_file = _reachable_original_file(source_info["original_file_path"])
         if original_file:
             # Folder AND stem from the resolved file, swapping only the
@@ -726,7 +786,35 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
 
     raw_album_type = ""
     if album_context:
-        raw_album_type = album_context.get("album_type", "") or ""
+        raw_album_type = (
+            album_context.get("album_type", "")
+            or album_context.get("record_type", "")
+            or ""
+        )
+    if not raw_album_type and isinstance(album_info, dict):
+        raw_album_type = (
+            album_info.get("album_type", "")
+            or album_info.get("record_type", "")
+            or ""
+        )
+    if not raw_album_type and isinstance(context, dict):
+        raw_album_type = (
+            context.get("album_type", "")
+            or context.get("record_type", "")
+            or ""
+        )
+    raw_album_type = str(raw_album_type or "").strip().lower()
+    if raw_album_type in ("compile", "compilations"):
+        raw_album_type = "compilation"
+
+    is_explicit_comp = (
+        (album_context and bool(album_context.get("is_compilation")))
+        or (isinstance(album_info, dict) and bool(album_info.get("is_compilation")))
+        or (isinstance(context, dict) and bool(context.get("is_compilation")))
+    )
+    if is_explicit_comp:
+        raw_album_type = "compilation"
+
     total_tracks = (album_context.get("total_tracks", 0) or 0) if album_context else 0
     album_type_display = get_album_type_display(raw_album_type, total_tracks)
 
@@ -785,6 +873,24 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 _artist_name and _artist_name != "Unknown Artist":
             _album_artist_name = _artist_name
 
+        # Check if the release or album artist indicates a compilation
+        if (not raw_album_type or raw_album_type == "album") and (
+            str(_album_artist_name or "").strip().lower() in ("various artists", "various", "va", "v.a.")
+            or str(artist_name or "").strip().lower() in ("various artists", "various", "va", "v.a.")
+        ):
+            raw_album_type = "compilation"
+            album_type_display = "Compilation"
+
+        # On compilations (or when album artist differs), ensure $artist reflects the track artist
+        if (raw_album_type in ("compilation", "compile", "compilations") or is_explicit_comp):
+            if _artists:
+                _first_ta = _artists[0]
+                _track_artist_cand = _first_ta.get("name") if isinstance(_first_ta, dict) else str(_first_ta)
+                if _track_artist_cand:
+                    _artist_name = _track_artist_cand
+            elif track_info.get("artist"):
+                _artist_name = track_info["artist"]
+
         template_context = {
             "artist": _artist_name,
             "albumartist": _album_artist_name,
@@ -839,7 +945,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # so $cdnum can decide between "CDxx" and an empty string.
         template_context["total_discs"] = total_discs
 
-        _template_key = "compilation_path" if raw_album_type in ("compilation", "compile") else "album_path"
+        _template_key = "compilation_path" if raw_album_type in ("compilation", "compile", "compilations") else "album_path"
 
         album_template = _get_config_manager().get("file_organization.templates", {}).get(_template_key, "") or ""
         # Suppress the auto-injected disc folder when the user already
@@ -878,7 +984,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         reuse_folder = None
         _multi_disc_album = total_discs > 1 or disc_number > 1
         if (filename_base and not _multi_disc_album
-                and raw_album_type not in ("compilation", "compile")
+                and raw_album_type not in ("compilation", "compile", "compilations")
                 and not context.get("_no_album_folder_reuse")):
             try:
                 from core.library.existing_album_folder import resolve_existing_album_folder

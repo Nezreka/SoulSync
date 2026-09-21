@@ -107,7 +107,17 @@ describe('deezerProgressLabel (#TheHomeGuy — "it just sits there saying Loadin
   });
 
   it('turns a frame into something a person can read', () => {
-    expect(deezerProgressLabel(frame(), '15653026843')).toBe('track numbers 340/877 (39%)');
+    expect(deezerProgressLabel(frame(), '15653026843')).toBe(
+      'track numbers 340/877 albums (39%), pass 2 of 2',
+    );
+  });
+
+  it('says the counter is albums, and which of the two passes this is', () => {
+    // nanomite: "only counting up to 1291 tracks... goes up, goes down a bit"
+    // on a 1582-track playlist. 1291 was the album count, twice over.
+    expect(
+      deezerProgressLabel(frame({ phase: 'release dates', done: 0, total: 1291 }), '15653026843'),
+    ).toBe('release dates 0/1291 albums (0%), pass 1 of 2');
   });
 
   it('ignores frames for a different playlist', () => {
@@ -117,7 +127,7 @@ describe('deezerProgressLabel (#TheHomeGuy — "it just sits there saying Loadin
   it('matches the id loosely, since one side arrives as a number', () => {
     expect(
       deezerProgressLabel(frame({ playlist_id: 15653026843 as unknown as string }), '15653026843'),
-    ).toBe('track numbers 340/877 (39%)');
+    ).toBe('track numbers 340/877 albums (39%), pass 2 of 2');
   });
 
   it('says nothing when there is no total to divide by', () => {

@@ -97,6 +97,7 @@ def _seed_schema(db):
             id INTEGER PRIMARY KEY,
             name TEXT,
             server_source TEXT,
+            owner_profile_id INTEGER DEFAULT NULL,
             genres TEXT,
             musicbrainz_id TEXT,
             spotify_artist_id TEXT,

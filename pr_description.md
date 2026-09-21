@@ -1,81 +1,47 @@
-# SoulSync 3.4.2: `dev` → `main`
+# soulsync 3.4.4: `dev` → `main`
 
-This release rebuilds chat around shareable music cards, upgrades search, tightens playlist discovery and sync correctness, and fixes reported Jellyfin, Navidrome and torrent client problems. Scope: commits since the `3.4.1` tag.
+separate music libraries and server accounts per profile, safer deep scans, and fixes for sync reporting, downloads, automations and chat. scope: the 23 commits since the 3.4.3 release commit (`7bc2650d3`).
 
-## Chat
+## pending fix: mp3 quality upgrades (#1270)
 
-- Now Playing cards (`/np`) with artwork, bitrate, a live equalizer and direct actions: preview, download the missing tracks, open the artist page, search. Wanted / In Search Of cards (`/want`, `/iso`) search Spotify, Deezer, Apple Music, Discogs and MusicBrainz for the release, check the local library automatically and offer a one-click PM to whoever has it. Both cards keep their full metadata and artwork, resolve the album tracklist for wishlist and download, and are SoulSync-only in room mode so vanilla Soulseek clients see plain text.
-- Links stand out with inline players for audio and video, YouTube embeds (the Error 153 referrer case is fixed) and unfurled preview cards for web links.
-- Friends, block list and peer bookmarks in a slide-over Social & Lists drawer, DM conversations can be closed, and the peer file explorer is a collapsible folder tree with one-click downloads.
-- Smart format detection with filter pills, drag-and-drop file uploads onto the chat, an expanded slash command autocomplete, a verified developer badge, and a cleaner composer row. Plain-mode chat no longer sends typing noise or empty beacons.
+- the finder could flag an mp3 below the selected bitrate, but import compared only extensions and discarded the better mp3 as redundant. finder-approved wishlist items now authorize a measured improvement under their assigned quality profile, without enabling force replacement for other wishlist items.
+- original filenames are reused, mp3-only targets do not accept flac replacements, and unreadable or non-improving files cannot overwrite the library. integrity and length checks remain in place; a different-format original is retired only after successful publication.
+- reproduced the failure before fixing it; the focused import, quality, wishlist and finder run passed 1,672 tests with 8 skips. final full-suite validation is pending.
 
-## Search and discovery
+## a library of your own
 
-- Search has an explore hub on the idle page, a hero result, a sticky jump bar with counts, hover play on album and playlist cards, shimmer skeletons and a clearable search history.
-- Deezer playlist search, with cover art in the playlist preview and track actions from the preview modal. Deezer requests now retry and rate-limit themselves.
-- Discovery scoring penalizes duration mismatches and rejects tribute, karaoke and preview false positives. Manual matches and provider metadata survive a mirrored playlist re-discovery, cancelling a sync actually stops the background work, unmatch works on every source, and resetting a mirrored playlist clears both discovery caches.
+- each profile can use its own music folder and server library (#1199), with its downloads, scans, ownership checks, watchlist and playlist folders scoped to that library. the admin stays on the shared library; another person's copy does not count as yours.
+- the folder is prefilled, checked when saved, and rejected if it overlaps the shared library or another profile's folder. docker compose includes a default mount path for personal libraries.
+- scans and download workers carry the owning profile through background work. jellyfin artists shared across server libraries keep their albums in the right library, and ownership filtering keeps indexed searches fast.
 
-## Sync and library
+## your playlists on your server account
 
-- Mirrored playlists have a select mode with batch delete. Pick the cards, or search a name and Select all visible, and delete them in one confirm (#1219).
-- A sync that finds no library matches no longer empties the existing server playlist; the missing tracks still go to the wishlist. Artist agreement is enforced in the second matching pass so a long shared title cannot override an artist mismatch.
-- Library ownership checks fold accents, punctuation and multi-artist strings, so a label or search release is recognized as owned when the tags differ only in form. The completeness cache is correct across artists and keeps full artist identities.
-- Discography completion skips upstream API calls for releases you do not own, and release cards on the artist page are clickable again.
-- The MusicBrainz release you picked is kept through import and album completion, the same release MBID is written to every track of an album across restarts, and tagging writes Picard's native frames with multi-value fields preserved.
-- Stale Navidrome track IDs are no longer reused when updating playlists, failed updates are not reported as successful, and confirmed duplicate library entries are cleaned up (#1248).
+- choose a plex home user or a personal navidrome login for your profile so synced playlists land on your account. jellyfin uses a profile-specific client view instead of changing the shared client's user.
+- two profiles syncing at once keep their own identity. personal settings shows the active server's account controls, the jellyfin user picker loads correctly, and user-library lookups run in parallel and cache their results.
+- a failed jellyfin connection can be retried instead of being remembered permanently. a second admin gets the same music-side admin access as the first.
 
-## Downloads
+## deep scans keep records when the server fails
 
-- Optional music size limit per minute of audio, as a pre-download candidate filter. Unknown sizes and durations stay eligible.
-- qBittorrent 5.0+ returns JSON from the add call; it is parsed, with 4.x still supported. Transmission URLs copied from the web UI normalize to the RPC endpoint.
+- a timeout used to look like an empty artist or album, leaving its tracks eligible for deletion. unverified listings now preserve the affected rows and report the failure; cancelling a scan skips stale-row removal.
+- jellyfin artist and album listings now page beyond their old 200-album and 100-track limits. incomplete bulk listings fall back to individual fetches. genuinely removed items are still cleaned up.
 
-## Video
+## sync and download reporting
 
-- Jellyfin 12 rejected every video-side request with 401 while the same key worked for music. The 3.4.0 fix for the modern Authorization header only reached the music client; the video connection test, user picker, library refresh, poster and collection calls and server activity now send the same header pair (#1250).
-- Watchlist is responsive on mobile with a bottom sheet drawer.
+- when several source entries match the same library file, sync reports what was folded together, names the entries in the log, and includes the folded count in the finished card. the review data retains the library artist and album, and deezer's album-loading progress explains its two passes.
+- cancelling the last track, cancelling a whole batch, and batch healing now close sync history instead of leaving it in progress forever. slow tag, playlist-folder and repair work runs outside the task lock so status updates and other batches can continue.
 
-## Fixes
+## automations and cleanup
 
-Matching and discovery
+- weekly cleanup can clear the download quarantine and recycle bin. it ships disabled, with separate controls for each part. the recycle bin follows its retention window; enabling cleanup with keep forever selected empties it.
+- interval automations that missed a scheduled run catch up soon after restart. the last.fm listens notification closes when its work finishes.
 
-- Band names containing commas, slashes, ampersands or "and" (Earth, Wind & Fire; AC/DC) are no longer split into separate artists during matching. Separate credits arrive as artist list entries, and only explicit featured-artist credits are split when there is no artist ID.
-- Duration mismatches are penalized, and tribute, karaoke and preview copies are rejected as false positives.
-- A release with an unknown track count uses release ownership instead of being assumed to be a one-track single.
-- Cancelling a sync now signals the sync service and keeps the worker handle until it has actually exited, so a new sync cannot start on top of a worker that is still running. A cancel that cannot identify its playlist returns an error instead of pretending.
-- Manual matches and provider metadata survive a mirrored playlist re-discovery. Rediscover from the modal runs immediately without crashing or closing the modal, and a reset clears both the SQLite discovery cache and the match cache.
-- Unmatch works on every source endpoint and match counts stay in step.
-- Playlist preview rows can be played without the selection controls being on.
+## chat
 
-Sync and library
+- messages sent from #bugs stay in #bugs, and multiline plain-text messages reach the selected room.
+- dismissed closed polls stay dismissed after refresh.
 
-- A sync that finds no library matches keeps the existing server playlist and still wishlists the missing tracks, instead of emptying the playlist (zero-match wishlisting).
-- Artist agreement is enforced in the second matching pass, so a long shared title cannot override an artist mismatch from the first pass.
-- Library ownership checks match SQLite's LOWER exactly, fold accents and punctuation, index albums under both the full credit and the primary artist, and try the full credit before a featured-artist fallback.
-- The completeness cache is keyed correctly across artists and no longer collapses full artist identities.
-- Discography completion skips upstream API calls for releases you do not own, and release cards open immediately while ownership checking is still running in the background.
-- A release-group is no longer treated as an edition, and an explicit edition never assigns a different song by track position alone.
-- The MusicBrainz release MBID resolved for an album is persisted, so every track of that album gets the same MUSICBRAINZ_ALBUMID even across restarts and cache eviction.
+## validation
 
-Navidrome (#1248)
-
-- Stale Navidrome track IDs were being reused when updating playlists. IDs are validated against a fresh, complete OpenSubsonic inventory (never partial; keeps paging when the server caps page size), same-path rekeys are repaired with foreign-key references preserved, and a selected folder cannot make other live IDs look obsolete.
-- A refused or failed Navidrome write is reported as a failure and never triggers a second destructive attempt.
-- Cover art keeps its identity instead of a newly salted auth URL on every serialization, so artwork stops churning.
-
-Chat
-
-- The Download Missing Tracks modal opened from a card showed Unknown Artist and zero durations; artists, duration and cover art are now populated, with an enhanced-search fallback when the card lacks them.
-- Wanted cards keep their full metadata and artwork, and resolve the full album tracklist before wishlist or download. Wishlisting from a card uses the standard Add to Wishlist modal.
-- Rich cards are never sent as plain text; in room mode they are SoulSync-only so vanilla Soulseek clients see readable text.
-- The /want drawer animates properly, Now Playing cards probe for missing artwork before sending, and YouTube embeds no longer fail with Error 153.
-- Plain-mode chat no longer sends typing noise or empty beacons, while avatar caching is preserved.
-
-Downloads and clients
-
-- qBittorrent 5.0+ returns a JSON body from the add call, which was being ignored; it is parsed now, with 4.x still supported and tested.
-- Transmission URLs copied from the web UI (/transmission/web, /web, bare host) normalize to the RPC endpoint.
-- Deezer requests retry on transient failures and rate-limit themselves during playlist searches.
-
-Video
-
-- Jellyfin 12: every video-side request was rejected with 401 while the same key worked on the music tab (#1250).
+- fixed the nine CI failures caused by outdated ownership-schema fixtures and a source-lookup fake missing its scope method.
+- all 51 tests in the four affected modules and the own-library profile suite passed. the supplied full-suite run had 19,086 passes and those nine failures; a new full-suite green run has not been verified.
+- release checks: 162 helper, script-loading and web-asset tests passed; helper.js passed node syntax checking; the discord draft is 1,519 characters.

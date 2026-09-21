@@ -274,10 +274,12 @@
         return pins;
     }
 
-    // poll.start {q, o1..o4} / poll.vote {o: '1'..'4'} / poll.end {} →
-    // ONE active poll per room, latest start wins and resets votes; only
-    // the starter's poll.end closes it. Votes ride tallyVotes (latest per
-    // user), restricted to the poll's real option indices.
+    // poll.start {q, o1..o8, dur, sv} / poll.vote {o: '1'..'8'} / poll.end {} →
+    // ONE active poll per room, latest start wins and resets votes; the
+    // starter OR a moderator can close it. dur = duration in seconds (timed
+    // close, max 86400); sv = show-voters flag (vote attribution visible).
+    // Votes ride tallyVotes (latest per user), restricted to the poll's
+    // real option indices.
     function reducePoll(events) {
         var poll = null;
         var votes = [];
@@ -286,26 +288,53 @@
             var p = ev.p;
             if (p.k === 'poll.start') {
                 var opts = [];
-                for (var i = 1; i <= 4; i++) {
+                for (var i = 1; i <= 8; i++) {
                     var o = p['o' + i];
                     if (typeof o === 'string' && o.trim()) opts.push(o.trim().slice(0, 80));
                 }
-                var qq = String(p.q || '').trim().slice(0, 160);
+                var qq = String(p.q || '').trim().slice(0, 200);
                 if (!qq || opts.length < 2) return;
+                var dur = (typeof p.dur === 'number' && isFinite(p.dur) && p.dur > 0)
+                    ? Math.min(Math.floor(p.dur), 86400) : 0;
+                var startTs = _streamTs(ev);
                 poll = { q: qq, options: opts, by: ev.username,
-                         at: ev.timestamp, closed: false };
+                         at: ev.timestamp, closed: false,
+                         dur: dur,
+                         endsAt: (dur && startTs) ? startTs + dur * 1000 : 0,
+                         sv: !!p.sv };
                 votes = [];
             } else if (p.k === 'poll.vote' && poll && !poll.closed) {
                 var idx = String(p.o || '');
-                if (/^[1-4]$/.test(idx) && parseInt(idx, 10) <= poll.options.length) {
-                    votes.push({ username: ev.username, option: idx });
+                if (/^[1-8]$/.test(idx) && parseInt(idx, 10) <= poll.options.length) {
+                    votes.push({ username: ev.username, option: idx,
+                                 timestamp: ev.timestamp });
                 }
-            } else if (p.k === 'poll.end' && poll && ev.username === poll.by) {
+            } else if (p.k === 'poll.end' && poll &&
+                       (ev.username === poll.by || isModerator(ev.username))) {
                 poll.closed = true;
             }
         });
         if (!poll) return null;
+        // Timed auto-close: if a duration was set and time has elapsed.
+        if (poll.endsAt && !poll.closed) {
+            var now = Date.now();
+            if (now >= poll.endsAt) poll.closed = true;
+        }
         poll.tally = tallyVotes(votes);
+        // Voter attribution: build a map of option index → [usernames]
+        // so the UI can show who voted for what when sv (show-voters) is on.
+        // Uses the deduplicated "latest vote per user" from tallyVotes' logic.
+        var byUser = {};
+        (votes || []).forEach(function (v) {
+            if (v && v.username && v.option) byUser[v.username] = v.option;
+        });
+        var voters = {};
+        Object.keys(byUser).forEach(function (u) {
+            var opt = byUser[u];
+            if (!voters[opt]) voters[opt] = [];
+            voters[opt].push(u);
+        });
+        poll.tally.voters = voters;
         return poll;
     }
 
@@ -567,6 +596,57 @@
         return state.queue[0];
     }
 
+    // ── Plain text file extraction (for non-SoulSync chats and DMs) ────
+    var _AUDIO_EXT = /\.(flac|mp3|m4a|ogg|opus|wav|aiff?)$/i;
+    var _VIDEO_EXT = /\.(mp4|mkv|webm|mov)$/i;
+    var _IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
+
+    function extractFileFromText(text) {
+        if (!text || typeof text !== 'string') return null;
+        var trimmed = text.trim();
+        var m = trimmed.match(/https?:\/\/(?:[a-z0-9-]+\.)?filepost\.dev\/[^\s]+/i);
+        if (!m) {
+            m = trimmed.match(/https?:\/\/[^\s]+?\.(?:flac|mp3|m4a|ogg|opus|wav|aiff?|mp4|mkv|webm|mov)(?:\?[^\s]*)?/i);
+        }
+        if (!m) return null;
+        var url = m[0];
+        var textLead = '';
+        var name = '';
+        var colonMatch = trimmed.match(/^([^:\n]+):\s*(https?:\/\/[^\s]+)$/);
+        if (colonMatch) {
+            var lead = colonMatch[1].trim();
+            if (/\.(flac|mp3|m4a|ogg|opus|wav|aiff?|mp4|mkv|webm|mov|jpe?g|png|gif|webp|zip|tar|gz|pdf|txt)$/i.test(lead)) {
+                name = lead;
+            } else {
+                textLead = lead;
+            }
+        } else if (trimmed !== url) {
+            textLead = trimmed.replace(url, '').replace(/^[:\s-]+|[:\s-]+$/g, '').trim();
+        }
+        if (!name) {
+            var cleanUrl = url.split('?')[0].split('#')[0];
+            var parts = cleanUrl.split('/');
+            var last = parts[parts.length - 1];
+            if (last && last.indexOf('.') !== -1) {
+                try { name = decodeURIComponent(last); } catch (e) { name = last; }
+            } else {
+                name = 'shared-file';
+            }
+        }
+        var mime = '';
+        if (_AUDIO_EXT.test(name)) {
+            var ext = name.split('.').pop().toLowerCase();
+            mime = 'audio/' + (ext === 'mp3' ? 'mpeg' : ext);
+        } else if (_VIDEO_EXT.test(name)) {
+            var vext = name.split('.').pop().toLowerCase();
+            mime = 'video/' + vext;
+        } else if (_IMAGE_EXT.test(name)) {
+            var iext = name.split('.').pop().toLowerCase();
+            mime = 'image/' + (iext === 'jpg' ? 'jpeg' : iext);
+        }
+        return { n: name, m: mime, url: url, textLead: textLead };
+    }
+
     window.ChatProtocol = {
         classifyUser: classifyUser,
         parseProtocol: parseProtocol,
@@ -587,5 +667,6 @@
         normalizeTriviaAnswer: normalizeTriviaAnswer,
         reduceTopic: reduceTopic,
         reduceTuned: reduceTuned,
+        extractFileFromText: extractFileFromText,
     };
 })();

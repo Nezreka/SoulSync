@@ -173,6 +173,7 @@ def resolve_library_file_path(
     download_folder: Optional[str] = None,
     config_manager: Any = None,
     plex_client: Any = None,
+    library_root: Optional[str] = None,
 ) -> Optional[str]:
     """Resolve a stored DB path to an actual file on disk.
 
@@ -182,6 +183,8 @@ def resolve_library_file_path(
         transfer_folder: Optional explicit transfer-folder override
             (bypasses the config_manager lookup). Useful when the caller
             already cached one.
+        library_root: When set, only resolve inside this library; never fall back
+            to the shared transfer folder or another configured music root.
         download_folder: Optional explicit download-folder override.
         config_manager: When provided, the resolver also pulls
             ``soulseek.transfer_path``, ``soulseek.download_path``, and
@@ -199,6 +202,7 @@ def resolve_library_file_path(
         download_folder=download_folder,
         config_manager=config_manager,
         plex_client=plex_client,
+        library_root=library_root,
     )
     return resolved
 
@@ -210,6 +214,7 @@ def resolve_library_file_path_with_diagnostic(
     download_folder: Optional[str] = None,
     config_manager: Any = None,
     plex_client: Any = None,
+    library_root: Optional[str] = None,
 ) -> Tuple[Optional[str], ResolveAttempt]:
     """Same as ``resolve_library_file_path`` but also returns a
     ``ResolveAttempt`` describing what the resolver tried.
@@ -230,12 +235,13 @@ def resolve_library_file_path_with_diagnostic(
     if not isinstance(file_path, str) or not file_path:
         return None, attempt
 
-    if os.path.exists(file_path):
+    if os.path.exists(file_path) and (not library_root or _inside_library_root(file_path, library_root)):
         attempt.raw_path_existed = True
         return file_path, attempt
 
     path_parts = file_path.replace("\\", "/").split("/")
-    base_dirs = _collect_base_dirs(transfer_folder, download_folder, config_manager, plex_client)
+    base_dirs = (_collect_base_dirs(library_root, None, None, None) if library_root else
+                 _collect_base_dirs(transfer_folder, download_folder, config_manager, plex_client))
     attempt.base_dirs_tried = list(base_dirs)
     if not base_dirs:
         return None, attempt
@@ -258,15 +264,26 @@ def resolve_library_file_path_with_diagnostic(
     for base in base_dirs:
         for i in range(0, len(path_parts)):
             candidate = os.path.join(base, *path_parts[i:])
-            if os.path.exists(candidate):
+            if os.path.exists(candidate) and (not library_root or _inside_library_root(candidate, library_root)):
                 return candidate, attempt
 
     sibling = _resolve_via_sibling_album_folder(path_parts, base_dirs)
-    if sibling:
+    if sibling and (not library_root or _inside_library_root(sibling, library_root)):
         return sibling, attempt
     # Filename wrong as well as the album folder — Navidrome synthesizes the
     # whole path from tags, so no exact segment is left to match on (#1127).
-    return _resolve_via_synthesized_filename(path_parts, base_dirs), attempt
+    resolved = _resolve_via_synthesized_filename(path_parts, base_dirs)
+    if library_root and resolved and not _inside_library_root(resolved, library_root):
+        resolved = None
+    return resolved, attempt
+
+
+def _inside_library_root(path, root):
+    try:
+        base = os.path.normcase(os.path.realpath(root))
+        return os.path.commonpath([base, os.path.normcase(os.path.realpath(path))]) == base
+    except (ValueError, OSError):
+        return False
 
 
 def _resolve_via_sibling_album_folder(

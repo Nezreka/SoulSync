@@ -283,11 +283,16 @@ export function syncHistoryProgress(state: unknown): SyncHistoryProgress {
   const failed = Number(raw.failed_tracks ?? 0) || 0;
   const total = Number(raw.total_tracks ?? 0) || 0;
   const synced = Number(raw.synced_tracks ?? 0) || 0;
+  // source entries that resolved to a library track already on the playlist.
+  // without this line "1581 matched, 1288 synced" reads as 293 tracks lost
+  const folded = Number(raw.duplicate_tracks ?? 0) || 0;
 
   if (status === 'finished') {
     return {
       percent: 100,
-      step: `Sync complete — ${matched}/${total} matched, ${synced} synced`,
+      step:
+        `Sync complete — ${matched}/${total} matched, ${synced} synced` +
+        (folded > 0 ? `, ${folded} already on the playlist under another entry` : ''),
       matched,
       failed,
       total,

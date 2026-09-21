@@ -145,6 +145,20 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
     # Claimed before the search so a second pass cannot pick up the same book.
     database.mark_wishlist_status(asin, STATUS_SEARCHING, profile_id=profile_id)
 
+    from core.audiobook_download_state import mark_status, promote_search_task, register_download
+
+    temp_task_id = f"ab:search:{asin}"
+    register_download(
+        task_id=temp_task_id,
+        title=str(row.get("title") or ""),
+        author=(row.get("authors") or [""])[0],
+        series=str(row.get("series_title") or ""),
+        artwork_url=str(row.get("cover_url") or ""),
+        protocol="Searching",
+        size_bytes=0,
+        status="searching",
+    )
+
     try:
         # The narrator choice is the listener's, made when they wished for the
         # book, and the automatic path must honour it exactly as the manual one
@@ -156,6 +170,7 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
         logger.warning("Audiobook wishlist search failed for %s: %s", asin, exc)
         database.mark_wishlist_status(asin, STATUS_FAILED, profile_id=profile_id,
                                       error=str(exc), count_attempt=True)
+        mark_status(temp_task_id, "failed", error=str(exc))
         outcome["error"] = str(exc)
         return outcome
 
@@ -165,6 +180,7 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
             asin, STATUS_FAILED, profile_id=profile_id,
             error="No releases found", count_attempt=True,
         )
+        mark_status(temp_task_id, "failed", error="No releases found")
         return outcome
 
     if not auto_grab:
@@ -172,6 +188,7 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
             asin, STATUS_FAILED, profile_id=profile_id,
             error="Found, not grabbed", count_attempt=True,
         )
+        mark_status(temp_task_id, "failed", error="Found, not grabbed")
         return outcome
 
     from core.audiobook_grab import grab_release
@@ -190,16 +207,15 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
             # An automatic grab belongs on the Downloads page just as much as a
             # manual one — a book appearing in the library with no card ever
             # having shown is indistinguishable from a bug.
-            from core.audiobook_download_state import register_download
-
-            register_download(
-                task_id=ref,
-                title=str(row.get("title") or ""),
-                author=(row.get("authors") or [""])[0],
-                series=str(row.get("series_title") or ""),
-                artwork_url=str(row.get("cover_url") or ""),
-                protocol=str(getattr(best, "protocol", "") or ""),
+            protocol_name = str(getattr(best, "protocol", "") or "")
+            peer_username = str(getattr(best, "indexer", "") or "") if protocol_name.lower() == "soulseek" else ""
+            promote_search_task(
+                temp_task_id=temp_task_id,
+                real_task_id=ref,
+                protocol=protocol_name,
                 size_bytes=int(getattr(best, "size_bytes", 0) or 0),
+                username=peer_username,
+                release_title=str(getattr(best, "title", "") or ""),
             )
             database.record_download(
                 download_id=ref,
@@ -226,6 +242,7 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
                 error="The client accepted the release but returned no handle",
                 count_attempt=True,
             )
+            mark_status(temp_task_id, "failed", error="The client accepted the release but returned no handle")
             logger.warning(
                 "Audiobook grab for %s reported success with no ref; not marking it grabbed",
                 asin,
@@ -239,15 +256,30 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
         error = str(result.get("error") or "Grab failed")
         database.mark_wishlist_status(asin, STATUS_FAILED, profile_id=profile_id,
                                       error=error, count_attempt=True)
+        mark_status(temp_task_id, "failed", error=error)
         outcome["error"] = error
     return outcome
 
 
-def run_pass(db: Any = None, limit: Optional[int] = None) -> Dict[str, Any]:
+def search_single_book(asin: str, profile_id: int = 1, db: Any = None) -> Dict[str, Any]:
+    """Search and attempt to grab a single wishlisted audiobook immediately."""
+    from core.audiobook_database import get_audiobook_db
+
+    database = db if db is not None else get_audiobook_db()
+    row = database.get_wishlist_entry(asin, profile_id=profile_id)
+    if not row:
+        return {"ok": False, "error": f"Book with ASIN {asin} not found in wishlist"}
+    outcome = process_one(row, db=database, auto_grab=True)
+    return {"ok": True, "outcome": outcome}
+
+
+def run_pass(db: Any = None, limit: Optional[int] = None, due_only: bool = True) -> Dict[str, Any]:
     """One sweep over the books that are due.
 
     Safe to call by hand — the "search now" button on the wishlist page runs
     exactly this, so the manual and automatic paths cannot drift apart.
+    When due_only is False, all wishlisted books are checked, bypassing the
+    6-hour retry backoff.
     """
     from core.audiobook_database import get_audiobook_db
 
@@ -302,6 +334,7 @@ def run_pass(db: Any = None, limit: Optional[int] = None) -> Dict[str, Any]:
                 profile_id=profile_id,
                 retry_after_seconds=retry_after_seconds(),
                 limit=limit if limit is not None else batch_size(),
+                due_only=due_only,
             ))
         except Exception as exc:                            # noqa: BLE001
             logger.warning("Could not read profile %s's audiobook wishlist: %s",

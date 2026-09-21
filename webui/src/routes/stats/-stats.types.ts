@@ -159,6 +159,29 @@ export interface LastfmListeningImportStatus {
   error?: string;
 }
 
+export interface ListenbrainzListeningImportStatus {
+  success: boolean;
+  enabled?: boolean;
+  token_configured?: boolean;
+  authenticated_user_available?: boolean;
+  username?: string | null;
+  running?: boolean;
+  status?: 'idle' | 'running' | 'complete' | 'error' | 'cancelled' | 'skipped' | string;
+  phase?: string | null;
+  progress?: number | null;
+  imported?: number;
+  inserted?: number;
+  duplicates?: number;
+  total_scrobbles?: number | null;
+  total_listens?: number | null;
+  page?: number;
+  total_pages?: number | null;
+  last_success_at?: string | null;
+  last_imported_at?: string | null;
+  next_run_in_seconds?: number;
+  error?: string;
+}
+
 export interface StatsDbStorageTable {
   name: string;
   size: number;

@@ -96,3 +96,99 @@ describe('_taskPct', () => {
         assert.equal(sandbox._taskPct(5, 0, 'finished'), 100);
     });
 });
+
+
+// #1268: terminal import snapshots must expire even when replayed by polling
+// or by opening the notification panel again. Run the actual update function
+// against a deterministic clock; no wall-clock sleeps or real DOM are needed.
+function lastfmHarness() {
+    const source = readFileSync(DOWNLOADS_PATH, 'utf8');
+    const start = source.indexOf('function updateLastfmListeningImportTask(');
+    const end = source.indexOf('function _lastfmImportActiveHTML(', start);
+    let now = Date.parse('2026-09-19T12:00:00Z');
+    let id = 0;
+    const timers = new Map();
+    class Clock extends Date { static now() { return now; } }
+    const ctx = vm.createContext({
+        Date: Clock,
+        _lastfmImportTask: null, _lastfmImportClearTimer: null, _lastfmImportCompletion: null,
+        _updateOverlayBell() {}, _patchOverlayActive() {},
+        setTimeout(fn, delay) { timers.set(++id, { fn, at: now + delay }); return id; },
+        clearTimeout(key) { timers.delete(key); },
+    });
+    vm.runInContext(source.slice(start, end), ctx);
+    return {
+        update: data => ctx.updateLastfmListeningImportTask(data),
+        get task() { return ctx._lastfmImportTask; },
+        get active() { return ctx._lastfmImportActive(); },
+        tick(ms) {
+            now += ms;
+            for (const [key, timer] of timers) {
+                if (timer.at <= now) { timers.delete(key); timer.fn(); }
+            }
+        },
+    };
+}
+
+const completedImport = {
+    username: 'wishx', status: 'complete', running: false, progress: 100,
+    started_at: '2026-09-19 11:00:00', finished_at: '2026-09-19 12:00:00',
+};
+
+describe('Last.fm notification expiry (#1268)', () => {
+    test('terminal socket event wins over the still-alive worker thread', () => {
+        const h = lastfmHarness();
+        h.update({ ...completedImport, running: true });
+        assert.equal(h.active, false);
+        h.tick(10000);
+        assert.equal(h.task, null);
+    });
+    test('repeated terminal updates do not extend the deadline', () => {
+        const h = lastfmHarness();
+        h.update(completedImport);
+        for (let i = 0; i < 9; i++) { h.tick(1000); h.update(completedImport); }
+        assert.notEqual(h.task, null);
+        h.tick(1000);
+        assert.equal(h.task, null);
+        h.update(completedImport);
+        assert.equal(h.task, null, 'panel reopen must not resurrect the result');
+    });
+    test('old persisted completion stays hidden on a freshly loaded page', () => {
+        const h = lastfmHarness();
+        h.update({ ...completedImport, finished_at: '2026-09-18 12:00:00' });
+        assert.equal(h.task, null);
+    });
+    test('timestamps without timezone are UTC and use only the remaining grace period', () => {
+        const h = lastfmHarness();
+        h.tick(8000);
+        h.update(completedImport);
+        assert.notEqual(h.task, null);
+        h.tick(2000);
+        assert.equal(h.task, null);
+    });
+    for (const status of ['complete', 'error', 'cancelled']) {
+        test(`${status} without a usable timestamp expires once per run`, () => {
+            const h = lastfmHarness();
+            const data = { status, finished_at: 'invalid' };
+            h.update(data);
+            h.tick(6000);
+            h.update(data);
+            h.tick(4000);
+            assert.equal(h.task, null);
+            h.update(data);
+            assert.equal(h.task, null);
+        });
+    }
+    test('a new running import remains visible and gets its own completion window', () => {
+        const h = lastfmHarness();
+        h.update(completedImport);
+        h.tick(10000);
+        h.update({ status: 'running', running: true, progress: 12 });
+        h.tick(60000);
+        assert.equal(h.active, true);
+        h.update({ ...completedImport, started_at: '2026-09-19 12:00:10', finished_at: '2026-09-19 12:01:10' });
+        assert.notEqual(h.task, null);
+        h.tick(10000);
+        assert.equal(h.task, null);
+    });
+});

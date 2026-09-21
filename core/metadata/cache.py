@@ -1109,7 +1109,12 @@ class MetadataCache:
             fields['release_date'] = data.get('release_date', '')
             fields['total_tracks'] = data.get('nb_tracks', 0)
             record_type = data.get('record_type', 'album')
-            fields['album_type'] = record_type if record_type in ('single', 'ep', 'album') else 'album'
+            if record_type in ('compile', 'compilation'):
+                fields['album_type'] = 'compilation'
+            elif record_type in ('single', 'ep', 'album'):
+                fields['album_type'] = record_type
+            else:
+                fields['album_type'] = 'album'
             fields['label'] = data.get('label', '')
             fields['image_url'] = data.get('cover_xl') or data.get('cover_big') or data.get('cover_medium')
             # Deezer full album response: genres in data.genres.data[].name

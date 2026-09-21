@@ -212,6 +212,13 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
         download_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.download_path', './downloads'))
         transfer_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.transfer_path', './Transfer'))
+        # an own-library profile's batch lands in that profile's folder (#1199);
+        # everyone else keeps the folder resolved above, untouched
+        try:
+            from core.imports.paths import import_profile_id, library_root_for_profile
+            transfer_dir = library_root_for_profile(import_profile_id({'batch_id': batch_id})) or transfer_dir
+        except Exception as _root_err:  # noqa: BLE001 - the shared folder is the fallback
+            logger.debug(f"[Post-Processing] per-profile root lookup failed: {_root_err}")
 
         # The importer records the actual destination before moving a file.
         # Guessing its name here ignores user templates and unknown numbering.
@@ -521,6 +528,9 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                                 'album_image_url': album_image_url,
                                 'confidence': 0.9,
                                 'source': 'verification_worker_corrected',
+                                'album_type': album_context.get('album_type') or context.get('album_type') or '',
+                                'record_type': album_context.get('record_type') or context.get('record_type') or '',
+                                'is_compilation': album_context.get('is_compilation') or context.get('is_compilation') or False,
                             }
 
                             # Apply album grouping for consistency with stream processor path.

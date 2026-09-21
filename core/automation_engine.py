@@ -203,11 +203,30 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 1200,
     },
     {
+        'name': 'ListenBrainz Listening Sync',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'import_listenbrainz_listening',
+        'initial_delay': 1260,
+    },
+    {
         'name': 'Auto-Deep Scan Library',
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 7, 'unit': 'days'},
         'action_type': 'deep_scan_library',
         'initial_delay': 900,  # 15 min after startup
+    },
+    # Quarantine + recycle bin sweep. Seeded SWITCHED OFF: it deletes files
+    # for good, so it is a thing you turn on, not a thing that starts happening
+    # to you after an update. enabled_on_create is honoured on the row's first
+    # creation only, so flipping it on sticks across restarts.
+    {
+        'name': 'Weekly Cleanup',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 7, 'unit': 'days'},
+        'action_type': 'library_cleanup',
+        'initial_delay': 1500,  # 25 min after startup, once enabled
+        'enabled_on_create': False,
     },
     {
         'name': 'Auto-Backup Database',
@@ -657,6 +676,10 @@ class AutomationEngine:
                 )
                 if aid:
                     self.db.update_automation(aid, is_system=1)
+                    if spec.get('enabled_on_create') is False:
+                        # first creation only: an existing row keeps whatever
+                        # the user set, or turning it on would never stick
+                        self.db.update_automation(aid, enabled=0)
                     logger.info(f"Created system automation: {spec['name']} (id={aid})")
                 existing = self.db.get_system_automation_by_action(spec['action_type'])
 
@@ -1486,11 +1509,30 @@ class AutomationEngine:
         multipliers = {'minutes': 60, 'hours': 3600, 'days': 86400}
         return max(int(interval), 1) * multipliers.get(unit, 3600)
 
+    # an interval automation whose slot passed while the app was down (or
+    # while it sat disabled) runs soon after it is armed again, not a full
+    # interval later. before this a past next_run fell through to the full
+    # interval, so a weekly automation on an install that restarts more
+    # often than weekly never ran at all. system rows were always caught
+    # up by ensure_system_automations; this is the same treatment for the
+    # rows users make. the id spreads a startup burst over a few minutes.
+    _OVERDUE_CATCHUP_SECONDS = 120
+    _OVERDUE_STAGGER_SECONDS = 20
+    _OVERDUE_STAGGER_SLOTS = 6
+
+    def _overdue_catchup_seconds(self, automation_id) -> int:
+        try:
+            slot = int(automation_id) % self._OVERDUE_STAGGER_SLOTS
+        except (TypeError, ValueError):
+            slot = 0
+        return self._OVERDUE_CATCHUP_SECONDS + slot * self._OVERDUE_STAGGER_SECONDS
+
     def _setup_schedule_trigger(self, automation_id, config):
         """Config: {"interval": 6, "unit": "hours"}"""
         delay = self._calc_delay_seconds(config)
 
-        # If there's a next_run in the future, use remaining time instead
+        # If there's a next_run in the future, use remaining time instead.
+        # a next_run in the past is a missed slot: catch up soon.
         auto = self.db.get_automation(automation_id)
         if auto and auto.get('next_run'):
             try:
@@ -1498,6 +1540,12 @@ class AutomationEngine:
                 remaining = (next_run - _utcnow()).total_seconds()
                 if remaining > 0:
                     delay = remaining
+                else:
+                    # never later than the interval itself (a 1-minute automation
+                    # is not "caught up" by a 2-minute wait)
+                    delay = min(self._overdue_catchup_seconds(automation_id), delay)
+                    logger.info(f"Automation {automation_id} missed its slot by {-remaining/3600:.1f}h, "
+                                f"running in {delay}s instead of a full interval")
             except (ValueError, TypeError):
                 pass
 
