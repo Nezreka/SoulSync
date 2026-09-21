@@ -930,6 +930,19 @@ def _make_context_key(username, filename):
     normalized = filename.replace('\\', '/').lstrip('/') if filename else ''
     return f"{username}::{normalized}"
 
+
+def _register_matched_download_context(context_key: str, context: dict) -> None:
+    """Store download post-processing context, ensuring profile_id is stamped (#1279)."""
+    if isinstance(context, dict) and 'profile_id' not in context:
+        try:
+            pid = get_current_profile_id()
+            context['profile_id'] = pid if pid is not None else 1
+        except Exception:
+            context['profile_id'] = 1
+    with matched_context_lock:
+        matched_downloads_context[context_key] = context
+
+
 IS_SHUTTING_DOWN = False
 
 # --- Initialize Core Application Components ---
@@ -6442,21 +6455,21 @@ def start_download():
                     if download_id:
                         # Register download for post-processing (simple transfer to /Transfer)
                         context_key = _make_context_key(username, filename)
-                        with matched_context_lock:
-                            matched_downloads_context[context_key] = {
-                                'search_result': {
-                                    'username': username,
-                                    'filename': filename,
-                                    'size': file_size,
-                                    'title': track_data.get('title', 'Unknown'),
-                                    'artist': track_data.get('artist', 'Unknown'),
-                                    'quality': track_data.get('quality', 'Unknown'),
-                                    'is_simple_download': True  # Flag for simple processing
-                                },
-                                'spotify_artist': None,  # No Spotify metadata
-                                'spotify_album': None,
-                                'track_info': None
-                            }
+                        _register_matched_download_context(context_key, {
+                            'profile_id': get_current_profile_id(),
+                            'search_result': {
+                                'username': username,
+                                'filename': filename,
+                                'size': file_size,
+                                'title': track_data.get('title', 'Unknown'),
+                                'artist': track_data.get('artist', 'Unknown'),
+                                'quality': track_data.get('quality', 'Unknown'),
+                                'is_simple_download': True  # Flag for simple processing
+                            },
+                            'spotify_artist': None,  # No Spotify metadata
+                            'spotify_album': None,
+                            'track_info': None
+                        })
                         _track_quick_download(
                             download_id,
                             title=track_data.get('title') or filename,
@@ -6523,24 +6536,24 @@ def start_download():
                     _skip_checks.append('acoustid')
                 if data.get('quality_check') is False:
                     _skip_checks.extend(['bit_depth', 'quality'])
-                with matched_context_lock:
-                    matched_downloads_context[context_key] = {
-                        'search_result': {
-                            'username': username,
-                            'filename': filename,
-                            'size': file_size,
-                            'title': data.get('title', 'Unknown'),
-                            'artist': data.get('artist', 'Unknown'),
-                            'quality': data.get('quality', 'Unknown'),
-                            'is_simple_download': True  # Flag for simple processing
-                        },
-                        'spotify_artist': None,  # No Spotify metadata
-                        'spotify_album': None,
-                        'track_info': None,
-                        '_skip_quarantine_check': _skip_checks or None,
-                    }
-                    source_label = username.title() if is_streaming_source else 'Soulseek'
-                    logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
+                _register_matched_download_context(context_key, {
+                    'profile_id': get_current_profile_id(),
+                    'search_result': {
+                        'username': username,
+                        'filename': filename,
+                        'size': file_size,
+                        'title': data.get('title', 'Unknown'),
+                        'artist': data.get('artist', 'Unknown'),
+                        'quality': data.get('quality', 'Unknown'),
+                        'is_simple_download': True  # Flag for simple processing
+                    },
+                    'spotify_artist': None,  # No Spotify metadata
+                    'spotify_album': None,
+                    'track_info': None,
+                    '_skip_quarantine_check': _skip_checks or None,
+                })
+                source_label = username.title() if is_streaming_source else 'Soulseek'
+                logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
 
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
@@ -12248,26 +12261,26 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
 
             if download_id:
                 context_key = _make_context_key(username, filename)
-                with matched_context_lock:
-                    # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
-                    matched_downloads_context[context_key] = {
-                        "spotify_artist": spotify_artist,
-                        "spotify_album": spotify_album,
-                        "track_info": spotify_track,  # Full Spotify track object!
-                        "original_search_result": {
-                            'username': username,
-                            'filename': filename,
-                            'size': size,
-                            'title': spotify_track['name'],  # Use Spotify title
-                            'artist': spotify_artist['name'],
-                            'album': spotify_album['name'],
-                            'track_number': spotify_track['track_number'],  # Use Spotify track number
-                            'disc_number': spotify_track.get('disc_number', 1),
-                            'spotify_clean_title': spotify_track['name']  # For filename generation
-                        },
-                        "is_album_download": True,
-                        "has_full_spotify_metadata": True  # Flag for robust processing
-                    }
+                # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
+                _register_matched_download_context(context_key, {
+                    "profile_id": get_current_profile_id(),
+                    "spotify_artist": spotify_artist,
+                    "spotify_album": spotify_album,
+                    "track_info": spotify_track,  # Full Spotify track object!
+                    "original_search_result": {
+                        'username': username,
+                        'filename': filename,
+                        'size': size,
+                        'title': spotify_track['name'],  # Use Spotify title
+                        'artist': spotify_artist['name'],
+                        'album': spotify_album['name'],
+                        'track_number': spotify_track['track_number'],  # Use Spotify track number
+                        'disc_number': spotify_track.get('disc_number', 1),
+                        'spotify_clean_title': spotify_track['name']  # For filename generation
+                    },
+                    "is_album_download": True,
+                    "has_full_spotify_metadata": True  # Flag for robust processing
+                })
 
                 logger.info(
                     "Queued matched track: title=%r track_number=%s",
@@ -12296,19 +12309,19 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
 
             if download_id:
                 context_key = _make_context_key(username, filename)
-                with matched_context_lock:
-                    # Basic context for unmatched tracks (simple cleanup)
-                    matched_downloads_context[context_key] = {
-                        'search_result': {
-                            'username': username,
-                            'filename': filename,
-                            'size': size,
-                            'is_simple_download': True  # Falls back to simple transfer
-                        },
-                        'spotify_artist': None,
-                        'spotify_album': None,
-                        'track_info': None
-                    }
+                # Basic context for unmatched tracks (simple cleanup)
+                _register_matched_download_context(context_key, {
+                    'profile_id': get_current_profile_id(),
+                    'search_result': {
+                        'username': username,
+                        'filename': filename,
+                        'size': size,
+                        'is_simple_download': True  # Falls back to simple transfer
+                    },
+                    'spotify_artist': None,
+                    'spotify_album': None,
+                    'track_info': None
+                })
 
                 logger.info(f"Queued unmatched track (basic cleanup): {filename}")
                 started_count += 1
@@ -12404,17 +12417,17 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
 
             if download_id:
                 context_key = _make_context_key(username, filename)
-                with matched_context_lock:
-                    # Enhanced context storage with Spotify clean titles (GUI parity)
-                    enhanced_context = individual_track_context.copy()
-                    enhanced_context['spotify_clean_title'] = individual_track_context.get('title', '')
+                # Enhanced context storage with Spotify clean titles (GUI parity)
+                enhanced_context = individual_track_context.copy()
+                enhanced_context['spotify_clean_title'] = individual_track_context.get('title', '')
 
-                    matched_downloads_context[context_key] = {
-                        "spotify_artist": spotify_artist,
-                        "spotify_album": spotify_album,
-                        "original_search_result": enhanced_context, # Contains corrected data + clean title
-                        "is_album_download": True
-                    }
+                _register_matched_download_context(context_key, {
+                    "profile_id": get_current_profile_id(),
+                    "spotify_artist": spotify_artist,
+                    "spotify_album": spotify_album,
+                    "original_search_result": enhanced_context, # Contains corrected data + clean title
+                    "is_album_download": True
+                })
                 logger.info(
                     "Queued track: filename=%s matched_title=%r",
                     filename,
@@ -12471,25 +12484,25 @@ def start_matched_download():
 
             if download_id:
                 context_key = _make_context_key(username, filename)
-                with matched_context_lock:
-                    # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
-                    matched_downloads_context[context_key] = {
-                        "spotify_artist": spotify_artist,
-                        "spotify_album": spotify_track.get('album'),  # Single's album from Spotify
-                        "track_info": spotify_track,  # Full Spotify track object!
-                        "original_search_result": {
-                            'username': username,
-                            'filename': filename,
-                            'size': size,
-                            'title': spotify_track['name'],
-                            'artist': spotify_artist['name'],
-                            'album': spotify_track.get('album', {}).get('name', 'Unknown Album'),
-                            'track_number': spotify_track.get('track_number', 1),
-                            'spotify_clean_title': spotify_track['name']
-                        },
-                        "is_album_download": False,  # It's a single
-                        "has_full_spotify_metadata": True  # Flag for robust processing
-                    }
+                # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
+                _register_matched_download_context(context_key, {
+                    "profile_id": get_current_profile_id(),
+                    "spotify_artist": spotify_artist,
+                    "spotify_album": spotify_track.get('album'),  # Single's album from Spotify
+                    "track_info": spotify_track,  # Full Spotify track object!
+                    "original_search_result": {
+                        'username': username,
+                        'filename': filename,
+                        'size': size,
+                        'title': spotify_track['name'],
+                        'artist': spotify_artist['name'],
+                        'album': spotify_track.get('album', {}).get('name', 'Unknown Album'),
+                        'track_number': spotify_track.get('track_number', 1),
+                        'spotify_clean_title': spotify_track['name']
+                    },
+                    "is_album_download": False,  # It's a single
+                    "has_full_spotify_metadata": True  # Flag for robust processing
+                })
 
                 logger.info(f"Queued enhanced single track: '{spotify_track['name']}'")
                 return jsonify({"success": True, "message": "Enhanced single track download started"})
@@ -12531,20 +12544,20 @@ def start_matched_download():
 
             if download_id:
                 context_key = _make_context_key(username, filename)
-                with matched_context_lock:
-                    # THE FIX: We preserve the spotify_album context if it was provided.
-                    # For a regular single, spotify_album will be None.
-                    # For an album track, it will contain the album's data.
-                    # Enhanced context storage with Spotify clean titles (GUI parity)
-                    enhanced_payload = download_payload.copy()
-                    enhanced_payload['spotify_clean_title'] = download_payload.get('title', '')
+                # THE FIX: We preserve the spotify_album context if it was provided.
+                # For a regular single, spotify_album will be None.
+                # For an album track, it will contain the album's data.
+                # Enhanced context storage with Spotify clean titles (GUI parity)
+                enhanced_payload = download_payload.copy()
+                enhanced_payload['spotify_clean_title'] = download_payload.get('title', '')
 
-                    matched_downloads_context[context_key] = {
-                        "spotify_artist": spotify_artist,
-                        "spotify_album": spotify_album, # PRESERVE album context
-                        "original_search_result": enhanced_payload,
-                        "is_album_download": False # It's a single track download, not a full album job.
-                    }
+                _register_matched_download_context(context_key, {
+                    "profile_id": get_current_profile_id(),
+                    "spotify_artist": spotify_artist,
+                    "spotify_album": spotify_album, # PRESERVE album context
+                    "original_search_result": enhanced_payload,
+                    "is_album_download": False # It's a single track download, not a full album job.
+                })
                 return jsonify({"success": True, "message": "Matched download started"})
             else:
                 return jsonify({"success": False, "error": "Failed to start download via slskd"}), 500

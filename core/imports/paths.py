@@ -178,6 +178,13 @@ def import_profile_id(context) -> Optional[int]:
             return int(pid)
         except (TypeError, ValueError):
             pass
+    for subkey in ("search_result", "original_search_result", "track_info"):
+        sub = context.get(subkey)
+        if isinstance(sub, dict) and sub.get("profile_id"):
+            try:
+                return int(sub["profile_id"])
+            except (TypeError, ValueError):
+                pass
     batch_id = context.get("batch_id")
     if batch_id:
         try:
