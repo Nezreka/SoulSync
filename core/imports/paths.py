@@ -781,7 +781,35 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
 
     raw_album_type = ""
     if album_context:
-        raw_album_type = album_context.get("album_type", "") or ""
+        raw_album_type = (
+            album_context.get("album_type", "")
+            or album_context.get("record_type", "")
+            or ""
+        )
+    if not raw_album_type and isinstance(album_info, dict):
+        raw_album_type = (
+            album_info.get("album_type", "")
+            or album_info.get("record_type", "")
+            or ""
+        )
+    if not raw_album_type and isinstance(context, dict):
+        raw_album_type = (
+            context.get("album_type", "")
+            or context.get("record_type", "")
+            or ""
+        )
+    raw_album_type = str(raw_album_type or "").strip().lower()
+    if raw_album_type in ("compile", "compilations"):
+        raw_album_type = "compilation"
+
+    is_explicit_comp = (
+        (album_context and bool(album_context.get("is_compilation")))
+        or (isinstance(album_info, dict) and bool(album_info.get("is_compilation")))
+        or (isinstance(context, dict) and bool(context.get("is_compilation")))
+    )
+    if is_explicit_comp:
+        raw_album_type = "compilation"
+
     total_tracks = (album_context.get("total_tracks", 0) or 0) if album_context else 0
     album_type_display = get_album_type_display(raw_album_type, total_tracks)
 
@@ -829,6 +857,24 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         if (not _album_artist_name or _album_artist_name == "Unknown Artist") and \
                 _artist_name and _artist_name != "Unknown Artist":
             _album_artist_name = _artist_name
+
+        # Check if the release or album artist indicates a compilation
+        if (not raw_album_type or raw_album_type == "album") and (
+            str(_album_artist_name or "").strip().lower() in ("various artists", "various", "va", "v.a.")
+            or str(artist_name or "").strip().lower() in ("various artists", "various", "va", "v.a.")
+        ):
+            raw_album_type = "compilation"
+            album_type_display = "Compilation"
+
+        # On compilations (or when album artist differs), ensure $artist reflects the track artist
+        if (raw_album_type in ("compilation", "compile", "compilations") or is_explicit_comp):
+            if _artists:
+                _first_ta = _artists[0]
+                _track_artist_cand = _first_ta.get("name") if isinstance(_first_ta, dict) else str(_first_ta)
+                if _track_artist_cand:
+                    _artist_name = _track_artist_cand
+            elif track_info.get("artist"):
+                _artist_name = track_info["artist"]
 
         template_context = {
             "artist": _artist_name,
@@ -884,7 +930,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # so $cdnum can decide between "CDxx" and an empty string.
         template_context["total_discs"] = total_discs
 
-        _template_key = "compilation_path" if raw_album_type in ("compilation", "compile") else "album_path"
+        _template_key = "compilation_path" if raw_album_type in ("compilation", "compile", "compilations") else "album_path"
 
         album_template = _get_config_manager().get("file_organization.templates", {}).get(_template_key, "") or ""
         # Suppress the auto-injected disc folder when the user already
@@ -923,7 +969,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         reuse_folder = None
         _multi_disc_album = total_discs > 1 or disc_number > 1
         if (filename_base and not _multi_disc_album
-                and raw_album_type not in ("compilation", "compile")
+                and raw_album_type not in ("compilation", "compile", "compilations")
                 and not context.get("_no_album_folder_reuse")):
             try:
                 from core.library.existing_album_folder import resolve_existing_album_folder

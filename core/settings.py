@@ -834,7 +834,8 @@ class ConfigManager:
                     # Plex both read. Series segments collapse when a book has no
                     # series, exactly as the podcast season folder does.
                     "audiobook_path": "$author/$series/$seriespos - $title",
-                }
+                },
+                "detect_multi_artist_compilations": True,
             },
             "wishlist": {
                 # When discovery finds no catalogue match for a track it stores a

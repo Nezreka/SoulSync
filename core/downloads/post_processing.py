@@ -581,6 +581,9 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                                 'album_image_url': album_image_url,
                                 'confidence': 0.9,
                                 'source': 'verification_worker_corrected',
+                                'album_type': album_context.get('album_type') or context.get('album_type') or '',
+                                'record_type': album_context.get('record_type') or context.get('record_type') or '',
+                                'is_compilation': album_context.get('is_compilation') or context.get('is_compilation') or False,
                             }
 
                             # Apply album grouping for consistency with stream processor path.
