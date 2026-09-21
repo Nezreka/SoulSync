@@ -2328,7 +2328,7 @@ def _prepare_stream_task(track_data, sess, sid):
 
 def _find_streaming_download_in_all_downloads(all_downloads, track_data):
     """
-    Find streaming download in DownloadStatus list (works for Soulseek, YouTube, and Tidal).
+    Find streaming download in DownloadStatus list (works for Soulseek, YouTube, Tidal, Deezer, etc.).
     Replaces the old _find_streaming_download_in_transfers function.
     """
     try:
@@ -2343,15 +2343,24 @@ def _find_streaming_download_in_all_downloads(all_downloads, track_data):
             download_filename = extract_filename(download.filename)
             download_username = download.username
 
-            if (download_filename == target_filename and
-                download_username == target_username):
+            username_match = (
+                download_username == target_username
+                or (
+                    download_username in ('deezer', 'deezer_dl')
+                    and target_username in ('deezer', 'deezer_dl')
+                )
+            )
+
+            if download_filename == target_filename and username_match:
                 # Convert DownloadStatus to dict format expected by caller
                 return {
+                    'id': getattr(download, 'id', ''),
                     'percentComplete': download.progress,
                     'state': download.state,
                     'size': download.size,
                     'bytesTransferred': download.transferred,
                     'averageSpeed': download.speed,
+                    'file_path': getattr(download, 'file_path', None),
                 }
 
         return None
@@ -2360,29 +2369,45 @@ def _find_streaming_download_in_all_downloads(all_downloads, track_data):
         return None
 
 def _find_downloaded_file(download_path, track_data):
-    """Find the downloaded audio file in the downloads directory tree (works for Soulseek, YouTube, and Tidal)"""
+    """Find the downloaded audio file in the downloads directory tree (works for Soulseek, YouTube, Tidal, Deezer, etc.)"""
     # Ensure path is accessible in Docker (handles E:/ -> /host/mnt/e/)
     download_path = docker_resolve_path(download_path)
 
     audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
     target_filename = extract_filename(track_data.get('filename', ''))
 
-    # YOUTUBE/TIDAL/QOBUZ/HIFI/AMAZON SUPPORT: Handle encoded filename format "id||title"
+    # YOUTUBE/TIDAL/QOBUZ/HIFI/AMAZON/DEEZER/SOUNDCLOUD SUPPORT: Handle encoded filename format "id||title"
     # The file on disk will be "title.ext", not "id||title"
     is_youtube = track_data.get('username') == 'youtube'
     is_tidal = track_data.get('username') == 'tidal'
     is_qobuz = track_data.get('username') == 'qobuz'
     is_hifi = track_data.get('username') == 'hifi'
     is_amazon = track_data.get('username') == 'amazon'
-    is_streaming_source = is_youtube or is_tidal or is_qobuz or is_hifi or is_amazon
+    is_deezer = track_data.get('username') in ('deezer', 'deezer_dl')
+    is_soundcloud = track_data.get('username') == 'soundcloud'
+    is_streaming_source = (
+        is_youtube or is_tidal or is_qobuz or is_hifi or is_amazon
+        or is_deezer or is_soundcloud
+    )
     target_filename_youtube = None
     if is_streaming_source and '||' in target_filename:
-        _, title = target_filename.split('||', 1)
-        if is_tidal or is_qobuz or is_hifi or is_amazon:
-            # Tidal/Qobuz/HiFi/Amazon files can be flac, opus, eac3, or m4a — match any audio extension
+        parts = target_filename.split('||')
+        title = parts[-1]
+        if is_tidal or is_qobuz or is_hifi or is_amazon or is_deezer or is_soundcloud:
+            # Tidal/Qobuz/HiFi/Amazon/Deezer/SoundCloud files can be flac, mp3, opus, etc. — match any audio extension
             safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
             target_filename_youtube = safe_title  # Extension-less for flexible matching
-            source_name = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else ('Amazon' if is_amazon else 'Tidal'))
+            source_name = (
+                'HiFi' if is_hifi else (
+                    'Qobuz' if is_qobuz else (
+                        'Amazon' if is_amazon else (
+                            'Deezer' if is_deezer else (
+                                'SoundCloud' if is_soundcloud else 'Tidal'
+                            )
+                        )
+                    )
+                )
+            )
             logger.debug(f"[{source_name} Stream] Looking for file starting with: {target_filename_youtube}")
         else:
             # yt-dlp will create "Title.mp3" from "Title"
@@ -2420,11 +2445,23 @@ def _find_downloaded_file(download_path, track_data):
                     # For Tidal, compare without extension (file could be .flac or .m4a)
                     compare_target = target_filename_youtube.lower()
                     compare_file = file.lower()
-                    if is_tidal or is_qobuz or is_hifi or is_amazon:
+                    if is_tidal or is_qobuz or is_hifi or is_amazon or is_deezer or is_soundcloud:
                         compare_file = os.path.splitext(compare_file)[0]
                     similarity = SequenceMatcher(None, compare_file, compare_target).ratio()
 
-                    source_label = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else ('Amazon' if is_amazon else ('Tidal' if is_tidal else 'YouTube')))
+                    source_label = (
+                        'HiFi' if is_hifi else (
+                            'Qobuz' if is_qobuz else (
+                                'Amazon' if is_amazon else (
+                                    'Deezer' if is_deezer else (
+                                        'SoundCloud' if is_soundcloud else (
+                                            'Tidal' if is_tidal else 'YouTube'
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
                     logger.debug(f"[{source_label} Stream] Comparing: '{file}' vs '{target_filename_youtube}' = {similarity:.2f}")
 
                     # Keep track of best match
@@ -2442,9 +2479,21 @@ def _find_downloaded_file(download_path, track_data):
                         logger.debug(f"Found streaming file: {file_path}")
                         return file_path
 
-        # For YouTube/Tidal, if we found a good enough match (80%+), use it
+        # For streaming sources, if we found a good enough match (80%+), use it
         if is_streaming_source and best_match and best_similarity >= 0.80:
-            source_label = 'Qobuz' if is_qobuz else ('Amazon' if is_amazon else ('Tidal' if is_tidal else 'YouTube'))
+            source_label = (
+                'HiFi' if is_hifi else (
+                    'Qobuz' if is_qobuz else (
+                        'Amazon' if is_amazon else (
+                            'Deezer' if is_deezer else (
+                                'SoundCloud' if is_soundcloud else (
+                                    'Tidal' if is_tidal else 'YouTube'
+                                )
+                            )
+                        )
+                    )
+                )
+            )
             logger.debug(f"Found good match ({best_similarity:.2f}) for {source_label} streaming file: {best_match}")
             return best_match
 

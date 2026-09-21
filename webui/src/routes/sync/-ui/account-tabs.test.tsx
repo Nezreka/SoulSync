@@ -4,12 +4,12 @@
  * selector — so they are asserted as literals, not derived.
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AccountDetailsModal } from './account-details-modal';
 import { AccountPlaylistCard } from './account-playlist-card';
-import { DeezerArlTab, SpotifyTab } from './account-tabs';
+import { DEEZER_PLAYLIST_PROGRESS_EVENT, DeezerArlTab, SpotifyTab } from './account-tabs';
 
 interface Call {
   url: string;
@@ -369,6 +369,27 @@ describe('seeding — the engine must be able to FIND the playlist (2235-2240)',
     ]);
     // Seeded BEFORE the engine is asked to open it.
     expect(openDownloadMissingModal).toHaveBeenCalledWith('deezer_arl_7');
+  });
+
+  it('formats deezer progress events with albums count and passes', async () => {
+    const showLoadingOverlay = vi.fn();
+    window.showLoadingOverlay = showLoadingOverlay;
+    render(<DeezerArlTab />);
+    await waitFor(() => expect(screen.getByText('Deep Cuts')).toBeInTheDocument());
+
+    fireEvent.click(document.querySelector('#action-btn-deezer_arl_7') as Element);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(DEEZER_PLAYLIST_PROGRESS_EVENT, {
+          detail: { playlist_id: 7, phase: 'release dates', done: 50, total: 100 },
+        }),
+      );
+    });
+
+    expect(showLoadingOverlay).toHaveBeenCalledWith(
+      'Loading playlist: Deep Cuts — release dates 50/100 albums (50%), pass 1 of 2',
+    );
   });
 });
 

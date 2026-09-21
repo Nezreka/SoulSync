@@ -4569,7 +4569,16 @@ function updateModalSyncProgress(playlistId, progress) {
             const failed = progress.failed_tracks || 0;
 
             if (totalEl) totalEl.textContent = total;
-            if (matchedEl) matchedEl.textContent = matched;
+            if (matchedEl) {
+                if (progress.duplicate_tracks > 0) {
+                    const synced = progress.synced_tracks || (matched - progress.duplicate_tracks);
+                    matchedEl.textContent = `${matched} (${synced} synced)`;
+                    matchedEl.title = `${progress.duplicate_tracks} duplicate track${progress.duplicate_tracks === 1 ? '' : 's'} folded (already on playlist)`;
+                } else {
+                    matchedEl.textContent = matched;
+                    matchedEl.removeAttribute('title');
+                }
+            }
             if (failedEl) failedEl.textContent = failed;
 
             // Calculate percentage like GUI

@@ -36,6 +36,8 @@ export interface CardCoverageValue {
    * is shown, so nothing appears that the card did not show before.
    */
   percentage: number | null;
+  synced?: number;
+  folded?: number;
 }
 
 export function coverageBarWidth(v: CardCoverageValue): number {
@@ -48,6 +50,15 @@ export function coverageBarWidth(v: CardCoverageValue): number {
 export function CardCoverage(value: CardCoverageValue) {
   const width = coverageBarWidth(value);
   const failed = value.failed ?? 0;
+  const countLabel =
+    value.folded && value.folded > 0
+      ? `${value.matched} (${value.synced ?? (value.matched - value.folded)} synced)`
+      : `${value.matched}`;
+  const countTitle =
+    value.folded && value.folded > 0
+      ? `${value.folded} duplicate track${value.folded === 1 ? '' : 's'} folded (already on playlist)`
+      : undefined;
+
   return (
     <div className="playlist-card-coverage">
       <div
@@ -60,8 +71,8 @@ export function CardCoverage(value: CardCoverageValue) {
         <i style={{ width: `${width}%` }} />
       </div>
       <div className="pcc-legend">
-        <span className="pcc-count">
-          {value.matched} / {value.total}
+        <span className="pcc-count" title={countTitle}>
+          {countLabel} / {value.total}
         </span>
         {value.percentage !== null && <span className="pcc-pct">{value.percentage}%</span>}
         {failed > 0 && <span className="pcc-failed">✗ {failed}</span>}
