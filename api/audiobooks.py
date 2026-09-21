@@ -1167,6 +1167,8 @@ def create_audiobooks_blueprint() -> Blueprint:
                 artwork_url=str(book.get("cover_url") or body.get("cover_url") or ""),
                 protocol=str(release.get("protocol") or ""),
                 size_bytes=int(release.get("size_bytes") or 0),
+                username=str(release.get("indexer") or "") if str(release.get("protocol") or "").lower() == "soulseek" else "",
+                release_title=str(release.get("title") or ""),
             )
             db.record_download(
                 download_id=ref,

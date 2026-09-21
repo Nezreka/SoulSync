@@ -56,6 +56,11 @@ logger = get_logger("downloads.lifecycle")
 # cut off mid-flight (the old 5-min cutoff falsely "completed" queued tasks).
 _POST_PROCESSING_STUCK_TIMEOUT = 1800  # 30 minutes
 
+# Maximum number of atomic album publish attempts before forcing the batch to
+# 'error' phase. Each attempt is spaced by the 30s healing loop. 3 attempts =
+# ~90 seconds of retries before we give up and unblock wishlist processing (#1277).
+_ATOMIC_PUBLISH_MAX_ATTEMPTS = 3
+
 
 def _resolve_stuck_post_processing_status(task: dict) -> str:
     """Decide the terminal status for a task stuck in post_processing.
@@ -1036,16 +1041,35 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                 # the staged album into the live library BEFORE anything is
                 # marked complete, so Plex sees the whole album at once.
                 #
-                # L2-002: the publish decides whether this batch IS complete. It
-                # used to run after the phase flip and its result was only
-                # logged, so a failed publish still produced a Complete batch
-                # with history, scan and completion events for an album that was
-                # never published. A failure leaves the phase alone; the batch
-                # stays in monitoring and the next completion check retries.
+                # L2-002: the publish decides whether this batch IS complete. A
+                # failed publish leaves staged files in place for retry. We allow
+                # up to _ATOMIC_PUBLISH_MAX_ATTEMPTS retries (spaced by the 30s
+                # healing loop) before forcing 'error' so the batch never blocks
+                # wishlist processing permanently (#1277).
                 if not _publish_atomic_album(batch_id, batch, deps):
+                    attempts = batch.get('_atomic_publish_attempts', 0) + 1
+                    batch['_atomic_publish_attempts'] = attempts
+                    if attempts < _ATOMIC_PUBLISH_MAX_ATTEMPTS:
+                        logger.error(
+                            "[Batch Manager] Batch %s: atomic album publish failed "
+                            "(attempt %d/%d) — staged files kept for retry on next "
+                            "healing pass", batch_id, attempts, _ATOMIC_PUBLISH_MAX_ATTEMPTS)
+                        return
+                    # Max attempts reached — force to error so wishlist isn't blocked
+                    # forever. Staged files stay on disk; the user can recover manually.
                     logger.error(
-                        "[Batch Manager] Batch %s: atomic album publish failed — "
-                        "not marking complete, staged files kept for retry", batch_id)
+                        "[Batch Manager] Batch %s: atomic album publish failed "
+                        "%d times — forcing 'error' phase to unblock wishlist. "
+                        "Staged files left in place for manual recovery.",
+                        batch_id, attempts)
+                    batch['phase'] = 'error'
+                    batch['completion_time'] = time.time()
+                    from database.music_database import MusicDatabase
+                    try:
+                        record_sync_history_completion(MusicDatabase(), batch_id, batch)
+                    except Exception as _hist_err:
+                        logger.warning("[Batch Manager] Could not write sync history on "
+                                       "publish-failed error: %s", _hist_err)
                     return
 
                 completion = _mark_batch_complete(
@@ -1158,11 +1182,30 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                     # publish the staged album into the live library before the
                     # batch is marked complete. L2-002: a failed publish must not
                     # produce a Complete batch for an album that is still staged.
+                    # After _ATOMIC_PUBLISH_MAX_ATTEMPTS failures, force 'error'
+                    # so the batch never blocks wishlist processing (#1277).
                     if not _publish_atomic_album(batch_id, batch, deps):
+                        attempts = batch.get('_atomic_publish_attempts', 0) + 1
+                        batch['_atomic_publish_attempts'] = attempts
+                        if attempts < _ATOMIC_PUBLISH_MAX_ATTEMPTS:
+                            logger.error(
+                                "[Completion Check V2] Batch %s: atomic album publish "
+                                "failed (attempt %d/%d) — staged files kept for retry",
+                                batch_id, attempts, _ATOMIC_PUBLISH_MAX_ATTEMPTS)
+                            return False
                         logger.error(
                             "[Completion Check V2] Batch %s: atomic album publish "
-                            "failed — not marking complete, staged files kept for "
-                            "retry", batch_id)
+                            "failed %d times — forcing 'error' phase to unblock wishlist. "
+                            "Staged files left in place for manual recovery.",
+                            batch_id, attempts)
+                        batch['phase'] = 'error'
+                        batch['completion_time'] = time.time()
+                        from database.music_database import MusicDatabase
+                        try:
+                            record_sync_history_completion(MusicDatabase(), batch_id, batch)
+                        except Exception as _hist_err:
+                            logger.warning("[Completion Check V2] Could not write sync "
+                                           "history on publish-failed error: %s", _hist_err)
                         return False
 
                     completion = _mark_batch_complete(

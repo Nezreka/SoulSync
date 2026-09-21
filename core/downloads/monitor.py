@@ -132,6 +132,57 @@ def _remaining_fallback_sources(exhausted):
     return [s for s in chain if str(s).lower() not in blocked]
 
 
+def _maybe_hybrid_fallback_on_giveup(task, task_id, current_time, deferred_ops, trigger_name, description):
+    """If the current source has failed its retries, check whether another
+    source is configured in the hybrid chain. If so, mark the failed source
+    as exhausted and re-queue the task for a fresh search with the remaining
+    sources (gzetk report: Soulseek failure never triggered YouTube fallback).
+
+    Returns True if a cross-source retry was dispatched (caller should not mark failed).
+    Returns False if no fallback source is available (caller proceeds to mark failed).
+    """
+    ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+    username = task.get('username') or ti.get('username', '')
+    filename = task.get('filename') or ti.get('filename', '')
+    failed_source = _resolve_download_source(username)
+    exhausted_now = set(task.get('exhausted_download_sources') or ())
+    exhausted_now.add(failed_source)
+    remaining = _remaining_fallback_sources(exhausted_now)
+    if not remaining:
+        return False
+
+    track_label = ti.get('name') or task.get('name', 'Unknown')
+    logger.warning(
+        f"[Hybrid Retry] {description} for \"{track_label}\" "
+        f"— marking '{failed_source}' exhausted and trying next source(s): "
+        f"{remaining}"
+    )
+    task['exhausted_download_sources'] = exhausted_now
+
+    # Mark the failed candidate as used so it is never re-picked
+    if username and filename:
+        used_sources = set(task.get('used_sources') or ())
+        used_sources.add(f"{username}_{filename}")
+        task['used_sources'] = used_sources
+
+    # Cancel the remote transfer so it doesn't leak or tie up slots
+    _cancel_on_giveup(task, deferred_ops, f'{trigger_name}_hybrid_fallback')
+    task.pop('download_id', None)
+    task.pop('username', None)
+    task.pop('filename', None)
+    task['error_retry_count'] = 0
+    task['stuck_retry_count'] = 0
+    task['status'] = 'searching'
+    task['status_change_time'] = current_time
+    task.pop('queued_start_time', None)
+    task.pop('downloading_start_time', None)
+    task.pop('search_live', None)
+    batch_id = task.get('batch_id')
+    if task_id:
+        deferred_ops.append(('restart_worker', task_id, batch_id))
+    return True
+
+
 def _download_id_key(download_id):
     return f"download_id::{download_id}" if download_id else None
 
@@ -725,6 +776,11 @@ class WebUIDownloadMonitor:
                 elif retry_count < 3:
                     return False
                 else:
+                    if _maybe_hybrid_fallback_on_giveup(
+                        task, task_id, current_time, deferred_ops, 'not_in_transfers',
+                        'Download disappeared from transfer list 3 times'
+                    ):
+                        return False
                     track_label = task.get('track_info', {}).get('name', 'Unknown')
                     tried_sources = task.get('used_sources', set())
                     sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
@@ -803,7 +859,13 @@ class WebUIDownloadMonitor:
                 # Wait a bit before next error retry
                 return False
             else:
-                # Too many error retries, mark as failed
+                # Too many error retries on this source.
+                if _maybe_hybrid_fallback_on_giveup(
+                    task, task_id, current_time, deferred_ops, 'errored_state',
+                    f'Transfer errored {retry_count} times'
+                ):
+                    return False
+
                 track_label = task.get('track_info', {}).get('name', 'Unknown')
                 tried_sources = task.get('used_sources', set())
                 sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
@@ -920,6 +982,12 @@ class WebUIDownloadMonitor:
                         return False
                     else:
                         # Too many retries, mark as failed
+                        if _maybe_hybrid_fallback_on_giveup(
+                            task, task_id, current_time, deferred_ops, 'queued_state',
+                            'Download stayed queued too long 3 times'
+                        ):
+                            return False
+
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
@@ -1009,6 +1077,12 @@ class WebUIDownloadMonitor:
                         # Wait longer before next retry
                         return False
                     else:
+                        if _maybe_hybrid_fallback_on_giveup(
+                            task, task_id, current_time, deferred_ops, 'zero_progress',
+                            'Download stuck at 0% three times'
+                        ):
+                            return False
+
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
@@ -1112,6 +1186,12 @@ class WebUIDownloadMonitor:
                             deferred_ops.append(('restart_worker', task_id, batch_id))
                         return False
                     elif retry_count >= 3:
+                        if _maybe_hybrid_fallback_on_giveup(
+                            task, task_id, current_time, deferred_ops, 'unknown_state',
+                            f'Download stuck in "{state_str}" state 3 times'
+                        ):
+                            return False
+
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''

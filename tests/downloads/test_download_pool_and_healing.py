@@ -344,3 +344,55 @@ class TestHealerNudgesGloballyHeldBatches:
         finally:
             batches.clear()
             tasks.clear()
+
+
+def test_stuck_downloading_batch_healed_by_validator(monkeypatch):
+    """A batch with all tasks dispatched, no active workers, and no completion_time
+    stuck in 'downloading' for >600s must be force-transitioned to 'error' phase
+    so the 5-minute cleanup can purge it and unblock wishlist automation (#1277)."""
+    import web_server
+    from core.runtime_state import download_batches, download_tasks
+
+    monkeypatch.setattr(web_server, '_check_batch_completion_v2', lambda _b: False)
+    monkeypatch.setattr(web_server, '_start_next_batch_of_downloads', lambda _b: None)
+
+    download_batches.clear()
+    download_tasks.clear()
+
+    now = time.time()
+    batch_id = 'stuck-batch-1'
+    task_id = 'stuck-task-1'
+
+    download_tasks[task_id] = {
+        'status': 'completed',
+        'track_index': 0,
+        'batch_id': batch_id,
+        'status_change_time': now - 700,
+    }
+    download_batches[batch_id] = {
+        'queue': [task_id],
+        'queue_index': 1,
+        'active_count': 0,
+        'max_concurrent': 2,
+        'phase': 'downloading',
+        'playlist_id': 'wishlist',
+    }
+
+    try:
+        # Pass 1: first detected, stamps _heal_stuck_detected_at
+        web_server.validate_and_heal_batch_states()
+        assert download_batches[batch_id]['phase'] == 'downloading'
+        assert download_batches[batch_id].get('_heal_stuck_detected_at') is not None
+        assert 'completion_time' not in download_batches[batch_id]
+
+        # Simulate 11 minutes having passed since detection (> 600s)
+        download_batches[batch_id]['_heal_stuck_detected_at'] = now - 650
+
+        # Pass 2: forced to 'error' with completion_time
+        web_server.validate_and_heal_batch_states()
+        assert download_batches[batch_id]['phase'] == 'error'
+        assert download_batches[batch_id].get('completion_time') is not None
+    finally:
+        download_batches.clear()
+        download_tasks.clear()
+

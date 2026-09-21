@@ -75,6 +75,8 @@ def register_download(
     size_bytes: int = 0,
     only_if_missing: bool = False,
     status: str = "queued",
+    username: str = "",
+    release_title: str = "",
 ) -> bool:
     """Put one grabbed or searching audiobook on the Downloads page.
 
@@ -121,6 +123,8 @@ def register_download(
             "status_change_time": time.time(),
             "cancel_requested": False,
             "error_message": None,
+            "username": username,
+            "release_title": release_title,
         }
     logger.info("Audiobook download on the downloads page: %s (%s, status=%s)", title, task_id, status)
     return True
@@ -131,6 +135,8 @@ def promote_search_task(
     real_task_id: str,
     protocol: str = "",
     size_bytes: int = 0,
+    username: str = "",
+    release_title: str = "",
 ) -> bool:
     """Transition a searching task to a grabbed client handle."""
     temp_task_id = str(temp_task_id or "").strip()
@@ -158,6 +164,10 @@ def promote_search_task(
             task["quality"] = protocol
         if size_bytes:
             task["size"] = int(size_bytes)
+        if username:
+            task["username"] = username
+        if release_title:
+            task["release_title"] = release_title
         task["status_change_time"] = time.time()
     return True
 
@@ -192,6 +202,8 @@ def mark_status(
     status: str,
     error: str = "",
     file_path: str = "",
+    held_reason: str = "",
+    release_title: str = "",
 ) -> None:
     """Move a card to a terminal state.
 
@@ -218,6 +230,29 @@ def mark_status(
             task["error_message"] = error
         if file_path:
             task["final_file_path"] = file_path
+        if held_reason:
+            task["held_reason"] = held_reason
+        if release_title:
+            task["release_title"] = release_title
+
+
+def set_task_metadata(
+    task_id: str,
+    username: str = "",
+    release_title: str = "",
+) -> None:
+    """Attach peer or release details to a live task."""
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if not task:
+            return
+        if username and not task.get("username"):
+            task["username"] = username
+        if release_title and not task.get("release_title"):
+            task["release_title"] = release_title
 
 
 def is_cancelled(task_id: str) -> bool:

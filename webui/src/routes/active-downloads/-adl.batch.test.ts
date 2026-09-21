@@ -61,6 +61,21 @@ describe('phase display', () => {
     expect(phaseDisplay(batch({ phase: 'error' })).text).toBe('Error');
   });
 
+  it('renders books unit for audiobook batches', () => {
+    expect(
+      phaseDisplay(batch({ playlist_id: 'audiobooks', phase: 'downloading', completed: 0, total: 3 })),
+    ).toEqual({
+      text: '0/3 books',
+      icon: 'spinner',
+    });
+    expect(
+      phaseDisplay(batch({ playlist_id: 'audiobooks', phase: 'complete', completed: 1, total: 1 })),
+    ).toEqual({
+      text: 'Done — 1 book',
+      icon: 'check',
+    });
+  });
+
   it('drops the spinner when a downloading batch has nothing in flight', () => {
     expect(phaseDisplay(batch({ phase: 'downloading', active: 0 })).icon).toBeNull();
   });

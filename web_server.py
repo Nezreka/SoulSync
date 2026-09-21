@@ -1856,6 +1856,47 @@ def validate_and_heal_batch_states():
                     if _new_orphans or stuck_post_processing:
                         batches_needing_completion_check.append(batch_id)
 
+                    # STUCK-NO-WORKERS EMERGENCY HEAL (#1277): If all tasks have
+                    # been dispatched (queue_index >= len(queue)), no workers are
+                    # active, and no completion_time has been recorded for >10
+                    # minutes, the batch is permanently stuck (most likely because
+                    # _publish_atomic_album failed and the early-return path never
+                    # set completion_time). Force it to 'error' so:
+                    #   1. The 5-minute auto-cleanup at the top of this loop fires.
+                    #   2. The wishlist concurrency guard stops treating it as active.
+                    # This is a last-resort safety net; the primary fix is in
+                    # lifecycle.py (_ATOMIC_PUBLISH_MAX_ATTEMPTS).
+                    _all_dispatched = batch_data.get('queue_index', 0) >= len(queue)
+                    _no_workers = actually_active == 0
+                    if _all_dispatched and _no_workers and not batch_data.get('completion_time'):
+                        _first_seen = batch_data.get('_heal_stuck_detected_at')
+                        if _first_seen is None:
+                            import time as _time
+                            batch_data['_heal_stuck_detected_at'] = _time.time()
+                            logger.warning(
+                                "[Batch Healing] Batch %s: all tasks dispatched, no workers, "
+                                "no completion_time — possibly stuck. Will force-error if still "
+                                "stuck in 600s.", batch_id)
+                        else:
+                            import time as _time
+                            if _time.time() - _first_seen > 600:  # 10 minutes
+                                logger.error(
+                                    "[Batch Healing] Batch %s has been stuck in 'downloading' "
+                                    "with no workers for >600s and no completion_time — "
+                                    "forcing 'error' to unblock wishlist (#1277).", batch_id)
+                                batch_data['phase'] = 'error'
+                                batch_data['completion_time'] = _time.time()
+                                try:
+                                    from core.downloads.history import record_sync_history_completion
+                                    from database.music_database import MusicDatabase
+                                    record_sync_history_completion(MusicDatabase(), batch_id, batch_data)
+                                except Exception as _hist_err:
+                                    logger.warning(
+                                        "[Batch Healing] Could not write sync history for "
+                                        "stuck batch %s: %s", batch_id, _hist_err)
+                    else:
+                        batch_data.pop('_heal_stuck_detected_at', None)
+
             # Cleanup stale batches inside the lock (safe - just dict mutations)
             for batch_id in batches_to_cleanup:
                 # #999: discard unpublished atomic staging for an abandoned batch

@@ -4,6 +4,7 @@ Hermetic: the slskd client is a stub in every test, nothing reaches the
 network, and no real config is read.
 """
 
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -287,7 +288,7 @@ def test_an_empty_client_id_decodes_to_nothing():
 
 def test_the_landing_path_is_under_the_slskd_root():
     client = SimpleNamespace(download_path="/downloads")
-    assert landing_path("Book", client) == "/downloads/Book"
+    assert landing_path("Book", client) == os.path.join("/downloads", "Book")
 
 
 def test_no_folder_means_no_landing_path():
@@ -350,7 +351,7 @@ def test_a_status_poll_only_counts_this_books_transfers():
     client.download_path = "/downloads"
     rolled = status_for(encode_refs(["mine-1"], "peer", "Book"), client=client)
     assert rolled["state"] == "done" and rolled["total"] == 1
-    assert rolled["save_path"] == "/downloads/Book"
+    assert rolled["save_path"] == os.path.join("/downloads", "Book")
 
 
 def test_an_unreachable_slskd_reports_nothing_rather_than_a_failure():

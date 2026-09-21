@@ -111,6 +111,8 @@ export interface AdlLiveDetail {
   speed?: number;
   size?: number;
   bytes?: number;
+  held_reason?: string;
+  release_title?: string;
 }
 
 /** GET /api/downloads/task/<id>/detail — the terminal-row expansion data. */

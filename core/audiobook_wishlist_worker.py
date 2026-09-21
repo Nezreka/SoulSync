@@ -207,11 +207,15 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
             # An automatic grab belongs on the Downloads page just as much as a
             # manual one — a book appearing in the library with no card ever
             # having shown is indistinguishable from a bug.
+            protocol_name = str(getattr(best, "protocol", "") or "")
+            peer_username = str(getattr(best, "indexer", "") or "") if protocol_name.lower() == "soulseek" else ""
             promote_search_task(
                 temp_task_id=temp_task_id,
                 real_task_id=ref,
-                protocol=str(getattr(best, "protocol", "") or ""),
+                protocol=protocol_name,
                 size_bytes=int(getattr(best, "size_bytes", 0) or 0),
+                username=peer_username,
+                release_title=str(getattr(best, "title", "") or ""),
             )
             database.record_download(
                 download_id=ref,

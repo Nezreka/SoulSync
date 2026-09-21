@@ -1,3 +1,4 @@
+import time
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -468,6 +469,41 @@ def test_process_wishlist_automatically_skips_when_wishlist_batch_is_already_act
     assert guard_events == ["enter", "exit"]
     assert [kwargs.get("progress") for _args, kwargs in progress_calls if "progress" in kwargs] == [10]
     assert any("already active in another batch" in msg for msg in logger.info_messages)
+
+
+def test_wishlist_guard_skips_stale_phantom_batch():
+    """A wishlist batch stuck without completion_time for > 1 hour is a phantom
+    batch (#1277). The guard must force it to 'error' and proceed with automatic
+    processing instead of staying blocked forever."""
+    batch_map = {
+        "batch-phantom": {
+            "playlist_id": "wishlist",
+            "phase": "downloading",
+            "_stale_detected_at": time.time() - 3700,
+        }
+    }
+    runtime, _service, _profiles_db, music_db, executor, logger, progress_calls, guard_events = _build_runtime(
+        tracks=[
+            {
+                "name": "Single Track",
+                "artists": [{"name": "Artist B"}],
+                "spotify_data": {"album": {"album_type": "single"}},
+            }
+        ],
+        cycle_value="singles",
+        count=1,
+        batch_map=batch_map,
+    )
+
+    process_wishlist_automatically(runtime, automation_id="auto-phantom")
+
+    # Phantom batch must be transitioned to error with completion_time
+    assert batch_map["batch-phantom"]["phase"] == "error"
+    assert batch_map["batch-phantom"]["completion_time"] is not None
+
+    # Processing must NOT have been blocked: track was submitted to executor
+    assert len(executor.submissions) == 1
+    assert any("forcing 'error' to unblock wishlist automation" in msg for msg in logger.error_messages)
 
 
 # --- #740: album-bundle batches must route to the dedicated pool ------------

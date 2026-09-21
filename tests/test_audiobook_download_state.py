@@ -303,3 +303,26 @@ def test_the_recreated_batch_still_carries_the_isolation_flags():
     forget("a")
     _register("b")
     assert is_music_batch(BATCH_ID, download_batches[BATCH_ID]) is False
+
+
+def test_registration_and_mark_status_carry_metadata_and_held_reason():
+    from core.audiobook_download_state import set_task_metadata
+
+    register_download("task-ab-1", "Infortunio", author="Brandon Sanderson",
+                      protocol="soulseek", username="SKYLiGHT", release_title="En_La_Niebla-Consuelo_Del_Infortunio")
+    task = download_tasks["task-ab-1"]
+    assert task["username"] == "SKYLiGHT"
+    assert task["release_title"] == "En_La_Niebla-Consuelo_Del_Infortunio"
+
+    mark_status("task-ab-1", "importing",
+                held_reason="Only 98 of 114 minutes present — about 15 minutes short",
+                release_title="Updated Release")
+    assert task["status"] == "importing"
+    assert task["held_reason"] == "Only 98 of 114 minutes present — about 15 minutes short"
+    assert task["release_title"] == "Updated Release"
+
+    set_task_metadata("task-ab-2", username="peer2", release_title="rel2")  # Non-existent safe
+    register_download("task-ab-2", "Book 2", author="Author")
+    set_task_metadata("task-ab-2", username="peer2", release_title="rel2")
+    assert download_tasks["task-ab-2"]["username"] == "peer2"
+    assert download_tasks["task-ab-2"]["release_title"] == "rel2"

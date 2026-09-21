@@ -893,6 +893,7 @@ def test_a_successful_publish_completes_the_batch_as_before(monkeypatch):
 
 def test_completion_check_v2_also_refuses_a_failed_publish(monkeypatch):
     _one_task_batch()
+    download_batches['b1']['active_count'] = 0
     monkeypatch.setattr(lc, '_publish_atomic_album', lambda *a, **kw: False)
     deps, _ = _build_deps()
 
@@ -900,6 +901,56 @@ def test_completion_check_v2_also_refuses_a_failed_publish(monkeypatch):
 
     assert result is False
     assert download_batches['b1'].get('phase') != 'complete'
+
+
+def test_atomic_publish_failure_exhaustion_marks_batch_error(monkeypatch):
+    """After _ATOMIC_PUBLISH_MAX_ATTEMPTS publish failures, on_download_completed
+    must force the batch to 'error' phase and stamp completion_time so it never
+    blocks wishlist processing permanently (#1277)."""
+    _one_task_batch()
+    monkeypatch.setattr(lc, '_publish_atomic_album', lambda *a, **kw: False)
+    deps, _ = _build_deps()
+
+    # Attempts 1 and 2: batch stays incomplete for retry
+    lc.on_download_completed('b1', 't1', True, deps)
+    assert download_batches['b1'].get('phase') != 'error'
+    assert 'completion_time' not in download_batches['b1']
+    assert download_batches['b1'].get('_atomic_publish_attempts') == 1
+
+    lc.on_download_completed('b1', 't1', True, deps)
+    assert download_batches['b1'].get('phase') != 'error'
+    assert 'completion_time' not in download_batches['b1']
+    assert download_batches['b1'].get('_atomic_publish_attempts') == 2
+
+    # Attempt 3: max attempts reached, forced to error with completion_time
+    lc.on_download_completed('b1', 't1', True, deps)
+    assert download_batches['b1'].get('phase') == 'error'
+    assert download_batches['b1'].get('completion_time') is not None
+    assert download_batches['b1'].get('_atomic_publish_attempts') == 3
+
+
+def test_completion_check_v2_atomic_publish_failure_exhaustion_marks_batch_error(monkeypatch):
+    """After _ATOMIC_PUBLISH_MAX_ATTEMPTS publish failures, check_batch_completion_v2
+    must force the batch to 'error' phase and stamp completion_time so healing loops
+    clean it up and wishlist is unblocked (#1277)."""
+    _one_task_batch()
+    download_batches['b1']['active_count'] = 0
+    monkeypatch.setattr(lc, '_publish_atomic_album', lambda *a, **kw: False)
+    deps, _ = _build_deps()
+
+    # Attempts 1 and 2: stays incomplete
+    assert lc.check_batch_completion_v2('b1', deps) is False
+    assert download_batches['b1'].get('phase') != 'error'
+    assert 'completion_time' not in download_batches['b1']
+
+    assert lc.check_batch_completion_v2('b1', deps) is False
+    assert download_batches['b1'].get('phase') != 'error'
+    assert 'completion_time' not in download_batches['b1']
+
+    # Attempt 3: max attempts reached, forced to error
+    assert lc.check_batch_completion_v2('b1', deps) is False
+    assert download_batches['b1'].get('phase') == 'error'
+    assert download_batches['b1'].get('completion_time') is not None
 
 
 # ---------------------------------------------------------------------------
