@@ -425,19 +425,16 @@ def _initial_appearance_context():
 
 @app.context_processor
 def _inject_static_cache_bust():
-    static_v = _STATIC_CACHE_BUST
-    if DEV_STATIC_NO_CACHE:
-        try:
-            static_dir = Path(app.static_folder)
-            mtimes = [
-                p.stat().st_mtime_ns
-                for p in static_dir.rglob('*')
-                if p.is_file() and p.suffix.lower() in {'.css', '.js'}
-            ]
-            if mtimes:
-                static_v = str(max(mtimes))
-        except Exception:
-            static_v = _STATIC_CACHE_BUST
+    try:
+        static_dir = Path(app.static_folder)
+        mtimes = [
+            p.stat().st_mtime_ns
+            for p in static_dir.rglob('*')
+            if p.is_file() and p.suffix.lower() in {'.css', '.js'}
+        ]
+        static_v = str(max(mtimes)) if mtimes else _STATIC_CACHE_BUST
+    except Exception:
+        static_v = _STATIC_CACHE_BUST
     return {'static_v': static_v, **_initial_appearance_context()}
 
 
