@@ -988,7 +988,6 @@ class WebUIDownloadMonitor:
                     elif retry_count < 3:
                         # Wait longer before next retry
                         return False
-
                     else:
                         # Too many retries, mark as failed
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
@@ -1251,7 +1250,7 @@ class WebUIDownloadMonitor:
         source_key = f"{username}_{filename}" if username and filename else None
         candidate_count = int(task.get('candidate_count', 0) or 0)
         candidate_index = int(task.get('current_candidate_index', 0) or 0)
-        observe_peer(username, average_bps or 0, 60)
+        observe_peer(username, average_bps or 0, tracker.window_speed()[1])
 
         # There is no known alternative left in this candidate set. Keep the
         # accepted transfer and exempt it from further speed checks rather than

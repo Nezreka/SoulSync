@@ -66,6 +66,16 @@ from core import slskd_throttle
 
 _DEFAULT_MIN_DELAY_SECONDS = 0  # 0 = disabled (preserves prior behavior)
 
+# Local caps on one search's merged results; slskd's own response limit is
+# per response, not per search, so a broad query can otherwise grow unbounded.
+_SEARCH_MAX_PEERS = 250
+_SEARCH_MAX_FILES = 20_000
+# Polls before slskd's search state is consulted; peers keep answering for a
+# while after the first burst and a "Completed" read too early loses them.
+_SEARCH_STATE_GRACE_POLLS = 15
+# Without a readable state, this many polls with nothing new ends the search.
+_SEARCH_QUIET_POLLS = 5
+
 
 def _index_transfers(downloads) -> Dict[tuple, DownloadStatus]:
     """Key slskd transfers by (username, filename) and (username, basename).
@@ -369,6 +379,34 @@ class SoulseekClient(DownloadSourcePlugin):
         return []
 
     @staticmethod
+    def _merge_search_responses(responses: List[Dict[str, Any]], responses_by_peer: Dict[str, Dict[str, Any]],
+                                seen_files: set) -> int:
+        """Fold one responses poll into the running per-peer snapshot.
+
+        slskd may reorder responses or add files to a peer's response on a
+        later poll, so peers merge by username and files dedupe by
+        (username, filename, size). Returns how many files were new.
+        """
+        new_file_count = 0
+        for response_data in responses:
+            username = response_data.get('username')
+            if not username or (username not in responses_by_peer and len(responses_by_peer) >= _SEARCH_MAX_PEERS):
+                continue
+            peer = responses_by_peer.setdefault(username, {'username': username, 'files': []})
+            peer.update({key: value for key, value in response_data.items() if key not in ('files', 'fileList')})
+            for file_data in response_data.get('files') or response_data.get('fileList') or []:
+                if not isinstance(file_data, dict):
+                    continue
+                filename = file_data.get('filename') or file_data.get('fileName') or file_data.get('path')
+                file_key = (username, filename, file_data.get('size', 0))
+                if not filename or file_key in seen_files or len(seen_files) >= _SEARCH_MAX_FILES:
+                    continue
+                seen_files.add(file_key)
+                peer['files'].append(file_data)
+                new_file_count += 1
+        return new_file_count
+
+    @staticmethod
     def _search_is_terminal(payload: Any) -> bool:
         """Use slskd's search state only when it is explicitly terminal."""
         if not isinstance(payload, dict):
@@ -670,8 +708,6 @@ class SoulseekClient(DownloadSourcePlugin):
             all_albums = []
             poll_interval = 1  # Check every 1 second for responsive updates
             last_new_poll = 0
-            max_peers = 250
-            max_files = 20_000
 
             # IMPORTANT: Poll for LONGER than slskd searches to catch all results
             # slskd timeout: how long slskd searches for
@@ -693,23 +729,7 @@ class SoulseekClient(DownloadSourcePlugin):
                 responses_data = await self._make_request('GET', f'searches/{search_id}/responses')
                 responses = self._normalize_search_responses(responses_data)
                 if responses:
-                    new_file_count = 0
-                    for response_data in responses:
-                        username = response_data.get('username')
-                        if not username or (username not in responses_by_peer and len(responses_by_peer) >= max_peers):
-                            continue
-                        peer = responses_by_peer.setdefault(username, {'username': username, 'files': []})
-                        peer.update({key: value for key, value in response_data.items() if key not in ('files', 'fileList')})
-                        for file_data in response_data.get('files') or response_data.get('fileList') or []:
-                            if not isinstance(file_data, dict):
-                                continue
-                            filename = file_data.get('filename') or file_data.get('fileName') or file_data.get('path')
-                            file_key = (username, filename, file_data.get('size', 0))
-                            if not filename or file_key in seen_files or len(seen_files) >= max_files:
-                                continue
-                            seen_files.add(file_key)
-                            peer['files'].append(file_data)
-                            new_file_count += 1
+                    new_file_count = self._merge_search_responses(responses, responses_by_peer, seen_files)
 
                     if new_file_count:
                         last_new_poll = poll_count
@@ -733,7 +753,7 @@ class SoulseekClient(DownloadSourcePlugin):
                         
                         logger.info(f"Processed results: {len(all_tracks)} tracks, {len(all_albums)} albums")
                         
-                        if len(seen_files) >= max_files or len(responses_by_peer) >= max_peers:
+                        if len(seen_files) >= _SEARCH_MAX_FILES or len(responses_by_peer) >= _SEARCH_MAX_PEERS:
                             logger.warning("Soulseek search reached local result cap (%d peers, %d files)",
                                            len(responses_by_peer), len(seen_files))
                             break
@@ -748,7 +768,7 @@ class SoulseekClient(DownloadSourcePlugin):
                 # still gets one response poll after its final additions;
                 # missing/unknown state uses the bounded quiet-period fallback,
                 # which needs at least one response to judge quiet against.
-                if poll_count >= 15 and poll_count - last_new_poll >= 2:
+                if poll_count >= _SEARCH_STATE_GRACE_POLLS and poll_count - last_new_poll >= 2:
                     try:
                         search_state = await self._make_request('GET', f'searches/{search_id}')
                     except Exception as exc:
@@ -760,8 +780,9 @@ class SoulseekClient(DownloadSourcePlugin):
                     has_search_state = isinstance(search_state, dict) and bool(
                         search_state.get('state') or search_state.get('status')
                     )
-                    if responses_by_peer and not has_search_state and poll_count - last_new_poll >= 5:
-                        logger.info("Soulseek search quiet for five polls after %d peers", len(responses_by_peer))
+                    if responses_by_peer and not has_search_state and poll_count - last_new_poll >= _SEARCH_QUIET_POLLS:
+                        logger.info("Soulseek search quiet for %d polls after %d peers",
+                                    _SEARCH_QUIET_POLLS, len(responses_by_peer))
                         break
                 
                 # Wait before next poll (unless this is the last attempt)
