@@ -28,6 +28,7 @@ from typing import Any, Callable, List, Optional, Tuple
 SRC_CACHE = "cache"
 SRC_DB = "db"
 SRC_FILE = "file"
+SRC_ISRC = "isrc"
 SRC_MUSICBRAINZ = "musicbrainz"
 SRC_NONE = None
 
@@ -84,5 +85,6 @@ __all__ = [
     "SRC_CACHE",
     "SRC_DB",
     "SRC_FILE",
+    "SRC_ISRC",
     "SRC_MUSICBRAINZ",
 ]

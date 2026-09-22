@@ -1,5 +1,6 @@
 import os
 import math
+import re
 import requests
 import time
 import threading
@@ -20,6 +21,12 @@ _LUCENE_SPECIAL = set('+-&|!(){}[]^"~*?:\\/')
 def _escape_lucene(text: str) -> str:
     """Backslash-escape Lucene special characters in a user-supplied term."""
     return ''.join('\\' + ch if ch in _LUCENE_SPECIAL else ch for ch in text)
+
+
+# ISRC (International Standard Recording Code): 2-letter country + 3-char
+# registrant + 2-digit year + 5-digit designation = 12 alphanumeric characters,
+# conventionally written upper-case (sometimes with hyphens, which we strip).
+_ISRC_RE = re.compile(r'^[A-Z0-9]{12}$')
 
 
 # Global rate limiting variables
@@ -702,3 +709,43 @@ class MusicBrainzClient:
         except Exception as e:
             logger.error(f"Error fetching recording {mbid}: {e}")
             return None
+
+    def lookup_recordings_by_isrc(self, isrc: str) -> List[Dict[str, Any]]:
+        """
+        Exact recording lookup by ISRC via MusicBrainz's ``/isrc/<ISRC>`` endpoint.
+
+        An ISRC identifies a specific recording exactly and is script/language
+        independent, unlike a text search — so this is the source of truth an
+        export waterfall reaches for once cheaper (cache/DB/file) rungs miss.
+
+        Fail-soft like ``search_recording``/``get_recording``: a malformed ISRC,
+        an unknown one (MusicBrainz 404s), or any transport error all return
+        ``[]`` rather than raise, so a caller can treat this as just another
+        waterfall rung. Honours the same shared rate limiting as every other
+        request this client makes.
+
+        Args:
+            isrc: The ISRC to look up (hyphens/case are normalized).
+
+        Returns:
+            List of recording dicts sharing that ISRC (usually 0 or 1, occasionally
+            a handful of remasters/duplicate masters).
+        """
+        code = re.sub(r'[^A-Za-z0-9]', '', str(isrc or '')).upper()
+        if not _ISRC_RE.match(code):
+            logger.debug(f"Invalid ISRC format, skipping lookup: {isrc!r}")
+            return []
+        try:
+            params = {'inc': 'artist-credits', 'fmt': 'json'}
+            response = self._get(f"/isrc/{code}", params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            recordings = data.get('recordings', [])
+
+            logger.debug(f"Found {len(recordings)} recordings for ISRC {code}")
+            return recordings
+
+        except Exception as e:
+            logger.debug(f"Error looking up ISRC {code}: {e}")
+            return []
