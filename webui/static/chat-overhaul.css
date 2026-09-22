@@ -1935,6 +1935,339 @@
     box-shadow: 0 4px 16px rgba(var(--accent-rgb, 29, 185, 84), 0.45) !important;
 }
 
+/* ── chat settings: tabbed layout ────────────────────────────────────────
+   the modal used to be one long list mixing your own stuff (avatar, sounds)
+   with server stuff (room, api keys). now a tab rail on the left, one topic
+   per panel, header and footer stay put while the panel scrolls.
+   scoped to .chat-set--tabs because the rooms/browse modals share the
+   .chat-settings-* classes above. */
+.chat-settings-modal.chat-set--tabs {
+    width: min(780px, 94%) !important;
+    height: min(620px, 90%) !important;
+    max-height: none !important;
+    overflow: hidden !important;
+}
+
+/* the shared gutter rule above would push these in, they manage their own */
+.chat-settings-modal.chat-set--tabs > .chat-set-head,
+.chat-settings-modal.chat-set--tabs > .chat-set-shell,
+.chat-settings-modal.chat-set--tabs > .chat-set-foot {
+    margin: 0 !important;
+}
+
+.chat-set-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 14px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
+}
+
+.chat-set-title {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: #fff;
+}
+
+.chat-set-x {
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-set-x:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.chat-set-shell {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.chat-set-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 188px;
+    flex-shrink: 0;
+    padding: 14px 10px;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(0, 0, 0, 0.18);
+}
+
+.chat-set-tab {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-set-tab svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.chat-set-tab:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+}
+
+.chat-set-tab--on,
+.chat-set-tab--on:hover {
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.14);
+    color: rgb(var(--accent-light-rgb, 88, 220, 134));
+}
+
+.chat-set-body {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 18px 24px 24px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--accent-rgb, 29, 185, 84), 0.3) transparent;
+}
+
+.chat-set-panel[hidden] {
+    display: none;
+}
+
+.chat-set-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* section heading inside a panel */
+.chat-set-h {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 10px 0 2px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.chat-set-panel > .chat-set-h:first-child {
+    margin-top: 0;
+}
+
+.chat-set-h-note {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.chat-set-row-title {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.chat-set-desc {
+    font-size: 12px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.48);
+}
+
+/* a toggle: text on the left, switch on the right */
+.chat-set-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.chat-set-row:hover {
+    background: rgba(255, 255, 255, 0.055);
+    border-color: rgba(255, 255, 255, 0.09);
+}
+
+.chat-set-row-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.chat-set-switch {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    width: 38px;
+    height: 22px;
+    flex-shrink: 0;
+    margin: 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    cursor: pointer;
+    transition: background 0.18s ease;
+}
+
+.chat-set-switch::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    transition: transform 0.18s ease;
+}
+
+.chat-set-switch:checked {
+    background: rgb(var(--accent-rgb, 29, 185, 84));
+}
+
+.chat-set-switch:checked::after {
+    transform: translateX(16px);
+}
+
+.chat-set-switch:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.7);
+    outline-offset: 2px;
+}
+
+/* a text/select field: label, input, hint stacked */
+.chat-set-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* the "this is you" card on the profile tab */
+.chat-set-me {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb, 29, 185, 84), 0.1), rgba(255, 255, 255, 0.02));
+    border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.18);
+}
+
+/* same portrait shape as the picker cells, avatars are rectangles */
+.chat-set-me-av {
+    width: 60px;
+    height: 80px;
+    flex-shrink: 0;
+}
+
+.chat-set-me-av .chat-av--xl {
+    border-radius: 10px;
+    font-size: 20px;
+}
+
+.chat-set-me-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.chat-set-me-name {
+    font-size: 16px;
+    font-weight: 800;
+    color: #fff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* the picker lives in a scrolling panel now, it doesn't need its own scroll */
+.chat-set--tabs .chat-avpicker {
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+}
+
+.chat-set-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(14, 18, 26, 0.95);
+    flex-shrink: 0;
+}
+
+.chat-set-foot .modal-button {
+    padding: 9px 22px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 13px;
+    min-width: 0;
+}
+
+.chat-set-foot .modal-button--primary {
+    background: linear-gradient(135deg, rgb(var(--accent-rgb, 29, 185, 84)), rgb(var(--accent-light-rgb, 88, 220, 134)));
+    color: #06130a;
+}
+
+/* narrow chat pane: the rail turns into a row of tabs across the top */
+@media (max-width: 720px) {
+    .chat-settings-modal.chat-set--tabs {
+        height: 92% !important;
+    }
+
+    .chat-set-shell {
+        flex-direction: column;
+    }
+
+    .chat-set-nav {
+        flex-direction: row;
+        width: auto;
+        overflow-x: auto;
+        padding: 8px 10px;
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .chat-set-tab {
+        width: auto;
+        white-space: nowrap;
+    }
+
+    .chat-set-body {
+        padding: 16px;
+    }
+}
+
 /* Browse Soulseek Rooms Modal */
 .chat-rooms-modal {
     width: min(640px, 94%) !important;

@@ -10329,48 +10329,145 @@
                             </div>
                             <!-- admin settings modal (cog in the room head) -->
                             <div class="chat-settings-overlay" data-chat-settings-modal hidden>
-                                <div class="chat-settings-modal">
-                                    <h3 class="chat-settings-title">Chat Settings</h3>
-                                    <label class="chat-settings-label">Community room
-                                        <input class="chat-input" data-chat-set-room type="text" maxlength="64"
-                                            placeholder="SoulSync" autocomplete="off">
-                                        <span class="chat-settings-hint">Soulseek room names are case-sensitive</span>
-                                    </label>
-                                    <label class="chat-settings-label">GIPHY API key
-                                        <input class="chat-input" data-chat-set-giphy type="password" placeholder=""
-                                            autocomplete="off">
-                                        <span class="chat-settings-hint">free at developers.giphy.com — enables GIF
-                                            search; leave blank to keep the current key</span>
-                                    </label>
-                                    <label class="chat-settings-label">filepost.dev API key
-                                        <input class="chat-input" data-chat-set-filepost type="password" placeholder=""
-                                            autocomplete="off">
-                                        <span class="chat-settings-hint">free at filepost.dev — enables file sharing in
-                                            chat; leave blank to keep the current key</span>
-                                    </label>
-                                    <label class="chat-settings-label">Shared files expire after
-                                        <select class="chat-input" data-chat-set-filepost-expiry>
-                                            <option value="">Never (permanent link)</option>
-                                            <option value="24h">24 hours</option>
-                                            <option value="7d">7 days</option>
-                                            <option value="30d">30 days</option>
-                                        </select>
-                                    </label>
-                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-autojoin>
-                                        Auto-join the community room</label>
-                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-membersend>
-                                        Let non-admin profiles send messages</label>
-                                    <label class="chat-settings-label">Your avatar
-                                        <span class="chat-settings-hint" data-chat-avwho></span></label>
-                                    <div class="chat-avpicker" data-chat-avpicker></div>
-                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-ping>
-                                        Play a sound when someone mentions or replies to me</label>
-                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-np>
-                                        Share what I'm playing in the room (everyone in the Soulseek room can see
-                                        it)</label>
-                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-autoprove>
-                                        Auto-answer "prove you're human" download challenges</label>
-                                    <div class="chat-settings-actions">
+                                <div class="chat-settings-modal chat-set--tabs" role="dialog" aria-modal="true"
+                                    aria-labelledby="chat-set-title">
+                                    <div class="chat-set-head">
+                                        <h3 class="chat-set-title" id="chat-set-title">Chat settings</h3>
+                                        <button type="button" class="chat-set-x" data-chat-settings-cancel
+                                            aria-label="Close">&times;</button>
+                                    </div>
+                                    <div class="chat-set-shell">
+                                        <nav class="chat-set-nav" role="tablist" aria-label="Chat settings sections">
+                                            <button type="button" class="chat-set-tab chat-set-tab--on" role="tab"
+                                                data-chat-settab="profile">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                    stroke-linecap="round" stroke-linejoin="round">
+                                                    <circle cx="12" cy="8" r="4" />
+                                                    <path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" />
+                                                </svg>Profile</button>
+                                            <button type="button" class="chat-set-tab" role="tab"
+                                                data-chat-settab="alerts">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                    stroke-linecap="round" stroke-linejoin="round">
+                                                    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                                                    <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+                                                </svg>Notifications</button>
+                                            <button type="button" class="chat-set-tab" role="tab"
+                                                data-chat-settab="room">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                    stroke-linecap="round" stroke-linejoin="round">
+                                                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                                </svg>Room</button>
+                                            <button type="button" class="chat-set-tab" role="tab"
+                                                data-chat-settab="integrations">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                    stroke-linecap="round" stroke-linejoin="round">
+                                                    <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" />
+                                                    <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+                                                </svg>Integrations</button>
+                                        </nav>
+                                        <div class="chat-set-body">
+                                            <section class="chat-set-panel" data-chat-setpanel="profile">
+                                                <div class="chat-set-me">
+                                                    <span class="chat-set-me-av" data-chat-avpreview></span>
+                                                    <div class="chat-set-me-text">
+                                                        <div class="chat-set-me-name" data-chat-avname></div>
+                                                        <div class="chat-set-desc" data-chat-avwho></div>
+                                                    </div>
+                                                </div>
+                                                <div class="chat-set-h">Avatar
+                                                    <span class="chat-set-h-note">saves as soon as you pick one</span>
+                                                </div>
+                                                <div class="chat-avpicker" data-chat-avpicker></div>
+                                            </section>
+                                            <section class="chat-set-panel" data-chat-setpanel="alerts" hidden>
+                                                <div class="chat-set-h">Notifications</div>
+                                                <label class="chat-set-row">
+                                                    <span class="chat-set-row-text">
+                                                        <span class="chat-set-row-title">Mention sound</span>
+                                                        <span class="chat-set-desc">Play a sound when someone mentions
+                                                            or replies to you. This browser only.</span>
+                                                    </span>
+                                                    <input type="checkbox" class="chat-set-switch" data-chat-set-ping>
+                                                </label>
+                                                <div class="chat-set-h">Privacy</div>
+                                                <label class="chat-set-row">
+                                                    <span class="chat-set-row-text">
+                                                        <span class="chat-set-row-title">Share what I'm playing</span>
+                                                        <span class="chat-set-desc">Everyone in the Soulseek room can
+                                                            see it. This browser only.</span>
+                                                    </span>
+                                                    <input type="checkbox" class="chat-set-switch" data-chat-set-np>
+                                                </label>
+                                            </section>
+                                            <section class="chat-set-panel" data-chat-setpanel="room" hidden>
+                                                <div class="chat-set-h">Community room</div>
+                                                <label class="chat-set-field">
+                                                    <span class="chat-set-row-title">Room name</span>
+                                                    <input class="chat-input" data-chat-set-room type="text" maxlength="64"
+                                                        placeholder="SoulSync" autocomplete="off">
+                                                    <span class="chat-set-desc">Soulseek room names are
+                                                        case-sensitive.</span>
+                                                </label>
+                                                <label class="chat-set-row">
+                                                    <span class="chat-set-row-text">
+                                                        <span class="chat-set-row-title">Auto-join</span>
+                                                        <span class="chat-set-desc">Join the community room when
+                                                            SoulSync connects.</span>
+                                                    </span>
+                                                    <input type="checkbox" class="chat-set-switch" data-chat-set-autojoin>
+                                                </label>
+                                                <label class="chat-set-row">
+                                                    <span class="chat-set-row-text">
+                                                        <span class="chat-set-row-title">Let other profiles send</span>
+                                                        <span class="chat-set-desc">Non-admin profiles can post as
+                                                            this Soulseek account.</span>
+                                                    </span>
+                                                    <input type="checkbox" class="chat-set-switch"
+                                                        data-chat-set-membersend>
+                                                </label>
+                                                <div class="chat-set-h">Soulseek</div>
+                                                <label class="chat-set-row">
+                                                    <span class="chat-set-row-text">
+                                                        <span class="chat-set-row-title">Answer "prove you're
+                                                            human"</span>
+                                                        <span class="chat-set-desc">Auto-answer the challenges some
+                                                            users send before a download.</span>
+                                                    </span>
+                                                    <input type="checkbox" class="chat-set-switch"
+                                                        data-chat-set-autoprove>
+                                                </label>
+                                            </section>
+                                            <section class="chat-set-panel" data-chat-setpanel="integrations" hidden>
+                                                <div class="chat-set-h">GIFs</div>
+                                                <label class="chat-set-field">
+                                                    <span class="chat-set-row-title">GIPHY API key</span>
+                                                    <input class="chat-input" data-chat-set-giphy type="password"
+                                                        placeholder="" autocomplete="off">
+                                                    <span class="chat-set-desc">Free at developers.giphy.com. Enables
+                                                        GIF search. Leave blank to keep the current key.</span>
+                                                </label>
+                                                <div class="chat-set-h">File sharing</div>
+                                                <label class="chat-set-field">
+                                                    <span class="chat-set-row-title">filepost.dev API key</span>
+                                                    <input class="chat-input" data-chat-set-filepost type="password"
+                                                        placeholder="" autocomplete="off">
+                                                    <span class="chat-set-desc">Free at filepost.dev. Enables file
+                                                        sharing in chat. Leave blank to keep the current key.</span>
+                                                </label>
+                                                <label class="chat-set-field">
+                                                    <span class="chat-set-row-title">Shared files expire after</span>
+                                                    <select class="chat-input" data-chat-set-filepost-expiry>
+                                                        <option value="">Never (permanent link)</option>
+                                                        <option value="24h">24 hours</option>
+                                                        <option value="7d">7 days</option>
+                                                        <option value="30d">30 days</option>
+                                                    </select>
+                                                </label>
+                                            </section>
+                                        </div>
+                                    </div>
+                                    <div class="chat-set-foot">
                                         <button type="button" class="modal-button modal-button--secondary"
                                             data-chat-settings-cancel>Cancel</button>
                                         <button type="button" class="modal-button modal-button--primary"

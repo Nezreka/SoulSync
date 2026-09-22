@@ -6690,6 +6690,19 @@
 
     var _gifTimer = null;
 
+    function _setSettingsTab(name) {
+        var tabs = document.querySelectorAll('[data-chat-settab]');
+        for (var i = 0; i < tabs.length; i++) {
+            var on = tabs[i].getAttribute('data-chat-settab') === name;
+            tabs[i].classList.toggle('chat-set-tab--on', on);
+            tabs[i].setAttribute('aria-selected', on ? 'true' : 'false');
+        }
+        var panels = document.querySelectorAll('[data-chat-setpanel]');
+        for (var j = 0; j < panels.length; j++) {
+            panels[j].hidden = panels[j].getAttribute('data-chat-setpanel') !== name;
+        }
+    }
+
     function openSettings() {
         var overlay = q('[data-chat-settings-modal]');
         if (!overlay) return;
@@ -6729,6 +6742,7 @@
                 try { localStorage.setItem('chat_avatar', String(_avatarId(b.avatar))); } catch (err) { /* ignore */ }
             }
             renderAvatarPicker();
+            _setSettingsTab('profile');     // always open on the avatar
             overlay.hidden = false;
         });
     }
@@ -7631,6 +7645,11 @@
                 '<img src="/static/avatar/' + i + '.png" alt="" loading="lazy"></button>');
         }
         host.innerHTML = cells.join('');
+        // the big "this is you" card at the top of the profile tab
+        var prev = q('[data-chat-avpreview]');
+        if (prev) prev.innerHTML = _avatarHtml(state.selfName || '?', cur, 'chat-av--xl');
+        var nm = q('[data-chat-avname]');
+        if (nm) nm.textContent = state.selfName || 'You';
         // Show which Soulseek identity the picker is using. Reserved avatars are
         // gated on this exact name, so when one is missing this line says why
         // instead of the option just silently not being there.
@@ -9129,6 +9148,8 @@
                 if (first && (first.username || first.name)) openPm(first.username || first.name);
                 return;
             }
+            t = e.target.closest('[data-chat-settab]');
+            if (t) { _setSettingsTab(t.getAttribute('data-chat-settab')); return; }
             t = e.target.closest('[data-chat-settings-save]');
             if (t) { saveSettings(); return; }
             t = e.target.closest('[data-chat-settings-cancel]');
@@ -9942,6 +9963,8 @@
 
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
+                var setM = q('[data-chat-settings-modal]');
+                if (setM && !setM.hidden) { setM.hidden = true; }
                 var bm = q('[data-chat-browse-modal]');
                 if (bm && !bm.hidden) { closeBrowse(); }
                 var socD = q('[data-chat-social-drawer]');
