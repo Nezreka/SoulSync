@@ -261,6 +261,96 @@ def test_manual_search_soundcloud_link_errors_when_not_connected(manual_search_c
     ctx['plugins']['soundcloud'].search.assert_not_called()
 
 
+def _wire_deezer_link_plugin(ctx, *, track=None, album=None):
+    """Give the mocked Deezer plugin real get_track / get_album so a pasted
+    link resolves instead of MagicMock-faking a payload."""
+    plugin = ctx['plugins']['deezer']
+    plugin.get_track = MagicMock(return_value=track)
+    plugin.get_album = MagicMock(return_value=album)
+    plugin.get_track_result = MagicMock(return_value=None)
+    return plugin
+
+
+def test_manual_search_deezer_track_link_forces_deezer_source(manual_search_client):
+    """A pasted Deezer track URL resolves to artist+title and searches Deezer
+    only — not a text search of the raw URL across every source."""
+    client, ctx = manual_search_client
+    plugin = _wire_deezer_link_plugin(ctx, track={
+        'id': 2914419581,
+        'title': 'Raccoons (Gaudi & Don Letts Remix)',
+        'artist': {'name': 'Caravan Palace'},
+    })
+
+    url = 'https://www.deezer.com/us/track/2914419581'
+    resp = client.post('/api/downloads/task/task-abc/manual-search',
+                       json={'query': url, 'source': 'all'})
+    assert resp.status_code == 200
+    msgs = _consume_ndjson(resp)
+    header = next(m for m in msgs if m.get('type') == 'header')
+    assert header['sources_queried'] == ['deezer']
+    assert header['query'] == 'Caravan Palace Raccoons (Gaudi & Don Letts Remix)'
+    plugin.search.assert_called()
+    ctx['plugins']['soulseek'].search.assert_not_called()
+
+
+def test_manual_search_deezer_album_link_resolves_to_track(manual_search_client):
+    """Deezer remix singles are album pages. Pasting the album URL must
+    resolve to the album's track and search Deezer for that title."""
+    client, ctx = manual_search_client
+    plugin = _wire_deezer_link_plugin(
+        ctx,
+        album={
+            'id': 620787111,
+            'title': 'Raccoons (Gaudi & Don Letts Remix)',
+            'artist': {'name': 'Caravan Palace'},
+            'tracks': {'data': [
+                {'id': 2914419581, 'title': 'Raccoons (Gaudi & Don Letts Remix)'},
+            ]},
+        },
+        track={
+            'id': 2914419581,
+            'title': 'Raccoons (Gaudi & Don Letts Remix)',
+            'artist': {'name': 'Caravan Palace'},
+        },
+    )
+
+    url = 'https://www.deezer.com/us/album/620787111'
+    resp = client.post('/api/downloads/task/task-abc/manual-search',
+                       json={'query': url, 'source': 'all'})
+    assert resp.status_code == 200
+    msgs = _consume_ndjson(resp)
+    header = next(m for m in msgs if m.get('type') == 'header')
+    assert header['sources_queried'] == ['deezer']
+    assert header['query'] == 'Caravan Palace Raccoons (Gaudi & Don Letts Remix)'
+    plugin.get_album.assert_called_once_with('620787111')
+    plugin.get_track.assert_called_once_with('2914419581')
+    plugin.search.assert_called()
+
+
+def test_manual_search_deezer_link_errors_when_not_connected(manual_search_client):
+    """A Deezer link with Deezer not in the available sources → clear 400,
+    not a useless text search of the raw URL."""
+    client, ctx = manual_search_client
+    from core.settings import config_manager
+    original = config_manager.get
+
+    def _cfg(key, default=None):
+        if key == 'download_source.mode':
+            return 'hybrid'
+        if key == 'download_source.hybrid_order':
+            return ['soulseek', 'youtube']
+        return original(key, default)
+    ctx['config_get_setter'](_cfg)
+
+    resp = client.post(
+        '/api/downloads/task/task-abc/manual-search',
+        json={'query': 'https://www.deezer.com/us/album/620787111', 'source': 'all'},
+    )
+    assert resp.status_code == 400
+    assert 'deezer' in resp.get_data(as_text=True).lower()
+    ctx['plugins']['soulseek'].search.assert_not_called()
+
+
 def test_manual_search_validates_query_length(manual_search_client):
     """Empty / 1-char query returns 400 — frontend hint says ≥2 chars."""
     client, _ctx = manual_search_client

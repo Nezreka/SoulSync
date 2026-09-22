@@ -142,7 +142,9 @@ export function ManualMatchModal({
             placeholder={
               service === 'musicbrainz'
                 ? `Search ${label}… or paste a MusicBrainz ID/URL`
-                : `Search ${label}...`
+                : service === 'deezer'
+                  ? `Search ${label}… or paste a Deezer URL`
+                  : `Search ${label}...`
             }
             value={query}
             autoFocus
