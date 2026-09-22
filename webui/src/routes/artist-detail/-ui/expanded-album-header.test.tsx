@@ -34,6 +34,9 @@ function renderHeader(album: EnhancedAlbum = ALBUM, isAdmin = true) {
   );
 }
 
+/** the admin's secondary actions live behind the More button now. */
+const openMore = () => fireEvent.click(document.querySelector('.lib-more') as HTMLElement);
+
 const ACTIONS = [
   'openAlbumArtPicker',
   'openManualMatchModal',
@@ -55,24 +58,52 @@ afterEach(() => {
 });
 
 describe('the header body', () => {
-  it('shows the title, detail line, genres and id badges', () => {
+  it('shows the type eyebrow, title, detail line and genres', () => {
     renderHeader();
+    expect(document.querySelector('.lib-eyebrow')?.textContent).toBe('album');
     expect(document.querySelector('.enhanced-expanded-title')?.textContent).toBe('SAW 85-92');
     expect(document.querySelector('.enhanced-expanded-meta')?.textContent).toBe(
-      '1992 · 1 track · 5:00 · Apollo · ALBUM',
+      '1992 · 1 track · 5:00 · Apollo',
     );
     expect([...document.querySelectorAll('.enhanced-genre-tag')].map((n) => n.textContent)).toEqual(
       ['ambient', 'idm'],
     );
-    const badge = document.querySelector('.enhanced-id-badge') as HTMLAnchorElement;
-    expect(badge.getAttribute('href')).toBe('https://open.spotify.com/album/sp1');
-    expect(badge.getAttribute('rel')).toBe('noopener noreferrer');
   });
 
-  it('omits the genre and id rows entirely when there are none', () => {
+  it('puts the external page behind the matched source dot', () => {
+    // the id badge row is gone; the link lives in the source's menu
+    renderHeader();
+    fireEvent.click(document.querySelector('.enhanced-match-chip[data-service="spotify"]')!);
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    fireEvent.click(screen.getByText('Open on Spotify'));
+    expect(open).toHaveBeenCalledWith(
+      'https://open.spotify.com/album/sp1',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    open.mockRestore();
+  });
+
+  it('omits the genre row entirely when there are none', () => {
     renderHeader({ id: 7, title: 'X', tracks: [] });
     expect(document.querySelector('.enhanced-expanded-genres')).toBeNull();
-    expect(document.querySelector('.enhanced-expanded-ids')).toBeNull();
+  });
+
+  it('plays the owned tracks from the header, skipping missing rows', () => {
+    window.playTrackList = vi.fn() as never;
+    try {
+      renderHeader({
+        ...ALBUM,
+        tracks: [{ id: 1, title: 'Xtal', track_number: 1, file_path: 'x.flac' }],
+        missing_tracks: [{ title: 'Tha', track_number: 2, source: 'spotify', track_id: 's2' }],
+      });
+      fireEvent.click(screen.getByText('Play'));
+      const [tracks, title] = (window.playTrackList as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(title).toBe('SAW 85-92');
+      expect(tracks.map((t: { title: string }) => t.title)).toEqual(['Xtal']);
+    } finally {
+      delete window.playTrackList;
+    }
   });
 
   it('HIDES a broken cover rather than removing it', () => {
@@ -104,13 +135,16 @@ describe('the header body', () => {
   });
 });
 
-describe('match chips', () => {
-  it('renders one per service with its status', () => {
+describe('source dots', () => {
+  it('renders one per service with its state', () => {
     renderHeader();
     const chips = [...document.querySelectorAll('.enhanced-match-chip')];
     expect(chips).toHaveLength(9);
-    expect(chips[0].textContent).toBe('Spotify: matched');
-    expect(chips[1].textContent).toBe('MB: —');
+    expect(chips[0].getAttribute('data-service')).toBe('spotify');
+    expect(chips[0].className).toContain('matched');
+    expect(chips[1].getAttribute('data-service')).toBe('musicbrainz');
+    expect(chips[1].className).toContain('pending');
+    expect(document.querySelector('.lib-sources-summary')?.textContent).toBe('1 of 9 matched');
   });
 
   it('opens the manual matcher for its own service', () => {
@@ -126,6 +160,7 @@ describe('match chips', () => {
     try {
       renderHeader();
       fireEvent.click(document.querySelectorAll('.enhanced-match-chip')[1]);
+      fireEvent.click(screen.getByText('Find on MusicBrainz…'));
       expect(screen.getByText('Match album on MusicBrainz')).toBeTruthy();
       expect(
         (document.querySelector('.enhanced-match-search-input') as HTMLInputElement).value,
@@ -135,7 +170,7 @@ describe('match chips', () => {
     }
   });
 
-  it('does not let an ID BADGE click bubble into the row toggle', () => {
+  it('does not let a source MENU click bubble into the row toggle', () => {
     // Following the link would otherwise also collapse the album underneath it.
     const onRowClick = vi.fn();
     render(
@@ -152,7 +187,10 @@ describe('match chips', () => {
         />
       </div>,
     );
-    fireEvent.click(document.querySelector('.enhanced-id-badge') as HTMLElement);
+    fireEvent.click(document.querySelector('.enhanced-match-chip') as HTMLElement);
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    fireEvent.click(screen.getByText('Open on Spotify'));
+    open.mockRestore();
     expect(onRowClick).not.toHaveBeenCalled();
   });
 
@@ -181,8 +219,21 @@ describe('admin actions', () => {
   it('are hidden for a non-admin, but Report Issue stays', () => {
     renderHeader(ALBUM, false);
     expect(document.querySelector('.enhanced-enrich-wrap')).toBeNull();
+    expect(document.querySelector('.lib-more')).toBeNull();
     expect(document.querySelector('.enhanced-delete-album-btn')).toBeNull();
     expect(document.querySelector('.enhanced-report-issue-btn')).not.toBeNull();
+    // the source dots keep the external link for them, but never a rematch
+    fireEvent.click(document.querySelector('.enhanced-match-chip')!);
+    expect([...document.querySelectorAll('.lib-menu-item')].map((n) => n.textContent)).toEqual([
+      'Open on Spotify',
+    ]);
+  });
+
+  it('an admin reports from the More menu', () => {
+    renderHeader();
+    openMore();
+    fireEvent.click(document.querySelector('.enhanced-report-issue-btn') as HTMLElement);
+    expect(window.showReportIssueModal).toHaveBeenCalledWith('album', 7, 'SAW 85-92', 'Aphex Twin');
   });
 
   it('reports an issue with the album and its artist', () => {
@@ -193,11 +244,10 @@ describe('admin actions', () => {
 
   it('opens the enrich menu on click and closes it after picking a source', () => {
     renderHeader();
-    const menu = document.querySelector('.enhanced-enrich-menu') as HTMLElement;
-    expect(menu.className).not.toContain('visible');
+    expect(document.querySelector('.enhanced-enrich-menu-item')).toBeNull();
 
     fireEvent.click(document.querySelector('.enhanced-enrich-btn') as HTMLElement);
-    expect(menu.className).toContain('visible');
+    expect(document.querySelectorAll('.enhanced-enrich-menu-item').length).toBeGreaterThan(3);
 
     // Picking a source fires the local enrichment request (no window bridge).
     const fetchSpy = vi.fn(
@@ -216,7 +266,7 @@ describe('admin actions', () => {
         artist_name: 'Aphex Twin',
         artist_id: 42,
       });
-      expect(menu.className).not.toContain('visible');
+      expect(document.querySelector('.enhanced-enrich-menu-item')).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -227,6 +277,7 @@ describe('admin actions', () => {
     // Write-tags is local now (writeAlbumTags's port): the fixture's tracks
     // have no file_path, so it refuses instead of opening the batch modal.
     window.showToast = vi.fn() as never;
+    openMore();
     fireEvent.click(document.querySelector('.enhanced-write-tags-album-btn') as HTMLElement);
     expect(window.showToast).toHaveBeenCalledWith('No tracks with files in this album', 'error');
     delete window.showToast;
@@ -246,6 +297,7 @@ describe('admin actions', () => {
     vi.unstubAllGlobals();
 
     // Delete now opens the LOCAL two-option dialog (deleteLibraryAlbum's port).
+    openMore();
     fireEvent.click(document.querySelector('.enhanced-delete-album-btn') as HTMLElement);
     expect(screen.getByText('Delete Album', { selector: 'h3' })).toBeTruthy();
   });
@@ -262,6 +314,7 @@ describe('admin actions', () => {
         title: 'SAW 85-92',
         tracks: [{ id: 1, file_path: '/music/a.flac' }, { id: 2 }],
       });
+      openMore();
       fireEvent.click(document.querySelector('.enhanced-write-tags-album-btn') as HTMLElement);
       expect(document.getElementById('batch-tag-preview-title')?.textContent).toBe('SAW 85-92');
       // Only the track that actually has a file goes into the batch (5449).
@@ -288,15 +341,23 @@ describe('admin actions', () => {
     window.showToast = vi.fn() as never;
     try {
       renderHeader();
-      const rg = document.querySelector('.enhanced-rg-album-btn') as HTMLElement;
-      fireEvent.click(rg);
-      expect(rg.textContent).toBe('♫ Analyzing…');
+      openMore();
+      fireEvent.click(document.querySelector('.enhanced-rg-album-btn') as HTMLElement);
+      // the menu closes on pick; reopening shows the busy label until onDone
+      openMore();
+      expect(document.querySelector('.enhanced-rg-album-btn')?.textContent).toBe(
+        'Analyzing ReplayGain…',
+      );
       expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/album/7/analyze-replaygain');
       // A refused job re-enables the button via onDone.
       await waitFor(() =>
         expect(window.showToast).toHaveBeenCalledWith('ReplayGain: no files', 'error'),
       );
-      await waitFor(() => expect(rg.textContent).toBe('♫ ReplayGain'));
+      await waitFor(() =>
+        expect(document.querySelector('.enhanced-rg-album-btn')?.textContent).toBe(
+          'Analyze ReplayGain',
+        ),
+      );
     } finally {
       vi.unstubAllGlobals();
       delete window.showToast;
@@ -321,9 +382,12 @@ describe('admin actions', () => {
     window.registerArtistDownload = vi.fn() as never;
     try {
       renderHeader();
-      const redownload = document.querySelector('.enhanced-redownload-album-btn') as HTMLElement;
-      fireEvent.click(redownload);
-      expect(redownload.textContent).toBe('Loading...');
+      openMore();
+      fireEvent.click(document.querySelector('.enhanced-redownload-album-btn') as HTMLElement);
+      openMore();
+      expect(document.querySelector('.enhanced-redownload-album-btn')?.textContent).toBe(
+        'Loading…',
+      );
       await waitFor(() => expect(window.openDownloadMissingModalForArtistAlbum).toHaveBeenCalled());
       const url = String(fetchSpy.mock.calls[0]?.[0]);
       expect(url).toContain('/api/album/sp1/tracks');
@@ -333,7 +397,11 @@ describe('admin actions', () => {
       expect(args?.[0]).toBe('library_redownload_sp1');
       expect(args?.[1]).toBe('[Aphex Twin] SAW 85-92');
       expect(window.registerArtistDownload).toHaveBeenCalled();
-      await waitFor(() => expect(redownload.textContent).toBe('↻ Redownload'));
+      await waitFor(() =>
+        expect(document.querySelector('.enhanced-redownload-album-btn')?.textContent).toBe(
+          'Redownload album',
+        ),
+      );
     } finally {
       vi.unstubAllGlobals();
       delete window.openDownloadMissingModalForArtistAlbum;
@@ -344,6 +412,7 @@ describe('admin actions', () => {
   it('survives a handler that is not loaded rather than throwing', () => {
     for (const action of ACTIONS) delete window[action];
     renderHeader();
+    openMore();
     fireEvent.click(document.querySelector('.enhanced-delete-album-btn') as HTMLElement);
   });
 });

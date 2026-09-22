@@ -138,7 +138,9 @@ const OTHER_SECTION_LABELS: Record<string, string> = {
  * common case and a greatest-hits-heavy artist could have several sitting in
  * the library with no way to see them here.
  */
-export function enhancedSectionsFor(albums: EnhancedAlbum[] = []): { type: string; label: string }[] {
+export function enhancedSectionsFor(
+  albums: EnhancedAlbum[] = [],
+): { type: string; label: string }[] {
   const known = new Set(ENHANCED_SECTIONS.map((s) => s.type));
   const extras: { type: string; label: string }[] = [];
   const seen = new Set<string>();
@@ -334,4 +336,67 @@ export function bulkEditUpdates(values: BulkEditValues): Record<string, unknown>
 /** "Batch Edit 3 Tracks" — singular for one. */
 export function bulkEditTitle(count: number): string {
   return `Batch Edit ${count} Track${count !== 1 ? 's' : ''}`;
+}
+
+/** formats that carry the full signal; everything else counts as lossy. */
+const LOSSLESS_FORMATS = new Set(['FLAC', 'WAV', 'AIFF', 'AIF', 'APE', 'ALAC', 'WV', 'DSF']);
+
+export interface QualityBreakdown {
+  /** 0-100, rounded; 0 when nothing has a file. */
+  losslessPercent: number;
+  lossless: number;
+  lossy: number;
+  total: number;
+  /** "74% lossless", or "no files" when the library has no paths at all. */
+  label: string;
+}
+
+/**
+ * the one number the artist card leads with: how much of what you own is
+ * lossless. computed from the same per-format counts the badge row shows so
+ * the two can never disagree.
+ */
+export function qualityBreakdown(badges: EnhancedFormatBadge[]): QualityBreakdown {
+  let lossless = 0;
+  let lossy = 0;
+  for (const badge of badges) {
+    if (LOSSLESS_FORMATS.has(badge.format)) lossless += badge.count;
+    else lossy += badge.count;
+  }
+  const total = lossless + lossy;
+  const losslessPercent = total ? Math.round((lossless / total) * 100) : 0;
+  return {
+    losslessPercent,
+    lossless,
+    lossy,
+    total,
+    label: total ? `${losslessPercent}% lossless` : 'no files',
+  };
+}
+
+export interface StatPart {
+  value: string | number;
+  label: string;
+}
+
+/**
+ * the stats as a sentence rather than five tiles: "3 albums · 2 EPs · 1 single
+ * · 46 tracks · 2h 46m". a zero bucket is dropped, singulars read as words, and
+ * the duration carries no label because the unit is in the value.
+ */
+export function statsSentenceParts(stats: EnhancedStats): StatPart[] {
+  const parts: StatPart[] = [];
+  const word = (n: number, one: string, many: string) => (n === 1 ? one : many);
+  const get = (label: string) => Number(stats.items.find((i) => i.label === label)?.value ?? 0);
+  const albums = get('Albums');
+  const eps = get('EPs');
+  const singles = get('Singles');
+  const tracks = get('Tracks');
+  if (albums) parts.push({ value: albums, label: word(albums, 'album', 'albums') });
+  if (eps) parts.push({ value: eps, label: word(eps, 'EP', 'EPs') });
+  if (singles) parts.push({ value: singles, label: word(singles, 'single', 'singles') });
+  parts.push({ value: tracks, label: word(tracks, 'track', 'tracks') });
+  const duration = stats.items.find((i) => i.label === 'Duration')?.value;
+  if (duration && duration !== '0m') parts.push({ value: duration, label: '' });
+  return parts;
 }

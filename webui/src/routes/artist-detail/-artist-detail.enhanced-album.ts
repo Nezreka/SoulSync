@@ -372,7 +372,8 @@ export function expandedHeaderDetails(album: EnhancedAlbum, rows: EnhancedTrack[
   if (durationMs > 0) details.push(formatDurationMs(durationMs));
 
   if (album.label) details.push(String(album.label));
-  if (album.record_type) details.push(String(album.record_type).toUpperCase());
+  // the release type used to trail here in caps; the header shows it as an
+  // eyebrow above the title now, so it no longer repeats in the line
 
   return details.join(' · ');
 }
@@ -686,8 +687,9 @@ export interface TrackColumn {
 /**
  * The track table's columns.
  *
- * An admin gets a leading select-all cell (not in this list), write-tag and
- * delete columns; everyone else gets a single report column instead.
+ * An admin gets a leading select-all cell (not in this list) and an actions
+ * column that holds the per-track menu; everyone else gets a report column
+ * instead. the write-tag column is gone: its buttons live in the row menu now.
  *
  * The header's admin `col-delete` does NOT match the body's
  * `col-track-actions` — verbatim from the vanilla, where the two drifted.
@@ -698,19 +700,14 @@ export function trackColumns(admin: boolean): TrackColumn[] {
     { label: '#', cls: 'col-num', sortField: 'track_number' },
     { label: 'Disc', cls: 'col-disc', sortField: 'disc_number' },
     { label: 'Title', cls: 'col-title', sortField: 'title' },
-    { label: 'Duration', cls: 'col-duration', sortField: 'duration' },
+    { label: 'Time', cls: 'col-duration', sortField: 'duration' },
     { label: 'Format', cls: 'col-format', sortField: 'format' },
     { label: 'Bitrate', cls: 'col-bitrate', sortField: 'bitrate' },
     { label: 'BPM', cls: 'col-bpm', sortField: 'bpm' },
     { label: 'File', cls: 'col-path' },
-    { label: 'Match', cls: 'col-match' },
+    { label: 'Sources', cls: 'col-match' },
     { label: '', cls: 'col-queue' },
-    ...(admin
-      ? [
-          { label: '', cls: 'col-writetag' },
-          { label: '', cls: 'col-delete' },
-        ]
-      : [{ label: '', cls: 'col-report' }]),
+    admin ? { label: '', cls: 'col-delete' } : { label: '', cls: 'col-report' },
     { label: '', cls: 'col-mobile-actions' },
   ];
 }
