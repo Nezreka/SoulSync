@@ -84,13 +84,13 @@ def get_current_profile_id() -> Optional[int]:
                 proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_hdr))
                 if not session.get('launch_pin_verified', False) and not proxy_authed:
                     return None
-        except Exception:
+        except Exception:  # noqa: S110 — unreadable config falls through to session/background
             pass
         try:
             sess_pid = session.get('profile_id')
             if sess_pid is not None:
                 return sess_pid
-        except Exception:
+        except Exception:  # noqa: S110 — unreadable session falls through to background override
             pass
         pid = get_background_profile()
         return pid if pid is not None else 1
@@ -128,7 +128,7 @@ def is_admin_request() -> bool:
                 proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_hdr))
                 if not session.get('launch_pin_verified', False) and not proxy_authed:
                     return False
-        except Exception:
+        except Exception:  # noqa: S110 — unreadable config falls through to profile inspection
             pass
 
         try:

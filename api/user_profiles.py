@@ -519,7 +519,7 @@ def update_profile(profile_id):
             try:
                 from core.imports.paths import reset_own_library_fallback_notifications
                 reset_own_library_fallback_notifications()
-            except Exception:
+            except Exception:  # noqa: S110 — resetting notification state is best-effort
                 pass
 
         success = database.update_profile(profile_id, **kwargs) if kwargs else True
