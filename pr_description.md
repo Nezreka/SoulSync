@@ -2,6 +2,12 @@
 
 separate music libraries and server accounts per profile, safer deep scans, and fixes for sync reporting, downloads, automations and chat. scope: the 23 commits since the 3.4.3 release commit (`7bc2650d3`).
 
+## pending fix: mp3 quality upgrades (#1270)
+
+- the finder could flag an mp3 below the selected bitrate, but import compared only extensions and discarded the better mp3 as redundant. finder-approved wishlist items now authorize a measured improvement under their assigned quality profile, without enabling force replacement for other wishlist items.
+- original filenames are reused, mp3-only targets do not accept flac replacements, and unreadable or non-improving files cannot overwrite the library. integrity and length checks remain in place; a different-format original is retired only after successful publication.
+- reproduced the failure before fixing it; the focused import, quality, wishlist and finder run passed 1,672 tests with 8 skips. final full-suite validation is pending.
+
 ## a library of your own
 
 - each profile can use its own music folder and server library (#1199), with its downloads, scans, ownership checks, watchlist and playlist folders scoped to that library. the admin stays on the shared library; another person's copy does not count as yours.

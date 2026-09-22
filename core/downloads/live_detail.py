@@ -37,7 +37,7 @@ SOURCE_LABELS = {
     "auto_import": "Auto-Import",
 }
 
-_LIVE_STATUSES = frozenset(("searching", "downloading", "queued", "post_processing"))
+_LIVE_STATUSES = frozenset(("searching", "downloading", "queued", "post_processing", "importing"))
 
 
 def resolve_source_label(username: Optional[str]) -> str:
@@ -133,6 +133,12 @@ def build_live_detail(task: Dict[str, Any], live_info: Optional[Dict[str, Any]],
             for src_key, dst_key in (("speed", "speed"), ("size", "size"), ("bytes", "bytes"), ("bytes_transferred", "bytes")):
                 if dst_key not in detail and task.get(src_key) is not None:
                     detail[dst_key] = task[src_key]
+            if task.get("held_reason"):
+                detail["held_reason"] = str(task["held_reason"])
+            elif task.get("completeness_reason"):
+                detail["held_reason"] = str(task["completeness_reason"])
+            if task.get("release_title"):
+                detail["release_title"] = str(task["release_title"])
             _add_shared_history(detail, task)
     except Exception:
         # decoration only — a malformed task must not break the status frame

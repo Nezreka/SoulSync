@@ -171,7 +171,10 @@ def group_video_files(responses: Any) -> list:
             continue
         user = resp.get("username")
         speed = resp.get("uploadSpeed", 0) or 0
-        slots = resp.get("freeUploadSlots", 0) or 0
+        # Current slskd returns a boolean; retain the old numeric field for
+        # compatibility with older releases.
+        slots = (int(bool(resp.get("hasFreeUploadSlot")))
+                 if "hasFreeUploadSlot" in resp else resp.get("freeUploadSlots", 0) or 0)
         queue = resp.get("queueLength", 0) or 0
         avail = peer_availability(slots, speed, queue)
         for f in (resp.get("files") or []):

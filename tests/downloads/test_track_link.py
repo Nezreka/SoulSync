@@ -1,6 +1,10 @@
 """Parse pasted Tidal/Qobuz track links for the manual download search (#813)."""
 
-from core.downloads.track_link import parse_download_track_link as p
+from core.downloads.track_link import (
+    parse_download_link as pl,
+    parse_download_track_link as p,
+    ParsedDownloadLink,
+)
 
 
 def test_tidal_track_url_with_region_suffix():
@@ -25,9 +29,16 @@ def test_id_with_slug_suffix():
     assert p('https://www.qobuz.com/track/555-some-slug') == ('qobuz', '555')
 
 
+def test_deezer_track_urls():
+    assert p('https://www.deezer.com/track/2914419581') == ('deezer', '2914419581')
+    assert p('https://www.deezer.com/us/track/2914419581') == ('deezer', '2914419581')
+    assert p('deezer.com/en/track/2914419581') == ('deezer', '2914419581')
+
+
 def test_non_track_links_rejected():
     assert p('https://tidal.com/album/123') is None       # album, not track
     assert p('https://tidal.com/artist/123') is None
+    assert p('https://www.deezer.com/us/album/620787111') is None  # album → parse_download_link
     assert p('https://open.spotify.com/track/abc') is None  # unsupported source
     assert p('https://example.com/track/123') is None
 
@@ -36,6 +47,24 @@ def test_garbage_rejected():
     assert p('') is None
     assert p('just some text') is None
     assert p('Habbit (T-Mass Remix)') is None
+
+
+def test_parse_download_link_deezer_album():
+    # Remix singles are published as album pages — this is the URL users paste.
+    assert pl('https://www.deezer.com/us/album/620787111') == ParsedDownloadLink(
+        'deezer', '620787111', 'album')
+    assert pl('deezer.com/album/620787111') == ParsedDownloadLink(
+        'deezer', '620787111', 'album')
+
+
+def test_parse_download_link_deezer_track():
+    assert pl('https://www.deezer.com/us/track/2914419581') == ParsedDownloadLink(
+        'deezer', '2914419581', 'track')
+
+
+def test_parse_download_link_rejects_tidal_album():
+    assert pl('https://tidal.com/album/123') is None
+    assert pl('https://www.deezer.com/artist/259767') is None
 
 
 # ── query_from_track_payload (pure per-source parsing) ──
@@ -78,6 +107,49 @@ def test_payload_non_dict_or_empty():
     assert q('tidal', None) is None
     assert q('tidal', {}) is None
     assert q('qobuz', 'garbage') is None
+
+
+def test_deezer_payload_artist_and_title():
+    raw = {'title': 'Raccoons (Gaudi & Don Letts Remix)',
+           'artist': {'name': 'Caravan Palace'}}
+    assert q('deezer', raw) == 'Caravan Palace Raccoons (Gaudi & Don Letts Remix)'
+
+
+def test_deezer_payload_appends_title_version():
+    raw = {'title': 'Raccoons', 'title_version': 'Gaudi & Don Letts Remix',
+           'artist': {'name': 'Caravan Palace'}}
+    assert q('deezer', raw) == 'Caravan Palace Raccoons (Gaudi & Don Letts Remix)'
+
+
+from core.downloads.track_link import (
+    query_from_album_payload, track_id_from_album_payload,
+)
+
+
+def test_album_payload_single_track():
+    raw = {'title': 'Raccoons (Gaudi & Don Letts Remix)',
+           'artist': {'name': 'Caravan Palace'},
+           'tracks': {'data': [{'id': 2914419581, 'title': 'Raccoons (Gaudi & Don Letts Remix)'}]}}
+    assert track_id_from_album_payload(raw) == '2914419581'
+    assert query_from_album_payload(raw) == 'Caravan Palace Raccoons (Gaudi & Don Letts Remix)'
+
+
+def test_album_payload_prefers_matching_title():
+    raw = {'tracks': {'data': [
+        {'id': 1, 'title': 'Intro'},
+        {'id': 2914419581, 'title': 'Raccoons (Gaudi & Don Letts Remix)'},
+        {'id': 3, 'title': 'Outro'},
+    ]}}
+    assert track_id_from_album_payload(raw, 'Raccoons (Gaudi & Don Letts Remix)') == '2914419581'
+
+
+def test_album_payload_falls_back_to_first_track():
+    raw = {'tracks': {'data': [
+        {'id': 11, 'title': 'A'},
+        {'id': 22, 'title': 'B'},
+    ]}}
+    assert track_id_from_album_payload(raw, 'No such track') == '11'
+    assert track_id_from_album_payload({}) is None
 
 
 # ── bubble the pasted-link track to the top (#932) ──
@@ -231,3 +303,39 @@ def test_get_track_result_survives_missing_streamable_flag(monkeypatch):
     r = client.get_track_result('296427754')
     assert r is not None
     assert linked_track_id(r) == '296427754'
+
+
+# ── DeezerDownloadClient.get_track_result: fetch by id → downloadable TrackResult ──
+
+from core.deezer_download_client import DeezerDownloadClient
+
+
+def _bare_deezer():
+    client = DeezerDownloadClient.__new__(DeezerDownloadClient)
+    client._quality = 'flac'
+    return client
+
+
+_DEEZER_TRACK = {
+    'id': 2914419581,
+    'title': 'Raccoons (Gaudi & Don Letts Remix)',
+    'duration': 273,
+    'artist': {'id': 259767, 'name': 'Caravan Palace'},
+    'album': {'id': 620787111, 'title': 'Raccoons (Gaudi & Don Letts Remix)'},
+}
+
+
+def test_deezer_get_track_result_converts_fetched_track(monkeypatch):
+    client = _bare_deezer()
+    monkeypatch.setattr(client, 'get_track', lambda tid: dict(_DEEZER_TRACK))
+    r = client.get_track_result('2914419581')
+    assert r is not None
+    assert linked_track_id(r) == '2914419581'
+    assert r.filename.startswith('2914419581||')
+    assert r.artist == 'Caravan Palace'
+
+
+def test_deezer_get_track_result_none_when_unavailable(monkeypatch):
+    client = _bare_deezer()
+    monkeypatch.setattr(client, 'get_track', lambda tid: None)
+    assert client.get_track_result('nope') is None

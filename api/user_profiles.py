@@ -497,7 +497,11 @@ def update_profile(profile_id):
             root = str(data.get('library_root') or '').strip()
             if mode == 'own':
                 if config_manager.get_active_media_server() not in ('plex', 'jellyfin'):
-                    return jsonify({'success': False, 'error': 'Own libraries require Plex or Jellyfin. Switch this profile to the shared library for Navidrome or Standalone.'}), 400
+                    existing_lib = database.get_profile_library(profile_id)
+                    is_already_own = (existing_lib.get('mode') == 'own' and
+                                      str(existing_lib.get('root') or '').strip() == root)
+                    if not is_already_own:
+                        return jsonify({'success': False, 'error': 'Own libraries require Plex or Jellyfin. Switch this profile to the shared library for Navidrome or Standalone.'}), 400
                 if not root:
                     return jsonify({'success': False, 'error': 'An own library needs an output folder'}), 400
                 shared_root = str(config_manager.get('soulseek.transfer_path', '') or '').strip().rstrip('/\\')
@@ -512,6 +516,11 @@ def update_profile(profile_id):
             library_result = database.set_profile_library(profile_id, mode, root or None)
             from core.library_scope import invalidate_library_scope_cache
             invalidate_library_scope_cache()
+            try:
+                from core.imports.paths import reset_own_library_fallback_notifications
+                reset_own_library_fallback_notifications()
+            except Exception:  # noqa: S110 — resetting notification state is best-effort
+                pass
 
         success = database.update_profile(profile_id, **kwargs) if kwargs else True
         if library_result is False:

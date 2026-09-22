@@ -2,8 +2,8 @@
 
 `attempt_download_with_candidates(task_id, candidates, track, batch_id, deps)`
 is the function the search/match pipeline calls once it has a sorted list of
-Soulseek candidates for a track. It walks the candidates by descending
-confidence and starts the first one that:
+Soulseek candidates for a track. It walks validated candidates in
+correctness-band / peer-availability order and starts the first one that:
 
 1. Hasn't been tried for this task already (`used_sources` dedup).
 2. Isn't blacklisted (user-flagged bad match).
@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from core.downloads.track_metadata_backfill import hydrate_download_metadata
+from core.downloads.peer_observation import peer_availability_key, peer_speed
 from core.runtime_state import (
     download_tasks,
     matched_context_lock,
@@ -104,6 +105,11 @@ def _preferred_version_hit(r):
 # peers use the sharing username, so they are everything else. Keep this list
 # in sync with ``core.downloads.validation._STREAMING_USERNAMES`` — imported
 # lazily would cycle (validation → candidates).
+# Soulseek candidates whose confidence is within this of the band leader are
+# equally likely to be the right file; a normal pathname's noise (a year, a
+# format tag) moves the score more than this.
+_CONFIDENCE_BAND_WIDTH = 0.08
+
 _STREAMING_USERNAMES = frozenset({
     'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'soundcloud',
     'amazon', 'torrent', 'usenet', 'lidarr',
@@ -180,12 +186,27 @@ def _quality_first_sort_key(r, targets, source_order=None):
     return (-target_idx, -src, tier) + _priority_sort_key(r)
 
 
+def _interleave_by_peer(rows):
+    """Round-robin *rows* (already best-first) across their usernames."""
+    by_peer = {}
+    for row in rows:
+        by_peer.setdefault(row.username, []).append(row)
+    ordered = []
+    while by_peer:
+        for peer in list(by_peer):
+            ordered.append(by_peer[peer].pop(0))
+            if not by_peer[peer]:
+                del by_peer[peer]
+    return ordered
+
+
 def order_candidates(candidates, *, quality_first=False, targets=None,
-                     source_order=None):
+                     source_order=None, peer_speeds=None, peer_occupancy=None):
     """Return *candidates* ordered best-first for the download walk.
 
-    ``quality_first=False`` (priority mode) → confidence-first, byte-for-byte
-    today's behaviour. ``quality_first=True`` (best-quality mode) → the user's
+    ``quality_first=False`` (priority mode) → confidence bands for Soulseek
+    peers, preserving ordinary confidence order elsewhere.
+    ``quality_first=True`` (best-quality mode) → the user's
     profile quality rank dominates, confidence/peer signals break ties.
 
     Mixed-source pools (YouTube + Soulseek from best-quality search) always
@@ -205,7 +226,56 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
     preference chooses between candidates the profile already accepted.
     """
     rows = list(candidates)
+    peer_speeds = peer_speeds or {}
+    peer_occupancy = peer_occupancy or {}
     use_quality = quality_first or _is_mixed_source_pool(rows)
+    all_soulseek = bool(rows) and all(
+        getattr(row, 'username', None)
+        and _candidate_source_name(row) == 'soulseek' for row in rows
+    )
+    if quality_first and all_soulseek and targets:
+        # Keep the user's quality ladder intact; peer availability only
+        # reorders equivalent files on the same rung and quality tier.
+        from core.quality.model import rank_candidate
+
+        groups = {}
+        for row in rows:
+            try:
+                target_index, tier = rank_candidate(row.audio_quality, targets)
+            except Exception:
+                target_index, tier = len(targets), 0.0
+            key = (_preferred_version_hit(row), -target_index, tier)
+            groups.setdefault(key, []).append(row)
+        return [row for key in sorted(groups, reverse=True)
+                for row in order_candidates(
+                    groups[key], peer_speeds=peer_speeds,
+                    peer_occupancy=peer_occupancy,
+                )]
+    if all_soulseek and not use_quality:
+        # Confidence differences smaller than a normal pathname's noise do
+        # not justify ignoring a much better peer. Keep correctness bands in
+        # order, then interleave peers within each band so one uploader with
+        # many hits cannot monopolise the retry walk.
+        ordered = []
+        remaining = sorted(rows, key=lambda row: (
+            _preferred_version_hit(row), getattr(row, 'confidence', 0) or 0,
+        ), reverse=True)
+        while remaining:
+            leader = getattr(remaining[0], 'confidence', 0) or 0
+            preferred = _preferred_version_hit(remaining[0])
+            band = [row for row in remaining if _preferred_version_hit(row) == preferred
+                    and leader - (getattr(row, 'confidence', 0) or 0) <= _CONFIDENCE_BAND_WIDTH]
+            band_ids = {id(row) for row in band}
+            remaining = [row for row in remaining if id(row) not in band_ids]
+            band.sort(key=lambda row: peer_availability_key(
+                row, peer_speeds.get(row.username),
+                occupancy=peer_occupancy.get(row.username, 0),
+            ) + (
+                getattr(row, 'quality_score', 0) or 0,
+                getattr(row, 'confidence', 0) or 0,
+            ), reverse=True)
+            ordered.extend(_interleave_by_peer(band))
+        return ordered
     if use_quality:
         key = lambda r: (
             (_preferred_version_hit(r),)
@@ -236,15 +306,12 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
     Returns True if successful, False if all candidates fail.
 
     ``quality_first`` (best-quality search mode) orders the walk by the user's
-    profile quality rank instead of confidence-first; ``quality_targets`` is the
-    profile target list used for that ranking. Defaults preserve priority-mode
-    behaviour exactly.
+    profile quality rank instead of confidence bands; ``quality_targets`` is
+    the profile target list used for that ranking.
     """
-    # Sort candidates. Priority mode: confidence-first, then peer quality —
-    # upstream Soulseek validation already considers peer speed/slots/queue when
-    # scores are close; preserve that signal instead of flattening ties back to
-    # arbitrary slskd response order. Best-quality mode: profile quality rank
-    # dominates (all candidates here already passed match filtering).
+    # Sort only validated candidates. Soulseek priority mode uses correctness
+    # bands and peer availability; best-quality mode keeps the profile ladder
+    # dominant. Mixed-source pools retain their source/profile ordering.
     source_order = None
     orch = getattr(deps, 'download_orchestrator', None) if deps else None
     if orch is not None:
@@ -263,15 +330,36 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                             else getattr(track, 'duration_ms', None))
     candidates = filter_music_candidates(candidates, expected_duration_ms=expected_duration_ms)
 
+    with tasks_lock:
+        active_peer_occupancy = {}
+        for active in download_tasks.values():
+            peer = active.get('username')
+            if (peer and peer.lower() not in _STREAMING_USERNAMES
+                    and active.get('status') in ('queued', 'downloading')):
+                active_peer_occupancy[peer] = active_peer_occupancy.get(peer, 0) + 1
+    observed_peer_speeds = {
+        candidate.username: peer_speed(candidate.username)
+        for candidate in candidates
+        if getattr(candidate, 'username', None)
+    }
     candidates = order_candidates(
         candidates, quality_first=quality_first, targets=quality_targets,
-        source_order=source_order,
+        source_order=source_order, peer_speeds=observed_peer_speeds,
+        peer_occupancy=active_peer_occupancy,
     )
     
     with tasks_lock:
         task = download_tasks.get(task_id)
         if not task:
             return False
+        slow_fallback_key = task.get('_slow_fallback_source_key')
+        if slow_fallback_key:
+            # The monitor kept this accepted-but-slow source as a failsafe.
+            # Try every alternative first, then permit this already-used source
+            # once at the very end if nothing else accepts the transfer.
+            candidates.sort(
+                key=lambda c: f"{c.username}_{c.filename}" == slow_fallback_key
+            )
         # for the live status payload (#1156): "candidate 2/14"
         task['candidate_count'] = len(candidates)
         used_sources = task.get('used_sources', set())
@@ -296,7 +384,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
             
         # Create source key to avoid duplicate attempts (like GUI)
         source_key = f"{candidate.username}_{candidate.filename}"
-        if source_key in used_sources:
+        is_slow_fallback = source_key == slow_fallback_key
+        if source_key in used_sources and not is_slow_fallback:
             logger.info(f"[Modal Worker] Skipping already tried source: {source_key}")
             continue
 
@@ -314,9 +403,18 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['used_sources'].add(source_key)
+                download_tasks[task_id].pop('_observed_speed_tracker', None)
+                if not is_slow_fallback:
+                    download_tasks[task_id].pop('_observed_speed_exempt', None)
                 logger.info(f"[Modal Worker] Marked source as used before download attempt: {source_key}")
             
-        logger.info(f"[Modal Worker] Trying candidate {candidate_index + 1}/{len(candidates)}: {candidate.filename} (Confidence: {candidate.confidence:.2f})")
+        evidence = getattr(candidate, 'soulseek_match_evidence', None)
+        identity_note = f", title via {evidence.source}" if evidence else ''
+        logger.info(
+            "[Modal Worker] Trying candidate %d/%d: %s (Confidence: %.2f%s)",
+            candidate_index + 1, len(candidates), candidate.filename,
+            candidate.confidence, identity_note,
+        )
         
         try:
             # Update task status to downloading
@@ -446,6 +544,17 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
             )
 
             if download_id:
+                if is_slow_fallback:
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id].pop('_slow_fallback_source_key', None)
+                            download_tasks[task_id].pop('_slow_fallback_speed_bps', None)
+                            download_tasks[task_id]['_observed_speed_exempt'] = True
+                    logger.warning(
+                        "[Observed Speed] Alternatives exhausted for task %s — "
+                        "continuing with retained slow candidate %s",
+                        task_id, source_key,
+                    )
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
                 context_key = deps.make_context_key(username, filename)
                 with matched_context_lock:

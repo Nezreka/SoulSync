@@ -287,6 +287,13 @@ ACTIONS: list[dict] = [
          {"key": "username", "type": "text", "label": "Username", "placeholder": "Blank = authorized Last.fm user"},
          {"key": "full", "type": "checkbox", "label": "Force full backfill", "default": False},
      ]},
+    {"type": "import_listenbrainz_listening", "label": "Import ListenBrainz Listening", "icon": "activity",
+     "description": "Pull ListenBrainz / Maloja listens into SoulSync listening history so Stats and discovery stay current.",
+     "available": True,
+     "config_fields": [
+         {"key": "username", "type": "text", "label": "Username", "placeholder": "Blank = authorized user or token user"},
+         {"key": "full", "type": "checkbox", "label": "Force full backfill", "default": False},
+     ]},
     {"type": "notify_only", "label": "Notify Only", "icon": "bell", "scope": "both", "description": "No action — just send notification", "available": True},
     # Phase 3 actions
     {"type": "start_database_update", "label": "Update Database", "icon": "database",

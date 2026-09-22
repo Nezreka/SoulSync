@@ -67,6 +67,8 @@ function stubFetch(items: ReturnType<typeof entry>[], record: Recorded[] = []) {
       const body = request.method === 'GET' ? '' : await request.clone().text();
       record.push({ method: request.method, url: request.url, body });
       const url = request.url;
+      if (/\/api\/audiobooks\/wishlist\/[^/]+\/search/.test(url) && request.method === 'POST')
+        return res({ success: true, outcome: { asin: 'B1', found: 1, grabbed: true } });
       if (url.includes('/api/audiobooks/wishlist/search'))
         return res({ success: true, summary: { checked: 2, grabbed: 1 } });
       if (url.includes('/api/audiobooks/wishlist/') && request.method === 'PATCH')
@@ -185,5 +187,45 @@ describe('audiobook wishlist tab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(record.some((r) => r.method === 'DELETE')).toBe(true));
     expect(record.find((r) => r.method === 'DELETE')?.url).toContain('/api/audiobooks/wishlist/B1');
+  });
+
+  it('quick remove corner button takes the row off the list', async () => {
+    const record = stubFetch([entry('B1', 'The Final Empire', 'failed')]);
+    renderTab();
+    await screen.findByText('The Final Empire');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove The Final Empire from wishlist' }));
+    await waitFor(() => expect(record.some((r) => r.method === 'DELETE')).toBe(true));
+    expect(record.find((r) => r.method === 'DELETE')?.url).toContain('/api/audiobooks/wishlist/B1');
+  });
+
+  it('filters books in realtime using the search input', async () => {
+    stubFetch([
+      entry('B1', 'The Final Empire', 'failed'),
+      entry('B2', 'The Way of Kings', 'wanted'),
+    ]);
+    renderTab();
+    await screen.findByText('The Final Empire');
+    await screen.findByText('The Way of Kings');
+
+    const searchInput = screen.getByRole('textbox', { name: 'Filter audiobook wishlist' });
+    fireEvent.change(searchInput, { target: { value: 'Kings' } });
+
+    expect(screen.queryByText('The Final Empire')).toBeNull();
+    expect(screen.getByText('The Way of Kings')).toBeTruthy();
+  });
+
+  it('targeted book search triggers individual search and grab', async () => {
+    const record = stubFetch([entry('B1', 'The Final Empire', 'failed')]);
+    renderTab();
+    await screen.findByText('The Final Empire');
+    fireEvent.click(screen.getByRole('button', { name: 'Search for The Final Empire now' }));
+    await waitFor(() =>
+      expect(
+        record.some(
+          (r) => r.method === 'POST' && r.url.includes('/api/audiobooks/wishlist/B1/search'),
+        ),
+      ).toBe(true),
+    );
+    await screen.findByText('Found and sent to downloads!');
   });
 });

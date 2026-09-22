@@ -211,6 +211,7 @@ def test_file_found_in_transfer_with_metadata_enhanced_skips_enhancement_and_com
         'track_info': {'name': 'Money'},
         'metadata_enhanced': True,
     }
+    matched_downloads_context['u1::song.flac'] = {'_final_processed_path': '/transfer/song.flac'}
     deps, rec = _build_deps(
         find_completed_file=lambda *a, **kw: ('/transfer/song.flac', 'transfer'),
     )
@@ -224,7 +225,7 @@ def test_file_found_in_transfer_with_metadata_enhanced_skips_enhancement_and_com
 
 def test_file_found_in_transfer_no_context_writes_nothing(monkeypatch):
     """jadux #wrong-metadata: a transfer-folder file whose identity can't be
-    verified (no context / expected filename) must not be written to AT ALL —
+    verified (no recorded import destination) must not be written to AT ALL —
     the old tag wipe could hit a neighboring track's finished file."""
     download_tasks['t1'] = {
         'status': 'post_processing',
@@ -234,6 +235,7 @@ def test_file_found_in_transfer_no_context_writes_nothing(monkeypatch):
         'metadata_enhanced': False,
     }
     monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
+    monkeypatch.setattr(pp.time, 'sleep', lambda seconds: None)
     deps, rec = _build_deps(
         find_completed_file=lambda *a, **kw: ('/transfer/song.flac', 'transfer'),
     )
@@ -241,13 +243,11 @@ def test_file_found_in_transfer_no_context_writes_nothing(monkeypatch):
     # NO writes of any kind to an unidentified transfer file
     assert not any(c[0] == 'wipe' for c in rec.calls)
     assert not any(c[0] == 'enhance' for c in rec.calls)
-    # Still completed (nothing touched, task closes out)
-    assert ('on_complete', ('b1', 't1', True), {}) in rec.calls
+    assert ('on_complete', ('b1', 't1', False), {}) in rec.calls
 
 
-def _transfer_task_with_context(title, track_number=1):
-    """Task + matched context whose expected final filename is
-    '0{track_number} - {title}.flac'."""
+def _transfer_task_with_context(title, track_number=1, final_path=None):
+    """Task and context with the importer's recorded destination."""
     download_tasks['t1'] = {
         'status': 'post_processing',
         'filename': 'remote/original.flac',
@@ -260,12 +260,13 @@ def _transfer_task_with_context(title, track_number=1):
                                    'album': 'Some Album'},
         'artist': {'name': 'Artist', 'id': 'a1'},
         'album': {'name': 'Some Album', 'id': 'al1'},
+        '_final_processed_path': final_path or f'/transfer/{track_number:02d} - {title}.flac',
     }
 
 
 def test_transfer_file_matching_expected_name_is_enhanced(monkeypatch):
     """The legit lag case (stream processor moved OUR file, flag not yet set)
-    keeps working: found name matches the context-derived expected name."""
+    keeps working: found path matches the importer's recorded destination."""
     _transfer_task_with_context('Money', track_number=1)
     monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
     deps, rec = _build_deps(
@@ -277,10 +278,8 @@ def test_transfer_file_matching_expected_name_is_enhanced(monkeypatch):
     assert ('on_complete', ('b1', 't1', True), {}) in rec.calls
 
 
-def test_transfer_file_matching_expected_stem_different_ext_is_enhanced(monkeypatch):
-    """expected_final_filename hardcodes .flac — a legit .mp3 with the same
-    stem must still pass the identity check."""
-    _transfer_task_with_context('Money', track_number=1)
+def test_transfer_file_with_different_extension_is_enhanced(monkeypatch):
+    _transfer_task_with_context('Money', track_number=1, final_path='/transfer/01 - Money.mp3')
     monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
     deps, rec = _build_deps(
         find_completed_file=lambda *a, **kw: ('/transfer/01 - Money.mp3', 'transfer'),
@@ -291,20 +290,43 @@ def test_transfer_file_matching_expected_stem_different_ext_is_enhanced(monkeypa
 
 
 def test_transfer_file_of_another_track_is_never_tagged(monkeypatch):
-    """THE jadux incident: this task's context says '01 - 0bpm.flac' but the
-    finder handed back a different track's imported file ('01 - Bimo.flac').
-    Writing would stamp 0bpm's metadata into Bimo's file — must refuse."""
-    _transfer_task_with_context('0bpm', track_number=1)
+    """A fuzzy match to another track must not be tagged or completed."""
+    _transfer_task_with_context('Jaw Breaker', track_number=233)
     monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
+    monkeypatch.setattr(pp.time, 'sleep', lambda seconds: None)
     enhanced = []
     deps, rec = _build_deps(
-        find_completed_file=lambda *a, **kw: ('/transfer/01 - Bimo.flac', 'transfer'),
+        find_completed_file=lambda *a, **kw: ('/transfer/04 - Jawbreaker.flac', 'transfer'),
         enhance_file_metadata=lambda *a, **kw: enhanced.append(a) or True,
     )
     pp.run_post_processing_worker('t1', 'b1', deps)
     assert enhanced == []                                   # no tag write
     assert not any(c[0] == 'wipe' for c in rec.calls)       # no wipe either
+    assert ('on_complete', ('b1', 't1', False), {}) in rec.calls
+    assert download_tasks['t1']['status'] == 'failed'
+
+
+def test_custom_import_template_is_accepted(monkeypatch):
+    final_path = '/transfer/Compilations/Big Comp/00 - Woob - Omricon.flac'
+    _transfer_task_with_context('Omricon', track_number=0, final_path=final_path)
+    monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
+    deps, rec = _build_deps(
+        find_completed_file=lambda *a, **kw: (final_path, 'transfer'),
+        enhance_file_metadata=lambda *a, **kw: True,
+    )
+    pp.run_post_processing_worker('t1', 'b1', deps)
     assert ('on_complete', ('b1', 't1', True), {}) in rec.calls
+
+
+def test_unknown_number_without_recorded_path_cannot_complete_neighbor(monkeypatch):
+    _transfer_task_with_context('Omricon', track_number=0)
+    matched_downloads_context['u1::remote/original.flac'].pop('_final_processed_path')
+    monkeypatch.setattr(pp.time, 'sleep', lambda seconds: None)
+    deps, rec = _build_deps(
+        find_completed_file=lambda *a, **kw: ('/transfer/00 - Other Song.flac', 'transfer'),
+    )
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert ('on_complete', ('b1', 't1', False), {}) in rec.calls
 
 
 def test_ambiguous_fuzzy_context_is_refused(monkeypatch):
@@ -329,6 +351,7 @@ def test_ambiguous_fuzzy_context_is_refused(monkeypatch):
         'album': {'name': 'Album B', 'id': 'alB'},
     }
     monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
+    monkeypatch.setattr(pp.time, 'sleep', lambda seconds: None)
     deps, rec = _build_deps(
         find_completed_file=lambda *a, **kw: ('/transfer/01 - Intro.flac', 'transfer'),
         enhance_file_metadata=lambda *a, **kw: True,
@@ -354,6 +377,7 @@ def test_unique_fuzzy_context_still_recovers(monkeypatch):
                                    'album': 'Some Album'},
         'artist': {'name': 'Artist', 'id': 'a1'},
         'album': {'name': 'Some Album', 'id': 'al1'},
+        '_final_processed_path': '/transfer/01 - Money.flac',
     }
     monkeypatch.setattr(pp.os.path, 'exists', lambda p: True)
     deps, rec = _build_deps(

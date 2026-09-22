@@ -42,10 +42,6 @@ RUN echo "yt-dlp nightly for build ${COMMIT_SHA}" && \
 # Stage 2: Runtime — only runtime dependencies, no build tools
 FROM python:3.11-slim
 
-# Build-time commit SHA for update detection
-ARG COMMIT_SHA=""
-ENV SOULSYNC_COMMIT_SHA=${COMMIT_SHA}
-
 # Copy pre-built virtualenv from builder
 COPY --from=builder /opt/venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv
@@ -78,6 +74,14 @@ RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash --uid 1000 soulsync
+
+# Build-time commit SHA for update detection.
+# Placed here rather than at the top of this stage: the value changes on every
+# commit, so every layer below it is rebuilt every build. Above the source COPY it
+# costs nothing, since that COPY invalidates the rest anyway, and it leaves the
+# venv copy, the apt install and the Deno install cacheable.
+ARG COMMIT_SHA=""
+ENV SOULSYNC_COMMIT_SHA=${COMMIT_SHA}
 
 # Copy application code with ownership baked in.
 # Using `COPY --chown` instead of `COPY` + `chown -R /app` avoids an

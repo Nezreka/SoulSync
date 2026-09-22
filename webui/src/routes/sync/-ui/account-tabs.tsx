@@ -51,7 +51,7 @@ import {
   fetchSpotifyPlaylistTracks,
   fetchSpotifyPlaylists,
 } from '../-sync.api';
-import { DEEZER_PLAYLIST_PROGRESS_EVENT } from '../-sync.events';
+import { DEEZER_PLAYLIST_PROGRESS_EVENT, deezerProgressLabel } from '../-sync.events';
 import { AccountDetailsModal } from './account-details-modal';
 import { AccountPlaylistCard } from './account-playlist-card';
 
@@ -288,11 +288,11 @@ export function DeezerArlTab() {
     window.showLoadingOverlay?.(`${label}...`);
     const onProgress = (event: Event) => {
       const frame = (event as CustomEvent<DeezerPlaylistProgress>).detail;
-      if (!frame || String(frame.playlist_id) !== String(row.id) || !frame.total) return;
-      const pct = Math.min(100, Math.round((frame.done / frame.total) * 100));
-      window.showLoadingOverlay?.(
-        `${label} — ${frame.phase} ${frame.done}/${frame.total} (${pct}%)`,
-      );
+      if (!frame || String(frame.playlist_id) !== String(row.id)) return;
+      const text = deezerProgressLabel(frame, row.id);
+      if (text) {
+        window.showLoadingOverlay?.(`${label} — ${text}`);
+      }
     };
     window.addEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT, onProgress);
     try {

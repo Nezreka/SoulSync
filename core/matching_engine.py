@@ -16,6 +16,7 @@ from core.download_plugins.types import TrackResult, AlbumResult
 # Pure text helpers, no cycle back here (core.text imports only core.text).
 from core.text.source_title import strip_artist_prefix
 from core.text.title_match import is_trailing_version_qualifier
+from core.text.track_prefix import strip_track_prefix
 
 
 logger = get_logger("matching_engine")
@@ -1365,10 +1366,6 @@ class MusicMatchingEngine:
     PREFERABLE_VERSIONS = ('extended', 'radio', 'remix', 'live', 'acoustic',
                            'instrumental', 'demo', 'clean', 'explicit')
 
-    # Everything wrapped around a title in a Soulseek filename: a track number
-    # ("01 - ", "01.", "12-01 "), a vinyl side ("A1 "), or nothing at all.
-    _TRACK_NUM_PREFIX = re.compile(
-        r'^(?:[a-d]?\d{1,3}(?:[-_.]\d{1,3})?)\s*[-_.]?\s+|^\d{1,3}[-_.]\s*', re.I)
     _BRACKET_GROUP = re.compile(r'[\(\[][^\)\]]*[\)\]]')
 
     @staticmethod
@@ -1411,7 +1408,7 @@ class MusicMatchingEngine:
         stem = self._BRACKET_GROUP.sub(' ', stem)                # (Extended Mix), [2004], [FLAC]
         stem = re.sub(r'\s+', ' ', stem).strip(' -_.')
         if from_filename:
-            stem = self._TRACK_NUM_PREFIX.sub('', stem, count=1).strip()
+            stem = strip_track_prefix(stem).strip()
         if artist:
             stem = strip_artist_prefix(stem, artist).strip(' -_.')
         if ' - ' in stem:

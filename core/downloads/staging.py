@@ -7,8 +7,8 @@ configured staging folder, we copy directly to the transfer dir and
 hand off to post-processing — skipping the network round-trip entirely.
 
 1. Pull the staging-file cache for the batch (one scan per batch).
-2. Compute title + artist similarity (SequenceMatcher) against each
-   staging entry; require title >= 0.80 and combined score >= 0.75.
+2. Compute version-aware title + artist similarity against each staging
+   entry; require title >= 0.80 and combined score >= 0.75.
    Score weighting flips based on whether artist info is available on
    both sides:
    - both have artist: 0.55*title + 0.45*artist
@@ -197,9 +197,21 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
 
     from difflib import SequenceMatcher
     normalize = deps.matching_engine.normalize_string
+    version_detector = getattr(type(deps.matching_engine), 'detect_version_type', None)
+    wanted_version = (
+        deps.matching_engine.detect_version_type(track_title)[0]
+        if callable(version_detector) else None
+    )
     norm_title = normalize(track_title)
     norm_artist = normalize(track_artist)
     title_variants = _staging_title_variants(track_title, normalize) or [norm_title]
+    same_named_version = wanted_version not in (None, 'original')
+    score_title_variants = title_variants
+    if same_named_version:
+        score_title_variants = [
+            re.sub(r'\bversion\b', ' ', value).strip()
+            for value in title_variants
+        ]
 
     best_match = None
     best_score = 0.0
@@ -220,10 +232,29 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             continue
 
         # Title similarity (primary)
+        candidate_version = (
+            deps.matching_engine.detect_version_type(sf['title'])[0]
+            if callable(version_detector) else None
+        )
+        if wanted_version is not None and candidate_version != wanted_version:
+            logger.debug(
+                "[Staging] Skip candidate %s — version mismatch (%s vs %s)",
+                os.path.basename(sf.get('full_path', '?')),
+                wanted_version,
+                candidate_version,
+            )
+            continue
+        score_candidate_variants = sf_title_variants
+        if same_named_version:
+            score_candidate_variants = [
+                re.sub(r'\bversion\b', ' ', value).strip()
+                for value in sf_title_variants
+            ]
+
         title_sim = max(
             SequenceMatcher(None, expected, candidate).ratio()
-            for expected in title_variants
-            for candidate in sf_title_variants
+            for expected in score_title_variants
+            for candidate in score_candidate_variants
         )
         if title_sim < 0.80:
             logger.debug(

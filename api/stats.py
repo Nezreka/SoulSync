@@ -32,16 +32,19 @@ _automation_engine = lambda: None   # noqa: E731
 
 _listening_stats_worker = lambda: None   # noqa: E731
 _lastfm_import_worker = lambda: None     # noqa: E731
+_listenbrainz_import_worker = lambda: None # noqa: E731
 
 
 def configure(*, get_database, config_manager, fix_artist_image_url, _automation_engine,
-              listening_stats_worker_getter, lastfm_import_worker_getter):
+              listening_stats_worker_getter, lastfm_import_worker_getter,
+              listenbrainz_import_worker_getter=lambda: None):
     globals()['get_database'] = get_database
     globals()['config_manager'] = config_manager
     globals()['fix_artist_image_url'] = fix_artist_image_url
     globals()['_automation_engine'] = _automation_engine
     globals()['_listening_stats_worker'] = listening_stats_worker_getter
     globals()['_lastfm_import_worker'] = lastfm_import_worker_getter
+    globals()['_listenbrainz_import_worker'] = listenbrainz_import_worker_getter
 
 
 def create_blueprint():
@@ -481,3 +484,56 @@ def lastfm_listening_import_cancel():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@bp.route('/api/listenbrainz/listening-import/status', methods=['GET'])
+def listenbrainz_listening_import_status():
+    """Get ListenBrainz listening-history import status."""
+    try:
+        if not _listenbrainz_import_worker():
+            return jsonify({'success': False, 'enabled': False, 'error': 'ListenBrainz importer unavailable'})
+        status = _listenbrainz_import_worker().status()
+        next_run = _automation_engine().get_system_automation_next_run_seconds('import_listenbrainz_listening') if _automation_engine() else 0
+        username = config_manager.get('listenbrainz.username', '') or status.get('username') or ''
+        has_token = bool(config_manager.get('listenbrainz.token', ''))
+        return jsonify({
+            'success': True,
+            'enabled': bool(config_manager.get('listenbrainz.listening_sync_enabled', False)),
+            'token_configured': has_token,
+            'authenticated_user_available': bool(has_token or username),
+            'next_run_in_seconds': next_run,
+            **status,
+            'username': username,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/listenbrainz/listening-import/run', methods=['POST'])
+def listenbrainz_listening_import_run():
+    """Start or update the ListenBrainz listening-history import."""
+    try:
+        if not _listenbrainz_import_worker():
+            return jsonify({'success': False, 'error': 'ListenBrainz importer unavailable'}), 400
+        body = request.get_json(silent=True) or {}
+        username = str(body.get('username') or config_manager.get('listenbrainz.username', '') or '').strip()
+        if username:
+            config_manager.set('listenbrainz.username', username)
+        if 'enabled' in body:
+            config_manager.set('listenbrainz.listening_sync_enabled', bool(body.get('enabled')))
+        result = _listenbrainz_import_worker().start_import(username=username or None, full=bool(body.get('full')))
+        ok = result.get('status') not in ('error',)
+        return jsonify({'success': ok, **result}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/listenbrainz/listening-import/cancel', methods=['POST'])
+def listenbrainz_listening_import_cancel():
+    """Cancel the active ListenBrainz listening-history import."""
+    try:
+        if not _listenbrainz_import_worker():
+            return jsonify({'success': False, 'error': 'ListenBrainz importer unavailable'}), 400
+        _listenbrainz_import_worker().cancel()
+        return jsonify({'success': True, **_listenbrainz_import_worker().status()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500

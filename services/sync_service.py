@@ -300,6 +300,7 @@ class SyncProgress:
     matched_tracks: int = 0
     failed_tracks: int = 0
     duplicate_tracks: int = 0
+    synced_tracks: int = 0
 
 class PlaylistSyncService:
     def __init__(self, spotify_client: SpotifyClient, download_orchestrator: DownloadOrchestrator, media_server_engine=None):
@@ -444,7 +445,7 @@ class PlaylistSyncService:
     
     def _update_progress(self, playlist_name: str, step: str, track: str, progress: float, total_steps: int, current_step: int, 
                         total_tracks: int = 0, matched_tracks: int = 0, failed_tracks: int = 0,
-                        duplicate_tracks: int = 0):
+                        duplicate_tracks: int = 0, synced_tracks: int = 0):
         # Send progress update to the specific playlist's callback
         callback = self.progress_callbacks.get(playlist_name)
         if callback:
@@ -458,6 +459,7 @@ class PlaylistSyncService:
                 matched_tracks=matched_tracks,
                 failed_tracks=failed_tracks,
                 duplicate_tracks=duplicate_tracks,
+                synced_tracks=synced_tracks,
             ))
     
     def _reconcile_or_replace(self, client, playlist_name: str, tracks) -> bool:
@@ -723,7 +725,8 @@ class PlaylistSyncService:
                                 total_tracks=total_tracks,
                                 matched_tracks=len(matched_tracks),
                                 failed_tracks=failed_tracks,
-                                duplicate_tracks=len(folds))
+                                duplicate_tracks=len(folds),
+                                synced_tracks=synced_tracks)
 
             # Auto-add unmatched tracks to wishlist (skip in Wing It mode or if cancelled)
             if self._is_cancelled(playlist.name):

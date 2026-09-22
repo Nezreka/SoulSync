@@ -17,8 +17,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.exports.mbid_resolver import normalize_key
 
-# resolve_fn(artist, title) -> (recording_mbid|None, source_label|None)
-ResolveFn = Callable[[str, str], Tuple[Optional[str], Optional[str]]]
+# resolve_fn(artist, title, track) -> (recording_mbid|None, source_label|None)
+# ``track`` is the full playlist row (the same dict ``tracks`` holds), so a source that
+# needs more than the artist/title text — the ISRC rung reads discovery's ``extra_data`` —
+# can get at it. Resolvers that only need the text simply ignore it.
+ResolveFn = Callable[[str, str, Dict[str, Any]], Tuple[Optional[str], Optional[str]]]
 ProgressFn = Callable[[int, int, Dict[str, Any]], None]
 
 
@@ -40,7 +43,7 @@ def resolve_playlist_tracks(
 ) -> Dict[str, Any]:
     """Resolve every track to an ID and build the export pseudo-playlist.
 
-    ``resolve_fn(artist, title) -> (id, source)`` returns whatever ID the target needs —
+    ``resolve_fn(artist, title, track) -> (id, source)`` returns whatever ID the target needs —
     a MusicBrainz recording MBID for ListenBrainz/JSPF (the default), or a Spotify/Deezer
     track ID for service export. ``id_key`` names the field that ID lands under in each
     resolved entry (defaults to ``recording_mbid`` so existing LB/JSPF callers are
@@ -54,6 +57,10 @@ def resolve_playlist_tracks(
     order, and stats carries ``total, resolved, unmatched, deduped, by_source``.
     """
     total = len(tracks or [])
+    # Memoized per (artist, title) text, NOT per-track — two rows with identical
+    # artist+title but different source ISRCs are the same song for playlist purposes,
+    # so the second one reuses the first's resolution rather than paying for (or
+    # re-checking) its own ISRC/MB lookup.
     memo: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
     resolved: List[Dict[str, Any]] = []
     stats: Dict[str, Any] = {
@@ -73,7 +80,7 @@ def resolve_playlist_tracks(
             stats["deduped"] += 1
             fresh = False
         else:
-            mbid, source = resolve_fn(artist, title)
+            mbid, source = resolve_fn(artist, title, t)
             memo[key] = (mbid, source)
             fresh = True
 

@@ -99,7 +99,7 @@ def is_available() -> bool:
 
 
 def audio_files(album: Any) -> List[Dict[str, Any]]:
-    """Every audio file in a folder result, as ``{filename, size}``.
+    """Every audio file in a folder result, as ``{filename, size, duration}``.
 
     Non-audio is dropped here rather than downloaded and deleted: peers share
     scans, playlists and stray archives alongside the audio, and none of it
@@ -110,7 +110,13 @@ def audio_files(album: Any) -> List[Dict[str, Any]]:
         name = str(getattr(track, "filename", "") or "")
         if not name or not name.lower().endswith(_AUDIO_SUFFIXES):
             continue
-        files.append({"filename": name, "size": int(getattr(track, "size", 0) or 0)})
+        duration_ms = getattr(track, "duration", None)
+        duration_sec = (float(duration_ms) / 1000.0) if duration_ms is not None else None
+        files.append({
+            "filename": name,
+            "size": int(getattr(track, "size", 0) or 0),
+            "duration": duration_sec,
+        })
     return files
 
 
@@ -162,6 +168,13 @@ def album_to_release(album: Any, book: Dict[str, Any]) -> Optional[Any]:
     # unabridged marker the same way a torrent name does.
     name = folder_name(album)
     size = sum(int(entry.get("size") or 0) for entry in files)
+    durations = [entry["duration"] for entry in files if entry.get("duration") is not None]
+    # Missing/zero chapter lengths are unknown, not silence. A partial sum is
+    # not a release runtime and must not drive the ranker's hard shortness gate.
+    total_duration_sec = (
+        sum(durations) if len(durations) == len(files) and all(d > 0 for d in durations)
+        else None
+    )
 
     wanted_narrators = book.get("narrator_names") or book.get("narrators") or []
 
@@ -186,12 +199,14 @@ def album_to_release(album: Any, book: Dict[str, Any]) -> Optional[Any]:
         narrator_verdict=narrator_verdict(name, wanted_narrators),
         abridgement_verdict=abridgement_verdict(name, book.get("format_type")),
         language_verdict=language_verdict(name, book.get("language")),
+        duration_seconds=total_duration_sec,
         soulseek={
             "username": username,
             "album_path": album_path,
             "files": files,
             "file_count": len(files),
             "queue_length": int(getattr(album, "queue_length", 0) or 0),
+            "duration_seconds": total_duration_sec,
         },
     )
 

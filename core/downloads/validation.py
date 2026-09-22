@@ -9,6 +9,7 @@ from utils.logging_config import get_logger
 import re
 
 from core.settings import config_manager
+from core.downloads.soulseek_identity import match_track
 from core.imports.file_integrity import resolve_duration_tolerance
 # One definition of "could this release satisfy the profile", shared with the
 # album-bundle picker. It lived here and the picker used the probed-file rule
@@ -538,8 +539,39 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
     # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)
     _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
     initial_candidates = matching_engine.find_best_slskd_matches_enhanced(spotify_track, results, max_peer_queue=_max_q)
+    # The generic path scorer can put a structurally unusual but exact title
+    # below its 0.58 threshold. It has already scored and version-checked
+    # every row (a version reject scores 0.0), so recover Soulseek files that
+    # still have positive confidence, an exact-title interpretation, and the
+    # artist in their path — the last so the recovery cannot undo the
+    # engine's short-title guard for a fuzzy-artist folder. Keep the
+    # configured queue gate's all-filtered fallback semantics.
+    if results and all(getattr(row, 'username', None) not in _STREAMING_USERNAMES
+                       for row in results):
+        eligible = list(results)
+        if _max_q > 0:
+            within_queue = [row for row in eligible
+                            if (getattr(row, 'queue_length', 0) or 0) <= _max_q]
+            if within_queue:
+                eligible = within_queue
+        accepted_ids = {id(row) for row in initial_candidates}
+        for row in eligible:
+            if id(row) in accepted_ids or (getattr(row, 'confidence', 0) or 0) <= 0:
+                continue
+            identity = match_track(spotify_track, row)
+            if identity.matches and identity.artist_path_evidence:
+                initial_candidates.append(row)
     if not initial_candidates:
         return []
+
+    # Identity is evidence for logging/ordering, never a rejection: a parsed
+    # title is not authoritative metadata.
+    for candidate in initial_candidates:
+        if getattr(candidate, 'username', None) in _STREAMING_USERNAMES:
+            continue
+        identity = match_track(spotify_track, candidate)
+        if identity.matches:
+            candidate.soulseek_match_evidence = identity
 
     # Skip quality filtering for streaming source results that somehow got here
     is_streaming_source = initial_candidates[0].username in _STREAMING_USERNAMES if initial_candidates else False

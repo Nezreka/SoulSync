@@ -198,3 +198,81 @@ def test_set_recovery_endpoint(client):
     r = client.post(f'/api/profiles/{pid}/set-recovery', json={'question': 'Q?', 'answer': 'A'})
     assert r.get_json()['has_recovery'] is True
     assert db.verify_profile_recovery_answer(pid, 'a') is True
+
+
+# ── GHSA-j7g5-8j44-jqhm security tests ────────────────────────────────────────
+
+def test_unauthenticated_session_never_resolves_to_admin(client, monkeypatch):
+    """GHSA-j7g5-8j44-jqhm: an unauthenticated session must never receive profile 1 or admin rights."""
+    from core.profile_context import is_admin_request, get_current_profile_id
+    from flask import g
+
+    _enable_login(monkeypatch)
+
+    # 1. Unauthenticated request to /api/profiles/current (allowlisted GET for login state)
+    res = client.get('/api/profiles/current')
+    assert res.status_code == 200
+    assert res.get_json()['login_required'] is True
+
+    # 2. Inside an unauthenticated request context, verify is_admin_request() and profile id
+    with web_server.app.test_request_context('/api/profiles/current'):
+        # Simulate hook having run
+        web_server._set_profile_context()
+        assert g.profile_id is None
+        assert g.is_admin is False
+        assert get_current_profile_id() is None
+        assert is_admin_request() is False
+
+    # 3. Direct admin-only check: unauthenticated session receives 403 on admin-only endpoints
+    # even if outer login gate was bypassed
+    with web_server.app.test_request_context('/api/v1/api-keys-internal'):
+        web_server._set_profile_context()
+        assert is_admin_request() is False
+
+
+def test_require_login_fails_closed_on_config_read_exception(client, monkeypatch):
+    """GHSA-j7g5-8j44-jqhm: transient config read error must fail closed to last known value."""
+    _enable_login(monkeypatch)
+    assert web_server._require_login_enabled() is True
+
+    # Simulate a transient SQLite lock / error reading config
+    def _exploding_get(k, d=None):
+        raise RuntimeError("database is locked (transient lock simulation)")
+
+    monkeypatch.setattr(web_server.config_manager, 'get', _exploding_get)
+
+    # Must return last known value (True), NOT fail open to False
+    assert web_server._require_login_enabled() is True
+
+    # Unauthenticated request is still blocked with 401
+    assert client.get(_GATED).status_code == 401
+
+
+def test_ws_gate_fails_closed_on_error(monkeypatch):
+    """GHSA-j7g5-8j44-jqhm: WebSocket gate must fail closed when check encounters an exception."""
+    _enable_login(monkeypatch)
+
+    with web_server.app.test_request_context('/socket.io/'):
+        # Login mode active, unauthenticated session -> blocked
+        assert web_server._ws_connection_blocked() is True
+
+        # Unexpected exception during check -> must fail closed (True), not open (False)
+        monkeypatch.setattr(web_server, '_require_login_enabled', lambda: (_ for _ in ()).throw(RuntimeError("WS gate fault")))
+        assert web_server._ws_connection_blocked() is True
+
+
+def test_authenticated_admin_retains_admin_rights(client, monkeypatch):
+    """GHSA-j7g5-8j44-jqhm: legitimate authenticated admin still gets full admin access."""
+    db = web_server.get_database()
+    admin_pid = 1
+    db.set_profile_password(admin_pid, 'adminpass123')
+    _enable_login(monkeypatch)
+
+    # Login as admin
+    login_res = client.post('/api/auth/login', json={'username': 'Admin', 'password': 'adminpass123'})
+    assert login_res.status_code == 200
+
+    # Authenticated admin can access gated endpoint and admin-only endpoint
+    assert client.get(_GATED).status_code == 200
+    assert client.get('/api/v1/api-keys-internal').status_code == 200
+

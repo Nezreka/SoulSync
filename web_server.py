@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.4"
+_SOULSYNC_BASE_VERSION = "3.4.5"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -425,19 +425,16 @@ def _initial_appearance_context():
 
 @app.context_processor
 def _inject_static_cache_bust():
-    static_v = _STATIC_CACHE_BUST
-    if DEV_STATIC_NO_CACHE:
-        try:
-            static_dir = Path(app.static_folder)
-            mtimes = [
-                p.stat().st_mtime_ns
-                for p in static_dir.rglob('*')
-                if p.is_file() and p.suffix.lower() in {'.css', '.js'}
-            ]
-            if mtimes:
-                static_v = str(max(mtimes))
-        except Exception:
-            static_v = _STATIC_CACHE_BUST
+    try:
+        static_dir = Path(app.static_folder)
+        mtimes = [
+            p.stat().st_mtime_ns
+            for p in static_dir.rglob('*')
+            if p.is_file() and p.suffix.lower() in {'.css', '.js'}
+        ]
+        static_v = str(max(mtimes)) if mtimes else _STATIC_CACHE_BUST
+    except Exception:
+        static_v = _STATIC_CACHE_BUST
     return {'static_v': static_v, **_initial_appearance_context()}
 
 
@@ -551,11 +548,23 @@ _launch_pin_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
 from api.login import login_limiter as _login_limiter
 
 
+_last_known_require_login: bool = False
+
+
 def _require_login_enabled():
+    global _last_known_require_login
     try:
-        return bool(config_manager.get('security.require_login', False)) if config_manager else False
-    except Exception:
-        return False
+        if config_manager is None:
+            return _last_known_require_login
+        val = bool(config_manager.get('security.require_login', False))
+        _last_known_require_login = val
+        return val
+    except Exception as e:
+        logger.warning(
+            "[_require_login_enabled] config read failed, falling back to last known (%s): %s",
+            _last_known_require_login, e
+        )
+        return _last_known_require_login
 
 
 # --- Login gate (opt-in username/password mode; replaces the launch PIN) ---
@@ -573,6 +582,10 @@ def _enforce_login():
         require_login=True,
         authenticated=bool(session.get('login_authenticated', False)),
     ):
+        logger.warning(
+            "[Login Gate] Blocked unauthenticated %s request to %s",
+            request.method, request.path
+        )
         if is_html_navigation(request.method, request.headers.get('Accept', ''),
                               request.headers.get('Sec-Fetch-Mode', '')):
             return redirect('/')
@@ -635,15 +648,34 @@ def _set_profile_context():
     """Set g.profile_id from session for every request"""
     g.request_start_monotonic = time.perf_counter()
     g.request_start_cpu = time.thread_time()
-    # Skip for profile management, static, and root routes
-    path = request.path
-    if (path.startswith('/api/profiles') or
-        path.startswith('/static/') or
-        path == '/' or
-        path.startswith('/api/v1/')):
-        g.profile_id = session.get('profile_id', 1)
+
+    # 1. Login mode: unauthenticated sessions have NO profile or admin rights (#GHSA-j7g5-8j44-jqhm).
+    if _require_login_enabled() and not session.get('login_authenticated', False):
+        g.profile_id = None
+        g.is_admin = False
+        g.can_download = False
+        g.profile_name = "Anonymous"
+        g.allowed_sides = 'none'
         return
 
+    # 2. Launch PIN mode: unverified sessions have NO profile or admin rights (#GHSA-j7g5-8j44-jqhm).
+    try:
+        require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
+    except Exception:
+        require_pin = False
+    if require_pin and not _require_login_enabled():
+        _proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
+        from core.security.auth_proxy import trusted_proxy_user
+        _proxy_authed = bool(trusted_proxy_user(request.headers.get, _proxy_header))
+        if not session.get('launch_pin_verified', False) and not _proxy_authed:
+            g.profile_id = None
+            g.is_admin = False
+            g.can_download = False
+            g.profile_name = "Locked"
+            g.allowed_sides = 'none'
+            return
+
+    path = request.path
     pid = session.get('profile_id', 1)
 
     # Validate session profile still exists (handles deleted profiles), and stash
@@ -651,8 +683,24 @@ def _set_profile_context():
     # music-DB read. Admin (1) is always allowed.
     g.can_download = True
     g.profile_name = "Admin"   # display name for isolated blueprints (video issues reporter)
-    g.is_admin = True          # profile 1 is always admin; others per their is_admin flag
+    g.is_admin = (pid == 1)    # profile 1 is always admin; others per their is_admin flag
     g.allowed_sides = 'both'   # per-profile side access (music|video|both); admins always both
+
+    # Skip DB validation for profile management, static, and root routes
+    if (path.startswith('/api/profiles') or
+        path.startswith('/static/') or
+        path == '/' or
+        path.startswith('/api/v1/')):
+        g.profile_id = pid
+        if pid != 1 and 'profile_id' in session:
+            try:
+                database = get_database()
+                profile = database.get_profile(pid)
+                g.is_admin = bool((profile or {}).get('is_admin', False))
+            except Exception:
+                g.is_admin = False
+        return
+
     if pid != 1 and 'profile_id' in session:
         g.is_admin = False
         try:
@@ -932,6 +980,19 @@ def _make_context_key(username, filename):
     """
     normalized = filename.replace('\\', '/').lstrip('/') if filename else ''
     return f"{username}::{normalized}"
+
+
+def _register_matched_download_context(context_key: str, context: dict) -> None:
+    """Store download post-processing context, ensuring profile_id is stamped (#1279)."""
+    if isinstance(context, dict) and 'profile_id' not in context:
+        try:
+            pid = get_current_profile_id()
+            context['profile_id'] = pid if pid is not None else 1
+        except Exception:
+            context['profile_id'] = 1
+    with matched_context_lock:
+        matched_downloads_context[context_key] = context
+
 
 IS_SHUTTING_DOWN = False
 
@@ -1449,6 +1510,7 @@ def _register_automation_handlers():
         record_progress_history=_auto_progress.record_history,
         build_personalized_manager=_build_personalized_manager,
         lastfm_import_worker=lastfm_import_worker,
+        listenbrainz_import_worker=listenbrainz_import_worker,
     )
     _register_extracted_handlers(_automation_deps)
 
@@ -1858,13 +1920,74 @@ def validate_and_heal_batch_states():
                     if _new_orphans or stuck_post_processing:
                         batches_needing_completion_check.append(batch_id)
 
+                    # A failed publish has no new orphan on the next pass. Keep
+                    # retrying it until lifecycle succeeds or exhausts its budget.
+                    _publish_pending = (
+                        0 < batch_data.get('_atomic_publish_attempts', 0)
+                        < _downloads_lifecycle._ATOMIC_PUBLISH_MAX_ATTEMPTS
+                        and actually_active == 0
+                        and batch_data.get('queue_index', 0) >= len(queue)
+                    )
+                    if _publish_pending and batch_id not in batches_needing_completion_check:
+                        batches_needing_completion_check.append(batch_id)
+
+                    # STUCK-NO-WORKERS EMERGENCY HEAL (#1277): If all tasks have
+                    # been dispatched (queue_index >= len(queue)), no workers are
+                    # active, and no completion_time has been recorded for >10
+                    # minutes, the batch is permanently stuck (most likely because
+                    # _publish_atomic_album failed and the early-return path never
+                    # set completion_time). Force it to 'error' so:
+                    #   1. The 5-minute auto-cleanup at the top of this loop fires.
+                    #   2. The wishlist concurrency guard stops treating it as active.
+                    # This is a last-resort safety net; the primary fix is in
+                    # lifecycle.py (_ATOMIC_PUBLISH_MAX_ATTEMPTS).
+                    _all_dispatched = batch_data.get('queue_index', 0) >= len(queue)
+                    _no_workers = actually_active == 0
+                    if (_all_dispatched and _no_workers and not batch_data.get('completion_time')
+                            and not _publish_pending):
+                        _first_seen = batch_data.get('_heal_stuck_detected_at')
+                        if _first_seen is None:
+                            import time as _time
+                            batch_data['_heal_stuck_detected_at'] = _time.time()
+                            logger.warning(
+                                "[Batch Healing] Batch %s: all tasks dispatched, no workers, "
+                                "no completion_time — possibly stuck. Will force-error if still "
+                                "stuck in 600s.", batch_id)
+                        else:
+                            import time as _time
+                            if _time.time() - _first_seen > 600:  # 10 minutes
+                                logger.error(
+                                    "[Batch Healing] Batch %s has been stuck in 'downloading' "
+                                    "with no workers for >600s and no completion_time — "
+                                    "forcing 'error' to unblock wishlist (#1277).", batch_id)
+                                batch_data['phase'] = 'error'
+                                batch_data['completion_time'] = _time.time()
+                                try:
+                                    from core.downloads.history import record_sync_history_completion
+                                    from database.music_database import MusicDatabase
+                                    record_sync_history_completion(MusicDatabase(), batch_id, batch_data)
+                                except Exception as _hist_err:
+                                    logger.warning(
+                                        "[Batch Healing] Could not write sync history for "
+                                        "stuck batch %s: %s", batch_id, _hist_err)
+                    else:
+                        batch_data.pop('_heal_stuck_detected_at', None)
+
             # Cleanup stale batches inside the lock (safe - just dict mutations)
             for batch_id in batches_to_cleanup:
                 # #999: discard unpublished atomic staging for an abandoned batch
                 # (no-op for normal batches and for atomic batches that already
                 # published — their staging was pruned at publish).
                 _cleanup_batch = download_batches[batch_id]
-                if _cleanup_batch.get('_atomic_active') and _cleanup_batch.get('_atomic_staging_root'):
+                _preserve_failed_publish = (
+                    _cleanup_batch.get('phase') == 'error'
+                    and _cleanup_batch.get('_atomic_publish_attempts', 0) > 0
+                )
+                if _preserve_failed_publish:
+                    logger.warning("[Atomic Publish] Keeping failed publish staging for manual recovery: %s",
+                                   _cleanup_batch.get('_atomic_staging_root'))
+                if (_cleanup_batch.get('_atomic_active') and _cleanup_batch.get('_atomic_staging_root')
+                        and not _preserve_failed_publish):
                     try:
                         from core.downloads.atomic_album_publish import discard_staging_root
                         if discard_staging_root(_cleanup_batch.get('_atomic_staging_root')):
@@ -2269,7 +2392,7 @@ def _prepare_stream_task(track_data, sess, sid):
 
 def _find_streaming_download_in_all_downloads(all_downloads, track_data):
     """
-    Find streaming download in DownloadStatus list (works for Soulseek, YouTube, and Tidal).
+    Find streaming download in DownloadStatus list (works for Soulseek, YouTube, Tidal, Deezer, etc.).
     Replaces the old _find_streaming_download_in_transfers function.
     """
     try:
@@ -2284,15 +2407,24 @@ def _find_streaming_download_in_all_downloads(all_downloads, track_data):
             download_filename = extract_filename(download.filename)
             download_username = download.username
 
-            if (download_filename == target_filename and
-                download_username == target_username):
+            username_match = (
+                download_username == target_username
+                or (
+                    download_username in ('deezer', 'deezer_dl')
+                    and target_username in ('deezer', 'deezer_dl')
+                )
+            )
+
+            if download_filename == target_filename and username_match:
                 # Convert DownloadStatus to dict format expected by caller
                 return {
+                    'id': getattr(download, 'id', ''),
                     'percentComplete': download.progress,
                     'state': download.state,
                     'size': download.size,
                     'bytesTransferred': download.transferred,
                     'averageSpeed': download.speed,
+                    'file_path': getattr(download, 'file_path', None),
                 }
 
         return None
@@ -2301,29 +2433,45 @@ def _find_streaming_download_in_all_downloads(all_downloads, track_data):
         return None
 
 def _find_downloaded_file(download_path, track_data):
-    """Find the downloaded audio file in the downloads directory tree (works for Soulseek, YouTube, and Tidal)"""
+    """Find the downloaded audio file in the downloads directory tree (works for Soulseek, YouTube, Tidal, Deezer, etc.)"""
     # Ensure path is accessible in Docker (handles E:/ -> /host/mnt/e/)
     download_path = docker_resolve_path(download_path)
 
     audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
     target_filename = extract_filename(track_data.get('filename', ''))
 
-    # YOUTUBE/TIDAL/QOBUZ/HIFI/AMAZON SUPPORT: Handle encoded filename format "id||title"
+    # YOUTUBE/TIDAL/QOBUZ/HIFI/AMAZON/DEEZER/SOUNDCLOUD SUPPORT: Handle encoded filename format "id||title"
     # The file on disk will be "title.ext", not "id||title"
     is_youtube = track_data.get('username') == 'youtube'
     is_tidal = track_data.get('username') == 'tidal'
     is_qobuz = track_data.get('username') == 'qobuz'
     is_hifi = track_data.get('username') == 'hifi'
     is_amazon = track_data.get('username') == 'amazon'
-    is_streaming_source = is_youtube or is_tidal or is_qobuz or is_hifi or is_amazon
+    is_deezer = track_data.get('username') in ('deezer', 'deezer_dl')
+    is_soundcloud = track_data.get('username') == 'soundcloud'
+    is_streaming_source = (
+        is_youtube or is_tidal or is_qobuz or is_hifi or is_amazon
+        or is_deezer or is_soundcloud
+    )
     target_filename_youtube = None
     if is_streaming_source and '||' in target_filename:
-        _, title = target_filename.split('||', 1)
-        if is_tidal or is_qobuz or is_hifi or is_amazon:
-            # Tidal/Qobuz/HiFi/Amazon files can be flac, opus, eac3, or m4a — match any audio extension
+        parts = target_filename.split('||')
+        title = parts[-1]
+        if is_tidal or is_qobuz or is_hifi or is_amazon or is_deezer or is_soundcloud:
+            # Tidal/Qobuz/HiFi/Amazon/Deezer/SoundCloud files can be flac, mp3, opus, etc. — match any audio extension
             safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
             target_filename_youtube = safe_title  # Extension-less for flexible matching
-            source_name = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else ('Amazon' if is_amazon else 'Tidal'))
+            source_name = (
+                'HiFi' if is_hifi else (
+                    'Qobuz' if is_qobuz else (
+                        'Amazon' if is_amazon else (
+                            'Deezer' if is_deezer else (
+                                'SoundCloud' if is_soundcloud else 'Tidal'
+                            )
+                        )
+                    )
+                )
+            )
             logger.debug(f"[{source_name} Stream] Looking for file starting with: {target_filename_youtube}")
         else:
             # yt-dlp will create "Title.mp3" from "Title"
@@ -2361,11 +2509,23 @@ def _find_downloaded_file(download_path, track_data):
                     # For Tidal, compare without extension (file could be .flac or .m4a)
                     compare_target = target_filename_youtube.lower()
                     compare_file = file.lower()
-                    if is_tidal or is_qobuz or is_hifi or is_amazon:
+                    if is_tidal or is_qobuz or is_hifi or is_amazon or is_deezer or is_soundcloud:
                         compare_file = os.path.splitext(compare_file)[0]
                     similarity = SequenceMatcher(None, compare_file, compare_target).ratio()
 
-                    source_label = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else ('Amazon' if is_amazon else ('Tidal' if is_tidal else 'YouTube')))
+                    source_label = (
+                        'HiFi' if is_hifi else (
+                            'Qobuz' if is_qobuz else (
+                                'Amazon' if is_amazon else (
+                                    'Deezer' if is_deezer else (
+                                        'SoundCloud' if is_soundcloud else (
+                                            'Tidal' if is_tidal else 'YouTube'
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
                     logger.debug(f"[{source_label} Stream] Comparing: '{file}' vs '{target_filename_youtube}' = {similarity:.2f}")
 
                     # Keep track of best match
@@ -2383,9 +2543,21 @@ def _find_downloaded_file(download_path, track_data):
                         logger.debug(f"Found streaming file: {file_path}")
                         return file_path
 
-        # For YouTube/Tidal, if we found a good enough match (80%+), use it
+        # For streaming sources, if we found a good enough match (80%+), use it
         if is_streaming_source and best_match and best_similarity >= 0.80:
-            source_label = 'Qobuz' if is_qobuz else ('Amazon' if is_amazon else ('Tidal' if is_tidal else 'YouTube'))
+            source_label = (
+                'HiFi' if is_hifi else (
+                    'Qobuz' if is_qobuz else (
+                        'Amazon' if is_amazon else (
+                            'Deezer' if is_deezer else (
+                                'SoundCloud' if is_soundcloud else (
+                                    'Tidal' if is_tidal else 'YouTube'
+                                )
+                            )
+                        )
+                    )
+                )
+            )
             logger.debug(f"Found good match ({best_similarity:.2f}) for {source_label} streaming file: {best_match}")
             return best_match
 
@@ -3555,8 +3727,37 @@ def handle_settings():
             if _primary_err:
                 return jsonify({"success": False, "error": _primary_err}), 400
 
+            settings_warnings = []
             if 'active_media_server' in new_settings:
-                config_manager.set_active_media_server(new_settings['active_media_server'])
+                old_server = config_manager.get_active_media_server()
+                new_server = new_settings['active_media_server']
+                if old_server != new_server:
+                    config_manager.set_active_media_server(new_server)
+                    try:
+                        from core.library_scope import invalidate_library_scope_cache
+                        invalidate_library_scope_cache()
+                        from core.imports.paths import reset_own_library_fallback_notifications
+                        reset_own_library_fallback_notifications()
+                    except Exception as _inv_err:
+                        logger.debug("scope cache invalidation failed: %s", _inv_err)
+                    if new_server not in ('plex', 'jellyfin'):
+                        try:
+                            own_profs = get_database().get_own_library_profiles()
+                            if own_profs:
+                                names = ", ".join(p.get('name', f"Profile {p.get('id')}") for p in own_profs)
+                                logger.warning(
+                                    "[Media Server] Switched active server to '%s'. Own-library isolation is not supported by '%s'. "
+                                    "Profiles [%s] will fall back to the shared library for downloads and scans.",
+                                    new_server, new_server, names
+                                )
+                                server_display = (new_server or 'this server').capitalize()
+                                settings_warnings.append(
+                                    f"Switching to {server_display} disables own-library isolation for profiles: {names}. "
+                                    "Their downloads will route to the shared library folder."
+                                )
+                        except Exception as _ms_err:
+                            logger.debug("Error checking own-library profiles on server switch: %s", _ms_err)
+
 
             # ONE database write for the whole page save. Per-leaf saves were
             # hundreds of encrypt+serialize+commit cycles per click — enough
@@ -3654,8 +3855,10 @@ def handle_settings():
                 )
             # Invalidate status cache so next poll reflects new settings (e.g. fallback source change)
             invalidate_metadata_status_caches()
-            logger.info("Service clients re-initialized with new settings.")
-            return jsonify({"success": True, "message": "Settings saved successfully."})
+            resp_data = {"success": True, "message": "Settings saved successfully."}
+            if settings_warnings:
+                resp_data["warnings"] = settings_warnings
+            return jsonify(resp_data)
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
     else:  # GET request
@@ -6303,21 +6506,21 @@ def start_download():
                     if download_id:
                         # Register download for post-processing (simple transfer to /Transfer)
                         context_key = _make_context_key(username, filename)
-                        with matched_context_lock:
-                            matched_downloads_context[context_key] = {
-                                'search_result': {
-                                    'username': username,
-                                    'filename': filename,
-                                    'size': file_size,
-                                    'title': track_data.get('title', 'Unknown'),
-                                    'artist': track_data.get('artist', 'Unknown'),
-                                    'quality': track_data.get('quality', 'Unknown'),
-                                    'is_simple_download': True  # Flag for simple processing
-                                },
-                                'spotify_artist': None,  # No Spotify metadata
-                                'spotify_album': None,
-                                'track_info': None
-                            }
+                        _register_matched_download_context(context_key, {
+                            'profile_id': get_current_profile_id(),
+                            'search_result': {
+                                'username': username,
+                                'filename': filename,
+                                'size': file_size,
+                                'title': track_data.get('title', 'Unknown'),
+                                'artist': track_data.get('artist', 'Unknown'),
+                                'quality': track_data.get('quality', 'Unknown'),
+                                'is_simple_download': True  # Flag for simple processing
+                            },
+                            'spotify_artist': None,  # No Spotify metadata
+                            'spotify_album': None,
+                            'track_info': None
+                        })
                         _track_quick_download(
                             download_id,
                             title=track_data.get('title') or filename,
@@ -6384,24 +6587,24 @@ def start_download():
                     _skip_checks.append('acoustid')
                 if data.get('quality_check') is False:
                     _skip_checks.extend(['bit_depth', 'quality'])
-                with matched_context_lock:
-                    matched_downloads_context[context_key] = {
-                        'search_result': {
-                            'username': username,
-                            'filename': filename,
-                            'size': file_size,
-                            'title': data.get('title', 'Unknown'),
-                            'artist': data.get('artist', 'Unknown'),
-                            'quality': data.get('quality', 'Unknown'),
-                            'is_simple_download': True  # Flag for simple processing
-                        },
-                        'spotify_artist': None,  # No Spotify metadata
-                        'spotify_album': None,
-                        'track_info': None,
-                        '_skip_quarantine_check': _skip_checks or None,
-                    }
-                    source_label = username.title() if is_streaming_source else 'Soulseek'
-                    logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
+                _register_matched_download_context(context_key, {
+                    'profile_id': get_current_profile_id(),
+                    'search_result': {
+                        'username': username,
+                        'filename': filename,
+                        'size': file_size,
+                        'title': data.get('title', 'Unknown'),
+                        'artist': data.get('artist', 'Unknown'),
+                        'quality': data.get('quality', 'Unknown'),
+                        'is_simple_download': True  # Flag for simple processing
+                    },
+                    'spotify_artist': None,  # No Spotify metadata
+                    'spotify_album': None,
+                    'track_info': None,
+                    '_skip_quarantine_check': _skip_checks or None,
+                })
+                source_label = username.title() if is_streaming_source else 'Soulseek'
+                logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
 
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
@@ -7337,26 +7540,54 @@ def download_selected_candidate(task_id):
         return jsonify({"error": str(e)}), 500
 
 
-def _resolve_link_track_query(source: str, track_id: str):
-    """Resolve a pasted (source, track_id) to a clean "artist title" search
-    query via the source client's get_track (#813). Returns (query, None) or
-    (None, error). Used so a pasted Tidal/Qobuz link runs the source's normal
-    search (proven-downloadable candidates) instead of a hand-built one."""
-    from core.downloads.track_link import query_from_track_payload
+def _resolve_link_track_query(source: str, entity_id: str, kind: str = 'track',
+                              prefer_title: str = ''):
+    """Resolve a pasted (source, kind, id) to a clean "artist title" search
+    query via the source client's get_track / get_album (#813). Returns
+    ``(query, track_id, None)`` or ``(None, None, error)``.
+
+    Album links (Deezer remix singles) resolve to a track id first, then
+    follow the same get_track path. Used so a pasted Tidal/Qobuz/Deezer
+    link runs the source's normal search (proven-downloadable candidates)
+    instead of a hand-built one."""
+    from core.downloads.track_link import (
+        query_from_album_payload, query_from_track_payload, track_id_from_album_payload,
+    )
     client = download_orchestrator.client(source) if download_orchestrator else None
-    if not client or not hasattr(client, 'get_track'):
-        return None, f"{source.title()} is not connected"
+    if not client:
+        return None, None, f"{source.title()} is not connected"
+
+    track_id = entity_id
+    if kind == 'album':
+        if not hasattr(client, 'get_album'):
+            return None, None, f"{source.title()} album links aren't supported"
+        try:
+            album = client.get_album(entity_id)
+        except Exception as e:
+            return None, None, f"Could not resolve {source.title()} album: {e}"
+        if not album:
+            return None, None, f"{source.title()} album {entity_id} not found"
+        track_id = track_id_from_album_payload(album, prefer_title)
+        if not track_id:
+            # No embedded tracks — still search by album artist+title.
+            query = query_from_album_payload(album)
+            if not query:
+                return None, None, f"Could not read the album title from {source.title()}"
+            return query, None, None
+
+    if not hasattr(client, 'get_track'):
+        return None, None, f"{source.title()} is not connected"
     try:
         raw = client.get_track(track_id)
     except Exception as e:
-        return None, f"Could not resolve {source.title()} track: {e}"
+        return None, None, f"Could not resolve {source.title()} track: {e}"
     if not raw:
-        return None, f"{source.title()} track {track_id} not found"
+        return None, None, f"{source.title()} track {track_id} not found"
 
     query = query_from_track_payload(source, raw)
     if not query:
-        return None, f"Could not read the track title from {source.title()}"
-    return query, None
+        return None, None, f"Could not read the track title from {source.title()}"
+    return query, str(track_id), None
 
 
 @app.route('/api/downloads/task/<task_id>/manual-search', methods=['POST'])
@@ -7398,14 +7629,14 @@ def manual_search_for_task(task_id):
         download_mode, available_sources = _list_available_download_sources()
         valid_source_ids = {s['id'] for s in available_sources}
 
-        # Pasted streaming-source track link (#813): resolve it to a clean
-        # "artist title" query and search ONLY that source, then bubble the
-        # exact track to the top. Falls back to a normal text search if the
+        # Pasted streaming-source track/album link (#813): resolve it to a
+        # clean "artist title" query and search ONLY that source, then bubble
+        # the exact track to the top. Falls back to a normal text search if the
         # source isn't connected or the link can't be resolved — so the user is
         # never worse off than typing the query themselves.
-        from core.downloads.track_link import parse_download_track_link
+        from core.downloads.track_link import parse_download_link
         from core.soundcloud_client import is_soundcloud_url
-        link = parse_download_track_link(query)
+        link = parse_download_link(query)
         link_source = None
         link_track_id = None
         linked_result = None  # the EXACT track fetched by id, injected into results
@@ -7421,8 +7652,8 @@ def manual_search_for_task(task_id):
                 }), 400
             source = 'soundcloud'
         elif link:
-            _src, _tid = link
-            # A parsed link is unambiguously a Tidal/Qobuz track URL, never a
+            _src, _kind, _eid = link.source, link.kind, link.entity_id
+            # A parsed link is unambiguously a Tidal/Qobuz/Deezer URL, never a
             # name a user would type — so if we can't use it, say why clearly
             # instead of running a useless search of the raw URL text.
             if _src not in valid_source_ids:
@@ -7430,26 +7661,30 @@ def manual_search_for_task(task_id):
                     "error": f"{_src.title()} isn't connected — can't resolve a "
                              f"{_src.title()} link. Connect it in Settings, or search by name."
                 }), 400
-            clean_q, link_err = _resolve_link_track_query(_src, _tid)
+            _prefer = track_info.get('name', '') if isinstance(track_info, dict) else ''
+            clean_q, resolved_tid, link_err = _resolve_link_track_query(
+                _src, _eid, kind=_kind, prefer_title=_prefer,
+            )
             if not clean_q:
                 return jsonify({
                     "error": link_err or f"Couldn't resolve that {_src.title()} link."
                 }), 400
             query = clean_q
             source = _src
-            link_source, link_track_id = _src, _tid
+            link_source, link_track_id = _src, resolved_tid
             # Fetch the EXACT linked track as a downloadable result to inject —
             # a text search for an obscure track's name often doesn't surface it
             # at all, so we can't rely on it being in the search results (#932).
-            # Defensive: only sources that expose get_track_result (Qobuz today);
+            # Defensive: only sources that expose get_track_result (Qobuz/Deezer);
             # others fall back to the bubble path below — never worse than before.
-            _link_client = download_orchestrator.client(_src) if download_orchestrator else None
-            if _link_client is not None and hasattr(_link_client, 'get_track_result'):
-                try:
-                    linked_result = _link_client.get_track_result(_tid)
-                except Exception as _lr_err:
-                    logger.debug("[Manual Search] get_track_result failed for %s %s: %s",
-                                 _src, _tid, _lr_err)
+            if resolved_tid:
+                _link_client = download_orchestrator.client(_src) if download_orchestrator else None
+                if _link_client is not None and hasattr(_link_client, 'get_track_result'):
+                    try:
+                        linked_result = _link_client.get_track_result(resolved_tid)
+                    except Exception as _lr_err:
+                        logger.debug("[Manual Search] get_track_result failed for %s %s: %s",
+                                     _src, resolved_tid, _lr_err)
 
         if source != 'all':
             if source not in valid_source_ids:
@@ -12109,26 +12344,26 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
 
             if download_id:
                 context_key = _make_context_key(username, filename)
-                with matched_context_lock:
-                    # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
-                    matched_downloads_context[context_key] = {
-                        "spotify_artist": spotify_artist,
-                        "spotify_album": spotify_album,
-                        "track_info": spotify_track,  # Full Spotify track object!
-                        "original_search_result": {
-                            'username': username,
-                            'filename': filename,
-                            'size': size,
-                            'title': spotify_track['name'],  # Use Spotify title
-                            'artist': spotify_artist['name'],
-                            'album': spotify_album['name'],
-                            'track_number': spotify_track['track_number'],  # Use Spotify track number
-                            'disc_number': spotify_track.get('disc_number', 1),
-                            'spotify_clean_title': spotify_track['name']  # For filename generation
-                        },
-                        "is_album_download": True,
-                        "has_full_spotify_metadata": True  # Flag for robust processing
-                    }
+                # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
+                _register_matched_download_context(context_key, {
+                    "profile_id": get_current_profile_id(),
+                    "spotify_artist": spotify_artist,
+                    "spotify_album": spotify_album,
+                    "track_info": spotify_track,  # Full Spotify track object!
+                    "original_search_result": {
+                        'username': username,
+                        'filename': filename,
+                        'size': size,
+                        'title': spotify_track['name'],  # Use Spotify title
+                        'artist': spotify_artist['name'],
+                        'album': spotify_album['name'],
+                        'track_number': spotify_track['track_number'],  # Use Spotify track number
+                        'disc_number': spotify_track.get('disc_number', 1),
+                        'spotify_clean_title': spotify_track['name']  # For filename generation
+                    },
+                    "is_album_download": True,
+                    "has_full_spotify_metadata": True  # Flag for robust processing
+                })
 
                 logger.info(
                     "Queued matched track: title=%r track_number=%s",
@@ -12157,19 +12392,19 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
 
             if download_id:
                 context_key = _make_context_key(username, filename)
-                with matched_context_lock:
-                    # Basic context for unmatched tracks (simple cleanup)
-                    matched_downloads_context[context_key] = {
-                        'search_result': {
-                            'username': username,
-                            'filename': filename,
-                            'size': size,
-                            'is_simple_download': True  # Falls back to simple transfer
-                        },
-                        'spotify_artist': None,
-                        'spotify_album': None,
-                        'track_info': None
-                    }
+                # Basic context for unmatched tracks (simple cleanup)
+                _register_matched_download_context(context_key, {
+                    'profile_id': get_current_profile_id(),
+                    'search_result': {
+                        'username': username,
+                        'filename': filename,
+                        'size': size,
+                        'is_simple_download': True  # Falls back to simple transfer
+                    },
+                    'spotify_artist': None,
+                    'spotify_album': None,
+                    'track_info': None
+                })
 
                 logger.info(f"Queued unmatched track (basic cleanup): {filename}")
                 started_count += 1
@@ -12265,17 +12500,17 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
 
             if download_id:
                 context_key = _make_context_key(username, filename)
-                with matched_context_lock:
-                    # Enhanced context storage with Spotify clean titles (GUI parity)
-                    enhanced_context = individual_track_context.copy()
-                    enhanced_context['spotify_clean_title'] = individual_track_context.get('title', '')
+                # Enhanced context storage with Spotify clean titles (GUI parity)
+                enhanced_context = individual_track_context.copy()
+                enhanced_context['spotify_clean_title'] = individual_track_context.get('title', '')
 
-                    matched_downloads_context[context_key] = {
-                        "spotify_artist": spotify_artist,
-                        "spotify_album": spotify_album,
-                        "original_search_result": enhanced_context, # Contains corrected data + clean title
-                        "is_album_download": True
-                    }
+                _register_matched_download_context(context_key, {
+                    "profile_id": get_current_profile_id(),
+                    "spotify_artist": spotify_artist,
+                    "spotify_album": spotify_album,
+                    "original_search_result": enhanced_context, # Contains corrected data + clean title
+                    "is_album_download": True
+                })
                 logger.info(
                     "Queued track: filename=%s matched_title=%r",
                     filename,
@@ -12332,25 +12567,25 @@ def start_matched_download():
 
             if download_id:
                 context_key = _make_context_key(username, filename)
-                with matched_context_lock:
-                    # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
-                    matched_downloads_context[context_key] = {
-                        "spotify_artist": spotify_artist,
-                        "spotify_album": spotify_track.get('album'),  # Single's album from Spotify
-                        "track_info": spotify_track,  # Full Spotify track object!
-                        "original_search_result": {
-                            'username': username,
-                            'filename': filename,
-                            'size': size,
-                            'title': spotify_track['name'],
-                            'artist': spotify_artist['name'],
-                            'album': spotify_track.get('album', {}).get('name', 'Unknown Album'),
-                            'track_number': spotify_track.get('track_number', 1),
-                            'spotify_clean_title': spotify_track['name']
-                        },
-                        "is_album_download": False,  # It's a single
-                        "has_full_spotify_metadata": True  # Flag for robust processing
-                    }
+                # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
+                _register_matched_download_context(context_key, {
+                    "profile_id": get_current_profile_id(),
+                    "spotify_artist": spotify_artist,
+                    "spotify_album": spotify_track.get('album'),  # Single's album from Spotify
+                    "track_info": spotify_track,  # Full Spotify track object!
+                    "original_search_result": {
+                        'username': username,
+                        'filename': filename,
+                        'size': size,
+                        'title': spotify_track['name'],
+                        'artist': spotify_artist['name'],
+                        'album': spotify_track.get('album', {}).get('name', 'Unknown Album'),
+                        'track_number': spotify_track.get('track_number', 1),
+                        'spotify_clean_title': spotify_track['name']
+                    },
+                    "is_album_download": False,  # It's a single
+                    "has_full_spotify_metadata": True  # Flag for robust processing
+                })
 
                 logger.info(f"Queued enhanced single track: '{spotify_track['name']}'")
                 return jsonify({"success": True, "message": "Enhanced single track download started"})
@@ -12392,20 +12627,20 @@ def start_matched_download():
 
             if download_id:
                 context_key = _make_context_key(username, filename)
-                with matched_context_lock:
-                    # THE FIX: We preserve the spotify_album context if it was provided.
-                    # For a regular single, spotify_album will be None.
-                    # For an album track, it will contain the album's data.
-                    # Enhanced context storage with Spotify clean titles (GUI parity)
-                    enhanced_payload = download_payload.copy()
-                    enhanced_payload['spotify_clean_title'] = download_payload.get('title', '')
+                # THE FIX: We preserve the spotify_album context if it was provided.
+                # For a regular single, spotify_album will be None.
+                # For an album track, it will contain the album's data.
+                # Enhanced context storage with Spotify clean titles (GUI parity)
+                enhanced_payload = download_payload.copy()
+                enhanced_payload['spotify_clean_title'] = download_payload.get('title', '')
 
-                    matched_downloads_context[context_key] = {
-                        "spotify_artist": spotify_artist,
-                        "spotify_album": spotify_album, # PRESERVE album context
-                        "original_search_result": enhanced_payload,
-                        "is_album_download": False # It's a single track download, not a full album job.
-                    }
+                _register_matched_download_context(context_key, {
+                    "profile_id": get_current_profile_id(),
+                    "spotify_artist": spotify_artist,
+                    "spotify_album": spotify_album, # PRESERVE album context
+                    "original_search_result": enhanced_payload,
+                    "is_album_download": False # It's a single track download, not a full album job.
+                })
                 return jsonify({"success": True, "message": "Matched download started"})
             else:
                 return jsonify({"success": False, "error": "Failed to start download via slskd"}), 500
@@ -20463,6 +20698,28 @@ except Exception as e:
     logger.error(f"Last.fm listening import worker initialization failed: {e}")
     lastfm_import_worker = None
 
+listenbrainz_import_worker = None
+try:
+    from core.listening_import.listenbrainz import ListenBrainzListeningImportWorker
+
+    def _emit_listenbrainz_import_progress(state):
+        try:
+            socketio.emit('listenbrainz:import-progress', state or {})
+        except Exception as e:
+            logger.debug("listenbrainz import progress emit failed: %s", e)
+
+    listenbrainz_import_db = MusicDatabase()
+    listenbrainz_import_worker = ListenBrainzListeningImportWorker(
+        database=listenbrainz_import_db,
+        config_manager=config_manager,
+        cache_builder=(listening_stats_worker._build_stats_cache if listening_stats_worker else None),
+        progress_callback=_emit_listenbrainz_import_progress,
+    )
+    logger.info("ListenBrainz listening import worker initialized")
+except Exception as e:
+    logger.error(f"ListenBrainz listening import worker initialization failed: {e}")
+    listenbrainz_import_worker = None
+
 # --- Stats API Endpoints ---
 # Lifted to api/stats.py (wired near the other internal blueprints below).
 # ===================================================================
@@ -20967,8 +21224,7 @@ def _emit_server_activity_loop():
 
 def _ws_connection_blocked():
     """#852: mirror the HTTP launch-PIN / login gate for the socketio handshake
-    (before_request doesn't run for it). Fails OPEN on a config-read error, same
-    as the HTTP gate, so a broken config never wedges every client."""
+    (before_request doesn't run for it). Fails CLOSED on unexpected errors (#GHSA-j7g5-8j44-jqhm)."""
     try:
         require_login = _require_login_enabled()
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
@@ -20986,8 +21242,8 @@ def _ws_connection_blocked():
             proxy_authed=proxy_authed,
         )
     except Exception as e:
-        logger.error(f"[WS gate] check failed, allowing (matches HTTP gate fail-open): {e}")
-        return False
+        logger.error(f"[WS gate] check failed, blocking unverified connection (fail-closed): {e}")
+        return True
 
 
 @socketio.on('connect')
@@ -21387,7 +21643,8 @@ _configure_stats_api(get_database=get_database, config_manager=config_manager,
                      fix_artist_image_url=fix_artist_image_url,
                      _automation_engine=lambda: automation_engine,
                      listening_stats_worker_getter=lambda: listening_stats_worker,
-                     lastfm_import_worker_getter=lambda: lastfm_import_worker)
+                     lastfm_import_worker_getter=lambda: lastfm_import_worker,
+                     listenbrainz_import_worker_getter=lambda: listenbrainz_import_worker)
 app.register_blueprint(_create_stats_blueprint())
 
 # Quality profiles / auto-import watcher / metadata-cache browser - three

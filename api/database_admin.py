@@ -667,7 +667,14 @@ def _own_library_scan_clients(server_type):
     server, so an own library there is a second server and stays shared."""
     db = get_database()
     profiles = db.get_own_library_profiles()
-    if not profiles or server_type not in ('plex', 'jellyfin'):
+    if not profiles:
+        return []
+    if server_type not in ('plex', 'jellyfin'):
+        logger.info(
+            "[Own Library] Active media server '%s' does not support per-profile libraries; "
+            "skipping own-library scans for %d profile(s)",
+            server_type, len(profiles)
+        )
         return []
     base = media_server_engine.client(server_type) if media_server_engine else None
     if base is None:

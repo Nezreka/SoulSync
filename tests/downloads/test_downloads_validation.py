@@ -12,7 +12,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from core.downloads import validation
-from core.downloads.validation import filter_soundcloud_previews, get_valid_candidates
+from core.downloads.validation import (
+    filter_soundcloud_previews,
+    get_valid_candidates,
+)
 
 
 @dataclass
@@ -249,6 +252,58 @@ def test_soulseek_first_pool_does_not_run_p2p_matcher_on_streaming(monkeypatch):
     assert tidal in result
     assert engine.slskd_usernames == [['alice']]
     assert slsk.batches == [['alice']]
+
+
+def test_exact_path_identity_recovers_low_generic_score_without_rescuing_sibling(monkeypatch):
+    class LowScoreEngine(_DispatchEngine):
+        def find_best_slskd_matches_enhanced(self, spotify_track, results, max_peer_queue=0):
+            for row in results:
+                row.confidence = 0.45
+            return []
+
+    slsk = _SoulseekQuality()
+
+    class Orch:
+        def client(self, name):
+            return slsk
+
+    monkeypatch.setattr(validation, 'matching_engine', LowScoreEngine())
+    monkeypatch.setattr(validation, 'download_orchestrator', Orch())
+    target = _Track(duration_ms=180_000, name='SexyBack', artists=('Justin Timberlake',))
+    candidate, _, _ = _peer_and_stream_hits()
+    candidate.filename = ('Justin Timberlake/FutureSex+LoveSounds/'
+                          'Justin Timberlake - FutureSex+LoveSounds - 02 - SexyBack.flac')
+    sibling, _, _ = _peer_and_stream_hits()
+    sibling.filename = 'Justin Timberlake/FutureSex+LoveSounds/03 - My Love.flac'
+
+    result = get_valid_candidates([candidate, sibling], target, 'Justin Timberlake SexyBack')
+
+    assert result == [candidate]
+    assert candidate.confidence == 0.45
+
+
+def test_exact_path_identity_recovery_requires_the_artist_in_the_path(monkeypatch):
+    """The engine's short-title guard sinks exact titles under fuzzy-artist
+    folders on purpose; recovery must not undo it."""
+    class LowScoreEngine(_DispatchEngine):
+        def find_best_slskd_matches_enhanced(self, spotify_track, results, max_peer_queue=0):
+            for row in results:
+                row.confidence = 0.30
+            return []
+
+    slsk = _SoulseekQuality()
+
+    class Orch:
+        def client(self, name):
+            return slsk
+
+    monkeypatch.setattr(validation, 'matching_engine', LowScoreEngine())
+    monkeypatch.setattr(validation, 'download_orchestrator', Orch())
+    target = _Track(duration_ms=180_000, name='Team', artists=('Lorde',))
+    other_artist, _, _ = _peer_and_stream_hits()
+    other_artist.filename = 'Lord Huron/Strange Trails/05 - Team.flac'
+
+    assert get_valid_candidates([other_artist], target, 'Lorde Team') == []
 
 
 def test_soulseek_first_pool_still_duration_gates_tidal(monkeypatch):

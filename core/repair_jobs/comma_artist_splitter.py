@@ -85,6 +85,56 @@ def split_artist_parts(name: str, symbols: list = None) -> list:
     return [p.strip() for p in parts if p.strip()]
 
 
+def _norm_set(items) -> set:
+    """casefolded, whitespace-collapsed set of tag values (empties dropped)."""
+    if not items:
+        return set()
+    if isinstance(items, (str, bytes)):
+        items = [items]
+    return {' '.join(str(x).casefold().split()) for x in items if str(x).strip()}
+
+
+def file_already_split(audio, parts: list) -> bool:
+    """True when the open mutagen file already carries ``parts`` as its
+    artist list: the #587 convention this job's fix writes (TXXX:Artists /
+    ``artists`` / an MP4 list), or a multi-value artist tag from picard.
+
+    shared by the scan (skip before spending an api call) and the fix
+    (resolve instead of re-tagging) so the two can never disagree."""
+    if not audio or not parts:
+        return False
+    target = _norm_set(parts)
+    if not target:
+        return False
+    try:
+        from mutagen.id3 import ID3
+        from mutagen.mp4 import MP4
+
+        if isinstance(audio.tags, ID3):
+            for frame in audio.tags.getall('TXXX'):
+                if str(getattr(frame, 'desc', '')).lower() == 'artists':
+                    if _norm_set(getattr(frame, 'text', [])) == target:
+                        return True
+            tpe1 = audio.tags.get('TPE1')
+            text = getattr(tpe1, 'text', None) if tpe1 else None
+            if text and len(text) > 1 and _norm_set(text) == target:
+                return True
+        elif isinstance(audio, MP4):
+            art = audio.tags.get('\xa9ART') if audio.tags else None
+            if isinstance(art, (list, tuple)) and len(art) > 1 and _norm_set(art) == target:
+                return True
+        elif hasattr(audio, 'get'):  # vorbis family
+            if _norm_set(audio.get('artists')) == target:
+                return True
+            artist = audio.get('artist')
+            if isinstance(artist, (list, tuple)) and len(artist) > 1 and _norm_set(artist) == target:
+                return True
+    except Exception:  # noqa: S110
+        # same contract as _get_artist_tag: an unreadable tag is "not split"
+        pass
+    return False
+
+
 @register_job
 class CommaArtistSplitterJob(RepairJob):
     job_id = 'comma_artist_splitter'
@@ -251,6 +301,14 @@ class CommaArtistSplitterJob(RepairJob):
                 parts = split_artist_parts(file_artist, symbols)
                 if len(parts) < 2:
                     logger.debug(f"Artist tag does not contain multiple parts: {file_artist}")
+                    continue
+
+                # a file that already carries the split list (our own fix, or
+                # picard's TXXX:Artists / ARTISTS / multi-value artist) is done.
+                # without this a fixed file re-flags on every scan forever,
+                # since its display artist is still "A; B".
+                if file_already_split(audio, parts):
+                    result.skipped += 1
                     continue
 
                 # Memoize the split

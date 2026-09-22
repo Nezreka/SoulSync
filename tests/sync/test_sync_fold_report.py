@@ -73,6 +73,7 @@ def test_a_sync_reports_the_fold_in_the_result_the_progress_and_the_log(caplog):
     assert result.synced_tracks + result.duplicate_tracks == result.matched_tracks
     assert final["current_step"] == "Sync completed"
     assert final["duplicate_tracks"] == 1
+    assert final["synced_tracks"] == 2
 
     # the folded entry says which entry already holds its file
     by_id = {d["source_track_id"]: d for d in result.match_details}
