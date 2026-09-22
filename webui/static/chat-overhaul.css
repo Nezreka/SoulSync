@@ -2105,6 +2105,7 @@
 }
 
 .chat-dev-badge--lg {
+    margin-left: 8px;
     font-size: 11px;
     padding: 3px 8px;
     border-radius: 5px;

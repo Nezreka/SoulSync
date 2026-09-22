@@ -2404,10 +2404,33 @@
         });
     }
 
-    // ── developer identification (SoulSync creator & lead dev) ─────────────
+    // ── developer identification ───────────────────────────────────────────
+    // one lead dev (the creator), plus contributors who earned a dev tag.
+    // slskd usernames, lowercase
+    var LEAD_DEV = 'boulderbadgedad';
+    var CHAT_DEVS = ['ezra9'];
+
+    function isLeadDev(name) {
+        return !!name && String(name).toLowerCase() === LEAD_DEV;
+    }
+
+    // any dev, lead included. drives the sort and the purple border
     function isDev(name) {
         if (!name) return false;
-        return String(name).toLowerCase() === 'boulderbadgedad';
+        return isLeadDev(name) || CHAT_DEVS.indexOf(String(name).toLowerCase()) !== -1;
+    }
+
+    function devTitle(name) {
+        return isLeadDev(name) ? 'SoulSync Creator & Lead Developer' : 'SoulSync Developer';
+    }
+
+    // the badge markup, '' for everyone else. mod is '', 'inline' or 'lg'
+    function devBadge(name, mod) {
+        if (!isDev(name)) return '';
+        var cls = 'chat-dev-badge' + (mod ? ' chat-dev-badge--' + mod : '');
+        return '<span class="' + cls + '" title="' + devTitle(name) + '">' +
+            '<span class="chat-dev-badge-check">✔</span> ' +
+            (isLeadDev(name) ? 'LEAD DEV' : 'DEV') + '</span>';
     }
 
     // Consecutive messages from the same sender (same app-ness, <5 min apart)
@@ -2449,7 +2472,7 @@
                 '<button class="chat-msg-user" type="button" data-chat-user="' + attr(user) +
                     '" style="color:hsl(' + _hue(user) + ',65%,68%)" title="Message ' +
                     attr(user) + '">' + esc(user) + '</button>' +
-                (isDev(user) ? '<span class="chat-dev-badge" title="SoulSync Creator & Lead Developer"><span class="chat-dev-badge-check">✔</span> DEV</span>' : '') +
+                devBadge(user) +
                 (!self && isFriend(user) ? '<span class="chat-friend-badge" title="Friend">⭐ Friend</span>' : '') +
                 (ext ? '<span class="chat-peer-badge chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '<span class="chat-peer-badge chat-peer-badge--soulsync">SoulSync</span>') +
                 '<span class="chat-msg-time">' + esc(fmtTime(m.timestamp)) + '</span>' +
@@ -2822,7 +2845,7 @@
             '</span>' +
             '<span class="chat-user-main">' +
                 '<span class="chat-user-name">' + esc(n) +
-                    (isDev(n) ? '<span class="chat-dev-badge chat-dev-badge--inline" title="SoulSync Creator & Lead Developer"><span class="chat-dev-badge-check">✔</span> DEV</span>' : '') +
+                    devBadge(n, 'inline') +
                     (fr ? '<span class="chat-user-friend-star" title="Friend">⭐</span>' : '') +
                 '</span>' +
                 // the shared jukebox wins the line — it's what the room is doing
@@ -2855,6 +2878,22 @@
         renderUsersList();
     }
 
+    // which sidebar group each user lands in. lead dev gets its own group
+    // above the other devs
+    function _bucketUsers(names, cls) {
+        var b = { leads: [], devs: [], self: [], friends: [], apps: [], rest: [] };
+        names.forEach(function (n) {
+            if (isLeadDev(n)) b.leads.push(n);
+            else if (isDev(n)) b.devs.push(n);
+            else if (state.selfName && n === state.selfName) b.self.push(n);
+            else if (isFriend(n)) b.friends.push(n);
+            // the flip: unknown (never spoke) = assumed SoulSync
+            else if (cls[n] !== 'vanilla') b.apps.push(n);
+            else b.rest.push(n);
+        });
+        return b;
+    }
+
     function renderUsersList() {
         var listHost = q('[data-chat-user-list]');
         if (!listHost) return;
@@ -2864,15 +2903,9 @@
         });
         if (f) names = names.filter(function (n) { return n.toLowerCase().indexOf(f) > -1; });
         var cls = _userClassification();
-        var devs = [], self = [], friends = [], apps = [], rest = [];
-        names.forEach(function (n) {
-            if (isDev(n)) devs.push(n);
-            else if (state.selfName && n === state.selfName) self.push(n);
-            else if (isFriend(n)) friends.push(n);
-            // the flip: unknown (never spoke) = assumed SoulSync
-            else if (cls[n] !== 'vanilla') apps.push(n);
-            else rest.push(n);
-        });
+        var b = _bucketUsers(names, cls);
+        var leads = b.leads, devs = b.devs, self = b.self,
+            friends = b.friends, apps = b.apps, rest = b.rest;
         var _evs = window.ChatProtocol ? _roomEvents() : [];
         var tunedMap = window.ChatProtocol
             ? window.ChatProtocol.reduceTuned(_evs) : {};            // once, not per user
@@ -2881,6 +2914,10 @@
         var avMap = _avatarMap();
         // Discord groups members by role with a "NAME — count" header.
         var html = '';
+        if (leads.length) {
+            html += '<div class="chat-users-label chat-users-label--sub" style="color:#a5b4fc;">👑 Lead Developer &mdash; ' + leads.length + '</div>' +
+                leads.map(function (n) { return _userBtn(n, ' chat-user--dev', tunedMap, npMap, avMap); }).join('');
+        }
         if (devs.length) {
             html += '<div class="chat-users-label chat-users-label--sub" style="color:#a5b4fc;">🛠️ Developer &mdash; ' + devs.length + '</div>' +
                 devs.map(function (n) { return _userBtn(n, ' chat-user--dev', tunedMap, npMap, avMap); }).join('');
@@ -2904,7 +2941,7 @@
                 rest.length + '</div>' +
                 rest.map(function (n) { return _userBtn(n, '', tunedMap, npMap, avMap); }).join('');
         }
-        if (!devs.length && !self.length && !friends.length && !apps.length && !rest.length) {
+        if (!leads.length && !devs.length && !self.length && !friends.length && !apps.length && !rest.length) {
             html += '<div class="chat-side-none">No users match</div>';
         }
         listHost.innerHTML = html;
@@ -5152,7 +5189,7 @@
               (state.isAdmin ? '<button class="chat-cog-btn" type="button" data-chat-settings-btn ' +
                   'title="Chat settings">⚙</button>' : '')
             : '<span class="chat-head-title">' + esc(state.pmUser || '') +
-              (isDev(state.pmUser) ? ' <span class="chat-dev-badge" title="SoulSync Creator & Lead Developer"><span class="chat-dev-badge-check">✔</span> DEV</span>' : '') +
+              (isDev(state.pmUser) ? ' ' + devBadge(state.pmUser) : '') +
               (isFriend(state.pmUser) ? ' <span class="chat-friend-badge" title="Friend">⭐ Friend</span>' : '') +
               '</span>' +
               '<span class="chat-head-sub">private message</span>' +
@@ -5637,10 +5674,10 @@
             var isFr = isFriend(name);
             body.innerHTML = '<div class="chat-card-head">' + _avatar(name) +
                 '<span class="chat-card-name">' + esc(name) + '</span>' +
-                (isDev(name) ? '<span class="chat-dev-badge chat-dev-badge--lg" style="margin-left:8px;" title="SoulSync Creator & Lead Developer"><span class="chat-dev-badge-check">✔</span> DEV</span>' : '') +
+                devBadge(name, 'lg') +
                 (isFr ? '<span class="chat-friend-badge" style="margin-left:8px;">⭐ Friend</span>' : '') +
                 '</div>' +
-                (isDev(name) ? '<div class="chat-card-sub" style="color:#a5b4fc;font-weight:700;font-size:12px;margin:2px 0 6px;">🛠️ SoulSync Creator &amp; Lead Developer</div>' : '') +
+                (isDev(name) ? '<div class="chat-card-sub" style="color:#a5b4fc;font-weight:700;font-size:12px;margin:2px 0 6px;">🛠️ ' + esc(devTitle(name)) + '</div>' : '') +
                 '<div class="chat-card-info">Loading…</div>';
         }
         overlay.hidden = false;
@@ -5909,12 +5946,12 @@
         // Set Hero identity
         var title = q('[data-chat-browse-title]');
         if (title) {
-            title.innerHTML = esc(name) + (isDev(name) ? ' <span class="chat-dev-badge chat-dev-badge--inline" title="SoulSync Creator & Lead Developer"><span class="chat-dev-badge-check">✔</span> DEV</span>' : '');
+            title.innerHTML = esc(name) + (isDev(name) ? ' ' + devBadge(name, 'inline') : '');
         }
         var av = q('[data-chat-browse-av]');
         if (av) av.textContent = (name[0] || '👤').toUpperCase();
         var statusText = q('[data-chat-browse-status-text]');
-        if (statusText) statusText.textContent = isDev(name) ? 'SoulSync Creator & Lead Developer' : 'Connecting…';
+        if (statusText) statusText.textContent = isDev(name) ? devTitle(name) : 'Connecting…';
 
         // Setup format filter pills
         var pBar = q('.chat-browse-format-filters');
