@@ -454,7 +454,54 @@ class MusicBrainzClient:
             if raise_on_error:
                 raise
             return []
-    
+
+    def search_recording_by_artist_mbid(self, track_name: str, artist_mbid: str,
+                                        limit: int = 5,
+                                        raise_on_error: bool = False) -> List[Dict[str, Any]]:
+        """Search recordings by exact title, pinned to a resolved artist MBID.
+
+        The ``artist``/``artistname``/``creditname`` fields on a /recording
+        query reflect the artist CREDIT printed on that specific recording —
+        never the artist entity's aliases, and /recording has no alias field
+        at all. So `search_recording(strict=True)`'s `artist:"..."` clause
+        can never match a romanised or cross-script name against a recording
+        credited in the artist's native script (e.g. "Tatsuro Yamashita"
+        finds nothing for a recording credited "山下達郎", even though the
+        artist entity itself resolves via the alias-aware artist search).
+        `arid:<mbid>` queries the artist relationship directly instead of the
+        printed credit text, sidestepping that mismatch entirely. Callers are
+        expected to have resolved ``artist_mbid`` through an alias-aware path
+        (e.g. `search_artist(strict=False)`) first.
+
+        ``raise_on_error`` re-raises a transport failure instead of folding it
+        into ``[]`` — same contract as `search_artist`, for callers that
+        would otherwise cache the empty list as "no such recording".
+        """
+        try:
+            safe_track = track_name.replace('\\', '\\\\').replace('"', '\\"')
+            query = f'arid:{artist_mbid} AND recording:"{safe_track}"'
+
+            params = {
+                'query': query,
+                'fmt': 'json',
+                'limit': limit
+            }
+
+            response = self._get("/recording", params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            recordings = data.get('recordings', [])
+
+            logger.debug(f"Found {len(recordings)} recordings for artist-pinned query: {track_name}")
+            return recordings
+
+        except Exception as e:
+            logger.error(f"Error searching recordings for artist {artist_mbid}, track '{track_name}': {e}")
+            if raise_on_error:
+                raise
+            return []
+
     def browse_artist_release_groups(self, artist_mbid: str,
                                      release_types: Optional[List[str]] = None,
                                      limit: int = 100,

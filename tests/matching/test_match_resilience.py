@@ -18,7 +18,7 @@ here, like there, never calls `_save_to_cache`.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -57,10 +57,13 @@ def test_match_recording_transient_failure_is_not_cached(service):
 
 def test_match_recording_genuine_miss_is_still_cached(service):
     service.mb_client.search_recording.return_value = []
+    # a strict miss now also tries the artist-pinned retry, which caches its
+    # own artist_recording_pin row; only the recording row matters here
+    service.mb_client.search_artist.return_value = []
 
     assert service.match_recording("Some Song", "Some Artist") is None
-    service._save_to_cache.assert_called_once_with(
-        'recording', "Some Song", "Some Artist", None, None, 0)
+    recording_writes = [c for c in service._save_to_cache.call_args_list if c.args[0] == 'recording']
+    assert recording_writes == [call('recording', "Some Song", "Some Artist", None, None, 0)]
 
 
 def test_match_recording_passes_raise_on_error(service):

@@ -73,6 +73,22 @@ def test_recording_strict_unchanged(client):
     assert q == 'recording:"Say You Will" AND artist:"Foreigner"'  # strict path untouched
 
 
+def test_recording_by_artist_mbid_pins_arid(client):
+    # The artist-pin fallback (romanised/cross-script names never match the
+    # printed credit on /recording — see core/musicbrainz_service.py
+    # match_recording) queries the artist RELATIONSHIP via arid: instead of
+    # the artist field, alongside the same phrase-quoted, escaped title.
+    client.search_recording_by_artist_mbid("Sparkle", "abc-123-def")
+    q = _query_of(client)
+    assert q == 'arid:abc-123-def AND recording:"Sparkle"'
+
+
+def test_recording_by_artist_mbid_escapes_title(client):
+    client.search_recording_by_artist_mbid('Say "It" Right', "abc-123")
+    q = _query_of(client)
+    assert q == 'arid:abc-123 AND recording:"Say \\"It\\" Right"'
+
+
 def test_recording_nonstrict_escapes_lucene_specials_in_artist(client):
     # Artist names with parens/?/! must NOT break the artist:(...) group.
     # Without escaping, "Sunn O)))" closes the group early and returns
