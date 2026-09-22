@@ -548,11 +548,23 @@ _launch_pin_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
 from api.login import login_limiter as _login_limiter
 
 
+_last_known_require_login: bool = False
+
+
 def _require_login_enabled():
+    global _last_known_require_login
     try:
-        return bool(config_manager.get('security.require_login', False)) if config_manager else False
-    except Exception:
-        return False
+        if config_manager is None:
+            return _last_known_require_login
+        val = bool(config_manager.get('security.require_login', False))
+        _last_known_require_login = val
+        return val
+    except Exception as e:
+        logger.warning(
+            "[_require_login_enabled] config read failed, falling back to last known (%s): %s",
+            _last_known_require_login, e
+        )
+        return _last_known_require_login
 
 
 # --- Login gate (opt-in username/password mode; replaces the launch PIN) ---
@@ -570,6 +582,10 @@ def _enforce_login():
         require_login=True,
         authenticated=bool(session.get('login_authenticated', False)),
     ):
+        logger.warning(
+            "[Login Gate] Blocked unauthenticated %s request to %s",
+            request.method, request.path
+        )
         if is_html_navigation(request.method, request.headers.get('Accept', ''),
                               request.headers.get('Sec-Fetch-Mode', '')):
             return redirect('/')
@@ -632,15 +648,34 @@ def _set_profile_context():
     """Set g.profile_id from session for every request"""
     g.request_start_monotonic = time.perf_counter()
     g.request_start_cpu = time.thread_time()
-    # Skip for profile management, static, and root routes
-    path = request.path
-    if (path.startswith('/api/profiles') or
-        path.startswith('/static/') or
-        path == '/' or
-        path.startswith('/api/v1/')):
-        g.profile_id = session.get('profile_id', 1)
+
+    # 1. Login mode: unauthenticated sessions have NO profile or admin rights (#GHSA-j7g5-8j44-jqhm).
+    if _require_login_enabled() and not session.get('login_authenticated', False):
+        g.profile_id = None
+        g.is_admin = False
+        g.can_download = False
+        g.profile_name = "Anonymous"
+        g.allowed_sides = 'none'
         return
 
+    # 2. Launch PIN mode: unverified sessions have NO profile or admin rights (#GHSA-j7g5-8j44-jqhm).
+    try:
+        require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
+    except Exception:
+        require_pin = False
+    if require_pin and not _require_login_enabled():
+        _proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
+        from core.security.auth_proxy import trusted_proxy_user
+        _proxy_authed = bool(trusted_proxy_user(request.headers.get, _proxy_header))
+        if not session.get('launch_pin_verified', False) and not _proxy_authed:
+            g.profile_id = None
+            g.is_admin = False
+            g.can_download = False
+            g.profile_name = "Locked"
+            g.allowed_sides = 'none'
+            return
+
+    path = request.path
     pid = session.get('profile_id', 1)
 
     # Validate session profile still exists (handles deleted profiles), and stash
@@ -648,8 +683,24 @@ def _set_profile_context():
     # music-DB read. Admin (1) is always allowed.
     g.can_download = True
     g.profile_name = "Admin"   # display name for isolated blueprints (video issues reporter)
-    g.is_admin = True          # profile 1 is always admin; others per their is_admin flag
+    g.is_admin = (pid == 1)    # profile 1 is always admin; others per their is_admin flag
     g.allowed_sides = 'both'   # per-profile side access (music|video|both); admins always both
+
+    # Skip DB validation for profile management, static, and root routes
+    if (path.startswith('/api/profiles') or
+        path.startswith('/static/') or
+        path == '/' or
+        path.startswith('/api/v1/')):
+        g.profile_id = pid
+        if pid != 1 and 'profile_id' in session:
+            try:
+                database = get_database()
+                profile = database.get_profile(pid)
+                g.is_admin = bool((profile or {}).get('is_admin', False))
+            except Exception:
+                g.is_admin = False
+        return
+
     if pid != 1 and 'profile_id' in session:
         g.is_admin = False
         try:
@@ -21141,8 +21192,7 @@ def _emit_server_activity_loop():
 
 def _ws_connection_blocked():
     """#852: mirror the HTTP launch-PIN / login gate for the socketio handshake
-    (before_request doesn't run for it). Fails OPEN on a config-read error, same
-    as the HTTP gate, so a broken config never wedges every client."""
+    (before_request doesn't run for it). Fails CLOSED on unexpected errors (#GHSA-j7g5-8j44-jqhm)."""
     try:
         require_login = _require_login_enabled()
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
@@ -21160,8 +21210,8 @@ def _ws_connection_blocked():
             proxy_authed=proxy_authed,
         )
     except Exception as e:
-        logger.error(f"[WS gate] check failed, allowing (matches HTTP gate fail-open): {e}")
-        return False
+        logger.error(f"[WS gate] check failed, blocking unverified connection (fail-closed): {e}")
+        return True
 
 
 @socketio.on('connect')
