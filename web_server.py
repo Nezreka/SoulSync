@@ -7540,26 +7540,54 @@ def download_selected_candidate(task_id):
         return jsonify({"error": str(e)}), 500
 
 
-def _resolve_link_track_query(source: str, track_id: str):
-    """Resolve a pasted (source, track_id) to a clean "artist title" search
-    query via the source client's get_track (#813). Returns (query, None) or
-    (None, error). Used so a pasted Tidal/Qobuz link runs the source's normal
-    search (proven-downloadable candidates) instead of a hand-built one."""
-    from core.downloads.track_link import query_from_track_payload
+def _resolve_link_track_query(source: str, entity_id: str, kind: str = 'track',
+                              prefer_title: str = ''):
+    """Resolve a pasted (source, kind, id) to a clean "artist title" search
+    query via the source client's get_track / get_album (#813). Returns
+    ``(query, track_id, None)`` or ``(None, None, error)``.
+
+    Album links (Deezer remix singles) resolve to a track id first, then
+    follow the same get_track path. Used so a pasted Tidal/Qobuz/Deezer
+    link runs the source's normal search (proven-downloadable candidates)
+    instead of a hand-built one."""
+    from core.downloads.track_link import (
+        query_from_album_payload, query_from_track_payload, track_id_from_album_payload,
+    )
     client = download_orchestrator.client(source) if download_orchestrator else None
-    if not client or not hasattr(client, 'get_track'):
-        return None, f"{source.title()} is not connected"
+    if not client:
+        return None, None, f"{source.title()} is not connected"
+
+    track_id = entity_id
+    if kind == 'album':
+        if not hasattr(client, 'get_album'):
+            return None, None, f"{source.title()} album links aren't supported"
+        try:
+            album = client.get_album(entity_id)
+        except Exception as e:
+            return None, None, f"Could not resolve {source.title()} album: {e}"
+        if not album:
+            return None, None, f"{source.title()} album {entity_id} not found"
+        track_id = track_id_from_album_payload(album, prefer_title)
+        if not track_id:
+            # No embedded tracks — still search by album artist+title.
+            query = query_from_album_payload(album)
+            if not query:
+                return None, None, f"Could not read the album title from {source.title()}"
+            return query, None, None
+
+    if not hasattr(client, 'get_track'):
+        return None, None, f"{source.title()} is not connected"
     try:
         raw = client.get_track(track_id)
     except Exception as e:
-        return None, f"Could not resolve {source.title()} track: {e}"
+        return None, None, f"Could not resolve {source.title()} track: {e}"
     if not raw:
-        return None, f"{source.title()} track {track_id} not found"
+        return None, None, f"{source.title()} track {track_id} not found"
 
     query = query_from_track_payload(source, raw)
     if not query:
-        return None, f"Could not read the track title from {source.title()}"
-    return query, None
+        return None, None, f"Could not read the track title from {source.title()}"
+    return query, str(track_id), None
 
 
 @app.route('/api/downloads/task/<task_id>/manual-search', methods=['POST'])
@@ -7601,14 +7629,14 @@ def manual_search_for_task(task_id):
         download_mode, available_sources = _list_available_download_sources()
         valid_source_ids = {s['id'] for s in available_sources}
 
-        # Pasted streaming-source track link (#813): resolve it to a clean
-        # "artist title" query and search ONLY that source, then bubble the
-        # exact track to the top. Falls back to a normal text search if the
+        # Pasted streaming-source track/album link (#813): resolve it to a
+        # clean "artist title" query and search ONLY that source, then bubble
+        # the exact track to the top. Falls back to a normal text search if the
         # source isn't connected or the link can't be resolved — so the user is
         # never worse off than typing the query themselves.
-        from core.downloads.track_link import parse_download_track_link
+        from core.downloads.track_link import parse_download_link
         from core.soundcloud_client import is_soundcloud_url
-        link = parse_download_track_link(query)
+        link = parse_download_link(query)
         link_source = None
         link_track_id = None
         linked_result = None  # the EXACT track fetched by id, injected into results
@@ -7624,8 +7652,8 @@ def manual_search_for_task(task_id):
                 }), 400
             source = 'soundcloud'
         elif link:
-            _src, _tid = link
-            # A parsed link is unambiguously a Tidal/Qobuz track URL, never a
+            _src, _kind, _eid = link.source, link.kind, link.entity_id
+            # A parsed link is unambiguously a Tidal/Qobuz/Deezer URL, never a
             # name a user would type — so if we can't use it, say why clearly
             # instead of running a useless search of the raw URL text.
             if _src not in valid_source_ids:
@@ -7633,26 +7661,30 @@ def manual_search_for_task(task_id):
                     "error": f"{_src.title()} isn't connected — can't resolve a "
                              f"{_src.title()} link. Connect it in Settings, or search by name."
                 }), 400
-            clean_q, link_err = _resolve_link_track_query(_src, _tid)
+            _prefer = track_info.get('name', '') if isinstance(track_info, dict) else ''
+            clean_q, resolved_tid, link_err = _resolve_link_track_query(
+                _src, _eid, kind=_kind, prefer_title=_prefer,
+            )
             if not clean_q:
                 return jsonify({
                     "error": link_err or f"Couldn't resolve that {_src.title()} link."
                 }), 400
             query = clean_q
             source = _src
-            link_source, link_track_id = _src, _tid
+            link_source, link_track_id = _src, resolved_tid
             # Fetch the EXACT linked track as a downloadable result to inject —
             # a text search for an obscure track's name often doesn't surface it
             # at all, so we can't rely on it being in the search results (#932).
-            # Defensive: only sources that expose get_track_result (Qobuz today);
+            # Defensive: only sources that expose get_track_result (Qobuz/Deezer);
             # others fall back to the bubble path below — never worse than before.
-            _link_client = download_orchestrator.client(_src) if download_orchestrator else None
-            if _link_client is not None and hasattr(_link_client, 'get_track_result'):
-                try:
-                    linked_result = _link_client.get_track_result(_tid)
-                except Exception as _lr_err:
-                    logger.debug("[Manual Search] get_track_result failed for %s %s: %s",
-                                 _src, _tid, _lr_err)
+            if resolved_tid:
+                _link_client = download_orchestrator.client(_src) if download_orchestrator else None
+                if _link_client is not None and hasattr(_link_client, 'get_track_result'):
+                    try:
+                        linked_result = _link_client.get_track_result(resolved_tid)
+                    except Exception as _lr_err:
+                        logger.debug("[Manual Search] get_track_result failed for %s %s: %s",
+                                     _src, resolved_tid, _lr_err)
 
         if source != 'all':
             if source not in valid_source_ids:

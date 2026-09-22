@@ -94,6 +94,16 @@ describe('ManualMatchModal', () => {
     expect(window.showToast).toHaveBeenCalledWith('Cleared MusicBrainz match', 'success');
   });
 
+  it('Deezer match invites a pasted URL', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ success: true, results: [] }))),
+    );
+    mount({ service: 'deezer', defaultQuery: 'Raccoons' });
+    const input = await screen.findByPlaceholderText(/paste a Deezer URL/i);
+    expect(input).toBeTruthy();
+  });
+
   it('a declined confirm clears nothing', async () => {
     const fetchSpy = vi.fn(
       async (_i: RequestInfo | URL, _init?: RequestInit) =>

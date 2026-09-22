@@ -2777,7 +2777,7 @@ function _renderCandidatesModal(data) {
                 <input type="text"
                        class="candidates-manual-search-input"
                        id="candidates-manual-search-input"
-                       placeholder="Search, or paste a Tidal / Qobuz track link..."
+                       placeholder="Search, or paste a Tidal / Qobuz / Deezer link..."
                        maxlength="300" />
                 ${sourceControl}
                 <button class="candidates-manual-search-btn"
