@@ -16435,6 +16435,90 @@ class MusicDatabase:
             logger.debug(f"update_similar_artist_popularity failed: {e}")
             return 0
 
+    @staticmethod
+    def _temp_key_set(cursor, table: str, values) -> None:
+        """Materialise a small python set as a temp table the query can test against.
+
+        connections are per-operation (see _get_connection), so a TEMP table lives and
+        dies with this one call — no cleanup, no collision between threads."""
+        cursor.execute(f"CREATE TEMP TABLE {table} (v TEXT PRIMARY KEY)")  # noqa: S608 - table name is a literal
+        if values:
+            cursor.executemany(
+                f"INSERT OR IGNORE INTO {table} VALUES (?)",  # noqa: S608 - table name is a literal
+                [(v,) for v in values],
+            )
+
+    @staticmethod
+    def _watchlist_exclusion_keys(cursor, profile_id: int = 1) -> Dict[str, set]:
+        """The ids + names of this profile's watchlist artists, for exclusion.
+
+        a recommendation you already watch is not a recommendation. only truthy
+        values go in: an empty id column must never match another empty one."""
+        keys = {'spotify': set(), 'itunes': set(), 'deezer': set(), 'names': set()}
+        cursor.execute("""
+            SELECT artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id
+            FROM watchlist_artists WHERE profile_id = ?
+        """, (profile_id,))
+        for row in cursor.fetchall():
+            if row['spotify_artist_id']:
+                keys['spotify'].add(str(row['spotify_artist_id']))
+            if row['itunes_artist_id']:
+                keys['itunes'].add(str(row['itunes_artist_id']))
+            if row['deezer_artist_id']:
+                keys['deezer'].add(str(row['deezer_artist_id']))
+            if row['artist_name']:
+                keys['names'].add(str(row['artist_name']).lower())
+        return keys
+
+    def _deliberate_artist_source_ids(self, cursor, profile_id: int = 1) -> set:
+        """Every source_artist_id that stands for an artist this profile CHOSE.
+
+        that is: an artist in their library (owner NULL = the shared scope, or their
+        own rows) or on their watchlist. the watchlist scanner keys a row by the
+        watchlist row id when the artist has no provider id at all, so that key
+        counts too — the artist map's own query already coalesces to it."""
+        owned = set()
+        cursor.execute("""
+            SELECT spotify_artist_id, itunes_artist_id, deezer_id, musicbrainz_id
+            FROM artists WHERE +owner_profile_id IS NULL OR +owner_profile_id = ?
+        """, (profile_id,))
+        for row in cursor.fetchall():
+            owned.update(str(v) for v in tuple(row) if v)
+        cursor.execute("""
+            SELECT id, spotify_artist_id, itunes_artist_id, deezer_artist_id, musicbrainz_artist_id
+            FROM watchlist_artists WHERE profile_id = ?
+        """, (profile_id,))
+        for row in cursor.fetchall():
+            owned.update(str(v) for v in tuple(row) if v)
+        return owned
+
+    def _stray_similar_artist_sources(self, cursor, profile_id: int = 1) -> set:
+        """The source ids in similar_artists that trace back to nothing you chose.
+
+        the artist map caches a browse into this table under the browsed artist's id
+        (core/artists/map.py), and the download path has been seen writing under the
+        'from_sync_modal' placeholder. neither is a preference, so neither may seed
+        discovery. returned as the set to EXCLUDE because it is small — a few dozen
+        against the tens of thousands of ids a real library owns."""
+        cursor.execute(
+            "SELECT DISTINCT source_artist_id FROM similar_artists WHERE profile_id = ?",
+            (profile_id,))
+        present = {str(row[0]) for row in cursor.fetchall() if row[0] is not None}
+        if not present:
+            return set()
+        stray = present - self._deliberate_artist_source_ids(cursor, profile_id)
+        if stray and len(stray) == len(present):
+            # every stored edge is unattributable — discovery is about to go quiet, and
+            # a quiet feature gets reported as boring, never as broken. say so out loud.
+            logger.info(
+                "similar_artists: all %d source artists for profile %s resolve to no "
+                "library or watchlist artist — recommendations will be empty until one does",
+                len(present), profile_id)
+        elif stray:
+            logger.debug("similar_artists: ignoring %d of %d source artists (not library or watchlist)",
+                         len(stray), len(present))
+        return stray
+
     def get_top_similar_artists(
         self,
         limit: int = 50,
@@ -16444,6 +16528,12 @@ class MusicDatabase:
         adventurousness: float = None,
     ) -> List[SimilarArtist]:
         """Get top similar artists excluding watchlist artists, with cycling support.
+
+        Only edges whose SOURCE artist is one you chose count — an artist in your
+        library or on your watchlist. Opening the artist map caches rows here for
+        whoever you looked up, and a look-up is not a preference; see
+        _stray_similar_artist_sources.
+
         require_source: if set, only returns artists with that source ID.
         exclude_library_server: if set, also excludes artists already present in that media server.
         adventurousness: 0..1 dial. When given, the CANDIDATE SELECTION itself shifts with it — the
@@ -16519,6 +16609,25 @@ class MusicDatabase:
                         AVG(sa.similarity_rank) ASC"""
                     order_params = (_dial, _dial)
 
+                # only the artists you actually chose may seed a recommendation.
+                # browsing the artist map caches rows here too (core/artists/map.py),
+                # keyed by whoever you just looked up — curiosity, not intent. we drop
+                # the rows whose source artist is neither in your library nor on your
+                # watchlist. done by EXCLUSION: the strays are a handful, the owned ids
+                # are tens of thousands.
+                stray_sources = self._stray_similar_artist_sources(cursor, profile_id)
+                excl = self._watchlist_exclusion_keys(cursor, profile_id)
+
+                # the watchlist exclusion was a LEFT JOIN with four OR'd predicates and
+                # no index to serve any of them — every row of similar_artists scanned
+                # the whole watchlist (3.3s on a 101k-row table). the watchlist is tiny,
+                # so resolve it once in python and hand the query a set to test against.
+                self._temp_key_set(cursor, 'sa_stray_sources', stray_sources)
+                self._temp_key_set(cursor, 'sa_excl_names', excl['names'])
+                self._temp_key_set(cursor, 'sa_excl_spotify', excl['spotify'])
+                self._temp_key_set(cursor, 'sa_excl_itunes', excl['itunes'])
+                self._temp_key_set(cursor, 'sa_excl_deezer', excl['deezer'])
+
                 cursor.execute(f"""
                     SELECT
                         MAX(sa.id) as id,
@@ -16535,17 +16644,20 @@ class MusicDatabase:
                         MAX(sa.genres) as genres,
                         MAX(sa.popularity) as popularity
                     FROM similar_artists sa
-                    LEFT JOIN watchlist_artists wa ON (
-                        (sa.similar_artist_spotify_id IS NOT NULL AND sa.similar_artist_spotify_id = wa.spotify_artist_id)
-                        OR (sa.similar_artist_itunes_id IS NOT NULL AND sa.similar_artist_itunes_id = wa.itunes_artist_id)
-                        OR (sa.similar_artist_deezer_id IS NOT NULL AND sa.similar_artist_deezer_id = wa.deezer_artist_id)
-                        OR LOWER(sa.similar_artist_name) = LOWER(wa.artist_name)
-                    ) AND wa.profile_id = ?
-                    WHERE wa.id IS NULL AND sa.profile_id = ? {source_filter}
+                    WHERE sa.profile_id = ?
+                      AND sa.source_artist_id NOT IN (SELECT v FROM sa_stray_sources)
+                      AND LOWER(sa.similar_artist_name) NOT IN (SELECT v FROM sa_excl_names)
+                      AND (sa.similar_artist_spotify_id IS NULL
+                           OR sa.similar_artist_spotify_id NOT IN (SELECT v FROM sa_excl_spotify))
+                      AND (sa.similar_artist_itunes_id IS NULL
+                           OR sa.similar_artist_itunes_id NOT IN (SELECT v FROM sa_excl_itunes))
+                      AND (sa.similar_artist_deezer_id IS NULL
+                           OR sa.similar_artist_deezer_id NOT IN (SELECT v FROM sa_excl_deezer))
+                      {source_filter}
                     GROUP BY sa.similar_artist_name
                     {order_clause}
                     LIMIT ?
-                """, (profile_id, profile_id, *order_params, sql_limit))
+                """, (profile_id, *order_params, sql_limit))
 
                 rows = cursor.fetchall()
                 results = []
