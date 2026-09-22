@@ -5153,6 +5153,25 @@
                                                         this (prefers peers with shorter queues regardless)</small>
                                                 </div>
                                                 <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="soulseek-observed-speed-fallback-enabled">
+                                                        Retry slow Soulseek downloads
+                                                    </label>
+                                                    <small class="settings-hint">Off by default. Applies to automatic
+                                                        tracks and album bundles when another eligible peer is
+                                                        available; not manually chosen files.</small>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Minimum Observed Download Speed (KB/s):</label>
+                                                    <input type="number" id="soulseek-min-observed-download-speed"
+                                                        placeholder="250" min="0" step="50" value="250">
+                                                    <small class="settings-hint">When enabled, try the next Soulseek
+                                                        candidate after roughly one minute below this observed speed.
+                                                        Uses actual byte progress rather than the peer's advertised
+                                                        speed. The final available candidate is always allowed to
+                                                        continue. 0 also disables.</small>
+                                                </div>
+                                                <div class="form-group">
                                                     <label>Download Timeout (minutes):</label>
                                                     <input type="number" id="soulseek-download-timeout" placeholder="10"
                                                         min="2" max="60" value="10">

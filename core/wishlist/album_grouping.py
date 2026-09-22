@@ -170,6 +170,9 @@ def group_wishlist_tracks_by_album(
 
         group = buckets.get(key)
         if group is None:
+            album_artist = _artist_name_from_track({'artists': album.get('artists')}, {})
+            if album.get('album_type') in ('compilation', 'compile'):
+                album_artist = album_artist or 'Various Artists'
             album_context = {
                 'id': album.get('id') or key,
                 'name': album_name.strip(),
@@ -181,7 +184,7 @@ def group_wishlist_tracks_by_album(
             }
             artist_context = {
                 'id': 'wishlist',
-                'name': artist_name,
+                'name': album_artist or artist_name,
                 'genres': [],
             }
             group = WishlistAlbumGroup(

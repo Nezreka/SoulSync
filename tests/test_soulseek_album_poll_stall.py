@@ -77,7 +77,7 @@ def _run_poll(stub, transfer_keys, *, timeout=7200.0, interval=2.0):
         result = SoulseekClient._poll_album_bundle_downloads(
             stub, transfer_keys, lambda phase, **kw: emits.append((phase, kw))
         )
-    return result, clock, emits
+    return list(result['completed'].values()), clock, emits
 
 
 def _keys(*names, user="peer"):

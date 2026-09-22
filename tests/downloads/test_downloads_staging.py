@@ -44,6 +44,12 @@ class _FakeMatchingEngine:
     def normalize_string(s):
         return (s or '').lower().strip()
 
+    @staticmethod
+    def detect_version_type(title):
+        from core.matching_engine import MusicMatchingEngine
+
+        return MusicMatchingEngine().detect_version_type(title)
+
 
 class _FakeConfig:
     def __init__(self, transfer_path):
@@ -400,6 +406,29 @@ def test_private_album_bundle_staging_keeps_task_number_when_file_has_no_number(
     assert ctx['original_search_result']['track_number'] == 4
 
 
+def test_soulseek_private_staging_does_not_claim_similar_sibling_title(tmp_path):
+    src_file = tmp_path / 'private' / '02 - Lost Souls Live.flac'
+    src_file.parent.mkdir()
+    src_file.write_bytes(b'audio')
+
+    def get_batch_field(_batch_id, field):
+        return {'album_bundle_source': 'soulseek',
+                'album_bundle_private_staging': True}.get(field)
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[{'full_path': str(src_file), 'title': 'Lost Souls Live',
+                        'artist': 'Doves'}],
+        get_batch_field=get_batch_field,
+    )
+    _seed_task('t_sibling')
+
+    assert not ds.try_staging_match(
+        't_sibling', 'b_sibling', _Track(name='Lost Souls', artists=['Doves']), deps,
+    )
+    assert src_file.exists()
+
+
 def test_staging_title_match_accepts_feature_suffix_from_release_file(tmp_path):
     """Album releases can include featured artists in filenames."""
     src_file = tmp_path / 'staging' / '05-kendrick_lamar-money_trees_(feat._jay_rock).flac'
@@ -493,6 +522,32 @@ def test_staging_title_match_keeps_wrong_versions_separate(tmp_path):
 
     assert result is False
     assert 'staging_t_wrong_version' not in matched_downloads_context
+
+
+def test_staging_title_match_accepts_equivalent_version_formatting(tmp_path):
+    src_file = tmp_path / 'staging' / '12. Duvet (Acoustic Version).flac'
+    src_file.parent.mkdir()
+    src_file.touch()
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[{
+            'full_path': str(src_file),
+            'title': 'Duvet (Acoustic Version)',
+            'artist': 'bôa',
+            'track_number': 12,
+        }],
+    )
+    _seed_task('t_equivalent_version')
+
+    result = ds.try_staging_match(
+        't_equivalent_version', 'b1',
+        _Track(name='Duvet - Acoustic', artists=['bôa']),
+        deps,
+    )
+
+    assert result is True
+    assert 'staging_t_equivalent_version' in matched_downloads_context
 
 
 def test_staging_title_match_handles_untagged_release_filename(tmp_path):

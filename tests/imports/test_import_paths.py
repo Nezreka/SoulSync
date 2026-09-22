@@ -112,6 +112,31 @@ def test_compilation_uses_compilation_path_template(monkeypatch, tmp_path):
     assert "Various Artists" not in final_path
 
 
+def test_compilation_path_uses_track_artist_when_album_artist_is_shared(monkeypatch, tmp_path):
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+    ctx = {
+        "album": {"name": "Magnatron 2.0", "album_type": "compilation", "artists": []},
+        "track_info": {"name": "Omricon", "artists": [{"name": "Woob"}]},
+        "original_search_result": {"title": "Omricon", "artists": [{"name": "Woob"}]},
+    }
+    info = {"is_album": True, "album_name": "Magnatron 2.0", "track_number": 6}
+
+    final_path, _ = import_paths.build_final_path_for_track(
+        ctx, {"name": "Various Artists"}, info, ".mp3", create_dirs=False,
+    )
+
+    assert final_path == str(tmp_path / "Transfer" / "Compilations" / "Magnatron 2.0"
+                             / "06 - Woob - Omricon.mp3")
+
+    info["track_number"] = 0
+    unknown_path, _ = import_paths.build_final_path_for_track(
+        ctx, {"name": "Various Artists"}, info, ".mp3", create_dirs=False,
+    )
+    assert unknown_path == str(tmp_path / "Transfer" / "Compilations" / "Magnatron 2.0"
+                               / "00 - Woob - Omricon.mp3")
+
+
 def test_create_dirs_true_still_creates_folders(monkeypatch, tmp_path):
     # The download/import flow must keep working (default behavior unchanged).
     monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
