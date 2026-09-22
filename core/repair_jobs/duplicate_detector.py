@@ -11,6 +11,7 @@ from core.library.duplicate_rules import (
 )
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from database.music_database import split_credit_names
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.duplicates")
@@ -67,8 +68,12 @@ class DuplicateDetectorJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
+            # artist_id is the ALBUM artist, so a compilation copy read as
+            # 'Various Artists' and never matched the same song on the
+            # artist's own album (#1263). the per-track credit wins when set
             cursor.execute("""
-                SELECT t.id, t.title, ar.name, al.title, t.file_path,
+                SELECT t.id, t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name),
+                       al.title, t.file_path,
                        t.bitrate, t.duration, al.thumb_url, ar.thumb_url, ar.id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
@@ -105,6 +110,7 @@ class DuplicateDetectorJob(RepairJob):
                 'norm_title': norm_title,
                 'artist': artist_name or '',
                 'norm_artist': _normalize(artist_name or ''),
+                'artist_names': _credit_names(artist_name),
                 'album': album_title,
                 'file_path': file_path,
                 'bitrate': bitrate,
@@ -249,7 +255,7 @@ class DuplicateDetectorJob(RepairJob):
                     title_sim = SequenceMatcher(None, t1['norm_title'], t2['norm_title']).ratio()
                     if title_sim < title_threshold:
                         continue
-                    artist_sim = SequenceMatcher(None, t1['norm_artist'], t2['norm_artist']).ratio()
+                    artist_sim = _artist_similarity(t1, t2)
                     if artist_sim < artist_threshold:
                         continue
                 else:
@@ -266,7 +272,7 @@ class DuplicateDetectorJob(RepairJob):
                         if abs(t1['duration'] - t2['duration']) > 3.0:
                             continue
                     elif t1['norm_artist'] and t2['norm_artist']:
-                        artist_sim = SequenceMatcher(None, t1['norm_artist'], t2['norm_artist']).ratio()
+                        artist_sim = _artist_similarity(t1, t2)
                         if artist_sim < 0.6:
                             continue
                     # else: both durations missing AND at least one artist
@@ -398,6 +404,22 @@ def _normalize(text: str) -> str:
         return ""
     t = text.lower()
     return ''.join(c for c in t if c.isalnum() or c in '() ').strip()
+
+
+def _credit_names(artist: str) -> list:
+    """every credited name in an artist string, normalized, whole string
+    first. split BEFORE normalizing, _normalize eats the ';' and '&'."""
+    names = [_normalize(n) for n in split_credit_names(artist or '')]
+    return [n for n in names if n]
+
+
+def _artist_similarity(t1: dict, t2: dict) -> float:
+    """best match between any credited name on each side. jellyfin keeps a
+    feat as 'A; B', so a copy with the feat and a copy without it scored
+    ~0.5 as whole strings once the per-track credit was used (#1263)."""
+    names1 = t1.get('artist_names') or [t1['norm_artist']]
+    names2 = t2.get('artist_names') or [t2['norm_artist']]
+    return max(SequenceMatcher(None, a, b).ratio() for a in names1 for b in names2)
 
 
 def _is_same_physical_file(p1, p2, dur1, dur2) -> bool:
