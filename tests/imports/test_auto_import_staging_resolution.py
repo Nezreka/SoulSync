@@ -17,7 +17,23 @@ import os
 
 import pytest
 
+import core.auto_import_worker as aiw
 from core.auto_import_worker import AutoImportWorker
+
+
+@pytest.fixture
+def warnings(monkeypatch):
+    """Every WARNING this module logs, captured at the source.
+
+    NOT caplog: `soulsync.auto_import` stops propagating to root once the
+    project's logging config is initialised, so caplog sees the records only
+    when this file runs before whatever test sets that up. It passed alone and
+    failed in a full run for exactly that reason.
+    """
+    captured: list[str] = []
+    monkeypatch.setattr(aiw.logger, 'warning',
+                        lambda msg, *a, **k: captured.append(str(msg)))
+    return captured
 
 
 class _Config:
@@ -71,69 +87,62 @@ def test_a_tilde_path_is_expanded(tmp_path, worker, monkeypatch):
 
 # ── the silent substitution ──
 
-def test_an_unusable_configured_path_warns_before_falling_back(tmp_path, worker, monkeypatch, caplog):
+def test_an_unusable_configured_path_warns_before_falling_back(tmp_path, worker, monkeypatch, warnings):
     """The heart of the bug: the scan read ./Staging and said nothing about
     the folder the user actually configured."""
     (tmp_path / 'Staging').mkdir()
     monkeypatch.chdir(tmp_path)
     worker._config_manager = _Config({'import.staging_path': '/mnt/nas/music/staging'})
 
-    with caplog.at_level('WARNING'):
-        resolved = worker._resolve_staging_path()
+    resolved = worker._resolve_staging_path()
 
     assert resolved == str(tmp_path / 'Staging')
-    logged = ' '.join(r.getMessage() for r in caplog.records)
+    logged = ' '.join(warnings)
     assert '/mnt/nas/music/staging' in logged, 'the warning must name the configured path'
     assert 'PUID' in logged, 'a bind mount is the usual cause; say so'
 
 
-def test_the_fallback_warning_is_not_repeated_every_cycle(tmp_path, worker, monkeypatch, caplog):
+def test_the_fallback_warning_is_not_repeated_every_cycle(tmp_path, worker, monkeypatch, warnings):
     (tmp_path / 'Staging').mkdir()
     monkeypatch.chdir(tmp_path)
     worker._config_manager = _Config({'import.staging_path': '/mnt/nas/music/staging'})
 
-    with caplog.at_level('WARNING'):
-        for _ in range(4):
-            worker._resolve_staging_path()
+    for _ in range(4):
+        worker._resolve_staging_path()
 
-    warnings = [r for r in caplog.records if r.levelname == 'WARNING']
     assert len(warnings) == 1, 'scan runs on a timer; one warning per pair, not per cycle'
 
 
-def test_a_path_that_exists_but_is_not_a_directory_says_which(tmp_path, worker, monkeypatch, caplog):
+def test_a_path_that_exists_but_is_not_a_directory_says_which(tmp_path, worker, monkeypatch, warnings):
     (tmp_path / 'Staging').mkdir()
     not_a_dir = tmp_path / 'staging.txt'
     not_a_dir.write_text('x')
     monkeypatch.chdir(tmp_path)
     worker._config_manager = _Config({'import.staging_path': str(not_a_dir)})
 
-    with caplog.at_level('WARNING'):
-        worker._resolve_staging_path()
+    worker._resolve_staging_path()
 
-    logged = ' '.join(r.getMessage() for r in caplog.records)
-    assert 'exists but is not a readable directory' in logged
+    assert 'exists but is not a readable directory' in ' '.join(warnings)
 
 
-def test_nothing_usable_anywhere_returns_none_and_explains(tmp_path, worker, monkeypatch, caplog):
+def test_nothing_usable_anywhere_returns_none_and_explains(tmp_path, worker, monkeypatch, warnings):
     monkeypatch.chdir(tmp_path)  # no ./Staging here
     worker._config_manager = _Config({'import.staging_path': '/mnt/nas/music/staging'})
 
-    with caplog.at_level('WARNING'):
-        assert worker._resolve_staging_path() is None
+    assert worker._resolve_staging_path() is None
 
-    logged = ' '.join(r.getMessage() for r in caplog.records)
+    logged = ' '.join(warnings)
     assert '/mnt/nas/music/staging' in logged
     assert 'Nothing will be imported' in logged
 
 
-def test_a_working_configured_path_never_warns(tmp_path, worker, monkeypatch, caplog):
+def test_a_working_configured_path_never_warns(tmp_path, worker, monkeypatch, warnings):
     staging = tmp_path / 'music-staging'
     staging.mkdir()
     (tmp_path / 'Staging').mkdir()
     monkeypatch.chdir(tmp_path)
     worker._config_manager = _Config({'import.staging_path': str(staging)})
 
-    with caplog.at_level('WARNING'):
-        assert worker._resolve_staging_path() == str(staging)
+    assert worker._resolve_staging_path() == str(staging)
 
-    assert [r for r in caplog.records if r.levelname == 'WARNING'] == []
+    assert warnings == []
