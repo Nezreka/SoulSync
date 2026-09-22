@@ -105,3 +105,40 @@ def test_the_setting_is_read_from_config_when_not_passed(monkeypatch):
     assert compilation_album_artist(ctx, 'Don Felder') is None
     monkeypatch.setattr(mod, '_detect_enabled', lambda: True)
     assert compilation_album_artist(ctx, 'Don Felder') == VARIOUS_ARTISTS
+
+
+# ── the setting has to be reachable, not just readable ──
+
+def _repo_root():
+    from pathlib import Path
+    return Path(__file__).resolve().parents[2]
+
+
+def test_the_toggle_exists_in_the_settings_page():
+    """It was config-only: the backend read it, both halves obeyed it, and
+    there was no way for a user to see or change it (sassmastawillis went
+    looking for it and there was nothing to find)."""
+    html = (_repo_root() / 'webui' / 'index.html').read_text(encoding='utf-8')
+    assert 'id="detect-multi-artist-compilations"' in html
+
+
+def test_the_toggle_saves_and_loads_under_the_key_the_backend_reads():
+    js = (_repo_root() / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+    assert ("detect_multi_artist_compilations: "
+            "document.getElementById('detect-multi-artist-compilations').checked") in js
+    # `!== false` and not `=== true`: the backend default is ON, so a config
+    # that has never stored the key must still render the box ticked.
+    assert "settings.file_organization?.detect_multi_artist_compilations !== false" in js
+
+
+def test_the_backend_default_and_the_checkbox_default_agree():
+    """A checkbox that renders unticked while the importer is doing the thing
+    is worse than no checkbox."""
+    from core.settings import config_manager
+    import inspect
+    defaults_src = inspect.getsource(type(config_manager))
+    assert '"detect_multi_artist_compilations": True' in defaults_src or \
+           "'detect_multi_artist_compilations': True" in defaults_src
+    html = (_repo_root() / 'webui' / 'index.html').read_text(encoding='utf-8')
+    block = html.split('id="detect-multi-artist-compilations"')[1][:60]
+    assert 'checked' in block, 'markup default must match the backend default'
