@@ -21,14 +21,14 @@ file's own tags are used and the finding is filed as a loose 'file'.
 
 import os
 
-from core.repair_jobs import register_job
-from core.repair_jobs.base import skip_deleted_quarantine, JobContext, JobResult, RepairJob
 # Same v3 quality primitives the download import guard and Quality Upgrade
 # Finder use. Module-level (not a local import inside scan()) so tests can
 # monkeypatch them the same way tests/repair_jobs/test_quality_upgrade.py does.
 from core.quality.model import rank_candidate
-from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
 from core.quality.retention import acquired_quality_from_json, retention_meets_profile
+from core.quality.selection import load_profile_by_id, quality_meets_profile, targets_from_profile
+from core.repair_jobs import register_job
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, walk_library
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.quality_upgrade")
@@ -231,6 +231,7 @@ class QualityUpgradeScannerJob(RepairJob):
             return profile_bundle_cache[row_profile_id]
 
         from core.imports.file_ops import probe_audio_quality
+
         # Same real-file AudioGuard the download/import pipeline runs: ffmpeg
         # DECODES the file (astats + silencedetect) to catch truncated or
         # mostly-silent audio the header can't reveal.
@@ -257,11 +258,7 @@ class QualityUpgradeScannerJob(RepairJob):
         audio_files = []
         seen = set()
         for base in base_dirs:
-            for root, _dirs, files in os.walk(base):
-                # Never scan SoulSync's own folders — a staged, half-landed
-                # album would be probed and flagged for "upgrade" before it is
-                # even in the library.
-                skip_deleted_quarantine(root, _dirs, base)
+            for root, _dirs, files in walk_library(base):
                 if context.check_stop():
                     return result
                 for fname in files:
@@ -616,7 +613,7 @@ class QualityUpgradeScannerJob(RepairJob):
     def estimate_scope(self, context: JobContext) -> int:
         count = 0
         for base in self._collect_music_dirs(context):
-            for _root, _dirs, files in os.walk(base):
+            for _root, _dirs, files in walk_library(base):
                 for fname in files:
                     if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
                         count += 1

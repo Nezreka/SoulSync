@@ -9,6 +9,7 @@ from pathlib import Path
 
 from core.library.residual_files import (
     is_disposable,
+    is_hidden,
     is_image,
     is_junk,
     is_sidecar,
@@ -27,6 +28,15 @@ def test_sidecars_classified():
 
 def test_junk_classified():
     assert is_junk('.DS_Store') and is_disposable('Thumbs.db')
+
+
+def test_hidden_classified():
+    # AppleDouble sidecars carry a real audio extension — the reason plain
+    # extension checks let them through — plus the usual hidden clutter.
+    for n in ('._01 - Track.flac', '.DS_Store', '.stversions', '.Trash', '.deleted'):
+        assert is_hidden(n) and is_disposable(n), n
+    for n in ('song.flac', 'cover.jpg', 'Artist Name'):
+        assert not is_hidden(n), n
 
 
 def test_real_content_not_disposable():

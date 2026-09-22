@@ -25,10 +25,15 @@ walks bottom-up, where mutating ``dirs`` in place does nothing at all.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
-from core.repair_jobs.base import is_internal_transfer_dir, skip_deleted_quarantine
+from core.repair_jobs.base import (
+    is_internal_transfer_dir,
+    skip_deleted_quarantine,
+    walk_library,
+)
 
 STAGING = '.soulsync_atomic_staging'
 
@@ -140,6 +145,40 @@ def test_bottom_up_walks_need_the_path_check_not_the_prune(tmp_path):
     assert not visited_staging
 
 
+# ── the shared walker ─────────────────────────────────────────────────────
+
+def test_walk_library_drops_internal_and_hidden_entries(tmp_path):
+    """One call gets a job both guards — the staging/quarantine prune AND the
+    hidden-entry filter — with nothing left to remember."""
+    transfer = _build(tmp_path)
+    snapshots = Path(transfer) / '.stversions' / 'Old'
+    snapshots.mkdir(parents=True)
+    (snapshots / '02 - snapshot.flac').touch()
+    (Path(transfer) / 'Neil Young' / 'Harvest' / '._01 - real.flac').touch()
+
+    found = [f for _root, _dirs, files in walk_library(transfer)
+             for f in files if f.endswith('.flac')]
+
+    assert found == ['01 - real.flac']
+
+
+def test_walk_library_can_keep_hidden_dirs_but_never_hidden_files(tmp_path):
+    """The Empty Folder Cleaner's case: a hidden subdirectory has to stay visible
+    as an occupant of its parent, while hidden files are still leftovers."""
+    transfer = _build(tmp_path)
+    (Path(transfer) / 'Neil Young' / '.stversions').mkdir()
+    (Path(transfer) / 'Neil Young' / '._stray.flac').touch()
+
+    seen_dirs, seen_files = set(), []
+    for _root, dirs, files in walk_library(transfer, include_hidden_dirs=True):
+        seen_dirs.update(dirs)
+        seen_files += files
+
+    assert '.stversions' in seen_dirs
+    assert '._stray.flac' not in seen_files
+    assert STAGING not in seen_dirs      # internal dirs pruned either way
+
+
 # ── every transfer-walking job actually uses one of them ──────────────────
 
 @pytest.mark.parametrize('path', [
@@ -153,11 +192,21 @@ def test_bottom_up_walks_need_the_path_check_not_the_prune(tmp_path):
 ])
 def test_transfer_walkers_guard_themselves(path):
     """A new job that walks the transfer dir without a guard would quietly
-    start eating staged albums, so the whole family is pinned here."""
+    start eating staged albums, so the whole family is pinned here.
+
+    ``walk_library`` is the preferred guard: it applies the prune (and the hidden
+    -entry filter) from inside the generator, so a caller cannot forget it the way
+    the quality-upgrade scanner's ``estimate_scope`` once did. The older spellings
+    stay valid for the bottom-up walkers, which cannot use it.
+    """
     with open(path, encoding='utf-8') as fh:
         src = fh.read()
-    assert 'os.walk' in src, f'{path} no longer walks — update this list'
-    guarded = ('skip_deleted_quarantine' in src
-               or 'is_internal_transfer_dir' in src
+    # Match on a CALL, not a mention: every module here imports `walk_library`, so
+    # a bare-name check would stay green for a raw `os.walk` added next to it.
+    assert 'os.walk(' in src or 'walk_library(' in src, (
+        f'{path} no longer walks — update this list')
+    guarded = ('walk_library(' in src
+               or 'skip_deleted_quarantine(' in src
+               or 'is_internal_transfer_dir(' in src
                or "startswith('.')" in src)
     assert guarded, f'{path} walks the library with no staging/quarantine guard'

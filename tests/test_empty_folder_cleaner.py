@@ -78,6 +78,32 @@ def test_apply_deletes_junk_then_folder(tmp_path):
     assert res['removed'] is True and not d.exists()
 
 
+def test_apply_refuses_folder_holding_a_hidden_subdir(tmp_path):
+    """is_disposable matches any dot-name, but a hidden *directory* holds entries
+    of its own — the `.deleted` quarantine being the one that matters. It must
+    block removal, not be swept as a leftover file."""
+    root = tmp_path / 'lib'; root.mkdir()
+    d = root / 'Artist'; d.mkdir()
+    quarantine = d / '.deleted'; quarantine.mkdir()
+    (quarantine / 'rescued.flac').write_text('audio')
+
+    res = remove_empty_folder(str(d), junk_files=[], remove_junk=True, root=str(root),
+                              remove_disposable=True, **_fx())
+
+    assert res['removed'] is False and 'no longer empty' in res['error'].lower()
+    assert (quarantine / 'rescued.flac').exists()    # quarantined audio untouched
+
+
+def test_apply_sweeps_hidden_files(tmp_path):
+    """A hidden FILE is a leftover — AppleDouble sidecars are the common case."""
+    root = tmp_path / 'lib'; root.mkdir()
+    d = root / 'Empty'; d.mkdir()
+    (d / '._01 - Track.flac').write_text('resource fork')
+    res = remove_empty_folder(str(d), junk_files=[], remove_junk=True, root=str(root),
+                              remove_disposable=True, **_fx())
+    assert res['removed'] is True and not d.exists()
+
+
 def test_apply_refuses_folder_that_gained_a_file(tmp_path):
     root = tmp_path / 'lib'; root.mkdir()
     d = root / 'NowFull'; d.mkdir()
