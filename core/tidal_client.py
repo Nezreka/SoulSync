@@ -119,6 +119,21 @@ class Playlist:
         if self.external_urls is None:
             self.external_urls = {}
 
+# Tidal's v2 search takes the query as a PATH segment
+# (/searchResults/{query}), not a query parameter. A name containing a slash
+# percent-encodes to %2F, and the gateway rejects that inside a path with a
+# 400 before the search ever runs — "AC/DC" is the one people hit. Slashes
+# become spaces; Tidal finds the artist either way.
+_PATH_HOSTILE_QUERY = re.compile(r'[\\/]+')
+
+
+def _search_query_segment(query: str) -> str:
+    """Encode a search query for Tidal's /searchResults/{query} path."""
+    cleaned = _PATH_HOSTILE_QUERY.sub(' ', str(query or ''))
+    cleaned = ' '.join(cleaned.split())
+    return urllib.parse.quote(cleaned, safe='')
+
+
 class TidalClient:
     """Tidal API client for fetching user playlists and track data"""
     
@@ -960,6 +975,37 @@ class TidalClient:
             
         
     
+    def _search_results(self, query: str, include: str, label: str,
+                        limit: Optional[int] = None) -> Optional[Dict]:
+        """GET /searchResults/{query} — the one request all four searches share.
+
+        They had drifted: only the track search logged the body Tidal sends
+        back, so the other three could report nothing but "failed: 400" and a
+        user's bug report could not be answered (Skowl, Sept 22 2026). The
+        status alone never says which parameter Tidal objected to.
+        """
+        params = {'countryCode': 'US', 'include': include}
+        if limit is not None:
+            params['limit'] = limit
+
+        response = self.session.get(
+            f"{self.base_url}/searchResults/{_search_query_segment(query)}",
+            params=params,
+            timeout=10
+        )
+
+        if response.status_code == 429:
+            raise Exception(f"Rate limited (429) on {label}")
+        if response.status_code == 200:
+            return response.json()
+
+        # warning, not debug: a non-200 here means the feature silently did
+        # nothing, and debug does not reach app.log.
+        logger.warning(
+            f"Tidal {label} failed: {response.status_code} - {response.text[:300]}"
+        )
+        return None
+
     @rate_limited
     def search_tracks(self, query: str, limit: int = 10) -> List[Track]:
         """Search for tracks using Tidal's search API"""
@@ -968,24 +1014,8 @@ class TidalClient:
                 logger.error("Not authenticated with Tidal")
                 return []
 
-            from urllib.parse import quote
-            encoded_query = quote(query, safe='')
-            params = {
-                'countryCode': 'US',
-                'include': 'tracks',
-                'limit': limit
-            }
-
-            response = self.session.get(
-                f"{self.base_url}/searchResults/{encoded_query}",
-                params=params,
-                timeout=10
-            )
-            
-            if response.status_code == 429:
-                raise Exception("Rate limited (429) on search_tracks")
-            if response.status_code == 200:
-                data = response.json()
+            data = self._search_results(query, 'tracks', 'search_tracks', limit=limit)
+            if data is not None:
                 tracks = []
 
                 # Handle V2 JSON:API response formats
@@ -1009,9 +1039,7 @@ class TidalClient:
 
                 logger.info(f"Found {len(tracks)} Tidal tracks for query: '{query}'")
                 return tracks
-            else:
-                logger.error(f"Tidal search failed: {response.status_code} - {response.text}")
-                return []
+            return []
 
         except Exception as e:
             if "429" in str(e):
@@ -1028,24 +1056,10 @@ class TidalClient:
             if not self._ensure_valid_token():
                 return None
 
-            from urllib.parse import quote
             from difflib import SequenceMatcher
-            encoded_query = quote(name, safe='')
-            params = {
-                'countryCode': 'US',
-                'include': 'artists',
-            }
 
-            response = self.session.get(
-                f"{self.base_url}/searchResults/{encoded_query}",
-                params=params,
-                timeout=10
-            )
-
-            if response.status_code == 429:
-                raise Exception("Rate limited (429) on search_artist")
-            if response.status_code == 200:
-                data = response.json()
+            data = self._search_results(name, 'artists', 'search_artist')
+            if data is not None:
                 # JSON:API format: included artists in 'artists' or nested in relationships
                 items = []
                 if 'artists' in data and isinstance(data['artists'], list):
@@ -1070,8 +1084,6 @@ class TidalClient:
                             best_score = score
                             best_item = flat
                     return best_item
-            else:
-                logger.debug(f"Tidal artist search failed: {response.status_code}")
             return None
 
         except Exception as e:
@@ -1087,24 +1099,10 @@ class TidalClient:
             if not self._ensure_valid_token():
                 return None
 
-            from urllib.parse import quote
             query = f"{artist} {title}" if artist else title
-            encoded_query = quote(query, safe='')
-            params = {
-                'countryCode': 'US',
-                'include': 'albums',
-            }
 
-            response = self.session.get(
-                f"{self.base_url}/searchResults/{encoded_query}",
-                params=params,
-                timeout=10
-            )
-
-            if response.status_code == 429:
-                raise Exception("Rate limited (429) on search_album")
-            if response.status_code == 200:
-                data = response.json()
+            data = self._search_results(query, 'albums', 'search_album')
+            if data is not None:
                 items = []
                 if 'albums' in data and isinstance(data['albums'], list):
                     items = data['albums']
@@ -1136,8 +1134,6 @@ class TidalClient:
                             best_score = score
                             best_item = flat
                     return best_item
-            else:
-                logger.debug(f"Tidal album search failed: {response.status_code}")
             return None
 
         except Exception as e:
@@ -1153,24 +1149,10 @@ class TidalClient:
             if not self._ensure_valid_token():
                 return None
 
-            from urllib.parse import quote
             query = f"{artist} {title}" if artist else title
-            encoded_query = quote(query, safe='')
-            params = {
-                'countryCode': 'US',
-                'include': 'tracks',
-            }
 
-            response = self.session.get(
-                f"{self.base_url}/searchResults/{encoded_query}",
-                params=params,
-                timeout=10
-            )
-
-            if response.status_code == 429:
-                raise Exception("Rate limited (429) on search_track")
-            if response.status_code == 200:
-                data = response.json()
+            data = self._search_results(query, 'tracks', 'search_track')
+            if data is not None:
                 items = []
                 if 'tracks' in data and isinstance(data['tracks'], list):
                     items = data['tracks']
@@ -1202,8 +1184,6 @@ class TidalClient:
                             best_score = score
                             best_item = flat
                     return best_item
-            else:
-                logger.debug(f"Tidal track search failed: {response.status_code}")
             return None
 
         except Exception as e:
