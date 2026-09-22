@@ -207,7 +207,7 @@ class Album:
             id=str(album_data.get('collectionId', '')),
             name=_clean_itunes_album_name(album_data.get('collectionName', '')),
             artists=[album_data.get('artistName', 'Unknown Artist')],
-            release_date=album_data.get('releaseDate', ''),
+            release_date=album_data.get('releaseDate', '').split('T')[0],
             total_tracks=track_count,
             album_type=album_type,
             image_url=image_url,
