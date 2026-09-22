@@ -51,7 +51,7 @@ def _fake_search(candidates, artist_name=None):
     Passing a matching artist_name makes the pre-gate confidence clear 70,
     so the assertion actually depends on the marker gate.
     """
-    def _search(name, artist=None, limit=5):
+    def _search(name, artist=None, limit=5, **kwargs):
         result = []
         for i, (title, score) in enumerate(candidates):
             entry = {"id": f"mbid-{i}", "title": title, "score": score}

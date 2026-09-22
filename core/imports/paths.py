@@ -222,7 +222,9 @@ def library_root_for_profile(profile_id) -> Optional[str]:
     from core.library_scope import own_library_supported
     if not own_library_supported():
         pid = int(profile_id)
-        active_server = _get_config_manager().get_active_media_server()
+        cm = _get_config_manager()
+        getter = getattr(cm, "get_active_media_server", None)
+        active_server = getter() if callable(getter) else (getattr(cm, "get", lambda k, d=None: d)("active_media_server", "unknown") or "unknown")
         shared_root = shared_transfer_root()
         logger.warning(
             "[Own Library] Profile %s has an own library configured (%s), "

@@ -288,6 +288,7 @@ export function DeezerArlTab() {
     window.showLoadingOverlay?.(`${label}...`);
     const onProgress = (event: Event) => {
       const frame = (event as CustomEvent<DeezerPlaylistProgress>).detail;
+      if (!frame || String(frame.playlist_id) !== String(row.id)) return;
       const text = deezerProgressLabel(frame, row.id);
       if (text) {
         window.showLoadingOverlay?.(`${label} — ${text}`);

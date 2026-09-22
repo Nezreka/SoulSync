@@ -134,14 +134,18 @@ def test_server_switch_to_navidrome_warns_when_own_profiles_exist(client, sam, m
     web_server.config_manager.set_active_media_server('plex')
     invalidate_library_scope_cache()
 
-    # Save settings switching to navidrome
-    r = client.post('/api/settings', json={'active_media_server': 'navidrome'})
-    assert r.status_code == 200
-    data = r.get_json()
-    assert data.get('success') is True
-    warnings = data.get('warnings') or []
-    assert len(warnings) >= 1
-    assert any('disables own-library isolation' in w for w in warnings)
+    try:
+        # Save settings switching to navidrome
+        r = client.post('/api/settings', json={'active_media_server': 'navidrome'})
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data.get('success') is True
+        warnings = data.get('warnings') or []
+        assert len(warnings) >= 1
+        assert any('disables own-library isolation' in w for w in warnings)
+    finally:
+        web_server.config_manager.set_active_media_server('plex')
+        invalidate_library_scope_cache()
 
 
 def test_scan_skip_logs_under_navidrome(sam, monkeypatch, caplog):
