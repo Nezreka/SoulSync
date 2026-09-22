@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.imports.folder_artist import resolve_folder_artist
+from core.imports.paths import config_root_path, docker_resolve_path
 from core.imports.pipeline import import_rejection_reason
 from utils.logging_config import get_logger
 
@@ -311,6 +312,9 @@ class AutoImportWorker:
         # PUID). warned once per path, then quiet until it clears.
         self._scan_problems: List[Dict[str, str]] = []
         self._warned_scan_problems: set = set()
+        # (configured, fallback) pairs already warned about — see
+        # _warn_staging_fallback.
+        self._warned_staging_fallbacks: set = set()
 
     # ── Per-candidate UI state helpers ──
 
@@ -798,16 +802,80 @@ class AutoImportWorker:
     # ── Scanning ──
 
     def _resolve_staging_path(self) -> Optional[str]:
-        path = self.staging_path
+        """The folder this scan reads, resolved the way every OTHER staging
+        consumer resolves it.
+
+        This was the one place with its own resolution: a bare isdir() on the
+        configured value, then a silent fall back to ./Staging or /app/Staging.
+        So a path the shared resolver would have handled — a Windows drive
+        letter under Docker, a ~, anything relative to a different CWD — failed
+        the isdir(), and the scan quietly read a DIFFERENT folder. It found
+        nothing there and reported "0 candidates in ./Staging" on every cycle,
+        with no per-file reason, because that folder really was empty, while
+        the Albums tab (which does use the shared resolver) read the user's
+        actual files. Reported from Docker on TrueNAS, Sept 22 2026.
+        """
+        configured = self.staging_path
         if self._config_manager:
-            path = self._config_manager.get('import.staging_path', path)
-        # Docker path resolution
-        if os.path.isdir(path):
-            return path
-        for candidate in ['./Staging', '/app/Staging']:
-            if os.path.isdir(candidate):
-                return candidate
+            configured = self._config_manager.get('import.staging_path', configured)
+
+        resolved = config_root_path(configured, self.staging_path or './Staging')
+        if resolved and os.path.isdir(resolved):
+            return resolved
+
+        # The legacy fallbacks stay — an install that never configured a path
+        # relies on them — but a scan never again reads a folder the user did
+        # not ask for without saying so.
+        for candidate in ('./Staging', '/app/Staging'):
+            fallback = docker_resolve_path(candidate)
+            if fallback and os.path.isdir(fallback) and fallback != resolved:
+                self._warn_staging_fallback(configured, resolved, fallback)
+                return fallback
+
+        logger.warning(
+            f"[Auto-Import] Staging folder not found: configured {configured!r} "
+            f"(resolved to {resolved!r}) is not a readable directory, and neither "
+            f"is ./Staging or /app/Staging. Nothing will be imported. If this is a "
+            f"bind mount, check the path exists INSIDE the container and that its "
+            f"owner matches the container's PUID/PGID."
+        )
         return None
+
+    def _warn_staging_fallback(self, configured: Any, resolved: Optional[str],
+                               fallback: str) -> None:
+        """Say — once per pair — that the scan is reading somewhere else.
+
+        Silence here is the whole bug: the count in the scan line was honest
+        about the folder it read and said nothing about the folder the user
+        configured.
+        """
+        # lazily, not via __init__ alone: this runs inside the scan, and an
+        # AttributeError in a WARNING path would take the whole cycle down.
+        warned = getattr(self, '_warned_staging_fallbacks', None)
+        if warned is None:
+            warned = set()
+            self._warned_staging_fallbacks = warned
+
+        key = (str(configured), fallback)
+        if key in warned:
+            logger.debug(
+                f"[Auto-Import] Still falling back to {fallback} "
+                f"(configured {configured!r})"
+            )
+            return
+        warned.add(key)
+
+        if resolved and os.path.exists(resolved):
+            why = f"{resolved!r} exists but is not a readable directory"
+        else:
+            why = f"{resolved!r} does not exist"
+        logger.warning(
+            f"[Auto-Import] Configured staging path {configured!r} is unusable "
+            f"({why}) — scanning {fallback} instead, which is almost certainly "
+            f"NOT where your files are. Any '0 candidates' below is about that "
+            f"folder, not yours. If this is a bind mount, check the path exists "
+            f"INSIDE the container and that its owner matches PUID/PGID."
+        )
 
     def enumerate_candidates(self, staging: str) -> Tuple[List[FolderCandidate], List[Dict[str, str]]]:
         """The scan without the side effects: candidates plus the directories
