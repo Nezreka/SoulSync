@@ -14625,11 +14625,20 @@ class MusicDatabase:
         the current global profile for a new row. An explicitly UNKNOWN Quality
         Profile is rejected instead of quietly becoming the default (P2-04).
         """
+        from core.context_sentinels import is_context_sentinel
         from core.watchlist_sources import (
             ARTIST_ID_COLUMNS, artist_id_match_sql, infer_source,
             normalize_source, source_column,
         )
         try:
+            # a download-context placeholder is not an id. one reached this table
+            # once and the scanner keyed 25 similar artists by it (#1284).
+            if is_context_sentinel(artist_id):
+                logger.error(
+                    "Refusing to watchlist '%s': %r is a context placeholder, not an artist id",
+                    artist_name, artist_id)
+                return False
+
             if quality_profile_id is not None and not self.quality_profile_exists(quality_profile_id):
                 logger.error(
                     "Cannot add artist '%s' to watchlist: unknown quality_profile_id %r",
@@ -16030,6 +16039,14 @@ class MusicDatabase:
         'watchlist_row'). readers match the PAIR, so a deezer id can never
         resolve as an itunes one. omitting it leaves the row unprovable and
         the recommendation readers will not use it."""
+        from core.context_sentinels import is_context_sentinel
+        # the second line of defence for #1284: whatever put the placeholder in
+        # front of us, an edge keyed by one can never be traced back to an artist.
+        if is_context_sentinel(source_artist_id):
+            logger.warning(
+                "Refusing similar artists for %r: a context placeholder is not an artist id",
+                source_artist_id)
+            return False
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
