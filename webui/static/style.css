@@ -27878,6 +27878,53 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 
 /* ─── Enhance Quality Button ─── */
 
+/* Delete Artist — the one destructive action in the hero row, so it is the
+   only one that is not competing for attention: quiet until hovered, and red
+   only then. Same geometry as its siblings so the row stays even. */
+.library-artist-delete-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 7px 16px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    outline: none;
+    font-family: inherit;
+}
+
+.library-artist-delete-btn:hover:not(:disabled) {
+    color: rgb(255, 138, 128);
+    background: linear-gradient(135deg, rgba(244, 67, 54, 0.18) 0%, rgba(244, 67, 54, 0.06) 100%);
+    border-color: rgba(244, 67, 54, 0.45);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(244, 67, 54, 0.2);
+}
+
+.library-artist-delete-btn:focus-visible {
+    border-color: rgba(244, 67, 54, 0.6);
+    box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.25);
+}
+
+.library-artist-delete-btn:disabled {
+    opacity: 0.55;
+    cursor: wait;
+    transform: none;
+}
+
+.library-artist-delete-btn .delete-icon {
+    font-size: 11px;
+    line-height: 1;
+}
+
 .library-artist-enhance-btn {
     position: relative;
     display: flex;

@@ -11522,6 +11522,88 @@ def sync_artist_library(artist_id):
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/library/artist/<artist_id>', methods=['DELETE'])
+@admin_only
+def library_delete_artist(artist_id):
+    """Remove an artist and everything the library knows about them.
+
+    DATABASE ONLY — no file on disk is touched, ever. There is deliberately no
+    `delete_files` switch like the album and track endpoints have: this can span
+    hundreds of albums, and "clear this artist out of my library" is a different
+    intent from "erase these recordings".
+
+    What goes: the artist row, their albums, and every track on those albums —
+    including tracks whose own `artist_id` points elsewhere (a compilation the
+    artist owns), because a track outliving its album is an orphan nothing can
+    reach. Plus the two tables keyed on the artist's library id, `similar_artists`
+    and `rematch_hints`, which would otherwise dangle.
+
+    What stays, on purpose: listening history and download history (keyed by NAME,
+    so stats and provenance survive a delete/rescan), the watchlist (wanting an
+    artist is separate from owning them), and the discovery caches.
+    """
+    try:
+        database = get_database()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT id, name, server_source FROM artists WHERE id = ?", (artist_id,))
+            artist_row = cursor.fetchone()
+            if not artist_row:
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+            artist_name = artist_row['name']
+            server_source = artist_row['server_source']
+
+            cursor.execute("SELECT id FROM albums WHERE artist_id = ?", (artist_id,))
+            album_ids = [row['id'] for row in cursor.fetchall()]
+
+            tracks_deleted = 0
+            if album_ids:
+                # Chunked: SQLite caps host parameters (999 by default) and a
+                # deep discography can exceed that.
+                for i in range(0, len(album_ids), 400):
+                    chunk = album_ids[i:i + 400]
+                    marks = ",".join("?" * len(chunk))
+                    cursor.execute(f"DELETE FROM tracks WHERE album_id IN ({marks})", chunk)
+                    tracks_deleted += cursor.rowcount
+            # Tracks credited to the artist that sat on someone else's album.
+            cursor.execute("DELETE FROM tracks WHERE artist_id = ?", (artist_id,))
+            tracks_deleted += cursor.rowcount
+
+            cursor.execute("DELETE FROM albums WHERE artist_id = ?", (artist_id,))
+            albums_deleted = cursor.rowcount
+
+            # Rows keyed on the library id — dangling once the artist is gone.
+            for table, column in (("similar_artists", "source_artist_id"),
+                                  ("rematch_hints", "artist_id")):
+                try:
+                    cursor.execute(f"DELETE FROM {table} WHERE {column} = ?", (artist_id,))
+                except Exception as e:
+                    # An older install may predate the table; losing the sweep
+                    # must not abort the delete the user asked for.
+                    logger.debug("artist delete: %s cleanup skipped: %s", table, e)
+
+            cursor.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
+            conn.commit()
+
+        logger.info(
+            f"[Library] Deleted artist '{artist_name}' ({artist_id}): "
+            f"{albums_deleted} albums, {tracks_deleted} tracks. No files touched."
+        )
+        return jsonify({
+            "success": True,
+            "artist_name": artist_name,
+            "albums_deleted": albums_deleted,
+            "tracks_deleted": tracks_deleted,
+            # A media-server artist is re-created by the next scan; the UI says so
+            # rather than letting them reappear and look like the delete failed.
+            "returns_on_rescan": bool(server_source and server_source != 'soulsync'),
+        })
+    except Exception as e:
+        logger.error(f"Error deleting artist {artist_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/album/<album_id>', methods=['DELETE'])
 @admin_only
 def library_delete_album(album_id):

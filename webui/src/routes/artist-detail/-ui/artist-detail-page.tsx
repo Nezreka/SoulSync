@@ -441,6 +441,9 @@ export function ArtistDetailPage() {
         enrichment={payload.enrichment_coverage}
         watchlist={watchlistIdentity(payload)}
         canFixMatches={canEnhance}
+        // same gate as the Enhanced toggle: admin, on a LIBRARY artist. a
+        // source-only artist has no library rows to remove.
+        canDelete={canEnhance}
         onMatchesChanged={() => {
           // the hero badges come from the page payload, the chips from the
           // enhanced one; a match change has to reach both
