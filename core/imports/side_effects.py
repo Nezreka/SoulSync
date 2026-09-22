@@ -447,6 +447,22 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         if not artist_name or artist_name in ("Unknown", "Unknown Artist"):
             return
 
+        # A compilation is imported one track at a time, and `artist_name` here
+        # is whoever the DOWNLOAD was for — so one contributor's track filed the
+        # whole soundtrack under them, over and over, until 45 compilations sat
+        # on one guitarist (sassmastawillis). When the album's own metadata says
+        # various artists, the ALBUM goes there; the track keeps its real artist
+        # through `track_artist` below, which exists for exactly this.
+        from core.imports.compilation import compilation_album_artist
+        _va_artist = compilation_album_artist(album_ctx, artist_name)
+        if _va_artist:
+            logger.info(
+                "[Import] '%s' is a various-artists release — filing the album "
+                "under %s instead of %s (the track keeps its own artist)",
+                album_ctx.get("name", "") or "album", _va_artist, artist_name,
+            )
+            artist_name = _va_artist
+
         album_name = ""
         if album_info and isinstance(album_info, dict):
             album_name = album_info.get("album_name", "")
