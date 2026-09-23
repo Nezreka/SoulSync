@@ -146,7 +146,32 @@ def _batch_force_replace(context: dict) -> bool:
         return False
 
 
+def _record_manual_lock(context: dict, final_path: str) -> None:
+    """remember a hand-tagged file so enrichment and the maintenance jobs leave
+    its album alone, now and after any future library scan"""
+    from core.metadata.manual import is_manual_context
+    if not is_manual_context(context):
+        return
+    try:
+        from database.music_database import get_database
+        album = get_import_context_album(context) or {}
+        artist = get_import_context_artist(context) or {}
+        get_database().record_manual_metadata_file(
+            context.get('_final_processed_path') or final_path,
+            album_title=album.get('name') or '',
+            album_artist=artist.get('name') or '',
+        )
+    except Exception as lock_err:  # noqa: BLE001 - the file is imported either way
+        logger.error("[Manual] could not record the manual lock: %s", lock_err)
+
+
 def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
+    # a hand-tagged download (bootleg, live set) fails the studio fingerprint
+    # by design, acoustid has nothing true to say about it
+    if check_name == 'acoustid':
+        from core.metadata.manual import is_manual_context
+        if is_manual_context(context):
+            return True
     bypass = context.get('_skip_quarantine_check')
     if bypass == 'all':
         return True
@@ -932,7 +957,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             # automation; fail open when the engine isn't available.
             _auto_scan_on = (automation_engine is None
                              or automation_engine.is_event_action_enabled('batch_complete', 'scan_library'))
-            if web_scan_manager and _auto_scan_on:
+            # a simple download inside a batch (basic search as-is) gets its
+            # scan from batch_complete, scanning here too would run it twice
+            if web_scan_manager and _auto_scan_on and not context.get('batch_id'):
                 threading.Thread(
                     target=lambda: web_scan_manager.request_scan("Simple download completed"),
                     daemon=True,
@@ -1405,6 +1432,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         record_library_history_download(context)
         record_download_provenance(context)
         record_soulsync_library_entry(context, artist_context, album_info)
+        _record_manual_lock(context, final_path)
 
         try:
             completed_path = context.get('_final_processed_path', final_path)

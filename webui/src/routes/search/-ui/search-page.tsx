@@ -9,7 +9,7 @@ import type {
 } from '../-search.types';
 import type { LibraryCheckTrack } from '../-search.types';
 
-import { downloadUnmatched, startDownload } from '../-basic.actions';
+import { startDownload } from '../-basic.actions';
 import { useBasicSearchController } from '../-basic.use-controller';
 import {
   openSearchAlbum,
@@ -147,21 +147,6 @@ export function SearchPage() {
 
   const results = activeResults(state);
   const soulseekActive = state.activeSource === 'soulseek';
-
-  /**
-   * The matched-download modal's "Skip Matching" button reaches back here.
-   *
-   * That modal is still vanilla (wishlist-tools.js) and has no way to run a
-   * download itself — the path it used to take was broken three ways over; see
-   * downloadUnmatched.
-   */
-  useEffect(() => {
-    window._basicDownloadUnmatched = (result) =>
-      void downloadUnmatched(result as Parameters<typeof downloadUnmatched>[0]);
-    return () => {
-      delete window._basicDownloadUnmatched;
-    };
-  }, []);
 
   const ownership = useLibraryCheck(results.albums, results.tracks);
   const artistImages = useArtistImages(results.db_artists, results.artists, state.activeSource);

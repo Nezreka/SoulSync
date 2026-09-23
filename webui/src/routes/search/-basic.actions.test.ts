@@ -5,16 +5,7 @@ import { server } from '@/test/msw';
 
 import type { BasicAlbum, BasicTrack } from './-basic.types';
 
-import {
-  downloadAlbum,
-  downloadAlbumTrack,
-  downloadTrack,
-  downloadUnmatched,
-  matchedDownloadAlbum,
-  matchedDownloadAlbumTrack,
-  matchedDownloadTrack,
-  startDownload,
-} from './-basic.actions';
+import { downloadAlbum, downloadAlbumTrack, downloadTrack, startDownload } from './-basic.actions';
 
 let toasts: { message: string; type?: string }[] = [];
 
@@ -23,13 +14,11 @@ beforeEach(() => {
   window.showToast = vi.fn((message: string, type?: string) => {
     toasts.push({ message, type });
   });
-  window.openMatchingModal = vi.fn();
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
   delete window.showToast;
-  delete window.openMatchingModal;
   Reflect.deleteProperty(window, 'showConfirmDialog');
   vi.restoreAllMocks();
 });
@@ -151,71 +140,6 @@ describe('downloadAlbumTrack', () => {
   });
 });
 
-describe('matched downloads', () => {
-  // These three are declared twice in the vanilla — downloads.js and
-  // wishlist-tools.js, with different behaviour. wishlist-tools.js loads
-  // second, so ITS versions are the ones that have been running.
-  it('sends a single track with no album context', () => {
-    const row = track();
-    matchedDownloadTrack(row);
-    expect(window.openMatchingModal).toHaveBeenCalledWith(row, false, null);
-  });
-
-  it('identifies an album by its FIRST TRACK, with the album as context', () => {
-    // A folder has no tags worth matching on; the modal searches with a real
-    // track's metadata and applies the answer to the album.
-    const row = album();
-    matchedDownloadAlbum(row);
-    expect(window.openMatchingModal).toHaveBeenCalledWith(row.tracks[0], true, row);
-  });
-
-  it('falls back to the album itself when it carries no tracks', () => {
-    const row = album({ tracks: [] });
-    matchedDownloadAlbum(row);
-    expect(window.openMatchingModal).toHaveBeenCalledWith(row, true, row);
-  });
-
-  it('treats an album track as a single track, album passed only as context', () => {
-    // `false` matters: `true` would make the modal ask the user to choose an
-    // album for a file they already located inside one.
-    const row = album();
-    matchedDownloadAlbumTrack(row, 1);
-    expect(window.openMatchingModal).toHaveBeenCalledWith(row.tracks[1], false, row);
-  });
-
-  it('ignores a track index that is not there', () => {
-    matchedDownloadAlbumTrack(album(), 99);
-    expect(window.openMatchingModal).not.toHaveBeenCalled();
-  });
-});
-
-describe('downloadUnmatched', () => {
-  // The "Skip Matching" button. Its old path could not work for three
-  // independent reasons — see the doc comment on downloadUnmatched.
-  it('downloads a track', async () => {
-    const bodies = stubDownload();
-    await downloadUnmatched(track());
-    expect(bodies[0].result_type).toBe('track');
-    expect(toasts).toEqual([{ message: 'Download started: Xtal', type: 'success' }]);
-  });
-
-  it('actually downloads an album instead of only claiming to', async () => {
-    // The vanilla's album branch toasted "Starting album download (unmatched)"
-    // above a comment reading "This would need to be implemented".
-    const bodies = stubDownload({ success: true, message: 'Started 2 tracks' });
-    await downloadUnmatched(album());
-    expect(bodies).toHaveLength(1);
-    expect(bodies[0].result_type).toBe('album');
-    expect(toasts).toEqual([{ message: 'Started 2 tracks', type: 'success' }]);
-  });
-
-  it('does nothing when handed nothing', async () => {
-    const bodies = stubDownload();
-    await downloadUnmatched(null as unknown as BasicTrack);
-    expect(bodies).toEqual([]);
-  });
-});
-
 /** a blocklisted artist: 409 {blocked} first, then whatever the override gets */
 function stubBlocked(after: Record<string, unknown> = { success: true }) {
   const bodies: Record<string, unknown>[] = [];
@@ -278,32 +202,23 @@ describe('blocklisted downloads', () => {
 });
 
 describe('startDownload', () => {
-  it('as-is posts the download', async () => {
+  it('a track posts the download', async () => {
     const bodies = stubDownload();
-    startDownload({ kind: 'track', track: track() }, 'plain');
+    startDownload({ kind: 'track', track: track() });
     await vi.waitFor(() => expect(bodies).toHaveLength(1));
-    expect(window.openMatchingModal).not.toHaveBeenCalled();
   });
 
-  it('as-is on an album posts the whole album', async () => {
+  it('an album posts the whole album', async () => {
     const bodies = stubDownload({ success: true, message: 'Started 2 downloads' });
-    startDownload({ kind: 'album', album: album() }, 'plain');
+    startDownload({ kind: 'album', album: album() });
     await vi.waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).toMatchObject({ result_type: 'album' });
   });
 
-  it('enriched hands each kind to the matching modal the way it expects', () => {
-    const a = album();
-    startDownload({ kind: 'track', track: track() }, 'enriched');
-    startDownload({ kind: 'album', album: a }, 'enriched');
-    startDownload({ kind: 'albumTrack', album: a, trackIndex: 1 }, 'enriched');
-    const calls = vi.mocked(window.openMatchingModal!).mock.calls;
-    expect(calls[0][1]).toBe(false);
-    expect(calls[0][2]).toBeNull();
-    expect(calls[1][1]).toBe(true);
-    expect(calls[1][2]).toBe(a);
-    expect(calls[2][0]).toBe(a.tracks[1]);
-    expect(calls[2][1]).toBe(false);
-    expect(calls[2][2]).toBe(a);
+  it('a track out of an album posts just that track', async () => {
+    const bodies = stubDownload();
+    startDownload({ kind: 'albumTrack', album: album(), trackIndex: 1 });
+    await vi.waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toMatchObject({ result_type: 'track', title: 'Tha' });
   });
 });

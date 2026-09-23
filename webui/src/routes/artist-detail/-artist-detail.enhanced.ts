@@ -14,6 +14,8 @@ export interface EnhancedTrack {
 }
 
 export interface EnhancedAlbum {
+  /** 1 when the user tagged it by hand from basic search; nothing automatic changes it */
+  metadata_locked?: number | boolean | null;
   record_type?: string;
   tracks?: EnhancedTrack[];
   [key: string]: unknown;

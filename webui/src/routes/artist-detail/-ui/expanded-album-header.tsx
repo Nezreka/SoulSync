@@ -14,6 +14,7 @@ import { foldUpdatedData, runEnrichmentRequest } from '../-artist-detail.enrich-
 import {
   deleteLibraryAlbumRequest,
   type DeleteAlbumChoice,
+  unlockHandTaggedAlbumRequest,
 } from '../-artist-detail.manage-actions';
 import { redownloadAlbumFlow } from '../-artist-detail.redownload';
 import { refreshReorganizeQueue, reorganizeStateForAlbum } from '../-artist-detail.reorganize';
@@ -73,6 +74,11 @@ interface Props {
  * in that menu behind a separator. every action still stops propagation, the
  * whole row above is a toggle and a bubbling click would fold the panel.
  */
+/** set when the user tagged this album by hand from basic search */
+function isHandTagged(album: { metadata_locked?: unknown }): boolean {
+  return Number(album.metadata_locked) === 1;
+}
+
 export function ExpandedAlbumHeader({
   album,
   rows,
@@ -225,7 +231,10 @@ export function ExpandedAlbumHeader({
       </div>
 
       <div className="enhanced-expanded-info">
-        <div className="lib-eyebrow">{String(album.record_type || 'album')}</div>
+        <div className="lib-eyebrow">
+          {String(album.record_type || 'album')}
+          {isHandTagged(album) ? ' · hand-tagged' : ''}
+        </div>
         <div className="enhanced-expanded-title">{albumTitle}</div>
         <div className="enhanced-expanded-meta">{expandedHeaderDetails(album, rows)}</div>
 
@@ -348,6 +357,23 @@ function AdminAlbumActions({
     if (rgBusy) return;
     setRgBusy(true);
     void analyzeAlbumReplayGainRequest(album.id, () => setRgBusy(false));
+  };
+
+  const unlockHandTagged = async () => {
+    const ok = await window.showConfirmDialog?.({
+      title: 'Unlock hand-tagged details?',
+      message:
+        'You tagged this album yourself. Unlocking lets enrichment and the maintenance jobs match it to a release and change it.',
+      confirmText: 'Unlock',
+      cancelText: 'Keep locked',
+    });
+    if (!ok) return;
+    if (await unlockHandTaggedAlbumRequest(album.id)) {
+      window.showToast?.('Unlocked. Enrichment can change this album again.', 'success');
+      onReassigned();
+    } else {
+      window.showToast?.('Could not unlock this album', 'error');
+    }
   };
 
   const redownload = () => {
@@ -480,6 +506,18 @@ function AdminAlbumActions({
             data: { 'album-id': String(album.id) },
             onSelect: () => setReassigning(true),
           },
+          ...(isHandTagged(album)
+            ? [
+                {
+                  key: 'unlock-manual',
+                  className: 'enhanced-unlock-manual-btn',
+                  icon: <TagIcon />,
+                  label: 'Unlock hand-tagged details…',
+                  title: 'Let enrichment and maintenance jobs change this album again',
+                  onSelect: () => void unlockHandTagged(),
+                },
+              ]
+            : []),
           {
             key: 'report',
             className: 'enhanced-report-issue-btn',

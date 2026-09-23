@@ -49,12 +49,28 @@ const OPTIONS: {
       </svg>
     ),
   },
+  {
+    mode: 'manual',
+    title: 'Tag it yourself',
+    text: 'For recordings no service knows, like bootlegs, live sets and mixtapes. You fill in the details.',
+    icon: (
+      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <path
+          d="M13.5 3.5 16.5 6.5 7 16H4v-3zM11.5 5.5l3 3"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
 ];
 
 function lastMode(): DownloadMode {
   try {
     const stored = localStorage.getItem(LAST_MODE_KEY);
-    if (stored === 'plain' || stored === 'enriched') return stored;
+    if (stored === 'plain' || stored === 'enriched' || stored === 'manual') return stored;
   } catch {
     // private mode, blocked storage: fall through to the default
   }

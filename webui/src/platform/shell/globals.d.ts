@@ -409,39 +409,6 @@ declare global {
       spotifyTracks: unknown[],
     ) => Promise<unknown>;
     /**
-     * The basic-search results currently on screen, published for the vanilla
-     * matched-download modal.
-     *
-     * `skipMatching` and the three `matchedDownload*` handlers in
-     * wishlist-tools.js read this by INDEX — and one of them by `indexOf` on
-     * the object — so it must be the same array the page renders, in the same
-     * order, holding the same object references. Owned by the React basic
-     * search controller; it goes away when that modal is ported too.
-     */
-    currentSearchResults?: unknown[];
-    /**
-     * wishlist-tools.js — opens the matched-download modal for a search result.
-     *
-     * `isAlbumDownload` drives whether the modal asks for an album selection;
-     * `albumResult` is the album context a track came from, or null.
-     */
-    openMatchingModal?: (
-      searchResult: unknown,
-      isAlbumDownload?: boolean,
-      albumResult?: unknown,
-    ) => void;
-    /**
-     * Download a basic-search result the user declined to match.
-     *
-     * Set by the React search page and called by the still-vanilla
-     * matched-download modal's "Skip Matching" button
-     * (wishlist-tools.js:skipMatching). It exists because the call that used to
-     * be there could not work: it looked the result up by index in an array
-     * nothing populates, after the state holding the result had already been
-     * cleared, and POSTed a route that does not exist.
-     */
-    _basicDownloadUnmatched?: (result: unknown) => void | Promise<void>;
-    /**
      * wishlist-tools.js — groups quarantined entries that are alternative
      * candidates for the SAME track.
      *

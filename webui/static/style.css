@@ -7578,106 +7578,31 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     pointer-events: none;
 }
 
-.matching-modal {
-    background: linear-gradient(135deg, #1a1a1a 0%, #121212 100%);
-    border-radius: 20px;
-    border: 1px solid rgba(var(--accent-rgb), 0.2);
-    width: 1100px;
-    max-width: 95vw;
-    height: 750px;
-    max-height: 95vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
-    transform: scale(1);
-    transition: transform 0.4s ease-in-out;
-    overflow: hidden;
-}
 
-.modal-overlay.hidden .matching-modal {
-    transform: scale(0.9);
-}
 
-/* Modal Header */
-.matching-modal-header {
-    padding: 30px 40px 20px 40px;
-    border-bottom: 1px solid rgba(var(--accent-rgb), 0.15);
-    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.03) 0%, transparent 50%);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-top-left-radius: 20px;
-    border-top-right-radius: 20px;
-}
 
-#matching-modal-title {
-    color: #ffffff;
-    font-size: 24px;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-    margin: 0;
-    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-}
 
-.matching-modal-close {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.8);
-    border: none;
-    border-radius: 50%;
-    width: 36px;
-    height: 36px;
-    font-size: 16px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
 
-.matching-modal-close:hover {
-    background: rgba(255, 255, 255, 0.2);
-    color: #ffffff;
-    transform: scale(1.1);
-}
 
-/* Modal Content */
-.matching-modal-content {
-    flex: 1;
-    padding: 30px 40px;
-    overflow-y: auto;
-    background: #121212;
-}
 
-.matching-modal-content::-webkit-scrollbar {
-    width: 8px;
-}
 
-.matching-modal-content::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
-}
 
-.matching-modal-content::-webkit-scrollbar-thumb {
-    background: rgba(var(--accent-rgb), 0.3);
-    border-radius: 4px;
-}
 
-.matching-modal-content::-webkit-scrollbar-thumb:hover {
-    background: rgba(var(--accent-rgb), 0.5);
-}
 
-/* Selection Stages */
-.selection-stage {
-    opacity: 1;
-    transform: translateY(0);
-    transition: all 0.4s ease-in-out;
-}
 
-.selection-stage.hidden {
-    opacity: 0;
-    transform: translateY(20px);
-    pointer-events: none;
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 .stage-header {
     margin-bottom: 30px;
@@ -7727,92 +7652,23 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     align-items: center;
 }
 
-/* Suggestion Cards */
-.suggestion-card {
-    width: 220px;
-    height: 130px;
-    background: linear-gradient(135deg, #1e1e1e 0%, #2a2a2a 100%);
-    border: 2px solid rgba(255, 255, 255, 0.1);
-    border-radius: 16px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    overflow: hidden;
-    position: relative;
-    display: flex;
-    flex-direction: column;
-}
 
-.suggestion-card:hover {
-    border-color: rgba(var(--accent-rgb), 0.6);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(var(--accent-rgb), 0.2);
-}
 
-.suggestion-card.selected {
-    border-color: rgb(var(--accent-rgb));
-    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.1) 0%, rgba(var(--accent-rgb), 0.05) 100%);
-    box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.4);
-}
 
-.suggestion-card-image {
-    width: 100%;
-    height: 80px;
-    object-fit: cover;
-    border-radius: 14px 14px 0 0;
-}
 
-.suggestion-card-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(to bottom,
-            rgba(18, 18, 18, 0.3) 0%,
-            rgba(18, 18, 18, 0.6) 60%,
-            rgba(18, 18, 18, 0.9) 100%);
-    border-radius: 16px;
-}
 
-.suggestion-card-content {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 12px;
-    z-index: 1;
-}
 
-.suggestion-card-name {
-    color: #ffffff;
-    font-size: 16px;
-    font-weight: 700;
-    margin-bottom: 4px;
-    line-height: 1.2;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-}
 
-.suggestion-card-details {
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 1.2;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
 
-.suggestion-card-confidence {
-    background: rgba(var(--accent-rgb), 0.2);
-    color: rgb(var(--accent-rgb));
-    padding: 2px 8px;
-    border-radius: 8px;
-    font-size: 11px;
-    font-weight: 600;
-    display: inline-block;
-    margin-top: 4px;
-}
+
+
+
+
+
+
+
+
+
 
 /* Loading Cards */
 .loading-card {
@@ -7876,17 +7732,7 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     color: rgba(255, 255, 255, 0.5);
 }
 
-/* Modal Actions */
-.matching-modal-actions {
-    padding: 20px 40px 30px 40px;
-    border-top: 1px solid rgba(var(--accent-rgb), 0.15);
-    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.02) 0%, transparent 50%);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom-left-radius: 20px;
-    border-bottom-right-radius: 20px;
-}
+
 
 .modal-button {
     padding: 12px 24px;
@@ -7936,22 +7782,9 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     color: #ff6b5a;
 }
 
-/* Modal Animation */
-@keyframes matchingModalFadeIn {
-    from {
-        opacity: 0;
-        transform: scale(0.9) translateY(20px);
-    }
 
-    to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
-}
 
-.modal-overlay:not(.hidden) .matching-modal {
-    animation: matchingModalFadeIn 0.4s ease-out;
-}
+
 
 /* Confirm Dialog Modal */
 /* Confirm dialog must sit above all other modals (playlist, download, etc.) */
@@ -7976,6 +7809,20 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 
 .modal-overlay.hidden .confirm-modal {
     transform: scale(0.9);
+}
+
+/* the confirm dialog's open animation. the matched-download modal it was
+   named for is gone, the name stayed so nothing else has to change */
+@keyframes matchingModalFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
 }
 
 .modal-overlay:not(.hidden) .confirm-modal {

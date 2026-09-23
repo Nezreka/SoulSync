@@ -10,7 +10,14 @@ from core.library.duplicate_rules import (
     lossy_companion_exts,
 )
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import (
+    JobContext,
+    JobResult,
+    RepairJob,
+    hand_tagged_path_keys,
+    is_hand_tagged_path,
+    not_locked_sql,
+)
 from database.music_database import split_credit_names
 from utils.logging_config import get_logger
 
@@ -71,6 +78,9 @@ class DuplicateDetectorJob(RepairJob):
             # artist_id is the ALBUM artist, so a compilation copy read as
             # 'Various Artists' and never matched the same song on the
             # artist's own album (#1263). the per-track credit wins when set
+            # hand-tagged: a live take the user typed would pair with its
+            # studio twin and one of them gets offered for deletion
+            locked_filter = not_locked_sql(cursor, 'tracks', 't')
             cursor.execute("""
                 SELECT t.id, t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name),
                        al.title, t.file_path,
@@ -80,7 +90,7 @@ class DuplicateDetectorJob(RepairJob):
                 LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.title IS NOT NULL AND t.title != ''
                   AND t.file_path IS NOT NULL AND t.file_path != ''
-            """)
+            """ + locked_filter)
             tracks = cursor.fetchall()
         except Exception as e:
             logger.error("Error fetching tracks from DB: %s", e, exc_info=True)
@@ -100,8 +110,12 @@ class DuplicateDetectorJob(RepairJob):
         # Group tracks by normalized key for fast comparison
         # Bucket by first 4 chars of normalized title for efficiency
         buckets = defaultdict(list)
+        hand_tagged = hand_tagged_path_keys(context.db)
         for row in tracks:
             track_id, title, artist_name, album_title, file_path, bitrate, duration, album_thumb, artist_thumb, artist_id = row
+            # same reason, for a hand-tagged file whose row isn't locked yet
+            if is_hand_tagged_path(file_path, hand_tagged):
+                continue
             norm_title = _normalize(title)
             bucket_key = norm_title[:4] if len(norm_title) >= 4 else norm_title
             buckets[bucket_key].append({

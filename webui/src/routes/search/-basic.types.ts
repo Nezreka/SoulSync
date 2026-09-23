@@ -159,4 +159,4 @@ export type DownloadTarget =
   | { kind: 'albumTrack'; album: BasicAlbum; trackIndex: number };
 
 /** How it comes in, picked in the chooser. */
-export type DownloadMode = 'plain' | 'enriched';
+export type DownloadMode = 'plain' | 'enriched' | 'manual';

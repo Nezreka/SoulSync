@@ -1338,29 +1338,6 @@
         overflow-y: auto;
     }
 
-    .matching-modal {
-        width: 100%;
-        max-width: 100%;
-        height: auto;
-        max-height: 95vh;
-        border-radius: 16px;
-    }
-
-    .matching-modal-content {
-        padding: 16px;
-    }
-
-    .matching-modal-actions {
-        flex-direction: column;
-        gap: 12px;
-        padding: 16px;
-    }
-
-    .matching-modal-actions button {
-        width: 100%;
-        min-height: 44px;
-    }
-
     .version-modal {
         width: 95vw;
     }
@@ -2105,10 +2082,6 @@
 
     .sync-tab-button {
         min-width: 0;
-    }
-
-    .matching-modal-actions {
-        padding: 12px;
     }
 
     /* Tool cards tighter on small screens */

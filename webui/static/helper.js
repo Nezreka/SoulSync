@@ -949,6 +949,7 @@ const HELPER_CONTENT = {
         tips: [
             'Download as-is keeps the file exactly as shared',
             'Enriched download matches it to a release, then tags it and files it into your library',
+            'Tag it yourself is for recordings no service knows: you type the details, and SoulSync keeps them',
             'Albums expand to show their tracks, each downloadable on its own',
             'Click an uploader to message them on Soulseek'
         ],

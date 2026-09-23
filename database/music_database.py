@@ -1660,6 +1660,7 @@ class MusicDatabase:
 
             self._ensure_core_media_schema_columns(cursor)
             self._ensure_art_lock_columns(cursor)
+            self._ensure_manual_metadata_schema(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -1949,6 +1950,137 @@ class MusicDatabase:
             except Exception:
                 cache[table] = False
         return cache[table]
+
+    def _ensure_manual_metadata_schema(self, cursor):
+        """Hand-tagged ("tag it yourself") albums: the files, and a lock flag.
+
+        the user typed the metadata for a release no service knows. the lock
+        keeps enrichment and the maintenance jobs from "correcting" it into the
+        studio release. its OWN method with its OWN try, like art_locked: no
+        sync upsert references these columns in its main statement, so a
+        missing column degrades to "not locked", never to a lost scan."""
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS manual_metadata_files (
+                    path_key TEXT PRIMARY KEY,
+                    file_path TEXT,
+                    album_title TEXT,
+                    album_artist TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        except Exception as e:
+            logger.error("Could not ensure manual_metadata_files: %s", e)
+        for table in ('albums', 'tracks'):
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cols = {c[1] for c in cursor.fetchall()}
+                if cols and 'metadata_locked' not in cols:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN metadata_locked INTEGER DEFAULT 0")
+                    logger.info("Added metadata_locked column to %s table (hand-tagged)", table)
+            except Exception as e:
+                logger.error("Could not ensure %s.metadata_locked: %s", table, e)
+
+    @staticmethod
+    def manual_path_key(file_path) -> str:
+        """artist/album/file, lowercased. a media server mounts the library
+        somewhere else than SoulSync does, the tail is what both agree on"""
+        parts = [p for p in str(file_path or '').replace('\\', '/').split('/') if p]
+        return '/'.join(parts[-3:]).lower()
+
+    def record_manual_metadata_file(self, file_path, album_title: str = '', album_artist: str = '') -> int:
+        """remember a hand-tagged file and lock whatever rows already point at
+        it. returns how many track rows got locked right now (a media-server
+        library locks its rows later, when the scan brings them in)"""
+        key = self.manual_path_key(file_path)
+        if not key:
+            return 0
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO manual_metadata_files (path_key, file_path, album_title, album_artist) "
+                "VALUES (?, ?, ?, ?)", (key, str(file_path), album_title or '', album_artist or ''))
+            name = key.rsplit('/', 1)[-1]
+            like = '%' + name.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            cursor.execute("SELECT id, album_id, file_path FROM tracks WHERE file_path LIKE ? ESCAPE '\\'", (like,))
+            hits = [(tid, aid) for tid, aid, fp in cursor.fetchall() if self.manual_path_key(fp) == key]
+            for track_id, album_id in hits:
+                self._lock_manual_rows(cursor, track_id, album_id)
+            conn.commit()
+            return len(hits)
+        finally:
+            conn.close()
+
+    def manual_path_keys(self) -> set:
+        """every hand-tagged file's path key, for jobs that walk the disk: one
+        query up front, then a set lookup per file"""
+        try:
+            conn = self._get_connection()
+            try:
+                return {row[0] for row in conn.execute("SELECT path_key FROM manual_metadata_files")}
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001 - old schema: nothing is hand-tagged
+            logger.debug("manual_path_keys unavailable: %s", e)
+            return set()
+
+    def clear_manual_lock(self, album_id) -> bool:
+        """the user unlocked a hand-tagged album: enrichment and the jobs may
+        look at it again. 'manual' statuses go back to NULL so every worker
+        picks the rows up fresh, and its files stop re-locking on rescans.
+        False when the album doesn't exist."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM albums WHERE id = ?", (album_id,))
+            if not cursor.fetchone():
+                return False
+            cursor.execute("SELECT id, file_path FROM tracks WHERE album_id = ?", (album_id,))
+            tracks = cursor.fetchall()
+            keys = [self.manual_path_key(fp) for _tid, fp in tracks if fp]
+            if keys:
+                try:
+                    cursor.executemany("DELETE FROM manual_metadata_files WHERE path_key = ?", [(k,) for k in keys])
+                except Exception as e:  # noqa: BLE001 - old schema, nothing to forget
+                    logger.debug("clear_manual_lock: %s", e)
+            for table, ids in (('tracks', [t[0] for t in tracks]), ('albums', [album_id])):
+                cols = self._match_status_columns(cursor, table)
+                sets = ', '.join([f"{c} = CASE WHEN {c} = 'manual' THEN NULL ELSE {c} END" for c in cols]
+                                 + ['metadata_locked = 0'])
+                cursor.executemany(f"UPDATE {table} SET {sets} WHERE id = ?", [(i,) for i in ids])
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def _match_status_columns(self, cursor, table: str) -> List[str]:
+        cursor.execute(f"PRAGMA table_info({table})")
+        return [c[1] for c in cursor.fetchall() if c[1].endswith('_match_status')]
+
+    def _lock_manual_rows(self, cursor, track_id, album_id) -> None:
+        """every per-source match status to 'manual' (every enrichment worker
+        only picks NULL / not_found / error, so this stands all of them down)
+        plus metadata_locked for the maintenance jobs"""
+        for table, row_id in (('tracks', track_id), ('albums', album_id)):
+            if row_id is None:
+                continue
+            cols = self._match_status_columns(cursor, table)
+            sets = ', '.join([f"{c} = 'manual'" for c in cols] + ['metadata_locked = 1'])
+            cursor.execute(f"UPDATE {table} SET {sets} WHERE id = ?", (row_id,))
+
+    def _apply_manual_lock_for_track(self, cursor, track_id, album_id, file_path) -> bool:
+        """a scan wrote this track row. if its file is one the user hand-tagged,
+        lock it and its album. cheap when nothing is hand-tagged: one indexed
+        lookup that misses"""
+        key = self.manual_path_key(file_path)
+        if not key:
+            return False
+        cursor.execute("SELECT 1 FROM manual_metadata_files WHERE path_key = ?", (key,))
+        if not cursor.fetchone():
+            return False
+        self._lock_manual_rows(cursor, track_id, album_id)
+        return True
 
     def _ensure_art_lock_columns(self, cursor):
         """Art chosen by hand (TheHomeGuy). Same shape as ``canonical_locked``:
@@ -9677,6 +9809,15 @@ class MusicDatabase:
                     self.backfill_track_external_ids_from_provenance(track_id, file_path)
                 except Exception as backfill_err:
                     logger.debug(f"Provenance ID backfill skipped for track {track_id}: {backfill_err}")
+
+                # a hand-tagged file keeps its lock across every rescan, even
+                # when the server makes a fresh row for it. own try: a missing
+                # table on an old schema must never cost the scan this track
+                try:
+                    if self._apply_manual_lock_for_track(cursor, track_id, album_id, file_path):
+                        conn.commit()
+                except Exception as lock_err:
+                    logger.debug(f"Manual lock check skipped for track {track_id}: {lock_err}")
 
                 # Log new imports to library history
                 if is_new_track:

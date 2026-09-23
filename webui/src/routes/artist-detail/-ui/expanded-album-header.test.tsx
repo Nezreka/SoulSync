@@ -416,3 +416,46 @@ describe('admin actions', () => {
     fireEvent.click(document.querySelector('.enhanced-delete-album-btn') as HTMLElement);
   });
 });
+
+describe('a hand-tagged album', () => {
+  const LOCKED: EnhancedAlbum = { ...ALBUM, metadata_locked: 1 };
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'showConfirmDialog');
+    Reflect.deleteProperty(window, 'showToast');
+    vi.restoreAllMocks();
+  });
+
+  it('says so in the eyebrow', () => {
+    renderHeader(LOCKED);
+    expect(document.querySelector('.lib-eyebrow')?.textContent).toBe('album · hand-tagged');
+  });
+
+  it('an ordinary album has no unlock, and no label', () => {
+    renderHeader();
+    openMore();
+    expect(document.querySelector('.enhanced-unlock-manual-btn')).toBeNull();
+    expect(document.querySelector('.lib-eyebrow')?.textContent).toBe('album');
+  });
+
+  it('unlocks only after the user confirms', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'));
+    window.showToast = vi.fn();
+    window.showConfirmDialog = vi.fn(async () => false);
+    renderHeader(LOCKED);
+    openMore();
+    fireEvent.click(document.querySelector('.enhanced-unlock-manual-btn') as HTMLElement);
+    await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    window.showConfirmDialog = vi.fn(async () => true);
+    openMore();
+    fireEvent.click(document.querySelector('.enhanced-unlock-manual-btn') as HTMLElement);
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith('/api/album/7/metadata-lock', { method: 'DELETE' }),
+    );
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith(expect.stringContaining('Unlocked'), 'success'),
+    );
+  });
+});

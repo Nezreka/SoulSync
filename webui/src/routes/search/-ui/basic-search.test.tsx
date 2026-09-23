@@ -1,12 +1,19 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { BasicResult, BasicTrack, DownloadMode, DownloadTarget } from '../-basic.types';
+import type { BasicResult, BasicTrack, DownloadTarget } from '../-basic.types';
 import type { BasicSearchController, BasicSearchState } from '../-basic.use-controller';
 
 import { DEFAULT_FILTERS } from '../-basic.types';
 import { IDLE_STATUS } from '../-basic.use-controller';
 import { BasicSearch, EMPTY_PLACEHOLDER, FILTERED_OUT_PLACEHOLDER } from './basic-search';
+
+// the enriched modal talks to the server as soon as it opens, keep it offline
+vi.mock('../-basic.enriched', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../-basic.enriched')>()),
+  fetchProviders: vi.fn(async () => [{ source: 'deezer', label: 'Deezer', active: true }]),
+  searchProvider: vi.fn(async () => ({ albums: [], tracks: [] })),
+}));
 
 afterEach(cleanup);
 beforeEach(() => {
@@ -68,7 +75,7 @@ function renderPanel(
     toggleSortOrder: vi.fn(),
     selectSource: vi.fn(),
   };
-  const onDownload = vi.fn<(target: DownloadTarget, mode: DownloadMode) => void>();
+  const onDownload = vi.fn<(target: DownloadTarget) => void>();
   const view = render(
     <BasicSearch controller={controller} onDownload={onDownload} active={active} />,
   );
@@ -231,23 +238,21 @@ describe('the download chooser', () => {
     expect(dialog.textContent).toContain('Enriched download');
   });
 
-  it('defaults to enriched, and Continue sends it that way', () => {
+  it('defaults to enriched, and Continue opens the enriched flow instead of downloading', async () => {
     const { onDownload } = openFor();
     expect(
       screen.getByRole('radio', { name: /Enriched download/ }).getAttribute('aria-checked'),
     ).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(onDownload).toHaveBeenCalledWith(
-      { kind: 'track', track: expect.objectContaining({ title: 'Xtal' }) },
-      'enriched',
-    );
+    expect(await screen.findByText('Which track is this?')).toBeTruthy();
+    expect(onDownload).not.toHaveBeenCalled();
   });
 
   it('as-is changes the button to Download and sends plain', () => {
     const { onDownload } = openFor();
     fireEvent.click(screen.getByRole('radio', { name: /Download as-is/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
-    expect(onDownload).toHaveBeenCalledWith(expect.objectContaining({ kind: 'track' }), 'plain');
+    expect(onDownload).toHaveBeenCalledWith(expect.objectContaining({ kind: 'track' }));
   });
 
   it('remembers the last pick for next time', () => {

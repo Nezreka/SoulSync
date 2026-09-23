@@ -147,17 +147,6 @@ describe('the search route', () => {
     expect(document.getElementById('basic-search-section')).toBeNull();
   });
 
-  it('exposes _basicDownloadUnmatched for the vanilla matched-download modal', async () => {
-    // skipMatching() in wishlist-tools.js calls this; that modal has no way to
-    // run a download itself.
-    const { unmount } = renderRoute('/search');
-    await settled();
-    expect(typeof window._basicDownloadUnmatched).toBe('function');
-
-    unmount();
-    await waitFor(() => expect(window._basicDownloadUnmatched).toBeUndefined());
-  });
-
   it('exposes _searchPageSetQuery for the global widget handoff', async () => {
     const { unmount } = renderRoute('/search');
     await settled();

@@ -22,7 +22,15 @@ file's own tags are used and the finding is filed as a loose 'file'.
 import os
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import skip_deleted_quarantine, JobContext, JobResult, RepairJob
+from core.repair_jobs.base import (
+    JobContext,
+    JobResult,
+    RepairJob,
+    has_metadata_locked,
+    hand_tagged_path_keys,
+    is_hand_tagged_path,
+    skip_deleted_quarantine,
+)
 # Same v3 quality primitives the download import guard and Quality Upgrade
 # Finder use. Module-level (not a local import inside scan()) so tests can
 # monkeypatch them the same way tests/repair_jobs/test_quality_upgrade.py does.
@@ -302,6 +310,7 @@ class QualityUpgradeScannerJob(RepairJob):
         companion_exts = lossy_companion_exts(
             context.config_manager, context.db, logger=logger,
         )
+        hand_tagged = hand_tagged_path_keys(context.db)
         for i, fpath in enumerate(audio_files):
             if context.check_stop():
                 return result
@@ -319,6 +328,11 @@ class QualityUpgradeScannerJob(RepairJob):
                 # lossless track beside it. Media servers may catalogue both
                 # representations, so this applies regardless of whether the
                 # derivative itself has a DB row.
+                result.skipped += 1
+                continue
+            # hand-tagged: the user typed this release (a bootleg, a live
+            # recording). redownload would wishlist the studio cut and delete it
+            if is_hand_tagged_path(fpath, hand_tagged) or (meta and meta.get('metadata_locked')):
                 result.skipped += 1
                 continue
             if library_only and meta is None:
@@ -547,13 +561,15 @@ class QualityUpgradeScannerJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            locked_col = 't.metadata_locked' if has_metadata_locked(cursor, 'tracks') else '0'
+            cursor.execute(f"""
                 SELECT t.id, t.title,
                        COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
                        t.file_path, t.track_number,
                        al.title AS album_title, al.thumb_url, ar.thumb_url,
                        t.quality_profile_id, ar.id,
-                       t.acquired_quality_json, t.retention_json
+                       t.acquired_quality_json, t.retention_json,
+                       {locked_col}
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -576,6 +592,7 @@ class QualityUpgradeScannerJob(RepairJob):
                     'artist_id': row[9],
                     'acquired_quality_json': row[10],
                     'retention_json': row[11],
+                    'metadata_locked': bool(row[12]) if len(row) > 12 else False,
                 }
                 for depth in range(1, min(4, len(parts) + 1)):
                     suffix = '/'.join(parts[-depth:]).lower()

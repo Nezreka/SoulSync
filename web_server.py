@@ -6473,6 +6473,18 @@ def _track_quick_download(download_id, title, artist='', size_bytes=0, source_la
                       name=f'quick-dl-{download_id[:12]}').start()
 
 
+from core.downloads import pinned_batch as _pinned_batch
+
+
+def _pinned_batch_deps():
+    return _pinned_batch.PinnedBatchDeps(
+        start_monitoring=download_monitor.start_monitoring,
+        submit=missing_download_executor.submit,
+        attempt_download_with_candidates=_attempt_download_with_candidates,
+        on_download_completed=_on_download_completed,
+    )
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
@@ -6490,6 +6502,31 @@ def start_download():
             tracks = data.get('tracks', [])
             if not tracks:
                 return jsonify({"error": "No tracks found in album."}), 400
+
+            # the user picked these exact files: one batch, one pinned task per
+            # file, so they show on the Downloads page like any other batch.
+            # torrent/usenet/lidarr are a whole release per download, they
+            # stay on the direct route below
+            if all(_pinned_batch.is_pinnable(t.get('username')) for t in tracks):
+                album_name = data.get('album_title') or data.get('album_name') or 'Unknown Album'
+                files = [
+                    _pinned_batch.PinnedFile(
+                        candidate=_pinned_batch.candidate_from_result(t),
+                        track_info=_pinned_batch.simple_track_info(t),
+                    )
+                    for t in tracks if t.get('username') and t.get('filename')
+                ]
+                if not files:
+                    return jsonify({"error": "No downloadable tracks in album."}), 400
+                batch_id, _task_ids = _pinned_batch.create_pinned_batch(
+                    files, name=album_name, profile_id=get_current_profile_id())
+                _pinned_batch.dispatch_pinned_batch(batch_id, _task_ids, _pinned_batch_deps())
+                add_activity_item("", "Album Download Started", f"'{album_name}' - {len(files)} tracks", "Now")
+                return jsonify({
+                    "success": True,
+                    "batch_id": batch_id,
+                    "message": f"Started {len(files)} downloads from album",
+                })
 
             started_downloads = 0
             for track_data in tracks:
@@ -6573,6 +6610,23 @@ def start_download():
                             }), 409
                 except Exception as _bl_err:
                     logger.debug("manual download blocklist check skipped: %s", _bl_err)
+
+            # one pinned task in its own batch, so it shows on the Downloads
+            # page. release-level sources stay on the direct route below
+            if _pinned_batch.is_pinnable(username):
+                title = data.get('title') or ''
+                artist = data.get('artist') or ''
+                batch_id, _task_ids = _pinned_batch.create_pinned_batch(
+                    [_pinned_batch.PinnedFile(
+                        candidate=_pinned_batch.candidate_from_result(data),
+                        track_info=_pinned_batch.simple_track_info(data),
+                    )],
+                    name=f"{artist} - {title}" if artist and title else (title or os.path.basename(str(filename).replace('\\', '/'))),
+                    profile_id=get_current_profile_id(),
+                )
+                _pinned_batch.dispatch_pinned_batch(batch_id, _task_ids, _pinned_batch_deps())
+                add_activity_item("", "Track Download Started", f"'{title or filename}'", "Now")
+                return jsonify({"success": True, "batch_id": batch_id, "message": "Download started"})
 
             download_id = run_async(download_orchestrator.download(username, filename, file_size))
             logger.info(f"Download ID returned: {download_id}")
@@ -12371,6 +12425,28 @@ def _is_explicit_blocked(track_data):
     return sp_data.get('explicit', False)
 
 
+def _preflight_mb_release(album_name, artist_name, track_count):
+    """Pre-populate the MusicBrainz release cache so every track of an album
+    download resolves to the same release."""
+    try:
+        mb_svc = mb_worker.mb_service if mb_worker else None
+        if mb_svc and album_name and artist_name:
+            from core.album_consistency import _find_best_release
+            _pf_release = _find_best_release(album_name, artist_name, track_count, mb_svc)
+            if _pf_release and _pf_release.get('id'):
+                _pf_mbid = _pf_release['id']
+                _pf_artist_key = artist_name.lower().strip()
+                with mb_release_cache_lock:
+                    mb_release_cache[(normalize_album_cache_key(album_name), _pf_artist_key)] = _pf_mbid
+                    mb_release_cache[(album_name.lower().strip(), _pf_artist_key)] = _pf_mbid
+                with mb_release_detail_cache_lock:
+                    mb_release_detail_cache[_pf_mbid] = _pf_release
+                logger.info(f"[Preflight] Pre-cached MB release for '{album_name}': "
+                      f"'{_pf_release.get('title', '')}' ({_pf_mbid[:8]}...)")
+    except Exception as pf_err:
+        logger.error(f"[Preflight] MB release preflight failed: {pf_err}")
+
+
 def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_artist, spotify_album):
     """
     Download album tracks that have been matched to Spotify with full track metadata.
@@ -12385,24 +12461,8 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
     started_count = 0
 
     # PREFLIGHT: Pre-populate MusicBrainz release cache so all tracks get the same release
-    try:
-        mb_svc = mb_worker.mb_service if mb_worker else None
-        if mb_svc and spotify_album.get('name') and spotify_artist.get('name'):
-            from core.album_consistency import _find_best_release
-            _pf_count = len(enhanced_tracks) + len(unmatched_tracks)
-            _pf_release = _find_best_release(spotify_album['name'], spotify_artist['name'], _pf_count, mb_svc)
-            if _pf_release and _pf_release.get('id'):
-                _pf_mbid = _pf_release['id']
-                _pf_artist_key = spotify_artist['name'].lower().strip()
-                with mb_release_cache_lock:
-                    mb_release_cache[(normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
-                    mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
-                with mb_release_detail_cache_lock:
-                    mb_release_detail_cache[_pf_mbid] = _pf_release
-                logger.info(f"[Preflight] Pre-cached MB release for '{spotify_album['name']}': "
-                      f"'{_pf_release.get('title', '')}' ({_pf_mbid[:8]}...)")
-    except Exception as pf_err:
-        logger.error(f"[Preflight] MB release preflight failed: {pf_err}")
+    _preflight_mb_release(spotify_album.get('name'), spotify_artist.get('name'),
+                          len(enhanced_tracks) + len(unmatched_tracks))
 
     # Process matched tracks with full Spotify metadata
     for matched_item in enhanced_tracks:
@@ -12732,6 +12792,283 @@ def start_matched_download():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+# ── enriched downloads from basic search ────────────────────────────────────
+# one metadata provider end to end: the release, its tracklist and the ids all
+# come from the provider the user picked. files are mapped to tracks on the
+# server with the import matcher. pinnable sources become a real batch, so the
+# download shows on the Downloads page; torrent/usenet keep the direct route.
+from core.search import enriched_download as _enriched
+
+
+def _enriched_blocklist_answer(data, artist, title):
+    """the same "blocked, download anyway?" 409 the as-is route gives"""
+    if data.get('ignore_blocklist') or not artist:
+        return None
+    try:
+        reason = get_database().blocklist_reason_for_track(
+            get_current_profile_id(), {'name': title, 'artists': [{'name': artist}]})
+    except Exception as bl_err:  # noqa: BLE001 - the guard is best-effort, like the as-is route
+        logger.debug("enriched download blocklist check skipped: %s", bl_err)
+        return None
+    if reason:
+        return jsonify({
+            "success": False, "blocked": True,
+            "blocked_entity_type": reason[0], "blocked_name": reason[1],
+        }), 409
+    return None
+
+
+def _enriched_files(data):
+    return [f for f in (data.get('files') or []) if isinstance(f, dict) and f.get('username') and f.get('filename')]
+
+
+@app.route('/api/search/enriched/match', methods=['POST'])
+def enriched_match():
+    """the chosen release's tracklist plus which picked file is which track"""
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
+    data = request.get_json(silent=True) or {}
+    source = str(data.get('source') or '').strip().lower()
+    album_id = str(data.get('album_id') or '').strip()
+    album_name = str(data.get('album_name') or '')
+    artist = str(data.get('artist') or '')
+    files = _enriched_files(data)
+    if not source or not album_id or not files:
+        return jsonify({"success": False, "error": "Pick a release and at least one file."}), 400
+    try:
+        release = _enriched.fetch_release(source, album_id, album_name, artist)
+    except _enriched.ProviderMismatch as mismatch:
+        return jsonify({"success": False, "error": f"{mismatch}. Try another source."}), 502
+    except LookupError as missing:
+        return jsonify({"success": False, "error": str(missing)}), 404
+    except Exception as err:  # noqa: BLE001 - surface it to the modal, don't 500 blind
+        logger.error("[Enriched] release lookup failed: %s", err, exc_info=True)
+        return jsonify({"success": False, "error": "Could not load that release."}), 500
+    album = _enriched.album_context(release['album'], source, artist)
+    assignments = _enriched.match_files(files, release['tracks'], album.get('name') or album_name)
+    tracks = [{
+        'index': i,
+        'name': t.get('name') or '',
+        'track_number': t.get('track_number') or 0,
+        'disc_number': t.get('disc_number') or 1,
+        'duration_ms': t.get('duration_ms') or 0,
+    } for i, t in enumerate(release['tracks'])]
+    return jsonify({"success": True, "album": album, "tracks": tracks, "assignments": assignments})
+
+
+@app.route('/api/search/enriched/start', methods=['POST'])
+def enriched_start():
+    """start an enriched download: an album (files + assignments) or a single
+    track (one file + track_id)"""
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
+    data = request.get_json(silent=True) or {}
+    source = str(data.get('source') or '').strip().lower()
+    files = _enriched_files(data)
+    if not source or not files:
+        return jsonify({"success": False, "error": "Pick a release and at least one file."}), 400
+    try:
+        if data.get('track_id'):
+            return _enriched_start_single(data, source, files[0])
+        return _enriched_start_album(data, source, files)
+    except _enriched.ProviderMismatch as mismatch:
+        return jsonify({"success": False, "error": f"{mismatch}. Try another source."}), 502
+    except LookupError as missing:
+        return jsonify({"success": False, "error": str(missing)}), 404
+    except Exception as err:  # noqa: BLE001
+        logger.error("[Enriched] start failed: %s", err, exc_info=True)
+        return jsonify({"success": False, "error": "Could not start the download."}), 500
+
+
+def _enriched_start_album(data, source, files):
+    album_id = str(data.get('album_id') or '').strip()
+    album_name = str(data.get('album_name') or '')
+    artist = str(data.get('artist') or '')
+    if not album_id:
+        return jsonify({"success": False, "error": "Pick a release first."}), 400
+    # re-fetched here, the browser never ships track objects we'd have to trust
+    release = _enriched.fetch_release(source, album_id, album_name, artist)
+    album = _enriched.album_context(release['album'], source, artist)
+    album_artist = (album.get('artists') or [{'name': artist}])[0].get('name') or artist
+
+    blocked = _enriched_blocklist_answer(data, album_artist, album.get('name'))
+    if blocked:
+        return blocked
+
+    by_key = {_enriched.file_key(f): f for f in files}
+    picked = []
+    for assignment in data.get('assignments') or []:
+        index = assignment.get('track_index')
+        file = by_key.get(assignment.get('file_key'))
+        if file is None or index is None or not (0 <= int(index) < len(release['tracks'])):
+            continue  # skipped by the user, or not a real track
+        track = release['tracks'][int(index)]
+        if _is_explicit_blocked(track):
+            logger.info("[Content Filter] Skipping explicit track: '%s'", track.get('name'))
+            continue
+        picked.append((file, track))
+    if not picked:
+        return jsonify({"success": False, "error": "No files are assigned to a track."}), 400
+
+    _preflight_mb_release(album.get('name'), album_artist, len(picked))
+    artist_ctx = {'name': album_artist, 'id': '', 'genres': [], 'source': source}
+
+    if all(_pinned_batch.is_pinnable(f.get('username')) for f, _t in picked):
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(
+                candidate=_pinned_batch.candidate_from_result(f),
+                track_info=_enriched.enriched_track_info(t, album, source, as_album=True),
+            ) for f, t in picked],
+            name=album.get('name') or album_name or 'Album',
+            profile_id=get_current_profile_id(),
+            is_album=True, album_context=album, artist_context=artist_ctx,
+        )
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        add_activity_item("", "Album Download Started", f"'{album.get('name')}' - {len(picked)} tracks", "Now")
+        return jsonify({"success": True, "batch_id": batch_id,
+                        "message": f"Downloading {len(picked)} tracks of {album.get('name')}"})
+
+    # torrent/usenet: one download is the whole release, keep the direct route
+    enhanced = [{'slskd_track': f, 'spotify_track': {**t, 'album': album}} for f, t in picked]
+    started = _start_enhanced_album_download(enhanced, [], artist_ctx, dict(album))
+    if not started:
+        return jsonify({"success": False, "error": "Failed to queue any tracks from the album."}), 500
+    return jsonify({"success": True, "message": f"Queued {started} tracks of {album.get('name')}"})
+
+
+def _enriched_start_single(data, source, file):
+    track_id = str(data.get('track_id'))
+    row = data.get('track') if isinstance(data.get('track'), dict) else {}
+    details = _enriched.single_track_details(source, track_id) or {}
+    artist = row.get('artist') or file.get('artist') or ''
+    track = {
+        'id': track_id,
+        'name': details.get('name') or row.get('name') or file.get('title') or '',
+        'artists': details.get('artists') or ([artist] if artist else []),
+        'duration_ms': details.get('duration_ms') or row.get('duration_ms') or 0,
+        'track_number': details.get('track_number') or 0,
+        'disc_number': details.get('disc_number') or 1,
+        'explicit': bool(details.get('explicit')),
+    }
+    raw_album = details.get('album') if isinstance(details.get('album'), dict) else {}
+    raw_album = dict(raw_album or {'name': row.get('album') or '', 'release_date': row.get('release_date') or ''})
+    if not raw_album.get('image_url') and row.get('image_url'):
+        raw_album['image_url'] = row['image_url']
+    album = _enriched.album_context(raw_album, source, artist)
+    # a track off a real album files under that album; a single stays a single
+    as_album = bool(album.get('id') and album.get('name') and album.get('album_type') != 'single')
+
+    names = [a.get('name') if isinstance(a, dict) else a for a in track['artists']]
+    first_artist = next((n for n in names if n), artist)
+    blocked = _enriched_blocklist_answer(data, first_artist, track['name'])
+    if blocked:
+        return blocked
+    if _is_explicit_blocked(track):
+        return jsonify({"success": False, "error": "Explicit content is disabled in settings",
+                        "explicit_blocked": True}), 403
+
+    track_info = _enriched.enriched_track_info(track, album, source, as_album=as_album)
+    title = f"{first_artist} - {track['name']}" if first_artist else track['name']
+
+    if _pinned_batch.is_pinnable(file.get('username')):
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(candidate=_pinned_batch.candidate_from_result(file), track_info=track_info)],
+            name=title, profile_id=get_current_profile_id(),
+            album_context=album if as_album else None,
+            artist_context={'name': first_artist, 'id': '', 'genres': [], 'source': source},
+        )
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        add_activity_item("", "Track Download Started", f"'{track['name']}'", "Now")
+        return jsonify({"success": True, "batch_id": batch_id, "message": f"Downloading {track['name']}"})
+
+    # release-level source: the direct route, as the old modal did
+    username, filename, size = file.get('username'), file.get('filename'), file.get('size', 0)
+    download_id = run_async(download_orchestrator.download(username, filename, size))
+    if not download_id:
+        return jsonify({"success": False, "error": "Failed to start the download"}), 500
+    _register_matched_download_context(_make_context_key(username, filename), {
+        "profile_id": get_current_profile_id(),
+        "spotify_artist": {'name': first_artist, 'id': '', 'genres': [], 'source': source},
+        "spotify_album": album,
+        "track_info": track_info,
+        "original_search_result": {
+            'username': username, 'filename': filename, 'size': size,
+            'title': track['name'], 'artist': first_artist, 'album': album.get('name') or '',
+            'track_number': track['track_number'] or 1,
+            'spotify_clean_title': track['name'],
+            'source': source,
+        },
+        "is_album_download": as_album,
+        "has_full_spotify_metadata": True,
+    })
+    return jsonify({"success": True, "message": f"Downloading {track['name']}"})
+
+
+# ── tag it yourself (basic search) ──────────────────────────────────────────
+# the user typed the release: bootlegs, live sets, mixtapes no service knows.
+# the tasks carry _manual_metadata, which stands tagging lookups, acoustid and
+# enrichment down (core/metadata/manual.py); the lock is recorded when each
+# file lands (pipeline _record_manual_lock).
+from core.search import manual_download as _manual
+
+
+@app.route('/api/search/manual/start', methods=['POST'])
+def manual_start():
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
+    data = request.get_json(silent=True) or {}
+    files = _enriched_files(data)
+    album = data.get('album') if isinstance(data.get('album'), dict) else {}
+    tracks = [t for t in (data.get('tracks') or []) if isinstance(t, dict)]
+    if not files:
+        return jsonify({"success": False, "error": "No files to download."}), 400
+    try:
+        album_ctx, tasks = _manual.build_manual_tasks(files, album, tracks, file_key=_enriched.file_key)
+    except _manual.ManualInputError as bad:
+        return jsonify({"success": False, "error": str(bad)}), 400
+
+    album_artist = album_ctx['artists'][0]['name']
+    blocked = _enriched_blocklist_answer(data, album_artist, album_ctx['name'])
+    if blocked:
+        return blocked
+
+    # the cover is saved only once everything else checked out
+    if album.get('image_data'):
+        try:
+            cover_path = _manual.save_cover(album['image_data'])
+        except _manual.ManualInputError as bad:
+            return jsonify({"success": False, "error": str(bad)}), 400
+        for _file, info in tasks:
+            info['_manual_cover_path'] = cover_path
+
+    name = album_ctx['name']
+    if all(_pinned_batch.is_pinnable(f.get('username')) for f, _i in tasks):
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(candidate=_pinned_batch.candidate_from_result(f), track_info=info)
+             for f, info in tasks],
+            name=name, profile_id=get_current_profile_id(),
+            is_album=True, album_context=album_ctx,
+            artist_context=tasks[0][1]['_explicit_artist_context'],
+        )
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        add_activity_item("", "Album Download Started", f"'{name}' - {len(tasks)} tracks (tagged by hand)", "Now")
+        return jsonify({"success": True, "batch_id": batch_id,
+                        "message": f"Downloading {len(tasks)} {'track' if len(tasks) == 1 else 'tracks'} of {name}"})
+
+    # torrent/usenet: one download is the whole release, the direct route.
+    # the track_info rides along as the context's track_info, so the manual
+    # flag reaches post-processing the same way
+    enhanced = [{'slskd_track': f, 'spotify_track': info} for f, info in tasks]
+    started = _start_enhanced_album_download(
+        enhanced, [], dict(tasks[0][1]['_explicit_artist_context']), dict(album_ctx))
+    if not started:
+        return jsonify({"success": False, "error": "Failed to queue any tracks."}), 500
+    return jsonify({"success": True, "message": f"Queued {started} tracks of {name}"})
+
 
 def _parse_filename_metadata(filename: str) -> dict:
     """

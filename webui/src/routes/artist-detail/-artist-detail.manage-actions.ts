@@ -239,3 +239,21 @@ export function albumArtAppliedMessage(result: ArtApplyResult): string {
   if (result.cover_written) parts.push('cover.jpg');
   return 'Cover art updated' + (parts.length ? ' (also updated: ' + parts.join(', ') + ')' : '');
 }
+
+/**
+ * DELETE /api/album/<id>/metadata-lock: hand a hand-tagged album back to
+ * enrichment and the maintenance jobs. true when it worked.
+ */
+export async function unlockHandTaggedAlbumRequest(albumId: unknown): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `/api/album/${encodeURIComponent(String(albumId))}/metadata-lock`,
+      {
+        method: 'DELETE',
+      },
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
+}

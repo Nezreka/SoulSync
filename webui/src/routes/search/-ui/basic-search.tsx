@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import type { DownloadMode, DownloadTarget } from '../-basic.types';
+import type { DownloadTarget } from '../-basic.types';
 import type { BasicSearchController } from '../-basic.use-controller';
 
 import { sourceLabel } from '../-basic.api';
@@ -9,6 +9,8 @@ import { BasicResults } from './basic-results';
 import { BasicSearchBar } from './basic-search-bar';
 import styles from './basic.module.css';
 import { DownloadChooser } from './download-chooser';
+import { EnrichedModal } from './enriched-modal';
+import { ManualModal } from './manual-modal';
 
 /** before anything has been searched for */
 export const EMPTY_PLACEHOLDER =
@@ -30,12 +32,15 @@ export function BasicSearch({
   active,
 }: {
   controller: BasicSearchController;
-  onDownload: (target: DownloadTarget, mode: DownloadMode) => void;
+  /** an as-is download. enriched never leaves this panel, it opens its modal */
+  onDownload: (target: DownloadTarget) => void;
   active: boolean;
 }) {
   const { state, visible, search, cancel, setFilters, toggleSortOrder, selectSource } = controller;
   const [query, setQuery] = useState('');
   const [target, setTarget] = useState<DownloadTarget | null>(null);
+  const [enriched, setEnriched] = useState<DownloadTarget | null>(null);
+  const [manual, setManual] = useState<DownloadTarget | null>(null);
 
   // the handoffs (wishlist "search manually", the global download widget) run
   // a search for a query this input never saw. following state.query keeps the
@@ -89,7 +94,21 @@ export function BasicSearch({
         onDownload={setTarget}
       />
 
-      <DownloadChooser target={target} onClose={() => setTarget(null)} onChoose={onDownload} />
+      <DownloadChooser
+        target={target}
+        onClose={() => setTarget(null)}
+        // enriched and tag-it-yourself are their own flows in their own modals,
+        // as-is goes straight out
+        onChoose={(picked, mode) =>
+          mode === 'enriched'
+            ? setEnriched(picked)
+            : mode === 'manual'
+              ? setManual(picked)
+              : onDownload(picked)
+        }
+      />
+      <EnrichedModal target={enriched} onClose={() => setEnriched(null)} />
+      <ManualModal target={manual} onClose={() => setManual(null)} />
     </div>
   );
 }
