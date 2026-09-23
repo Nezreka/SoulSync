@@ -51,7 +51,8 @@ _ISOLATION_FLAGS: Dict[str, Any] = {
 }
 
 
-def _ensure_batch(batch_id: str) -> Dict[str, Any]:
+def _ensure_batch(batch_id: str, name: str = "", batch_type: str = "",
+                  source_page: str = "") -> Dict[str, Any]:
     """The batch, created on first use. Caller holds tasks_lock."""
     batch = download_batches.get(batch_id)
     if batch is None:
@@ -61,15 +62,15 @@ def _ensure_batch(batch_id: str) -> Dict[str, Any]:
             "max_concurrent": 3,
             "queue_index": 0,
             "playlist_id": batch_id,
-            "playlist_name": _BATCH_NAMES.get(batch_id, batch_id),
+            "playlist_name": name or _BATCH_NAMES.get(batch_id, batch_id),
             "phase": "downloading",
         }
         download_batches[batch_id] = batch
     # Re-stamped every time: a batch that lost these would be picked up by the
     # music workers on their next pass.
     batch.update(_ISOLATION_FLAGS)
-    batch["batch_type"] = batch_id
-    batch["source_page"] = _BATCH_NAMES.get(batch_id, batch_id)
+    batch["batch_type"] = batch_type or batch_id
+    batch["source_page"] = source_page or _BATCH_NAMES.get(batch_id, batch_id)
     return batch
 
 
@@ -82,22 +83,31 @@ def register(
     artwork_url: str = "",
     source_label: str = "",
     size_bytes: int = 0,
+    status: str = "downloading",
+    batch_name: str = "",
+    batch_type: str = "",
+    source_page: str = "",
+    phase: str = "downloading",
 ) -> bool:
-    """Put one download on the Downloads page. Returns False if it cannot."""
+    """Put one download on the Downloads page. Returns False if it cannot.
+
+    the batch_* arguments only matter for a batch of its own (a music video
+    is one): the shared quick-downloads batch keeps its fixed name."""
     task_id = str(task_id or "").strip()
     title = str(title or "").strip()
     if not task_id or not title:
         return False
 
     with tasks_lock:
-        batch = _ensure_batch(batch_id)
+        batch = _ensure_batch(batch_id, batch_name, batch_type, source_page)
         if task_id not in batch["queue"]:
             batch["queue"].append(task_id)
-        batch["phase"] = "downloading"
+        batch["phase"] = phase
+        batch.pop("completion_time", None)
 
         # The music track_info shape, because the existing cards read it.
         download_tasks[task_id] = {
-            "status": "downloading",
+            "status": status,
             "track_info": {
                 "title": title,
                 "name": title,
@@ -161,6 +171,39 @@ def mark_status(task_id: str, status: str, error: str = "", file_path: str = "")
             task["error_message"] = str(error)
         if file_path:
             task["final_file_path"] = str(file_path)
+
+
+def update_info(task_id: str, title: str = "", artist: str = "",
+                batch_name: str = "") -> None:
+    """Rename the card (and its own batch) once we know what it really is."""
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if not task:
+            return
+        info = task.setdefault("track_info", {})
+        if title:
+            info.update(title=title, name=title, track_name=title)
+        if artist:
+            info.update(artist=artist, artist_name=artist)
+        batch = download_batches.get(task.get("batch_id") or "")
+        if batch_name and batch is not None:
+            batch["playlist_name"] = batch_name
+
+
+def set_phase(batch_id: str, phase: str) -> None:
+    """Move a batch's own phase. Nothing else will: the music side's batch
+    completion never looks at these batches, so a batch that is not told it
+    finished reads 'downloading' forever."""
+    with tasks_lock:
+        batch = download_batches.get(batch_id)
+        if batch is None:
+            return
+        batch["phase"] = phase
+        if phase in ("complete", "error", "cancelled"):
+            batch["completion_time"] = time.time()
 
 
 def is_cancelled(task_id: str) -> bool:

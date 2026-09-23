@@ -1927,19 +1927,24 @@ class YouTubeClient(DownloadSourcePlugin):
             return None
 
     def download_music_video(self, video_url: str, output_path: str,
-                              progress_callback=None) -> Optional[str]:
+                              progress_callback=None, should_cancel=None) -> Optional[str]:
         """Download a YouTube video as a music video file (keeps video, not audio-only).
 
         Args:
             video_url: YouTube video URL
             output_path: Full path for the output file (without extension — yt-dlp adds it)
             progress_callback: Optional callback(percent: float) for progress updates
+            should_cancel: Optional callable; True stops the fetch at the next
+                progress tick (a cancel on the Downloads page)
 
         Returns:
             Final file path if successful, None otherwise
         """
         try:
             def _progress_hook(d):
+                # raising from a progress hook is how yt-dlp is told to stop
+                if should_cancel and should_cancel():
+                    raise yt_dlp.utils.DownloadCancelled('cancelled by user')
                 if progress_callback and d.get('status') == 'downloading':
                     total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                     downloaded = d.get('downloaded_bytes', 0)
@@ -1975,6 +1980,9 @@ class YouTubeClient(DownloadSourcePlugin):
                 logger.error(f"Music video download completed but file not found: {final_path}")
                 return None
 
+        except yt_dlp.utils.DownloadCancelled:
+            logger.info("Music video download cancelled: %s", video_url)
+            return None
         except Exception as e:
             logger.error(f"Music video download failed: {e}")
             import traceback

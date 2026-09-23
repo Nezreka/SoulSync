@@ -1032,6 +1032,9 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'playlist_id': batch.get('playlist_id', ''),
                 'batch_name': batch.get('playlist_name') or batch.get('album_name') or '',
                 'source_page': batch.get('source_page') or batch.get('initiated_from') or '',
+                # what kind of thing is in it (audiobook, music_video), so the
+                # page can say "1 video" and not "1 tracks"
+                'batch_type': batch.get('batch_type') or '',
                 'phase': batch.get('phase', 'unknown'),
                 'total': len(queue),
                 'completed': sum(1 for s in statuses if s in ('completed', 'skipped', 'already_owned')),

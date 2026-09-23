@@ -141,20 +141,13 @@ def test_the_two_batches_stay_separate():
 # The call sites
 # ---------------------------------------------------------------------------
 
-def test_the_music_video_path_registers_and_reports():
+def test_the_music_video_route_hands_the_job_to_its_module():
+    """the route validates and hands off. registering, progress and every
+    terminal state are core/downloads/music_video.py's job now, and
+    tests/test_music_video_job.py drives them for real."""
     src = _read("web_server.py")
     fn = src.split("def download_music_video(", 1)[1].split("\n@app.route", 1)[0]
-    assert "direct_download_state.register(" in fn
-    assert "update_progress(" in fn
-    assert fn.count("mark_status(") >= 3, "a terminal state is unreported somewhere"
-
-
-def test_a_dead_music_video_thread_does_not_leave_a_running_card():
-    """The card would say 'downloading' forever."""
-    src = _read("web_server.py")
-    fn = src.split("def download_music_video(", 1)[1].split("\n@app.route", 1)[0]
-    handler = fn.split("except Exception as e:", 1)[1]
-    assert "mark_status" in handler
+    assert "_music_video.start(" in fn
 
 
 def test_the_basic_search_path_registers_both_branches():

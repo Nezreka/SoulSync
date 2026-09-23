@@ -190,6 +190,7 @@ from core.metadata.source import (
     normalize_album_cache_key,
 )
 from core import direct_download_state
+from core.downloads import music_video as _music_video
 from core import runtime_state as _rt_state
 from core.runtime_state import (
     activity_feed,
@@ -5903,47 +5904,18 @@ def stream_enhanced_search_track():
 # MUSIC VIDEO DOWNLOADS
 # =============================================================================
 
-_music_video_downloads = {}  # {video_id: {status, progress, path, error}}
+def _music_video_deps():
+    """the music video job's reach into the app. core/downloads/music_video.py"""
+    return _music_video.MusicVideoDeps(
+        search_tracks=lambda query, limit: _get_metadata_fallback_client().search_tracks(query, limit=limit),
+        download=lambda url, stem, progress, should_cancel: download_orchestrator.client("youtube").download_music_video(
+            url, stem, progress_callback=progress, should_cancel=should_cancel),
+        video_template=lambda: (config_manager.get('file_organization.templates', {}) or {}).get('video_path', ''),
+        artist_letter=_shared_artist_letter,
+        add_activity=lambda icon, title, subtitle: add_activity_item(icon, title, subtitle, "Now"),
+        record_history=lambda **fields: get_database().add_library_history_entry(**fields),
+    )
 
-
-def _clean_music_video_title(raw_title):
-    """Strip YouTube noise from a video title for metadata search + filing.
-
-    Handles the suffix both parenthesized — "(Official Music Video)" — and
-    BARE at the end of the title ("... Fat Official Music Video", the shape
-    fan uploads use constantly; the old parenthesized-only strip left the
-    noise in the search query, which is half of how a video ends up filed
-    under the uploader's channel name). Bare stripping is deliberately
-    conservative: only unambiguous multi-word forms ('official …', 'music
-    video', 'lyric video', 'visualizer'), so a song genuinely titled
-    "Video" or "Video Games" is never eaten."""
-    import re as _re
-    s = _re.sub(
-        r'\s*[\(\[](official\s*(music\s*)?video|official\s*lyric\s*video|official\s*audio'
-        r'|official\s*hd|hd|4k|remastered|lyric\s*video|visualizer|audio)[\)\]]',
-        '', raw_title or '', flags=_re.IGNORECASE).strip()
-    s = _re.sub(
-        r'[\s\-–—|]*\b(official\s+(music\s+|lyric\s+)?(video|audio)'
-        r'|music\s+video|lyric\s+video|visualizer)\s*$',
-        '', s, flags=_re.IGNORECASE).strip()
-    return _re.sub(r'\s*-\s*$', '', s).strip()
-
-
-def _parse_music_video_artist_title(raw_title, raw_channel):
-    """Artist/title for filing a music video, from the video's own name.
-
-    'Artist - Title' (hyphen, en or em dash) parses to the real artist —
-    the UPLOADER's channel name is only the last resort for titles with no
-    separator at all, because fan-channel uploads ("Bad Boy Edd") are the
-    norm and filing under them scatters one artist's videos across folders."""
-    import re as _re
-    for sep in (' - ', ' – ', ' — '):
-        if sep in (raw_title or ''):
-            artist, title = raw_title.split(sep, 1)
-            title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
-            title = _clean_music_video_title(title) or title
-            return artist.strip(), title
-    return raw_channel, (_clean_music_video_title(raw_title) or raw_title)
 
 @app.route('/api/music-video/download', methods=['POST'])
 def download_music_video():
@@ -5951,17 +5923,9 @@ def download_music_video():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
-
-    video_id = data.get('video_id', '')
-    video_url = data.get('url', '')
-    raw_title = data.get('title', '')
-    raw_channel = data.get('channel', '')
-
-    if not video_id or not video_url:
+    if not data.get('video_id') or not data.get('url'):
         return jsonify({"error": "Missing video_id or url"}), 400
-
-    # Check if already downloading
-    if video_id in _music_video_downloads and _music_video_downloads[video_id].get('status') == 'downloading':
+    if _music_video.is_in_flight(str(data.get('video_id'))):
         return jsonify({"error": "Already downloading"}), 409
 
     # Get and validate music videos path
@@ -5979,141 +5943,16 @@ def download_music_video():
     except (OSError, PermissionError) as e:
         return jsonify({"error": f"Music Videos directory is not writable: {e}"}), 400
 
-    # Initialize download state
-    _music_video_downloads[video_id] = {'status': 'searching', 'progress': 0, 'path': None, 'error': None}
-
-    def _do_download():
-        try:
-            # Step 1: Try to match against primary metadata source for clean artist/title
-            _music_video_downloads[video_id]['status'] = 'matching'
-            artist_name = raw_channel
-            track_title = raw_title
-            year = ''
-            matched = False
-
-            import re as _re
-            clean_search = _clean_music_video_title(raw_title)
-
-            try:
-                fallback_client = _get_metadata_fallback_client()
-                results = fallback_client.search_tracks(clean_search, limit=5)
-                if results:
-                    from difflib import SequenceMatcher
-                    best = None
-                    best_score = 0
-                    for r in results:
-                        name_sim = SequenceMatcher(None, clean_search.lower(), r.name.lower()).ratio()
-                        if r.artists:
-                            artist_sim = SequenceMatcher(None, raw_channel.lower(), r.artists[0].lower()).ratio()
-                            name_sim = (name_sim * 0.6) + (artist_sim * 0.4)
-                        if name_sim > best_score:
-                            best_score = name_sim
-                            best = r
-                    if best and best_score >= 0.5 and best.artists:
-                        matched = True
-                        artist_name = best.artists[0]
-                        track_title = best.name
-                        if hasattr(best, 'release_date') and best.release_date:
-                            year = str(best.release_date)[:4]
-                        logger.info(f"[Music Video] Matched to: {artist_name} - {track_title} (confidence: {best_score:.2f})")
-            except Exception as e:
-                logger.error(f"[Music Video] Metadata lookup failed: {e}")
-
-            if not matched:
-                # No confident metadata match — parse 'Artist - Title' from the
-                # video's own name. This must cover EVERY unmatched path
-                # (weak match, lookup crash, and crucially an EMPTY result
-                # list — the old code skipped the parse entirely on zero
-                # results, so the video filed under the uploader's channel:
-                # the '"Weird Al" Yankovic - Fat' → 'bad boy edd/' bug).
-                artist_name, track_title = _parse_music_video_artist_title(raw_title, raw_channel)
-                logger.warning(f"[Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
-
-            # Sanitize for filesystem
-            def _sanitize(s):
-                return _re.sub(r'[<>:"/\\|?*]', '_', s).strip().rstrip('.')
-
-            # Apply video path template
-            video_template = config_manager.get('file_organization.templates', {}).get('video_path', '$artist/$title-video')
-            if not video_template or not video_template.strip():
-                video_template = '$artist/$title-video'
-            safe_artist = _sanitize(artist_name)
-            video_path = video_template
-            video_path = video_path.replace('$artistletter', _shared_artist_letter(safe_artist) if safe_artist else 'A')
-            video_path = video_path.replace('$artist', safe_artist)
-            video_path = video_path.replace('$title', _sanitize(track_title))
-            video_path = video_path.replace('$year', str(year) if year else '')
-            # Clean up empty segments from missing variables
-            video_path = _re.sub(r'//+', '/', video_path).strip('/')
-            # Split into folder and filename
-            path_parts = video_path.rsplit('/', 1)
-            if len(path_parts) == 2:
-                folder_part, file_part = path_parts
-            else:
-                folder_part, file_part = '', path_parts[0]
-            output_dir = os.path.join(music_videos_path, folder_part) if folder_part else music_videos_path
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, file_part)
-
-            # Step 2: Download
-            _music_video_downloads[video_id]['status'] = 'downloading'
-            _music_video_downloads[video_id]['artist'] = artist_name
-            _music_video_downloads[video_id]['title'] = track_title
-
-            # Also put it on the Downloads page. This path keeps its own private
-            # dict and its own status endpoint, so until now a music video was
-            # downloading with nothing to show for it on the page whose whole
-            # job is showing downloads. Registered as managed_externally: this
-            # thread runs and files it, the music engine must not adopt it.
-            _mv_card = direct_download_state.register(
-                direct_download_state.MUSIC_VIDEO_BATCH, video_id,
-                title=track_title, artist=artist_name, album='Music Videos',
-                artwork_url=data.get('thumbnail') or '',
-                source_label='Music Video (YouTube)',
-            )
-
-            def _progress(pct):
-                _music_video_downloads[video_id]['progress'] = round(pct, 1)
-                if _mv_card:
-                    direct_download_state.update_progress(video_id, percent=pct)
-
-            final_path = download_orchestrator.client("youtube").download_music_video(video_url, output_path, progress_callback=_progress)
-
-            if final_path and os.path.exists(final_path):
-                _music_video_downloads[video_id]['status'] = 'completed'
-                _music_video_downloads[video_id]['progress'] = 100
-                _music_video_downloads[video_id]['path'] = final_path
-                if _mv_card:
-                    direct_download_state.mark_status(video_id, 'completed', file_path=final_path)
-                logger.info(f"[Music Video] Downloaded: {artist_name} - {track_title} → {final_path}")
-                add_activity_item("", "Music Video Downloaded", f"{artist_name} - {track_title}", "Now")
-            else:
-                _music_video_downloads[video_id]['status'] = 'error'
-                _music_video_downloads[video_id]['error'] = 'Download failed — file not found'
-                if _mv_card:
-                    direct_download_state.mark_status(video_id, 'failed',
-                                                     error='Download failed — file not found')
-                logger.error(f"[Music Video] Download failed for: {artist_name} - {track_title}")
-
-        except Exception as e:
-            _music_video_downloads[video_id]['status'] = 'error'
-            _music_video_downloads[video_id]['error'] = str(e)
-            # A card left saying 'downloading' after the thread died is worse
-            # than no card: the page would show it running forever.
-            direct_download_state.mark_status(video_id, 'failed', error=str(e))
-            logger.error(f"[Music Video] {e}")
-
-    # Run in background thread
-    import threading
-    threading.Thread(target=_do_download, daemon=True, name=f'music-video-{video_id}').start()
-
-    return jsonify({"success": True, "video_id": video_id})
+    result = _music_video.start(data, music_videos_path, _music_video_deps())
+    if result.get('error'):
+        return jsonify({"error": result['error']}), result.get('code', 400)
+    return jsonify(result)
 
 
 @app.route('/api/music-video/status/<video_id>', methods=['GET'])
 def get_music_video_status(video_id):
     """Get download status for a music video."""
-    status = _music_video_downloads.get(video_id)
+    status = _music_video.state.get(video_id)
     if not status:
         return jsonify({"status": "unknown"})
     return jsonify(status)

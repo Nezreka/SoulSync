@@ -83,7 +83,12 @@ def test_all_call_sites_use_the_shared_helper():
     ws_src = (_ROOT / 'web_server.py').read_text(encoding='utf-8')
     assert paths_src.count('artist_letter(clean_context.get("artist", "U"))') == 2
     assert ws_src.count("_shared_artist_letter(clean_context.get('artist', 'U'))") == 2
-    assert "_shared_artist_letter(safe_artist)" in ws_src
+    # the music-video path builder lives in its own module now, handed the
+    # shared helper by the route
+    mv_src = (_ROOT / 'core' / 'downloads' / 'music_video.py').read_text(encoding='utf-8')
+    assert "artist_letter=_shared_artist_letter" in ws_src
+    assert "artist_letter(safe_artist)" in mv_src
+    assert "[0].upper()" not in mv_src
     # the raw extraction may never reappear at a call site
     assert "[0].upper()" not in paths_src.replace('literal = (artist or "U")[0].upper()', '')
     for needle in ("(clean_context.get('artist', 'U') or 'U')[0].upper()",
