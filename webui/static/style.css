@@ -40684,7 +40684,10 @@ div.artist-hero-badge {
     accent-color: #1db954;
 }
 
-.has-select .track-compact-image {
+/* #1296 the play overlay anchors to its thumb on every row that has one. scoped
+   to .has-select, the search playlist modal's buttons (no checkboxes) escaped
+   to the overlay: invisible full-screen buttons that ate every click and scroll. */
+.track-compact-image {
     position: relative;
 }
 
@@ -40706,7 +40709,7 @@ div.artist-hero-badge {
     transition: opacity 0.15s ease;
 }
 
-.has-select .track-compact-image:hover .track-compact-play,
+.track-compact-image:hover .track-compact-play,
 .track-compact-play:focus-visible {
     opacity: 1;
 }
