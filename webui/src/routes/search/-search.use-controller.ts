@@ -289,13 +289,12 @@ export function useSearchController({
     for (const key of Object.keys(tokensRef.current)) delete tokensRef.current[key];
     abortRef.current?.abort();
     abortRef.current = null;
-    setState((prev) => ({
-      ...prev,
-      query,
-      sources: {},
-      fallbacks: {},
-      loadingSources: new Set<string>(),
-    }));
+    const reset = { query, sources: {}, fallbacks: {}, loadingSources: new Set<string>() };
+    // callers click the soulseek icon right after this, before any render.
+    // the click reads stateRef, so it has to hold the new query now or the
+    // handoff searches the old one (#1294)
+    stateRef.current = { ...previous, ...reset };
+    setState((prev) => ({ ...prev, ...reset }));
   }, []);
 
   const submitQuery = useCallback(

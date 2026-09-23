@@ -394,6 +394,27 @@ describe('the global widget handoff', () => {
     expect(basicInput.value).toBe('from the widget');
   });
 
+  it('hands the query over when the sync and the click land in the same tick (#1294)', async () => {
+    // the wishlist's "search manually" and the widget call the sync and click
+    // the icon back to back, no render in between. the click read the query
+    // from before the sync, so the basic box came up empty.
+    const queries = watchBasicSearches();
+
+    renderRoute('/search');
+    await settled();
+
+    await act(async () => {
+      window._searchPageSetQuery?.('a perfect circle the noose');
+      (
+        document.querySelector('#enh-source-row [data-source="soulseek"]') as HTMLButtonElement
+      ).click();
+    });
+
+    await waitFor(() => expect(queries).toEqual(['a perfect circle the noose']));
+    const basicInput = document.getElementById('downloads-search-input') as HTMLInputElement;
+    expect(basicInput.value).toBe('a perfect circle the noose');
+  });
+
   it('switches to the basic panel without searching when there is no query', async () => {
     // Clicking Soulseek on a page nobody has typed into should show the panel,
     // not scold the user for an empty search.
