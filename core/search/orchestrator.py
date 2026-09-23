@@ -134,8 +134,13 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
     return out
 
 
+# 2, not 3: U2, A1, M83's cousins. a 3 floor quietly made them unsearchable
+# (#1291). matches MIN_QUERY_LENGTH on the search page.
+MIN_REMOTE_QUERY_LENGTH = 2
+
+
 def _short_query_response(db_artists: list[dict], requested_source: str, deps: SearchDeps) -> dict:
-    """Skip the remote search for queries shorter than 3 chars."""
+    """Skip the remote search for a query too short to mean anything."""
     short_source = requested_source or deps.get_metadata_fallback_source()
     return {
         'db_artists': db_artists,
@@ -337,7 +342,7 @@ def run_enhanced_search(query: str, requested_source: str, deps: SearchDeps) -> 
     """
     db_artists = _build_db_artists(query, deps)
 
-    if len(query) < 3:
+    if len(query) < MIN_REMOTE_QUERY_LENGTH:
         return _short_query_response(db_artists, requested_source, deps)
 
     if requested_source:
