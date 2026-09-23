@@ -382,10 +382,6 @@
         min-height: 44px;
     }
 
-    #downloads-search-input {
-        width: 100%;
-    }
-
     .enhanced-search-bar-container {
         flex-direction: column;
         gap: 8px;

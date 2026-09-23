@@ -1,77 +1,95 @@
 import { useEffect, useState } from 'react';
 
+import type { DownloadMode, DownloadTarget } from '../-basic.types';
 import type { BasicSearchController } from '../-basic.use-controller';
-import type { BasicResultActions } from './basic-results';
 
+import { sourceLabel } from '../-basic.api';
 import { BasicFilters } from './basic-filters';
 import { BasicResults } from './basic-results';
-import { BasicSearchBar, BasicStatusBar } from './basic-search-bar';
-import { BasicSourceRow } from './basic-source-row';
+import { BasicSearchBar } from './basic-search-bar';
+import styles from './basic.module.css';
+import { DownloadChooser } from './download-chooser';
 
-/** The static markup's line, before anything has been searched for. */
-export const EMPTY_PLACEHOLDER = 'Enter a search term to get started.';
-/** displayDownloadsResults' line, after a search that found nothing. */
-export const NO_RESULTS_PLACEHOLDER = 'No search results found.';
+/** before anything has been searched for */
+export const EMPTY_PLACEHOLDER =
+  'Search a download source directly, then pick how each file comes in.';
+/** results came back, the filters hide all of them */
+export const FILTERED_OUT_PLACEHOLDER = 'Nothing matches these filters.';
 
 /**
  * The basic (download-source file) search panel.
  *
- * `.search-section` + `.active` is what the stylesheet keys visibility on, and
- * only the active one of the two panels is displayed — the same class the
- * vanilla toggled when the source picker switched modes. Rendering this without
- * `active` leaves a fully-correct panel that is invisible, which no jsdom test
- * can see because jsdom applies no CSS.
+ * `.search-section` + `.active` is what the page stylesheet keys visibility on,
+ * only the active one of the two panels is displayed. rendering this without
+ * `active` leaves a correct panel that is invisible, which no jsdom test can
+ * see because jsdom applies no CSS.
  */
 export function BasicSearch({
   controller,
-  actions,
+  onDownload,
   active,
 }: {
   controller: BasicSearchController;
-  actions: BasicResultActions;
+  onDownload: (target: DownloadTarget, mode: DownloadMode) => void;
   active: boolean;
 }) {
   const { state, visible, search, cancel, setFilters, toggleSortOrder, selectSource } = controller;
   const [query, setQuery] = useState('');
+  const [target, setTarget] = useState<DownloadTarget | null>(null);
 
-  // The handoffs (wishlist "search manually", the global download widget) run
-  // a search for a query this input never saw. Following state.query keeps the
-  // box showing what the results below it are for.
+  // the handoffs (wishlist "search manually", the global download widget) run
+  // a search for a query this input never saw. following state.query keeps the
+  // box showing what the results below it are for
   useEffect(() => {
     if (state.query) setQuery(state.query);
   }, [state.query]);
 
-  return (
-    <div id="basic-search-section" className={`search-section${active ? ' active' : ''}`}>
-      <BasicSourceRow
-        sources={state.sources}
-        activeSource={state.activeSource}
-        singleSource={state.singleSource}
-        onSelect={selectSource}
-      />
+  const current = state.singleSource
+    ? state.sources[0]
+    : state.sources.find((source) => source.name === state.activeSource);
 
+  return (
+    <div
+      id="basic-search-section"
+      className={`search-section${active ? ' active' : ''} ${styles.panel}`}
+    >
       <BasicSearchBar
         query={query}
         searching={state.searching}
+        sources={state.sources}
+        activeSource={state.activeSource}
+        singleSource={state.singleSource}
         onQueryChange={setQuery}
         onSubmit={() => search(query)}
         onCancel={cancel}
+        onSelectSource={selectSource}
       />
-
-      <BasicStatusBar status={state.status} searching={state.searching} />
 
       <BasicFilters
         filters={state.filters}
-        visible={state.filtersVisible}
+        visible={state.filtersVisible && !state.searching}
+        results={state.results}
+        sourceName={current ? sourceLabel(current) : ''}
         onChange={setFilters}
         onToggleOrder={toggleSortOrder}
       />
 
       <BasicResults
         results={visible}
-        actions={actions}
-        placeholder={state.query ? NO_RESULTS_PLACEHOLDER : EMPTY_PLACEHOLDER}
+        // one message at a time: the hint before any search, a filter that
+        // hides everything, else whatever the controller says (searching,
+        // nothing found, failed, cancelled)
+        placeholder={
+          state.results.length
+            ? FILTERED_OUT_PLACEHOLDER
+            : state.query || state.searching
+              ? state.status
+              : EMPTY_PLACEHOLDER
+        }
+        onDownload={setTarget}
       />
+
+      <DownloadChooser target={target} onClose={() => setTarget(null)} onChoose={onDownload} />
     </div>
   );
 }

@@ -5644,57 +5644,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     align-items: center;
 }
 
-#downloads-search-input {
-    flex-grow: 1;
-    height: 40px;
-    background: rgba(60, 60, 60, 0.7);
-    border: 2px solid rgba(100, 100, 100, 0.3);
-    border-radius: 20px;
-    padding: 0 20px;
-    color: #ffffff;
-    font-size: 14px;
-    font-weight: 500;
-    outline: none;
-    transition: all 0.2s ease;
-}
-
-#downloads-search-input:focus {
-    border-color: rgba(var(--accent-rgb), 0.8);
-    background: rgba(70, 70, 70, 0.9);
-}
-
-#downloads-search-btn,
-#downloads-cancel-btn {
-    height: 40px;
-    border: none;
-    border-radius: 20px;
-    font-size: 13px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: background 0.2s ease;
-}
-
-#downloads-search-btn {
-    background: linear-gradient(to bottom, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
-    color: #000000;
-    width: 120px;
-}
-
-#downloads-search-btn:hover {
-    background: linear-gradient(to bottom, #1fdf64, rgb(var(--accent-light-rgb)));
-}
-
-#downloads-cancel-btn {
-    background: linear-gradient(to bottom, rgba(220, 53, 69, 0.9), rgba(200, 43, 58, 0.9));
-    color: #ffffff;
-    width: 100px;
-}
-
-#downloads-cancel-btn:hover {
-    background: linear-gradient(to bottom, rgba(240, 73, 89, 1.0), rgba(220, 63, 79, 1.0));
-}
-
-
 /* Search Status Bar */
 .search-status-container {
     background: linear-gradient(to right, rgba(var(--accent-rgb), 0.12), rgba(var(--accent-rgb), 0.08));

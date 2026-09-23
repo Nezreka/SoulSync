@@ -6534,7 +6534,8 @@ def start_download():
                     continue
 
             # Add activity for album download start
-            album_name = data.get('album_name', 'Unknown Album')
+            # basic search albums carry album_title, album_name was never sent
+            album_name = data.get('album_title') or data.get('album_name') or 'Unknown Album'
             logger.info(f"Starting simple album download: '{album_name}' with {started_downloads}/{len(tracks)} tracks")
             add_activity_item("", "Album Download Started", f"'{album_name}' - {started_downloads} tracks", "Now")
 

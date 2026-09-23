@@ -1,65 +1,55 @@
 import { useEffect, useState } from 'react';
 
-import type { BasicAlbum, BasicResult, BasicTrack } from '../-basic.types';
+import type { BasicAlbum, BasicResult, BasicTrack, DownloadTarget } from '../-basic.types';
 
 import {
-  albumFormatLabel,
+  artColors,
   detectDiscBreaks,
-  formatBitrate,
+  formatDuration,
   formatSize,
+  isLossless,
+  qualityLabel,
   resultTitle,
 } from '../-basic.helpers';
 import { isAlbum } from '../-basic.types';
-
-export interface BasicResultActions {
-  onDownloadTrack: (track: BasicTrack, index: number) => void;
-  onStreamTrack: (track: BasicTrack, index: number) => void;
-  onMatchedTrack: (track: BasicTrack, index: number) => void;
-  onDownloadAlbum: (album: BasicAlbum, index: number) => void;
-  onMatchedAlbum: (album: BasicAlbum, index: number) => void;
-  onDownloadAlbumTrack: (album: BasicAlbum, albumIndex: number, trackIndex: number) => void;
-  onStreamAlbumTrack: (album: BasicAlbum, albumIndex: number, trackIndex: number) => void;
-  onMatchedAlbumTrack: (album: BasicAlbum, albumIndex: number, trackIndex: number) => void;
-}
+import styles from './basic.module.css';
 
 /**
- * The results list.
+ * The results list. one row per result, one Download button per row. HOW the
+ * file comes in is picked afterwards in the chooser, so the row stays quiet.
  *
- * Indices are positions in THIS list — the one on screen, after filtering and
- * sorting — because that is what `window.currentSearchResults` publishes and
- * what the vanilla matched-download modal indexes into.
+ * #search-results-area is load-bearing, the page tour points at it.
  */
 export function BasicResults({
   results,
-  actions,
   placeholder,
+  onDownload,
 }: {
   results: BasicResult[];
-  actions: BasicResultActions;
   /**
-   * The empty-state line. Two different sentences in the vanilla, and the
-   * difference matters: before any search the static markup reads "Enter a
-   * search term to get started." (index.html), while a search that found
-   * nothing renders "No search results found." (displayDownloadsResults).
-   * Showing the second one on a fresh page accuses the user of a failed search
-   * they never ran.
+   * the empty-state line. before any search it's a hint, after a search that
+   * found nothing it says so. showing "no results" on a fresh page accuses the
+   * user of a search they never ran.
    */
   placeholder: string;
+  onDownload: (target: DownloadTarget) => void;
 }) {
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
 
-  // Collapse everything when the list changes underneath. Index 2 in a new
-  // result set is a different album, so keeping it open would expand a folder
-  // the user never clicked.
+  // collapse everything when the list changes underneath. index 2 in a new
+  // result set is a different album, keeping it open would expand a folder
+  // the user never clicked
   useEffect(() => {
     setExpanded(new Set());
   }, [results]);
 
   if (!results.length) {
     return (
-      <div className="bs-results-wrap" id="search-results-area">
-        <div className="search-results-placeholder">
-          <p>{placeholder}</p>
+      <div className={styles.list} id="search-results-area">
+        <div className={`${styles.empty} bs-status-bar`}>
+          <p id="search-status-text" role="status">
+            {placeholder}
+          </p>
         </div>
       </div>
     );
@@ -74,265 +64,242 @@ export function BasicResults({
     });
 
   return (
-    <div className="bs-results-wrap" id="search-results-area">
+    <div className={styles.list} id="search-results-area">
       {results.map((result, index) =>
         isAlbum(result) ? (
-          <AlbumCard
+          <AlbumItem
             key={`${result.username}:${result.album_path}:${index}`}
             album={result}
-            index={index}
             expanded={expanded.has(index)}
             onToggle={() => toggle(index)}
-            actions={actions}
+            onDownload={onDownload}
           />
         ) : (
-          <TrackCard
-            key={`${result.username}:${result.filename}:${index}`}
-            track={result}
-            index={index}
-            actions={actions}
-          />
+          <div key={`${result.username}:${result.filename}:${index}`} className={styles.item}>
+            <div className={styles.row} data-result-kind="track">
+              <Art seed={`${result.artist ?? ''}${result.album ?? result.title ?? ''}`} />
+              <div className={styles.meta}>
+                <div className={styles.title}>
+                  <span className={styles.titleText}>{resultTitle(result) || 'Unknown title'}</span>
+                </div>
+                <div className={styles.sub}>
+                  {result.artist || 'Unknown artist'}
+                  {result.album ? (
+                    <>
+                      <span className={styles.sep}>·</span>
+                      {result.album}
+                    </>
+                  ) : null}
+                </div>
+              </div>
+              <Facts result={result} />
+              <DownloadButton
+                label={`Download ${resultTitle(result) || 'track'}`}
+                onClick={() => onDownload({ kind: 'track', track: result })}
+              />
+            </div>
+          </div>
         ),
       )}
     </div>
   );
 }
 
-/** `Shared by <uploader>` — the button chat.js's delegated handler listens for. */
-function Uploader({ username }: { username: string }) {
+function AlbumItem({
+  album,
+  expanded,
+  onToggle,
+  onDownload,
+}: {
+  album: BasicAlbum;
+  expanded: boolean;
+  onToggle: () => void;
+  onDownload: (target: DownloadTarget) => void;
+}) {
+  const tracks = album.tracks ?? [];
+  const count = tracks.length || album.track_count || 0;
+  return (
+    <div className={styles.item}>
+      <div className={styles.row} data-result-kind="album">
+        <Art seed={`${album.artist ?? ''}${album.album_title ?? ''}`} album />
+        <div className={styles.meta}>
+          <div className={styles.title}>
+            <button
+              type="button"
+              className={styles.expand}
+              aria-expanded={expanded}
+              aria-label={`${expanded ? 'Hide' : 'Show'} tracks of ${album.album_title || 'album'}`}
+              onClick={onToggle}
+            >
+              <svg className={styles.chevron} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M6 3.5 10.5 8 6 12.5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span className={styles.titleText}>{album.album_title || 'Unknown album'}</span>
+            </button>
+          </div>
+          <div className={styles.sub}>
+            {album.artist || 'Unknown artist'}
+            <span className={styles.sep}>·</span>
+            {count} {count === 1 ? 'track' : 'tracks'}
+            {album.year ? (
+              <>
+                <span className={styles.sep}>·</span>
+                {album.year}
+              </>
+            ) : null}
+          </div>
+        </div>
+        <Facts result={album} />
+        <DownloadButton
+          label={`Download ${album.album_title || 'album'}`}
+          onClick={() => onDownload({ kind: 'album', album })}
+        />
+      </div>
+      {expanded ? <AlbumTracks album={album} onDownload={onDownload} /> : null}
+    </div>
+  );
+}
+
+function AlbumTracks({
+  album,
+  onDownload,
+}: {
+  album: BasicAlbum;
+  onDownload: (target: DownloadTarget) => void;
+}) {
+  const tracks = album.tracks ?? [];
+  const breaks = detectDiscBreaks(tracks);
+  let disc = 1;
+  return (
+    <div className={styles.tracks}>
+      {breaks.size ? <div className={styles.disc}>Disc 1</div> : null}
+      {tracks.map((track, trackIndex) => {
+        const newDisc = breaks.has(trackIndex) ? ++disc : null;
+        const artist = track.artist && track.artist !== album.artist ? track.artist : '';
+        return (
+          <TrackLine
+            key={`${track.filename}:${trackIndex}`}
+            disc={newDisc}
+            track={track}
+            trackIndex={trackIndex}
+            artist={artist}
+            onDownload={() => onDownload({ kind: 'albumTrack', album, trackIndex })}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function TrackLine({
+  disc,
+  track,
+  trackIndex,
+  artist,
+  onDownload,
+}: {
+  disc: number | null;
+  track: BasicTrack;
+  trackIndex: number;
+  artist: string;
+  onDownload: () => void;
+}) {
+  const number = track.track_number || trackIndex + 1;
   return (
     <>
-      Shared by{' '}
-      <button
-        type="button"
-        className="chat-user-link"
-        data-chat-msg-user={username}
-        title="Message this user on Soulseek"
-      >
-        {username || 'Unknown'}
-      </button>
+      {disc ? <div className={styles.disc}>Disc {disc}</div> : null}
+      <div className={styles.track}>
+        <span className={styles.trackNumber}>{String(number).padStart(2, '0')}</span>
+        <span className={styles.trackTitle}>
+          {track.title || `Track ${trackIndex + 1}`}
+          {artist ? <span className={styles.trackArtist}> · {artist}</span> : null}
+        </span>
+        <span className={`${styles.dim} ${styles.trackMeta}`}>
+          {formatDuration(track.duration)}
+        </span>
+        <span className={`${styles.dim} ${styles.trackMeta}`}>{formatSize(track.size)}</span>
+        <button
+          type="button"
+          className={styles.trackDownload}
+          aria-label={`Download ${track.title || `track ${trackIndex + 1}`}`}
+          onClick={onDownload}
+        >
+          Download
+        </button>
+      </div>
     </>
   );
 }
 
-function AlbumCard({
-  album,
-  index,
-  expanded,
-  onToggle,
-  actions,
-}: {
-  album: BasicAlbum;
-  index: number;
-  expanded: boolean;
-  onToggle: () => void;
-  actions: BasicResultActions;
-}) {
-  const tracks = album.tracks ?? [];
-  const discBreaks = detectDiscBreaks(tracks);
-  const multiDisc = discBreaks.size > 0;
-  let discNumber = 1;
-
+/** quality badge, size, length (or album), uploader */
+function Facts({ result }: { result: BasicResult }) {
+  const label = qualityLabel(result);
+  const album = isAlbum(result);
+  const duration = album ? '' : formatDuration(result.duration);
   return (
-    <div className={`album-result-card${expanded ? ' expanded' : ''}`} data-album-index={index}>
-      {/*
-        The whole header is the expand target, as in the vanilla. It is a div
-        rather than a button because it CONTAINS buttons, and a button inside a
-        button is invalid markup that browsers resolve by dropping one of them.
-      */}
-      <div
-        className="album-card-header"
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded}
-        onClick={onToggle}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            onToggle();
-          }
-        }}
-      >
-        <div className="album-expand-indicator">{expanded ? '▼' : '▶'}</div>
-        <div className="album-icon">💿</div>
-        <div className="album-info">
-          <div className="album-title">{album.album_title || 'Unknown Album'}</div>
-          <div className="album-artist">by {album.artist || 'Unknown Artist'}</div>
-          <div className="album-details">
-            {tracks.length} tracks • {formatSize(album.total_size)} • {albumFormatLabel(album)}
-          </div>
-          <div className="album-uploader">
-            <Uploader username={album.username || ''} />
-          </div>
-        </div>
-        {/* stopPropagation so a download does not also toggle the folder. */}
-        <div className="album-actions" onClick={(event) => event.stopPropagation()}>
-          <button
-            type="button"
-            className="album-download-btn"
-            onClick={() => actions.onDownloadAlbum(album, index)}
-          >
-            ⬇ Download Album
-          </button>
-          <button
-            type="button"
-            className="album-matched-btn"
-            title="Matched Album Download"
-            onClick={() => actions.onMatchedAlbum(album, index)}
-          >
-            Matched Album🎯
-          </button>
-        </div>
-      </div>
-
-      <div className="album-track-list" style={{ display: expanded ? 'block' : 'none' }}>
-        {multiDisc ? <DiscSeparator label="Disc 1" first /> : null}
-        {tracks.map((track, trackIndex) => {
-          const separator = discBreaks.has(trackIndex) ? ++discNumber : null;
-          return (
-            <div key={`${track.filename}:${trackIndex}`}>
-              {separator ? <DiscSeparator label={`Disc ${separator}`} /> : null}
-              <AlbumTrackRow
-                album={album}
-                track={track}
-                albumIndex={index}
-                trackIndex={trackIndex}
-                actions={actions}
-              />
-            </div>
-          );
-        })}
-      </div>
+    <div className={styles.facts}>
+      {label ? (
+        <span className={`${styles.badge}${isLossless(result) ? ` ${styles.badgeLossless}` : ''}`}>
+          {label}
+        </span>
+      ) : null}
+      <span>{formatSize(album ? result.total_size : result.size)}</span>
+      {duration ? <span className={styles.dim}>{duration}</span> : null}
+      <Uploader username={result.username || ''} />
     </div>
   );
 }
 
 /**
- * The inline styles are the vanilla's, kept verbatim.
- *
- * `.disc-separator` has no stylesheet rule — the appearance lives entirely in
- * these attributes, so dropping them for a class would leave the separators
- * looking like unstyled text.
+ * The uploader. chat.js listens for clicks on .chat-user-link with
+ * data-chat-msg-user and opens a message to them, so both stay.
  */
-function DiscSeparator({ label, first = false }: { label: string; first?: boolean }) {
+function Uploader({ username }: { username: string }) {
+  if (!username) return null;
+  return (
+    <button
+      type="button"
+      className={`${styles.uploader} chat-user-link`}
+      data-chat-msg-user={username}
+      title={`Shared by ${username}. Message them on Soulseek`}
+    >
+      {username}
+    </button>
+  );
+}
+
+function DownloadButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" className={styles.download} aria-label={label} onClick={onClick}>
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path
+          d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span className={styles.downloadLabel}>Download</span>
+    </button>
+  );
+}
+
+/** a stable colour field per release, raw results carry no cover */
+function Art({ seed, album = false }: { seed: string; album?: boolean }) {
+  const [light, dark] = artColors(seed || '?');
   return (
     <div
-      className="disc-separator"
+      className={`${styles.art}${album ? ` ${styles.artAlbum}` : ''}`}
+      aria-hidden="true"
       style={{
-        padding: '6px 12px',
-        fontWeight: 600,
-        fontSize: '0.85em',
-        color: 'var(--text-secondary, #aaa)',
-        borderBottom: '1px solid var(--border-color, #333)',
-        margin: first ? '0 0 4px 0' : '8px 0 4px 0',
+        background: `radial-gradient(120% 90% at 20% 15%, ${light}, transparent 60%), linear-gradient(145deg, ${dark}, #111218)`,
       }}
-    >
-      {label}
-    </div>
-  );
-}
-
-function AlbumTrackRow({
-  album,
-  track,
-  albumIndex,
-  trackIndex,
-  actions,
-}: {
-  album: BasicAlbum;
-  track: BasicTrack;
-  albumIndex: number;
-  trackIndex: number;
-  actions: BasicResultActions;
-}) {
-  const bitrate = formatBitrate(track.bitrate);
-  return (
-    <div className="track-item">
-      <div className="track-item-info">
-        <div className="track-item-title">{track.title || `Track ${trackIndex + 1}`}</div>
-        <div className="track-item-details">
-          {track.track_number ? `${track.track_number}. ` : ''}
-          {track.artist || album.artist || 'Unknown Artist'} • {formatSize(track.size)} •{' '}
-          {track.quality || 'Unknown'} {bitrate}
-        </div>
-      </div>
-      <div className="track-item-actions">
-        <button
-          type="button"
-          className="track-stream-btn"
-          onClick={() => actions.onStreamAlbumTrack(album, albumIndex, trackIndex)}
-        >
-          Stream ▶
-        </button>
-        <button
-          type="button"
-          className="track-download-btn"
-          onClick={() => actions.onDownloadAlbumTrack(album, albumIndex, trackIndex)}
-        >
-          Download ⬇
-        </button>
-        <button
-          type="button"
-          className="track-matched-btn"
-          title="Matched Download"
-          onClick={() => actions.onMatchedAlbumTrack(album, albumIndex, trackIndex)}
-        >
-          Matched Download 🎯
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function TrackCard({
-  track,
-  index,
-  actions,
-}: {
-  track: BasicTrack;
-  index: number;
-  actions: BasicResultActions;
-}) {
-  const bitrate = formatBitrate(track.bitrate);
-  return (
-    <div className="track-result-card">
-      <div className="track-icon">🎵</div>
-      <div className="track-info">
-        <div className="track-title">{resultTitle(track) || 'Unknown Title'}</div>
-        <div className="track-artist">by {track.artist || 'Unknown Artist'}</div>
-        <div className="track-details">
-          {formatSize(track.size)} • {track.quality || 'Unknown'} {bitrate}
-        </div>
-        <div className="track-uploader">
-          <Uploader username={track.username || ''} />
-        </div>
-      </div>
-      <div className="track-actions">
-        <button
-          type="button"
-          className="track-stream-btn"
-          title="Stream Track"
-          onClick={() => actions.onStreamTrack(track, index)}
-        >
-          Stream ▶
-        </button>
-        <button
-          type="button"
-          className="track-download-btn"
-          title="Download"
-          onClick={() => actions.onDownloadTrack(track, index)}
-        >
-          Download ⬇
-        </button>
-        <button
-          type="button"
-          className="track-matched-btn"
-          title="Matched Download"
-          onClick={() => actions.onMatchedTrack(track, index)}
-        >
-          Matched Download🎯
-        </button>
-      </div>
-    </div>
+    />
   );
 }

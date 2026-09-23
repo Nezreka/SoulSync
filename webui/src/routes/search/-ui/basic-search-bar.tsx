@@ -1,94 +1,132 @@
+import type { BasicSource } from '../-basic.types';
+
+import { sourceLabel } from '../-basic.api';
+import styles from './basic.module.css';
+
 /**
- * The basic-search input, its Cancel affordance and the Search button.
+ * The one search control: source picker, input, Search (or Cancel while a
+ * search runs).
  *
- * The ✕ here is a CANCEL button, not a clear button — the opposite of the
- * enhanced bar's. It is hidden until a search is in flight and aborts it
- * (search.js:18, downloads.js:4366/4429). Getting those two the wrong way
- * round is easy: they look identical and sit six lines apart in the markup.
+ * the ids are load-bearing. the global download widget and the wishlist hand
+ * queries in through #downloads-search-input, and the page tour points at
+ * #bs-source-row and .bs-search-bar.
  *
- * `disabled` while searching mirrors the vanilla, which disabled both the input
- * and the button for the duration so a second Enter could not stack a search
- * on top of the one running.
+ * the input is disabled mid-search so a second Enter can't stack a search on
+ * top of the one running.
  */
 export function BasicSearchBar({
   query,
   searching,
+  sources,
+  activeSource,
+  singleSource,
   onQueryChange,
   onSubmit,
   onCancel,
+  onSelectSource,
 }: {
   query: string;
   searching: boolean;
+  sources: BasicSource[];
+  activeSource: string | null;
+  singleSource: boolean;
   onQueryChange: (value: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
+  onSelectSource: (name: string) => void;
 }) {
   return (
-    <div className="bs-search-bar">
-      <div className="bs-search-input-wrap">
-        <svg
-          className="bs-search-icon"
-          viewBox="0 0 20 20"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="9" cy="9" r="6" />
-          <path d="M15 15l3 3" />
-        </svg>
-        <input
-          type="text"
-          id="downloads-search-input"
-          placeholder="Search artists, albums, tracks…"
-          autoComplete="off"
-          spellCheck={false}
-          value={query}
-          disabled={searching}
-          onChange={(event) => onQueryChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') onSubmit();
-          }}
-        />
-        <button
-          id="downloads-cancel-btn"
-          className={`bs-cancel-btn${searching ? '' : ' hidden'}`}
-          type="button"
-          aria-label="Cancel"
-          onClick={onCancel}
-        >
-          ✕
-        </button>
-      </div>
-      <button
-        id="downloads-search-btn"
-        className="bs-search-btn"
-        type="button"
+    <form
+      className={`${styles.searchBox} bs-search-bar`}
+      role="search"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!searching) onSubmit();
+      }}
+    >
+      <SourcePicker
+        sources={sources}
+        activeSource={activeSource}
+        singleSource={singleSource}
+        onSelect={onSelectSource}
+      />
+      <input
+        className={styles.input}
+        type="text"
+        id="downloads-search-input"
+        placeholder="Search artists, albums, tracks…"
+        aria-label="Search download sources"
+        autoComplete="off"
+        spellCheck={false}
+        value={query}
         disabled={searching}
-        onClick={onSubmit}
-      >
-        Search
-      </button>
-    </div>
+        onChange={(event) => onQueryChange(event.target.value)}
+      />
+      {searching ? (
+        <>
+          <span className={styles.spinner} role="status" aria-label="Searching" />
+          <button
+            id="downloads-cancel-btn"
+            className={styles.cancelButton}
+            type="button"
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+        </>
+      ) : (
+        <button id="downloads-search-btn" className={styles.goButton} type="submit">
+          Search
+        </button>
+      )}
+    </form>
   );
 }
 
 /**
- * The status line: spinner, message, animated dots.
+ * Which source the search goes to.
  *
- * Both animations are hidden outside a search — they are the only motion on
- * the page, and leaving them running reads as a search that never finished.
+ * with one source configured there is nothing to pick, so it's a plain label.
+ * with several it's a native select laid invisibly over the pill: the keyboard
+ * and screen readers get a real picker, the eye gets the pill.
  */
-export function BasicStatusBar({ status, searching }: { status: string; searching: boolean }) {
+function SourcePicker({
+  sources,
+  activeSource,
+  singleSource,
+  onSelect,
+}: {
+  sources: BasicSource[];
+  activeSource: string | null;
+  singleSource: boolean;
+  onSelect: (name: string) => void;
+}) {
+  if (!sources.length) return null;
+  const current =
+    (singleSource ? sources[0] : sources.find((s) => s.name === activeSource)) ?? sources[0];
+
   return (
-    <div className="bs-status-bar">
-      <div className={`spinner-animation${searching ? '' : ' hidden'}`} />
-      <span id="search-status-text" className="bs-status-text">
-        {status}
-      </span>
-      <div className={`dots-animation${searching ? '' : ' hidden'}`} />
+    <div className={styles.source} id="bs-source-row" data-source={current.name}>
+      <span className={styles.sourceDot} aria-hidden="true" />
+      <span className={styles.sourceName}>{sourceLabel(current)}</span>
+      {singleSource ? null : (
+        <>
+          <svg className={styles.caret} viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+          <select
+            aria-label="Search source"
+            value={current.name}
+            onChange={(event) => onSelect(event.target.value)}
+          >
+            {sources.map((source) => (
+              <option key={source.name} value={source.name}>
+                {sourceLabel(source)}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
     </div>
   );
 }

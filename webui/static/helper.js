@@ -920,37 +920,37 @@ const HELPER_CONTENT = {
     // nothing. document.querySelector just returns null and the step is skipped.
     '#bs-source-row': {
         title: 'Search Source',
-        description: 'Which download source the search is sent to. With one source configured this is a label; with several, pick the one to search.',
+        description: 'Which download source the search goes to. With one source configured this is a label; with several, click it to pick another.',
         docsId: 'search-basic'
     },
     '.bs-search-bar': {
         title: 'Basic Search',
-        description: 'Direct search query sent to your download source. Enter artist name, song title, or any keywords. Results show raw P2P file listings.',
+        description: 'Searches the download source directly. Enter artist name, song title, or any keywords. Results are raw file listings.',
         docsId: 'search-basic'
     },
     '#filters-container': {
-        title: 'Search Filters',
-        description: 'Filter and sort the results. Type filters hide non-matching results. Format filters show only specific audio formats. Sort reorders by relevance, quality, size, name, uploader, bitrate or duration.',
+        title: 'Filter and sort',
+        description: 'How many results came back, then filter by type and format and change the sort.',
         tips: [
-            'Type: All, Albums (grouped results), or Tracks (individual files)',
-            'Format: FLAC for lossless, MP3 for compressed, or specific formats',
-            'Sort: Relevance uses the matching engine score; Quality uses bitrate density',
-            'The arrow flips the order — down is best-first, up reverses it'
+            'Type: All, Albums (whole folders), or Tracks (single files)',
+            'Format: FLAC for lossless, MP3 for compressed, or another format',
+            'Sort: Quality weighs format, bitrate and how fast the uploader is',
+            'The arrow flips the order: down is best first, up reverses it'
         ],
         docsId: 'search-basic'
     },
     '.bs-status-bar': {
         title: 'Search Status',
-        description: 'Shows the current search state — ready, searching, or results count. The spinner animates while the source is being queried.',
+        description: 'Before a search, a hint. While one runs, what it is searching for. After, what happened if nothing came back.',
     },
     '#search-results-area': {
         title: 'Search Results',
-        description: 'Raw Soulseek results grouped by album or listed individually. Each result shows filename, format, bitrate, quality score, file size, uploader name, upload speed, and availability.',
+        description: 'One row per file or album: quality badge, size, length and who shares it. Each row has one Download button, which asks how the file should come in.',
         tips: [
-            'Click a result to start downloading',
-            'Album results group files from the same folder',
-            'Quality score combines format, bitrate, peer speed, and availability',
-            'Green = high quality, Yellow = medium, Red = low'
+            'Download as-is keeps the file exactly as shared',
+            'Enriched download matches it to a release, then tags it and files it into your library',
+            'Albums expand to show their tracks, each downloadable on its own',
+            'Click an uploader to message them on Soulseek'
         ],
         docsId: 'search-basic'
     },
