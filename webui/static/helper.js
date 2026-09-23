@@ -857,43 +857,35 @@ const HELPER_CONTENT = {
     // ─── SEARCH / DOWNLOADS PAGE ────────────────────────────────────
 
     // Header & Mode Toggle
-    '.downloads-header': {
-        title: 'Music Downloads',
-        description: 'Search for music across your configured metadata sources and download from Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer.',
+    '#search-head': {
+        title: 'Search',
+        description: 'Find music across your metadata sources and download it tagged and filed. Catalog searches a metadata source, Videos searches YouTube music videos, Files searches Soulseek directly.',
         docsId: 'search'
     },
     '#enh-source-row': {
-        title: 'Search Source Icons',
-        description: 'Each icon is a metadata source. The highlighted one is what your next search will target — defaults to your configured primary source on page load. Click a different icon to search or switch to that source; a small dot on the icon marks sources that already have cached results for the current query.',
+        title: 'What to Search',
+        description: 'Catalog searches the metadata source picked in the search field. Videos finds music videos on YouTube. Files is the raw Soulseek search, for grabbing exactly what someone shares.',
         tips: [
-            'Typing searches only the highlighted source — no more silent fan-out across every provider',
-            'Switching to an already-cached source is instant, no re-fetch',
-            'The Soulseek icon routes to the raw-file search (same as the old Basic Search)',
-            'Music Videos queries YouTube for downloadable music video files',
-            'An amber border on a source means the backend fell back to a different provider for you (usually because Spotify is rate-limited)'
+            'Catalog returns to the source you were last on',
+            'Files downloads can still be tagged: as-is, enriched from one provider, or by hand'
         ],
         docsId: 'search-enhanced'
     },
 
     // Enhanced Search
-    '.enhanced-search-input-wrapper': {
-        title: 'Search Bar',
-        description: 'Type an artist, album, or track name. Results appear in categorized sections: Library Artists, Artists, Albums, Singles & EPs, and Tracks. Only the source highlighted in the icon row above is queried — click another icon to switch.',
+    '#enhanced-search-bar': {
+        title: 'Search Field',
+        description: 'Type an artist, album, or track. The pill on the left picks the metadata source; only that source is searched. Paste a Spotify, Apple Music, Deezer or MusicBrainz link (or a MusicBrainz ID) to jump straight to that release.',
         tips: [
-            'Click an album to open the download modal',
-            'Click a track to search your download source',
-            'Play button previews tracks from your download source',
-            'Switch sources via the icon row above — results are cached per query'
+            'Results are cached per source, so switching back is instant',
+            'A source that is not set up opens Settings instead',
+            'If a source is unavailable the menu says which one answered instead'
         ],
         docsId: 'search-enhanced'
     },
-    '#enh-db-artists-section': {
-        title: 'Library Artists',
-        description: 'Artists from your local music library that match the search. Click to view their collection on the Library page.',
-    },
     '#enh-spotify-artists-section': {
         title: 'Artists',
-        description: 'Artists from your metadata source matching the search. Click one to open their discography.',
+        description: 'Artists matching the search. The ones already in your library come first and are marked. Click one to open their page.',
     },
     '#enh-albums-section': {
         title: 'Albums',
@@ -2335,11 +2327,11 @@ const HELPER_TOURS = {
         description: 'Step-by-step guide to downloading your first album.',
         icon: '⬇️',
         steps: [
-            { page: 'search', selector: '#enh-source-row', title: 'Pick a Search Source', description: 'Each icon is a metadata source. The highlighted one is where your next search goes — defaults to your configured primary source. Click a different icon to switch to Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, Music Videos, or Soulseek (raw P2P files). A small dot marks sources you\'ve already searched for the current query.' },
-            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
-            { page: 'search', selector: '#enhanced-results-container', title: 'Search Results', description: 'After searching, results appear organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
-            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
-            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'That\'s It!', description: 'Search, click, download. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. Active downloads live on the dedicated Downloads page.' },
+            { page: 'search', selector: '#enh-source-row', title: 'Pick What to Search', description: 'Catalog searches a metadata source like Spotify, Deezer or MusicBrainz. Videos finds music videos on YouTube. Files is the raw Soulseek search.' },
+            { page: 'search', selector: '#enhanced-search-bar', title: 'Search for Music', description: 'Type an artist or album name. The pill on the left picks which source to search. You can also paste a link to a release and it opens that exact one. Try searching for your favorite artist now!' },
+            { page: 'search', selector: '#enhanced-results-container', title: 'Search Results', description: 'The top result sits next to the first few tracks, then artists, albums, singles and EPs. The pills along the top narrow it to one kind. "In library" marks things you already own.' },
+            { page: 'search', selector: '#enhanced-search-bar', title: 'Downloading an Album', description: 'Click any album to open the download modal with its tracklist and quality options, or use the download button on the cover. Tracks have a play button to preview before downloading.' },
+            { page: 'search', selector: '#enhanced-search-bar', title: 'That\'s It!', description: 'Search, click, download. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. Active downloads live on the dedicated Downloads page.' },
         ]
     },
     'sync-playlist': {

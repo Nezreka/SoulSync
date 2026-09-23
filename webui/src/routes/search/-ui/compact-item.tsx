@@ -1,288 +1,246 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
+
+import { DownloadIcon, PlayIcon } from './search-icons';
+import styles from './search.module.css';
 
 /**
- * One result card, ported from renderCompactSection's per-item DOM.
+ * The search page's result pieces: an artist face, a cover card (albums,
+ * singles, playlists, labels) and a track row.
  *
- * The class names are the vanilla's and are load-bearing: the stylesheet keys on
- * the COMPOUND selectors (`.enh-compact-item.album-card`), which is the only
- * thing keeping these cards clear of the global `.album-card` used by the
- * artist-detail and library discographies. Rendering `.album-card` alone here
- * would inherit the 300px stacked treatment from a different page.
- *
- * The vanilla inferred the card type from the section id string
- * (`sectionId.includes('albums')`). That is passed explicitly instead — a
- * renamed section silently changing card type is a trap, not a feature.
+ * one primary action each. a card opens its thing, the round button on a
+ * cover and the arrow on a track row download it, the play button on a row
+ * plays it. nothing decorative pretends to be a button.
  */
-export type CompactItemKind = 'artist' | 'label' | 'album' | 'track' | 'playlist';
 
-const IMAGE_CLASS: Record<CompactItemKind, string> = {
-  artist: 'artist-image',
-  label: 'artist-image',
-  album: 'album-cover',
-  track: 'track-cover',
-  playlist: 'album-cover',
-};
-
-const PLACEHOLDER_CLASS: Record<CompactItemKind, string> = {
-  artist: 'artist-placeholder',
-  label: 'artist-placeholder',
-  album: 'album-placeholder',
-  track: 'track-placeholder',
-  playlist: 'album-placeholder',
-};
-
-/** Labels piggyback the artist card's styling, hence both classes. */
-const CARD_CLASS: Record<CompactItemKind, string> = {
-  artist: 'enh-compact-item artist-card',
-  label: 'enh-compact-item label-card artist-card',
-  album: 'enh-compact-item album-card',
-  track: 'enh-compact-item track-item',
-  playlist: 'enh-compact-item album-card playlist-card',
-};
-
-export interface CompactItemProps {
-  kind: CompactItemKind;
-  name: string;
-  meta: string;
-  placeholder: string;
-  image?: string;
-  /** Artists and labels render as links so middle-click and copy-link work. */
-  href?: string;
-  duration?: string;
-  badge?: { text: string; className: string };
-  /**
-   * Extra badges the library check adds — in-library / on-wishlist.
-   *
-   * `delay` staggers the arrival animation, which is how the vanilla's
-   * setTimeout cascade reads without any timers.
-   */
-  extraBadges?: { text: string; className: string; delay?: string }[];
-  artistId?: string | number;
-  artistName?: string;
-  /**
-   * Receives the event: a link card has to be able to preventDefault so the
-   * click routes in-app instead of reloading the page.
-   */
-  onClick?: (event: React.MouseEvent | React.KeyboardEvent) => void;
-  onPlay?: () => void;
-  /** The play button's tooltip — it streams, or plays a local file. */
-  playTitle?: string;
+/** the first letters of a name, for a card with no art */
+function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return (
+    words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? '?').slice(0, 2)
+  ).toUpperCase();
 }
 
-export function CompactItem({
-  kind,
+/** an image that falls back to its placeholder when the url 404s */
+function useImage(url: string | undefined) {
+  const [failed, setFailed] = useState(false);
+  return { show: Boolean(url) && !failed, onError: () => setFailed(true) };
+}
+
+export function ArtistFace({
   name,
-  meta,
-  placeholder,
   image,
   href,
-  duration,
-  badge,
-  extraBadges,
+  inLibrary,
   artistId,
-  artistName,
-  onClick,
-  onPlay,
-  playTitle = 'Stream this track',
-}: CompactItemProps) {
-  /**
-   * A deterministic image URL that 404s is common — MusicBrainz Cover Art
-   * Archive urls are constructed without probing first. Falling back to the
-   * placeholder on error is what stops the browser's broken-image glyph.
-   */
-  const [imageFailed, setImageFailed] = useState(false);
-  const showImage = Boolean(image) && !imageFailed;
-
-  /**
-   * Every card with artwork gets a glow sampled from that artwork.
-   *
-   * Not an artist-only flourish: renderCompactSection ran this for ANY card with
-   * an image (shared-helpers.js:748-753), and the stylesheet turns the sampled
-   * palette into the hover border and box-shadow of album, track and artist
-   * cards alike (style.css:40314/40538). Skipping it leaves every result card
-   * with the plain grey hover it has when art fails to load.
-   *
-   * Keyed on the url, so a lazily-resolved artist photo arriving later glows
-   * too — the same path, one effect.
-   */
-  const cardRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    const card = cardRef.current;
-    if (!card || !image || imageFailed) return;
-    try {
-      window.extractImageColors?.(image, (colors) => {
-        window.applyDynamicGlow?.(card, colors);
-      });
-    } catch {
-      // Reading pixels can throw on a CORS-opaque image. A card without a glow
-      // is fine; a card that failed to render is not.
-    }
-  }, [image, imageFailed]);
-
-  const content = (
-    <>
-      {showImage ? (
-        <img
-          src={image}
-          className={`enh-item-image ${IMAGE_CLASS[kind]}`}
-          alt={name}
-          onError={() => setImageFailed(true)}
-        />
+}: {
+  name: string;
+  image?: string;
+  href: string;
+  inLibrary: boolean;
+  artistId?: string | number;
+}) {
+  const img = useImage(image);
+  return (
+    <a
+      className={styles.face}
+      href={href}
+      data-artist-id={artistId != null ? String(artistId) : undefined}
+    >
+      {img.show ? (
+        <img className={styles.faceImg} src={image} alt="" loading="lazy" onError={img.onError} />
       ) : (
-        <div
-          className={`enh-item-image-placeholder ${PLACEHOLDER_CLASS[kind]}`}
-          data-lazy-image="true"
+        <span
+          className={`${styles.faceImg} ${styles.facePh}`}
+          aria-hidden="true"
+          // the lazy artist-image loader looks for these
+          data-needs-image={artistId != null ? 'true' : undefined}
+          data-artist-id={artistId != null ? String(artistId) : undefined}
         >
-          {placeholder}
-        </div>
-      )}
-      {(kind === 'album' || kind === 'playlist') && (
-        <span className="enh-card-floating-play" aria-hidden="true">
-          ▶
+          {initials(name)}
         </span>
       )}
-      <div className="enh-item-info">
-        <div className="enh-item-name">{name}</div>
-        <div className="enh-item-meta">{meta}</div>
-      </div>
-      {duration && kind === 'track' ? (
-        <div className="enh-item-duration">
-          {duration}
+      <span className={styles.faceName}>{name}</span>
+      <span className={styles.faceSub}>
+        {inLibrary ? (
+          <>
+            <span className={styles.libDot} aria-hidden="true" />
+            In your library
+          </>
+        ) : (
+          'Artist'
+        )}
+      </span>
+    </a>
+  );
+}
+
+export function CoverCard({
+  name,
+  sub,
+  image,
+  round = false,
+  badge,
+  href,
+  onOpen,
+  actionLabel,
+  onAction,
+}: {
+  name: string;
+  sub: string;
+  image?: string;
+  round?: boolean;
+  badge?: string;
+  /** a label or anything else that is a page, opens as a link */
+  href?: string;
+  onOpen?: () => void;
+  /** the round button on the cover, e.g. "Download OK Computer" */
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  const img = useImage(image);
+  const body = (
+    <>
+      <div className={`${styles.cover}${round ? ` ${styles.coverRound}` : ''}`}>
+        {img.show ? (
+          <img src={image} alt="" loading="lazy" onError={img.onError} />
+        ) : (
+          <span className={styles.coverPh} aria-hidden="true">
+            {initials(name)}
+          </span>
+        )}
+        {badge ? <span className={`${styles.badge} ${styles.coverBadge}`}>{badge}</span> : null}
+        {onAction ? (
           <button
-            className="enh-item-play-btn"
-            title={playTitle}
             type="button"
+            className={styles.coverAction}
+            aria-label={actionLabel}
+            title={actionLabel}
             onClick={(event) => {
-              // Without this the card's own click fires too and the download
-              // modal opens behind the player.
               event.stopPropagation();
-              onPlay?.();
+              event.preventDefault();
+              onAction();
             }}
           >
-            ▶
+            <DownloadIcon />
           </button>
-        </div>
-      ) : null}
-      {badge ? <div className={`enh-item-badge ${badge.className}`}>{badge.text}</div> : null}
-      {extraBadges?.map((extra) => (
-        <div
-          key={extra.className}
-          className={extra.className}
-          style={extra.delay ? { animationDelay: extra.delay } : undefined}
-        >
-          {extra.text}
-        </div>
-      ))}
+        ) : null}
+      </div>
+      <span className={styles.coverName}>{name}</span>
+      <span className={styles.coverSub}>{sub}</span>
     </>
   );
-
-  // `data-needs-image` is what the lazy image loader looks for; it must be
-  // 'true' only when there is genuinely nothing to show yet.
-  const dataAttrs =
-    artistId != null
-      ? {
-          'data-artist-id': String(artistId),
-          'data-needs-image': image ? 'false' : 'true',
-          ...(artistName ? { 'data-artist-name': artistName } : {}),
-        }
-      : {};
-
-  if (href && (kind === 'artist' || kind === 'label')) {
+  if (href) {
     return (
-      <a
-        ref={cardRef as React.Ref<HTMLAnchorElement>}
-        className={CARD_CLASS[kind]}
-        href={href}
-        aria-label={name || 'Artist'}
-        style={{ color: 'inherit', textDecoration: 'none' }}
-        // The handler receives the event so the page can preventDefault and
-        // route in-app; the href stays real for middle-click and copy-link.
-        onClick={onClick}
-        {...dataAttrs}
-      >
-        {content}
+      <a className={styles.coverCard} href={href}>
+        {body}
       </a>
     );
   }
-
   return (
     <div
-      ref={cardRef as React.Ref<HTMLDivElement>}
-      className={CARD_CLASS[kind]}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onClick={onClick}
+      className={styles.coverCard}
+      role="button"
+      tabIndex={0}
+      aria-label={name}
+      onClick={onOpen}
       onKeyDown={(event) => {
-        if (!onClick) return;
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          // The media player's document-level keydown treats Space on
-          // anything that isn't an input as play/pause (media-player.js:2591)
-          // — without this, activating a focused card also toggles playback.
-          // Vanilla cards weren't focusable, so only this path can collide.
-          event.stopPropagation();
-          onClick(event);
+          onOpen?.();
         }
       }}
-      {...dataAttrs}
     >
-      {content}
+      {body}
     </div>
   );
 }
 
-/** The grid class each kind's list wears. */
-export const LIST_CLASS: Record<CompactItemKind, string> = {
-  artist: 'enh-artists-grid',
-  label: 'enh-artists-grid',
-  album: 'enh-albums-grid',
-  track: 'enh-tracks-list',
-  playlist: 'enh-albums-grid',
-};
-
-/**
- * One titled section. Renders nothing at all when empty — the vanilla added
- * `.hidden`, and an empty section with a "0" count is noise.
- */
-export function ResultSection({
-  id,
-  listId,
-  countId,
-  icon,
-  title,
-  kind,
-  count,
-  sectionClass,
-  children,
+export function TrackRow({
+  index,
+  name,
+  sub,
+  image,
+  duration,
+  badge,
+  playTitle,
+  onOpen,
+  onPlay,
 }: {
-  id: string;
-  listId: string;
-  countId: string;
-  icon: string;
-  title: string;
-  kind: CompactItemKind;
-  count: number;
-  /** Extra section class — `enh-artist-section` strips the card chrome. */
-  sectionClass?: string;
-  children: React.ReactNode;
+  index: number;
+  name: string;
+  sub: string;
+  image?: string;
+  duration: string;
+  badge?: 'library' | 'wishlist';
+  /** plays from the library, or streams */
+  playTitle: string;
+  /** opens the download for this track */
+  onOpen: () => void;
+  onPlay: () => void;
 }) {
-  if (!count) return null;
+  const img = useImage(image);
   return (
-    <div className={`enh-dropdown-section${sectionClass ? ` ${sectionClass}` : ''}`} id={id}>
-      <div className="enh-section-header">
-        {/* The icon is display:none in the stylesheet; kept so the markup still
-            matches the vanilla's, and re-showing it stays a CSS-only change. */}
-        <span className="enh-section-icon">{icon}</span>
-        {/* A heading, as the vanilla's was — the styling is class-only, so this
-            is purely the document outline a screen reader reads. */}
-        <h4 className="enh-section-title">{title}</h4>
-        <span className="enh-section-count" id={countId}>
-          {count}
+    <div
+      className={styles.trackRow}
+      role="button"
+      tabIndex={0}
+      aria-label={`${name}, ${sub}`}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+    >
+      <span className={styles.trackNum}>{index + 1}</span>
+      <button
+        type="button"
+        className={styles.trackPlay}
+        aria-label={`${playTitle}: ${name}`}
+        title={playTitle}
+        onClick={(event) => {
+          event.stopPropagation();
+          onPlay();
+        }}
+      >
+        <PlayIcon />
+      </button>
+      {img.show ? (
+        <img className={styles.thumb} src={image} alt="" loading="lazy" onError={img.onError} />
+      ) : (
+        <span className={styles.thumb} aria-hidden="true" />
+      )}
+      <span style={{ minWidth: 0 }}>
+        <span className={styles.trackTitle} style={{ display: 'block' }}>
+          {name}
         </span>
-      </div>
-      <div className={`enh-compact-list ${LIST_CLASS[kind]}`} id={listId}>
-        {children}
-      </div>
+        <span className={styles.trackSub} style={{ display: 'block' }}>
+          {sub}
+        </span>
+      </span>
+      <span className={styles.badgeSlot}>
+        {badge === 'library' ? (
+          <span className={styles.badge}>In library</span>
+        ) : badge === 'wishlist' ? (
+          <span className={`${styles.badge} ${styles.badgeWish}`}>In wishlist</span>
+        ) : null}
+      </span>
+      <span className={styles.duration}>{duration}</span>
+      <button
+        type="button"
+        className={styles.rowDownload}
+        aria-label={`Download ${name}`}
+        title="Download"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpen();
+        }}
+      >
+        <DownloadIcon />
+      </button>
     </div>
   );
 }

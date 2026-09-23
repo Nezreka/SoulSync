@@ -78,8 +78,12 @@ export const SEARCH_DEBOUNCE_MS = 600;
  */
 export const MBID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** a pasted link, one token, no spaces. the lookup endpoint says if it knows the site */
+export const LINK_RE = /^https?:\/\/\S+$/i;
+
 export function isIdLookupQuery(query: string): boolean {
-  return MBID_RE.test(query.trim());
+  const trimmed = query.trim();
+  return MBID_RE.test(trimmed) || LINK_RE.test(trimmed);
 }
 
 export function shouldSearch(query: string): boolean {

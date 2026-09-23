@@ -162,5 +162,7 @@ def test_the_dead_selectors_stay_dead():
     # the six anchors the redesigns orphaned — never reference them again
     block = _tour_block()
     for dead in ('#enh-results-container', '#retag-tool-card', '.import-page-header',
-                 '.import-page-refresh-btn', '.import-page-staging-bar', '.import-page-tab-bar'):
+                 '.import-page-refresh-btn', '.import-page-staging-bar', '.import-page-tab-bar',
+                 # the search overhaul took the input wrapper out (Sept 2026)
+                 '.enhanced-search-input-wrapper'):
         assert dead not in block, f'{dead} is a dead anchor'

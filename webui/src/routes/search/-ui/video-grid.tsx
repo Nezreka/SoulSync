@@ -1,20 +1,18 @@
 import type { SearchVideo } from '../-search.types';
 
 import { formatVideoDuration, formatViewCount } from '../-search.helpers';
+import { DownloadIcon } from './search-icons';
+import styles from './search.module.css';
 
 /**
  * The YouTube music-video grid.
  *
- * Two things differ from the vanilla by construction rather than by choice:
+ * the section is a normal part of the tree (the vanilla built it in JS on first
+ * use), and the video object is passed straight to the handler instead of being
+ * serialised into an onclick attribute, which broke on a quote in a title.
  *
- * 1. **The section is a normal part of the tree.** The vanilla CREATED
- *    #enh-videos-section in JS on first use and appended it to the results
- *    container, which is why it always landed after Labels and then persisted,
- *    hidden, for the rest of the session.
- * 2. **The video object is passed, not serialised into an attribute.** The
- *    vanilla built `onclick="_downloadMusicVideo(this, ${JSON.stringify(v)…})"`,
- *    so a title containing a quote or a backslash broke the card. Handing the
- *    object straight to the handler removes that whole class of failure.
+ * the progress ring, tick and cross keep their global .enh-video-* classes:
+ * the artist page's videos share that styling.
  */
 export type VideoDownloadState = 'idle' | 'downloading' | 'completed' | 'errored';
 
@@ -37,46 +35,36 @@ export function VideoGrid({
   onDownload: (video: SearchVideo) => void;
 }) {
   return (
-    <div className="enh-dropdown-section" id="enh-videos-section">
-      <div className="enh-section-header">
-        <span className="enh-section-icon">🎬</span>
-        <h4 className="enh-section-title">Music Videos</h4>
-        <span className="enh-section-count" id="enh-videos-count">
-          {videos.length}
-        </span>
+    <section className={styles.section} id="enh-videos-section">
+      <div className={styles.sectionHead}>
+        <h2 className={styles.sectionTitle}>
+          Music videos
+          <span className={styles.sectionCount} id="enh-videos-count">
+            {videos.length}
+          </span>
+        </h2>
       </div>
-      <div className="enh-video-grid" id="enh-videos-list">
-        {!videos.length ? (
-          <div className="enh-empty-state">No music videos found</div>
-        ) : (
-          videos.map((video) => {
+      {!videos.length ? (
+        <p className={styles.stateText}>No music videos found.</p>
+      ) : (
+        <div className={styles.videos} id="enh-videos-list">
+          {videos.map((video) => {
             const id = String(video.video_id ?? '');
             const state = progress[id]?.state ?? 'idle';
             const percent = progress[id]?.percent ?? 0;
             const duration = formatVideoDuration(video.duration);
             const views = formatViewCount(video.view_count);
-
-            const classes = ['enh-video-card'];
-            if (state === 'downloading') classes.push('downloading');
-            if (state === 'completed') classes.push('completed');
-            if (state === 'errored') classes.push('errored');
-
             return (
-              <div
+              <button
                 key={id || video.title}
-                className={classes.join(' ')}
+                type="button"
+                className={styles.video}
                 data-video-id={id}
-                role="button"
-                tabIndex={0}
+                data-state={state}
+                aria-label={`Download ${video.title}`}
                 onClick={() => onDownload(video)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    onDownload(video);
-                  }
-                }}
               >
-                <div className="enh-video-thumb">
+                <span className={styles.videoThumb}>
                   {video.thumbnail ? (
                     <img
                       src={video.thumbnail}
@@ -87,8 +75,12 @@ export function VideoGrid({
                       }}
                     />
                   ) : null}
-                  <div className="enh-video-play">▶</div>
-                  <div
+                  {state === 'idle' ? (
+                    <span className={styles.videoAction} aria-hidden="true">
+                      <DownloadIcon />
+                    </span>
+                  ) : null}
+                  <span
                     className={`enh-video-progress-ring${state === 'downloading' ? '' : ' hidden'}`}
                   >
                     <svg viewBox="0 0 36 36">
@@ -110,31 +102,32 @@ export function VideoGrid({
                         stroke="rgb(var(--accent-rgb))"
                         strokeWidth="3"
                         strokeDasharray={RING_LENGTH}
-                        // Counts DOWN as it fills: full offset is empty.
                         strokeDashoffset={RING_LENGTH * (1 - Math.min(100, percent) / 100)}
                         strokeLinecap="round"
                         transform="rotate(-90 18 18)"
                       />
                     </svg>
-                  </div>
-                  <div className={`enh-video-done${state === 'completed' ? '' : ' hidden'}`}>✓</div>
-                  <div className={`enh-video-error${state === 'errored' ? '' : ' hidden'}`}>✗</div>
-                  {duration ? <span className="enh-video-duration">{duration}</span> : null}
-                </div>
-                <div className="enh-video-info">
-                  <div className="enh-video-title" title={video.title}>
-                    {video.title}
-                  </div>
-                  <div className="enh-video-channel">
-                    {video.channel}
-                    {views ? ` · ${views} views` : ''}
-                  </div>
-                </div>
-              </div>
+                  </span>
+                  <span className={`enh-video-done${state === 'completed' ? '' : ' hidden'}`}>
+                    ✓
+                  </span>
+                  <span className={`enh-video-error${state === 'errored' ? '' : ' hidden'}`}>
+                    ✗
+                  </span>
+                  {duration ? <span className={styles.videoDuration}>{duration}</span> : null}
+                </span>
+                <span className={styles.videoTitle} title={video.title}>
+                  {video.title}
+                </span>
+                <span className={styles.videoSub}>
+                  {video.channel}
+                  {views ? ` · ${views} views` : ''}
+                </span>
+              </button>
             );
-          })
-        )}
-      </div>
-    </div>
+          })}
+        </div>
+      )}
+    </section>
   );
 }

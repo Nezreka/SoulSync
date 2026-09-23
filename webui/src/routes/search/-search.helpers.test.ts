@@ -73,6 +73,13 @@ describe('isIdLookupQuery', () => {
     expect(isIdLookupQuery('770a1e6b-2d17-4bbe-a0c2-a3c4f77e9bc')).toBe(false);
     expect(isIdLookupQuery('not-a-uuid')).toBe(false);
   });
+
+  it('treats a pasted link as a lookup, text with a link in it as a search', () => {
+    expect(isIdLookupQuery('https://open.spotify.com/album/4LH4d3cOWNNsVw41Gqt2kv')).toBe(true);
+    expect(isIdLookupQuery('  http://www.deezer.com/album/302127 ')).toBe(true);
+    expect(isIdLookupQuery('daft punk https://open.spotify.com/album/x')).toBe(false);
+    expect(isIdLookupQuery('spotify.com/album/x')).toBe(false);
+  });
 });
 
 describe('visibleSources', () => {
