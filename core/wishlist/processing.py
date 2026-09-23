@@ -100,7 +100,8 @@ def remove_completed_tracks_from_wishlist(
                     # never left the downloads folder, and an atomic batch's
                     # tasks complete while their files are still staged (those
                     # were already settled by the publish itself).
-                    remove_from_wishlist(context, published_path=task.get('final_file_path'))
+                    remove_from_wishlist(context, published_path=task.get('final_file_path'),
+                                         quiet_refusal=True)
                     removed_count += 1
                 except Exception as exc:
                     logger.error(f"[Wishlist Processing] Error removing completed track from wishlist: {exc}")

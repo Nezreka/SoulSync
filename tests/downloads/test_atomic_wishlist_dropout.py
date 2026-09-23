@@ -758,8 +758,13 @@ def test_removal_is_scoped_to_the_profiles_whose_library_holds_the_file(monkeypa
     published.write_bytes(b"AUDIO")
 
     monkeypatch.setattr(paths, "shared_transfer_root", lambda: str(shared))
-    monkeypatch.setattr(paths, "library_root_for_profile",
-                        lambda pid: str(own) if pid == 2 else None)
+    announce_flags = []
+
+    def _root(pid, **kw):
+        announce_flags.append(kw.get("announce", True))
+        return str(own) if pid == 2 else None
+
+    monkeypatch.setattr(paths, "library_root_for_profile", _root)
 
     seen = {}
 
@@ -777,3 +782,50 @@ def test_removal_is_scoped_to_the_profiles_whose_library_holds_the_file(monkeypa
     )
 
     assert seen["profile_ids"] == [1], "only the shared-library profile owns this file"
+    # a wishlist lookup isn't routing a download, so it must not fire the
+    # "own library inactive" warning + notification on every removal
+    assert announce_flags and not any(announce_flags)
+
+
+class _RecordingLogger:
+    def __init__(self):
+        self.calls = []
+
+    def debug(self, msg, *args, **kw):
+        self.calls.append(("debug", msg % args if args else msg))
+
+    def info(self, msg, *args, **kw):
+        self.calls.append(("info", msg % args if args else msg))
+
+    def warning(self, msg, *args, **kw):
+        self.calls.append(("warning", msg % args if args else msg))
+
+    def error(self, msg, *args, **kw):
+        self.calls.append(("error", msg % args if args else msg))
+
+
+@pytest.mark.parametrize("quiet, level", [(True, "debug"), (False, "warning")])
+def test_backstop_refusals_log_quietly(monkeypatch, quiet, level):
+    """batch completion re-checks every finished track after the import already
+    settled it. its refusals are expected, so they log at debug, while a direct
+    refusal still warns."""
+    from core.wishlist import resolution
+
+    rec = _RecordingLogger()
+    monkeypatch.setattr(resolution, "logger", rec)
+
+    class _Svc:
+        def mark_track_download_result(self, *a, **kw):
+            raise AssertionError("a refused removal must not touch the wishlist")
+
+    removed = resolution.check_and_remove_from_wishlist(
+        {"track_info": {"id": "sp-1", "name": "S", "artists": [{"name": "B"}]}},
+        wishlist_service=_Svc(),
+        published_path=None,
+        quiet_refusal=quiet,
+    )
+
+    assert removed is False
+    refusals = [lvl for lvl, msg in rec.calls if "removal refused" in msg]
+    assert refusals == [level]
+

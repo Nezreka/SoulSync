@@ -118,7 +118,7 @@ def _profiles_owning_path(published_path: Any, database=None) -> List[Any]:
             continue
         root = None
         try:
-            root = library_root_for_profile(pid)
+            root = library_root_for_profile(pid, announce=False)
         except Exception:  # noqa: BLE001 - treat as shared
             root = None
         if not root:
@@ -138,7 +138,7 @@ def _profiles_owning_path(published_path: Any, database=None) -> List[Any]:
     return owners
 
 
-def _log_removal(event: str, **fields: Any) -> None:
+def _log_removal(event: str, *, quiet: bool = False, **fields: Any) -> None:
     """One structured line per wishlist removal decision.
 
     The old log named a Spotify id and nothing else, so reconstructing why a
@@ -149,7 +149,11 @@ def _log_removal(event: str, **fields: Any) -> None:
     """
     payload = " ".join(f"{k}={v!r}" for k, v in sorted(fields.items()) if v not in (None, ""))
     if event == "refused":
-        logger.warning("[Wishlist] removal refused %s", payload)
+        # backstop callers refuse on nearly every track (the pipeline already
+        # cleared the row, or deferred it for the album publish), so a warning
+        # there reads like a failure when nothing is wrong
+        log = logger.debug if quiet else logger.warning
+        log("[Wishlist] removal refused %s", payload)
     else:
         logger.info("[Wishlist] removal %s %s", event, payload)
 
@@ -164,6 +168,7 @@ def check_and_remove_from_wishlist(
     transfer_dir: Optional[str] = None,
     batch_id: Optional[str] = None,
     owner_profiles: Optional[List[Any]] = None,
+    quiet_refusal: bool = False,
 ) -> bool:
     """Remove a wishlist row for a download that finished — if it really did.
 
@@ -172,6 +177,10 @@ def check_and_remove_from_wishlist(
     still sitting in the downloads folder, or not on disk at all has NOT
     satisfied the request, and deleting its row destroys the only durable record
     that anyone wanted it. See :mod:`core.wishlist.removal_guard`.
+
+    ``quiet_refusal`` is for the backstop callers (batch completion and the
+    completed-task sweep): the import already settled the row, so their
+    refusals are expected and log at debug.
 
     Returns True when a row was removed.
     """
@@ -184,6 +193,7 @@ def check_and_remove_from_wishlist(
         if not allowed:
             _log_removal(
                 "refused",
+                quiet=quiet_refusal,
                 reason=reason,
                 state=state,
                 path=published_path,

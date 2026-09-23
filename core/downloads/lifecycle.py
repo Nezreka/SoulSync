@@ -1002,6 +1002,7 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                             context,
                             published_path=task.get('final_file_path'),
                             batch_id=batch_id,
+                            quiet_refusal=True,
                         )
                 except Exception as wishlist_error:
                     logger.error(f"[Batch Manager] Error checking wishlist removal for successful download: {wishlist_error}")

@@ -308,6 +308,24 @@ def test_on_complete_success_calls_check_and_remove_wishlist():
     assert any(c[0] == 'check_wishlist' for c in rec.calls)
 
 
+def test_on_complete_wishlist_backstop_refuses_quietly():
+    """the import already settled this track's row (or deferred it for the
+    album publish), so the batch-completion re-check must ask for a quiet
+    refusal. otherwise every staged or basic search track logs a warning."""
+    download_tasks['t1'] = {'status': 'completed', 'track_info': {'name': 'X', 'artists': ['A']},
+                            'final_file_path': '/lib/.soulsync_atomic_staging/b1/A/X.flac'}
+    download_batches['b1'] = {
+        'queue': ['t1'], 'queue_index': 1, 'active_count': 1,
+        'max_concurrent': 1, 'permanently_failed_tracks': [],
+        'cancelled_tracks': set(),
+    }
+    deps, rec = _build_deps()
+    lc.on_download_completed('b1', 't1', True, deps)
+    calls = [c for c in rec.calls if c[0] == 'check_wishlist']
+    assert len(calls) == 1
+    assert calls[0][2].get('quiet_refusal') is True
+
+
 # ---------------------------------------------------------------------------
 # Batch completion (via on_download_completed)
 # ---------------------------------------------------------------------------

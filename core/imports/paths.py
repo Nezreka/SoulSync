@@ -205,9 +205,13 @@ def reset_own_library_fallback_notifications() -> None:
     _notified_own_lib_fallback.clear()
 
 
-def library_root_for_profile(profile_id) -> Optional[str]:
+def library_root_for_profile(profile_id, *, announce: bool = True) -> Optional[str]:
     """the own-library output folder of a profile (docker-resolved), or None
-    when the profile is on the shared library."""
+    when the profile is on the shared library.
+
+    announce=False skips the "own library inactive" warning + notification.
+    that's for lookups that aren't routing a download (the wishlist asks on
+    every removal and would repeat the warning each time)."""
     if not profile_id:
         return None
     try:
@@ -221,6 +225,8 @@ def library_root_for_profile(profile_id) -> Optional[str]:
 
     from core.library_scope import own_library_supported
     if not own_library_supported():
+        if not announce:
+            return None
         pid = int(profile_id)
         cm = _get_config_manager()
         getter = getattr(cm, "get_active_media_server", None)

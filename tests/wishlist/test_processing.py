@@ -127,7 +127,7 @@ def test_remove_completed_tracks_from_wishlist_calls_remover():
     # the downloads folder.
     assert calls == [(
         {"track_info": {"name": "Song A"}, "original_search_result": {"name": "Song A"}},
-        {"published_path": "/library/Artist/Album/01.mp3"},
+        {"published_path": "/library/Artist/Album/01.mp3", "quiet_refusal": True},
     )]
 
 
