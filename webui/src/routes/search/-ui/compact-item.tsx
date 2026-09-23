@@ -1,11 +1,12 @@
 import { useState } from 'react';
 
-import { DownloadIcon, PlayIcon } from './search-icons';
+import { splitTitleExtra } from '../-search.helpers';
+import { ChevronIcon, DiscIcon, DownloadIcon, PlayIcon } from './search-icons';
 import styles from './search.module.css';
 
 /**
  * The search page's result pieces: an artist face, a cover card (albums,
- * singles, playlists, labels) and a track row.
+ * singles, playlists), a label tile and a track row.
  *
  * one primary action each. a card opens its thing, the round button on a
  * cover and the arrow on a track row download it, the play button on a row
@@ -28,12 +29,15 @@ function useImage(url: string | undefined) {
 
 export function ArtistFace({
   name,
+  sub,
   image,
   href,
   inLibrary,
   artistId,
 }: {
   name: string;
+  /** a found artist's quiet line, e.g. "9.8M fans". defaults to "Artist" */
+  sub?: string;
   image?: string;
   href: string;
   inLibrary: boolean;
@@ -67,8 +71,29 @@ export function ArtistFace({
             In your library
           </>
         ) : (
-          'Artist'
+          (sub ?? 'Artist')
         )}
+      </span>
+    </a>
+  );
+}
+
+/**
+ * a record label, as a quiet tile: a disc where art would be, the name, where
+ * it is from, a chevron. the same material as the track list.
+ */
+export function LabelTile({ name, area, href }: { name: string; area?: string; href: string }) {
+  return (
+    <a className={styles.labelTile} href={href}>
+      <span className={styles.labelMark} aria-hidden="true">
+        <DiscIcon />
+      </span>
+      <span className={styles.labelText}>
+        <span className={styles.labelName}>{name}</span>
+        <span className={styles.labelMeta}>{area ? `Record label · ${area}` : 'Record label'}</span>
+      </span>
+      <span className={styles.labelChevron} aria-hidden="true">
+        <ChevronIcon />
       </span>
     </a>
   );
@@ -180,6 +205,7 @@ export function TrackRow({
   onPlay: () => void;
 }) {
   const img = useImage(image);
+  const title = splitTitleExtra(name);
   return (
     <div
       className={styles.trackRow}
@@ -215,7 +241,8 @@ export function TrackRow({
       )}
       <span style={{ minWidth: 0 }}>
         <span className={styles.trackTitle} style={{ display: 'block' }}>
-          {name}
+          {title.main}
+          {title.extra ? <span className={styles.trackTitleExtra}> {title.extra}</span> : null}
         </span>
         <span className={styles.trackSub} style={{ display: 'block' }}>
           {sub}

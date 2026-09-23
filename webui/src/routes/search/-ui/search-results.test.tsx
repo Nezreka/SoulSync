@@ -1,4 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { SearchAlbum, SearchTrack } from '../-search.types';
@@ -59,6 +61,7 @@ describe('SearchResults sections', () => {
         album({ id: '1', name: 'Full Length', album_type: 'album' }),
         album({ id: '2', name: 'A Single', album_type: 'single' }),
         album({ id: '3', name: 'An EP', album_type: 'ep' }),
+        album({ id: '4', name: 'Another Single', album_type: 'single' }),
       ],
     });
     expect(within(section('enh-albums-section')).getByText('Full Length')).toBeInTheDocument();
@@ -68,6 +71,21 @@ describe('SearchResults sections', () => {
     expect(singles.textContent).not.toContain('Full Length');
   });
 
+  it('folds one or two singles into the albums row, marked with their kind', () => {
+    // a whole shelf for one card read as unfinished
+    renderResults({
+      albums: [
+        album({ id: '1', name: 'Full Length', release_date: '1991-11-18' }),
+        album({ id: '2', name: 'Street Of Dreams', album_type: 'single', release_date: '2004' }),
+      ],
+    });
+    expect(section('enh-singles-section')).toBeNull();
+    const albums = section('enh-albums-section');
+    expect(within(albums).getByText('Street Of Dreams')).toBeInTheDocument();
+    expect(within(albums).getByText('Aphex Twin • Single • 2004')).toBeInTheDocument();
+    expect(within(albums).getByText('Aphex Twin • 1991')).toBeInTheDocument();
+  });
+
   it('badges the RIGHT album when albums and singles interleave', () => {
     // The whole point of keying ownership by identity. In document order this
     // owned single is the LAST card; in request order it is the middle row.
@@ -75,6 +93,8 @@ describe('SearchResults sections', () => {
       album({ id: 'A1', name: 'First LP', album_type: 'album' }),
       album({ id: 'S1', name: 'Owned Single', album_type: 'single' }),
       album({ id: 'A2', name: 'Second LP', album_type: 'album' }),
+      album({ id: 'S2', name: 'Other Single', album_type: 'single' }),
+      album({ id: 'S3', name: 'Third Single', album_type: 'single' }),
     ];
     renderResults({
       albums: rows,
@@ -123,13 +143,20 @@ describe('SearchResults sections', () => {
     expect(within(section('enh-tracks-section')).getByText('Aphex Twin • SAW 85-92')).toBeTruthy();
   });
 
-  it('gives an album card its year, or N/A', () => {
+  it('gives an album card its year, never N/A', () => {
+    // deezer's album search has no dates; "N/A" sat on every card
     renderResults({
-      albums: [album({ release_date: '2001-10-22' }), album({ id: 'a2', release_date: undefined })],
+      albums: [
+        album({ release_date: '2001-10-22' }),
+        album({ id: 'a2', release_date: undefined, total_tracks: 12 }),
+        album({ id: 'a3', release_date: undefined }),
+      ],
     });
     const grid = section('enh-albums-section');
     expect(within(grid).getByText('Aphex Twin • 2001')).toBeTruthy();
-    expect(within(grid).getByText('Aphex Twin • N/A')).toBeTruthy();
+    expect(within(grid).getByText('Aphex Twin • 12 tracks')).toBeTruthy();
+    expect(within(grid).getByText('Aphex Twin')).toBeTruthy();
+    expect(grid.textContent).not.toContain('N/A');
   });
 
   it('hides labels under soulseek as well as youtube_videos', () => {
@@ -352,10 +379,11 @@ describe('the filter', () => {
       labels: [{ id: 'l' }],
       activeSource: 'spotify',
     });
+    // the lone single folds into albums, so the pills count it there
     expect(counts).toEqual({
       artists: 2,
-      albums: 1,
-      singles: 1,
+      albums: 2,
+      singles: 0,
       tracks: 0,
       playlists: 0,
       labels: 1,
@@ -420,5 +448,114 @@ describe('videos', () => {
   it('never renders a video grid under a metadata source', () => {
     renderResults({ albums: [album()] });
     expect(section('enh-videos-section')).toBeNull();
+  });
+});
+
+describe('the layout', () => {
+  it('shows one measured row per shelf, with Show all when more exist', () => {
+    // 1000px fits 5 covers of 168 + 14 gap
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+    try {
+      const onFilter = vi.fn();
+      renderResults({
+        albums: Array.from({ length: 9 }, (_, i) => album({ id: `a${i}`, name: `LP ${i}` })),
+        onFilter,
+      });
+      const albums = section('enh-albums-section');
+      expect(within(albums).getAllByRole('button', { name: /^LP \d$/ })).toHaveLength(5);
+      fireEvent.click(within(albums).getByRole('button', { name: 'Show all 9' }));
+      expect(onFilter).toHaveBeenCalledWith('albums');
+    } finally {
+      width.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('offers no Show all when the row holds everything', () => {
+    renderResults({ albums: [album()] });
+    expect(within(section('enh-albums-section')).queryByText(/Show all/)).toBeNull();
+  });
+
+  it('shows one face for a library artist and its found twin', () => {
+    renderResults({
+      dbArtists: [{ id: 7, name: 'U2' }],
+      artists: [
+        { id: 'd1', name: 'U2', source: 'deezer', followers: 9_800_000 },
+        { id: 'd2', name: 'U2', source: 'deezer', followers: 1_200 },
+      ],
+    });
+    const faces = section('enh-spotify-artists-section').querySelectorAll('a');
+    expect(faces).toHaveLength(2);
+    expect(faces[0].textContent).toContain('In your library');
+    // the namesake that is left says who it is
+    expect(faces[1].textContent).toContain('1.2K fans');
+  });
+
+  it('renders labels as quiet tiles, not initials circles', () => {
+    renderResults({ labels: [{ id: 'l1', name: 'U2 Limited', type: 'Holding', area: 'Ireland' }] });
+    const link = within(section('enh-labels-section')).getByRole('link');
+    expect(within(link).getByText('U2 Limited')).toBeTruthy();
+    expect(within(link).getByText('Record label · Ireland')).toBeTruthy();
+    expect(link.getAttribute('href')).toBe('/label-detail/l1');
+    // the musicbrainz type means nothing to a user
+    expect(section('enh-labels-section').textContent).not.toContain('Holding');
+  });
+
+  it('dims a track title release note in its own span', () => {
+    renderResults({
+      tracks: [{ id: 't1', name: 'Vertigo (Remastered 2024)', artist: 'U2', album: 'Bomb' }],
+    });
+    const row = within(section('enh-tracks-section')).getByRole('button', { name: /^Vertigo/ });
+    expect(row.textContent).toContain('Vertigo');
+    expect(within(row).getByText('(Remastered 2024)').tagName).toBe('SPAN');
+  });
+
+  it('ranks playlists that name the query first', () => {
+    renderResults({
+      query: 'u2',
+      playlists: [
+        { id: 'p1', name: 'Joe Joe Vault II', creator: 'jaws2u4' },
+        { id: 'p2', name: '100% U2', creator: 'Deezer Artist Editor' },
+      ],
+    });
+    const names = within(section('enh-playlists-section'))
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label'));
+    expect(names).toEqual(['100% U2', 'Joe Joe Vault II']);
+  });
+});
+
+/**
+ * found by measuring in chromium, invisible to jsdom. each one sounded fine
+ * the first way and did nothing.
+ */
+describe('the layout css', () => {
+  const css = readFileSync(resolve(__dirname, 'search.module.css'), 'utf8');
+  const rule = (selector: string) => {
+    const at = css.indexOf(`\n${selector} {`);
+    return at < 0 ? '' : css.slice(at, css.indexOf('}', at));
+  };
+
+  it('puts the container query on the column, not the top card', () => {
+    // on .top itself the @container rule never matched and the card never stacked
+    expect(rule('.topCol')).toContain('container-type: inline-size');
+    expect(rule('.top')).not.toContain('container-type');
+  });
+
+  it('pulls the shelves back by the card padding so art meets the heading edge', () => {
+    expect(rule('.covers')).toContain('margin-inline: -10px');
+    expect(rule('.faces')).toContain('margin-inline: -10px');
+    expect(rule('.coverCard')).toContain('padding: 10px');
   });
 });

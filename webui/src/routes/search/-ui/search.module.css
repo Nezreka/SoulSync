@@ -22,6 +22,8 @@
   flex-direction: column;
   gap: 18px;
   min-width: 0;
+  /* the last shelf ended flush with the bottom of the page */
+  padding-bottom: 64px;
   color: var(--sp-text);
 }
 
@@ -466,8 +468,9 @@
   font-size: 12.5px;
 }
 
+/* 22 from .results plus this: shelves breathe, the pills stay close */
 .section {
-  margin-top: 8px;
+  margin-top: 14px;
 }
 
 /* ── top result + tracks ──────────────────────────────────────────────── */
@@ -482,27 +485,103 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-.top {
-  position: relative;
+/* heading, then the card or list filling the rest, so the top result and the
+   tracks beside it end on the same line */
+.topCol {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  min-width: 0;
+  /* the top card stacks by its own width, not the window's. a container
+     query cannot style the container itself, so the column holds it */
+  container-type: inline-size;
+}
+
+.topCol > .top {
+  flex: 1;
+}
+
+/* art on the left, the name beside it with its action under. a flat column
+   left the right half of the card empty. stacks when the card is narrow */
+.top {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 1fr auto;
+  grid-template-areas:
+    'art text'
+    'art actions';
+  column-gap: 26px;
+  row-gap: 16px;
+  align-items: end;
   min-height: 240px;
-  padding: 20px;
+  padding: 22px;
   border: 1px solid var(--sp-line);
   border-radius: 18px;
+  overflow: hidden;
   background:
     radial-gradient(120% 120% at 0% 0%, rgba(var(--accent-rgb), 0.14), transparent 55%),
     var(--sp-surface);
 }
 
+/* the top result's own art, blurred across the card. the scrim on top keeps
+   the name legible over a bright cover */
+.topBackdrop {
+  position: absolute;
+  inset: -60px;
+  z-index: -2;
+  background-position: center;
+  background-size: cover;
+  filter: blur(56px) saturate(1.35);
+  opacity: 0.55;
+}
+
+.top:has(.topBackdrop)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, rgba(19, 20, 26, 0.25), rgba(19, 20, 26, 0.82));
+}
+
+.top:not(:has(.topArt)) {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'text'
+    'actions';
+}
+
 .topArt {
-  width: 108px;
-  height: 108px;
+  grid-area: art;
+  align-self: center;
+  width: 176px;
+  height: 176px;
   flex-shrink: 0;
   border-radius: 12px;
   object-fit: cover;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+}
+
+.topText {
+  grid-area: text;
+  min-width: 0;
+}
+
+@container (max-width: 460px) {
+  .top {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas:
+      'art'
+      'text'
+      'actions';
+  }
+
+  .topArt {
+    align-self: start;
+    width: 128px;
+    height: 128px;
+  }
 }
 
 .topArt[data-round] {
@@ -518,8 +597,8 @@
 }
 
 .topName {
-  margin-top: 2px;
-  font-size: 30px;
+  margin-top: 4px;
+  font-size: 34px;
   font-weight: 800;
   letter-spacing: -0.02em;
   line-height: 1.05;
@@ -533,10 +612,10 @@
 }
 
 .topActions {
+  grid-area: actions;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: auto;
 }
 
 .button {
@@ -646,6 +725,11 @@
   text-overflow: ellipsis;
 }
 
+.trackTitleExtra {
+  color: var(--sp-faint);
+  font-weight: 500;
+}
+
 .trackSub {
   color: var(--sp-muted);
   font-size: 12.5px;
@@ -705,20 +789,15 @@
 
 /* ── artists ──────────────────────────────────────────────────────────── */
 
+/* same auto-fill grid as .covers, so every shelf lines up on one rhythm.
+   the min and gap are FACE_GRID in search-results.tsx; the All view measures
+   the row with them, keep the two in step */
 .faces {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(132px, 148px);
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 6px;
-  scrollbar-width: thin;
-}
-
-.facesWrap {
-  grid-auto-flow: row;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-  overflow: visible;
+  /* the cards' own 10px padding, pulled back so art lines up with the heading */
+  margin-inline: -10px;
 }
 
 .face {
@@ -783,10 +862,12 @@
 
 /* ── albums, singles, playlists, labels ───────────────────────────────── */
 
+/* COVER_GRID in search-results.tsx mirrors this min and gap */
 .covers {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: 14px;
+  margin-inline: -10px;
 }
 
 .coverCard {
@@ -906,6 +987,92 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── labels ───────────────────────────────────────────────────────────── */
+
+.labelTiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.labelTile {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px 11px 11px;
+  border: 1px solid var(--sp-line);
+  border-radius: 14px;
+  background: var(--sp-surface);
+  text-decoration: none;
+  color: var(--sp-text) !important;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.labelTile:hover {
+  border-color: var(--sp-line-strong);
+  background: var(--sp-raised);
+}
+
+.labelMark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.22), rgba(var(--accent-rgb), 0.06));
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.labelMark svg {
+  width: 20px;
+  height: 20px;
+}
+
+.labelText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.labelName {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.labelMeta {
+  color: var(--sp-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.labelChevron {
+  display: grid;
+  place-items: center;
+  color: var(--sp-faint);
+  transition:
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.labelChevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+.labelTile:hover .labelChevron {
+  color: var(--sp-text);
+  transform: translateX(2px);
 }
 
 /* ── videos ───────────────────────────────────────────────────────────── */

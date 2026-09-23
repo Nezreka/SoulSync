@@ -486,6 +486,7 @@ export function SearchPage() {
                 tracks={results.tracks}
                 playlists={results.playlists}
                 labels={labels}
+                query={state.query}
                 videos={results.videos}
                 videoProgress={videoProgress}
                 ownership={ownership}

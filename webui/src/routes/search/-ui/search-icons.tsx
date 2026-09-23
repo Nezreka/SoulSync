@@ -55,3 +55,9 @@ export const FileIcon = () => (
     <path d="M9 2.5v3h3" />
   </svg>
 );
+
+export const ChevronIcon = () => (
+  <svg {...common} viewBox="0 0 12 12">
+    <path d="M4.5 3 7.5 6 4.5 9" />
+  </svg>
+);

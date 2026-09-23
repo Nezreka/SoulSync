@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import type {
   LibraryCheckTrack,
   SearchAlbum,
@@ -12,13 +14,16 @@ import type { VideoProgress } from './video-grid';
 import {
   albumIdentity,
   albumMetaLine,
+  foundArtistLine,
   formatDuration,
-  labelMetaLine,
-  splitAlbums,
+  mergeArtistFaces,
+  rankPlaylists,
+  shelfAlbums,
   trackIdentity,
   trackMetaLine,
 } from '../-search.helpers';
-import { ArtistFace, CoverCard, TrackRow } from './compact-item';
+import { useShelfColumns } from '../-search.use-shelf-columns';
+import { ArtistFace, CoverCard, LabelTile, TrackRow } from './compact-item';
 import { DownloadIcon, PlayIcon } from './search-icons';
 import styles from './search.module.css';
 import { VideoGrid } from './video-grid';
@@ -54,8 +59,16 @@ export type ResultFilter =
   | 'playlists'
   | 'labels';
 
-/** how much of each section the All view previews before "Show all" */
+/**
+ * how much of each section the All view previews before "Show all". the cover
+ * and face shelves show one measured row instead; these only hold where nothing
+ * can measure (jsdom, a first paint).
+ */
 const PREVIEW = { artists: 12, albums: 12, singles: 8, tracks: 5, playlists: 8, labels: 8 };
+
+/** the css grid each shelf lays out on, see .covers and .faces */
+const COVER_GRID = { min: 168, gap: 14 };
+const FACE_GRID = { min: 140, gap: 12 };
 
 function artistImage(artist: SearchArtist): string | undefined {
   return artist.image_url || artist.images?.[0]?.url || undefined;
@@ -103,9 +116,9 @@ export function resultCounts({
   labels: SearchLabel[];
   activeSource: string;
 }): ResultCounts {
-  const split = splitAlbums(albums);
+  const split = shelfAlbums(albums);
   return {
-    artists: dbArtists.length + artists.length,
+    artists: mergeArtistFaces(dbArtists, artists).length,
     albums: split.albums.length,
     singles: split.singlesAndEps.length,
     tracks: tracks.length,
@@ -169,14 +182,14 @@ function SectionHead({
   showAll,
 }: {
   title: string;
-  count: number;
+  count?: number;
   showAll?: () => void;
 }) {
   return (
     <div className={styles.sectionHead}>
       <h2 className={styles.sectionTitle}>
         {title}
-        <span className={styles.sectionCount}>{count}</span>
+        {count != null ? <span className={styles.sectionCount}>{count}</span> : null}
       </h2>
       {showAll ? (
         <button type="button" className={styles.textLink} onClick={showAll}>
@@ -184,6 +197,52 @@ function SectionHead({
         </button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * One kind of result: a heading, then its cards.
+ *
+ * in the All view it is one full row, as many as fit, with "Show all" whenever
+ * more exist than fit. the same rule for every shelf, so "Show all" no longer
+ * turns up on some rows and not others.
+ */
+function Shelf<T>({
+  id,
+  title,
+  items,
+  preview,
+  all,
+  grid,
+  className,
+  onShowAll,
+  render,
+}: {
+  id: string;
+  title: string;
+  items: T[];
+  preview: number;
+  all: boolean;
+  grid: { min: number; gap: number };
+  className: string;
+  onShowAll: () => void;
+  render: (item: T, index: number) => React.ReactNode;
+}) {
+  const [ref, columns] = useShelfColumns(grid.min, grid.gap);
+  // a measured row is the answer on its own; a ceiling under it would leave a
+  // hole on a wide screen, which is the bug this replaced
+  const fit = all ? (columns ?? preview) : items.length;
+  return (
+    <section className={styles.section} id={id}>
+      <SectionHead
+        title={title}
+        count={items.length}
+        showAll={all && items.length > fit ? onShowAll : undefined}
+      />
+      <div ref={ref} className={className} data-shelf={all || undefined}>
+        {items.slice(0, fit).map(render)}
+      </div>
+    </section>
   );
 }
 
@@ -195,6 +254,7 @@ export function SearchResults({
   tracks,
   playlists = [],
   labels,
+  query = '',
   videos,
   videoProgress,
   ownership,
@@ -216,6 +276,8 @@ export function SearchResults({
   tracks: SearchTrack[];
   playlists?: SearchPlaylist[];
   labels: SearchLabel[];
+  /** what was searched, for ranking playlists that name it first */
+  query?: string;
   videos: SearchVideo[];
   videoProgress: Record<string, VideoProgress>;
   ownership: OwnershipState;
@@ -238,7 +300,8 @@ export function SearchResults({
     return <VideoGrid videos={videos} progress={videoProgress} onDownload={onVideoDownload} />;
   }
 
-  const { albums: fullAlbums, singlesAndEps } = splitAlbums(albums);
+  const { albums: fullAlbums, singlesAndEps } = shelfAlbums(albums);
+  const rankedPlaylists = rankPlaylists(playlists, query);
   const shownLabels = suppressesLabels(activeSource) ? [] : labels;
   const all = filter === 'all';
   const show = (key: Exclude<ResultFilter, 'all'>) => all || filter === key;
@@ -268,13 +331,14 @@ export function SearchResults({
     );
   };
 
-  const albumCard = (album: SearchAlbum, index: number) => {
+  // singles folded into the albums row say so; on their own shelf they need not
+  const albumCard = (album: SearchAlbum, index: number, withKind = false) => {
     const identity = albumIdentity(album);
     return (
       <CoverCard
         key={`${identity}::${index}`}
         name={album.name ?? ''}
-        sub={albumMetaLine(album)}
+        sub={albumMetaLine(album, { withKind })}
         image={albumImage(album)}
         badge={ownership.ownedAlbums.has(identity) ? 'In library' : undefined}
         onOpen={() => onAlbumClick(album)}
@@ -286,21 +350,17 @@ export function SearchResults({
 
   // library artists first: this page is where things get acquired, and the
   // ones already yours are the most likely click
-  const faces = [
-    ...dbArtists.map((artist) => ({ artist, inLibrary: true })),
-    ...artists.map((artist) => ({ artist, inLibrary: false })),
-  ];
+  const faces = mergeArtistFaces(dbArtists, artists);
 
   return (
     <>
       {all ? (
         <TopAndTracks
-          dbArtists={dbArtists}
-          artists={artists}
+          faces={faces}
           fullAlbums={fullAlbums}
           singles={singlesAndEps}
           tracks={tracks}
-          playlists={playlists}
+          playlists={rankedPlaylists}
           artistImages={artistImages}
           onArtistHref={onArtistHref}
           onAlbumClick={onAlbumClick}
@@ -315,47 +375,55 @@ export function SearchResults({
       ) : null}
 
       {show('artists') && faces.length ? (
-        <section className={styles.section} id="enh-spotify-artists-section">
-          <SectionHead
-            title="Artists"
-            count={faces.length}
-            showAll={more(faces.length, 'artists')}
-          />
-          <div className={`${styles.faces}${all ? '' : ` ${styles.facesWrap}`}`}>
-            {cap(faces, 'artists').map(({ artist, inLibrary }, index) => (
-              <ArtistFace
-                key={`${inLibrary ? 'lib' : 'src'}:${artist.id ?? artist.name}:${index}`}
-                name={artist.name ?? ''}
-                image={artistImages[String(artist.id ?? '')] || artistImage(artist)}
-                href={onArtistHref(artist, inLibrary)}
-                inLibrary={inLibrary}
-                artistId={artist.id}
-              />
-            ))}
-          </div>
-        </section>
+        <Shelf
+          id="enh-spotify-artists-section"
+          title="Artists"
+          items={faces}
+          preview={PREVIEW.artists}
+          all={all}
+          grid={FACE_GRID}
+          className={styles.faces}
+          onShowAll={() => onFilter('artists')}
+          render={({ artist, inLibrary }, index) => (
+            <ArtistFace
+              key={`${inLibrary ? 'lib' : 'src'}:${artist.id ?? artist.name}:${index}`}
+              name={artist.name ?? ''}
+              sub={inLibrary ? undefined : foundArtistLine(artist)}
+              image={artistImages[String(artist.id ?? '')] || artistImage(artist)}
+              href={onArtistHref(artist, inLibrary)}
+              inLibrary={inLibrary}
+              artistId={artist.id}
+            />
+          )}
+        />
       ) : null}
 
       {show('albums') && fullAlbums.length ? (
-        <section className={styles.section} id="enh-albums-section">
-          <SectionHead
-            title="Albums"
-            count={fullAlbums.length}
-            showAll={more(fullAlbums.length, 'albums')}
-          />
-          <div className={styles.covers}>{cap(fullAlbums, 'albums').map(albumCard)}</div>
-        </section>
+        <Shelf
+          id="enh-albums-section"
+          title="Albums"
+          items={fullAlbums}
+          preview={PREVIEW.albums}
+          all={all}
+          grid={COVER_GRID}
+          className={styles.covers}
+          onShowAll={() => onFilter('albums')}
+          render={(album, index) => albumCard(album, index, true)}
+        />
       ) : null}
 
       {show('singles') && singlesAndEps.length ? (
-        <section className={styles.section} id="enh-singles-section">
-          <SectionHead
-            title="Singles & EPs"
-            count={singlesAndEps.length}
-            showAll={more(singlesAndEps.length, 'singles')}
-          />
-          <div className={styles.covers}>{cap(singlesAndEps, 'singles').map(albumCard)}</div>
-        </section>
+        <Shelf
+          id="enh-singles-section"
+          title="Singles & EPs"
+          items={singlesAndEps}
+          preview={PREVIEW.singles}
+          all={all}
+          grid={COVER_GRID}
+          className={styles.covers}
+          onShowAll={() => onFilter('singles')}
+          render={(album, index) => albumCard(album, index)}
+        />
       ) : null}
 
       {filter === 'tracks' && tracks.length ? (
@@ -365,27 +433,30 @@ export function SearchResults({
         </section>
       ) : null}
 
-      {show('playlists') && playlists.length ? (
-        <section className={styles.section} id="enh-playlists-section">
-          <SectionHead
-            title="Playlists"
-            count={playlists.length}
-            showAll={more(playlists.length, 'playlists')}
-          />
-          <div className={styles.covers}>
-            {cap(playlists, 'playlists').map((playlist, index) => (
-              <CoverCard
-                key={`${playlist.id ?? playlist.name}::${index}`}
-                name={playlist.name ?? ''}
-                sub={playlistMetaLine(playlist)}
-                image={playlist.image_url || undefined}
-                onOpen={() => onPlaylistClick?.(playlist)}
-              />
-            ))}
-          </div>
-        </section>
+      {show('playlists') && rankedPlaylists.length ? (
+        <Shelf
+          id="enh-playlists-section"
+          title="Playlists"
+          items={rankedPlaylists}
+          preview={PREVIEW.playlists}
+          all={all}
+          grid={COVER_GRID}
+          className={styles.covers}
+          onShowAll={() => onFilter('playlists')}
+          render={(playlist, index) => (
+            <CoverCard
+              key={`${playlist.id ?? playlist.name}::${index}`}
+              name={playlist.name ?? ''}
+              sub={playlistMetaLine(playlist)}
+              image={playlist.image_url || undefined}
+              onOpen={() => onPlaylistClick?.(playlist)}
+            />
+          )}
+        />
       ) : null}
 
+      {/* labels have no art to speak of: a row of initials circles read as
+          broken artist photos. quiet tiles, last. */}
       {show('labels') && shownLabels.length ? (
         <section className={styles.section} id="enh-labels-section">
           <SectionHead
@@ -393,13 +464,12 @@ export function SearchResults({
             count={shownLabels.length}
             showAll={more(shownLabels.length, 'labels')}
           />
-          <div className={styles.covers}>
+          <div className={styles.labelTiles}>
             {cap(shownLabels, 'labels').map((label, index) => (
-              <CoverCard
+              <LabelTile
                 key={`${label.id ?? label.name}::${index}`}
                 name={label.name ?? ''}
-                sub={labelMetaLine(label)}
-                round
+                area={label.area}
                 href={onLabelHref(label)}
               />
             ))}
@@ -418,8 +488,7 @@ export function SearchResults({
  * the old decorative play affordance is gone.
  */
 function TopAndTracks({
-  dbArtists,
-  artists,
+  faces,
   fullAlbums,
   singles,
   tracks,
@@ -433,8 +502,7 @@ function TopAndTracks({
   renderTracks,
   showAllTracks,
 }: {
-  dbArtists: SearchArtist[];
-  artists: SearchArtist[];
+  faces: { artist: SearchArtist; inLibrary: boolean }[];
   fullAlbums: SearchAlbum[];
   singles: SearchAlbum[];
   tracks: SearchTrack[];
@@ -448,8 +516,8 @@ function TopAndTracks({
   renderTracks: () => React.ReactNode;
   showAllTracks?: () => void;
 }) {
-  const topArtist = dbArtists[0] ?? artists[0];
-  const libraryArtist = topArtist !== undefined && topArtist === dbArtists[0];
+  const topArtist = faces[0]?.artist;
+  const libraryArtist = faces[0]?.inLibrary ?? false;
   const topAlbum = topArtist ? undefined : (fullAlbums[0] ?? singles[0]);
   const topTrack = topArtist || topAlbum ? undefined : tracks[0];
   const topPlaylist = topArtist || topAlbum || topTrack ? undefined : playlists[0];
@@ -460,6 +528,7 @@ function TopAndTracks({
       <TopCard
         kind={libraryArtist ? 'Artist · In your library' : 'Artist'}
         name={topArtist.name ?? ''}
+        sub={libraryArtist ? undefined : optionalArtistLine(topArtist)}
         image={artistImages[String(topArtist.id ?? '')] || artistImage(topArtist)}
         round
         actions={
@@ -541,24 +610,26 @@ function TopAndTracks({
   if (!card && !tracks.length) return null;
   return (
     <div className={styles.topGrid} data-solo={!card || !tracks.length ? true : undefined}>
-      {card ? <div id="enh-top-result">{card}</div> : null}
+      {card ? (
+        <section className={styles.topCol} id="enh-top-result">
+          <SectionHead title="Top result" />
+          {card}
+        </section>
+      ) : null}
       {tracks.length ? (
-        <section id="enh-tracks-section">
-          <div className={styles.sectionHead} style={{ marginBottom: 10 }}>
-            <h2 className={styles.sectionTitle} style={{ fontSize: 16 }}>
-              Tracks
-            </h2>
-            {showAllTracks ? (
-              <button type="button" className={styles.textLink} onClick={showAllTracks}>
-                Show all {tracks.length}
-              </button>
-            ) : null}
-          </div>
+        <section className={styles.topCol} id="enh-tracks-section">
+          <SectionHead title="Tracks" count={tracks.length} showAll={showAllTracks} />
           <div className={styles.list}>{renderTracks()}</div>
         </section>
       ) : null}
     </div>
   );
+}
+
+/** "9.8M fans", or nothing when the source sent no count */
+function optionalArtistLine(artist: SearchArtist): string | undefined {
+  const line = foundArtistLine(artist);
+  return line === 'Artist' ? undefined : line;
 }
 
 function TopCard({
@@ -576,20 +647,29 @@ function TopCard({
   round?: boolean;
   actions: React.ReactNode;
 }) {
+  const [failed, setFailed] = useState(false);
+  const art = image && !failed ? image : undefined;
   return (
     <div className={styles.top}>
-      {image ? (
+      {/* the art, blurred wide behind the card, so the space around the
+          picture carries its colour instead of a flat panel */}
+      {art ? (
+        <div
+          className={styles.topBackdrop}
+          style={{ backgroundImage: `url("${art.replace(/"/g, '%22')}")` }}
+          aria-hidden="true"
+        />
+      ) : null}
+      {art ? (
         <img
           className={styles.topArt}
           data-round={round || undefined}
-          src={image}
+          src={art}
           alt=""
-          onError={(event) => {
-            event.currentTarget.style.display = 'none';
-          }}
+          onError={() => setFailed(true)}
         />
       ) : null}
-      <div>
+      <div className={styles.topText}>
         <div className={styles.topKind}>{kind}</div>
         <div className={styles.topName}>{name}</div>
         {sub ? <div className={styles.topSub}>{sub}</div> : null}

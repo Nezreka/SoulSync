@@ -304,10 +304,144 @@ export function trackMetaLine(track: SearchTrack): string {
   return [track.artist, track.album].filter(Boolean).join(' • ');
 }
 
-/** An album's display line — `artist • year`, with the vanilla's N/A year. */
-export function albumMetaLine(album: SearchAlbum): string {
-  const year = album.release_date ? album.release_date.slice(0, 4) : 'N/A';
-  return `${album.artist ?? ''} • ${year}`;
+/**
+ * An album's display line: artist, then the year.
+ *
+ * deezer's album search carries no date, so the vanilla printed "N/A" on every
+ * card. no year falls back to the track count, and nothing falls back to
+ * nothing. `withKind` names a single or EP folded in with the albums.
+ */
+export function albumMetaLine(album: SearchAlbum, { withKind = false } = {}): string {
+  const year = album.release_date ? album.release_date.slice(0, 4) : '';
+  const tracks = album.total_tracks ? `${album.total_tracks} tracks` : '';
+  const kind = withKind ? singleKind(album) : '';
+  return [album.artist, kind || year || tracks, kind ? year : ''].filter(Boolean).join(' • ');
+}
+
+function singleKind(album: SearchAlbum): string {
+  if (album.album_type === 'single') return 'Single';
+  if (album.album_type === 'ep') return 'EP';
+  return '';
+}
+
+/** below this many, singles and EPs ride at the end of the albums row */
+export const SINGLES_SHELF_MIN = 3;
+
+/**
+ * The albums and singles as the page lays them out.
+ *
+ * one or two singles made a whole shelf for a card or two. they fold into the
+ * albums row instead, marked with their kind. counts and render both read this
+ * so a pill never counts something the page does not show under it.
+ */
+export function shelfAlbums(all: SearchAlbum[]): {
+  albums: SearchAlbum[];
+  singlesAndEps: SearchAlbum[];
+} {
+  const { albums, singlesAndEps } = splitAlbums(all);
+  if (albums.length > 0 && singlesAndEps.length > 0 && singlesAndEps.length < SINGLES_SHELF_MIN) {
+    return { albums: [...albums, ...singlesAndEps], singlesAndEps: [] };
+  }
+  return { albums, singlesAndEps };
+}
+
+function nameKey(name: string | undefined): string {
+  return (name ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+export interface ArtistFaceEntry {
+  artist: SearchArtist;
+  inLibrary: boolean;
+}
+
+/**
+ * Library artists first, then the found ones, without the twin.
+ *
+ * the source's best match for a library artist is the same artist, so showing
+ * both put two identical U2 faces side by side. the first found artist sharing
+ * a library artist's name is dropped; the library one wins because it links to
+ * what you own. later same-named artists are real strangers and stay.
+ */
+export function mergeArtistFaces(
+  dbArtists: SearchArtist[],
+  artists: SearchArtist[],
+): ArtistFaceEntry[] {
+  const unmatched = new Set(dbArtists.map((artist) => nameKey(artist.name)));
+  const found = artists.filter((artist) => {
+    const key = nameKey(artist.name);
+    if (!key || !unmatched.has(key)) return true;
+    unmatched.delete(key);
+    return false;
+  });
+  return [
+    ...dbArtists.map((artist) => ({ artist, inLibrary: true })),
+    ...found.map((artist) => ({ artist, inLibrary: false })),
+  ];
+}
+
+/** 9800000 → "9.8M", 12400 → "12K" */
+export function compactCount(value: number): string {
+  if (value >= 1_000_000) return `${trimZero(value / 1_000_000)}M`;
+  if (value >= 1_000) return `${trimZero(value / 1_000)}K`;
+  return String(value);
+}
+
+function trimZero(value: number): string {
+  return (value >= 100 ? Math.round(value) : Math.round(value * 10) / 10).toString();
+}
+
+/** the quiet line under a found artist. deezer calls them fans */
+export function foundArtistLine(artist: SearchArtist): string {
+  if (!artist.followers) return 'Artist';
+  const noun = artist.source === 'deezer' ? 'fans' : 'followers';
+  return `${compactCount(artist.followers)} ${noun}`;
+}
+
+const EDITORIAL_RE = /\b(deezer|spotify|tidal|apple music|qobuz)\b/i;
+
+/**
+ * Playlists with the likely click first.
+ *
+ * the source ranks by its own idea of popular, which put a stranger's
+ * 2171-track "Joe Joe Vault II" beside "100% U2". editorial playlists that name
+ * the query lead, then any that name it, then editorial, then the rest, each
+ * group in the source's order.
+ */
+export function rankPlaylists<T extends { name?: string; creator?: string }>(
+  playlists: T[],
+  query: string,
+): T[] {
+  const needle = nameKey(query);
+  const score = (playlist: T) => {
+    const named = needle ? nameKey(playlist.name).includes(needle) : false;
+    const editorial = EDITORIAL_RE.test(playlist.creator ?? '');
+    return (named ? 0 : 2) + (editorial ? 0 : 1);
+  };
+  return playlists
+    .map((playlist, index) => ({ playlist, index, rank: score(playlist) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((entry) => entry.playlist);
+}
+
+const QUALIFIER_RE =
+  /remaster|live|version|edit\b|mix\b|mono|stereo|deluxe|edition|bonus|acoustic|demo|instrumental|anniversary/i;
+const TRAILING_GROUP_RE = /\s*([([][^()[\]]*[)\]])\s*$/;
+const TRAILING_DASH_RE = /\s+-\s+([^-]+)$/;
+
+/**
+ * "Pride (In The Name Of Love) (Remastered 2009)" → the title, and the
+ * trailing qualifier to set in a quieter tone. only a last group or dash tail
+ * that reads like a release note dims; "(In The Name Of Love)" is the name.
+ */
+export function splitTitleExtra(title: string): { main: string; extra: string } {
+  const trimmed = title.trim();
+  for (const re of [TRAILING_GROUP_RE, TRAILING_DASH_RE]) {
+    const match = re.exec(trimmed);
+    if (!match || !QUALIFIER_RE.test(match[1])) continue;
+    const main = trimmed.slice(0, match.index).trim();
+    if (main) return { main, extra: match[1].trim() };
+  }
+  return { main: title, extra: '' };
 }
 
 /**
