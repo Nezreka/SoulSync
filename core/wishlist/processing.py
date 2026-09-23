@@ -511,7 +511,11 @@ def finalize_auto_wishlist_completion(
     behavior — the gate treats a missing run_id as "lone batch"."""
     tracks_added = completion_summary.get('tracks_added', 0)
     total_failed = completion_summary.get('total_failed', 0)
-    logger.error(
+    # INFO, not ERROR: this is the normal end of every sub-batch, and "0 added
+    # to wishlist" is the healthy case (nothing failed, so nothing to re-queue).
+    # At ERROR it fired several times per cycle and made a working wishlist run
+    # read as a string of failures.
+    logger.info(
         f"[Auto-Wishlist] Background processing complete: {tracks_added} added to wishlist, {total_failed} failed"
     )
 
