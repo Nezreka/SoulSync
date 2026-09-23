@@ -1980,21 +1980,28 @@ def validate_and_heal_batch_states():
                 # (no-op for normal batches and for atomic batches that already
                 # published — their staging was pruned at publish).
                 _cleanup_batch = download_batches[batch_id]
-                _preserve_failed_publish = (
-                    _cleanup_batch.get('phase') == 'error'
-                    and _cleanup_batch.get('_atomic_publish_attempts', 0) > 0
-                )
-                if _preserve_failed_publish:
-                    logger.warning("[Atomic Publish] Keeping failed publish staging for manual recovery: %s",
-                                   _cleanup_batch.get('_atomic_staging_root'))
-                if (_cleanup_batch.get('_atomic_active') and _cleanup_batch.get('_atomic_staging_root')
-                        and not _preserve_failed_publish):
-                    try:
-                        from core.downloads.atomic_album_publish import discard_staging_root
+                # #1289: this used to preserve staging ONLY after an exhausted
+                # publish, so the batch force-errored by the stuck healer below
+                # (which never attempts a publish, leaving _atomic_publish_attempts
+                # at 0) had its finished audio rmtree'd five minutes later — and
+                # before the deferred-removal fix, its wishlist rows had already
+                # been deleted, so the track was gone from everywhere at once.
+                # Staged audio is now kept for startup reconciliation unless the
+                # user explicitly cancelled. Same lesson as #1210.
+                try:
+                    from core.downloads.atomic_album_publish import (
+                        discard_staging_root, should_discard_staging)
+                    _discard, _why = should_discard_staging(_cleanup_batch)
+                    if _discard:
                         if discard_staging_root(_cleanup_batch.get('_atomic_staging_root')):
-                            logger.info(f"[Atomic Publish] Discarded staging for abandoned batch {batch_id}")
-                    except Exception as _atomic_e:
-                        logger.debug(f"[Atomic Publish] staging discard failed: {_atomic_e}")
+                            logger.info("[Atomic Publish] Discarded staging for batch %s (%s)",
+                                        batch_id, _why)
+                    elif _cleanup_batch.get('_atomic_staging_root') and _cleanup_batch.get('_atomic_active'):
+                        logger.warning(
+                            "[Atomic Publish] Keeping staged audio for batch %s (%s): %s",
+                            batch_id, _why, _cleanup_batch.get('_atomic_staging_root'))
+                except Exception as _atomic_e:
+                    logger.debug(f"[Atomic Publish] staging discard check failed: {_atomic_e}")
                 task_ids_to_remove = download_batches[batch_id].get('queue', [])
                 del download_batches[batch_id]
                 # Clean up associated tasks
@@ -16610,13 +16617,22 @@ def cleanup_batch():
 
                 # #999: discard unpublished atomic staging on cleanup/cancel of a
                 # staged album (no-op for normal batches and already-published ones).
-                if batch.get('_atomic_active') and batch.get('_atomic_staging_root'):
-                    try:
-                        from core.downloads.atomic_album_publish import discard_staging_root
+                # #1289: only an explicit cancel throws the audio away — a cleanup
+                # of an errored or stale batch leaves it for startup recovery.
+                try:
+                    from core.downloads.atomic_album_publish import (
+                        discard_staging_root, should_discard_staging)
+                    _discard, _why = should_discard_staging(batch)
+                    if _discard:
                         if discard_staging_root(batch.get('_atomic_staging_root')):
-                            logger.info(f"[Atomic Publish] Discarded staging for cleaned-up batch {batch_id}")
-                    except Exception as _atomic_e:
-                        logger.debug(f"[Atomic Publish] staging discard failed: {_atomic_e}")
+                            logger.info("[Atomic Publish] Discarded staging for cleaned-up batch %s (%s)",
+                                        batch_id, _why)
+                    elif batch.get('_atomic_active') and batch.get('_atomic_staging_root'):
+                        logger.warning(
+                            "[Atomic Publish] Keeping staged audio for cleaned-up batch %s (%s): %s",
+                            batch_id, _why, batch.get('_atomic_staging_root'))
+                except Exception as _atomic_e:
+                    logger.debug(f"[Atomic Publish] staging discard check failed: {_atomic_e}")
 
                 # Delete the batch record
                 del download_batches[batch_id]
@@ -23019,6 +23035,45 @@ def start_runtime_services():
         except Exception as _sweep_err:
             # Sweep must not crash startup — log and continue.
             logger.warning("[Startup] Album-bundle staging sweep failed: %s", _sweep_err)
+
+        # Atomic-album staging reconciliation (#1289). A batch interrupted
+        # mid-album leaves finished, tagged audio under
+        # <library>/.soulsync_atomic_staging/<batch id>/, and the only thing
+        # that knew what that directory was is download_batches — a dict that
+        # died with the process. Nothing looked at it afterwards: the dot prefix
+        # hides it from media servers and both SoulSync's scanner and the repair
+        # jobs prune it on purpose, so the tracks were invisible forever.
+        # download_batches is empty here (no batch survives a restart), so every
+        # tree on disk is an orphan by definition, and this runs before any new
+        # batch can claim a staging directory.
+        try:
+            from core.downloads.atomic_recovery import recover_orphan_staging
+            from core.imports.paths import library_root_for_profile, shared_transfer_root
+            _libraries = [shared_transfer_root()]
+            try:
+                for _profile in (get_database().get_all_profiles() or []):
+                    _own = library_root_for_profile(_profile.get('id'))
+                    if _own:
+                        _libraries.append(_own)
+            except Exception as _lib_err:
+                logger.debug("[Startup] Could not enumerate own libraries: %s", _lib_err)
+            _recovery = recover_orphan_staging(
+                _libraries,
+                live_batch_ids=set(download_batches.keys()),
+                enabled=bool(config_manager.get('album_downloads.atomic_recover_orphans', True)),
+            )
+            if _recovery.get('scanned'):
+                logger.warning(
+                    "[Startup] Atomic staging reconciliation: %d tree(s) scanned, "
+                    "%d album(s) recovered (%d file(s)), %d file(s) superseded by the "
+                    "library and moved to the recycle bin, %d failed, %d empty, "
+                    "%d reported, %d wishlist entries cleared",
+                    _recovery['scanned'], _recovery['published'], _recovery['files'],
+                    _recovery['superseded'], _recovery['failed'], _recovery['empty'],
+                    _recovery['reported'], _recovery['wishlist_cleared'])
+        except Exception as _recover_err:
+            # Recovery must not crash startup — the files are still on disk.
+            logger.warning("[Startup] Atomic staging reconciliation failed: %s", _recover_err)
 
         # Start simple background monitor when server starts
         logger.info("Starting simple background monitor...")

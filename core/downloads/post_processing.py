@@ -591,6 +591,13 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             with tasks_lock:
                 if task_id in download_tasks:
                     track_info = download_tasks[task_id].get('track_info')
+                    # #1289: this branch completes a task the stream processor
+                    # already imported, and it was the one success path that
+                    # never recorded where the file went. The wishlist removal
+                    # downstream now needs that path as proof, and without it a
+                    # genuinely published track would be kept on the wishlist
+                    # and downloaded twice.
+                    download_tasks[task_id].setdefault('final_file_path', found_file)
                     deps.mark_task_completed(task_id, track_info)
 
             # Clean up context now that both stream processor and verification worker are done
@@ -617,7 +624,16 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                 deps.post_process_with_verification(context_key, context, found_file, task_id, batch_id)
             else:
                 # No matched context - just mark as completed since file exists
-                logger.warning(f"[Post-Processing] No matched context, marking as completed: {os.path.basename(found_file)}")
+                #
+                # #1289: "the file exists" here means it exists in the DOWNLOADS
+                # folder. Nothing imported it: it is untagged, unrenamed, and in
+                # a directory no media server scans. Reporting success is still
+                # right for the task — the transfer did finish — but it is not a
+                # satisfied wishlist request, so no final_file_path is recorded
+                # and the removal guard keeps the track retryable.
+                logger.warning(f"[Post-Processing] No matched context, marking as completed "
+                               f"WITHOUT import (file stays in the downloads folder): "
+                               f"{os.path.basename(found_file)}")
                 with tasks_lock:
                     if task_id in download_tasks:
                         track_info = download_tasks[task_id].get('track_info')

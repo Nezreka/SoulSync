@@ -606,6 +606,31 @@ class MusicDatabase:
                 )
             """)
 
+            # Wishlist removal audit (#1289). A wishlist row is deleted, not
+            # tombstoned, so when a user asks "where did this track go?" there
+            # was nothing to look at: the only trace was a log line carrying an
+            # id and no reason, no path and no batch. Tracking down the atomic-
+            # publish dropout meant correlating timestamps across three loggers
+            # by hand. This is small, append-only and trimmed, and turns that
+            # into one query.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS wishlist_removals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    spotify_track_id TEXT NOT NULL,
+                    profile_ids TEXT,          -- JSON list, or NULL for an all-profile sweep
+                    rows_removed INTEGER DEFAULT 0,
+                    reason TEXT,               -- download_complete / atomic_published / already_owned / ...
+                    final_path TEXT,
+                    batch_id TEXT,
+                    source TEXT,
+                    removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_removals_track "
+                           "ON wishlist_removals (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_removals_at "
+                           "ON wishlist_removals (removed_at)")
+
             # Purge any podcast items that erroneously leaked into wishlist_tracks
             try:
                 cursor.execute("""
@@ -14560,15 +14585,89 @@ class MusicDatabase:
             logger.error(f"Error getting wishlist tracks: {e}")
             return []
 
-    def update_wishlist_retry(self, spotify_track_id: str, success: bool, error_message: str = None, profile_id: int = 1) -> bool:
-        """Update retry count and status for a wishlist track"""
+    _WISHLIST_REMOVAL_KEEP = 5000
+
+    def _record_wishlist_removal(self, cursor, spotify_track_id, profile_ids, audit, rows_removed) -> None:
+        """Append one row to the removal audit. Best-effort by construction:
+        losing the audit must never fail the removal it describes."""
+        try:
+            audit = audit or {}
+            cursor.execute(
+                """INSERT INTO wishlist_removals
+                   (spotify_track_id, profile_ids, rows_removed, reason, final_path, batch_id, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (str(spotify_track_id),
+                 json.dumps(list(profile_ids)) if profile_ids else None,
+                 int(rows_removed or 0),
+                 str(audit.get('reason') or '') or None,
+                 str(audit.get('final_path') or '') or None,
+                 str(audit.get('batch_id') or '') or None,
+                 str(audit.get('source') or '') or None))
+            # Keep the table from growing without bound on a big library; the
+            # recent history is the part anyone ever reads.
+            cursor.execute(
+                "DELETE FROM wishlist_removals WHERE id <= "
+                "(SELECT MAX(id) - ? FROM wishlist_removals)",
+                (self._WISHLIST_REMOVAL_KEEP,))
+        except Exception as e:  # noqa: BLE001
+            logger.debug("wishlist removal audit skipped: %s", e)
+
+    def get_wishlist_removals(self, spotify_track_id: str = None, limit: int = 100):
+        """Recent wishlist removals, newest first — the answer to "why did this
+        track disappear?"."""
+        try:
+            with self._get_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                if spotify_track_id:
+                    cursor.execute(
+                        "SELECT * FROM wishlist_removals WHERE spotify_track_id = ? "
+                        "ORDER BY id DESC LIMIT ?", (str(spotify_track_id), int(limit)))
+                else:
+                    cursor.execute(
+                        "SELECT * FROM wishlist_removals ORDER BY id DESC LIMIT ?", (int(limit),))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.debug("wishlist removal history unavailable: %s", e)
+            return []
+
+    def update_wishlist_retry(self, spotify_track_id: str, success: bool, error_message: str = None,
+                              profile_id: int = 1, *, profile_ids=None, audit=None) -> bool:
+        """Update retry count and status for a wishlist track.
+
+        ``profile_ids`` scopes the success DELETE to the profiles whose library
+        actually holds the published file. The unscoped sweep below is kept as
+        the default because it is right for the ordinary single-root install and
+        because leaving a stale row behind causes a duplicate download, but it
+        is wrong for an own-library profile (#1199) whose request would be
+        cleared by a download into a folder it cannot see — so callers that CAN
+        tell should always pass the owners (#1289).
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 if success:
-                    # Remove from ALL profiles' wishlists — track is now in shared library
-                    cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ?", (spotify_track_id,))
+                    scoped = [p for p in (profile_ids or []) if p is not None]
+                    if scoped:
+                        placeholders = ",".join("?" for _ in scoped)
+                        cursor.execute(
+                            f"DELETE FROM wishlist_tracks WHERE spotify_track_id = ? "
+                            f"AND profile_id IN ({placeholders})",
+                            (spotify_track_id, *scoped))
+                    else:
+                        # Remove from ALL profiles' wishlists — track is now in shared library
+                        cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ?", (spotify_track_id,))
+                    # Capture BEFORE the audit insert: rowcount reflects the
+                    # last statement this cursor ran, so reading it afterwards
+                    # would report the audit's own trim and tell every caller
+                    # the track was never on the wishlist.
+                    deleted = cursor.rowcount
+                    if deleted > 0:
+                        self._record_wishlist_removal(
+                            cursor, spotify_track_id, scoped or None, audit, deleted)
+                    conn.commit()
+                    return deleted > 0
                 else:
                     # Increment retry count and update failure reason
                     cursor.execute("""

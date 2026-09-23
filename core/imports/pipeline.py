@@ -29,7 +29,9 @@ from core.imports.context import (
     get_import_context_artist,
     get_import_has_clean_metadata,
     get_import_original_search,
+    get_import_search_result,
     get_import_source,
+    get_import_source_ids,
     get_import_track_info,
     normalize_import_context,
 )
@@ -56,6 +58,9 @@ from core.imports.side_effects import (
     record_library_history_download,
     record_soulsync_library_entry,
 )
+from core.downloads.atomic_album_publish import split_staged_path
+from core.wishlist.library_match import artist_names
+from core.wishlist.removal_guard import STAGED as GUARD_STAGED, classify_publication
 from core.wishlist.resolution import check_and_remove_from_wishlist
 from core.runtime_state import (
     add_activity_item,
@@ -78,6 +83,7 @@ from core.imports.paths import (
     build_final_path_for_track,
     build_simple_download_destination,
     docker_resolve_path,
+    import_profile_id,
 )
 from core.imports.album_naming import resolve_album_group
 from core.metadata.lyrics import generate_lrc_file
@@ -352,6 +358,92 @@ def build_import_pipeline_runtime(
 
 
 
+def _wishlist_context_snapshot(context):
+    """The slice of an import context a later wishlist removal actually needs.
+
+    Stored on the batch and in the on-disk manifest, so it has to stay small and
+    JSON-clean. These six keys are exactly what ``get_import_source_ids`` and the
+    metadata fallback read, so a snapshot resolves to the same track id the live
+    context would.
+    """
+    return {
+        'source': context.get('source') or context.get('_source') or '',
+        'artist': get_import_context_artist(context),
+        'album': get_import_context_album(context),
+        'track_info': get_import_track_info(context),
+        'original_search_result': get_import_original_search(context),
+        'search_result': get_import_search_result(context),
+        'batch_id': context.get('batch_id') or context.get('_atomic_publish_batch_id'),
+    }
+
+
+def _settle_wishlist_for_completed_track(context, completed_path):
+    """Clear this track's wishlist row — or defer it until the album publishes.
+
+    #1289. Atomic album publishing (#999) moved the moment a track becomes
+    visible in the library from here to batch completion, but the wishlist
+    removal stayed here, so between the two a track was in neither the library
+    nor the wishlist. That gap is not a millisecond: it lasts until the LAST
+    track of the album finishes, and a restart, a failed publish or a cancel
+    inside it left the user with no file and no request to retry it.
+
+    A staged track is recorded instead — on the batch, for the publish to act
+    on, and in the on-disk manifest, so a process that never reaches the publish
+    can still be reconciled by the next one. Returns True when deferred.
+    """
+    state = classify_publication(completed_path)
+    if state != GUARD_STAGED:
+        check_and_remove_from_wishlist(context, published_path=completed_path)
+        return False
+
+    staged_path = os.path.normpath(str(completed_path))
+    split = split_staged_path(staged_path)
+    transfer_dir, staging_root, rel = split if split else (None, None, None)
+    final_path = os.path.join(transfer_dir, rel) if (transfer_dir and rel) else ''
+
+    track_info = get_import_track_info(context)
+    entry = {
+        'staged_path': staged_path,
+        'final_path': final_path,
+        'track_name': track_info.get('name', '') or '',
+        # artist_names, not artists[0]: a bare-string 'Band' indexes to 'B', and
+        # that is what would land in the manifest and, on the recovery path, in
+        # the context its metadata fallback matches on.
+        'artist_name': next(iter(artist_names(track_info.get('artists'))), ''),
+        'context': _wishlist_context_snapshot(context),
+    }
+
+    batch_id = context.get('batch_id') or context.get('_atomic_publish_batch_id')
+    with tasks_lock:
+        batch = download_batches.get(batch_id) if batch_id else None
+        if batch is not None:
+            batch.setdefault('_wishlist_pending', []).append(entry)
+            staging_root = batch.get('_atomic_staging_root') or staging_root
+
+    if staging_root:
+        try:
+            from core.downloads.atomic_manifest import record_staged_track
+            record_staged_track(
+                staging_root,
+                staged_path=staged_path,
+                final_path=final_path,
+                source=entry['context']['source'],
+                source_ids=get_import_source_ids(context),
+                track_name=entry['track_name'],
+                artist_name=entry['artist_name'],
+                profile_id=import_profile_id(context),
+            )
+        except Exception as man_err:  # noqa: BLE001 - bookkeeping never fails a download
+            logger.warning("[Atomic Publish] Could not record %r in the batch manifest: %s",
+                           entry['track_name'] or staged_path, man_err)
+
+    logger.info(
+        "[Wishlist] Deferring removal for %r — staged for atomic album publish "
+        "(batch=%s, staged=%s, final=%s)",
+        entry['track_name'] or os.path.basename(staged_path), batch_id, staged_path, final_path)
+    return True
+
+
 def _maybe_stage_album_track(context, final_path):
     """#999 atomic album publishing (opt-in, default off). When this track belongs
     to a FRESH whole-album batch and ``album_downloads.atomic_publish`` is on,
@@ -423,6 +515,18 @@ def _maybe_stage_album_track(context, final_path):
                             logger.info("[Atomic Publish] Batch %s: STAGING album until complete "
                                         "(album=%r, transfer=%s)", batch_id,
                                         os.path.basename(album_folder), transfer_dir)
+                            # #1289: put the batch's identity on disk NOW. Everything
+                            # that knows what this directory is lives in a dict in
+                            # this process; if the process goes away mid-album the
+                            # tree becomes anonymous audio that no scanner looks at.
+                            try:
+                                from core.downloads.atomic_manifest import begin_batch
+                                begin_batch(_staging_root, batch_id=batch_id,
+                                            transfer_dir=transfer_dir,
+                                            profile_id=batch.get('profile_id'),
+                                            album_name=os.path.basename(album_folder))
+                            except Exception as _man_err:  # noqa: BLE001
+                                logger.debug("[Atomic Publish] manifest header failed: %s", _man_err)
                     else:
                         logger.info("[Atomic Publish] Batch %s: album folder already has tracks "
                                     "(completeness fill) — publishing directly: %s",
@@ -976,7 +1080,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             record_library_history_download(context)
             record_download_provenance(context)
             try:
-                check_and_remove_from_wishlist(context)
+                check_and_remove_from_wishlist(context, published_path=str(destination))
             except Exception as wishlist_error:
                 logger.error(f"[Simple Download] Error checking wishlist removal: {wishlist_error}")
             return
@@ -1465,7 +1569,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             logger.error(f"[Post-Process] Album consistency registration failed: {cons_err}")
 
         try:
-            check_and_remove_from_wishlist(context)
+            _settle_wishlist_for_completed_track(
+                context, context.get('_final_processed_path', final_path))
         except Exception as wishlist_error:
             logger.error(f"[Post-Process] Error checking wishlist removal: {wishlist_error}")
 

@@ -108,7 +108,8 @@ class _FakeLock:
 def test_remove_completed_tracks_from_wishlist_calls_remover():
     batch = {"queue": ["a", "b"]}
     download_tasks = {
-        "a": {"status": "completed", "track_info": {"name": "Song A"}},
+        "a": {"status": "completed", "track_info": {"name": "Song A"},
+              "final_file_path": "/library/Artist/Album/01.mp3"},
         "b": {"status": "failed", "track_info": {"name": "Song B"}},
     }
     calls = []
@@ -116,12 +117,18 @@ def test_remove_completed_tracks_from_wishlist_calls_remover():
     removed = processing.remove_completed_tracks_from_wishlist(
         batch,
         download_tasks,
-        lambda context: calls.append(context),
+        lambda context, **kw: calls.append((context, kw)),
         logger=_FakeLogger(),
     )
 
     assert removed == 1
-    assert calls == [{"track_info": {"name": "Song A"}, "original_search_result": {"name": "Song A"}}]
+    # #1289: the remover is handed where the import actually landed, so its
+    # guard can tell a published track from one still in staging or still in
+    # the downloads folder.
+    assert calls == [(
+        {"track_info": {"name": "Song A"}, "original_search_result": {"name": "Song A"}},
+        {"published_path": "/library/Artist/Album/01.mp3"},
+    )]
 
 
 def test_add_cancelled_tracks_to_failed_tracks_builds_entries():
@@ -389,7 +396,7 @@ def test_automatic_wishlist_cleanup_after_db_update_removes_library_matches():
         def get_wishlist_tracks_for_download(self, profile_id=1):
             return list(self.tracks)
 
-        def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1):
+        def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1, **kwargs):
             self.removed.append((spotify_track_id, success, error_message, profile_id))
             return True
 
@@ -479,7 +486,7 @@ class _CleanupWishlistService:
     def get_wishlist_tracks_for_download(self, profile_id=1):
         return list(self._tracks)
 
-    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1):
+    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1, **kwargs):
         self.removed.append((spotify_track_id, success, error_message, profile_id))
         return True
 
