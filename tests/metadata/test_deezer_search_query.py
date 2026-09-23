@@ -28,11 +28,14 @@ from core.deezer_client import DeezerClient
 
 
 class TestBuildAdvancedQuery:
-    def test_track_and_artist_quoted(self):
+    def test_track_quoted_artist_plain(self):
+        # #1295: deezer's artist:"X" filter returns nothing, even for their
+        # own docs example. the artist rides as plain words instead.
         q = DeezerClient._build_advanced_query(
             track='Dirty White Boy', artist='Foreigner',
         )
-        assert q == 'track:"Dirty White Boy" artist:"Foreigner"'
+        assert q == 'Foreigner track:"Dirty White Boy"'
+        assert 'artist:' not in q
 
     def test_track_only(self):
         q = DeezerClient._build_advanced_query(track='Dirty White Boy')
@@ -40,13 +43,13 @@ class TestBuildAdvancedQuery:
 
     def test_artist_only(self):
         q = DeezerClient._build_advanced_query(artist='Foreigner')
-        assert q == 'artist:"Foreigner"'
+        assert q == 'Foreigner'
 
     def test_all_three_fields(self):
         q = DeezerClient._build_advanced_query(
             track='Head Games', artist='Foreigner', album='Head Games',
         )
-        assert q == 'track:"Head Games" artist:"Foreigner" album:"Head Games"'
+        assert q == 'Foreigner track:"Head Games" album:"Head Games"'
 
     def test_empty_inputs_produce_empty_query(self):
         assert DeezerClient._build_advanced_query() == ''
@@ -58,6 +61,10 @@ class TestBuildAdvancedQuery:
         produce a malformed `track:"O"Hara"` that breaks parsing."""
         q = DeezerClient._build_advanced_query(track='O"Hara')
         assert q == 'track:"OHara"'
+
+    def test_embedded_quotes_stripped_from_plain_artist(self):
+        q = DeezerClient._build_advanced_query(track='X', artist='The "Band"')
+        assert q == 'The Band track:"X"'
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +109,7 @@ class TestSearchTracksQueryWiring:
         # Stubbed API returns a hit so fallback doesn't fire; first
         # (and only) call uses advanced syntax.
         params = c._api_get.call_args_list[0].args[1]
-        assert params['q'] == 'track:"Dirty White Boy" artist:"Foreigner"', (
+        assert params['q'] == 'Foreigner track:"Dirty White Boy"', (
             f"Expected advanced-syntax query string, got {params['q']!r}"
         )
 
@@ -233,7 +240,7 @@ class TestSearchTracksAdvancedQueryFallback:
         assert len(results) == 1
         assert results[0].name == 'Found It'
         # First call was the advanced query, second was the free-text fallback
-        assert c._call_log[0] == 'track:"Dirty White Boy" artist:"Foreigner [US]"'
+        assert c._call_log[0] == 'Foreigner [US] track:"Dirty White Boy"'
         assert c._call_log[1] == 'Dirty White Boy Foreigner [US]'
 
     def test_no_fallback_when_advanced_query_has_results(self, monkeypatch):
@@ -298,6 +305,97 @@ class TestSearchTracksCacheKey:
 
         cache.get_search_results.assert_called_once_with(
             'deezer', 'track',
-            'track:"Dirty White Boy" artist:"Foreigner"',
+            'Foreigner track:"Dirty White Boy"',
             20,
         )
+
+
+# ---------------------------------------------------------------------------
+# search_track (enrichment interface), #1295
+# ---------------------------------------------------------------------------
+
+
+def _hit(track_id, title, artist):
+    return {'id': track_id, 'title': title, 'artist': {'id': track_id + 1000, 'name': artist}}
+
+
+class TestSearchTrackEnrichment:
+    """#1295: search_track sent artist:"X" track:"Y", which deezer answers
+    with an empty list for every song, so enrichment marked every track
+    not_found. the artist is plain words now and we pick the artist
+    ourselves, because plain words rank covers above the real song."""
+
+    def _client(self, monkeypatch, responses):
+        monkeypatch.setattr('core.deezer_client.get_metadata_cache', lambda: MagicMock())
+        # skip the shared rate budget, these are unit calls
+        monkeypatch.setattr('core.deezer_throttle.wait_for_slot', lambda: None)
+
+        c = DeezerClient.__new__(DeezerClient)
+        c._call_log = []
+
+        def fake_get(_url, params=None, timeout=None):
+            c._call_log.append(params['q'])
+            resp = MagicMock()
+            resp.json.return_value = {'data': responses.pop(0) if responses else []}
+            return resp
+
+        c.session = MagicMock()
+        c.session.get.side_effect = fake_get
+        return c
+
+    def test_query_never_uses_the_artist_filter(self, monkeypatch):
+        c = self._client(monkeypatch, [[_hit(1, 'Rock You Like A Hurricane', 'Scorpions')]])
+        c.search_track('Scorpions', 'Rock You Like a Hurricane')
+        assert c._call_log == ['Scorpions track:"Rock You Like a Hurricane"']
+
+    def test_skips_covers_ranked_above_the_real_song(self, monkeypatch):
+        c = self._client(monkeypatch, [[
+            _hit(1, 'Hello (Originally Performed by Adele) [Piano Version]', 'Piano Learning Tracks'),
+            _hit(2, 'Hello', 'Karaoke Hits Band'),
+            _hit(3, 'Hello', 'Adele'),
+        ]])
+        result = c.search_track('Adele', 'Hello')
+        assert result['id'] == 3
+
+    def test_only_covers_is_not_found_not_a_cover(self, monkeypatch):
+        # a same-titled cover would pass the worker's title check and get
+        # its deezer id stamped on the user's track. nothing beats that.
+        c = self._client(monkeypatch, [
+            [_hit(1, 'Hello', 'Karaoke Hits Band')],
+            [_hit(2, 'Hello', 'Piano Learning Tracks')],
+        ])
+        assert c.search_track('Adele', 'Hello') is None
+
+    def test_collab_credit_matches_the_primary_artist(self, monkeypatch):
+        c = self._client(monkeypatch, [[_hit(1, 'Get Lucky', 'Daft Punk')]])
+        result = c.search_track('Daft Punk & Pharrell Williams', 'Get Lucky')
+        assert result['id'] == 1
+
+    def test_accent_variant_matches(self, monkeypatch):
+        c = self._client(monkeypatch, [[_hit(1, 'Halo', 'Beyoncé')]])
+        assert c.search_track('Beyonce', 'Halo')['id'] == 1
+
+    def test_falls_back_to_plain_search_when_title_phrase_misses(self, monkeypatch):
+        c = self._client(monkeypatch, [[], [_hit(1, 'Dirty White Boy', 'Foreigner')]])
+        result = c.search_track('Foreigner', 'Dirty White Boy')
+        assert result['id'] == 1
+        assert c._call_log == ['Foreigner track:"Dirty White Boy"', 'Foreigner Dirty White Boy']
+
+    def test_no_fallback_when_first_search_finds_the_artist(self, monkeypatch):
+        c = self._client(monkeypatch, [[_hit(1, 'Dirty White Boy', 'Foreigner')]])
+        c.search_track('Foreigner', 'Dirty White Boy')
+        assert len(c._call_log) == 1
+
+    def test_no_artist_keeps_the_top_result(self, monkeypatch):
+        # the manual service search passes '' for the artist; nothing to
+        # check against, so it gets the top hit like before
+        c = self._client(monkeypatch, [[_hit(1, 'Hello', 'Adele'), _hit(2, 'Hello', 'Lionel Richie')]])
+        assert c.search_track('', 'Hello')['id'] == 1
+        assert c._call_log == ['track:"Hello"']
+
+    def test_api_error_is_none(self, monkeypatch):
+        c = self._client(monkeypatch, [])
+        resp = MagicMock()
+        resp.json.return_value = {'error': {'type': 'Exception', 'message': 'Quota limit exceeded'}}
+        c.session.get.side_effect = lambda *_a, **_k: resp
+        assert c.search_track('Adele', 'Hello') is None
