@@ -7,6 +7,7 @@ Album art is fetched from Cover Art Archive (free, linked by release MBID).
 """
 
 import threading
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -121,6 +122,90 @@ def _extract_title_hint(query: str, artist_name: str) -> Optional[str]:
     return None
 
 
+def _word_key(word: str) -> str:
+    """one word, folded for comparing names: case, accents and punctuation
+    gone, so "Guns N' Roses" and "guns n roses" read the same."""
+    folded = unicodedata.normalize('NFKD', word or '')
+    return ''.join(c for c in folded if c.isalnum()).casefold()
+
+
+def _name_keys(text: str) -> List[str]:
+    return [k for k in (_word_key(w) for w in (text or '').split()) if k]
+
+
+def _split_on_artist(query: str, artist_name: str) -> Optional[str]:
+    """the title left over when the query is the artist's name plus more words.
+
+    works from either end: "Gotye somebody that i used to know" and
+    "somebody that i used to know Gotye" both give the song back for Gotye.
+    None when the query is just the name, or the name isn't at either end.
+    the title keeps the words as typed so a text search still sees "don't".
+    """
+    words = [w for w in (query or '').split() if _word_key(w)]
+    keys = [_word_key(w) for w in words]
+    name = _name_keys(artist_name)
+    if not name or len(keys) <= len(name):
+        return None
+    if keys[:len(name)] == name:
+        return ' '.join(words[len(name):])
+    if keys[-len(name):] == name:
+        return ' '.join(words[:-len(name)])
+    return None
+
+
+# a name found at one end of the query is strong evidence on its own, so it
+# clears a lower bar than a bare-name hit. MB scores Gotye 76 for "Gotye
+# somebody that i used to know" because the song words dilute the match.
+_SPLIT_MIN_SCORE = 50
+
+
+def _pick_query_artist(candidates: List[Dict[str, Any]], query: str,
+                       min_score: int) -> Optional[Dict[str, Any]]:
+    """which artist a free-text query means (#1297).
+
+    MB ranks by text similarity, so "Gotye somebody that i used to know"
+    puts a jazz act literally named "Somebody That I Used to Know" first at
+    100 and Gotye second at 76. taking the top hit browsed the jazz act.
+
+    when the top hit only matched PART of the query (its name sits at one end
+    with words left over), the query is artist + title, so pick the artist
+    that splits it (a band named the whole query still wins over any split):
+    artist-first beats artist-last (that's
+    how people type it and how the wishlist fills the box), then the longer
+    name ("The Beatles" over "The"). a top hit that isn't a piece of the
+    query at all is a fuzzy match ("metalica") and stays the answer.
+    """
+    rows = [a for a in candidates or [] if a.get('id') and a.get('name')]
+    if not rows:
+        return None
+
+    def score(a):
+        return a.get('score', 0) or 0
+
+    q = _name_keys(query)
+    top = rows[0]
+    if score(top) < min_score or _split_on_artist(query, top['name']):
+        # a band named the whole query still beats splitting it. only here
+        # though: MB's own top already outranks a same-named parody act
+        # ("metalica" is Metallica at 100, not Metalica at 94).
+        for a in rows:
+            if _name_keys(a['name']) == q and score(a) >= min_score:
+                return a
+        best = None
+        for a in rows:
+            if score(a) < _SPLIT_MIN_SCORE or not _split_on_artist(query, a['name']):
+                continue
+            name = _name_keys(a['name'])
+            leads = q[:len(name)] == name
+            key = (leads, len(name), score(a))
+            if best is None or key > best[0]:
+                best = (key, a)
+        if best:
+            return best[1]
+
+    return top if score(top) >= min_score else None
+
+
 # Thin module-level alias retained so callers inside this file keep
 # working without touching every call site. The canonical implementation
 # (including the 'other' / 'broadcast' handling that fixes issue #650)
@@ -222,6 +307,14 @@ class MusicBrainzSearchClient:
             top = sorted(seen.values(),
                          key=lambda r: (-(r.get('score', 0) or 0), -_tag_weight(r)))[:limit]
 
+            # "Gotye somebody that i used to know" means Gotye, even though MB
+            # scores him 76 behind a jazz act named after the song (#1297).
+            # lead with him, the albums and tracks tabs already follow him.
+            meant = _pick_query_artist(raw, query, self._MIN_SCORE)
+            if meant and raw and meant.get('id') != raw[0].get('id'):
+                top = [meant] + [a for a in top if a.get('id') != meant.get('id')]
+                top = top[:limit]
+
             artists = []
             for a in top:
                 mbid = a.get('id', '')
@@ -260,9 +353,10 @@ class MusicBrainzSearchClient:
         return None, query
 
     def _resolve_top_artist(self, query: str) -> Optional[Dict[str, Any]]:
-        """Return the top-scoring artist for a bare-name query, or None if
-        nothing scores above threshold. Cached per instance so parallel
-        album/track searches don't each refetch."""
+        """Return the artist a query means, or None if nothing qualifies.
+        Cached per instance so parallel album/track searches don't each
+        refetch. Looks past the top hit when the query is artist + title,
+        see _pick_query_artist (#1297)."""
         if not query:
             return None
         key = query.strip().lower()
@@ -271,10 +365,10 @@ class MusicBrainzSearchClient:
                 return self._artist_mbid_cache[key]
         # Do the HTTP call OUTSIDE the lock so other threads can still
         # check the cache while we wait on the network.
-        raw = self._client.search_artist(query, limit=1, strict=False)
-        top = None
-        if raw and (raw[0].get('score', 0) or 0) >= self._MIN_SCORE:
-            top = raw[0]
+        # 10, not 1: the artist a query splits on is often not MB's top hit.
+        # same single request either way.
+        raw = self._client.search_artist(query, limit=10, strict=False)
+        top = _pick_query_artist(raw or [], query, self._MIN_SCORE)
         with self._artist_mbid_lock:
             self._artist_mbid_cache[key] = top
         return top
@@ -464,7 +558,7 @@ class MusicBrainzSearchClient:
                 # album the user typed rather than dumping the full back
                 # catalogue. kettui flagged the regression — bare-name browse
                 # was burying a specific-album query inside a discography list.
-                title_hint = _extract_title_hint(query, tname)
+                title_hint = _split_on_artist(query, tname)
                 rgs = self._client.browse_artist_release_groups(
                     mbid,
                     # 'compilation' is a SECONDARY type, not a primary type
@@ -660,6 +754,14 @@ class MusicBrainzSearchClient:
             if top:
                 mbid = top.get('id', '')
                 tname = top.get('name', '') or query
+                # "Gotye somebody that i used to know" names a song, not a
+                # discography. search for it; browsing Gotye's recordings
+                # comes back in no useful order and missed the song (#1297).
+                title_hint = _split_on_artist(query, tname)
+                if title_hint:
+                    found = self._search_tracks_text(title_hint, tname, limit)
+                    if found:
+                        return found
                 # /recording?artist=<mbid> (browse) rejects inc=releases,
                 # so we use the fielded Lucene search arid:<mbid> instead —
                 # that returns recordings with release context inline.
