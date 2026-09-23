@@ -170,6 +170,17 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
             if fi.get('path') in pubmap:
                 fi['path'] = pubmap[fi['path']]
 
+        # Each task recorded where its import landed, which for a staged batch
+        # is the staging path this publish just emptied. Everything downstream
+        # reads that field and would be pointing at a file that no longer
+        # exists: playlist materialization collects it to build the playlist
+        # folder (core/playlists/materialize_service.py), the downloads API
+        # reports it, and the stuck-task resolver checks it for existence.
+        for _task_id in (batch.get('queue') or []):
+            _task = download_tasks.get(_task_id)
+            if _task and _task.get('final_file_path') in pubmap:
+                _task['final_file_path'] = pubmap[_task['final_file_path']]
+
         # Per-track work registered the STAGING album folder with the repair
         # worker (now emptied by the publish above), so track-number repair would
         # scan nothing. Re-register the PUBLISHED album folder(s) so the post-batch

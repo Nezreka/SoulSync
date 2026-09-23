@@ -59,6 +59,7 @@ from core.imports.side_effects import (
     record_soulsync_library_entry,
 )
 from core.downloads.atomic_album_publish import split_staged_path
+from core.wishlist.library_match import artist_names
 from core.wishlist.removal_guard import STAGED as GUARD_STAGED, classify_publication
 from core.wishlist.resolution import check_and_remove_from_wishlist
 from core.runtime_state import (
@@ -380,7 +381,10 @@ def _settle_wishlist_for_completed_track(context, completed_path):
         'staged_path': staged_path,
         'final_path': final_path,
         'track_name': track_info.get('name', '') or '',
-        'artist_name': extract_artist_name((track_info.get('artists') or [None])[0]),
+        # artist_names, not artists[0]: a bare-string 'Band' indexes to 'B', and
+        # that is what would land in the manifest and, on the recovery path, in
+        # the context its metadata fallback matches on.
+        'artist_name': next(iter(artist_names(track_info.get('artists'))), ''),
         'context': _wishlist_context_snapshot(context),
     }
 

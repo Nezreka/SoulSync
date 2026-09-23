@@ -2,8 +2,8 @@
 
 Atomic album publishing (#999) keeps a batch's finished tracks in a private
 staging tree until the whole album is ready. Everything that knows what that
-tree IS -- which batch owns it, which library it belongs to, which wishlist
-requests its files satisfy -- lived in ``download_batches``, a plain dict in the
+tree IS — which batch owns it, which library it belongs to, which wishlist
+requests its files satisfy — lived in ``download_batches``, a plain dict in the
 web process. When the process went away mid-batch, so did all of it, and the
 staging tree became an anonymous pile of audio that no scanner looks at
 (``.soulsync_atomic_staging`` is deliberately skipped by SoulSync's own scan,
@@ -12,7 +12,7 @@ by the repair jobs, and by every media server, because it is dot-prefixed).
 This module writes the missing half to disk, next to the files it describes, so
 a later process can pick the tree up and finish the job. It is deliberately
 dumb: JSON, one file per batch, atomically replaced, best-effort everywhere. A
-manifest that fails to write must never fail a download -- the worst it costs is
+manifest that fails to write must never fail a download — the worst it costs is
 a slower recovery.
 
 Pure mechanics, like ``atomic_album_publish``: no config reads, no globals, no
@@ -28,7 +28,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from core.downloads.atomic_album_publish import MANIFEST_NAME, _STAGING_DIRNAME
+from core.downloads.atomic_album_publish import MANIFEST_NAME, STAGING_DIRNAME
 from utils.logging_config import get_logger
 
 logger = get_logger("downloads.atomic_manifest")
@@ -50,8 +50,8 @@ def manifest_path(staging_root: str) -> str:
 def read_manifest(staging_root: str) -> Optional[Dict[str, Any]]:
     """The batch manifest, or None when there isn't a readable one.
 
-    A corrupt manifest reads as absent on purpose. Recovery works without one --
-    the staged layout alone is enough to publish -- so a half-written file must
+    A corrupt manifest reads as absent on purpose. Recovery works without one —
+    the staged layout alone is enough to publish — so a half-written file must
     degrade to "no manifest", never to an exception that aborts the sweep and
     strands every other batch behind it.
     """
@@ -156,15 +156,15 @@ def remove_manifest(staging_root: str) -> None:
 
 
 def staging_parent(transfer_dir: str) -> str:
-    """``<transfer>/.soulsync_atomic_staging`` -- the folder holding every
+    """``<transfer>/.soulsync_atomic_staging`` — the folder holding every
     batch's staging root."""
-    return os.path.join(os.path.normpath(str(transfer_dir)), _STAGING_DIRNAME)
+    return os.path.join(os.path.normpath(str(transfer_dir)), STAGING_DIRNAME)
 
 
 def orphan_staging_roots(transfer_dir: str, live_batch_ids=()) -> List[str]:
     """Every staging root under ``transfer_dir`` not owned by a live batch.
 
-    At startup ``download_batches`` is empty, so everything on disk qualifies --
+    At startup ``download_batches`` is empty, so everything on disk qualifies —
     the same reasoning the album-bundle sweep already relies on. Passing live ids
     keeps the function honest if it is ever called from a running process.
     """

@@ -12,6 +12,7 @@ from core.imports.context import (
     get_import_source_ids,
     get_import_track_info,
 )
+from core.wishlist.library_match import artist_names
 from core.wishlist.removal_guard import (
     REASON_ALREADY_OWNED,
     REASON_ATOMIC_PUBLISHED,
@@ -48,6 +49,14 @@ def _album_name(payload: Dict[str, Any]) -> str:
 
 def _normalized(value: Any) -> str:
     return str(value or "").strip().lower()
+
+
+def _candidate_track_id(wishlist_track: Dict[str, Any]) -> str:
+    """The source track id of a wishlist row, whichever key it arrived under."""
+    return (wishlist_track.get("track_id")
+            or wishlist_track.get("spotify_track_id")
+            or wishlist_track.get("id")
+            or "")
 
 
 def _all_profile_wishlist_tracks(wishlist_service, database=None,
@@ -288,44 +297,51 @@ def _match_by_metadata(wishlist_tracks: List[Dict[str, Any]], track_name: str,
     for wishlist_track in wishlist_tracks:
         if _normalized(wishlist_track.get("name")) != wanted_name:
             continue
-        wl_artists = wishlist_track.get("artists", [])
-        wl_artist_name = ""
-        if wl_artists:
-            if isinstance(wl_artists[0], dict):
-                wl_artist_name = wl_artists[0].get("name", "")
-            else:
-                wl_artist_name = str(wl_artists[0])
-        if _normalized(wl_artist_name) != wanted_artist:
+        wl_names = artist_names(wishlist_track.get("artists"))
+        if _normalized(wl_names[0] if wl_names else "") != wanted_artist:
             continue
         candidates.append(wishlist_track)
 
     if not candidates:
         return None
 
-    if wanted_album:
-        album_matches = [c for c in candidates
-                         if not _normalized(_album_name(c)) or _normalized(_album_name(c)) == wanted_album]
-        if not album_matches:
-            logger.warning(
-                "%s Metadata match rejected — '%s' by '%s' is on the wishlist from album(s) %s, "
-                "but this download is from '%s'",
-                log_prefix, track_name, artist_name,
-                sorted({_album_name(c) for c in candidates}), album_name)
-            return None
-        candidates = album_matches
+    # Ambiguity is about distinct REQUESTS, not rows. The same track wishlisted
+    # by two profiles is two rows and one request, and the sweep returns a row
+    # per profile — counting rows made the fallback refuse every match on any
+    # multi-profile install, so nothing was ever cleared and the track was
+    # re-downloaded on every cycle.
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for candidate in candidates:
+        track_id = _candidate_track_id(candidate)
+        if track_id:
+            by_id.setdefault(track_id, candidate)
 
-    if len(candidates) > 1:
-        logger.warning(
-            "%s Metadata match ambiguous — %d wishlist entries match '%s' by '%s'; "
-            "keeping them all rather than guessing",
-            log_prefix, len(candidates), track_name, artist_name)
+    if not by_id:
         return None
 
-    match = candidates[0]
-    track_id = match.get("track_id") or match.get("spotify_track_id") or match.get("id")
-    if track_id:
-        logger.info("%s Found metadata match - track ID: %s (profile %s)",
-                    log_prefix, track_id, match.get("_profile_id"))
+    # The album only breaks a tie. Vetoing a LONE candidate on a album mismatch
+    # cannot prevent a wrong pick — there is no other request to pick — and a
+    # wishlist row stored from one release ("Album") against a download resolved
+    # from another ("Album (Deluxe Edition)") is completely ordinary, so the veto
+    # just left the track on the wishlist to be downloaded again forever.
+    if wanted_album and len(by_id) > 1:
+        narrowed = {
+            track_id: candidate for track_id, candidate in by_id.items()
+            if _normalized(_album_name(candidate)) in ("", wanted_album)
+        }
+        if narrowed:
+            by_id = narrowed
+
+    if len(by_id) > 1:
+        logger.warning(
+            "%s Metadata match ambiguous — %d wishlist requests match '%s' by '%s'; "
+            "keeping them all rather than guessing",
+            log_prefix, len(by_id), track_name, artist_name)
+        return None
+
+    track_id, match = next(iter(by_id.items()))
+    logger.info("%s Found metadata match - track ID: %s (profile %s)",
+                log_prefix, track_id, match.get("_profile_id"))
     return track_id
 
 

@@ -9,7 +9,7 @@ Three separate code paths assumed it, and each one lost tracks:
 
   * Atomic album publishing (#999) redirects a finished track to a path under
     ``.soulsync_atomic_staging``, which every scanner and media server skips by
-    design. The per-track completion callback deleted the wishlist row there --
+    design. The per-track completion callback deleted the wishlist row there —
     minutes to hours before the album actually published, and unconditionally,
     so a restart, a failed publish or a cancel in that window left the user with
     neither a library file nor a request to retry.
@@ -21,7 +21,7 @@ Three separate code paths assumed it, and each one lost tracks:
 The guard below is the one place that decides, and it decides from the file:
 a wishlist row may be deleted for a completed download only when the caller can
 name a file that exists and is not staged. Everything else keeps the row, which
-is the self-healing direction -- a track that is already in the library and
+is the self-healing direction — a track that is already in the library and
 still on the wishlist gets cleared by the already-owned cleanup, whereas a track
 that is on neither is gone for good.
 """
@@ -48,7 +48,6 @@ REASON_DOWNLOAD_COMPLETE = "download_complete"
 REASON_ATOMIC_PUBLISHED = "atomic_published"
 REASON_ALREADY_OWNED = "already_owned"
 REASON_MANUAL_MATCH = "manual_match"
-REASON_USER = "user_action"
 
 _GATED_REASONS = {REASON_DOWNLOAD_COMPLETE, REASON_ATOMIC_PUBLISHED}
 
@@ -82,8 +81,8 @@ def may_remove(published_path: Optional[str], *,
                transfer_dir: Optional[str] = None) -> Tuple[bool, str]:
     """``(allowed, state)`` for one removal decision.
 
-    Ungated reasons pass straight through -- a user deleting their own wishlist
-    entry, or the already-owned cleanup which proves ownership its own way --
+    Ungated reasons pass straight through — a user deleting their own wishlist
+    entry, or the already-owned cleanup which proves ownership its own way —
     so this never becomes a bottleneck on paths it knows nothing about.
     """
     if reason not in _GATED_REASONS:
@@ -111,7 +110,6 @@ __all__ = [
     "REASON_ATOMIC_PUBLISHED",
     "REASON_DOWNLOAD_COMPLETE",
     "REASON_MANUAL_MATCH",
-    "REASON_USER",
     "STAGED",
     "UNKNOWN",
     "classify_publication",

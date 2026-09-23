@@ -2479,9 +2479,21 @@ class WatchlistScanner:
                 for query_title in unique_title_variations:
                     # When allow_duplicates is on, skip album hint so we get title+artist matches only
                     search_album = None if allow_duplicates else album_name
+                    from core.downloads.atomic_album_publish import contains_staging_segment
                     db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=search_album)
 
                     if db_track and confidence >= 0.7:
+                        # #1289: a row whose file is still in atomic-publish
+                        # staging is not ownership — the file is quarantined and
+                        # may never publish, so the watchlist must keep asking.
+                        # The rule rather than find_owned_match: this loop walks
+                        # title variations and has its own allow-duplicates album
+                        # logic that the shared helper does not model.
+                        if contains_staging_segment(getattr(db_track, 'file_path', '') or ''):
+                            logger.info(
+                                f"[Watchlist] Ignoring staged library row for '{original_title}' "
+                                f"— not published yet, keeping the request")
+                            continue
                         # When allow_duplicates is on, only skip if we believe
                         # the library copy is on the same album the watchlist
                         # is asking about. Album name drift between Spotify

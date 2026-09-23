@@ -197,8 +197,8 @@ def _transfer_dir_for(root: str, manifest: Optional[Dict[str, Any]],
                       staged_files: List[str]) -> Optional[str]:
     """Which library this tree publishes into.
 
-    The manifest says so directly. Without one the staged layout still does --
-    everything above ``.soulsync_atomic_staging`` IS the library root -- which is
+    The manifest says so directly. Without one the staged layout still does —
+    everything above ``.soulsync_atomic_staging`` IS the library root — which is
     why a tree with no manifest is still recoverable.
     """
     recorded = (manifest or {}).get('transfer_dir')
@@ -207,7 +207,9 @@ def _transfer_dir_for(root: str, manifest: Optional[Dict[str, Any]],
     split = _publish.split_staged_path(staged_files[0] if staged_files else root)
     if split:
         return split[0]
-    return str(recorded) or None
+    # `str(recorded) or None` returned the literal string 'None' when there was
+    # no manifest, because str(None) is truthy.
+    return str(recorded) if recorded else None
 
 
 def recover_orphan_staging(transfer_dirs: Iterable[str], *,
@@ -255,10 +257,10 @@ def recover_orphan_staging(transfer_dirs: Iterable[str], *,
             # A published batch prunes its own tree; an empty one left behind is
             # bookkeeping, not audio, and is the one thing safe to clear.
             remove_manifest(root)
-            try:
-                os.rmdir(root)
-            except OSError:
-                pass
+            # prune, not rmdir: a tree whose audio has already been published
+            # still holds its empty album/artist subdirectories, and rmdir on a
+            # non-empty directory fails, leaving a husk to rescan every boot.
+            _publish.prune_empty_tree(root)
             stats['empty'] += 1
             continue
 
@@ -292,7 +294,7 @@ def recover_orphan_staging(transfer_dirs: Iterable[str], *,
                     "[Atomic Recovery] Every staged file in %s was already in the library "
                     "— nothing to publish; the older copies are in the recycle bin.", root)
                 remove_manifest(root)
-                _publish._prune_empty_tree(root)
+                _publish.prune_empty_tree(root)
                 stats['empty'] += 1
                 continue
 

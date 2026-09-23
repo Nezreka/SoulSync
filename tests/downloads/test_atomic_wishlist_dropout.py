@@ -564,3 +564,216 @@ def test_staging_paths_are_recognised_without_any_batch_state(tmp_path):
     assert split_staged_path(staged) == (
         "/library", "/library/.soulsync_atomic_staging/B", "Artist/Album/01.mp3")
     assert contains_staging_segment("/library/Artist/Album/01.mp3") is False
+
+
+# --- 9. review follow-ups (#1289 review pass) ------------------------------
+
+def test_metadata_fallback_survives_the_same_track_on_two_profiles():
+    """The sweep returns one row PER PROFILE, so a track two profiles both want
+    is two rows and one request. Counting rows made the fallback call every such
+    match ambiguous, so it cleared nothing and the track was re-downloaded on
+    every wishlist cycle."""
+    from core.wishlist.resolution import _match_by_metadata
+
+    rows = [
+        {"name": "Song A", "artists": [{"name": "Band"}], "track_id": "sp-1", "_profile_id": 1},
+        {"name": "Song A", "artists": [{"name": "Band"}], "track_id": "sp-1", "_profile_id": 2},
+    ]
+    assert _match_by_metadata(rows, "Song A", "Band", "") == "sp-1"
+
+
+def test_metadata_fallback_does_not_veto_a_lone_candidate_on_album():
+    """A wishlist row stored from one release against a download resolved from
+    another is ordinary. With a single candidate there is no wrong request to
+    pick, so the album cannot justify refusing."""
+    from core.wishlist.resolution import _match_by_metadata
+
+    rows = [{"name": "Song A", "artists": [{"name": "Band"}], "track_id": "sp-1",
+             "album": {"name": "Album"}}]
+    assert _match_by_metadata(rows, "Song A", "Band", "Album (Deluxe Edition)") == "sp-1"
+
+
+def test_metadata_fallback_uses_the_album_to_break_a_real_tie():
+    from core.wishlist.resolution import _match_by_metadata
+
+    rows = [
+        {"name": "S", "artists": [{"name": "B"}], "track_id": "a", "album": {"name": "One"}},
+        {"name": "S", "artists": [{"name": "B"}], "track_id": "b", "album": {"name": "Two"}},
+    ]
+    assert _match_by_metadata(rows, "S", "B", "Two") == "b"
+    # ...and still refuses when the album cannot separate them
+    assert _match_by_metadata(rows, "S", "B", "") is None
+    assert _match_by_metadata(rows, "S", "B", "Three") is None
+
+
+def test_artist_names_handles_a_bare_string():
+    """`artists` is sometimes a plain string; indexing it yields a single
+    character, which is what used to land in the manifest."""
+    from core.wishlist.library_match import artist_names
+
+    assert artist_names("Band") == ["Band"]
+    assert artist_names([{"name": "Band"}]) == ["Band"]
+    assert artist_names(None) == []
+
+
+def test_a_leftover_manifest_temp_file_is_never_published(tmp_path):
+    """The manifest is replaced through a sibling temp file. A hard kill between
+    mkstemp and os.replace leaves one behind, and matching only the exact
+    manifest name would publish it into the user's library root."""
+    import tempfile
+
+    from core.downloads.atomic_album_publish import MANIFEST_NAME, iter_staged_files
+
+    root = tmp_path / ".soulsync_atomic_staging" / "b"
+    root.mkdir(parents=True)
+    fd, _tmp = tempfile.mkstemp(prefix=MANIFEST_NAME, suffix=".tmp", dir=str(root))
+    os.close(fd)
+    (root / "01.mp3").write_bytes(b"AUDIO")
+
+    assert [os.path.basename(p) for p in iter_staged_files(str(root))] == ["01.mp3"]
+
+
+def test_publish_removes_manifest_leftovers_so_the_tree_can_prune(tmp_path):
+    import tempfile
+
+    from core.downloads.atomic_album_publish import MANIFEST_NAME, publish_album_batch
+    from core.imports.file_ops import safe_move_file
+
+    transfer = tmp_path / "library"
+    root = transfer / ".soulsync_atomic_staging" / "b"
+    (root / "Artist" / "Album").mkdir(parents=True)
+    (root / "Artist" / "Album" / "01.mp3").write_bytes(b"AUDIO")
+    fd, _tmp = tempfile.mkstemp(prefix=MANIFEST_NAME, suffix=".tmp", dir=str(root))
+    os.close(fd)
+
+    assert publish_album_batch(str(root), str(transfer), safe_move_file)["success"] is True
+    assert not os.path.exists(root), "a leftover temp must not keep the tree alive"
+    assert os.path.isfile(transfer / "Artist" / "Album" / "01.mp3")
+
+
+def test_publish_repoints_each_task_final_file_path(monkeypatch, tmp_path):
+    """Tasks record where their import landed, which for a staged batch is the
+    path this publish just emptied. Playlist materialization, the downloads API
+    and the stuck-task resolver all read that field."""
+    from core.downloads.atomic_album_publish import publish_album_batch
+    from core.imports.file_ops import safe_move_file
+
+    batch = {"is_album_download": True}
+    transfer, staged, final = _stage_a_track(monkeypatch, tmp_path, batch)
+    tasks = {"t1": {"status": "completed", "final_file_path": staged}}
+    monkeypatch.setattr(lc, "download_tasks", tasks)
+    monkeypatch.setattr(lc, "safe_move_file", safe_move_file, raising=False)
+    batch["queue"] = ["t1"]
+
+    monkeypatch.setattr("core.downloads.atomic_album_publish.publish_album_batch",
+                        publish_album_batch)
+    assert lc._publish_atomic_album("B", batch) is True
+    assert tasks["t1"]["final_file_path"] == final
+    assert os.path.isfile(tasks["t1"]["final_file_path"])
+
+
+def test_split_staged_path_refuses_a_path_with_no_library_above_it():
+    """Reporting os.sep as the library would map every file into the filesystem
+    root."""
+    assert split_staged_path(".soulsync_atomic_staging/b/A/01.mp3") is None
+
+
+def test_transfer_dir_for_returns_none_not_the_string_none():
+    from core.downloads.atomic_recovery import _transfer_dir_for
+
+    assert _transfer_dir_for("/nope", None, []) is None
+
+
+def test_a_superseded_track_still_clears_its_wishlist_row(tmp_path):
+    """Its staged copy went to the recycle bin, but the library holds the track
+    at the final path, so the request really is satisfied."""
+    from core.wishlist.resolution import remove_published_wishlist_entries
+
+    live = tmp_path / "library" / "A" / "Album"
+    live.mkdir(parents=True)
+    kept = live / "01.mp3"
+    kept.write_bytes(b"LIBRARY COPY")
+
+    cleared = []
+    import core.wishlist.resolution as res
+    orig = res.check_and_remove_from_wishlist
+    res.check_and_remove_from_wishlist = lambda ctx, **kw: cleared.append(kw["published_path"]) or True
+    try:
+        n = remove_published_wishlist_entries(
+            [{"staged_path": "/staged/01.mp3", "final_path": str(kept),
+              "track_name": "T", "context": {}}],
+            {},  # empty pubmap: this file was superseded, not published
+            batch_id="B")
+    finally:
+        res.check_and_remove_from_wishlist = orig
+
+    assert n == 1 and cleared == [str(kept)]
+
+
+def test_completed_sweep_refuses_a_staged_path():
+    """'completed' is a task state, not a library state."""
+    from core.wishlist import processing
+
+    staged = "/lib/.soulsync_atomic_staging/b/A/01.mp3"
+    calls = []
+    processing.remove_completed_tracks_from_wishlist(
+        {"queue": ["a"]},
+        {"a": {"status": "completed", "track_info": {"name": "S"},
+               "final_file_path": staged}},
+        lambda ctx, **kw: calls.append(kw["published_path"]),
+        logger=_SilentLogger(),
+    )
+    # It hands the guard the path it recorded, and that path is staged — so the
+    # sweep can no longer clear a row for a file the media server cannot see.
+    assert calls == [staged]
+    assert guard.may_remove(staged) == (False, guard.STAGED)
+
+
+class _SilentLogger:
+    def info(self, *a, **k):
+        pass
+
+    def warning(self, *a, **k):
+        pass
+
+    def error(self, *a, **k):
+        pass
+
+
+def test_removal_is_scoped_to_the_profiles_whose_library_holds_the_file(monkeypatch, tmp_path):
+    """One profile on the shared library, one with its own. A download into the
+    shared folder must not clear the own-library profile's request — it cannot
+    see that file (#1199)."""
+    from types import SimpleNamespace
+
+    import core.imports.paths as paths
+    from core.wishlist import resolution
+
+    shared = tmp_path / "shared"
+    own = tmp_path / "own"
+    for d in (shared, own):
+        d.mkdir()
+    published = shared / "A" / "Album" / "01.mp3"
+    published.parent.mkdir(parents=True)
+    published.write_bytes(b"AUDIO")
+
+    monkeypatch.setattr(paths, "shared_transfer_root", lambda: str(shared))
+    monkeypatch.setattr(paths, "library_root_for_profile",
+                        lambda pid: str(own) if pid == 2 else None)
+
+    seen = {}
+
+    class _Svc:
+        def mark_track_download_result(self, track_id, success, **kw):
+            seen.update(kw)
+            return True
+
+    resolution.check_and_remove_from_wishlist(
+        {"source": "spotify", "track_info": {"id": "sp-1", "name": "S",
+                                             "artists": [{"name": "B"}]}},
+        wishlist_service=_Svc(),
+        database=SimpleNamespace(get_all_profiles=lambda: [{"id": 1}, {"id": 2}]),
+        published_path=str(published),
+    )
+
+    assert seen["profile_ids"] == [1], "only the shared-library profile owns this file"

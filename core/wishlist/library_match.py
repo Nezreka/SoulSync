@@ -7,9 +7,9 @@ post-batch cleanup in :mod:`core.downloads.cleanup`. Both asked
 what they had actually matched.
 
 The hole that matters is a row whose ``file_path`` points INTO the atomic
-staging tree. Those rows are real -- ``record_soulsync_library_entry`` writes
+staging tree. Those rows are real — ``record_soulsync_library_entry`` writes
 one for every staged track on a ``soulsync`` server, which is exactly why the
-publish has to repoint them -- but the file they name is invisible to the media
+publish has to repoint them — but the file they name is invisible to the media
 server and may never be published at all. Matching against one and deleting the
 wishlist row means the request is gone while the audio is still quarantined:
 the same dropout the atomic-publish fix closes, arriving by a different door.
@@ -26,21 +26,23 @@ from __future__ import annotations
 from typing import Any, Optional, Tuple
 
 from core.downloads.atomic_album_publish import contains_staging_segment
+from core.imports.context import extract_artist_name
 from utils.logging_config import get_logger
 
 logger = get_logger("wishlist.library_match")
 
 
 def artist_names(artists: Any) -> list:
-    out = []
-    for artist in artists or []:
-        if isinstance(artist, str):
-            out.append(artist)
-        elif isinstance(artist, dict) and 'name' in artist:
-            out.append(artist['name'])
-        else:
-            out.append(str(artist))
-    return [a for a in out if a]
+    """Every credited artist name, whatever shape the payload arrived in.
+
+    A bare string is one artist, not a list of characters — iterating it would
+    hand back 'B', 'a', 'n', 'd'. Per-item normalisation is
+    :func:`core.imports.context.extract_artist_name`, which already knows about
+    dicts, objects with ``.name`` and plain strings.
+    """
+    if isinstance(artists, str):
+        artists = [artists]
+    return [name for name in (extract_artist_name(a) for a in (artists or [])) if name]
 
 
 def find_owned_match(music_database, track_name: str, artists: Any, album: Optional[str],
