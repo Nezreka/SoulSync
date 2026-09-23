@@ -180,3 +180,24 @@ def test_single_word_spelling_variants_not_regressed():
                      ("4ever", "Forever"), ("Lovin'", "Loving"), ("Colour", "Color")]:
         conf = s._calculate_track_confidence(src, a, _FakeTrack(lib, a))
         assert conf >= _THRESHOLD, f"{src!r}->{lib!r} regressed to {conf:.3f}"
+
+
+# ── #1292: a shared article is not a shared song ──────────────────────────
+
+def _pick(search, candidates):
+    return choose_best_title_candidate(
+        search, search,
+        [(c, c, c) for c in candidates],
+        lambda left, right: SequenceMatcher(None, left, right).ratio(),
+    )
+
+
+def test_shared_article_does_not_carry_a_fuzzy_match():
+    # 'the noose'/'the doomed' = 0.74 char-wise, almost all of it 'the '
+    assert _pick("the noose", ["the doomed"]) is None
+
+
+def test_fuzzy_spellings_still_match_after_the_article_check():
+    assert _pick("the grey", ["the gray"]) == "the gray"
+    assert _pick("tonite", ["tonight"]) == "tonight"
+    assert _pick("the beleive", ["the believe"]) == "the believe"
