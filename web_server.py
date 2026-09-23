@@ -15320,6 +15320,10 @@ def _get_staging_file_cache(batch_id):
                 'full_path': full_path,
                 'title': meta['title'] or '',
                 'artist': meta['albumartist'] or meta['artist'] or '',
+                # the performer, when the file has one. 'artist' above reads the
+                # album artist first, so every compilation track looked like
+                # 'Various Artists' and never matched the track it was
+                'track_artist': meta['artist'] or '',
                 'album': meta['album'] or '',
                 'track_number': meta.get('track_number'),
                 'disc_number': meta.get('disc_number'),
