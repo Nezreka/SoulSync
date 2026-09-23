@@ -3295,6 +3295,9 @@ async function loadSettingsData() {
         // Album Publishing (#999) — atomic album publish, opt-in, default off.
         const _atomicPub = document.getElementById('album-atomic-publish');
         if (_atomicPub) _atomicPub.checked = settings.album_downloads?.atomic_publish === true;
+        const _atomicRecover = document.getElementById('album-atomic-recover');
+        // Defaults ON — an absent value means "recover", not "quarantine".
+        if (_atomicRecover) _atomicRecover.checked = settings.album_downloads?.atomic_recover_orphans !== false;
 
         // Populate Listening Stats settings
         document.getElementById('listening-stats-enabled').checked = settings.listening_stats?.enabled === true;
@@ -6355,7 +6358,8 @@ async function saveSettings(quiet = false) {
         },
         album_downloads: {
             // Atomic album publishing (#999) — opt-in, default off.
-            atomic_publish: _cfgBool('album-atomic-publish')
+            atomic_publish: _cfgBool('album-atomic-publish'),
+            atomic_recover_orphans: _cfgBool('album-atomic-recover')
         },
         listening_stats: {
             enabled: document.getElementById('listening-stats-enabled').checked,

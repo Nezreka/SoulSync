@@ -806,6 +806,13 @@ class ConfigManager:
                 # publishes to the library as it finishes). Strictly opt-in; only
                 # ever affects whole-album batches (never singles / completeness-fill).
                 "atomic_publish": False,
+                # #1289: at startup, publish staging trees left behind by a batch
+                # that never finished (restart / crash / failed publish) instead
+                # of leaving finished, tagged audio permanently invisible in a
+                # dot-directory no scanner reads. Turn it off to keep strict
+                # quarantine — the trees are then reported and left alone, never
+                # deleted. Only meaningful when atomic_publish has been used.
+                "atomic_recover_orphans": True,
             },
             "listening_stats": {
                 "enabled": True,

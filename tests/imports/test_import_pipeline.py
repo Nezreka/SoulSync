@@ -150,7 +150,8 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     monkeypatch.setattr(import_pipeline, "emit_track_downloaded", lambda *args, **kwargs: None)
     monkeypatch.setattr(import_pipeline, "record_library_history_download", lambda *args, **kwargs: None)
     monkeypatch.setattr(import_pipeline, "record_download_provenance", lambda *args, **kwargs: None)
-    monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda context: wishlist_calls.append(dict(context)))
+    monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist",
+                        lambda context, **kw: wishlist_calls.append((dict(context), kw)))
     monkeypatch.setattr(import_pipeline, "_mark_task_completed", lambda task, track_info: mark_calls.append((task, track_info)))
     monkeypatch.setattr(import_pipeline.threading, "Thread", _ImmediateThread)
 
@@ -176,7 +177,12 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         assert completion_calls == [(batch_id, task_id, True)]
         assert context_key not in runtime_state.matched_downloads_context
         assert scan_calls == ["Simple download completed"]
-        assert wishlist_calls and wishlist_calls[0]["search_result"]["is_simple_download"] is True
+        assert wishlist_calls
+        _wl_context, _wl_kwargs = wishlist_calls[0]
+        assert _wl_context["search_result"]["is_simple_download"] is True
+        # #1289: the removal is handed the library path the file actually landed
+        # at, so its guard can prove the request was satisfied.
+        assert _wl_kwargs["published_path"] == str(expected_path)
         assert activity_calls
     finally:
         runtime_state.matched_downloads_context.clear()

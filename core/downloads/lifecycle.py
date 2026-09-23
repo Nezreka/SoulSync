@@ -84,6 +84,36 @@ def _safe_batch_dirname(batch_id: str) -> str:
 _ALBUM_BUNDLE_CLEANED_SOURCES = ('soulseek', 'torrent', 'usenet')
 
 
+def _settle_deferred_wishlist(batch_id: str, batch: dict, pubmap: dict) -> int:
+    """Remove the wishlist rows deferred by this batch's staged tracks.
+
+    Only reachable from a SUCCESSFUL publish, and each row is still checked
+    against a file that exists at its final path — the roster says what the
+    batch intended to publish, the filesystem says what it did.
+
+    The roster is cleared whether or not every entry cleared, so a later healing
+    pass over an already-published batch cannot replay removals. Anything left
+    unremoved stays on the wishlist, which is the self-healing direction: the
+    already-owned cleanup clears a track that really is in the library, and
+    nothing clears one that is not.
+    """
+    pending = batch.get('_wishlist_pending') or []
+    if not pending:
+        return 0
+    try:
+        from core.wishlist.resolution import remove_published_wishlist_entries
+        removed = remove_published_wishlist_entries(pending, pubmap or {}, batch_id=batch_id)
+        logger.info("[Atomic Publish] Batch %s: cleared %d/%d deferred wishlist entries",
+                    batch_id, removed, len(pending))
+        return removed
+    except Exception as e:  # noqa: BLE001 — a publish that worked must not be undone by this
+        logger.error("[Atomic Publish] Batch %s: deferred wishlist removal failed "
+                     "(entries stay on the wishlist): %s", batch_id, e, exc_info=True)
+        return 0
+    finally:
+        batch['_wishlist_pending'] = []
+
+
 def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
     """#999 atomic album publishing (opt-in): if this batch staged its tracks
     (private mirror, so Plex never saw a partial album), move them into the live
@@ -107,42 +137,29 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
 
         db = MusicDatabase()
 
-        def _db_update(staged_path: str, final_path: str):
-            """Repoint one file, returning how many library rows moved with it.
-
-            The count is the publish's proof that the library knows where the
-            file went; an audio file that repoints nothing leaves the library
-            pointing at a staging path this publish is about to remove. None
-            means the count carries no meaning — "unknown", not "zero" — and an
-            unknown must not fail a publish that may well have worked.
-
-            THAT PROOF ONLY EXISTS ON A 'soulsync' SERVER. Rows with a staged
-            path are written by record_soulsync_library_entry, which is gated on
-            the active media server being soulsync — on a Plex/Navidrome/Jellyfin
-            install there is legitimately NO row until the server scans the
-            PUBLISHED files. Reading that 0 as a failure made every atomic album
-            publish on a media-server install roll itself back and strand the
-            album in .soulsync_atomic_staging forever (Lil-Uzi-Chimp, Docker +
-            Navidrome: two direct albums landed, the one staged album stuck).
-            The UPDATE still runs — a row from an earlier soulsync-mode session
-            deserves repointing — but its count is only evidence where the rows
-            are ours to expect."""
-            conn = db._get_connection()
-            try:
-                cur = conn.cursor()
-                cur.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                            (final_path, staged_path))
-                conn.commit()
-                rowcount = getattr(cur, 'rowcount', None)
-            finally:
-                conn.close()
-            try:
-                from core.settings import config_manager as _cm
-                if _cm.get_active_media_server() != 'soulsync':
-                    return None
-            except Exception:   # noqa: BLE001 - can't tell whose rows these are → unknown
-                return None
-            return int(rowcount) if isinstance(rowcount, int) else None
+        # Repoint one file, returning how many library rows moved with it.
+        #
+        # The count is the publish's proof that the library knows where the file
+        # went; an audio file that repoints nothing leaves the library pointing
+        # at a staging path this publish is about to remove. None means the count
+        # carries no meaning — "unknown", not "zero" — and an unknown must not
+        # fail a publish that may well have worked.
+        #
+        # THAT PROOF ONLY EXISTS ON A 'soulsync' SERVER. Rows with a staged path
+        # are written by record_soulsync_library_entry, which is gated on the
+        # active media server being soulsync — on a Plex/Navidrome/Jellyfin
+        # install there is legitimately NO row until the server scans the
+        # PUBLISHED files. Reading that 0 as a failure made every atomic album
+        # publish on a media-server install roll itself back and strand the album
+        # in .soulsync_atomic_staging forever (Lil-Uzi-Chimp, Docker + Navidrome:
+        # two direct albums landed, the one staged album stuck). The UPDATE still
+        # runs — a row from an earlier soulsync-mode session deserves repointing
+        # — but its count is only evidence where the rows are ours to expect.
+        #
+        # Shared with the startup recovery (#1289), which republishes an
+        # abandoned staging tree and needs the identical rule.
+        from core.downloads.atomic_recovery import make_db_path_updater
+        _db_update = make_db_path_updater(db)
 
         result = publish_album_batch(staging_root, transfer_dir, safe_move_file, _db_update)
 
@@ -177,6 +194,12 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
             return False
         logger.info("[Atomic Publish] Batch %s: published %d file(s)",
                     batch_id, len(pubmap))
+
+        # #1289: the album is live NOW, so this is the first moment the wishlist
+        # rows for its tracks are safe to delete. Per-track completion deferred
+        # them here precisely so that a batch which never reached this line
+        # leaves every request intact and retryable.
+        _settle_deferred_wishlist(batch_id, batch, pubmap)
         return True
     except Exception as e:
         logger.error("[Atomic Publish] Batch %s publish failed (staged files kept): %s",
@@ -956,7 +979,19 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                             'track_info': track_info,
                             'original_search_result': track_info,  # fallback
                         }
-                        deps.check_and_remove_from_wishlist(context)
+                        # #1289: this context is built from track_info alone, so
+                        # it never carried any evidence the download actually
+                        # reached the library — which is how a file still in the
+                        # downloads folder (the verification worker's no-context
+                        # branch) and a file still in atomic staging both got
+                        # their wishlist rows deleted. final_file_path is set by
+                        # the importer only when a file really landed; the guard
+                        # in check_and_remove_from_wishlist refuses without it.
+                        deps.check_and_remove_from_wishlist(
+                            context,
+                            published_path=task.get('final_file_path'),
+                            batch_id=batch_id,
+                        )
                 except Exception as wishlist_error:
                     logger.error(f"[Batch Manager] Error checking wishlist removal for successful download: {wishlist_error}")
 

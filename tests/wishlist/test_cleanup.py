@@ -29,7 +29,7 @@ class _FakeWishlistService:
             if (track.get("spotify_track_id") or track.get("id")) not in self.removed_ids
         ]
 
-    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1):
+    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1, **kwargs):
         self.removed_ids.add(spotify_track_id)
         return True
 

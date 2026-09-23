@@ -78,9 +78,10 @@ class _ForwardingService:
         self.db = db
 
     def mark_track_download_result(self, spotify_track_id, success,
-                                   error_message=None, profile_id=1):
+                                   error_message=None, profile_id=1, **kwargs):
         return self.db.update_wishlist_retry(spotify_track_id, success,
-                                             error_message, profile_id=profile_id)
+                                             error_message, profile_id=profile_id,
+                                             **kwargs)
 
 
 def _wishlisted_track(db, sp_id="trk1"):

@@ -94,7 +94,13 @@ def remove_completed_tracks_from_wishlist(
                 try:
                     track_info = task.get('track_info', {})
                     context = {'track_info': track_info, 'original_search_result': track_info}
-                    remove_from_wishlist(context)
+                    # #1289: same proof the per-track callback needs. 'completed'
+                    # is a task state, not a library state — the verification
+                    # worker's no-context branch completes a task whose file
+                    # never left the downloads folder, and an atomic batch's
+                    # tasks complete while their files are still staged (those
+                    # were already settled by the publish itself).
+                    remove_from_wishlist(context, published_path=task.get('final_file_path'))
                     removed_count += 1
                 except Exception as exc:
                     logger.error(f"[Wishlist Processing] Error removing completed track from wishlist: {exc}")
@@ -629,7 +635,11 @@ def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, acti
         manual_match = _mlm.get_match_for_track(music_database, profile_id, track, default_source='wishlist')
         if manual_match and _mlm.match_is_live(music_database, manual_match):
             try:
-                removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True, profile_id=profile_id)
+                from core.wishlist.removal_guard import REASON_MANUAL_MATCH
+                removed = wishlist_service.mark_track_download_result(
+                    spotify_track_id, success=True, profile_id=profile_id,
+                    profile_ids=[profile_id],
+                    audit={'reason': REASON_MANUAL_MATCH})
                 if removed:
                     cleanup_removed += 1
                     logger.info(f"{log_prefix} [Manual Match] Skipped already-matched track: '{track_name}'")
@@ -637,38 +647,24 @@ def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, acti
                 logger.error(f"{log_prefix} [Manual Match] Error removing track: {_mlm_err}")
             return cleanup_removed
 
-        found_in_db = False
-        matched_artist_name = ''
-        for artist in artists:
-            if isinstance(artist, str):
-                artist_name = artist
-            elif isinstance(artist, dict) and 'name' in artist:
-                artist_name = artist['name']
-            else:
-                artist_name = str(artist)
+        from core.wishlist.library_match import find_owned_match
+        from core.wishlist.removal_guard import REASON_ALREADY_OWNED
 
+        match = find_owned_match(
+            music_database, track_name, artists, track_album, active_server,
+            log=logger, log_prefix=log_prefix)
+
+        if match:
+            db_track, confidence, matched_artist_name = match
             try:
-                db_track, confidence = music_database.check_track_exists(
-                    track_name,
-                    artist_name,
-                    confidence_threshold=0.7,
-                    server_source=active_server,
-                    album=track_album,
-                )
-
-                if db_track and confidence >= 0.7:
-                    found_in_db = True
-                    matched_artist_name = artist_name
-                    break
-            except Exception:
-                continue
-
-        if found_in_db:
-            try:
-                removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True, profile_id=profile_id)
+                removed = wishlist_service.mark_track_download_result(
+                    spotify_track_id, success=True, profile_id=profile_id,
+                    profile_ids=[profile_id],
+                    audit={'reason': REASON_ALREADY_OWNED,
+                           'final_path': getattr(db_track, 'file_path', '') or ''})
                 if removed:
                     cleanup_removed += 1
-                    logger.info(f"{log_prefix} Removed already-owned track: '{track_name}' by {matched_artist_name or artist_name}")
+                    logger.info(f"{log_prefix} Removed already-owned track: '{track_name}' by {matched_artist_name}")
             except Exception as remove_error:
                 logger.error(f"{log_prefix} Error removing track from wishlist: {remove_error}")
 

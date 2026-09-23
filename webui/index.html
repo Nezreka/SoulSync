@@ -6839,7 +6839,30 @@
                                                     (labelled &ldquo;Stalled album download&rdquo;) rather than deleting
                                                     it, so a stalled album is recoverable instead of gone. Only affects
                                                     full-album and wishlist-album downloads — single tracks and album
-                                                    top-ups (completeness fills) are unaffected.</div>
+                                                    top-ups (completeness fills) are unaffected. Tracks stay on your
+                                                    wishlist until the album is actually published, so an interrupted
+                                                    album is always retryable.</div>
+                                            </div>
+                                            <div class="form-group">
+                                                <div class="setting-row">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="album-atomic-recover">
+                                                        Recover interrupted albums on startup
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                </div>
+                                                <div class="setting-help-body" hidden><strong>On by default</strong>, and
+                                                    only relevant when album publishing above is on. If SoulSync
+                                                    restarts or crashes part-way through an album, the tracks it had
+                                                    already finished are left in the private staging folder, where no
+                                                    media server can see them. On the next start SoulSync moves those
+                                                    finished tracks into your library, and the tracks it never got to
+                                                    are still on your wishlist, so the album fills itself in. Turn this
+                                                    <strong>off</strong> to keep strict quarantine instead: the
+                                                    interrupted album stays hidden until you deal with it by hand. Files
+                                                    are never deleted either way.</div>
                                             </div>
                                         </div>
                                     </div><!-- end Album Publishing body -->
