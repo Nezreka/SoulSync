@@ -1756,6 +1756,7 @@ class MusicDatabase:
         'deezer_cache_v2':          ('table', '_deezer_cache_v2_migrated'),
         'cache_junk_artist_purged': ('table', '_cache_junk_artist_purged'),
         'genius_search_fix':        ('table', '_genius_search_fix_applied'),
+        'tidal_search_fix':         ('table', '_tidal_search_fix_applied'),
         'quality_profiles_schema':  ('table', 'quality_profiles'),
     }
 
@@ -4943,6 +4944,22 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_id ON tracks (qobuz_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_status ON tracks (qobuz_match_status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_isrc ON tracks (isrc)")
+
+            # one-time requeue (#1290): tidal retired /searchResults/{query},
+            # so every search 400'd and got recorded as not_found. those rows
+            # would sit out the 30-day retry. only not_found goes back, a real
+            # match is left alone.
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_tidal_search_fix_applied'")
+            if not cursor.fetchone():
+                requeued = 0
+                for table in ('artists', 'albums', 'tracks'):
+                    cursor.execute(f"""
+                        UPDATE {table} SET tidal_match_status = NULL, tidal_last_attempted = NULL
+                        WHERE tidal_match_status = 'not_found'
+                    """)
+                    requeued += max(cursor.rowcount, 0)
+                cursor.execute("CREATE TABLE _tidal_search_fix_applied (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                logger.info(f"Tidal search fix applied: requeued {requeued} not_found rows for enrichment")
 
         except Exception as e:
             logger.error(f"Error adding Tidal/Qobuz enrichment columns: {e}")

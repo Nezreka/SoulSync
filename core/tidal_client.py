@@ -119,19 +119,44 @@ class Playlist:
         if self.external_urls is None:
             self.external_urls = {}
 
-# Tidal's v2 search takes the query as a PATH segment
-# (/searchResults/{query}), not a query parameter. A name containing a slash
-# percent-encodes to %2F, and the gateway rejects that inside a path with a
-# 400 before the search ever runs — "AC/DC" is the one people hit. Slashes
-# become spaces; Tidal finds the artist either way.
-_PATH_HOSTILE_QUERY = re.compile(r'[\\/]+')
+# Tidal's v2 search used to take the query as a path segment
+# (/searchResults/{query}). tidal retired that route: it now answers 400
+# INVALID_RESOURCE_ID for every search, which read as "not found" for every
+# artist, album and track (#1290). the query is a filter[query] param now.
+# the spec caps it at 256 chars and rejects an empty one.
+_SEARCH_QUERY_MAX = 256
 
 
-def _search_query_segment(query: str) -> str:
-    """Encode a search query for Tidal's /searchResults/{query} path."""
-    cleaned = _PATH_HOSTILE_QUERY.sub(' ', str(query or ''))
-    cleaned = ' '.join(cleaned.split())
-    return urllib.parse.quote(cleaned, safe='')
+def _clean_search_query(query) -> str:
+    """Collapse whitespace and cap the length Tidal accepts for filter[query]."""
+    cleaned = ' '.join(str(query or '').split())
+    return cleaned[:_SEARCH_QUERY_MAX].strip()
+
+
+def _order_included_by_relevance(data, include: str):
+    """Put `included` in the order the search ranked it.
+
+    the collection response lists the ranked hits as ids under
+    data[0].relationships.<include>.data; `included` carries the resources
+    themselves and json:api promises no order for it. anything the ranking
+    does not mention keeps its place at the end.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get('included'), list):
+        return data
+    try:
+        ranked = data['data'][0]['relationships'][include]['data']
+        rank = {str(r.get('id')): i for i, r in enumerate(ranked)}
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return data
+    if not rank:
+        return data
+    tail = len(rank)
+    data['included'] = sorted(
+        data['included'],
+        key=lambda r: rank.get(str(r.get('id')), tail)
+        if isinstance(r, dict) and r.get('type') == include else tail,
+    )
+    return data
 
 
 class TidalClient:
@@ -975,29 +1000,29 @@ class TidalClient:
             
         
     
-    def _search_results(self, query: str, include: str, label: str,
-                        limit: Optional[int] = None) -> Optional[Dict]:
-        """GET /searchResults/{query} — the one request all four searches share.
+    def _search_results(self, query: str, include: str, label: str) -> Optional[Dict]:
+        """GET /searchResults?filter[query]= — the one request all four searches share.
 
         They had drifted: only the track search logged the body Tidal sends
         back, so the other three could report nothing but "failed: 400" and a
         user's bug report could not be answered (Skowl, Sept 22 2026). The
         status alone never says which parameter Tidal objected to.
         """
-        params = {'countryCode': 'US', 'include': include}
-        if limit is not None:
-            params['limit'] = limit
+        cleaned = _clean_search_query(query)
+        if not cleaned:
+            # tidal 400s an empty filter[query]; nothing to search for anyway
+            return None
 
         response = self.session.get(
-            f"{self.base_url}/searchResults/{_search_query_segment(query)}",
-            params=params,
+            f"{self.base_url}/searchResults",
+            params={'filter[query]': cleaned, 'countryCode': 'US', 'include': include},
             timeout=10
         )
 
         if response.status_code == 429:
             raise Exception(f"Rate limited (429) on {label}")
         if response.status_code == 200:
-            return response.json()
+            return _order_included_by_relevance(response.json(), include)
 
         # warning, not debug: a non-200 here means the feature silently did
         # nothing, and debug does not reach app.log.
@@ -1014,7 +1039,7 @@ class TidalClient:
                 logger.error("Not authenticated with Tidal")
                 return []
 
-            data = self._search_results(query, 'tracks', 'search_tracks', limit=limit)
+            data = self._search_results(query, 'tracks', 'search_tracks')
             if data is not None:
                 tracks = []
 
@@ -1027,7 +1052,8 @@ class TidalClient:
                 elif 'included' in data:
                     items = [r for r in data['included'] if r.get('type') == 'tracks']
 
-                for item in items:
+                # no limit param on the collection endpoint; trim here
+                for item in items[:limit]:
                     # Flatten JSON:API resource if needed
                     if 'attributes' in item and 'id' in item:
                         flat = dict(item['attributes'])
