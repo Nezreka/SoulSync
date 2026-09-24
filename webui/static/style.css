@@ -84060,6 +84060,35 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     #chat-page .chat-jbx-input {
         min-width: 0;
     }
+
+    /* phone type. text boxes go to 16px because ios safari zooms the whole
+       page into any input smaller than that and stays zoomed. messages read
+       at the size phone chat apps use; the small print comes up a step */
+    #chat-page .chat-input,
+    #chat-page .chat-head-search-in {
+        font-size: 16px;
+    }
+
+    #chat-page .chat-line,
+    #chat-page .chat-msg-text {
+        font-size: 16px;
+        line-height: 1.45;
+    }
+
+    #chat-page .chat-msg-user,
+    #chat-page .chat-chan {
+        font-size: 15px;
+    }
+
+    #chat-page .chat-msg-time,
+    #chat-page .chat-day-sep span {
+        font-size: 12px;
+    }
+
+    #chat-page .chat-filter-btn,
+    #chat-page .chat-modehint {
+        font-size: 12.5px;
+    }
 }
 
 /* ==================================================================================
