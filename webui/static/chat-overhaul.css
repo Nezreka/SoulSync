@@ -162,29 +162,19 @@
     box-shadow: 0 0 10px rgba(var(--accent-rgb, 29, 185, 84), 0.4);
 }
 
-/* 4-column Chat Shell Grid */
-.chat-shell {
-    display: grid;
-    grid-template-columns: 68px 230px 1fr 240px;
-    gap: 12px;
-    flex: 1;
-    min-height: 0;
-    height: calc(100vh - 200px);
-}
+/* layout (grid, display, direction, overflow) is style.css's job. this file loads
+   after all of style.css, so any layout declared here beats every breakpoint
+   there: the member rail kept its column when hidden, narrow windows scrolled
+   sideways and phones lost the channel list. only surface styling lives here. */
 
 /* ── 2. GUILD RAIL (LEFTMOST SERVER COLUMN) ──────────────────────────────── */
 .chat-guilds {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
     gap: 10px;
-    padding: 12px 0;
     background: rgba(11, 14, 20, 0.85);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 18px;
-    overflow-y: auto;
     scrollbar-width: none;
 }
 
@@ -291,14 +281,11 @@
 
 /* ── 3. CHANNEL & DM SIDEBAR ─────────────────────────────────────────────── */
 .chat-side {
-    display: flex;
-    flex-direction: column;
     background: rgba(14, 18, 26, 0.75);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 18px;
-    overflow: hidden;
 }
 
 .chat-side-head {
@@ -320,13 +307,6 @@
 .chat-side-head-caret {
     color: rgba(255, 255, 255, 0.4);
     font-size: 11px;
-}
-
-.chat-side-scroll {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 10px 8px;
 }
 
 .chat-side-scroll::-webkit-scrollbar {
@@ -789,8 +769,6 @@
 
 /* ── 6. RIGHT MEMBER LIST RAIL ───────────────────────────────────────────── */
 .chat-rail {
-    display: flex;
-    flex-direction: column;
     background: rgba(14, 18, 26, 0.75);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -2970,19 +2948,8 @@
     line-height: 1.6;
 }
 
-/* Mobile & Tablet Responsive Adjustments */
-@media (max-width: 1100px) {
-    .chat-shell {
-        grid-template-columns: 60px 200px 1fr;
-    }
-    .chat-rail { display: none; }
-}
-
+/* the shell's breakpoints are style.css's (see the note on the guild rail) */
 @media (max-width: 768px) {
-    .chat-shell {
-        grid-template-columns: 56px 1fr;
-    }
-    .chat-side { display: none; }
     .chat-peer-drawer {
         width: 100vw;
     }

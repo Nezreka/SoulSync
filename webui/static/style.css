@@ -83647,6 +83647,15 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
    This lives at the end of the file on purpose: the chat composer/jukebox
    refinements are declared after the base chat grid, so earlier media queries
    lose the cascade for the exact controls that break on small screens. */
+/* laptop widths keep the member list, but at full size the four columns left
+   the messages ~440px at 1440 (discord: topic wrapped tall, header buttons cut) */
+@media (max-width: 1600px) {
+    .chat-shell {
+        grid-template-columns: 56px 200px minmax(0, 1fr) 200px;
+        gap: 0 10px;
+    }
+}
+
 @media (max-width: 1320px) {
     #chat-page {
         padding: 28px 28px 80px;
