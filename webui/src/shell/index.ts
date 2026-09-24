@@ -39,8 +39,8 @@ import {
 import {
   closeServiceSwitchModal,
   openServiceSwitchModal,
+  openServiceSwitchSettings,
   setActiveSource,
-  setDownloadMode,
   switchServiceSwitchTab,
 } from './service-switch';
 import {
@@ -106,7 +106,7 @@ export const SHELL_WINDOW_EXPORTS = {
   closeServiceSwitchModal,
   switchServiceSwitchTab,
   setActiveSource,
-  setDownloadMode,
+  openServiceSwitchSettings,
   // library-globals.js (ported aug 26; the state objects self-assign inside)
   navigateToArtistDetail,
   playLibraryTrack,
