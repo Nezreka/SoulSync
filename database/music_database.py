@@ -1686,6 +1686,7 @@ class MusicDatabase:
 
             self._ensure_core_media_schema_columns(cursor)
             self._ensure_art_lock_columns(cursor)
+            self._ensure_genres_lock_columns(cursor)
             self._ensure_manual_metadata_schema(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
@@ -2108,6 +2109,41 @@ class MusicDatabase:
             return False
         self._lock_manual_rows(cursor, track_id, album_id)
         return True
+
+    def _ensure_genres_lock_columns(self, cursor):
+        """genres soulsync's own genre jobs settled (Cremonies, discord).
+
+        genre enrichment and the whitelist cleanup write the db. the next media
+        server scan used to put back whatever the server read from the files,
+        so the cleanup quietly undid itself. a locked row keeps its genres
+        through scans until the files catch up (write tags). 0 = follow the
+        server, today's behaviour for every existing row. its own method and
+        try, same reason as art_locked: the scan upserts reference it."""
+        for table in ('albums', 'artists'):
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cols = {c[1] for c in cursor.fetchall()}
+                if cols and 'genres_locked' not in cols:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN genres_locked INTEGER DEFAULT 0")
+                    logger.info("Added genres_locked column to %s table", table)
+            except Exception as e:
+                logger.error("Could not ensure %s.genres_locked: %s", table, e)
+
+    def _genres_lock_supported(self, cursor, table: str) -> bool:
+        """does this db have ``<table>.genres_locked`` yet. no column means the
+        scan behaves exactly like before, never a lost upsert. same reasoning
+        and memo as _art_lock_supported."""
+        cache = getattr(self, '_genres_lock_cols', None)
+        if cache is None:
+            cache = {}
+            self._genres_lock_cols = cache
+        if table not in cache:
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cache[table] = any(row[1] == 'genres_locked' for row in cursor.fetchall())
+            except Exception:
+                cache[table] = False
+        return cache[table]
 
     def _ensure_art_lock_columns(self, cursor):
         """Art chosen by hand (TheHomeGuy). Same shape as ``canonical_locked``:
@@ -9341,11 +9377,17 @@ class MusicDatabase:
                         "CASE WHEN COALESCE(art_locked, 0) = 1 THEN thumb_url ELSE ? END"
                         if self._art_lock_supported(cursor, 'artists') else "?"
                     )
+                    # genres_locked = soulsync's genre jobs settled these, the
+                    # server's copy is what the files said before the cleanup
+                    genres_expr = (
+                        "CASE WHEN COALESCE(genres_locked, 0) = 1 THEN genres ELSE ? END"
+                        if self._genres_lock_supported(cursor, 'artists') else "?"
+                    )
                     cursor.execute(f"""
                         UPDATE artists
                         SET name = ?,
                             thumb_url = {thumb_expr},
-                            genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
+                            genres = {genres_expr}, summary = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ? AND server_source = ?
                     """, (name, thumb_url, genres_json, summary, artist_id, server_source))
                     logger.debug(f"Updated existing {server_source} artist: {name} (ID: {artist_id})")
@@ -9375,6 +9417,8 @@ class MusicDatabase:
                             # See the album rekey path: without this, rebuilding the
                             # row under a new id silently unlocks a hand-picked photo.
                             'art_locked',
+                            # and settled genres, same reason
+                            'genres_locked',
                         ]
 
                         # Read enrichment data from old artist
@@ -9386,13 +9430,16 @@ class MusicDatabase:
                         preserved_thumb_url = thumb_url
                         if _row_value(old_row, 'art_locked'):
                             preserved_thumb_url = _row_value(old_row, 'thumb_url') or thumb_url
+                        preserved_genres = genres_json
+                        if _row_value(old_row, 'genres_locked'):
+                            preserved_genres = _row_value(old_row, 'genres')
 
                         # Insert new artist with fresh server metadata + preserved created_at
                         old_created = old_row['created_at'] if old_row else None
                         cursor.execute("""
                             INSERT INTO artists (id, name, thumb_url, genres, summary, server_source, owner_profile_id, created_at, updated_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        """, (artist_id, name, preserved_thumb_url, genres_json, summary, server_source, owner_profile_id, old_created))
+                        """, (artist_id, name, preserved_thumb_url, preserved_genres, summary, server_source, owner_profile_id, old_created))
 
                         # Copy enrichment data from old record to new record
                         if old_row:
@@ -9545,11 +9592,15 @@ class MusicDatabase:
                     if self._art_lock_supported(cursor, 'albums')
                     else "COALESCE(NULLIF(?, ''), thumb_url)"
                 )
+                genres_expr = (
+                    "CASE WHEN COALESCE(genres_locked, 0) = 1 THEN genres ELSE ? END"
+                    if self._genres_lock_supported(cursor, 'albums') else "?"
+                )
                 cursor.execute(f"""
                     UPDATE albums
                     SET artist_id = ?, title = ?, year = ?,
                         thumb_url = {thumb_expr},
-                        genres = ?,
+                        genres = {genres_expr},
                         track_count = ?, duration = ?, server_source = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source, album_id))
@@ -9584,6 +9635,8 @@ class MusicDatabase:
                         # the row is rebuilt under a new id, art_locked defaults
                         # back to 0, and the next sync overwrites the pick.
                         'art_locked',
+                        # settled genres, same reason
+                        'genres_locked',
                     ]
 
                     # Read enrichment data from old album
@@ -9596,6 +9649,9 @@ class MusicDatabase:
                         preserved_thumb_url = old_thumb_url or thumb_url
                     else:
                         preserved_thumb_url = thumb_url or old_thumb_url
+                    preserved_genres = genres_json
+                    if _row_value(old_row, 'genres_locked'):
+                        preserved_genres = _row_value(old_row, 'genres')
 
                     # Insert new album with fresh server metadata + preserved created_at
                     old_created = old_row['created_at'] if old_row else None
@@ -9603,7 +9659,7 @@ class MusicDatabase:
                         INSERT INTO albums (id, artist_id, title, year, thumb_url, genres,
                                             track_count, duration, server_source, owner_profile_id, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (album_id, artist_id, title, year, preserved_thumb_url, genres_json,
+                    """, (album_id, artist_id, title, year, preserved_thumb_url, preserved_genres,
                           track_count, duration, server_source, owner_profile_id, old_created))
 
                     # Copy enrichment data from old record to new record
