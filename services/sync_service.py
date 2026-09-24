@@ -706,12 +706,16 @@ class PlaylistSyncService:
                         f"Syncing playlist '{playlist.name}' to {server_type.upper()} server "
                         f"(mode: {sync_mode})"
                     )
+                    # media server calls block, keep them off the shared loop
                     if sync_mode == 'append':
-                        sync_success = media_client.append_to_playlist(playlist.name, plex_tracks)
+                        sync_success = await asyncio.to_thread(
+                            media_client.append_to_playlist, playlist.name, plex_tracks)
                     elif sync_mode == 'reconcile':
-                        sync_success = self._reconcile_or_replace(media_client, playlist.name, plex_tracks)
+                        sync_success = await asyncio.to_thread(
+                            self._reconcile_or_replace, media_client, playlist.name, plex_tracks)
                     else:
-                        sync_success = media_client.update_playlist(playlist.name, plex_tracks)
+                        sync_success = await asyncio.to_thread(
+                            media_client.update_playlist, playlist.name, plex_tracks)
 
                 if not sync_success:
                     return self._create_error_result(playlist.name, [
@@ -740,75 +744,8 @@ class PlaylistSyncService:
                 )
                 unmatched_tracks = []  # Clear so the loop below doesn't run
             if unmatched_tracks:
-                try:
-                    from core.wishlist_service import get_wishlist_service
-                    wishlist_service = get_wishlist_service()
-
-                    logger.info(f"Auto-adding {len(unmatched_tracks)} unmatched tracks to wishlist")
-
-                    for match_result in unmatched_tracks:
-                        spotify_track = match_result.spotify_track
-
-                        # Wing-it stubs are unverified guesses, so they stay off the
-                        # wishlist unless wishlist.wing_it_guesses says otherwise —
-                        # and then only when the source gave a real artist + title.
-                        # Normalize the artist first — should_wishlist_stub does a
-                        # placeholder-name check and a raw {"name": ...} dict would
-                        # stringify past it instead of matching "unknown artist".
-                        stub_artist = _artist_name((spotify_track.artists or [None])[0])
-                        if is_stub_id(spotify_track.id) and not should_wishlist_stub(
-                            stub_artist, spotify_track.name,
-                        ):
-                            logger.info(f"Skipping wishlist for wing-it track: {spotify_track.name}")
-                            continue
-
-                        # Check if we have original track data with full album objects
-                        original_track_data = None
-                        if hasattr(self, '_original_tracks_map') and self._original_tracks_map:
-                            original_track_data = self._original_tracks_map.get(spotify_track.id)
-
-                        # Use original data if available (preserves album images), otherwise convert
-                        if original_track_data:
-                            spotify_track_data = original_track_data
-                        else:
-                            spotify_track_data = {
-                                'id': spotify_track.id,
-                                'name': spotify_track.name,
-                                'artists': [{'name': a} if isinstance(a, str) else a for a in spotify_track.artists],
-                                'album': {'name': spotify_track.album},
-                                'duration_ms': spotify_track.duration_ms,
-                                'popularity': getattr(spotify_track, 'popularity', 0),
-                                'preview_url': getattr(spotify_track, 'preview_url', None),
-                                'external_urls': getattr(spotify_track, 'external_urls', {})
-                            }
-
-                        # Add to wishlist with source context
-                        success = wishlist_service.add_spotify_track_to_wishlist(
-                            spotify_track_data=spotify_track_data,
-                            failure_reason='Missing from media server after sync',
-                            source_type='playlist',
-                            source_context={
-                                'playlist_name': playlist.name,
-                                'playlist_id': playlist.id,
-                                'sync_type': 'automatic_sync',
-                                'timestamp': datetime.now().isoformat()
-                            },
-                            profile_id=_sync_profile_id.get() or 1,
-                            quality_profile_id=(
-                                original_track_data.get('quality_profile_id')
-                                if isinstance(original_track_data, dict)
-                                else None
-                            ),
-                        )
-
-                        if success:
-                            wishlist_added_count += 1
-
-                    logger.info(f"Successfully added {wishlist_added_count}/{len(unmatched_tracks)} tracks to wishlist")
-
-                except Exception as e:
-                    logger.warning(f"Failed to auto-add tracks to wishlist: {e}")
-                    # Don't fail the sync if wishlist add fails
+                wishlist_added_count = await asyncio.to_thread(
+                    self._wishlist_unmatched, playlist, unmatched_tracks)
 
             # Build per-track match details for sync history
             _match_details = []
@@ -891,6 +828,82 @@ class PlaylistSyncService:
             if not getattr(self, 'syncing_playlists', None):
                 self._cancelled = False
     
+    def _wishlist_unmatched(self, playlist, unmatched_tracks) -> int:
+        """put the tracks the library doesn't have on the wishlist, returns
+        how many went on. a db write per track, so the sync runs this off the
+        shared event loop (see _find_track_in_media_server)."""
+        wishlist_added_count = 0
+        try:
+            from core.wishlist_service import get_wishlist_service
+            wishlist_service = get_wishlist_service()
+
+            logger.info(f"Auto-adding {len(unmatched_tracks)} unmatched tracks to wishlist")
+
+            for match_result in unmatched_tracks:
+                spotify_track = match_result.spotify_track
+
+                # Wing-it stubs are unverified guesses, so they stay off the
+                # wishlist unless wishlist.wing_it_guesses says otherwise —
+                # and then only when the source gave a real artist + title.
+                # Normalize the artist first — should_wishlist_stub does a
+                # placeholder-name check and a raw {"name": ...} dict would
+                # stringify past it instead of matching "unknown artist".
+                stub_artist = _artist_name((spotify_track.artists or [None])[0])
+                if is_stub_id(spotify_track.id) and not should_wishlist_stub(
+                    stub_artist, spotify_track.name,
+                ):
+                    logger.info(f"Skipping wishlist for wing-it track: {spotify_track.name}")
+                    continue
+
+                # Check if we have original track data with full album objects
+                original_track_data = None
+                if hasattr(self, '_original_tracks_map') and self._original_tracks_map:
+                    original_track_data = self._original_tracks_map.get(spotify_track.id)
+
+                # Use original data if available (preserves album images), otherwise convert
+                if original_track_data:
+                    spotify_track_data = original_track_data
+                else:
+                    spotify_track_data = {
+                        'id': spotify_track.id,
+                        'name': spotify_track.name,
+                        'artists': [{'name': a} if isinstance(a, str) else a for a in spotify_track.artists],
+                        'album': {'name': spotify_track.album},
+                        'duration_ms': spotify_track.duration_ms,
+                        'popularity': getattr(spotify_track, 'popularity', 0),
+                        'preview_url': getattr(spotify_track, 'preview_url', None),
+                        'external_urls': getattr(spotify_track, 'external_urls', {})
+                    }
+
+                # Add to wishlist with source context
+                success = wishlist_service.add_spotify_track_to_wishlist(
+                    spotify_track_data=spotify_track_data,
+                    failure_reason='Missing from media server after sync',
+                    source_type='playlist',
+                    source_context={
+                        'playlist_name': playlist.name,
+                        'playlist_id': playlist.id,
+                        'sync_type': 'automatic_sync',
+                        'timestamp': datetime.now().isoformat()
+                    },
+                    profile_id=_sync_profile_id.get() or 1,
+                    quality_profile_id=(
+                        original_track_data.get('quality_profile_id')
+                        if isinstance(original_track_data, dict)
+                        else None
+                    ),
+                )
+
+                if success:
+                    wishlist_added_count += 1
+
+            logger.info(f"Successfully added {wishlist_added_count}/{len(unmatched_tracks)} tracks to wishlist")
+
+        except Exception as e:
+            logger.warning(f"Failed to auto-add tracks to wishlist: {e}")
+            # Don't fail the sync if wishlist add fails
+        return wishlist_added_count
+
     def _get_or_fetch_artist_candidates(self, candidate_pool: Optional[Dict[str, list]], db, artist_name: str, active_server) -> Optional[list]:
         """Lazy per-artist pool fetch. Returns None when pooling is off so the
         caller falls back to the per-track SQL loop; otherwise returns the
@@ -927,6 +940,19 @@ class PlaylistSyncService:
             return None
 
     async def _find_track_in_media_server(self, spotify_track: SpotifyTrack, candidate_pool: Optional[Dict[str, list]] = None) -> Tuple[Optional[TrackInfo], float]:
+        """match one track, on a worker thread.
+
+        the sync runs on the app's ONE shared event loop (utils.async_helpers),
+        the same loop search, downloads, slskd status and chat all go through.
+        the matcher is all blocking work (sqlite, fuzzy scoring, plex
+        fetchItem) and never awaits, so run inline it held that loop for the
+        whole matching pass and the app froze until the sync finished. the
+        thread keeps the loop free; to_thread copies the context, so the sync's
+        profile id comes along.
+        """
+        return await asyncio.to_thread(self._find_track_blocking, spotify_track, candidate_pool)
+
+    def _find_track_blocking(self, spotify_track: SpotifyTrack, candidate_pool: Optional[Dict[str, list]] = None) -> Tuple[Optional[TrackInfo], float]:
         """Find a track using the same improved database matching as Download Missing Tracks modal"""
         try:
             # Check active media server connection
