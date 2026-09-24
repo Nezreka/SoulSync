@@ -85654,7 +85654,6 @@ body.src-modal-open { overflow: hidden; }
 #settings-page [data-src="qobuz"], #settings-page [data-source-id="qobuz"] { --brand: 0, 122, 239; }
 #settings-page [data-src="hifi"], #settings-page [data-source-id="hifi"] { --brand: 168, 120, 255; }
 #settings-page [data-src="deezer_dl"], #settings-page [data-source-id="deezer_dl"] { --brand: 162, 56, 255; }
-#settings-page [data-src="amazon"], #settings-page [data-source-id="amazon"] { --brand: 255, 153, 0; }
 #settings-page [data-src="lidarr"], #settings-page [data-source-id="lidarr"] { --brand: 0, 200, 100; }
 #settings-page [data-src="soundcloud"], #settings-page [data-source-id="soundcloud"] { --brand: 255, 85, 0; }
 #settings-page [data-src="torrent"], #settings-page [data-source-id="torrent"] { --brand: 255, 59, 107; }

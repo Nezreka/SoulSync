@@ -239,6 +239,7 @@ from core.tidal_worker import TidalWorker
 from core.qobuz_worker import QobuzWorker
 from core.hydrabase_worker import HydrabaseWorker
 from core.amazon_worker import AmazonWorker
+from core.amazon_outage import amazon_enrichment_should_run as _amazon_enrichment_should_run
 from core.hydrabase_client import HydrabaseClient
 from core.automation_engine import AutomationEngine
 
@@ -20343,7 +20344,9 @@ try:
     # (T2Tunes) that can be down, so it stays paused unless the user has
     # explicitly enabled it (amazon_enrichment_paused=False). This stops an
     # instance outage from grinding/log-flooding installs that never opted in.
-    if config_manager.get('amazon_enrichment_paused', True):
+    # the public t2tunes.site is gone for good (#1300), so an opt-in pointed at
+    # it just hammers a dead host. only a self-hosted amazon.base_url can run.
+    if not _amazon_enrichment_should_run(config_manager):
         amazon_worker.pause()
         logger.info("Amazon enrichment worker initialized (paused — enable it in Settings)")
     else:
