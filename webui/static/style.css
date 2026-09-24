@@ -6714,6 +6714,16 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     display: none !important;
 }
 
+/* and for chat's full-screen web preview: on a phone the bell and helper sat
+   on the page being previewed */
+body:has(.chat-web-modal-overlay--open) #gsearch-bar,
+body:has(.chat-web-modal-overlay--open) #gsearch-aura,
+body:has(.chat-web-modal-overlay--open) #notif-bell-btn,
+body:has(.chat-web-modal-overlay--open) #helper-float-btn,
+body:has(.chat-web-modal-overlay--open) #activity-float-btn {
+    display: none !important;
+}
+
 .gsearch-bar {
     position: fixed;
     bottom: 24px;
@@ -81457,6 +81467,13 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
 }
 .chat-avatar--img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* one line, always. in a narrow message the player header squeezed this label
+   to one letter per line and the card head grew to 226px */
+.chat-embed-brand-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* same squeeze on a link card's site name ("EX / AM / PLE / NE / WS") */
+.chat-unfurl-site { min-width: 0; white-space: nowrap; overflow: hidden; }
+.chat-unfurl-site > span { overflow: hidden; text-overflow: ellipsis; }
+.chat-unfurl-actions { flex-shrink: 0; }
 .chat-group-body { min-width: 0; }
 .chat-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 1px; }
 .chat-group-head .chat-msg-user { font-size: 14.5px; }
@@ -84088,6 +84105,35 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     #chat-page .chat-filter-btn,
     #chat-page .chat-modehint {
         font-size: 12.5px;
+    }
+
+    /* a smaller avatar column hands players and link cards the width back */
+    #chat-page .chat-group {
+        grid-template-columns: 32px minmax(0, 1fr);
+        gap: 8px;
+        padding: 4px 2px;
+    }
+
+    #chat-page .chat-avatar {
+        width: 32px;
+        height: 32px;
+        font-size: 14px;
+    }
+
+    /* the red dot says youtube; the words don't fit next to three buttons */
+    #chat-page .chat-embed-brand-label {
+        display: none;
+    }
+
+    /* 380px of web page in a ~270px message area buried the chat. this fits
+       it; the expand button is there for reading the whole page */
+    #chat-page .chat-inline-web-body {
+        height: min(380px, 30dvh);
+    }
+
+    #chat-page .chat-unfurl-thumb-wrap,
+    #chat-page .chat-unfurl-thumb {
+        max-height: 140px;
     }
 }
 

@@ -65,6 +65,7 @@ import {
   closeTrackDetail,
   openTrackDetail,
 } from './track-detail';
+import { patchChatMessages } from './chat-morph';
 import {
   closeWatchlistHistoryModal,
   openWatchlistHistoryModal,
@@ -125,6 +126,8 @@ export const SHELL_WINDOW_EXPORTS = {
   _mlmSaveMatch,
   _mlmDeleteMatch,
   // server-activity.js (ported aug 26): self-assigns window.ServerActivity
+  // chat.js renderMessages patches the list instead of rebuilding it (sept 24)
+  patchChatMessages,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);

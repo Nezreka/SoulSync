@@ -2581,11 +2581,15 @@
         } else {
             body = renderGroups(shown);
         }
-        host.innerHTML = body +
+        var listHtml = body +
             (hidden ? '<button type="button" class="chat-hidden-note" data-chat-filter>' + hidden +
                 ' message' + (hidden === 1 ? '' : 's') + ' from other Soulseek clients hidden — show</button>' : '') +
             (muted ? '<div class="chat-hidden-note">' + muted +
                 ' message' + (muted === 1 ? '' : 's') + ' from muted users hidden</div>' : '');
+        // patched, not rebuilt: a rebuild killed any video, player or inline
+        // preview the reader had open every time someone posted (src/shell/chat-morph.ts)
+        if (typeof window.patchChatMessages === 'function') window.patchChatMessages(host, listHtml);
+        else host.innerHTML = listHtml;
         _unfurlPendingLinks(host);
         if (state.stickBottom) {
             host.scrollTop = host.scrollHeight;
@@ -8076,7 +8080,8 @@
     var _linkPreviewCache = {};
 
     function _unfurlCardHtml(p) {
-        var theme = p.theme_color || '#6366f1';
+        // it lands in a style attribute: a plain hex colour or the default
+        var theme = /^#[0-9a-f]{3,8}$/i.test(String(p.theme_color || '')) ? p.theme_color : '#6366f1';
         var domain = p.domain || '';
         var site = p.site_name || domain || 'Website';
         var title = p.title || p.url;
@@ -8092,7 +8097,10 @@
                         '<span>' + esc(site) + '</span>' +
                     '</span>' +
                     '<div class="chat-unfurl-actions">' +
-                        '<button type="button" class="chat-unfurl-btn chat-unfurl-btn--preview" data-chat-preview-url="' + attr(p.url) + '" title="Open interactive inline preview">👁 Preview Inline</button>' +
+                        // most big sites refuse to be framed and the iframe still fires
+                        // onload, so offering it there only ever opened a dead box
+                        (p.frameable === false ? '' :
+                        '<button type="button" class="chat-unfurl-btn chat-unfurl-btn--preview" data-chat-preview-url="' + attr(p.url) + '" title="Open interactive inline preview">👁 Preview</button>') +
                         '<a href="' + attr(p.url) + '" target="_blank" rel="noopener noreferrer" class="chat-unfurl-btn" title="Open in browser">↗ Open</a>' +
                         '<button type="button" class="chat-unfurl-btn chat-unfurl-btn--close" data-chat-unfurl-close title="Dismiss preview">✕</button>' +
                     '</div>' +
@@ -8767,11 +8775,11 @@
                     if (existingFrame) {
                         existingFrame.remove();
                         t.classList.remove('chat-unfurl-btn--active');
-                        t.textContent = '👁 Preview Inline';
+                        t.textContent = '👁 Preview';
                         return;
                     }
                     t.classList.add('chat-unfurl-btn--active');
-                    t.textContent = '✕ Close Preview';
+                    t.textContent = '✕ Close';
 
                     var pDomain = '';
                     try { pDomain = new URL(pUrl).hostname; } catch (err) { pDomain = pUrl; }
@@ -8829,7 +8837,7 @@
                         var pb = pc.querySelector('[data-chat-preview-url]');
                         if (pb) {
                             pb.classList.remove('chat-unfurl-btn--active');
-                            pb.textContent = '👁 Preview Inline';
+                            pb.textContent = '👁 Preview';
                         }
                     }
                     fr.remove();

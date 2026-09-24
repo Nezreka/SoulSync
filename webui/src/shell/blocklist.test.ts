@@ -184,6 +184,7 @@ describe('the window contract', () => {
       'openServiceSwitchModal',
       'openTrackDetail',
       'openWatchlistHistoryModal',
+      'patchChatMessages',
       'playLibraryTrack',
       'saveMyAccountToken',
       'setActiveSource',
