@@ -3361,6 +3361,47 @@
                                  22 services in nested accordions meant scrolling a wall of chevrons to
                                  find out whether Last.fm was even configured. The tiles answer that
                                  without opening anything. -->
+                                    <div class="settings-group" data-stg="connections" data-music-only>
+                                        <!-- metadata source. this sat inside the hidden legacy group after the tiles rebuild, so the
+                                             dropdown (and the library discography source injected next to it) had no way in -->
+                                        <div class="api-service-frame">
+                                            <h4 class="service-title" style="color: #e8e8e8;">Metadata Source</h4>
+                                            <div class="form-group">
+                                                <label>Primary metadata source:</label>
+                                                <select id="metadata-fallback-source">
+                                                    <option value="spotify">Spotify</option>
+                                                    <option value="spotify_free">Spotify (no auth)</option>
+                                                    <option value="itunes">iTunes / Apple Music</option>
+                                                    <option value="deezer">Deezer</option>
+                                                    <option value="discogs">Discogs</option>
+                                                    <option value="musicbrainz">MusicBrainz</option>
+                                                </select>
+                                                <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                    onclick="toggleSettingHelp(this)"
+                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                <div class="setting-help-text setting-help-body" hidden>Where artist,
+                                                    album, and track metadata comes from:<br>
+                                                    • <strong>Spotify</strong> — official Spotify; connect your account
+                                                    with the Spotify tile under Services.<br>
+                                                    • <strong>Spotify (no auth)</strong> — the same Spotify catalog with
+                                                    no account needed. It's unofficial and best-effort (may break if
+                                                    Spotify changes its site) and can't read your personal library or
+                                                    playlists.<br>
+                                                    • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no
+                                                    account.<br>
+                                                    • <strong>MusicBrainz</strong> — free; the public server is limited
+                                                    to 1 request/sec. Configure a self-hosted server in the MusicBrainz
+                                                    tile under Services.<br>
+                                                    • <strong>Discogs</strong> — needs a personal access token.<br>
+                                                    • <strong>JioSaavn</strong> — opt in under Advanced → Experimental.
+                                                    Strong for Indian and Bollywood catalogs.<br><br>
+                                                    Tip: if you pick <strong>Spotify (no auth)</strong> and later
+                                                    connect a real Spotify account, it uses the official account
+                                                    normally and only falls back to no-auth while Spotify is
+                                                    rate-limited — then switches back automatically.</div>
+                                            </div>
+                                        </div>
+                                    </div>
                                     <div class="stg-cardgroup" data-stg="connections">
                                         <span class="stg-cardgroup-label">Services</span>
                                         <span class="stg-cardgroup-sub">Accounts and API keys SoulSync connects
@@ -3398,45 +3439,6 @@
                                     <div class="settings-group" data-stg="connections" data-music-only data-svc-legacy>
                                         <h3>API Configuration <button class="stg-accordion-toggle"
                                                 onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
-
-                                        <!-- Metadata Source Selection (first — tells user what they're configuring for) -->
-                                        <div class="api-service-frame">
-                                            <h4 class="service-title" style="color: #e8e8e8;">Metadata Source</h4>
-                                            <div class="form-group">
-                                                <label>Primary metadata source:</label>
-                                                <select id="metadata-fallback-source">
-                                                    <option value="spotify">Spotify</option>
-                                                    <option value="spotify_free">Spotify (no auth)</option>
-                                                    <option value="itunes">iTunes / Apple Music</option>
-                                                    <option value="deezer">Deezer</option>
-                                                    <option value="discogs">Discogs</option>
-                                                    <option value="musicbrainz">MusicBrainz</option>
-                                                </select>
-                                                <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                                    onclick="toggleSettingHelp(this)"
-                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                <div class="setting-help-text setting-help-body" hidden>Where artist,
-                                                    album, and track metadata comes from:<br>
-                                                    • <strong>Spotify</strong> — official Spotify; connect your account
-                                                    in the Spotify section below.<br>
-                                                    • <strong>Spotify (no auth)</strong> — the same Spotify catalog with
-                                                    no account needed. It's unofficial and best-effort (may break if
-                                                    Spotify changes its site) and can't read your personal library or
-                                                    playlists.<br>
-                                                    • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no
-                                                    account.<br>
-                                                    • <strong>MusicBrainz</strong> — free; the public server is limited
-                                                    to 1 request/sec. Configure a self-hosted server in the MusicBrainz
-                                                    section below.<br>
-                                                    • <strong>Discogs</strong> — needs a personal access token.<br>
-                                                    • <strong>JioSaavn</strong> — opt in under Advanced → Experimental.
-                                                    Strong for Indian and Bollywood catalogs.<br><br>
-                                                    Tip: if you pick <strong>Spotify (no auth)</strong> and later
-                                                    connect a real Spotify account, it uses the official account
-                                                    normally and only falls back to no-auth while Spotify is
-                                                    rate-limited — then switches back automatically.</div>
-                                            </div>
-                                        </div>
 
                                         <!-- Spotify Settings -->
                                         <div class="api-service-frame stg-service" data-service="spotify">
