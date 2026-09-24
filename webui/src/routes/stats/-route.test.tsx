@@ -116,7 +116,9 @@ describe('stats route', () => {
     await waitFor(() => expect(screen.getByTestId('stats-page')).toBeInTheDocument());
     expect(await screen.findByText('Listening Stats')).toBeInTheDocument();
     expect(screen.getByText('Not synced yet')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sync listening stats' })).toBeInTheDocument();
+    // by label, not role: a role query walks the whole stats page (~3s alone,
+    // past the time budget under a full run)
+    expect(screen.getByLabelText('Sync listening stats').tagName).toBe('BUTTON');
   });
 
   it('shows an explicit standalone notice instead of the sync button', async () => {
@@ -131,7 +133,7 @@ describe('stats route', () => {
     await waitFor(() => expect(screen.getByTestId('stats-page')).toBeInTheDocument());
     expect(await screen.findByText('Listening Stats')).toBeInTheDocument();
     expect(screen.getByText('Standalone mode: manual sync unavailable')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Sync listening stats' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sync listening stats')).not.toBeInTheDocument();
   });
 
   // #1293: a profile with its own history only sees the import cards for the

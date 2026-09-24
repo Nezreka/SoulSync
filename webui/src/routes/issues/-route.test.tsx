@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -224,10 +224,18 @@ describe('issues route', () => {
       });
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: /wrong cover art/i }));
-    const titleInput = screen.getByLabelText(/title/i);
-    const descriptionInput = screen.getByLabelText(/details/i);
-    const submitButton = screen.getByRole('button', { name: /submit issue/i });
+    // everything below happens inside the composer, and its buttons are found
+    // by their exact text. role queries compute every button's accessible name
+    // and took this test past its time budget under a full run
+    const composer = await screen.findByRole('dialog');
+    await waitFor(() => expect(composer).toHaveTextContent(/wrong cover art/i));
+    const inComposer = within(composer);
+    const button = (text: RegExp) => inComposer.getByText(text).closest('button')!;
+
+    fireEvent.click(button(/^wrong cover art$/i));
+    const titleInput = inComposer.getByLabelText(/title/i);
+    const descriptionInput = inComposer.getByLabelText(/details/i);
+    const submitButton = button(/^submit issue$/i);
     const form = submitButton.closest('form');
 
     expect(titleInput).toHaveValue('Wrong Cover Art: Album Name');
@@ -235,7 +243,9 @@ describe('issues route', () => {
     expect(submitButton).toBeDisabled();
     fireEvent.submit(form!);
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent('Please provide a title for the issue');
+      expect(inComposer.getByRole('alert')).toHaveTextContent(
+        'Please provide a title for the issue',
+      );
     });
 
     fireEvent.change(titleInput, { target: { value: 'Custom report title' } });
@@ -243,12 +253,12 @@ describe('issues route', () => {
     fireEvent.change(descriptionInput, {
       target: { value: 'Detailed reproduction notes' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /high/i }));
-    fireEvent.click(screen.getByRole('button', { name: /wrong metadata/i }));
+    fireEvent.click(button(/^high$/i));
+    fireEvent.click(button(/^wrong metadata$/i));
     expect(titleInput).toHaveValue('Custom report title');
     expect(descriptionInput).toHaveValue('Detailed reproduction notes');
-    expect(screen.getByRole('button', { name: /high/i })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: /submit issue/i }));
+    expect(button(/^high$/i)).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(button(/^submit issue$/i));
 
     await waitFor(() => {
       expect(

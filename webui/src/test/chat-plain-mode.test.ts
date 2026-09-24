@@ -26,15 +26,24 @@ function fn(name: string, deps = '') {
   return new Function(`${deps}${extractFunction(name, JS)}; return ${name};`)();
 }
 
-type St = { view: string; ssOnly: boolean };
+type St = {
+  view: string;
+  ssOnly: boolean;
+  channel?: string;
+  thread?: string | null;
+  room?: string;
+  homeRoom?: string;
+};
 const plainOn = fn('_plainOn', 'var state;\n') as unknown as () => boolean;
 
 function withState(st: St): boolean {
-  // _plainOn closes over `state`; rebuild it with the state we want
+  // _plainOn closes over `state` and leans on _chanRoom + the default channel
+  // (#bugs only exists inside the envelope); rebuild them with the state we want
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   return new Function(
     'st',
-    `var state = st; ${extractFunction('_plainOn', JS)}; return _plainOn();`,
+    `var state = st; var CHAT_DEFAULT_CHANNEL = 'general';
+     ${extractFunction('_chanRoom', JS)}; ${extractFunction('_plainOn', JS)}; return _plainOn();`,
   )(st);
 }
 
@@ -45,6 +54,12 @@ describe('the filter decides the send format', () => {
 
   it('filtering to SoulSync sends the envelope', () => {
     expect(withState({ view: 'room', ssOnly: true })).toBe(false);
+  });
+
+  it('a channel other than #general keeps the envelope, it only exists in there', () => {
+    expect(withState({ view: 'room', ssOnly: false, channel: 'general' })).toBe(true);
+    expect(withState({ view: 'room', ssOnly: false, channel: 'bugs' })).toBe(false);
+    expect(withState({ view: 'room', ssOnly: false, channel: 'general', thread: 't1' })).toBe(false);
   });
 
   it('a PM is never plain-moded, it is already plaintext', () => {
