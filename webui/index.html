@@ -7213,7 +7213,10 @@
                                                         <code>$albumtype</code>, <code>$title</code>,
                                                         <code>$track</code>, <code>$disc</code> (01),
                                                         <code>$discnum</code> (1), <code>$cdnum</code> (CD01),
-                                                        <code>$year</code>, <code>$quality</code> (filename only). The
+                                                        <code>$year</code>, <code>$quality</code> (filename only),
+                                                        <code>$disambiguation</code> (the release's edition note, like
+                                                        &ldquo;baby punk version&rdquo;; added to the album folder
+                                                        automatically when your template leaves it out). The
                                                         three disc variables work in a folder segment as well as in the
                                                         filename and are empty on a single-disc album, so
                                                         <code>$albumartist/$album/Disc $discnum/$track - $title</code>
@@ -8243,6 +8246,9 @@
                                                             <label class="checkbox-label"><input type="checkbox"
                                                                     data-config="musicbrainz.tags.release_id" checked>
                                                                 Release ID</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="musicbrainz.tags.release_comment" checked>
+                                                                Release Comment</label>
                                                             <label class="checkbox-label"><input type="checkbox"
                                                                     data-config="musicbrainz.tags.release_group_id"
                                                                     checked> Release Group ID</label>

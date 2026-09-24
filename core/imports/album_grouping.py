@@ -52,32 +52,31 @@ def find_existing_soulsync_album_id(
     album_source_id: Optional[str] = None,
 ) -> Optional[str]:
     """Resolve the existing ``soulsync`` album row a track should join, or None
-    (caller inserts a new row keyed by ``name_key_id``).
+    (caller inserts a new row).
 
     Match precedence:
-      1. ``name_key_id`` — the exact prior stable-name-hash id (unchanged
-         behaviour: a re-import with the identical name hits its own row).
-      2. ``album_source_col == album_source_id`` — CANONICAL grouping: an
-         existing row already carrying THIS release's source id, so a
-         differently-named import of the same release unifies instead of
-         splitting. Only when the column is allow-listed and the id is non-empty.
-      3. ``(title, artist_id)`` — the legacy name match (kept so nothing that
-         grouped before stops grouping now).
-    """
-    cursor.execute(
-        "SELECT id FROM albums WHERE id = ? AND server_source = 'soulsync'",
-        (name_key_id,),
-    )
-    row = cursor.fetchone()
-    if row:
-        return row[0]
+      1. ``album_source_col == album_source_id`` — CANONICAL grouping: the row
+         already carrying THIS release's id, so a differently-named import of
+         the same release unifies instead of splitting. Only when the column is
+         allow-listed and the id is non-empty.
+      2. ``name_key_id`` — the prior stable-name-hash id.
+      3. ``(title, artist_id)`` — the legacy name match.
 
-    if album_source_col in ALLOWED_ALBUM_SOURCE_COLS and album_source_id:
+    2 and 3 skip a row that already carries a DIFFERENT release id in that
+    column. two releases can share a title and artist and differ only by
+    musicbrainz's disambiguation (#1299); matching them by name merged both into
+    one album with every shared song twice. a row with no id yet still matches,
+    so nothing that grouped before stops grouping now.
+    """
+    source_col = album_source_col if album_source_col in ALLOWED_ALBUM_SOURCE_COLS else None
+    source_id = (album_source_id or "").strip() if source_col else ""
+
+    if source_id:
         try:
             cursor.execute(
-                f"SELECT id FROM albums WHERE {album_source_col} = ? "
+                f"SELECT id FROM albums WHERE {source_col} = ? "
                 "AND server_source = 'soulsync' LIMIT 1",
-                (album_source_id,),
+                (source_id,),
             )
             row = cursor.fetchone()
             if row:
@@ -87,12 +86,31 @@ def find_existing_soulsync_album_id(
             # doesn't split per-entity id columns) — fall through to the name
             # match rather than break the import. Mirrors the guarded source-id
             # UPDATE the caller already does on insert.
-            logger.debug("album source-id lookup skipped (%s): %s", album_source_col, exc)
+            logger.debug("album source-id lookup skipped (%s): %s", source_col, exc)
+            source_id = ""
 
-    cursor.execute(
-        "SELECT id FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? "
-        "AND server_source = 'soulsync' LIMIT 1",
-        (album_name, artist_id),
-    )
-    row = cursor.fetchone()
-    return row[0] if row else None
+    for sql, params in (
+        ("SELECT id{extra} FROM albums WHERE id = ? AND server_source = 'soulsync'",
+         (name_key_id,)),
+        ("SELECT id{extra} FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? "
+         "AND server_source = 'soulsync'",
+         (album_name, artist_id)),
+    ):
+        rows = None
+        if source_id:
+            try:
+                cursor.execute(sql.format(extra=f", {source_col}"), params)
+                rows = cursor.fetchall()
+            except Exception as exc:
+                logger.debug("album release check skipped (%s): %s", source_col, exc)
+                source_id = ""
+        if rows is None:
+            cursor.execute(sql.format(extra=""), params)
+            rows = cursor.fetchall()
+        for row in rows:
+            if source_id:
+                stored = str(row[1] or "").strip()
+                if stored and stored.casefold() != source_id.casefold():
+                    continue  # another release that happens to share the name
+            return row[0]
+    return None

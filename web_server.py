@@ -14061,10 +14061,12 @@ def _apply_path_template(template: str, context: dict) -> str:
         'discnum': str(clean_context.get('disc_number', 1)),
         'year': str(clean_context.get('year', '')),
         'quality': clean_context.get('quality', ''),
+        'disambiguation': clean_context.get('disambiguation', ''),
     }
     for var_name, val in _bracket_map.items():
         result = result.replace('${' + var_name + '}', val)
 
+    result = result.replace('$disambiguation', clean_context.get('disambiguation', ''))
     result = result.replace('$albumartist', album_artist_value)
     result = result.replace('$albumtype', clean_context.get('albumtype', 'Album'))
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))

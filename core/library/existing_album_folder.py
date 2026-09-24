@@ -17,6 +17,9 @@ Safety rails:
   * Only reuses when the album lives in EXACTLY ONE folder on disk. Multiple
     folders means disc subfolders (DatabaseTrack carries no disc number, so we
     can't safely pick the right one) — those defer to the template path.
+  * Never reuses another release's folder. Two releases can share a title and
+    differ only by musicbrainz's disambiguation (#1299); the album's release id
+    (db row, else the files' own tags) has to agree before its folder is reused.
   * Any failure returns None — the caller falls back to the normal template.
 """
 
@@ -27,6 +30,7 @@ import unicodedata
 from typing import Any, Optional
 
 from core.library.path_resolver import resolve_library_file_path
+from core.library.release_identity import read_release_identity
 from utils.logging_config import get_logger
 
 logger = get_logger("library.existing_album_folder")
@@ -104,6 +108,44 @@ def _find_album(db: Any, spotify_album_id: Optional[str], album_name: Optional[s
     return None
 
 
+def _row_release_id(db: Any, album_id: Any) -> str:
+    """The album row's musicbrainz release id, "" when unknown."""
+    conn = None
+    try:
+        conn = db._get_connection()
+        row = conn.execute(
+            "SELECT musicbrainz_release_id FROM albums WHERE id = ?", (str(album_id),),
+        ).fetchone()
+        return str((row[0] if row else "") or "").strip()
+    except Exception as e:
+        logger.debug("release id lookup for album %s failed: %s", album_id, e)
+        return ""
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: S110 - cleanup only
+                pass
+
+
+def _same_release(db: Any, album: Any, sample_file: Optional[str],
+                  release_id: str, disambiguation: str,
+                  read_identity=read_release_identity) -> bool:
+    """Is the found album the release being imported? ids decide when both sides
+    have one. an import that knows nothing about its release keeps today's reuse."""
+    known_id = _row_release_id(db, getattr(album, "id", None))
+    file_comment = ""
+    if sample_file:
+        file_id, file_comment = read_identity(sample_file)
+        known_id = known_id or file_id
+    if release_id and known_id:
+        return known_id.casefold() == release_id.casefold()
+    if disambiguation:
+        # an edition we can't match by id joins only a folder tagged as that edition
+        return file_comment.casefold() == disambiguation.casefold()
+    return True
+
+
 def resolve_existing_album_folder(
     *,
     db: Any,
@@ -115,6 +157,9 @@ def resolve_existing_album_folder(
     expected_track_count: Optional[int] = None,
     config_manager: Any = None,
     resolver=resolve_library_file_path,
+    musicbrainz_release_id: Optional[str] = None,
+    disambiguation: Optional[str] = None,
+    read_identity=read_release_identity,
 ) -> Optional[str]:
     """Return the on-disk folder an existing album lives in (so a new track joins
     it) or None to fall back to the templated path. See module docstring."""
@@ -135,6 +180,7 @@ def resolve_existing_album_folder(
         return None
 
     folders = set()
+    sample_file = None
     for t in tracks:
         file_path = getattr(t, 'file_path', None)
         if not file_path:
@@ -149,11 +195,18 @@ def resolve_existing_album_folder(
         folder = os.path.dirname(resolved)
         if _is_under(folder, transfer_dir):
             folders.add(os.path.normpath(folder))
+            sample_file = sample_file or resolved
 
     # Single folder under the transfer dir → reuse it. Zero (nothing on disk yet)
     # or many (disc subfolders) → let the template decide.
     if len(folders) == 1:
         reuse = next(iter(folders))
+        if not _same_release(db, album, sample_file,
+                             (musicbrainz_release_id or "").strip(),
+                             (disambiguation or "").strip(), read_identity):
+            logger.info("[Existing Album Folder] '%s' holds a different release of '%s', "
+                        "not reusing it", reuse, getattr(album, 'title', album_name))
+            return None
         logger.info("[Existing Album Folder] Reusing '%s' for album '%s'",
                     reuse, getattr(album, 'title', album_name))
         return reuse

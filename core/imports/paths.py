@@ -461,10 +461,12 @@ def _replace_template_variables(template: str, context: dict) -> str:
         "discnum": (str(_disc_number) if (_total_discs > 1 or _disc_number > 1) else ""),
         "year": str(clean_context.get("year", "")),
         "quality": clean_context.get("quality", ""),
+        "disambiguation": clean_context.get("disambiguation", ""),
     }
     for var_name, val in bracket_map.items():
         result = result.replace("${" + var_name + "}", val)
 
+    result = result.replace("$disambiguation", clean_context.get("disambiguation", ""))
     result = result.replace("$albumartist", album_artist_value)
     result = result.replace("$albumtype", clean_context.get("albumtype", "Album"))
     result = result.replace("$playlist", clean_context.get("playlist_name", ""))
@@ -483,6 +485,45 @@ def _replace_template_variables(template: str, context: dict) -> str:
     result = re.sub(r"\s*-\s*-\s*", " - ", result)
     result = result.strip()
     return result
+
+
+# $album as its own token, not the front of $albumartist / $albumtype.
+_ALBUM_TOKEN_RE = re.compile(r"\$\{album\}|\$album(?!artist|type)")
+
+
+def album_name_carries(album_name: str, disambiguation: str) -> bool:
+    """Does the album name already say it? whole words, so "live" isn't in "alive"."""
+    disambiguation = (disambiguation or "").strip()
+    return bool(disambiguation) and re.search(
+        r"(?<!\w)" + re.escape(disambiguation) + r"(?!\w)", album_name or "", re.IGNORECASE,
+    ) is not None
+
+
+def with_disambiguation(template: str, disambiguation: str, album_name: str = "") -> str:
+    """Give the album folder the release's disambiguation when the template doesn't.
+
+    two releases can share a title, artist and release group and differ only by
+    musicbrainz's disambiguation ("baby punk version"). without it in the folder
+    they land in one directory and their same-named tracks collide (#1299). so
+    the suffix goes on after the last $album in the folder part, unless the
+    template already places $disambiguation itself or the album name already
+    carries it. no disambiguation means the template comes back untouched.
+    """
+    disambiguation = (disambiguation or "").strip()
+    if not disambiguation or not template:
+        return template
+    if "$disambiguation" in template or "${disambiguation}" in template:
+        return template
+    if album_name_carries(album_name, disambiguation):
+        return template
+    folder, sep, filename = template.rpartition("/")
+    if not sep:
+        return template
+    matches = list(_ALBUM_TOKEN_RE.finditer(folder))
+    if not matches:
+        return template
+    end = matches[-1].end()
+    return folder[:end] + " ($disambiguation)" + folder[end:] + sep + filename
 
 
 def apply_path_template(template: str, context: dict) -> str:
@@ -543,6 +584,7 @@ def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
 
 def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, str]:
     """Build file path using a user-provided template string directly."""
+    template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
     _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
@@ -620,6 +662,7 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
         }
         template = default_templates.get(template_type, "$artist/$album/$track - $title")
 
+    template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
     _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
@@ -951,6 +994,8 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "albumtype": album_type_display,
             "_artists_list": _album_artists_for_collab if _album_artists_for_collab else _artists,
             "_itunes_artist_id": _itunes_aid,
+            # #1299: the one thing telling same-named releases apart.
+            "disambiguation": str((album_context or {}).get("disambiguation") or "").strip(),
         }
         # A caller that KNOWS the disc count is authoritative: re-deriving it from
         # a live provider tracklist made the destination depend on whether that
@@ -1046,6 +1091,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 _expected_tracks = None
                 if album_context and album_context.get("total_tracks"):
                     _expected_tracks = _coerce_int(album_context.get("total_tracks"), 0) or None
+                from core.metadata.musicbrainz_tags import selected_release_id
                 reuse_folder = resolve_existing_album_folder(
                     db=get_database(),
                     transfer_dir=transfer_dir,
@@ -1055,6 +1101,8 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                     active_server=_active_server,
                     expected_track_count=_expected_tracks,
                     config_manager=_get_config_manager(),
+                    musicbrainz_release_id=selected_release_id(album_context),
+                    disambiguation=template_context.get("disambiguation", ""),
                 )
             except Exception as _reuse_err:
                 logger.debug("[Existing Album Folder] lookup failed: %s", _reuse_err)
@@ -1082,7 +1130,11 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             _ensure_dir(album_dir, exist_ok=True)
             return final_path, True
 
-        album_name_sanitized = sanitize_filename(album_info["album_name"])
+        _fallback_album = album_info["album_name"]
+        _disambiguation = template_context.get("disambiguation", "")
+        if _disambiguation and not album_name_carries(_fallback_album, _disambiguation):
+            _fallback_album = f"{_fallback_album} ({_disambiguation})"
+        album_name_sanitized = sanitize_filename(_fallback_album)
         if raw_album_type in ("compilation", "compile"):
             album_relative = os.path.join("Compilations", album_name_sanitized)
         else:

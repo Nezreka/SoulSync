@@ -79,6 +79,23 @@ _SOULSYNC_FILLABLE_COLUMNS = {
 }
 
 
+def _fill_empty_mb_release_id(cursor, album_id: Any, release_id: str) -> None:
+    """Record the musicbrainz release an imported album is, when the row has none.
+
+    marked matched the way the embedded-id reconcile does, so the enrichment
+    worker doesn't go looking and land on a same-named sibling release (#1299).
+    never overwrites an id that's already there.
+    """
+    try:
+        cursor.execute(
+            "UPDATE albums SET musicbrainz_release_id = ?, musicbrainz_match_status = 'matched' "
+            "WHERE id = ? AND (musicbrainz_release_id IS NULL OR musicbrainz_release_id = '')",
+            (release_id, album_id),
+        )
+    except Exception as e:
+        logger.debug("album musicbrainz release id fill failed: %s", e)
+
+
 def _fill_empty_columns(cursor, table: str, row_id: Any, fields: Dict[str, Any]) -> None:
     """UPDATE only the columns whose current value is NULL or empty.
 
@@ -625,10 +642,20 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # dressing each split row in its own cover art (Sokhi). Precedence:
             # name-hash id -> source release id -> (title, artist). Falls back to
             # the legacy name match, so nothing that grouped before stops now.
+            #
+            # a musicbrainz release id is the sharpest edition identity we get, and
+            # the only one a musicbrainz import has (that source has no album
+            # column of its own). two releases can share a name (#1299), so it
+            # keys the grouping whenever the import carries one.
             from core.imports.album_grouping import find_existing_soulsync_album_id
+            from core.metadata.musicbrainz_tags import selected_release_id
+            mb_release_id = selected_release_id(album_ctx)
+            group_col, group_id = album_source_col, album_source_id
+            if mb_release_id:
+                group_col, group_id = "musicbrainz_release_id", mb_release_id
             existing_album_id = find_existing_soulsync_album_id(
                 cursor, name_key_id=album_id, artist_id=artist_id, album_name=album_name,
-                album_source_col=album_source_col, album_source_id=album_source_id,
+                album_source_col=group_col, album_source_id=group_id,
             )
             if existing_album_id is not None:
                 album_id = existing_album_id
@@ -654,7 +681,11 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             else:
                 cursor.execute("SELECT id FROM albums WHERE id = ?", (album_id,))
                 if cursor.fetchone():
-                    album_id = _stable_soulsync_id(f"{artist_name}::{album_name}::soulsync".lower().strip())
+                    # the name-hash id is taken, by another server's row or by a
+                    # different release of the same name. a release id gives each
+                    # release its own stable id, so a third one can't collide.
+                    _scope = group_id or "soulsync"
+                    album_id = _stable_soulsync_id(f"{artist_name}::{album_name}::{_scope}".lower().strip())
                 cursor.execute(
                     """
                     INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count,
@@ -671,6 +702,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         )
                     except Exception as e:
                         logger.debug("album source-id update failed: %s", e)
+
+            if mb_release_id:
+                _fill_empty_mb_release_id(cursor, album_id, mb_release_id)
 
             track_artist = None
             track_artists_list = track_info.get("artists", []) or original_search.get("artists", [])

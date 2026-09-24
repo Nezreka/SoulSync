@@ -61,6 +61,7 @@ _HUNG_WORKER_THRESHOLD_SECONDS = 300  # 5 min — generous; real worst-case
                                        # is ffmpeg downsampling a long
                                        # hi-res FLAC, ~30-60s typically.
 
+from core.library.release_identity import read_release_identity
 from core.metadata_service import (
     get_album_for_source,
     get_album_tracks_for_source,
@@ -1086,7 +1087,9 @@ def plan_album_reorganize(
         }
 
     if metadata_source == 'tags':
-        return _plan_from_tags(album_data, tracks, resolve_file_path_fn)
+        return _with_release_disambiguation(
+            _plan_from_tags(album_data, tracks, resolve_file_path_fn),
+            tracks, resolve_file_path_fn)
 
     if primary_source is None:
         try:
@@ -1184,7 +1187,7 @@ def plan_album_reorganize(
     else:
         resolved_record_type = raw_db_type or api_album_type or 'album'
 
-    return {
+    return _with_release_disambiguation({
         'status': 'planned',
         'source': source,
         'api_album': api_album,
@@ -1192,7 +1195,49 @@ def plan_album_reorganize(
         'items': items,
         'record_type': resolved_record_type,
         'is_compilation': (resolved_record_type == 'compilation'),
-    }
+    }, tracks, resolve_file_path_fn)
+
+
+def _files_disambiguation(tracks, resolve_file_path_fn, read_identity) -> str:
+    """The release comment off the album's own files, "" when none carry one."""
+    if not resolve_file_path_fn:
+        return ''
+    for track in tracks:
+        try:
+            path = resolve_file_path_fn(track.get('file_path'))
+        except Exception:
+            path = None
+        if not path:
+            continue
+        _release_id, comment = read_identity(path)
+        if comment:
+            return comment
+    return ''
+
+
+def _with_release_disambiguation(plan: dict, tracks, resolve_file_path_fn,
+                                 read_identity=None) -> dict:
+    """Carry the release's disambiguation onto the plan's album dicts.
+
+    the import puts it on the album folder (#1299), so reorganize has to know it
+    too or it folds "album (baby punk version)" back into "album", on top of the
+    other release. musicbrainz says it directly when it's the source; otherwise
+    the files' album comment tag does, which picard and beets write as well.
+    """
+    if plan.get('status') != 'planned':
+        return plan
+    api_album = plan.get('api_album') or {}
+    if plan.get('source') == 'musicbrainz' and 'disambiguation' in api_album:
+        disambiguation = api_album.get('disambiguation')
+    else:
+        disambiguation = _files_disambiguation(
+            tracks, resolve_file_path_fn, read_identity or read_release_identity)
+    disambiguation = str(disambiguation or '').strip()
+    plan['api_album'] = {**api_album, 'disambiguation': disambiguation}
+    for item in plan.get('items') or []:
+        if isinstance(item.get('api_album'), dict):
+            item['api_album'] = {**item['api_album'], 'disambiguation': disambiguation}
+    return plan
 
 
 def _build_post_process_context(
@@ -1315,6 +1360,8 @@ def _build_post_process_context(
             # would decide the destination).
             'total_discs_declared': True,
             'image_url': api_album_image,
+            # #1299: keeps a same-named release in its own folder
+            'disambiguation': str(api_album.get('disambiguation') or '').strip(),
             'album_type': eff_type or 'album',
             'record_type': eff_type or 'album',
             'is_compilation': is_comp,
