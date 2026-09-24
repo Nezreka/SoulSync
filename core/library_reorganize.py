@@ -186,6 +186,25 @@ def _is_unknown_artist(artist_name: Optional[str]) -> bool:
     return str(artist_name).strip().lower() in _UNKNOWN_ARTIST_NAMES
 
 
+def _source_album_artist(api_album) -> str:
+    """the album artist the metadata source gives the album, '' when it gives
+    none. every source shape: a spotify-style artists list, a bare artist or
+    artist_name, or a tag-mode album_artist."""
+    if not isinstance(api_album, dict):
+        return ''
+    artists = api_album.get('artists')
+    if isinstance(artists, list) and artists:
+        first = artists[0]
+        name = first.get('name') if isinstance(first, dict) else first
+    else:
+        name = (api_album.get('album_artist') or api_album.get('artist')
+                or api_album.get('artist_name'))
+        if isinstance(name, dict):
+            name = name.get('name')
+    name = str(name or '').strip()
+    return '' if _is_unknown_artist(name) else name
+
+
 def _looks_like_album_id_title(album_title: Optional[str]) -> bool:
     """Pre-#524 manual-import bug left some albums with a numeric
     album_id stored as `albums.title`. Detect that shape so reorganize
@@ -1207,7 +1226,17 @@ def _build_post_process_context(
     normalized_artists = [
         ({'name': a} if isinstance(a, str) else a) for a in track_artists
     ]
-    album_artist_name = album_artist or artist_name
+    # album artist comes from the source, like every other tag reorganize
+    # writes. it used to be the name soulsync already had, which on navidrome
+    # IS the file's old album artist tag, so a wrong variation got written
+    # straight back every run (LettuceSnob). the library name is only the
+    # fallback, and a case-only difference keeps the user's casing.
+    library_album_artist = album_artist or artist_name
+    source_album_artist = _source_album_artist(api_album)
+    album_artist_name = (
+        _keep_user_casing(source_album_artist, library_album_artist)
+        if source_album_artist else library_album_artist
+    )
     primary_track_artist = ''
     if normalized_artists:
         first_a = normalized_artists[0]
