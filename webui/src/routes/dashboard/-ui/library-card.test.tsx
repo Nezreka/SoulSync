@@ -48,7 +48,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   delete window.showToast;
-  delete window.showConfirmDialog;
+  Reflect.deleteProperty(window, 'showConfirmDialog');
 });
 
 async function mountCard() {
@@ -73,19 +73,17 @@ function fireDbStats(stats: Record<string, unknown>) {
   });
 }
 
-describe('the strip shape', () => {
-  // The 1:1 vanilla artefact differential retired with the tall card:
-  // 3.2.0 re-renders the library as a full-width STRIP (the stats band's
-  // language), dropping the outer dash-card__head — the inner
-  // library-status-card carries its own title/subtitle/actions. What must
-  // survive is pinned instead: the strip class, and every id the state
-  // machine + scan flows write into (their tests below all target them).
-  it('keeps the strip class and the state-machine ids', async () => {
+describe('the hero status line', () => {
+  // The Sept 2026 dashboard redesign: the library is the hero's status line,
+  // one primary action (Scan) and the rest behind "⋯". The page links that
+  // only repeated the sidebar (wishlist, downloads, discover, sync) are gone.
+  // What must survive is pinned: every id the state machine + scan flows
+  // write into (their tests below all target them), menu items included.
+  it('keeps the state-machine ids, the extra actions in the menu', async () => {
     const view = await mountCard();
     const root = view.container.firstElementChild!;
     expect(root.getAttribute('data-card')).toBe('library');
-    expect(root.className).toContain('dash-card--strip');
-    expect(root.querySelector('.dash-card__head')).toBeNull();
+    expect(root.className).toBe('dash-hero-library');
     for (const id of [
       'library-status-card',
       'library-status-title',
@@ -97,10 +95,6 @@ describe('the strip shape', () => {
       'library-status-repair-btn',
       'library-status-backup-btn',
       'library-status-review-btn',
-      'library-status-wishlist-btn',
-      'library-status-downloads-btn',
-      'library-status-discover-btn',
-      'library-status-sync-btn',
       // the four-stat row retired with the header's hello strip —
       // albums + db size live in the subtitle now
       'library-status-progress',
@@ -108,6 +102,33 @@ describe('the strip shape', () => {
     ]) {
       expect(root.querySelector(`#${id}`)).not.toBeNull();
     }
+    for (const id of [
+      'library-status-wishlist-btn',
+      'library-status-downloads-btn',
+      'library-status-discover-btn',
+      'library-status-sync-btn',
+    ]) {
+      expect(root.querySelector(`#${id}`)).toBeNull();
+    }
+    const menu = root.querySelector('.library-status-menu')!;
+    for (const id of ['deep', 'browse', 'verify', 'repair', 'backup', 'review']) {
+      expect(menu.querySelector(`#library-status-${id}-btn`)).not.toBeNull();
+    }
+  });
+
+  it('the ⋯ button opens the menu, and Escape or a pick closes it', async () => {
+    const view = await mountCard();
+    const more = view.container.querySelector<HTMLElement>('.library-status-more')!;
+    const menu = view.container.querySelector<HTMLElement>('.library-status-menu')!;
+    expect(menu.hidden).toBe(true);
+    fireEvent.click(more);
+    expect(menu.hidden).toBe(false);
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(menu.hidden).toBe(true);
+    fireEvent.click(more);
+    fireEvent.click(menu.querySelector('#library-status-browse-btn')!);
+    expect(menu.hidden).toBe(true);
   });
 });
 
@@ -289,14 +310,12 @@ describe('the quick access links', () => {
   });
 
   afterEach(() => {
-    delete window.navigateToPage;
+    Reflect.deleteProperty(window, 'navigateToPage');
   });
 
   it.each([
-    ['library-status-wishlist-btn', 'wishlist'],
-    ['library-status-downloads-btn', 'active-downloads'],
-    ['library-status-discover-btn', 'discover'],
-    ['library-status-sync-btn', 'sync'],
+    ['library-status-browse-btn', 'library'],
+    ['library-status-repair-btn', 'tools'],
     ['library-status-review-btn', 'active-downloads'],
   ])('%s goes to %s', async (id, page) => {
     const view = await mountCard();
@@ -312,6 +331,10 @@ describe('the quick access links', () => {
     // the real class list, not just "the rule exists". a badge nobody can
     // select is the shape that has shipped here before.
     expect(btn.className).toContain('library-status-btn-attention');
+    // it lives in the menu now, so the menu button carries the dot
+    expect(view.container.querySelector('.library-status-more')!.className).toContain(
+      'library-status-more--attention',
+    );
     expect(btn.querySelector('.library-status-btn-badge')?.textContent).toBe('74');
   });
 

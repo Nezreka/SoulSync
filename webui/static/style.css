@@ -86052,3 +86052,539 @@ body.src-modal-open { overflow: hidden; }
     font-size: 13px;
 }
 #settings-page .stg-media-panel > .settings-group:last-child { margin-bottom: 0 !important; }
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   The dashboard (Sept 2026 redesign). Music first, the system beside it.
+   A hero (greeting, library size and controls, the worker orbs on their own
+   stage), then two columns: what you play on the left, a calm system rail on
+   the right. Everything here is scoped to #dashboard-page so the video
+   dashboard, which shares the header classes, is untouched.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── the hero ── */
+#dashboard-page .dashboard-header.dash-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 480px);
+    align-items: stretch;
+    gap: 32px;
+    padding: 34px 40px 30px;
+    /* the page's own gap spaces it from what follows */
+    margin: -28px -24px 0 -24px;
+}
+#dashboard-page .dash-hero-main {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 22px;
+    min-width: 0;
+    position: relative;
+    z-index: 6;
+}
+#dashboard-page .dash-hero .hello-greeting {
+    font-size: 44px;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    text-transform: none;
+}
+/* the gradient is painted only inside the span's own box, and at 44px a
+   tight line box ends above the descenders, so the p and g got sliced off.
+   the padding gives the paint room, the negative margin keeps the spacing */
+#dashboard-page .dash-hero .hello-greeting > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    padding-bottom: 0.18em;
+    margin-bottom: -0.18em;
+}
+#dashboard-page .dash-hero .hello-greeting > span::first-letter { text-transform: uppercase; }
+
+#dashboard-page .dash-hero-numbers { gap: 36px; }
+#dashboard-page .dash-hero-number {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+}
+#dashboard-page .dash-hero .hello-stat + .hello-stat::before { content: none; }
+#dashboard-page .dash-hero-number-value {
+    font-size: 26px;
+    font-weight: 650;
+    color: #f4f5f7;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+#dashboard-page .dash-hero-number-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(244, 245, 247, 0.5);
+}
+#dashboard-page .dash-hero-number:hover .dash-hero-number-label { color: rgba(244, 245, 247, 0.8); }
+
+/* the library, as one status line under the numbers */
+#dashboard-page .dash-hero-library .library-status-card {
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+    min-height: 0;
+    overflow: visible;
+}
+#dashboard-page .dash-hero-library .library-status-card::before,
+#dashboard-page .dash-hero-library .library-status-card::after { display: none; }
+#dashboard-page .dash-hero-library .library-status-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    margin: 0;
+}
+#dashboard-page .dash-hero-library .library-status-info {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    flex: 1 1 260px;
+    min-width: 0;
+    order: 2;
+}
+#dashboard-page .dash-hero-library .library-status-actions {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    order: 1;
+    flex-wrap: nowrap;
+}
+#dashboard-page .dash-hero-library .library-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgb(var(--accent-light-rgb));
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
+    align-self: center;
+    flex-shrink: 0;
+}
+#dashboard-page .dash-hero-library .needs-setup .library-status-dot { background: #ff7b72; box-shadow: 0 0 0 3px rgba(255, 123, 114, 0.18); }
+#dashboard-page .dash-hero-library .empty-library .library-status-dot { background: #f0b35a; box-shadow: 0 0 0 3px rgba(240, 179, 90, 0.18); }
+#dashboard-page .dash-hero-library .scanning .library-status-dot { background: #f0b35a; animation: dash-dot-pulse 1.4s ease-in-out infinite; }
+@keyframes dash-dot-pulse { 50% { opacity: 0.35; } }
+#dashboard-page .dash-hero-library .library-status-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #f4f5f7;
+}
+#dashboard-page .dash-hero-library .library-status-subtitle {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(244, 245, 247, 0.55);
+}
+#dashboard-page .dash-hero-library .library-status-btn {
+    min-height: 40px;
+    padding: 0 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+    color: #f4f5f7;
+    font-size: 14px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: none;
+}
+#dashboard-page .dash-hero-library .library-status-btn:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.26); }
+#dashboard-page .dash-hero-library .library-status-btn.scanning { border-color: rgba(240, 179, 90, 0.5); color: #f0b35a; }
+#dashboard-page .library-status-more {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+    color: #f4f5f7;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+#dashboard-page .library-status-more:hover,
+#dashboard-page .library-status-more[aria-expanded="true"] { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.26); }
+/* something waits in review: a quiet dot on the menu, the count inside it */
+#dashboard-page .library-status-more--attention::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #f0b35a;
+    box-shadow: 0 0 0 2px #0b0c0f;
+}
+#dashboard-page .library-status-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 7000;
+    min-width: 230px;
+    padding: 6px;
+    border-radius: 14px;
+    background: #16181d;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+}
+#dashboard-page .library-status-menu[hidden] { display: none; }
+#dashboard-page .library-status-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 38px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 9px;
+    background: none;
+    color: #f4f5f7;
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+}
+#dashboard-page .library-status-menu-item:hover,
+#dashboard-page .library-status-menu-item:focus-visible { background: rgba(255, 255, 255, 0.07); outline: none; }
+#dashboard-page .library-status-menu-hint { margin-left: auto; font-size: 12px; color: rgba(244, 245, 247, 0.45); }
+#dashboard-page .library-status-menu-item .library-status-btn-badge {
+    margin-left: auto;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: rgba(240, 179, 90, 0.18);
+    color: #f0b35a;
+    font-size: 12px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+#dashboard-page .dash-hero-library .library-status-progress { margin-top: 12px; max-width: 520px; }
+#dashboard-page .dash-hero-library .library-status-message {
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: rgba(244, 245, 247, 0.7);
+    max-width: 560px;
+}
+
+/* ── the orb stage: worker-orbs.js anchors its canvas here and orbits the
+   nucleus at the stage centre. hovering the stage opens the worker grid.
+   no overflow clip: the worker tooltips have to escape it. ── */
+#dashboard-page .orb-stage {
+    position: relative;
+    min-height: 250px;
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background:
+        radial-gradient(60% 70% at 50% 50%, rgba(var(--accent-rgb), 0.10) 0%, transparent 70%),
+        rgba(255, 255, 255, 0.02);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 18px 18px 34px;
+    box-sizing: border-box;
+}
+/* centred wrap, not a grid: 15-17 workers depending on the experimental
+   toggles, and every row should sit balanced whatever the count */
+#dashboard-page .orb-stage .header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 12px 18px;
+    margin: 0 auto;
+    width: 100%;
+    max-width: 380px;
+}
+#dashboard-page .orb-stage .em-manage-btn { flex-basis: 100%; max-width: max-content; margin: 4px auto 0; }
+#dashboard-page .orb-stage-caption {
+    position: absolute;
+    left: 16px;
+    bottom: 11px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: rgba(244, 245, 247, 0.55);
+    pointer-events: none;
+}
+#dashboard-page .orb-stage-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.3); }
+#dashboard-page .orb-stage-dot--busy { background: rgb(var(--accent-light-rgb)); box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.7); }
+
+/* ── two columns: music, then the system rail ── */
+#dashboard-page .dash-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 28px;
+    align-items: start;
+}
+#dashboard-page .dash-main {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    min-width: 0;
+}
+#dashboard-page .dash-main > .dash-card,
+#dashboard-page .dash-side > .dash-card { grid-column: auto; margin: 0; }
+#dashboard-page .dash-side {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+/* rail cards: one title, one quiet link, no chrome shouting */
+#dashboard-page .dash-side-card { padding: 20px; border-radius: 20px; }
+#dashboard-page .dash-side-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+#dashboard-page .dash-side-title { margin: 0; font-size: 17px; font-weight: 600; color: #f4f5f7; }
+#dashboard-page .dash-side-link,
+#dashboard-page .dash-side-more {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 13px;
+    color: rgb(var(--accent-light-rgb));
+    cursor: pointer;
+}
+#dashboard-page .dash-side-link:hover,
+#dashboard-page .dash-side-more:hover { color: #fff; }
+#dashboard-page .dash-side-more { margin-top: 12px; color: rgba(244, 245, 247, 0.55); text-align: left; }
+#dashboard-page .dash-side-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; font-size: 13px; color: rgba(244, 245, 247, 0.6); }
+#dashboard-page .dash-side-cta {
+    min-height: 36px;
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+    color: #f4f5f7;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+/* playlist sync health */
+#dashboard-page .dash-sync-health { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+#dashboard-page .dash-sync-health-line { display: flex; align-items: baseline; gap: 10px; }
+#dashboard-page .dash-sync-pct { font-size: 32px; font-weight: 700; color: #f4f5f7; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+#dashboard-page .dash-sync-of { font-size: 13px; line-height: 1.35; color: rgba(244, 245, 247, 0.6); }
+#dashboard-page .dash-sync-bar { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+#dashboard-page .dash-sync-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+}
+#dashboard-page .dash-sync-rows { display: flex; flex-direction: column; gap: 4px; }
+#dashboard-page .dash-sync-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 2px 6px 2px 2px;
+    border-radius: 10px;
+}
+#dashboard-page .dash-sync-row:hover { background: rgba(255, 255, 255, 0.04); }
+#dashboard-page .dash-sync-row--open { cursor: pointer; }
+#dashboard-page .dash-sync-row--open:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 1px; }
+/* the sort: a quiet word and a quiet select, right above the rows */
+#dashboard-page .dash-sync-sortbar { display: flex; justify-content: flex-end; margin: -2px 0 6px; }
+#dashboard-page .dash-side-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(244, 245, 247, 0.45);
+}
+#dashboard-page .dash-side-sort select {
+    appearance: none;
+    -webkit-appearance: none;
+    padding: 3px 22px 3px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23b8b9bd' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 7px center;
+    color: #f4f5f7;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+#dashboard-page .dash-side-sort select:hover { border-color: rgba(255, 255, 255, 0.16); }
+#dashboard-page .dash-side-sort select:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 1px; }
+#dashboard-page .dash-side-sort option { background: #1a1c22; color: #f4f5f7; }
+/* the band's art carries grid-area: art for ITS grid; here it just sits in
+   the first column */
+#dashboard-page .dash-sync-row .syncband-art { grid-area: auto; grid-column: 1; grid-row: 1; width: 32px; height: 32px; border-radius: 7px; }
+#dashboard-page .dash-sync-row .dash-sync-name { grid-column: 2; grid-row: 1; }
+#dashboard-page .dash-sync-row > :nth-child(3) { grid-column: 3; grid-row: 1; }
+#dashboard-page .dash-sync-row .syncband-art-badge { width: 13px; height: 13px; }
+#dashboard-page .dash-sync-name { font-size: 14px; color: #f4f5f7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dashboard-page .dash-sync-missing { font-size: 13px; color: #f0b35a; white-space: nowrap; }
+#dashboard-page .dash-sync-done { font-size: 13px; color: rgba(244, 245, 247, 0.45); }
+#dashboard-page .dash-sync-live { font-size: 12px; font-weight: 600; color: rgb(var(--accent-light-rgb)); }
+#dashboard-page .dash-sync-actions {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none;
+    gap: 4px;
+}
+#dashboard-page .dash-sync-row:hover .dash-sync-actions,
+#dashboard-page .dash-sync-row:focus-within .dash-sync-actions { display: flex; }
+#dashboard-page .dash-sync-row:hover .dash-sync-missing,
+#dashboard-page .dash-sync-row:hover .dash-sync-done,
+#dashboard-page .dash-sync-row:focus-within .dash-sync-missing,
+#dashboard-page .dash-sync-row:focus-within .dash-sync-done { visibility: hidden; }
+#dashboard-page .dash-sync-act {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: #1a1c22;
+    color: #f4f5f7;
+    font-size: 12px;
+    cursor: pointer;
+}
+#dashboard-page .dash-sync-act:hover:not(:disabled) { border-color: rgba(var(--accent-rgb), 0.6); color: rgb(var(--accent-light-rgb)); }
+#dashboard-page .dash-sync-act:disabled { opacity: 0.4; cursor: default; }
+
+/* up next: the automation rows, compact */
+#dashboard-page .dash-side-card[data-card="automations"] .dash-card__body { padding: 0; }
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-rows { gap: 4px; }
+/* flat rows like the sync card above, not boxes inside a box */
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row {
+    padding: 8px 6px 8px 4px;
+    background: none;
+    border-color: transparent;
+}
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row:hover { background: rgba(255, 255, 255, 0.04); }
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row--live { background: rgba(var(--accent-rgb), 0.06); }
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-name { font-size: 14px; font-weight: 500; }
+/* a bare green "1h ago" read like a countdown. say what it is, the dot
+   already says it went fine */
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-last:not(.dash-autom-last--bad) { color: rgba(244, 245, 247, 0.45); }
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-last:not(.dash-autom-last--bad)::before { content: 'ran '; }
+/* narrow rail: run/pause float over the row on hover instead of holding a
+   column open that squeezes the names */
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row { position: relative; }
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-actions {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none;
+    gap: 4px;
+}
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row:hover .dash-autom-actions,
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row:focus-within .dash-autom-actions { display: flex; }
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row:hover .dash-autom-when { visibility: hidden; }
+
+/* watchlist + wishlist: two quiet count tiles, not glowing pills */
+#dashboard-page .dash-tiles.header-quick-nav {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 12px;
+}
+#dashboard-page .dash-tiles .dash-tile.header-button {
+    height: auto;
+    min-height: 92px;
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.035);
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    animation: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 4px;
+    color: #f4f5f7;
+    font-family: inherit;
+    text-align: left;
+    transform: none;
+}
+#dashboard-page .dash-tiles .dash-tile.header-button:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.12); }
+#dashboard-page .dash-tiles .dash-tile::before,
+#dashboard-page .dash-tiles .dash-tile::after { display: none; }
+#dashboard-page .dash-tiles .dash-tile .hero-btn-badge {
+    position: static;
+    min-width: 0;
+    height: auto;
+    padding: 0;
+    margin: 0;
+    background: none;
+    border: none;
+    box-shadow: none;
+    animation: none;
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #f4f5f7;
+}
+#dashboard-page .dash-tiles .dash-tile .hero-btn-label {
+    font-size: 13px;
+    font-weight: 400;
+    color: rgba(244, 245, 247, 0.6);
+}
+#dashboard-page .dash-tiles .dash-tile-sub { font-size: 12px; font-weight: 400; color: rgba(244, 245, 247, 0.45); }
+
+/* Boulder's quick switches: a quiet footer, not part of any card */
+#dashboard-page .dash-footer { margin-top: 8px; padding-top: 18px; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+#dashboard-page .dash-footer .dash-quick-settings { margin: 0; border: none; padding: 0; }
+/* swatches stay round when the footer wraps onto a phone */
+#dashboard-page .dash-footer .dash-qs-accent { align-items: center; flex-wrap: wrap; }
+#dashboard-page .dash-footer .dash-qs-swatch { flex: none; width: 16px; height: 16px; aspect-ratio: 1; }
+
+/* narrower windows: one column, the rail after the music */
+@media (max-width: 1180px) {
+    #dashboard-page .dashboard-header.dash-hero { grid-template-columns: 1fr; }
+    #dashboard-page .orb-stage { min-height: 220px; }
+    #dashboard-page .dash-layout { grid-template-columns: 1fr; }
+    #dashboard-page .dash-side { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+}
+/* a phone: no orb canvas (worker-orbs is off below 768px), so the stage is
+   just the worker buttons in a tidy grid */
+@media (max-width: 768px) {
+    #dashboard-page .dashboard-header.dash-hero { padding: 22px 16px 20px; margin: -16px -12px 0 -12px; gap: 20px; }
+    #dashboard-page .dash-hero .hello-greeting { font-size: 30px; }
+    #dashboard-page .dash-hero-numbers { gap: 20px; }
+    #dashboard-page .dash-hero-number-value { font-size: 20px; }
+    #dashboard-page .orb-stage { min-height: 0; padding: 14px 12px 34px; }
+    #dashboard-page .orb-stage .header-actions { max-width: none; gap: 10px 12px; }
+    #dashboard-page .dash-side { display: flex; }
+    /* no hover on a phone, so the worker tooltips only ever pushed the page
+       sideways from off-screen. tapping a worker still toggles it. */
+    #dashboard-page .orb-stage .header-actions [id$="-tooltip"] { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    #dashboard-page .dash-hero-library .scanning .library-status-dot { animation: none; }
+}

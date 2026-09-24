@@ -441,27 +441,14 @@ export function Row({
   if (sched && !sched.enabled) classes.push('syncband-row--off');
 
   const lastId = row.last?.id;
-  // A scheduled row can always open ITS PLAYLIST, run or no run. It used to
-  // open only the sync-detail modal, keyed on a history entry, so a playlist
-  // with no run in the fetched window was simply inert: clicking Discover
-  // Weekly did nothing while Release Radar opened (Boulder, Aug 2026). The
-  // schedule's board key IS the mirrored playlist id.
-  const playlistId = sched ? Number(sched.key) : NaN;
-  const openPlaylist = Number.isFinite(playlistId) && playlistId > 0;
-  const clickable = lastId !== undefined || openPlaylist;
-
-  const onOpen = () => {
-    // The run detail is the better answer when there is one: it shows what that
-    // sync actually did. The playlist is the fallback, not the preference.
-    if (lastId !== undefined) void window.openSyncDetailModal?.(Number(lastId));
-    else if (openPlaylist) void window.openMirroredPlaylistModal?.(playlistId);
-  };
+  const onOpen = rowOpener(row);
+  const clickable = onOpen !== null;
 
   return (
     <div
       className={classes.join(' ')}
       style={fading ? { opacity: 0, transform: 'scale(0.97)' } : undefined}
-      onClick={clickable ? onOpen : undefined}
+      onClick={onOpen ?? undefined}
       role={clickable ? 'button' : undefined}
     >
       <RowArt row={row} />
@@ -678,6 +665,266 @@ export function SyncBand() {
           )}
         </div>
       </div>
+    </article>
+  );
+}
+
+/** how many of a playlist's tracks are still not in the library. */
+/** what clicking a playlist row opens, or null when there's nothing to open.
+ *  A scheduled row can always open ITS PLAYLIST, run or no run. It used to
+ *  open only the sync-detail modal, keyed on a history entry, so a playlist
+ *  with no run in the fetched window was simply inert: clicking Discover
+ *  Weekly did nothing while Release Radar opened (Boulder, Aug 2026). The
+ *  schedule's board key IS the mirrored playlist id. */
+export function rowOpener(row: SyncBandRow): (() => void) | null {
+  const lastId = row.last?.id;
+  const playlistId = row.schedule ? Number(row.schedule.key) : NaN;
+  const openPlaylist = Number.isFinite(playlistId) && playlistId > 0;
+  // The run detail is the better answer when there is one: it shows what that
+  // sync actually did. The playlist is the fallback, not the preference.
+  if (lastId !== undefined) return () => void window.openSyncDetailModal?.(Number(lastId));
+  if (openPlaylist) return () => void window.openMirroredPlaylistModal?.(playlistId);
+  return null;
+}
+
+function missingOf(row: SyncBandRow): number {
+  return row.coverage ? Math.max(0, row.coverage.total - row.coverage.inLibrary) : 0;
+}
+
+/** the whole sync picture in one number: tracks in the library across every
+ *  playlist with a known total. null until a playlist has one. */
+export function syncHealth(rows: SyncBandRow[]): {
+  inLibrary: number;
+  total: number;
+  pct: number;
+  short: number;
+} | null {
+  const known = rows.filter((r) => r.coverage && r.coverage.total > 0);
+  if (!known.length) return null;
+  const inLibrary = known.reduce((n, r) => n + (r.coverage?.inLibrary ?? 0), 0);
+  const total = known.reduce((n, r) => n + (r.coverage?.total ?? 0), 0);
+  return {
+    inLibrary,
+    total,
+    pct: Math.floor((inLibrary / total) * 100),
+    short: known.filter((r) => missingOf(r) > 0).length,
+  };
+}
+
+export type RailSort = 'missing' | 'recent' | 'next' | 'name';
+
+export const RAIL_SORTS: { id: RailSort; label: string }[] = [
+  { id: 'missing', label: 'Most missing' },
+  { id: 'recent', label: 'Last synced' },
+  { id: 'next', label: 'Next run' },
+  { id: 'name', label: 'Name' },
+];
+
+// paused and unscheduled playlists have no next run, they go last
+const nextRunKey = (r: SyncBandRow) =>
+  r.schedule?.enabled && r.schedule.nextRunAt !== null ? r.schedule.nextRunAt : Infinity;
+
+/** which playlists the rail lists and in what order. collapsed it's the top
+ *  three, and "most missing" skips the complete ones since those need
+ *  nothing. rows arrive newest sync first, so "last synced" is that order
+ *  as is (the sort is stable, ties keep it too). a sync that's running
+ *  right now always sits on top and always shows, whatever the sort, so you
+ *  can watch it without opening anything. */
+export function railRows(
+  rows: SyncBandRow[],
+  showAll: boolean,
+  sort: RailSort = 'missing',
+  isLive: (row: SyncBandRow) => boolean = () => false,
+): SyncBandRow[] {
+  const ranked = [...rows];
+  if (sort === 'missing') ranked.sort((a, b) => missingOf(b) - missingOf(a));
+  else if (sort === 'next') ranked.sort((a, b) => nextRunKey(a) - nextRunKey(b));
+  else if (sort === 'name') ranked.sort((a, b) => a.name.localeCompare(b.name));
+  const live = ranked.filter(isLive);
+  const rest = ranked.filter((r) => !isLive(r));
+  if (showAll) return [...live, ...rest];
+  const fill = (sort === 'missing' ? rest.filter((r) => missingOf(r) > 0) : rest).slice(
+    0,
+    Math.max(0, 3 - live.length),
+  );
+  return [...live, ...fill];
+}
+
+const SORT_KEY = 'ss.dash.syncRailSort';
+
+// the sort is a per-viewer convenience, so browser storage, and it can fail
+function useRailSort(): [RailSort, (s: RailSort) => void] {
+  const [sort, setSort] = useState<RailSort>(() => {
+    try {
+      const saved = window.localStorage.getItem(SORT_KEY);
+      if (RAIL_SORTS.some((s) => s.id === saved)) return saved as RailSort;
+    } catch {
+      // storage blocked, the default it is
+    }
+    return 'missing';
+  });
+  const choose = useCallback((next: RailSort) => {
+    setSort(next);
+    try {
+      window.localStorage.setItem(SORT_KEY, next);
+    } catch {
+      // storage blocked, it just won't be remembered
+    }
+  }, []);
+  return [sort, choose];
+}
+
+/**
+ * The Sync band as the dashboard rail's health card: one number for how much
+ * of your playlists you own, the three playlists missing the most, and "See
+ * all" for the rest. Same hook, same actions as the full band (sync again,
+ * run now, listen, on hover), same board behind Manage.
+ */
+export function SyncRail() {
+  const { seamPhase, entries, rows, busyId, runNow, syncAgain, listen, loadAll, liveForRow } =
+    useSyncBand();
+  const [showAll, setShowAll] = useState(false);
+  const [sort, setSort] = useRailSort();
+  const loaded = seamPhase !== 'loading' || entries !== null;
+  const health = syncHealth(rows);
+  const shown = railRows(rows, showAll, sort, (row) =>
+    Boolean(row.schedule?.running ?? liveForRow(row)),
+  );
+  const rest = rows.length - shown.length;
+
+  return (
+    <article className="dash-card dash-side-card" data-card="sync">
+      <header className="dash-side-head">
+        <h3 className="dash-side-title">Playlist sync</h3>
+        <button type="button" className="dash-side-link" onClick={() => openBoard(loadAll)}>
+          Manage
+        </button>
+      </header>
+      {!loaded ? null : rows.length === 0 ? (
+        <div className="dash-side-empty">
+          <span>Keep a playlist in your library, on a schedule you set.</span>
+          <button type="button" className="dash-side-cta" onClick={() => openBoard(loadAll)}>
+            Set one up
+          </button>
+        </div>
+      ) : (
+        <>
+          {health ? (
+            <div className="dash-sync-health">
+              <div className="dash-sync-health-line">
+                <span className="dash-sync-pct">{health.pct}%</span>
+                <span className="dash-sync-of">
+                  of {health.total.toLocaleString()} playlist tracks in your library
+                </span>
+              </div>
+              <div
+                className="dash-sync-bar"
+                role="progressbar"
+                aria-label="Playlist tracks in your library"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={health.pct}
+              >
+                <span style={{ width: `${health.pct}%` }}></span>
+              </div>
+            </div>
+          ) : null}
+          <div className="dash-sync-sortbar">
+            <label className="dash-side-sort">
+              <span>Sort</span>
+              <select
+                value={sort}
+                aria-label="Sort playlists"
+                onChange={(e) => setSort(e.target.value as RailSort)}
+              >
+                {RAIL_SORTS.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="dash-sync-rows">
+            {shown.map((row) => {
+              const open = rowOpener(row);
+              const missing = missingOf(row);
+              const live = liveForRow(row);
+              const busy =
+                busyId !== null &&
+                (busyId === row.schedule?.automationId ||
+                  (row.last?.id !== undefined && busyId === `resync-${row.last.id}`));
+              return (
+                <div
+                  key={row.rowKey}
+                  className={open ? 'dash-sync-row dash-sync-row--open' : 'dash-sync-row'}
+                  role={open ? 'button' : undefined}
+                  tabIndex={open ? 0 : undefined}
+                  title={open ? `Open ${row.name}` : undefined}
+                  onClick={open ?? undefined}
+                  onKeyDown={
+                    open
+                      ? (e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            open();
+                          }
+                        }
+                      : undefined
+                  }
+                >
+                  <RowArt row={row} />
+                  <span className="dash-sync-name" title={row.name}>
+                    {row.name}
+                  </span>
+                  {live ? (
+                    <span className="dash-sync-live">
+                      {live.progress > 0 ? `${live.progress}%` : 'syncing'}
+                    </span>
+                  ) : missing > 0 ? (
+                    <span className="dash-sync-missing">{missing} missing</span>
+                  ) : (
+                    <span className="dash-sync-done">all in</span>
+                  )}
+                  <span className="dash-sync-actions" onClick={(e) => e.stopPropagation()}>
+                    {row.last?.id !== undefined ? (
+                      <button
+                        type="button"
+                        className="dash-sync-act"
+                        title="Listen"
+                        aria-label={`Listen to ${row.name}`}
+                        onClick={() => void listen(row.last!.id!, row.name)}
+                      >
+                        ▶
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="dash-sync-act"
+                      disabled={busy || !!live}
+                      title={row.schedule ? 'Run now' : 'Sync again'}
+                      aria-label={`${row.schedule ? 'Run' : 'Sync'} ${row.name} now`}
+                      onClick={() => void (row.schedule ? runNow(row) : syncAgain(row))}
+                    >
+                      ⟳
+                    </button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {rows.length > 0 && (rest > 0 || showAll) ? (
+            <button type="button" className="dash-side-more" onClick={() => setShowAll((v) => !v)}>
+              {showAll
+                ? 'Show less'
+                : sort === 'missing' && health && health.short === 0
+                  ? `All ${rows.length} playlists fully in your library`
+                  : `See all ${rows.length} playlists`}
+            </button>
+          ) : null}
+        </>
+      )}
     </article>
   );
 }

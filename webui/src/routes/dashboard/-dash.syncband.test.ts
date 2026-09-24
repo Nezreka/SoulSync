@@ -19,6 +19,7 @@ function sched(over: Partial<AutoSyncCardRow>): AutoSyncCardRow {
     cadence: 'Every 6 hours',
     enabled: true,
     nextRun: 'in 1h',
+    nextRunAt: null,
     coverage: { inLibrary: 41, total: 50, pct: 82 },
     lastRun: null,
     running: null,

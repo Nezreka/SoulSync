@@ -1,8 +1,9 @@
 /**
- * The dashboard header — title block, the 17 worker orbs + Manage Workers
- * button, and the watchlist/wishlist quick-nav. Transcribed 1:1 from
- * index.html 2227-2624; the structural fidelity is pinned by the artefact
- * differential test against that region.
+ * The dashboard hero (Sept 2026 redesign): the greeting, the library's size
+ * and controls on the left, and the 17 worker orbs + Manage Workers on their
+ * own stage on the right. Watchlist/wishlist moved to the rail as tiles
+ * (QuickNavTiles). The orb strip is transcribed 1:1 from the old index.html
+ * and still pinned by the artefact differential against it.
  *
  * Chrome vs behaviour: the ORB MARKUP is genuinely regular (same shape, per-orb
  * ids/classes/copy), so it is table-driven below — every difference is an
@@ -11,20 +12,21 @@
  * per the P0's no-flattening rule.
  *
  * worker-orbs.js contract (it reads this DOM every frame while on the
- * dashboard): the container classes below are its WORKER_DEFS anchors, the
+ * dashboard): `.orb-stage` is its anchor (canvas, nucleus, hover), the
+ * container classes below are its WORKER_DEFS anchors, the
  * button's `active` class is its live-state read, and the nodes must STAY
  * MOUNTED — JioSaavn/Hydrabase hide via inline display, never conditional
  * render, so the orb layer's captured element references never go stale.
  */
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import type { HeaderPill, HeaderPillId } from '../-dash.header';
 
 import { useDashboardHeader } from '../-dash.header';
-import { buildHelloStats, countBusyWorkers, greetingForHour } from '../-dash.hello';
+import { countBusyWorkers, greetingForHour, greetingLine, heroNumbers } from '../-dash.hello';
 import { lastDbStats, subscribeDbStats } from '../-dash.library';
 
 interface OrbChrome {
@@ -489,32 +491,16 @@ function Orb({
 }
 
 /**
- * The hello strip — what replaced the "Music Dashboard" title block. The
- * header's words are now live facts instead of the page's own name: library
- * size from the db stats the library card publishes, busy-worker count read
- * straight off the orb pills, and the watchlist scan countdown the quick-nav
- * already receives. Zero fetches of its own. Each chip is a shortcut to the
- * place the number lives.
+ * The hero's left side: who's here, how big the library is, and the library
+ * controls. The numbers are the db stats the library card publishes (zero
+ * fetches of their own), each a shortcut to the library.
  */
-function HelloStrip({
-  pills,
-  scanCountdown,
-}: {
-  pills: Record<string, { stateClass: string | null }>;
-  scanCountdown?: string;
-}) {
+function HeroIntro({ library }: { library?: ReactNode }) {
   const stats = useSyncExternalStore(subscribeDbStats, lastDbStats);
-  const chips = buildHelloStats({
-    tracks: stats?.tracks ?? null,
-    artists: stats?.artists ?? null,
-    busyWorkers: countBusyWorkers(pills),
-    scanCountdown: scanCountdown ?? null,
-  });
 
   // The active profile's name, mirrored by init.js (set before the app
   // mounts, so the plain read is fresh); the event re-reads it on an
-  // in-session profile switch. The greeting's text-transform lowercases it
-  // into the strip's voice.
+  // in-session profile switch.
   const [profileName, setProfileName] = useState((window._currentProfileName ?? '').trim());
   useEffect(() => {
     const onProfileChange = () => setProfileName((window._currentProfileName ?? '').trim());
@@ -523,55 +509,40 @@ function HelloStrip({
   }, []);
 
   const greeting = greetingForHour(new Date().getHours());
+  const numbers = heroNumbers(stats);
   return (
-    <div className="header-text header-hello">
+    <div className="header-text header-hello dash-hero-main">
       <h2 className="hello-greeting">
-        <img src="/static/dashboard.png" className="page-header-icon" alt="" />
-        <span>{profileName ? `${greeting}, ${profileName}` : greeting}</span>
+        <span>{greetingLine(greeting, profileName)}</span>
       </h2>
-      <div className="hello-stats">
-        {chips.map((chip) => (
-          <button
-            key={chip.id}
-            type="button"
-            className="hello-stat"
-            onClick={() => {
-              if (chip.page) void window.navigateToPage?.(chip.page);
-              else window.openEnrichmentManager?.();
-            }}
-          >
-            {chip.label}
-          </button>
-        ))}
-      </div>
+      {numbers.length ? (
+        <div className="hello-stats dash-hero-numbers">
+          {numbers.map((n) => (
+            <button
+              key={n.id}
+              type="button"
+              className="hello-stat dash-hero-number"
+              onClick={() => void window.navigateToPage?.('library')}
+            >
+              <span className="dash-hero-number-value">{n.value}</span>
+              <span className="dash-hero-number-label">{n.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {library}
     </div>
   );
 }
 
-export function DashboardHeader() {
-  const {
-    pills,
-    repairBadge,
-    onOrbClick,
-    jiosaavnVisible,
-    hydrabaseVisible,
-    watchlist,
-    wishlistCount,
-  } = useDashboardHeader();
-
-  const wishlistClass =
-    wishlistCount === null
-      ? 'header-button wishlist-button'
-      : wishlistCount === 0
-        ? 'header-button wishlist-button wishlist-inactive'
-        : 'header-button wishlist-button wishlist-active';
-
+/** The orbs' own stage. worker-orbs.js anchors its canvas here, orbits the
+ * nucleus at the stage centre, and opens the worker grid on hover of the
+ * stage only, so reading the greeting or pressing Scan never pops it. */
+function OrbStage({ header }: { header: DashboardHeaderState }) {
+  const { pills, repairBadge, onOrbClick, jiosaavnVisible, hydrabaseVisible } = header;
+  const busy = countBusyWorkers(pills);
   return (
-    <div className="dashboard-header">
-      <div className="dashboard-header-sweep" aria-hidden="true">
-        <span></span>
-      </div>
-      <HelloStrip pills={pills} scanCountdown={watchlist.countdown} />
+    <div className="orb-stage">
       <div className="header-actions">
         {ORBS.map((chrome) => (
           <Orb
@@ -603,48 +574,94 @@ export function DashboardHeader() {
           <span className="em-manage-btn-label">Manage Workers</span>
         </button>
       </div>
-      {/* Watchlist / Wishlist quick-nav (top-right corner) */}
-      <div className="header-quick-nav">
-        <button
-          className="header-button watchlist-button"
-          id="watchlist-button"
-          title={watchlist.title}
-          onClick={() => void window.navigateToPage?.('watchlist')}
-        >
-          <span className="hero-btn-icon">👁️</span>
-          <span className="hero-btn-label">Watchlist</span>
-          <span
-            className={watchlist.count > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'}
-            id="watchlist-badge"
-          >
-            {watchlist.count}
-          </span>
-          <span className="hero-btn-shimmer"></span>
-        </button>
-        <button
-          className={wishlistClass}
-          id="wishlist-button"
-          onClick={() => {
-            // The in-flight-download fast/slow path lives in init.js
-            // (openWishlistFromHero) — it needs activeDownloadProcesses /
-            // WishlistModalState / rehydrateModal, all script-scoped.
-            if (window.openWishlistFromHero) void window.openWishlistFromHero();
-            else void window.navigateToPage?.('wishlist');
-          }}
-        >
-          <span className="hero-btn-icon">🎵</span>
-          <span className="hero-btn-label">Wishlist</span>
-          <span
-            className={
-              wishlistCount && wishlistCount > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'
-            }
-            id="wishlist-badge"
-          >
-            {wishlistCount ?? 0}
-          </span>
-          <span className="hero-btn-shimmer"></span>
-        </button>
+      <div className="orb-stage-caption" aria-live="polite">
+        <span className={busy > 0 ? 'orb-stage-dot orb-stage-dot--busy' : 'orb-stage-dot'}></span>
+        {busy === 0 ? 'Workers resting' : busy === 1 ? '1 worker busy' : `${busy} workers busy`}
       </div>
+    </div>
+  );
+}
+
+type DashboardHeaderState = ReturnType<typeof useDashboardHeader>;
+
+/** The hero. The page owns the header hook (its counts also feed the rail's
+ * watchlist/wishlist tiles), so this is a view over that state. */
+export function DashboardHeaderView({
+  header,
+  library,
+}: {
+  header: DashboardHeaderState;
+  library?: ReactNode;
+}) {
+  return (
+    <div className="dashboard-header dash-hero">
+      <div className="dashboard-header-sweep" aria-hidden="true">
+        <span></span>
+      </div>
+      <HeroIntro library={library} />
+      <OrbStage header={header} />
+    </div>
+  );
+}
+
+/** The hero on its own, owning the hook. */
+export function DashboardHeader({ library }: { library?: ReactNode }) {
+  const header = useDashboardHeader();
+  return <DashboardHeaderView header={header} library={library} />;
+}
+
+/** Watchlist + wishlist, as two quiet count tiles in the rail. The ids,
+ * handlers and badges are the old header quick-nav's (the tour anchors
+ * #watchlist-button, the wishlist keeps init.js's in-flight fast path). */
+export function QuickNavTiles({ header }: { header: DashboardHeaderState }) {
+  const { watchlist, wishlistCount } = header;
+  const wishlistClass =
+    wishlistCount === null
+      ? 'header-button wishlist-button dash-tile'
+      : wishlistCount === 0
+        ? 'header-button wishlist-button wishlist-inactive dash-tile'
+        : 'header-button wishlist-button wishlist-active dash-tile';
+
+  return (
+    <div className="header-quick-nav dash-tiles">
+      <button
+        className="header-button watchlist-button dash-tile"
+        id="watchlist-button"
+        title={watchlist.title}
+        onClick={() => void window.navigateToPage?.('watchlist')}
+      >
+        <span
+          className={watchlist.count > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'}
+          id="watchlist-badge"
+        >
+          {watchlist.count}
+        </span>
+        <span className="hero-btn-label">Artists watched</span>
+        {watchlist.countdown ? (
+          <span className="dash-tile-sub">next scan in {watchlist.countdown}</span>
+        ) : null}
+      </button>
+      <button
+        className={wishlistClass}
+        id="wishlist-button"
+        onClick={() => {
+          // The in-flight-download fast/slow path lives in init.js
+          // (openWishlistFromHero) — it needs activeDownloadProcesses /
+          // WishlistModalState / rehydrateModal, all script-scoped.
+          if (window.openWishlistFromHero) void window.openWishlistFromHero();
+          else void window.navigateToPage?.('wishlist');
+        }}
+      >
+        <span
+          className={
+            wishlistCount && wishlistCount > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'
+          }
+          id="wishlist-badge"
+        >
+          {wishlistCount ?? 0}
+        </span>
+        <span className="hero-btn-label">On your wishlist</span>
+      </button>
     </div>
   );
 }

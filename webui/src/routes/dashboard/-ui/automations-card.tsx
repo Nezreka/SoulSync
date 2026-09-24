@@ -146,7 +146,9 @@ const ACCENT_PRESETS: Array<{ hex: string; name: string }> = [
   { hex: '#14b8a6', name: 'Teal' },
 ];
 
-function QuickSettings() {
+/** Boulder's quick switches (effects, performance, particles, orbs, accent),
+ *  their own quiet footer at the bottom of the dashboard now. */
+export function QuickSettings() {
   const [reduce, setReduce] = useState(
     () => localStorage.getItem('soulsync-reduce-effects') === '1',
   );
@@ -281,20 +283,27 @@ function QuickSettings() {
   );
 }
 
-export function AutomationsCard() {
-  const { loaded, view, busyId, runNow, toggle } = useAutomationsCard();
+/** The engine's next moves. `compact` is the dashboard rail's "Up next": the
+ *  next three with a "See all" for the rest, no quick-settings footer (that
+ *  lives at the page bottom). */
+export function AutomationsCard({ compact = false }: { compact?: boolean } = {}) {
+  const { loaded, view: allRows, busyId, runNow, toggle } = useAutomationsCard();
+  const [showAll, setShowAll] = useState(false);
+  const view = compact && !showAll ? allRows.slice(0, 3) : allRows;
 
   return (
-    <article className="dash-card" data-card="automations">
-      <header className="dash-card__head">
-        <h3 className="dash-card__title">Automations</h3>
-        <p className="dash-card__sub">What the engine runs next.</p>
+    <article className={compact ? 'dash-card dash-side-card' : 'dash-card'} data-card="automations">
+      <header className={compact ? 'dash-side-head' : 'dash-card__head'}>
+        <h3 className={compact ? 'dash-side-title' : 'dash-card__title'}>
+          {compact ? 'Up next' : 'Automations'}
+        </h3>
+        {compact ? null : <p className="dash-card__sub">What the engine runs next.</p>}
         <button
           type="button"
-          className="autosync-manage-btn"
+          className={compact ? 'dash-side-link' : 'autosync-manage-btn'}
           onClick={() => void window.navigateToPage?.('automations')}
         >
-          All →
+          {compact ? 'Automations' : 'All →'}
         </button>
       </header>
       <div className="dash-card__body">
@@ -419,7 +428,12 @@ export function AutomationsCard() {
             ))
           )}
         </div>
-        <QuickSettings />
+        {compact && allRows.length > 3 ? (
+          <button type="button" className="dash-side-more" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? 'Show less' : `See all ${allRows.length} automations`}
+          </button>
+        ) : null}
+        {compact ? null : <QuickSettings />}
       </div>
     </article>
   );

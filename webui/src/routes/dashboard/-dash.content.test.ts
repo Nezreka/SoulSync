@@ -45,6 +45,14 @@ describe('fileBadge', () => {
     expect(fileBadge('', 'tidal')).toBe('tidal');
     expect(fileBadge('', '')).toBe('');
   });
+
+  it('shows a podcast mime type as the format a person would say', () => {
+    expect(fileBadge('AUDIO/MPEG', 'Podcast')).toBe('MP3 · Podcast');
+    expect(fileBadge('audio/x-m4a', '')).toBe('M4A');
+    // an unknown audio type still loses the mime prefix
+    expect(fileBadge('AUDIO/X-WEIRD', '')).toBe('WEIRD');
+    expect(fileBadge('MP3 320', '')).toBe('MP3 320');
+  });
 });
 
 // ── albumIsOwned ─────────────────────────────────────────────────────────────
