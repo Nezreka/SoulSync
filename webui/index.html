@@ -7224,6 +7224,17 @@
                                                         gives you a disc folder only where there is more than one disc.
                                                         Put any of them in the template and it replaces the automatic
                                                         disc folder from &ldquo;Multi-Disc Folder Label&rdquo; below.
+                                                        <code>$atypes</code> is the beets-style release label: empty
+                                                        for an ordinary album, and one bracketed tag per qualifier the
+                                                        release actually carries, so
+                                                        <code>$albumartist/[$year]$atypes $album</code> gives
+                                                        <code>[2019] Tokyo</code> for an album but
+                                                        <code>[2017][EP][Live] Audiotree Live</code> for a live EP.
+                                                        (<code>$albumtype</code> is the older one-word form and always
+                                                        resolves — an ordinary album renders the word
+                                                        &ldquo;Album&rdquo;.) The labels, brackets and the
+                                                        various-artists exception are configurable under
+                                                        <code>file_organization.album_types</code>.
                                                         Use <code>${var}</code> to append text:
                                                         <code>${albumtype}s</code> → Albums</small>
                                                 </div>
@@ -7264,7 +7275,10 @@
                                                         <code>$albumtype</code>, <code>$atypes</code>,
                                                         <code>$year</code>,
                                                         <code>$quality</code> (filename only). Use <code>${var}</code>
-                                                        to append text: <code>${albumtype}s</code> → Singles</small>
+                                                        to append text: <code>${albumtype}s</code> → Singles.
+                                                        <code>$atypes</code> is the beets-style release label: empty for
+                                                        an ordinary release, bracketed tags otherwise
+                                                        (<code>[Single]</code>, <code>[EP][Live]</code>).</small>
                                                 </div>
 
                                                 <!-- Playlist Path Template: hidden from the UI. Playlists now import

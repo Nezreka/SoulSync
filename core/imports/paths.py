@@ -576,6 +576,10 @@ def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
     part = part.replace("$discnum", disc_value_raw)
     part = part.replace("$disc", disc_value)
     part = part.replace("$cdnum", "")
+    # Same no-op guard, same reason: $atypes is substituted in the global pass
+    # above, and a raw token leaking into a directory name is the failure worth
+    # spending one replace to prevent.
+    part = part.replace("$atypes", "")
     part = re.sub(r"\s*\[\s*\]", "", part)
     part = re.sub(r"\s*\(\s*\)", "", part)
     part = re.sub(r"\s*\{\s*\}", "", part)

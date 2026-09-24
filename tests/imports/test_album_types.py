@@ -165,3 +165,21 @@ def test_a_plain_album_leaves_no_double_space():
 def test_missing_atypes_key_renders_empty_not_literal():
     out = _render("[$year]$atypes $album", {"artist": "A", "album": "X", "year": "2020", "title": "t"})
     assert "$atypes" not in out
+
+
+def test_an_empty_year_collapses_but_the_type_labels_survive():
+    """"[$year]$atypes $album" on a release with no year must drop the empty
+    brackets and keep the real ones — the segment cleaner strips "[]" by regex,
+    and a greedier rule would eat "[EP]" with it."""
+    part = paths._clean_folder_segment("[][EP][Live] Audiotree Live", "", "", False)
+    assert part == "[EP][Live] Audiotree Live"
+
+
+def test_an_empty_year_and_no_types_leaves_just_the_album():
+    assert paths._clean_folder_segment("[] Schmilco", "", "", False) == "Schmilco"
+
+
+def test_a_leaked_atypes_token_never_reaches_a_directory_name():
+    """Defensive: the global pass already substituted it, but a raw token in a
+    folder name is the one failure worth a spare replace."""
+    assert paths._clean_folder_segment("$atypes Album", "", "", False) == "Album"
