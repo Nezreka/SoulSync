@@ -83646,13 +83646,44 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 /* Chat final responsive pass.
    This lives at the end of the file on purpose: the chat composer/jukebox
    refinements are declared after the base chat grid, so earlier media queries
-   lose the cascade for the exact controls that break on small screens. */
+   lose the cascade for the exact controls that break on small screens.
+   every selector carries #chat-page: chat-overhaul.css loads after this whole
+   file, so without the id its surface rules (.chat-cat display:flex, the
+   rail puck widths, ...) quietly undid half of the phone layout. */
 /* laptop widths keep the member list, but at full size the four columns left
    the messages ~440px at 1440 (discord: topic wrapped tall, header buttons cut) */
 @media (max-width: 1600px) {
-    .chat-shell {
+    #chat-page .chat-shell {
         grid-template-columns: 56px 200px minmax(0, 1fr) 200px;
         gap: 0 10px;
+    }
+
+    /* title and a one-line topic get the first row, the buttons wrap under
+       them. in one row the topic squeezed into a word-per-line column and the
+       last buttons were cut off */
+    #chat-page .chat-head {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+
+    #chat-page .chat-head-title {
+        flex: none;
+    }
+
+    #chat-page .chat-head-sub {
+        flex: 1 1 calc(100% - 200px);
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* every filter button carries margin-left: auto, which spreads a wrapped
+       row across the whole width */
+    #chat-page .chat-head > .chat-filter-btn,
+    #chat-page .chat-head > .chat-head-search,
+    #chat-page .chat-head > .chat-cog-btn {
+        margin-left: 0;
     }
 }
 
@@ -83661,17 +83692,17 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         padding: 28px 28px 80px;
     }
 
-    .chat-page-head {
+    #chat-page .chat-page-head {
         align-items: flex-start;
         gap: 12px;
     }
 
-    .chat-page-head .tools-page-header-left {
+    #chat-page .chat-page-head .tools-page-header-left {
         flex: 1 1 auto;
         min-width: 220px;
     }
 
-    .chat-jbx-headbar {
+    #chat-page .chat-jbx-headbar {
         order: 2;
         flex: 1 1 100%;
         width: 100%;
@@ -83680,97 +83711,88 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         gap: 10px;
     }
 
-    .chat-jbx-headbar .chat-jbx-form {
+    #chat-page .chat-jbx-headbar .chat-jbx-form {
         min-width: 260px;
     }
 
-    .chat-shell {
+    #chat-page .chat-shell {
         grid-template-columns: 56px 220px minmax(0, 1fr);
         gap: 0 10px;
         height: calc(100vh - 214px);
     }
 
-    .chat-rail {
+    #chat-page .chat-rail {
         display: none !important;
     }
 
-    .chat-guilds {
+    #chat-page .chat-guilds {
         padding: 8px 0;
     }
 
-    .chat-guild {
+    #chat-page .chat-guild {
         width: 42px;
         height: 42px;
         border-radius: 14px;
     }
 
-    .chat-side,
-    .chat-users {
+    #chat-page .chat-side,
+    #chat-page .chat-users {
         padding: 10px;
     }
 
-    .chat-head {
+    #chat-page .chat-head {
         align-items: center;
         flex-wrap: wrap;
         gap: 8px 10px;
         padding: 12px 16px;
     }
 
-    .chat-head-title {
+    #chat-page .chat-head-title {
         flex: 0 1 auto;
         min-width: 0;
     }
 
-    .chat-head-sub {
-        flex: 1 1 180px;
-        min-width: 0;
-    }
-
-    .chat-head-search {
-        margin-left: auto;
-    }
-
-    .chat-head-search-in {
+    #chat-page .chat-head-search-in {
         width: 150px;
     }
 
-    .chat-scroll {
+    #chat-page .chat-scroll {
         overflow-x: hidden;
     }
 
-    .chat-msg,
-    .chat-msg-text {
+    #chat-page .chat-msg,
+    #chat-page .chat-msg-text {
         min-width: 0;
     }
 
-    .chat-composer {
+    #chat-page .chat-composer {
         padding: 10px 12px 12px;
     }
 
-    .chat-composer-panel {
+    #chat-page .chat-composer-panel {
         min-width: 0;
         overflow: hidden;
     }
 
-    .chat-toolbar {
+    #chat-page .chat-toolbar {
         min-width: 0;
         overflow: hidden;
     }
 
-    .chat-toolbar-hint {
+    #chat-page .chat-toolbar-hint {
         display: none;
     }
 
-    .chat-tbtn {
+    #chat-page .chat-tbtn {
         flex: 0 0 30px;
     }
 
-    .chat-tbtn.chat-gif-btn {
+    #chat-page .chat-tbtn.chat-gif-btn {
         flex-basis: auto;
     }
 
-    .chat-composer-row,
-    .chat-input--area {
+    #chat-page .chat-composer-row,
+    #chat-page .chat-input--area {
         min-width: 0;
     }
 }
@@ -83780,14 +83802,39 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         padding: 22px 22px 76px;
     }
 
-    .chat-shell {
+    /* stacked, the page-shell sizes to its content, so flex: 1 made the
+       height below meaningless and the box grew with every message */
+    #chat-page .chat-shell {
+        flex: none;
+    }
+
+    #chat-page .chat-guild-wrap {
+        width: auto;
+    }
+
+    /* friends / blocklist / bookmarks stacked as a column made the channel
+       row 150px tall. icons in the row instead, names in the tooltip */
+    #chat-page .chat-social-nav-group {
+        flex-direction: row;
+        flex: none;
+        padding: 0;
+        margin: 0;
+        border: 0;
+    }
+
+    #chat-page .chat-social-nav-text,
+    #chat-page .chat-side-label-row {
+        display: none;
+    }
+
+    #chat-page .chat-shell {
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: auto auto minmax(0, 1fr);
         gap: 8px;
         height: calc(100vh - 214px);
     }
 
-    .chat-guilds {
+    #chat-page .chat-guilds {
         display: flex;
         flex-direction: row;
         align-items: center;
@@ -83798,12 +83845,12 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         border-radius: 12px;
     }
 
-    .chat-guilds::-webkit-scrollbar,
-    .chat-side-scroll::-webkit-scrollbar {
+    #chat-page .chat-guilds::-webkit-scrollbar,
+    #chat-page .chat-side-scroll::-webkit-scrollbar {
         display: none;
     }
 
-    .chat-guild::before {
+    #chat-page .chat-guild::before {
         left: 50%;
         top: auto;
         bottom: -8px;
@@ -83814,10 +83861,10 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         transition: width .16s ease;
     }
 
-    .chat-guild:hover::before { width: 20px; height: 3px; }
-    .chat-guild--on::before { width: 28px; height: 3px; }
+    #chat-page .chat-guild:hover::before { width: 20px; height: 3px; }
+    #chat-page .chat-guild--on::before { width: 28px; height: 3px; }
 
-    .chat-side {
+    #chat-page .chat-side {
         display: flex;
         flex-direction: row;
         overflow-x: auto;
@@ -83826,14 +83873,14 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         border-radius: 12px;
     }
 
-    .chat-side-head,
-    .chat-userpanel,
-    .chat-side-label,
-    .chat-cat {
+    #chat-page .chat-side-head,
+    #chat-page .chat-userpanel,
+    #chat-page .chat-side-label,
+    #chat-page .chat-cat {
         display: none;
     }
 
-    .chat-side-scroll {
+    #chat-page .chat-side-scroll {
         display: flex;
         gap: 6px;
         min-width: 100%;
@@ -83843,26 +83890,26 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         scrollbar-width: none;
     }
 
-    .chat-side-list,
-    .chat-chanlist {
+    #chat-page .chat-side-list,
+    #chat-page .chat-chanlist {
         display: flex;
         align-items: center;
         gap: 6px;
     }
 
-    .chat-chan,
-    .chat-side-item,
-    .chat-thread {
+    #chat-page .chat-chan,
+    #chat-page .chat-side-item,
+    #chat-page .chat-thread {
         width: auto;
         min-height: 34px;
         white-space: nowrap;
     }
 
-    .chat-thread {
+    #chat-page .chat-thread {
         padding: 6px 10px;
     }
 
-    .chat-thread-branch {
+    #chat-page .chat-thread-branch {
         display: none;
     }
 }
@@ -83872,78 +83919,146 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         padding: 70px 12px 72px;
     }
 
-    .chat-page-head {
+    #chat-page .chat-page-head {
         gap: 10px;
     }
 
-    .chat-page-head .tools-page-header-left {
+    #chat-page .chat-page-head .tools-page-header-left {
         min-width: 0;
     }
 
-    .chat-jbx-headbar {
+    #chat-page .chat-jbx-headbar {
         flex-wrap: wrap;
         gap: 8px;
     }
 
-    .chat-jbx-headbar .chat-jbx-form {
+    #chat-page .chat-jbx-headbar .chat-jbx-form {
         flex: 1 1 100%;
         min-width: 0;
         margin-left: 0;
     }
 
-    .chat-shell {
-        height: calc(100dvh - 220px);
+    #chat-page .chat-shell {
+        /* ends above the floating activity / bell / help buttons, which
+           otherwise sit on top of the send button */
+        height: calc(100dvh - 266px);
         min-height: 0;
     }
 
-    .chat-head {
+    #chat-page .chat-head {
         padding: 10px 12px;
     }
 
-    .chat-head-search {
+    /* the header is one row that scrolls sideways, the topic hides. wrapped,
+       the title, topic and six buttons took 212px of a 624px chat */
+    #chat-page .chat-head {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    #chat-page .chat-head::-webkit-scrollbar,
+    #chat-page .chat-head-sub {
+        display: none;
+    }
+
+    #chat-page .chat-head > * {
+        flex: none;
+    }
+
+    #chat-page .chat-head-search {
+        order: 0;
+        width: auto;
+    }
+
+    /* searching needs the room, so only then the input drops to its own line */
+    #chat-page .chat-head:has(.chat-head-search--on) {
+        flex-wrap: wrap;
+    }
+
+    #chat-page .chat-head-search--on {
         order: 3;
         width: 100%;
         margin-left: 0;
     }
 
-    .chat-head-search-in {
+    #chat-page .chat-head-search-in {
         width: 100%;
     }
 
-    .chat-scroll {
+    #chat-page .chat-scroll {
         padding: 10px 12px;
     }
 
-    .chat-msg {
+    #chat-page .chat-msg {
         grid-template-columns: minmax(0, auto) 1fr;
         gap: 4px 8px;
     }
 
-    .chat-msg-time {
+    #chat-page .chat-msg-time {
         justify-self: end;
     }
 
-    .chat-toolbar {
+    #chat-page .chat-toolbar {
         overflow-x: auto;
         scrollbar-width: none;
     }
 
-    .chat-toolbar::-webkit-scrollbar {
+    #chat-page .chat-toolbar::-webkit-scrollbar {
         display: none;
     }
 
-    .chat-composer-row {
+    #chat-page .chat-composer-row {
         padding: 4px 6px 6px;
     }
 
-    .chat-input--bare {
+    #chat-page .chat-input--bare {
         padding: 8px;
     }
 
-    .chat-send-fab {
+    #chat-page .chat-send-fab {
         width: 32px;
         height: 32px;
         margin-left: 2px;
+    }
+
+    /* six buttons left the text box 37px wide. these four have slash
+       commands (/np /want /poll /gif), so on a phone they go */
+    #chat-page .chat-tbtn--np,
+    #chat-page .chat-tbtn--want,
+    #chat-page [data-chat-poll-btn],
+    #chat-page .chat-gif-btn {
+        display: none;
+    }
+
+    #chat-page .chat-input--bare {
+        flex: 1 1 auto;
+    }
+
+    /* the plain-text note keeps its first line; the rest is desktop detail */
+    #chat-page .chat-modehint {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    /* page head: the subtitle and the jukebox label go, the add-a-song box
+       stays on one line with auto-dj */
+    #chat-page .tools-page-subtitle,
+    #chat-page .chat-jbx-brand {
+        display: none;
+    }
+
+    #chat-page .chat-jbx-headbar {
+        flex-wrap: nowrap;
+    }
+
+    #chat-page .chat-jbx-headbar .chat-jbx-form {
+        flex: 1 1 0;
+    }
+
+    #chat-page .chat-jbx-input {
+        min-width: 0;
     }
 }
 

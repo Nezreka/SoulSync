@@ -42,5 +42,30 @@ def test_the_overhaul_declares_no_layout_on_the_chat_shell():
 
 def test_style_keeps_the_laptop_slim_columns_with_the_member_rail():
     css = (_STATIC / "style.css").read_text(encoding="utf-8")
-    m = re.search(r"@media \(max-width: 1600px\) \{\s*\.chat-shell \{([^}]*)\}", css)
+    m = re.search(r"@media \(max-width: 1600px\) \{\s*#chat-page \.chat-shell \{([^}]*)\}", css)
     assert m and "minmax(0, 1fr) 200px" in m.group(1)
+
+
+def _final_pass():
+    css = (_STATIC / "style.css").read_text(encoding="utf-8")
+    start = css.index("Chat final responsive pass.")
+    end = css.index("/* ====", start)
+    return css[start:end]
+
+
+def test_the_final_pass_outranks_the_overhaul():
+    """the overhaul loads later, so a bare .chat-cat here lost to its
+    .chat-cat { display: flex } and the phone channel row showed every category."""
+    bare = []
+    for selectors, _ in _rules(_final_pass()):
+        for sel in selectors:
+            if sel and not sel.startswith("@") and not sel.startswith("#chat-page"):
+                bare.append(sel)
+    assert not bare, f"final-pass selectors without #chat-page: {bare}"
+
+
+def test_the_stacked_shell_holds_its_height():
+    """stacked, the page-shell sizes to its content, so flex: 1 let the chat
+    grow past the screen with every message."""
+    m = re.search(r"@media \(max-width: 1040px\) \{.*?#chat-page \.chat-shell \{\s*flex: none;", _final_pass(), re.S)
+    assert m
