@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from core.library.residual_files import is_appledouble
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.base")
@@ -96,33 +97,27 @@ def skip_deleted_quarantine(root: str, dirs: list, transfer_folder: str) -> None
                if not is_internal_transfer_dir(os.path.join(root, d), transfer_folder)]
 
 
-def walk_library(root: str, *, include_hidden_dirs: bool = False):
+def walk_library(root: str):
     """Walk a library tree the way every maintenance job should: SoulSync's own
-    folders and hidden entries are already gone by the time you see them.
+    folders and macOS AppleDouble sidecars are already gone by the time you see them.
 
     Yields ``(dirpath, dirnames, filenames)`` like ``os.walk``, minus the
-    quarantine / atomic-staging trees and minus dot-prefixed entries — macOS
-    AppleDouble sidecars (``._01 - Track.flac``, a real audio extension wrapped
-    around resource-fork bytes), ``.Trash``, ``.stversions`` and friends. None of
-    it is library content, and a job that scans it produces findings against files
-    no media server even shows.
+    quarantine / atomic-staging trees and minus ``._``-prefixed files. An
+    AppleDouble sidecar (``._01 - Track.flac``) is resource-fork bytes under the
+    real file's name and extension, so every extension check in the codebase reads
+    one as audio — the orphan detector files a finding for a file no media server
+    even shows, and the quality scanner tries to probe it. Nothing else is
+    filtered: a hidden *directory* is walked like any other, as it always was.
 
     Exists because the exclusions used to be a thing each job had to REMEMBER:
     `skip_deleted_quarantine` was called at seven of the eight walk sites, and the
     one that forgot (the quality-upgrade scanner's `estimate_scope`) silently
     counted staged files its own scan would skip. Reach for this instead of
     ``os.walk`` and the whole class of mismatch goes away.
-
-    ``include_hidden_dirs`` is for the job whose counting has to match a walk that
-    does NOT drop hidden dirs — the Empty Folder Cleaner's `estimate_scope`, whose
-    `scan` is bottom-up and skips only the internal transfer trees. Hidden *files*
-    are filtered either way.
     """
     for dirpath, dirnames, filenames in os.walk(root):
         skip_deleted_quarantine(dirpath, dirnames, root)
-        if not include_hidden_dirs:
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-        yield dirpath, dirnames, [f for f in filenames if not f.startswith(".")]
+        yield dirpath, dirnames, [f for f in filenames if not is_appledouble(f)]
 
 
 @dataclass

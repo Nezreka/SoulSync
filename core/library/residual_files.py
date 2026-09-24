@@ -41,14 +41,14 @@ def is_sidecar(name: str) -> bool:
     return _ext(name) in SIDECAR_EXTS
 
 
-def is_hidden(name: str) -> bool:
-    return (name or "").startswith(".")
+def is_appledouble(name: str) -> bool:
+    return (name or "").startswith("._")
 
 
 def is_disposable(name: str) -> bool:
-    """True if this file is junk, a cover/scan image, a lyric/metadata sidecar, or a
-    hidden dot-file — i.e. safe to delete from a folder that has no audio left."""
-    return is_junk(name) or is_image(name) or is_sidecar(name) or is_hidden(name)
+    """True if this file is junk, a cover/scan image, a lyric/metadata sidecar, or an
+    AppleDouble sidecar — i.e. safe to delete from a folder that has no audio left."""
+    return is_junk(name) or is_image(name) or is_sidecar(name) or is_appledouble(name)
 
 
 __all__ = [
@@ -58,6 +58,6 @@ __all__ = [
     "is_junk",
     "is_image",
     "is_sidecar",
-    "is_hidden",
+    "is_appledouble",
     "is_disposable",
 ]

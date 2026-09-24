@@ -185,7 +185,7 @@ class EmptyFolderCleanerJob(RepairJob):
         if not root or not os.path.isdir(root):
             return 0
         total = 0
-        for _dp, dirnames, _f in walk_library(root, include_hidden_dirs=True):
+        for _dp, dirnames, _f in walk_library(root):
             total += len(dirnames)
         return total
 
@@ -212,7 +212,7 @@ def remove_empty_folder(folder_path: str, *, junk_files: List[str], remove_junk:
 
     def _purgeable(e: str) -> bool:
         if isdir(os.path.join(folder_path, e)):
-            return False   # a hidden dir holds entries of its own — it blocks removal
+            return False   # only files are leftovers; a subdir holds entries of its own
         return (remove_junk and is_junk(e)) or (remove_disposable and is_disposable(e))
 
     # Re-check at apply time: only purgeable leftovers now? (Anything else = leave it.)

@@ -110,10 +110,10 @@ def test_small_orphan_set_still_surfaces(tmp_path: Path) -> None:
     assert all(f['finding_type'] == 'orphan_file' for f in findings)
 
 
-def test_hidden_files_and_folders_are_not_scanned(tmp_path: Path) -> None:
+def test_appledouble_sidecars_are_not_scanned(tmp_path: Path) -> None:
     """macOS AppleDouble sidecars ('._Track.flac') carry an audio extension but no
-    audio, so every match tier misses and each one used to land as a finding.
-    They — and hidden trees like .stversions — must never reach the walk results.
+    audio, so every match tier misses and each one used to land as a finding —
+    always right next to the real track, which matched fine.
     """
     db_path = tmp_path / "library.sqlite"
     _seed_library(db_path)
@@ -122,9 +122,6 @@ def test_hidden_files_and_folders_are_not_scanned(tmp_path: Path) -> None:
     music.mkdir(parents=True)
     (music / "00 - Stray 0.mp3").write_bytes(b"no DB match")
     (music / "._00 - Stray 0.mp3").write_bytes(b"resource fork")
-    snapshot = tmp_path / ".stversions" / "Old"
-    snapshot.mkdir(parents=True)
-    (snapshot / "01 - Snapshot.flac").write_bytes(b"no DB match")
 
     findings = []
     context = JobContext(

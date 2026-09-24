@@ -147,13 +147,11 @@ def test_bottom_up_walks_need_the_path_check_not_the_prune(tmp_path):
 
 # ── the shared walker ─────────────────────────────────────────────────────
 
-def test_walk_library_drops_internal_and_hidden_entries(tmp_path):
+def test_walk_library_drops_internal_dirs_and_appledouble_files(tmp_path):
     """One call gets a job both guards — the staging/quarantine prune AND the
-    hidden-entry filter — with nothing left to remember."""
+    AppleDouble filter — with nothing left to remember. `._01 - real.flac` splits
+    to a '.flac' extension, so without the filter it walks out as a track."""
     transfer = _build(tmp_path)
-    snapshots = Path(transfer) / '.stversions' / 'Old'
-    snapshots.mkdir(parents=True)
-    (snapshots / '02 - snapshot.flac').touch()
     (Path(transfer) / 'Neil Young' / 'Harvest' / '._01 - real.flac').touch()
 
     found = [f for _root, _dirs, files in walk_library(transfer)
@@ -162,21 +160,23 @@ def test_walk_library_drops_internal_and_hidden_entries(tmp_path):
     assert found == ['01 - real.flac']
 
 
-def test_walk_library_can_keep_hidden_dirs_but_never_hidden_files(tmp_path):
-    """The Empty Folder Cleaner's case: a hidden subdirectory has to stay visible
-    as an occupant of its parent, while hidden files are still leftovers."""
+def test_walk_library_leaves_other_hidden_entries_alone(tmp_path):
+    """Only `._` is filtered. Every other dot-name — a hidden folder, a marker
+    file — is walked exactly as a plain ``os.walk`` would."""
     transfer = _build(tmp_path)
-    (Path(transfer) / 'Neil Young' / '.stversions').mkdir()
-    (Path(transfer) / 'Neil Young' / '._stray.flac').touch()
+    snapshots = Path(transfer) / '.stversions' / 'Old'
+    snapshots.mkdir(parents=True)
+    (snapshots / '02 - snapshot.flac').touch()
+    (Path(transfer) / 'Neil Young' / '.nomedia').touch()
 
     seen_dirs, seen_files = set(), []
-    for _root, dirs, files in walk_library(transfer, include_hidden_dirs=True):
+    for _root, dirs, files in walk_library(transfer):
         seen_dirs.update(dirs)
         seen_files += files
 
-    assert '.stversions' in seen_dirs
-    assert '._stray.flac' not in seen_files
-    assert STAGING not in seen_dirs      # internal dirs pruned either way
+    assert '.stversions' in seen_dirs and '02 - snapshot.flac' in seen_files
+    assert '.nomedia' in seen_files
+    assert STAGING not in seen_dirs      # internal dirs still pruned
 
 
 # ── every transfer-walking job actually uses one of them ──────────────────
@@ -194,10 +194,10 @@ def test_transfer_walkers_guard_themselves(path):
     """A new job that walks the transfer dir without a guard would quietly
     start eating staged albums, so the whole family is pinned here.
 
-    ``walk_library`` is the preferred guard: it applies the prune (and the hidden
-    -entry filter) from inside the generator, so a caller cannot forget it the way
-    the quality-upgrade scanner's ``estimate_scope`` once did. The older spellings
-    stay valid for the bottom-up walkers, which cannot use it.
+    ``walk_library`` is the preferred guard: it applies the prune (and the
+    AppleDouble filter) from inside the generator, so a caller cannot forget it the
+    way the quality-upgrade scanner's ``estimate_scope`` once did. The older
+    spellings stay valid for the bottom-up walkers, which cannot use it.
     """
     with open(path, encoding='utf-8') as fh:
         src = fh.read()
