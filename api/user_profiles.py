@@ -1001,6 +1001,12 @@ def get_my_connections():
         return jsonify({
             'success': True,
             'is_admin': pid == 1,
+            # whose listening this profile's stats read (#1293), for the card
+            # at the top of My Account
+            'listening': {
+                'scope': get_database().listening_history_scope(pid),
+                'sources': [s for s, on in (('listenbrainz', lb_connected), ('lastfm', fm_connected)) if on],
+            },
             'connections': {
                 'spotify': {'connected': sp_connected, 'account': sp_account},
                 'tidal': {'connected': td_connected, 'account': td_account},

@@ -183,3 +183,19 @@ def test_the_admin_keeps_lastfm_in_settings(client, db):
     r = client.post('/api/profiles/me/lastfm', json={'username': 'admin_fm'})
     assert r.status_code == 400
     assert db.get_profile_lastfm(1)['username'] == ''
+
+
+def test_my_account_says_whose_listening_the_profile_reads(client, db):
+    """the card at the top of My Account: shared until the profile connects its
+    own listenbrainz or last.fm, then its own, naming the sources."""
+    kim = db.create_profile(name=f'kim_{os.urandom(3).hex()}')
+    _as(client, kim)
+
+    def listening():
+        return client.get('/api/profiles/me/connections').get_json()['listening']
+
+    assert listening() == {'scope': 'shared', 'sources': []}
+    db.set_profile_lastfm(kim, 'kim_fm')
+    assert listening() == {'scope': 'profile', 'sources': ['lastfm']}
+    db.set_profile_listenbrainz(kim, 'token', '', 'kim_lb')
+    assert listening() == {'scope': 'profile', 'sources': ['listenbrainz', 'lastfm']}

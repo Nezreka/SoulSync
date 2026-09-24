@@ -24,6 +24,7 @@ import {
   closeMyAccountsModal,
   disconnectMyAccount,
   openMyAccountsModal,
+  openPersonalSettings,
   saveMyAccountToken,
 } from './my-accounts';
 import {
@@ -97,6 +98,8 @@ export const SHELL_WINDOW_EXPORTS = {
   connectMyAccount,
   saveMyAccountToken,
   disconnectMyAccount,
+  // the old My Settings entry point, now the same modal
+  openPersonalSettings,
   // service-switch.js (ported aug 26)
   openServiceSwitchModal,
   closeServiceSwitchModal,

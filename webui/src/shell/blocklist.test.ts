@@ -180,6 +180,7 @@ describe('the window contract', () => {
       'openDownloadOriginsModal',
       'openManualLibraryMatchTool',
       'openMyAccountsModal',
+      'openPersonalSettings',
       'openServiceSwitchModal',
       'openTrackDetail',
       'openWatchlistHistoryModal',

@@ -2085,11 +2085,11 @@ const HELPER_CONTENT = {
         description: 'Albums you\'ve saved or liked across connected services (Spotify, Tidal, Deezer). Shows which are already in your library and lets you download missing ones.',
     },
 
-    // ─── PERSONAL SETTINGS ─────────────────────────────────────────
+    // ─── MY ACCOUNT ────────────────────────────────────────────────
 
-    '#personal-settings-btn': {
-        title: 'My Settings',
-        description: 'Personal settings for your profile — accent color, home page preference, notification preferences, and other per-user customizations.',
+    '#my-accounts-btn': {
+        title: 'My Account',
+        description: 'Everything that\'s yours: who you are on the media server, plus your own Spotify, Tidal, ListenBrainz and Last.fm. Connect ListenBrainz or Last.fm and your stats and recommendations use your own listening.',
     },
 };
 
@@ -2315,7 +2315,7 @@ const HELPER_TOURS = {
 
             // The shell around every page
             { page: 'dashboard', selector: '.side-toggle', title: 'Music / Video Toggle', description: 'SoulSync has two whole sides. This switch flips between the MUSIC app and the VIDEO app (movies + TV) — each has its own pages, library, and settings.' },
-            { page: 'dashboard', selector: '#profile-indicator', title: 'Your Profile', description: 'Who\'s signed in. Click to switch profiles; the small icons open My Accounts (per-profile streaming logins) and My Settings.' },
+            { page: 'dashboard', selector: '#profile-indicator', title: 'Your Profile', description: 'Who\'s signed in. Click to switch profiles; the person icon opens My Account (your media server login and your own music services).' },
             { page: 'dashboard', selector: '.nav-section-label[data-section="find"]', title: 'Find', description: 'Discovery lives here — Search, Discover, and the Artist Map. Section headers collapse if you like a tidy sidebar.' },
             { page: 'dashboard', selector: '.nav-section-label[data-section="music"]', title: 'Music', description: 'Your collection: Library, Playlists & Sync, Downloads, and Import for files you already have.' },
             { page: 'dashboard', selector: '.nav-section-label[data-section="system"]', title: 'System', description: 'The machinery: Automations, Tools, Stats, Issues, and Settings.' },
