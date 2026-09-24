@@ -312,7 +312,8 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     monkeypatch.setattr(import_pipeline, "emit_track_downloaded", lambda *args, **kwargs: None)
     monkeypatch.setattr(import_pipeline, "record_library_history_download", lambda *args, **kwargs: None)
     monkeypatch.setattr(import_pipeline, "record_download_provenance", lambda *args, **kwargs: None)
-    monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda context: wishlist_calls.append(dict(context)))
+    monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist",
+                        lambda context, **kw: wishlist_calls.append((dict(context), kw)))
     monkeypatch.setattr(import_pipeline, "_mark_task_completed", lambda task, track_info: mark_calls.append((task, track_info)))
     monkeypatch.setattr(import_pipeline.threading, "Thread", _ImmediateThread)
     check_events = []
@@ -344,7 +345,12 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         assert completion_calls == [(batch_id, task_id, True)]
         assert context_key not in runtime_state.matched_downloads_context
         assert scan_calls == ["Simple download completed"]
-        assert wishlist_calls and wishlist_calls[0]["search_result"]["is_simple_download"] is True
+        assert wishlist_calls
+        _wl_context, _wl_kwargs = wishlist_calls[0]
+        assert _wl_context["search_result"]["is_simple_download"] is True
+        # #1289: the removal is handed the library path the file actually landed
+        # at, so its guard can prove the request was satisfied.
+        assert _wl_kwargs["published_path"] == str(expected_path)
         assert activity_calls
         acoustic = [
             event for event in check_events if event["check"] == "acoustic_id"
@@ -782,6 +788,29 @@ def test_scan_order_fallback_not_used_for_plain_download(tmp_path, monkeypatch):
 
     assert fallback_calls == []
     assert library_calls[0]["track_number"] == 1
+
+
+def test_unknown_compilation_track_number_does_not_claim_first_position(tmp_path, monkeypatch):
+    source_path = tmp_path / "Omricon.mp3"
+    source_path.write_bytes(b"audio")
+    library_calls = _wire_post_process_common(
+        monkeypatch, tmp_path, tmp_path / "Omricon.mp3",
+        track_number=0, is_album_download=True,
+    )
+    import core.imports.track_number as track_number_module
+    monkeypatch.setattr(track_number_module, "track_number_from_directory_order", lambda path: None)
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                    web_scan_manager=None, repair_worker=None)
+    context = {
+        "album": {"name": "Magnatron 2.0", "album_type": "compilation"},
+        "track_info": {"name": "Omricon"},
+        "original_search_result": {"title": "Omricon"},
+        "is_album_download": True,
+    }
+
+    import_pipeline.post_process_matched_download("ctx-1", context, str(source_path), runtime)
+
+    assert library_calls[0]["track_number"] == 0
 
 
 # ---------------------------------------------------------------------------

@@ -27,7 +27,9 @@ until one is applied.
 from __future__ import annotations
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.library_retag")
@@ -78,9 +80,11 @@ class LibraryRetagJob(RepairJob):
     def _subjects(self, context: JobContext) -> list:
         from core.library2.maintenance_subjects import active_file_subjects
 
-        return scoped_file_subjects(context, active_file_subjects(
+        # hand-tagged: the user typed this release, retagging from a service
+        # would overwrite it with the studio album
+        return drop_hand_tagged(context, scoped_file_subjects(context, active_file_subjects(
             context.db, context.config_manager,
-        ))
+        )))
 
     def estimate_scope(self, context: JobContext) -> int:
         try:

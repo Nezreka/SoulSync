@@ -17,6 +17,7 @@ from urllib.parse import quote, urlparse
 from flask import Blueprint, jsonify, request
 
 from core.metadata import is_internal_image_host
+from core.profile_context import get_current_profile_id
 from utils.logging_config import get_logger
 
 logger = get_logger("api.stats")
@@ -32,16 +33,25 @@ _automation_engine = lambda: None   # noqa: E731
 
 _listening_stats_worker = lambda: None   # noqa: E731
 _lastfm_import_worker = lambda: None     # noqa: E731
+_listenbrainz_import_worker = lambda: None # noqa: E731
+_listenbrainz_import_workers = lambda: None # noqa: E731
+_lastfm_import_workers = lambda: None     # noqa: E731
 
 
 def configure(*, get_database, config_manager, fix_artist_image_url, _automation_engine,
-              listening_stats_worker_getter, lastfm_import_worker_getter):
+              listening_stats_worker_getter, lastfm_import_worker_getter,
+              listenbrainz_import_worker_getter=lambda: None,
+              listenbrainz_import_workers_getter=lambda: None,
+              lastfm_import_workers_getter=lambda: None):
     globals()['get_database'] = get_database
     globals()['config_manager'] = config_manager
     globals()['fix_artist_image_url'] = fix_artist_image_url
     globals()['_automation_engine'] = _automation_engine
     globals()['_listening_stats_worker'] = listening_stats_worker_getter
     globals()['_lastfm_import_worker'] = lastfm_import_worker_getter
+    globals()['_listenbrainz_import_worker'] = listenbrainz_import_worker_getter
+    globals()['_listenbrainz_import_workers'] = listenbrainz_import_workers_getter
+    globals()['_lastfm_import_workers'] = lastfm_import_workers_getter
 
 
 def create_blueprint():
@@ -59,7 +69,8 @@ def stats_cached():
     """Get all pre-computed stats for a time range from cache. Instant response."""
     try:
         time_range = request.args.get('range', '7d')
-        data = _stats_queries.get_cached_stats(get_database(), fix_artist_image_url, time_range)
+        data = _stats_queries.get_cached_stats(get_database(), fix_artist_image_url, time_range,
+                                               profile_id=get_current_profile_id())
         return jsonify({'success': True, **data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -72,7 +83,8 @@ def stats_year_in_listening():
     caller narrow it would turn the story back into the filter the rest of
     the page already provides."""
     try:
-        data = _stats_queries.get_year_in_listening(get_database(), fix_artist_image_url)
+        data = _stats_queries.get_year_in_listening(get_database(), fix_artist_image_url,
+                                                    profile_id=get_current_profile_id())
         return jsonify({'success': True, **data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -98,7 +110,7 @@ def stats_overview():
     """Get aggregate listening stats for a time range."""
     try:
         time_range = request.args.get('range', 'all')
-        data = _stats_queries.get_overview(get_database(), time_range)
+        data = _stats_queries.get_overview(get_database(), time_range, profile_id=get_current_profile_id())
         return jsonify({'success': True, **data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -109,7 +121,8 @@ def stats_top_artists():
     try:
         time_range = request.args.get('range', 'all')
         limit = int(request.args.get('limit', 10))
-        artists = _stats_queries.get_top_artists(get_database(), fix_artist_image_url, time_range, limit)
+        artists = _stats_queries.get_top_artists(get_database(), fix_artist_image_url, time_range, limit,
+                                                 profile_id=get_current_profile_id())
         return jsonify({'success': True, 'artists': artists})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -120,7 +133,8 @@ def stats_top_albums():
     try:
         time_range = request.args.get('range', 'all')
         limit = int(request.args.get('limit', 10))
-        albums = _stats_queries.get_top_albums(get_database(), fix_artist_image_url, time_range, limit)
+        albums = _stats_queries.get_top_albums(get_database(), fix_artist_image_url, time_range, limit,
+                                               profile_id=get_current_profile_id())
         return jsonify({'success': True, 'albums': albums})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -131,7 +145,8 @@ def stats_top_tracks():
     try:
         time_range = request.args.get('range', 'all')
         limit = int(request.args.get('limit', 10))
-        tracks = _stats_queries.get_top_tracks(get_database(), fix_artist_image_url, time_range, limit)
+        tracks = _stats_queries.get_top_tracks(get_database(), fix_artist_image_url, time_range, limit,
+                                               profile_id=get_current_profile_id())
         return jsonify({'success': True, 'tracks': tracks})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -142,7 +157,8 @@ def stats_timeline():
     try:
         time_range = request.args.get('range', '30d')
         granularity = request.args.get('granularity', 'day')
-        data = _stats_queries.get_timeline(get_database(), time_range, granularity)
+        data = _stats_queries.get_timeline(get_database(), time_range, granularity,
+                                           profile_id=get_current_profile_id())
         return jsonify({'success': True, 'timeline': data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -152,7 +168,7 @@ def stats_genres():
     """Get genre distribution by play count."""
     try:
         time_range = request.args.get('range', 'all')
-        data = _stats_queries.get_genres(get_database(), time_range)
+        data = _stats_queries.get_genres(get_database(), time_range, profile_id=get_current_profile_id())
         return jsonify({'success': True, 'genres': data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -195,7 +211,8 @@ def stats_recent():
     """Get recently played tracks."""
     try:
         limit = int(request.args.get('limit', 20))
-        tracks = _stats_queries.get_recent_tracks(get_database(), limit, fix_artist_image_url)
+        tracks = _stats_queries.get_recent_tracks(get_database(), limit, fix_artist_image_url,
+                                                  profile_id=get_current_profile_id())
         return jsonify({'success': True, 'tracks': tracks})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -288,6 +305,7 @@ def stats_listening_events():
             weekday=weekday,
             hour=hour,
             limit=limit,
+            profile_id=get_current_profile_id(),
         )
         return jsonify({'success': True, **data})
     except ValueError as e:
@@ -426,14 +444,68 @@ def listening_stats_status():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def _import_target(service, shared_getter, workers_getter):
+    """which importer the current profile drives on the stats page (#1293).
+
+    ('shared', worker) for the admin and every profile on the shared history,
+    same as it always was. ('own', worker) for a profile with its own account
+    on this service. ('none', None) when the profile has its own history but
+    not from this service, the card isn't theirs to run.
+    """
+    from core.listening_scope import SHARED_OWNER, has_own_account, listening_owner
+    workers = workers_getter()
+    if workers is None:
+        return 'shared', shared_getter()
+    owner = listening_owner(get_database(), get_current_profile_id())
+    if owner == SHARED_OWNER:
+        return 'shared', shared_getter()
+    if has_own_account(get_database(), owner, service):
+        return 'own', workers.for_owner(owner)
+    return 'none', None
+
+
+def _own_status(worker, username, next_run):
+    """the card for a profile running its own account, hourly while connected."""
+    status = worker.status()
+    return {
+        'success': True,
+        'enabled': True,
+        'api_key_configured': True,
+        'token_configured': True,
+        'authenticated_user_available': True,
+        'next_run_in_seconds': next_run,
+        **status,
+        'username': username or status.get('username') or '',
+        'history_scope': 'profile',
+        'own_account': True,
+    }
+
+
+# a profile whose history comes from the other service: nothing to show here
+_NOT_YOUR_CARD = {'success': True, 'status': 'idle', 'history_scope': 'profile', 'own_account': False}
+
+
+def _run_own(worker, body):
+    # their own account, and nothing in the admin's settings moves
+    result = worker.start_import(full=bool(body.get('full')))
+    ok = result.get('status') not in ('error',)
+    return jsonify({'success': ok, **result}), 200 if ok else 400
+
+
 @bp.route('/api/lastfm/listening-import/status', methods=['GET'])
 def lastfm_listening_import_status():
     """Get Last.fm listening-history import status."""
     try:
         if not _lastfm_import_worker():
             return jsonify({'success': False, 'enabled': False, 'error': 'Last.fm importer unavailable'})
-        status = _lastfm_import_worker().status()
         next_run = _automation_engine().get_system_automation_next_run_seconds('import_lastfm_listening') if _automation_engine() else 0
+        kind, worker = _import_target('lastfm', _lastfm_import_worker, _lastfm_import_workers)
+        if kind == 'none':
+            return jsonify(_NOT_YOUR_CARD)
+        if kind == 'own':
+            saved = get_database().get_profile_lastfm(worker.profile_id) or {}
+            return jsonify(_own_status(worker, saved.get('username'), next_run))
+        status = worker.status()
         username = config_manager.get('lastfm.username', '') or status.get('username') or ''
         can_use_auth_user = bool(
             config_manager.get('lastfm.api_key', '')
@@ -448,6 +520,8 @@ def lastfm_listening_import_status():
             'next_run_in_seconds': next_run,
             **status,
             'username': username,
+            'history_scope': 'shared',
+            'own_account': False,
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -459,12 +533,17 @@ def lastfm_listening_import_run():
         if not _lastfm_import_worker():
             return jsonify({'success': False, 'error': 'Last.fm importer unavailable'}), 400
         body = request.get_json(silent=True) or {}
+        kind, worker = _import_target('lastfm', _lastfm_import_worker, _lastfm_import_workers)
+        if kind == 'none':
+            return jsonify({'success': False, 'error': 'Connect your Last.fm in My Accounts first'}), 400
+        if kind == 'own':
+            return _run_own(worker, body)
         username = str(body.get('username') or config_manager.get('lastfm.username', '') or '').strip()
         if username:
             config_manager.set('lastfm.username', username)
         if 'enabled' in body:
             config_manager.set('lastfm.listening_sync_enabled', bool(body.get('enabled')))
-        result = _lastfm_import_worker().start_import(username=username or None, full=bool(body.get('full')))
+        result = worker.start_import(username=username or None, full=bool(body.get('full')))
         ok = result.get('status') not in ('error',)
         return jsonify({'success': ok, **result}), 200 if ok else 400
     except Exception as e:
@@ -476,8 +555,80 @@ def lastfm_listening_import_cancel():
     try:
         if not _lastfm_import_worker():
             return jsonify({'success': False, 'error': 'Last.fm importer unavailable'}), 400
-        _lastfm_import_worker().cancel()
-        return jsonify({'success': True, **_lastfm_import_worker().status()})
+        kind, worker = _import_target('lastfm', _lastfm_import_worker, _lastfm_import_workers)
+        if kind == 'none':
+            return jsonify(_NOT_YOUR_CARD)
+        worker.cancel()
+        return jsonify({'success': True, **worker.status()})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@bp.route('/api/listenbrainz/listening-import/status', methods=['GET'])
+def listenbrainz_listening_import_status():
+    """Get ListenBrainz listening-history import status."""
+    try:
+        if not _listenbrainz_import_worker():
+            return jsonify({'success': False, 'enabled': False, 'error': 'ListenBrainz importer unavailable'})
+        next_run = _automation_engine().get_system_automation_next_run_seconds('import_listenbrainz_listening') if _automation_engine() else 0
+        kind, worker = _import_target('listenbrainz', _listenbrainz_import_worker, _listenbrainz_import_workers)
+        if kind == 'none':
+            return jsonify(_NOT_YOUR_CARD)
+        if kind == 'own':
+            saved = get_database().get_profile_listenbrainz(worker.profile_id) or {}
+            return jsonify(_own_status(worker, saved.get('username'), next_run))
+        status = worker.status()
+        username = config_manager.get('listenbrainz.username', '') or status.get('username') or ''
+        has_token = bool(config_manager.get('listenbrainz.token', ''))
+        return jsonify({
+            'success': True,
+            'enabled': bool(config_manager.get('listenbrainz.listening_sync_enabled', False)),
+            'token_configured': has_token,
+            'authenticated_user_available': bool(has_token or username),
+            'next_run_in_seconds': next_run,
+            **status,
+            'username': username,
+            'history_scope': 'shared',
+            'own_account': False,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/listenbrainz/listening-import/run', methods=['POST'])
+def listenbrainz_listening_import_run():
+    """Start or update the ListenBrainz listening-history import."""
+    try:
+        if not _listenbrainz_import_worker():
+            return jsonify({'success': False, 'error': 'ListenBrainz importer unavailable'}), 400
+        body = request.get_json(silent=True) or {}
+        kind, worker = _import_target('listenbrainz', _listenbrainz_import_worker, _listenbrainz_import_workers)
+        if kind == 'none':
+            return jsonify({'success': False, 'error': 'Connect your ListenBrainz in My Accounts first'}), 400
+        if kind == 'own':
+            return _run_own(worker, body)
+        username = str(body.get('username') or config_manager.get('listenbrainz.username', '') or '').strip()
+        if username:
+            config_manager.set('listenbrainz.username', username)
+        if 'enabled' in body:
+            config_manager.set('listenbrainz.listening_sync_enabled', bool(body.get('enabled')))
+        result = worker.start_import(username=username or None, full=bool(body.get('full')))
+        ok = result.get('status') not in ('error',)
+        return jsonify({'success': ok, **result}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/listenbrainz/listening-import/cancel', methods=['POST'])
+def listenbrainz_listening_import_cancel():
+    """Cancel the active ListenBrainz listening-history import."""
+    try:
+        if not _listenbrainz_import_worker():
+            return jsonify({'success': False, 'error': 'ListenBrainz importer unavailable'}), 400
+        kind, worker = _import_target('listenbrainz', _listenbrainz_import_worker, _listenbrainz_import_workers)
+        if kind == 'none':
+            return jsonify(_NOT_YOUR_CARD)
+        worker.cancel()
+        return jsonify({'success': True, **worker.status()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500

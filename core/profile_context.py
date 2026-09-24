@@ -16,6 +16,7 @@ even on thread-pool reuse.
 from __future__ import annotations
 
 import contextvars
+from typing import Optional
 
 _background_profile_id: "contextvars.ContextVar[int | None]" = contextvars.ContextVar(
     "background_profile_id", default=None
@@ -53,7 +54,7 @@ __all__ = ["set_background_profile", "reset_background_profile", "get_background
 # decorator), and importing web_server from api/* is circular. web_server
 # imports them back from here — one definition, same objects everywhere.
 
-def get_current_profile_id() -> int:
+def get_current_profile_id() -> Optional[int]:
     """The current profile id: the request's, else the background override, else 1.
 
     Background callers (automation engine, sync threads, watchlist scanner) have
@@ -62,11 +63,39 @@ def get_current_profile_id() -> int:
     profile instead of crashing the handler. A real web request always wins;
     only with NO request does the background-profile override apply.
     """
-    from flask import g
-    try:
-        return g.profile_id
-    except (AttributeError, RuntimeError):
-        pass
+    from flask import g, has_request_context
+    if has_request_context():
+        try:
+            if hasattr(g, 'profile_id'):
+                return g.profile_id
+        except RuntimeError:
+            pass
+        from flask import session
+        try:
+            from core.settings import config_manager
+            req_login = bool(config_manager.get('security.require_login', False)) if config_manager else False
+            if req_login and not session.get('login_authenticated', False):
+                return None
+
+            req_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
+            if req_pin and not req_login:
+                from flask import request
+                from core.security.auth_proxy import trusted_proxy_user
+                proxy_hdr = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
+                proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_hdr))
+                if not session.get('launch_pin_verified', False) and not proxy_authed:
+                    return None
+        except Exception:  # noqa: S110 — unreadable config falls through to session/background
+            pass
+        try:
+            sess_pid = session.get('profile_id')
+            if sess_pid is not None:
+                return sess_pid
+        except Exception:  # noqa: S110 — unreadable session falls through to background override
+            pass
+        pid = get_background_profile()
+        return pid if pid is not None else 1
+
     pid = get_background_profile()
     return pid if pid is not None else 1
 
@@ -120,17 +149,38 @@ def is_admin_request() -> bool:
     gate used to be profile 1 only, so a second admin got the page and a
     403 behind it.
     """
-    from flask import g
+    from flask import g, has_request_context, session
+
+    if has_request_context():
+        try:
+            from core.settings import config_manager
+            req_login = bool(config_manager.get('security.require_login', False)) if config_manager else False
+            if req_login and not session.get('login_authenticated', False):
+                return False
+
+            req_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
+            if req_pin:
+                from flask import request
+                from core.security.auth_proxy import trusted_proxy_user
+                proxy_hdr = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
+                proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_hdr))
+                if not session.get('launch_pin_verified', False) and not proxy_authed:
+                    return False
+        except Exception:  # noqa: S110 — unreadable config falls through to profile inspection
+            pass
+
+        try:
+            cached = getattr(g, 'is_admin', None)
+            if cached is not None:
+                return bool(cached)
+        except RuntimeError:
+            pass
 
     pid = get_current_profile_id()
+    if pid is None:
+        return False
     if pid == 1:
         return True
-    try:
-        cached = getattr(g, 'is_admin', None)
-    except RuntimeError:
-        cached = None
-    if cached is not None:
-        return bool(cached)
     is_admin = is_admin_profile(pid)
     try:
         g.is_admin = is_admin

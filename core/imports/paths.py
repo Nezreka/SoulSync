@@ -178,6 +178,13 @@ def import_profile_id(context) -> Optional[int]:
             return int(pid)
         except (TypeError, ValueError):
             pass
+    for subkey in ("search_result", "original_search_result", "track_info"):
+        sub = context.get(subkey)
+        if isinstance(sub, dict) and sub.get("profile_id"):
+            try:
+                return int(sub["profile_id"])
+            except (TypeError, ValueError):
+                pass
     batch_id = context.get("batch_id")
     if batch_id:
         try:
@@ -222,13 +229,22 @@ def import_owner_id(context) -> Optional[int]:
     return owner_for_new_file(import_profile_id(context))
 
 
-def library_root_for_profile(profile_id) -> Optional[str]:
+_notified_own_lib_fallback: set[int] = set()
+
+
+def reset_own_library_fallback_notifications() -> None:
+    """Clear notification throttle state (useful for tests and server switches)."""
+    _notified_own_lib_fallback.clear()
+
+
+def library_root_for_profile(profile_id, *, announce: bool = True) -> Optional[str]:
     """the own-library output folder of a profile (docker-resolved), or None
-    when the profile is on the shared library."""
+    when the profile is on the shared library.
+
+    announce=False skips the "own library inactive" warning + notification.
+    that's for lookups that aren't routing a download (the wishlist asks on
+    every removal and would repeat the warning each time)."""
     if not profile_id:
-        return None
-    from core.library_scope import own_library_supported
-    if not own_library_supported():
         return None
     try:
         from database.music_database import get_database
@@ -238,7 +254,39 @@ def library_root_for_profile(profile_id) -> Optional[str]:
         return None
     if lib.get("mode") != "own" or not lib.get("root"):
         return None
+
+    from core.library_scope import own_library_supported
+    if not own_library_supported():
+        if not announce:
+            return None
+        pid = int(profile_id)
+        cm = _get_config_manager()
+        getter = getattr(cm, "get_active_media_server", None)
+        active_server = getter() if callable(getter) else (getattr(cm, "get", lambda k, d=None: d)("active_media_server", "unknown") or "unknown")
+        shared_root = shared_transfer_root()
+        logger.warning(
+            "[Own Library] Profile %s has an own library configured (%s), "
+            "but active media server '%s' does not support own-library isolation. "
+            "Routing download to shared folder: %s",
+            pid, lib.get("root"), active_server, shared_root
+        )
+        if pid not in _notified_own_lib_fallback:
+            _notified_own_lib_fallback.add(pid)
+            try:
+                server_display = (active_server or 'this media server').capitalize()
+                get_database().add_notifications([{
+                    'type': 'warning',
+                    'message': (
+                        f"Own library is inactive on {server_display}. "
+                        f"Downloads for this profile will route to the shared library folder ({shared_root})."
+                    ),
+                }], profile_id=pid)
+            except Exception as notif_err:  # noqa: BLE001
+                logger.debug("failed to dispatch own library fallback notification: %s", notif_err)
+        return None
+
     return config_root_path(lib["root"])
+
 
 
 def shared_transfer_root() -> str:
@@ -430,6 +478,11 @@ def _replace_template_variables(template: str, context: dict) -> str:
     _total_discs = _coerce_int(clean_context.get("total_discs", 1), 1)
     _disc_number = _coerce_int(clean_context.get("disc_number", 1), 1)
     cdnum_value = f"CD{_disc_number:02d}" if _total_discs > 1 else ""
+    _track_number = clean_context.get("track_number", 1)
+    track_value = (
+        "00" if type(_track_number) is int and _track_number == 0
+        else f"{_coerce_int(_track_number, 1):02d}"
+    )
 
     bracket_map = {
         "albumartist": album_artist_value,
@@ -439,7 +492,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
         "artist": clean_context.get("artist", "Unknown Artist"),
         "album": clean_context.get("album", "Unknown Album"),
         "title": clean_context.get("title", "Unknown Track"),
-        "track": f"{_coerce_int(clean_context.get('track_number', 1), 1):02d}",
+        "track": track_value,
         "cdnum": cdnum_value,
         # #981: ${disc}/${discnum} vanish on single-disc albums, matching ${cdnum}
         # (a track on disc 2+ still shows even if total_discs wasn't populated).
@@ -447,10 +500,12 @@ def _replace_template_variables(template: str, context: dict) -> str:
         "discnum": (str(_disc_number) if (_total_discs > 1 or _disc_number > 1) else ""),
         "year": str(clean_context.get("year", "")),
         "quality": clean_context.get("quality", ""),
+        "disambiguation": clean_context.get("disambiguation", ""),
     }
     for var_name, val in bracket_map.items():
         result = result.replace("${" + var_name + "}", val)
 
+    result = result.replace("$disambiguation", clean_context.get("disambiguation", ""))
     result = result.replace("$albumartist", album_artist_value)
     result = result.replace("$albumtype", clean_context.get("albumtype", "Album"))
     result = result.replace("$playlist", clean_context.get("playlist_name", ""))
@@ -462,13 +517,52 @@ def _replace_template_variables(template: str, context: dict) -> str:
     # rule used throughout this function (no current $c* var collides, but
     # ordering matches the web_server.py path-builder for parity).
     result = result.replace("$cdnum", cdnum_value)
-    result = result.replace("$track", f"{clean_context.get('track_number', 1):02d}")
+    result = result.replace("$track", track_value)
     result = result.replace("$year", str(clean_context.get("year", "")))
 
     result = re.sub(r"\s+", " ", result)
     result = re.sub(r"\s*-\s*-\s*", " - ", result)
     result = result.strip()
     return result
+
+
+# $album as its own token, not the front of $albumartist / $albumtype.
+_ALBUM_TOKEN_RE = re.compile(r"\$\{album\}|\$album(?!artist|type)")
+
+
+def album_name_carries(album_name: str, disambiguation: str) -> bool:
+    """Does the album name already say it? whole words, so "live" isn't in "alive"."""
+    disambiguation = (disambiguation or "").strip()
+    return bool(disambiguation) and re.search(
+        r"(?<!\w)" + re.escape(disambiguation) + r"(?!\w)", album_name or "", re.IGNORECASE,
+    ) is not None
+
+
+def with_disambiguation(template: str, disambiguation: str, album_name: str = "") -> str:
+    """Give the album folder the release's disambiguation when the template doesn't.
+
+    two releases can share a title, artist and release group and differ only by
+    musicbrainz's disambiguation ("baby punk version"). without it in the folder
+    they land in one directory and their same-named tracks collide (#1299). so
+    the suffix goes on after the last $album in the folder part, unless the
+    template already places $disambiguation itself or the album name already
+    carries it. no disambiguation means the template comes back untouched.
+    """
+    disambiguation = (disambiguation or "").strip()
+    if not disambiguation or not template:
+        return template
+    if "$disambiguation" in template or "${disambiguation}" in template:
+        return template
+    if album_name_carries(album_name, disambiguation):
+        return template
+    folder, sep, filename = template.rpartition("/")
+    if not sep:
+        return template
+    matches = list(_ALBUM_TOKEN_RE.finditer(folder))
+    if not matches:
+        return template
+    end = matches[-1].end()
+    return folder[:end] + " ($disambiguation)" + folder[end:] + sep + filename
 
 
 def apply_path_template(template: str, context: dict) -> str:
@@ -529,6 +623,7 @@ def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
 
 def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, str]:
     """Build file path using a user-provided template string directly."""
+    template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
     _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
@@ -606,6 +701,7 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
         }
         template = default_templates.get(template_type, "$artist/$album/$track - $title")
 
+    template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
     _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
@@ -789,7 +885,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             source_info = json.loads(source_info)
         except (json.JSONDecodeError, TypeError):
             source_info = {}
-    if source_info.get("enhance") and source_info.get("original_file_path"):
+    if not isinstance(source_info, dict):
+        source_info = {}
+    replace_original = source_info.get("enhance") or source_info.get("job") == "quality_upgrade"
+    if replace_original and source_info.get("original_file_path"):
         original_file = _reachable_original_file(source_info["original_file_path"])
         if original_file:
             # Folder AND stem from the resolved file, swapping only the
@@ -817,13 +916,43 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
 
     raw_album_type = ""
     if album_context:
-        raw_album_type = album_context.get("album_type", "") or ""
+        raw_album_type = (
+            album_context.get("album_type", "")
+            or album_context.get("record_type", "")
+            or ""
+        )
+    if not raw_album_type and isinstance(album_info, dict):
+        raw_album_type = (
+            album_info.get("album_type", "")
+            or album_info.get("record_type", "")
+            or ""
+        )
+    if not raw_album_type and isinstance(context, dict):
+        raw_album_type = (
+            context.get("album_type", "")
+            or context.get("record_type", "")
+            or ""
+        )
+    raw_album_type = str(raw_album_type or "").strip().lower()
+    if raw_album_type in ("compile", "compilations"):
+        raw_album_type = "compilation"
+
+    is_explicit_comp = (
+        (album_context and bool(album_context.get("is_compilation")))
+        or (isinstance(album_info, dict) and bool(album_info.get("is_compilation")))
+        or (isinstance(context, dict) and bool(context.get("is_compilation")))
+    )
+    if is_explicit_comp:
+        raw_album_type = "compilation"
+
     total_tracks = (album_context.get("total_tracks", 0) or 0) if album_context else 0
     album_type_display = get_album_type_display(raw_album_type, total_tracks)
 
     if album_info and album_info.get("is_album"):
         clean_track_name = get_import_clean_title(context, album_info=album_info, default=original_search.get("title", "Unknown Track"))
-        track_number = _coerce_int(album_info.get("track_number", 1), 1)
+        raw_track_number = album_info.get("track_number", 1)
+        track_number = (0 if raw_album_type in ("compilation", "compile") and raw_track_number == 0
+                        else _coerce_int(raw_track_number, 1))
         disc_number = _coerce_int(album_info.get("disc_number", 1), 1)
         _artists = original_search.get("artists") or track_info.get("artists") or []
         _album_ctx = album_context
@@ -839,7 +968,15 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 _itunes_aid = _ext["itunes_artist_id"]
 
         _artist_name = artist_name
-        _album_artist_name = _artist_name
+        if raw_album_type in ("compilation", "compile") and _artists:
+            _first_track_artist = _artists[0]
+            _track_artist_name = (
+                _first_track_artist.get("name") if isinstance(_first_track_artist, dict)
+                else str(_first_track_artist)
+            )
+            if _track_artist_name:
+                _artist_name = _track_artist_name
+        _album_artist_name = artist_name
         _album_artists_for_collab = None
         _explicit_artist_ctx = track_info.get("_explicit_artist_context") if isinstance(track_info, dict) else None
         if isinstance(_explicit_artist_ctx, dict) and _explicit_artist_ctx.get("name"):
@@ -866,6 +1003,24 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 _artist_name and _artist_name != "Unknown Artist":
             _album_artist_name = _artist_name
 
+        # Check if the release or album artist indicates a compilation
+        if (not raw_album_type or raw_album_type == "album") and (
+            str(_album_artist_name or "").strip().lower() in ("various artists", "various", "va", "v.a.")
+            or str(artist_name or "").strip().lower() in ("various artists", "various", "va", "v.a.")
+        ):
+            raw_album_type = "compilation"
+            album_type_display = "Compilation"
+
+        # On compilations (or when album artist differs), ensure $artist reflects the track artist
+        if (raw_album_type in ("compilation", "compile", "compilations") or is_explicit_comp):
+            if _artists:
+                _first_ta = _artists[0]
+                _track_artist_cand = _first_ta.get("name") if isinstance(_first_ta, dict) else str(_first_ta)
+                if _track_artist_cand:
+                    _artist_name = _track_artist_cand
+            elif track_info.get("artist"):
+                _artist_name = track_info["artist"]
+
         template_context = {
             "artist": _artist_name,
             "albumartist": _album_artist_name,
@@ -878,6 +1033,8 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "albumtype": album_type_display,
             "_artists_list": _album_artists_for_collab if _album_artists_for_collab else _artists,
             "_itunes_artist_id": _itunes_aid,
+            # #1299: the one thing telling same-named releases apart.
+            "disambiguation": str((album_context or {}).get("disambiguation") or "").strip(),
         }
         # A caller that KNOWS the disc count is authoritative: re-deriving it from
         # a live provider tracklist made the destination depend on whether that
@@ -920,7 +1077,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # so $cdnum can decide between "CDxx" and an empty string.
         template_context["total_discs"] = total_discs
 
-        _template_key = "compilation_path" if raw_album_type in ("compilation", "compile") else "album_path"
+        _template_key = "compilation_path" if raw_album_type in ("compilation", "compile", "compilations") else "album_path"
 
         album_template = _get_config_manager().get("file_organization.templates", {}).get(_template_key, "") or ""
         # Suppress the auto-injected disc folder when the user already
@@ -959,7 +1116,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         reuse_folder = None
         _multi_disc_album = total_discs > 1 or disc_number > 1
         if (filename_base and not _multi_disc_album
-                and raw_album_type not in ("compilation", "compile")
+                and raw_album_type not in ("compilation", "compile", "compilations")
                 and not context.get("_no_album_folder_reuse")):
             try:
                 from core.library.existing_album_folder import resolve_existing_album_folder
@@ -973,6 +1130,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 _expected_tracks = None
                 if album_context and album_context.get("total_tracks"):
                     _expected_tracks = _coerce_int(album_context.get("total_tracks"), 0) or None
+                from core.metadata.musicbrainz_tags import selected_release_id
                 reuse_folder = resolve_existing_album_folder(
                     db=get_database(),
                     transfer_dir=transfer_dir,
@@ -982,6 +1140,8 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                     active_server=_active_server,
                     expected_track_count=_expected_tracks,
                     config_manager=_get_config_manager(),
+                    musicbrainz_release_id=selected_release_id(album_context),
+                    disambiguation=template_context.get("disambiguation", ""),
                 )
             except Exception as _reuse_err:
                 logger.debug("[Existing Album Folder] lookup failed: %s", _reuse_err)
@@ -1009,7 +1169,11 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             _ensure_dir(album_dir, exist_ok=True)
             return final_path, True
 
-        album_name_sanitized = sanitize_filename(album_info["album_name"])
+        _fallback_album = album_info["album_name"]
+        _disambiguation = template_context.get("disambiguation", "")
+        if _disambiguation and not album_name_carries(_fallback_album, _disambiguation):
+            _fallback_album = f"{_fallback_album} ({_disambiguation})"
+        album_name_sanitized = sanitize_filename(_fallback_album)
         if raw_album_type in ("compilation", "compile"):
             album_relative = os.path.join("Compilations", album_name_sanitized)
         else:

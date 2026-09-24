@@ -350,6 +350,8 @@ def _normalize_album_type(value: Any, default: str = 'album') -> str:
     v = str(value).strip().lower()
     if not v:
         return default
+    if v in ('compile', 'compilations'):
+        return 'compilation'
     return v if v in _ALBUM_TYPE_CANONICAL else default
 
 

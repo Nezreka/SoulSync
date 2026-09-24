@@ -522,6 +522,10 @@ class ConfigManager:
                 "download_path": "./downloads",
                 "transfer_path": "./Transfer",
                 "max_peer_queue": 0,
+                # Measured transfer speed, not the peer's advertised upload
+                # speed. Opt in explicitly; 0 also disables fallback.
+                "observed_speed_fallback_enabled": False,
+                "min_observed_download_speed_kbps": 250,
                 "download_timeout": 600,
                 # Reddit report (YeloMelo95, Bell Canada): the existing
                 # 35-per-220s sliding-window cap allows all 35 searches in
@@ -803,6 +807,13 @@ class ConfigManager:
                 # publishes to the library as it finishes). Strictly opt-in; only
                 # ever affects whole-album batches (never singles / completeness-fill).
                 "atomic_publish": False,
+                # #1289: at startup, publish staging trees left behind by a batch
+                # that never finished (restart / crash / failed publish) instead
+                # of leaving finished, tagged audio permanently invisible in a
+                # dot-directory no scanner reads. Turn it off to keep strict
+                # quarantine — the trees are then reported and left alone, never
+                # deleted. Only meaningful when atomic_publish has been used.
+                "atomic_recover_orphans": True,
             },
             "listening_stats": {
                 "enabled": True,
@@ -835,7 +846,8 @@ class ConfigManager:
                     # Plex both read. Series segments collapse when a book has no
                     # series, exactly as the podcast season folder does.
                     "audiobook_path": "$author/$series/$seriespos - $title",
-                }
+                },
+                "detect_multi_artist_compilations": True,
             },
             "wishlist": {
                 # When discovery finds no catalogue match for a track it stores a

@@ -401,6 +401,37 @@ def _strip_track_number(basename: str) -> str:
     return (stripped or (basename or "")).lower()
 
 
+# the synthesized basename split into its parts: "01-04 - Tether" is disc 01,
+# track 04, title "Tether". the disc is optional ("04 - Tether").
+_SYNTH_NAME = re.compile(r"^(?:\d{1,3}-)?(?P<track>\d{1,3})\s+-\s+(?P<title>.+)$")
+
+# a physical "<artist> - <album> - <track> - <title>" filename (#1298). the
+# prefix is checked against the artist and album the path names, not guessed.
+_PREFIXED_NAME = re.compile(
+    r"^(?P<prefix>.+?)\s+-\s+(?:\d{1,3}-)?(?P<track>\d{1,3})\s+-\s+(?P<title>.+)$")
+
+# characters a tagger or navidrome writes in place of one a filename can't hold.
+# navidrome turns "Science/Visions" into "Science_Visions", a tagger may have
+# written "Science+Visions", so all of these compare as one slot.
+_FILENAME_SUBSTITUTES = re.compile(r'[/\\_+:*?"<>|-]')
+
+
+def _loose(text: str) -> str:
+    return _FILENAME_SUBSTITUTES.sub("_", text or "").casefold().strip()
+
+
+def _prefixed_name_matches(entry_base: str, artist: str, album: str,
+                           track: int, title: str) -> bool:
+    """``"CHVRCHES - The Bones of What You Believe - 04 - Tether"`` against the
+    synthesized artist, album, track and title. every one of them has to agree."""
+    m = _PREFIXED_NAME.match(entry_base)
+    if not m or int(m.group("track")) != track:
+        return False
+    if _loose(m.group("title")) != _loose(title):
+        return False
+    return _loose(m.group("prefix")) == _loose(f"{artist} - {album}")
+
+
 def _resolve_via_synthesized_filename(
     path_parts: List[str], base_dirs: List[str]
 ) -> Optional[str]:
@@ -426,6 +457,11 @@ def _resolve_via_synthesized_filename(
     Conservative by design: exactly ONE file across all album folders may match,
     and the extension must be identical. Dead File Cleaner DELETES what this
     resolves, so an ambiguous guess is far worse than failing.
+
+    #1298: a library named ``Artist - Album - NN - Title`` has the numbering in
+    the middle, so stripping a leading number never lines up. when the plain
+    comparison finds nothing, a file is taken only if its artist, album, track
+    number and title all agree with the synthesized path.
     """
     if len(path_parts) < 3:
         return None
@@ -441,8 +477,11 @@ def _resolve_via_synthesized_filename(
     wanted_stem = _strip_track_number(wanted_base)
     if not wanted_stem or not wanted_ext:
         return None
+    synth = _SYNTH_NAME.match(wanted_base)
+    album_segment = path_parts[-2]
 
     matches: List[str] = []
+    prefixed: List[str] = []
     for base in base_dirs:
         artist_dir = os.path.join(base, artist_segment)
         if not os.path.isdir(artist_dir):
@@ -475,11 +514,19 @@ def _resolve_via_synthesized_filename(
                 entry_base, entry_ext = os.path.splitext(entry.name)
                 if entry_ext.lower() != wanted_ext.lower():
                     continue
-                if _strip_track_number(entry_base) != wanted_stem:
-                    continue
-                if entry.path not in matches:
-                    matches.append(entry.path)
+                if _strip_track_number(entry_base) == wanted_stem:
+                    if entry.path not in matches:
+                        matches.append(entry.path)
+                elif synth and album_segment and _prefixed_name_matches(
+                        entry_base, artist_segment, album_segment,
+                        int(synth.group("track")), synth.group("title")):
+                    if entry.path not in prefixed:
+                        prefixed.append(entry.path)
 
+    # the plain match wins outright, so a path that resolved before #1298
+    # still resolves the same way and can't turn ambiguous
+    if not matches:
+        matches = prefixed
     if not matches:
         return None
     # Same reasoning as the sibling-album step: one library reachable through

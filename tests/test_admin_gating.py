@@ -198,7 +198,40 @@ def test_track_scoped_album_grab_is_rejected_before_dispatch(client, monkeypatch
     assert dispatched == []
 
 
+def test_a_plain_basic_search_pick_becomes_a_pinned_batch(client, monkeypatch):
+    """Upstream 097589c38: a basic-search pick is a real batch now -- one pinned
+    task per file, on the Downloads page, with the monitor and verification.
+    Its acquisition correlation happens in the batch worker's candidate walk,
+    not in the route; and the batch carries the library the request selected,
+    so the file lands where the page was pointed (#1199)."""
+    dispatched = []
+    prepared = []
+    monkeypatch.setattr(web_server._pinned_batch, 'dispatch_pinned_batch',
+                        lambda batch_id, task_ids, deps: dispatched.append((batch_id, task_ids)))
+    monkeypatch.setattr(web_server, '_prepare_manual_grab',
+                        lambda *a, **k: prepared.append(a) or None)
+    monkeypatch.setattr(web_server, 'add_activity_item', lambda *_args: None)
+
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/pinned.flac',
+        'title': 'Pinned Track',
+        'artist': 'Pinned Artist',
+    })
+
+    assert response.status_code == 200
+    batch_id = response.get_json()['batch_id']
+    assert dispatched and dispatched[0][0] == batch_id
+    assert prepared == []
+    batch = web_server.download_batches.pop(batch_id)
+    assert 'library_owner_id' in batch
+    for task_id in dispatched[0][1]:
+        web_server.download_tasks.pop(task_id, None)
+
+
 def test_admin_manual_download_without_lib2_context_is_correlated(client, monkeypatch):
+    """A release-level source (torrent/usenet/lidarr) is not pinnable and keeps
+    the direct route: prepared, dispatched, then bound."""
     calls = []
     order = []
 
@@ -225,10 +258,10 @@ def test_admin_manual_download_without_lib2_context_is_correlated(client, monkey
             ('bind', markers['download_id'], transfer_id)),
     )
 
-    key = web_server._make_context_key('user', 'folder/shadow.flac')
+    key = web_server._make_context_key('torrent', 'folder/shadow.flac')
     web_server.matched_downloads_context.pop(key, None)
     response = client.post('/api/download', json={
-        'username': 'user',
+        'username': 'torrent',
         'filename': 'folder/shadow.flac',
         'title': 'Shadow Track',
         'artist': 'Shadow Artist',
@@ -274,7 +307,7 @@ def test_manual_enforcement_blocks_dispatch_when_preparation_fails(
     )
 
     response = client.post('/api/download', json={
-        'username': 'user',
+        'username': 'torrent',
         'filename': 'folder/not-started.flac',
         'title': 'Not Started',
         'artist': 'Artist',

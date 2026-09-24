@@ -61,6 +61,7 @@ _HUNG_WORKER_THRESHOLD_SECONDS = 300  # 5 min — generous; real worst-case
                                        # is ffmpeg downsampling a long
                                        # hi-res FLAC, ~30-60s typically.
 
+from core.library.release_identity import read_release_identity
 from core.metadata_service import (
     get_album_for_source,
     get_album_tracks_for_source,
@@ -216,6 +217,25 @@ def _is_unknown_artist(artist_name: Optional[str]) -> bool:
     if not artist_name:
         return True
     return str(artist_name).strip().lower() in _UNKNOWN_ARTIST_NAMES
+
+
+def _source_album_artist(api_album) -> str:
+    """the album artist the metadata source gives the album, '' when it gives
+    none. every source shape: a spotify-style artists list, a bare artist or
+    artist_name, or a tag-mode album_artist."""
+    if not isinstance(api_album, dict):
+        return ''
+    artists = api_album.get('artists')
+    if isinstance(artists, list) and artists:
+        first = artists[0]
+        name = first.get('name') if isinstance(first, dict) else first
+    else:
+        name = (api_album.get('album_artist') or api_album.get('artist')
+                or api_album.get('artist_name'))
+        if isinstance(name, dict):
+            name = name.get('name')
+    name = str(name or '').strip()
+    return '' if _is_unknown_artist(name) else name
 
 
 def _looks_like_album_id_title(album_title: Optional[str]) -> bool:
@@ -867,6 +887,71 @@ def load_album_and_tracks(db, album_id):
                 pass
 
 
+def _detect_compilation_enabled() -> bool:
+    try:
+        from core.settings import config_manager
+        return bool(config_manager.get("file_organization.detect_multi_artist_compilations", True))
+    except Exception:
+        return True
+
+
+def is_multi_artist_compilation(
+    album_artist: Optional[str],
+    tracks: Optional[List[dict]] = None,
+    api_tracks: Optional[List[dict]] = None,
+    threshold: int = 3,
+) -> bool:
+    """Detect if an album release is a compilation based on artist signals.
+
+    A release is identified as a compilation if:
+    1. The album artist name is explicitly 'Various Artists', 'Various', 'VA', 'V.A.', etc.
+    2. Or there are multiple tracks (>= threshold, default 3) with distinct primary
+       artists, where neither any single track artist nor the album artist accounts
+       for more than 50% of the total tracks.
+    """
+    clean_aa = str(album_artist or '').strip().lower()
+    if clean_aa in ('various artists', 'various', 'va', 'v.a.', 'soundtrack'):
+        return True
+
+    track_artists: List[str] = []
+    if api_tracks:
+        for t in api_tracks:
+            a_list = t.get('artists')
+            if isinstance(a_list, list) and a_list:
+                first = a_list[0]
+                name = first.get('name') if isinstance(first, dict) else str(first)
+                if name and str(name).strip():
+                    track_artists.append(str(name).strip().lower())
+            elif t.get('artist') or t.get('artist_name'):
+                name = t.get('artist') or t.get('artist_name')
+                if name and str(name).strip():
+                    track_artists.append(str(name).strip().lower())
+    elif tracks:
+        for t in tracks:
+            name = t.get('track_artist') or t.get('artist_name') or t.get('artist')
+            if name and str(name).strip():
+                track_artists.append(str(name).strip().lower())
+
+    if len(track_artists) < threshold:
+        return False
+
+    unique_artists = set(track_artists)
+    if len(unique_artists) < threshold:
+        return False
+
+    total = len(track_artists)
+    from collections import Counter
+    counts = Counter(track_artists)
+    max_count = max(counts.values())
+    if (max_count / total) > 0.50:
+        return False
+
+    if clean_aa and (counts.get(clean_aa, 0) / total) > 0.50:
+        return False
+
+    return True
+
+
 def _plan_from_tags(
     album_data: dict,
     tracks: List[dict],
@@ -965,12 +1050,35 @@ def _plan_from_tags(
             'items': items,
         }
 
+    raw_db_type = str(album_data.get('record_type') or '').strip().lower()
+    tag_album_type = str((first_album_meta or {}).get('album_type') or '').strip().lower()
+    tag_api_tracks = [it['api_track'] for it in items if it.get('api_track')]
+    is_multi = False
+    if _detect_compilation_enabled():
+        is_multi = is_multi_artist_compilation(
+            album_artist=album_data.get('artist_name'),
+            tracks=tracks,
+            api_tracks=tag_api_tracks,
+        )
+    if (raw_db_type in ('compilation', 'compile', 'compilations')
+            or tag_album_type in ('compilation', 'compile', 'compilations')
+            or is_multi):
+        resolved_record_type = 'compilation'
+    elif raw_db_type in ('single', 'ep'):
+        resolved_record_type = raw_db_type
+    elif tag_album_type in ('single', 'ep'):
+        resolved_record_type = tag_album_type
+    else:
+        resolved_record_type = raw_db_type or tag_album_type or 'album'
+
     return {
         'status': 'planned',
         'source': 'tags',
         'api_album': first_album_meta or {},
         'total_discs': max_disc,
         'items': items,
+        'record_type': resolved_record_type,
+        'is_compilation': (resolved_record_type == 'compilation'),
     }
 
 
@@ -1023,7 +1131,9 @@ def plan_album_reorganize(
         }
 
     if metadata_source == 'tags':
-        return _plan_from_tags(album_data, tracks, resolve_file_path_fn)
+        return _with_release_disambiguation(
+            _plan_from_tags(album_data, tracks, resolve_file_path_fn),
+            tracks, resolve_file_path_fn)
 
     if primary_source is None:
         try:
@@ -1101,13 +1211,77 @@ def plan_album_reorganize(
             # odd data just fall back to the source's disc structure
             logger.debug("single-disc cap skipped (unexpected track data)", exc_info=True)
 
-    return {
+    raw_db_type = str(album_data.get('record_type') or '').strip().lower()
+    api_album_type = str((api_album or {}).get('album_type') or (api_album or {}).get('record_type') or '').strip().lower()
+    is_multi = False
+    if _detect_compilation_enabled():
+        is_multi = is_multi_artist_compilation(
+            album_artist=album_data.get('artist_name'),
+            tracks=tracks,
+            api_tracks=api_tracks,
+        )
+    if (raw_db_type in ('compilation', 'compile', 'compilations')
+            or api_album_type in ('compilation', 'compile', 'compilations')
+            or is_multi):
+        resolved_record_type = 'compilation'
+    elif raw_db_type in ('single', 'ep'):
+        resolved_record_type = raw_db_type
+    elif api_album_type in ('single', 'ep'):
+        resolved_record_type = api_album_type
+    else:
+        resolved_record_type = raw_db_type or api_album_type or 'album'
+
+    return _with_release_disambiguation({
         'status': 'planned',
         'source': source,
         'api_album': api_album,
         'total_discs': total_discs,
         'items': items,
-    }
+        'record_type': resolved_record_type,
+        'is_compilation': (resolved_record_type == 'compilation'),
+    }, tracks, resolve_file_path_fn)
+
+
+def _files_disambiguation(tracks, resolve_file_path_fn, read_identity) -> str:
+    """The release comment off the album's own files, "" when none carry one."""
+    if not resolve_file_path_fn:
+        return ''
+    for track in tracks:
+        try:
+            path = resolve_file_path_fn(track.get('file_path'))
+        except Exception:
+            path = None
+        if not path:
+            continue
+        _release_id, comment = read_identity(path)
+        if comment:
+            return comment
+    return ''
+
+
+def _with_release_disambiguation(plan: dict, tracks, resolve_file_path_fn,
+                                 read_identity=None) -> dict:
+    """Carry the release's disambiguation onto the plan's album dicts.
+
+    the import puts it on the album folder (#1299), so reorganize has to know it
+    too or it folds "album (baby punk version)" back into "album", on top of the
+    other release. musicbrainz says it directly when it's the source; otherwise
+    the files' album comment tag does, which picard and beets write as well.
+    """
+    if plan.get('status') != 'planned':
+        return plan
+    api_album = plan.get('api_album') or {}
+    if plan.get('source') == 'musicbrainz' and 'disambiguation' in api_album:
+        disambiguation = api_album.get('disambiguation')
+    else:
+        disambiguation = _files_disambiguation(
+            tracks, resolve_file_path_fn, read_identity or read_release_identity)
+    disambiguation = str(disambiguation or '').strip()
+    plan['api_album'] = {**api_album, 'disambiguation': disambiguation}
+    for item in plan.get('items') or []:
+        if isinstance(item.get('api_album'), dict):
+            item['api_album'] = {**item['api_album'], 'disambiguation': disambiguation}
+    return plan
 
 
 def _build_post_process_context(
@@ -1118,6 +1292,8 @@ def _build_post_process_context(
     total_discs: int,
     local_title: Optional[str] = None,
     local_year: Optional[str] = None,
+    record_type: Optional[str] = None,
+    album_artist: Optional[str] = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
     treats this exactly like a fresh download with full Spotify-style
@@ -1128,10 +1304,43 @@ def _build_post_process_context(
     API doesn't supply one (#1078)."""
     track_number = int(api_track.get('track_number') or 1)
     disc_number = int(api_track.get('disc_number') or 1)
-    track_artists = api_track.get('artists') or [artist_name]
+    track_artists = api_track.get('artists')
+    if not track_artists:
+        if api_track.get('artist'):
+            track_artists = [api_track['artist']]
+        elif api_track.get('artist_name'):
+            track_artists = [api_track['artist_name']]
+        else:
+            track_artists = [artist_name]
     normalized_artists = [
         ({'name': a} if isinstance(a, str) else a) for a in track_artists
     ]
+    # album artist comes from the source, like every other tag reorganize
+    # writes. it used to be the name soulsync already had, which on navidrome
+    # IS the file's old album artist tag, so a wrong variation got written
+    # straight back every run (LettuceSnob). the library name is only the
+    # fallback, and a case-only difference keeps the user's casing.
+    library_album_artist = album_artist or artist_name
+    source_album_artist = _source_album_artist(api_album)
+    album_artist_name = (
+        _keep_user_casing(source_album_artist, library_album_artist)
+        if source_album_artist else library_album_artist
+    )
+    primary_track_artist = ''
+    if normalized_artists:
+        first_a = normalized_artists[0]
+        if isinstance(first_a, dict) and first_a.get('name'):
+            primary_track_artist = first_a['name']
+
+    eff_type = (
+        record_type
+        or api_album.get('record_type')
+        or api_album.get('album_type')
+        or ''
+    ).strip().lower()
+    if eff_type in ('compile', 'compilations'):
+        eff_type = 'compilation'
+    is_comp = (eff_type == 'compilation') or bool(api_album.get('is_compilation'))
 
     api_album_id = api_album.get('id') or api_album.get('album_id') or ''
     api_album_name = api_album.get('name') or api_album.get('title') or album_title
@@ -1175,9 +1384,11 @@ def _build_post_process_context(
     # filename and the title tag are built from this string, so they agree.
     track_name = _keep_user_casing(track_name, local_title or '')
 
+    effective_artist_name = primary_track_artist if (is_comp and primary_track_artist) else album_artist_name
+
     return {
         'spotify_artist': {
-            'name': artist_name,
+            'name': effective_artist_name,
             'id': '',
             'genres': [],
         },
@@ -1193,6 +1404,12 @@ def _build_post_process_context(
             # would decide the destination).
             'total_discs_declared': True,
             'image_url': api_album_image,
+            # #1299: keeps a same-named release in its own folder
+            'disambiguation': str(api_album.get('disambiguation') or '').strip(),
+            'album_type': eff_type or 'album',
+            'record_type': eff_type or 'album',
+            'is_compilation': is_comp,
+            'artists': [{'name': album_artist_name}],
         },
         'track_info': {
             'name': track_name,
@@ -1202,10 +1419,11 @@ def _build_post_process_context(
             'duration_ms': api_track.get('duration_ms', 0),
             'artists': normalized_artists,
             'uri': api_track.get('uri', ''),
+            '_explicit_artist_context': {'name': album_artist_name},
         },
         'original_search_result': {
             'title': track_name,
-            'artist': artist_name,
+            'artist': effective_artist_name,
             'album': api_album_name,
             'track_number': track_number,
             'disc_number': disc_number,
@@ -1213,6 +1431,9 @@ def _build_post_process_context(
             'spotify_clean_album': api_album_name,
             'artists': normalized_artists,
         },
+        'album_type': eff_type or 'album',
+        'record_type': eff_type or 'album',
+        'is_compilation': is_comp,
         'is_album_download': True,
         'has_clean_spotify_data': True,
         'has_full_spotify_metadata': True,
@@ -1405,6 +1626,8 @@ def preview_album_reorganize(
             per_item_album, api_track, artist_name, album_title, total_discs,
             local_title=title,
             local_year=(str(album_data.get('year')) if album_data.get('year') else None),
+            record_type=plan.get('record_type') or album_data.get('record_type'),
+            album_artist=artist_name,
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1449,6 +1672,8 @@ def preview_album_reorganize(
 
     return {
         'success': True, 'status': 'planned',
+        'record_type': plan.get('record_type') or album_data.get('record_type'),
+        'is_compilation': plan.get('is_compilation', False),
         **common,
         'tracks': preview_tracks,
     }
@@ -1544,6 +1769,9 @@ def _build_album_info(context: dict) -> dict:
         'disc_number': track_info.get('disc_number') or 1,
         'album_image_url': spotify_album.get('image_url') or '',
         'spotify_album_id': spotify_album.get('id') or '',
+        'album_type': spotify_album.get('album_type') or context.get('album_type') or '',
+        'record_type': spotify_album.get('record_type') or context.get('record_type') or '',
+        'is_compilation': spotify_album.get('is_compilation') or context.get('is_compilation') or False,
     }
 
 
@@ -1603,6 +1831,7 @@ class _RunContext:
     on_progress: Optional[Callable[[dict], None]] = None
     stop_check: Optional[Callable[[], bool]] = None
     transfer_dir: Optional[str] = None      # anchors the #746 /deleted-quarantine skip
+    record_type: Optional[str] = None
 
     def emit(self, **updates) -> None:
         """Fire the progress callback. Caller is responsible for
@@ -1651,8 +1880,8 @@ def _stage_track(ctx: _RunContext, track_id, title, resolved_src) -> Optional[st
     With per-track subdirs:
 
     - Worker A's cleanup walks: per-track subdir (empty after move →
-      removed) → ``staging_album_dir`` (still has other workers'
-      subdirs → not empty → walk stops). ✓
+       removed) → ``staging_album_dir`` (still has other workers'
+       subdirs → not empty → walk stops). ✓
     - Worker B's stage-in: makedirs its OWN subdir, copies into
       it. No interference from worker A. ✓
     """
@@ -1688,6 +1917,8 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
     context = _build_post_process_context(
         api_album, api_track, ctx.artist_name, ctx.album_title, ctx.total_discs,
         local_title=title, local_year=ctx.local_year,
+        record_type=ctx.record_type,
+        album_artist=ctx.artist_name,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -1823,6 +2054,24 @@ def _process_one_track(ctx: _RunContext, plan_item: dict) -> None:
             moved=ctx.summary['moved'],
             processed=ctx.summary['moved'] + ctx.summary['skipped'] + ctx.summary['failed'],
         )
+
+
+def _persist_compilation_record_type(db, album_id: str) -> None:
+    """Persist compilation record_type to the database for the given album."""
+    if not db or not album_id:
+        return
+    try:
+        if hasattr(db, 'update_album_fields'):
+            db.update_album_fields(album_id, {'record_type': 'compilation'})
+        elif hasattr(db, '_get_connection'):
+            conn = db._get_connection()
+            try:
+                conn.execute("UPDATE lib2_albums SET album_type = 'compilation' WHERE id = ?", (int(album_id),))
+                conn.commit()
+            finally:
+                conn.close()
+    except Exception as e:
+        logger.warning("[Reorganize] Failed to persist compilation record_type for album %s: %s", album_id, e)
 
 
 def reorganize_album(
@@ -2002,6 +2251,7 @@ def reorganize_album(
         on_progress=on_progress,
         stop_check=stop_check,
         transfer_dir=transfer_dir,
+        record_type=plan.get('record_type') or album_data.get('record_type'),
     )
 
     try:
@@ -2115,6 +2365,9 @@ def reorganize_album(
                     artist_dirs.add(artist)
             for artist_dir in artist_dirs:
                 _prune_empty_album_dirs(artist_dir)
+
+        if plan.get('record_type') == 'compilation' and str(album_data.get('record_type') or '').strip().lower() != 'compilation':
+            _persist_compilation_record_type(db, album_id)
 
     return summary
 
@@ -2316,6 +2569,9 @@ def reorganize_album_rename_only(
             _prune_empty_source_dirs(src_dir)   # #985: library-safe prune (transfer-dir-independent)
         except Exception as e:
             logger.debug("[Reorganize/rename] source prune of %s failed: %s", src_dir, e)
+
+    if summary.get('moved', 0) > 0 and preview.get('record_type') == 'compilation':
+        _persist_compilation_record_type(db, album_id)
 
     return summary
 

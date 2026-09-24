@@ -23,7 +23,7 @@ from core.metadata_service import (
     get_source_priority,
 )
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_tagged
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.track_number")
@@ -82,8 +82,11 @@ class TrackNumberRepairJob(RepairJob):
         dry_run = bool(settings.get("dry_run", True))
         scope_artist = get_scope_artist(context)
         scope_key = scope_artist.casefold() if scope_artist else None
+        # hand-tagged: the user typed this release and its numbering; the
+        # service's tracklist is the studio album and would renumber it
         subjects = [
-            row for row in active_file_subjects(context.db, context.config_manager)
+            row for row in drop_hand_tagged(
+                context, active_file_subjects(context.db, context.config_manager))
             if not scope_key or str(row.get("artist_name") or "").casefold() == scope_key
         ]
         by_album: Dict[int, list[Dict[str, Any]]] = {}

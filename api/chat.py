@@ -33,7 +33,7 @@ _MAX_MESSAGE_LEN = 1000
 # Preset chat avatars live at webui/static/avatar/1.png .. <AVATAR_COUNT>.png.
 # The id is only ever an INDEX into that fixed set — remote input must never
 # reach a filesystem path.
-AVATAR_COUNT = 100
+AVATAR_COUNT = 244  # 101-244 are the games set. chat.js CHAT_AVATARS must match
 # Avatars only their owner may wear. The picker hides them from everyone else,
 # but the envelope is client-controlled, so ownership is ALSO enforced on send
 # here and on render in chat.js — a forged id can't put someone else's face on
@@ -498,15 +498,65 @@ def _is_safe_preview_url(url: str) -> bool:
             return False
         if host.endswith((".local", ".internal", ".lan", ".home", ".corp", ".onion")):
             return False
-        try:
-            ip = ipaddress.ip_address(host)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-                return False
-        except ValueError:
-            pass
-        return True
+        # what the name RESOLVES to is what gets fetched. checking only an ip
+        # literal let "127.0.0.1.nip.io", "http://2130706433/" and any public
+        # name pointed at a lan address straight through
+        addrs = _resolve_host(host, p.port or (443 if p.scheme == "https" else 80))
+        return bool(addrs) and all(_is_public_ip(a) for a in addrs)
     except Exception:
         return False
+
+
+def _resolve_host(host: str, port: int) -> list[str]:
+    import socket
+    return [info[4][0] for info in socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)]
+
+
+def _is_public_ip(addr: str) -> bool:
+    ip = ipaddress.ip_address(addr.split("%", 1)[0])
+    if getattr(ip, "ipv4_mapped", None):
+        ip = ip.ipv4_mapped
+    return ip.is_global and not ip.is_multicast
+
+
+_PREVIEW_MAX_REDIRECTS = 3
+_HEX_COLOR = _re.compile(r"^#[0-9a-fA-F]{3,8}$")
+
+
+def _preview_get(url: str, headers: dict):
+    """GET that re-runs the ssrf guard on every redirect hop. requests follows
+    redirects on its own, so a public link that 302s to the router's admin
+    page used to be fetched without a second look."""
+    import requests
+    for _ in range(_PREVIEW_MAX_REDIRECTS + 1):
+        if not _is_safe_preview_url(url):
+            return None, url
+        r = requests.get(url, headers=headers, timeout=4, stream=True, allow_redirects=False)
+        if r.is_redirect or r.status_code in (301, 302, 303, 307, 308):
+            location = r.headers.get("location")
+            r.close()
+            if not location:
+                return None, url
+            url = urljoin(url, location)
+            continue
+        return r, url
+    return None, url
+
+
+def _frameable(headers) -> bool:
+    """whether the page lets another site show it in an iframe. most big sites
+    refuse, and the iframe still fires onload, so "preview inline" used to open
+    a dead box with no fallback."""
+    xfo = str(headers.get("x-frame-options") or "").strip().lower()
+    if xfo:
+        return False
+    csp = str(headers.get("content-security-policy") or "").lower()
+    for part in csp.split(";"):
+        part = part.strip()
+        if part.startswith("frame-ancestors"):
+            sources = part.split()[1:]
+            return "*" in sources
+    return True
 
 
 def _fetch_link_preview(url: str) -> dict | None:
@@ -521,17 +571,15 @@ def _fetch_link_preview(url: str) -> dict | None:
         if now - cached_time < 3600:
             return data
 
-    if not _is_safe_preview_url(url):
-        return None
-
     try:
-        import requests
         from bs4 import BeautifulSoup
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 (compatible; SoulSync/1.0; +https://github.com/Nezreka/SoulSync)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
-        r = requests.get(url, headers=headers, timeout=4, stream=True)
+        r, final_url = _preview_get(url, headers)
+        if r is None:
+            return None
         r.raise_for_status()
         ctype = r.headers.get("content-type", "").lower()
         if "text/html" not in ctype and "xhtml" not in ctype:
@@ -568,7 +616,9 @@ def _fetch_link_preview(url: str) -> dict | None:
         if og_img and og_img.get("content"):
             img = str(og_img["content"]).strip()
             if img and not (img.startswith("http://") or img.startswith("https://")):
-                img = urljoin(url, img)
+                img = urljoin(final_url, img)
+            if not img.startswith(("http://", "https://")):
+                img = ""
 
         # Site Name
         site_name = ""
@@ -581,6 +631,10 @@ def _fetch_link_preview(url: str) -> dict | None:
         tc = soup.find("meta", attrs={"name": "theme-color"})
         if tc and tc.get("content"):
             theme_color = str(tc["content"]).strip()
+        # it lands in a style attribute, so anything but a plain hex colour
+        # could append its own declarations (position: fixed over the app)
+        if not _HEX_COLOR.match(theme_color):
+            theme_color = ""
 
         domain = urlparse(url).hostname or ""
 
@@ -592,7 +646,8 @@ def _fetch_link_preview(url: str) -> dict | None:
             "image": img[:500],
             "site_name": (site_name or domain)[:80],
             "domain": domain,
-            "theme_color": theme_color[:30],
+            "theme_color": theme_color,
+            "frameable": _frameable(r.headers),
         }
         if len(_LINK_PREVIEW_CACHE) > 500:
             _LINK_PREVIEW_CACHE.clear()

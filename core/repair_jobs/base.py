@@ -214,6 +214,67 @@ def skip_deleted_quarantine(root: str, dirs: list, transfer_folder: str) -> None
                if not is_internal_transfer_dir(os.path.join(root, d), transfer_folder)]
 
 
+# hand-tagged releases ("tag it yourself"): the user typed every tag for a
+# bootleg or live recording no service knows. jobs that would match it to a
+# service, renumber it, or offer to delete it must leave it alone.
+
+def hand_tagged_path_keys(db) -> set:
+    """every hand-tagged file's path key, once per job run. anything odd
+    (no db, old schema, a test double) means nothing is hand-tagged"""
+    if db is None:
+        return set()
+    try:
+        keys = db.manual_path_keys()
+    except Exception as e:  # noqa: BLE001 - never let the guard crash a job
+        logger.debug("hand-tagged keys unavailable: %s", e)
+        return set()
+    return keys if isinstance(keys, (set, frozenset)) else set()
+
+
+def is_hand_tagged_path(path, keys) -> bool:
+    """true when this file is one the user hand-tagged"""
+    if not keys or not path:
+        return False
+    from database.music_database import MusicDatabase
+    return MusicDatabase.manual_path_key(path) in keys
+
+
+def drop_hand_tagged(context, subjects, path_key: str = 'path') -> list:
+    """``subjects`` without the files the user hand-tagged.
+
+    Library v2 keeps no ``metadata_locked`` column on its rows; the lock is the
+    remembered file (``manual_metadata_files``), which is also what survives a
+    rescan. A job that would retag, renumber, rematch or delete from a service's
+    view of the release filters its subjects through this -- the service's view
+    is the studio album the user deliberately did not want.
+    """
+    subjects = list(subjects or [])
+    keys = hand_tagged_path_keys(getattr(context, 'db', None))
+    if not keys:
+        return subjects
+    return [s for s in subjects
+            if not is_hand_tagged_path((s or {}).get(path_key), keys)]
+
+
+def has_metadata_locked(cursor, table: str) -> bool:
+    """does this table carry metadata_locked yet. very old schemas don't, and
+    a missing column just means nothing there is locked"""
+    try:
+        cursor.execute(f"PRAGMA table_info({table})")
+        return any(row[1] == 'metadata_locked' for row in cursor.fetchall())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def not_locked_sql(cursor, table: str, alias: str = '') -> str:
+    """an ' AND ...' clause that drops hand-tagged rows, or '' on a schema
+    without the column"""
+    if not has_metadata_locked(cursor, table):
+        return ''
+    col = f"{alias}.metadata_locked" if alias else 'metadata_locked'
+    return f" AND COALESCE({col}, 0) = 0"
+
+
 @dataclass
 class JobResult:
     """Result of a single job scan run."""

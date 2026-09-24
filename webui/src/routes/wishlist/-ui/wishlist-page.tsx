@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
+import { clearAudiobookWishlist } from '@/routes/audiobooks/-audiobooks.api';
 
 import type { ParsedWishlistTrack } from '../-wishlist.types';
 
@@ -38,6 +39,9 @@ export function WishlistPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
 
+  const [audiobookCount, setAudiobookCount] = useState<number | null>(null);
+  const [abReloadKey, setAbReloadKey] = useState(0);
+
   // Only one orb open at a time, matching the vanilla accordion which cleared
   // `.expanded` from every group before setting it on the clicked one.
   const [expandedArtist, setExpandedArtist] = useState<string | null>(null);
@@ -45,7 +49,8 @@ export function WishlistPage() {
   // its operational twin. Persisted so the choice survives navigation.
   const [view, setView] = useState<'nebula' | 'list'>(() => {
     try {
-      return window.localStorage.getItem('wishlistView') === 'list' ? 'list' : 'nebula';
+      const stored = window.localStorage.getItem('wishlistView');
+      return stored === 'list' ? 'list' : 'nebula';
     } catch {
       return 'nebula';
     }
@@ -148,6 +153,24 @@ export function WishlistPage() {
     removeAlbum.mutate(albumName);
   };
 
+  const onClearAudiobooks = async () => {
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'Clear Audiobook Wishlist',
+      message: 'Remove all audiobooks from your wishlist? This cannot be undone.',
+      confirmText: 'Clear All',
+      destructive: true,
+    });
+    if (confirmed === false) return;
+    const ok = await clearAudiobookWishlist();
+    if (ok) {
+      window.showToast?.('Audiobook wishlist cleared', 'success');
+      setAudiobookCount(0);
+      setAbReloadKey((k) => k + 1);
+    } else {
+      window.showToast?.('Failed to clear wishlist', 'error');
+    }
+  };
+
   return (
     <div className="page-shell wishlist-page-container">
       <div className="wishlist-page-header">
@@ -157,40 +180,59 @@ export function WishlistPage() {
             Wishlist
           </h2>
           <div className="wishlist-page-meta">
-            <span className="wishlist-page-count">{trackCountLabel(total)}</span>
-            {/* startWishlistCountdownTimer writes this line. */}
-            <span className="wishlist-page-timer" id="wishlist-next-auto-timer">
-              Next Auto: --
+            <span className="wishlist-page-count">
+              {media === 'audiobooks'
+                ? audiobookCount !== null
+                  ? `${audiobookCount} ${audiobookCount === 1 ? 'audiobook' : 'audiobooks'}`
+                  : ''
+                : trackCountLabel(total)}
             </span>
+            {media !== 'audiobooks' && (
+              <span className="wishlist-page-timer" id="wishlist-next-auto-timer">
+                Next Auto: --
+              </span>
+            )}
           </div>
         </div>
       </div>
 
       <div className="wishlist-page-actions">
-        {/* All three open modals owned by downloads.js and shared with the
-            wishlist hero button, so they are invoked rather than reimplemented. */}
-        <button
-          className="btn btn--secondary"
-          type="button"
-          title="Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again."
-          onClick={() => window.openWishlistIgnoreModal?.()}
-        >
-          Ignored
-        </button>
-        <button
-          className="btn btn--secondary"
-          type="button"
-          onClick={() => window.cleanupWishlistOverview?.()}
-        >
-          Cleanup
-        </button>
-        <button
-          className="btn btn--danger"
-          type="button"
-          onClick={() => window.clearEntireWishlist?.()}
-        >
-          Clear All
-        </button>
+        {media === 'audiobooks' ? (
+          <button
+            className="btn btn--danger"
+            type="button"
+            onClick={() => void onClearAudiobooks()}
+          >
+            Clear All
+          </button>
+        ) : (
+          <>
+            {/* All three open modals owned by downloads.js and shared with the
+                wishlist hero button, so they are invoked rather than reimplemented. */}
+            <button
+              className="btn btn--secondary"
+              type="button"
+              title="Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again."
+              onClick={() => window.openWishlistIgnoreModal?.()}
+            >
+              Ignored
+            </button>
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={() => window.cleanupWishlistOverview?.()}
+            >
+              Cleanup
+            </button>
+            <button
+              className="btn btn--danger"
+              type="button"
+              onClick={() => window.clearEntireWishlist?.()}
+            >
+              Clear All
+            </button>
+          </>
+        )}
       </div>
 
       {/* Media tabs. Music and audiobooks are kept as separate lists, the same
@@ -219,7 +261,7 @@ export function WishlistPage() {
       </div>
 
       {media === 'audiobooks' ? (
-        <WishlistAudiobooks />
+        <WishlistAudiobooks key={abReloadKey} onCountChange={setAudiobookCount} />
       ) : total === 0 ? (
         <div className="wishlist-page-empty">
           <div className="wishlist-page-empty-icon">

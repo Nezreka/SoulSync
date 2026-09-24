@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Optional
+
+# an artist's release LIST goes stale the day they drop something new, unlike
+# an album entity which never changes. the row itself lives the cache's 30 days,
+# so it carries its own fetch time and the readers below give up on it after
+# half a day. a list with no stamp predates this and is treated as stale.
+ARTIST_ALBUM_LIST_MAX_AGE_S = 12 * 3600
+_CACHED_AT_FIELD = '_cached_at'
+
+
+def _is_fresh(payload: dict[str, Any]) -> bool:
+    try:
+        cached_at = float(payload.get(_CACHED_AT_FIELD))
+    except (TypeError, ValueError):
+        return False
+    return 0 <= time.time() - cached_at <= ARTIST_ALBUM_LIST_MAX_AGE_S
 
 
 def make_artist_album_cache_key(
@@ -34,7 +50,7 @@ def get_cached_artist_album_items(
         'artist',
         make_artist_album_cache_key(artist_id, album_type, limit, include_limit=include_limit),
     )
-    if not isinstance(cached, dict):
+    if not isinstance(cached, dict) or not _is_fresh(cached):
         return None
 
     items = cached.get(items_field)
@@ -56,7 +72,7 @@ def get_cached_artist_album_payload(
         'artist',
         make_artist_album_cache_key(artist_id, album_type, limit, include_limit=include_limit),
     )
-    return cached if isinstance(cached, dict) else None
+    return cached if isinstance(cached, dict) and _is_fresh(cached) else None
 
 
 def store_artist_album_items(
@@ -81,6 +97,7 @@ def store_artist_album_items(
     }
     if extra_fields:
         payload.update(extra_fields)
+    payload[_CACHED_AT_FIELD] = time.time()
 
     cache.store_entity(
         source,

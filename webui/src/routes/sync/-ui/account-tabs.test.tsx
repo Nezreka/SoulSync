@@ -4,7 +4,7 @@
  * selector — so they are asserted as literals, not derived.
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AccountDetailsModal } from './account-details-modal';
@@ -370,6 +370,27 @@ describe('seeding — the engine must be able to FIND the playlist (2235-2240)',
     // Seeded BEFORE the engine is asked to open it.
     expect(openDownloadMissingModal).toHaveBeenCalledWith('deezer_arl_7');
   });
+
+  it('formats deezer progress events with albums count and passes', async () => {
+    const showLoadingOverlay = vi.fn();
+    window.showLoadingOverlay = showLoadingOverlay;
+    render(<DeezerArlTab />);
+    await waitFor(() => expect(screen.getByText('Deep Cuts')).toBeInTheDocument());
+
+    fireEvent.click(document.querySelector('#action-btn-deezer_arl_7') as Element);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(DEEZER_PLAYLIST_PROGRESS_EVENT, {
+          detail: { playlist_id: 7, phase: 'release dates', done: 50, total: 100 },
+        }),
+      );
+    });
+
+    expect(showLoadingOverlay).toHaveBeenCalledWith(
+      'Loading playlist: Deep Cuts — release dates 50/100 albums (50%), pass 1 of 2',
+    );
+  });
 });
 
 describe('the header count is per-tab drift (1901 vs 2592)', () => {
@@ -593,7 +614,7 @@ describe('DeezerArlTab', () => {
     );
     expect(window.showLoadingOverlay).not.toHaveBeenCalledWith(expect.stringContaining('99'));
     expect(window.showLoadingOverlay).toHaveBeenCalledWith(
-      expect.stringContaining('track numbers 3/10 (30%)'),
+      expect.stringContaining('track numbers 3/10'),
     );
     await waitFor(() =>
       expect(document.querySelector('#deezer-arl-playlist-details-modal')).not.toBeNull(),

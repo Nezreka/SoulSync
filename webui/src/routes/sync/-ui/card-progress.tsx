@@ -34,15 +34,39 @@ import { CardCoverage } from './card-coverage';
  * line in place.
  */
 export function syncCardCounts(
-  progress: { total_tracks?: number; matched_tracks?: number; failed_tracks?: number } | undefined,
-): { total: number; matched: number; failed: number; percentage: number } | null {
+  progress:
+    | {
+        total_tracks?: number;
+        matched_tracks?: number;
+        failed_tracks?: number;
+        duplicate_tracks?: number;
+        synced_tracks?: number;
+      }
+    | undefined,
+): {
+  total: number;
+  matched: number;
+  failed: number;
+  percentage: number;
+  synced?: number;
+  folded?: number;
+} | null {
   if (!progress || !progress.total_tracks || progress.total_tracks <= 0) return null;
   const matched = progress.matched_tracks || 0;
   const failed = progress.failed_tracks || 0;
   const total = progress.total_tracks || 0;
   const processed = matched + failed;
   const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
-  return { total, matched, failed, percentage };
+  const folded = progress.duplicate_tracks;
+  const synced = progress.synced_tracks ?? (folded && folded > 0 ? matched - folded : undefined);
+  return {
+    total,
+    matched,
+    failed,
+    percentage,
+    ...(synced !== undefined ? { synced } : {}),
+    ...(folded !== undefined ? { folded } : {}),
+  };
 }
 
 /**
@@ -71,6 +95,8 @@ export function cardCoverageValue(
       matched: sync.matched,
       failed: sync.failed,
       percentage: sync.percentage,
+      synced: sync.synced,
+      folded: sync.folded,
     };
   }
 

@@ -787,7 +787,10 @@ def get_artist_map_explore():
                     similar = scanner._fetch_similar_artists_from_musicmap(center_name, limit=15)
                     if similar:
                         source_artist_id = center_ids.get('spotify_id') or center_ids.get('itunes_id') or center_name
-                        # Store in DB for future use
+                        # Store in DB for future use. CACHE ONLY: looking an artist up
+                        # is not a preference, so these rows never seed the discovery
+                        # pool — get_top_similar_artists keeps only the edges whose
+                        # source is a library or watchlist artist (#1284).
                         for rank, sa in enumerate(similar, 1):
                             try:
                                 database.add_or_update_similar_artist(

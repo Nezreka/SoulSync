@@ -6,6 +6,7 @@ import { apiClient, readJson } from '@/app/api-client';
 import type {
   ListeningStatsStatus,
   LastfmListeningImportStatus,
+  ListenbrainzListeningImportStatus,
   StatsCachedPayload,
   StatsDbStoragePayload,
   StatsLibraryDiskUsagePayload,
@@ -72,6 +73,12 @@ export async function fetchLastfmListeningImportStatus(): Promise<LastfmListenin
   );
 }
 
+export async function fetchListenbrainzListeningImportStatus(): Promise<ListenbrainzListeningImportStatus> {
+  return await readJson<ListenbrainzListeningImportStatus>(
+    apiClient.get('listenbrainz/listening-import/status'),
+  );
+}
+
 export async function fetchStatsDbStorage(): Promise<StatsDbStoragePayload> {
   const payload = await readJson<StatsDbStoragePayload>(apiClient.get('stats/db-storage'));
   if (!payload.success) {
@@ -111,6 +118,26 @@ export async function runLastfmListeningImport(
     throw new Error(payload.error || 'Last.fm import failed');
   }
   return payload;
+}
+
+export async function runListenbrainzListeningImport(
+  username?: string,
+): Promise<ListenbrainzListeningImportStatus> {
+  const payload = await readJson<ListenbrainzListeningImportStatus>(
+    apiClient.post('listenbrainz/listening-import/run', {
+      json: { username: username?.trim() || undefined, enabled: true },
+    }),
+  );
+  if (!payload.success) {
+    throw new Error(payload.error || 'ListenBrainz import failed');
+  }
+  return payload;
+}
+
+export async function cancelListenbrainzListeningImport(): Promise<ListenbrainzListeningImportStatus> {
+  return await readJson<ListenbrainzListeningImportStatus>(
+    apiClient.post('listenbrainz/listening-import/cancel'),
+  );
 }
 
 export async function fetchStatsListeningEvents(
@@ -191,6 +218,13 @@ export function lastfmListeningImportStatusQueryOptions() {
   return queryOptions({
     queryKey: [...STATS_QUERY_KEY, 'lastfm-import'],
     queryFn: fetchLastfmListeningImportStatus,
+  });
+}
+
+export function listenbrainzListeningImportStatusQueryOptions() {
+  return queryOptions({
+    queryKey: [...STATS_QUERY_KEY, 'listenbrainz-import'],
+    queryFn: fetchListenbrainzListeningImportStatus,
   });
 }
 

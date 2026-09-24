@@ -7,8 +7,8 @@ configured staging folder, we copy directly to the transfer dir and
 hand off to post-processing — skipping the network round-trip entirely.
 
 1. Pull the staging-file cache for the batch (one scan per batch).
-2. Compute title + artist similarity (SequenceMatcher) against each
-   staging entry; require title >= 0.80 and combined score >= 0.75.
+2. Compute version-aware title + artist similarity against each staging
+   entry; require title >= 0.80 and combined score >= 0.75.
    Score weighting flips based on whether artist info is available on
    both sides:
    - both have artist: 0.55*title + 0.45*artist
@@ -100,6 +100,41 @@ def _extract_release_filename_title(stem: str) -> str:
         if re.fullmatch(r'\d{1,3}', part) and i < len(parts) - 1:
             return ' - '.join(parts[i + 1:]).strip()
     return ''
+
+
+def _filename_artist_title_guesses(stem: str) -> list[tuple[str, str]]:
+    """(artist, title) guesses from an untagged release-style filename.
+
+    torrent rips often come untagged with names like 'Artist_-_Title',
+    'NN - Artist - Title' or 'Artist - Album - NN - Title'. the whole stem
+    never scores against a clean title because the artist is glued on.
+    these are only guesses, the caller keeps one only when the guessed
+    artist really matches the wanted artist, so 'Hold Me - Live' can't
+    get split into an artist and a title and match something it isn't.
+    """
+    text = re.sub(r'_+', ' ', str(stem or ''))
+    text = re.sub(r'\s+', ' ', text).strip()
+    parts = [p.strip() for p in text.split(' - ') if p.strip()]
+    if len(parts) < 2:
+        return []
+    # '01. Artist - Title' carries the number on the first segment
+    lead = re.match(r'^\d{1,3}\.\s+(.+)$', parts[0])
+    if lead:
+        parts = [lead.group(1)] + parts[1:]
+    guesses: list[tuple[str, str]] = []
+    if re.fullmatch(r'\d{1,3}', parts[0]):
+        # NN - Artist - Title
+        if len(parts) >= 3:
+            guesses.append((parts[1], ' - '.join(parts[2:])))
+    else:
+        # Artist - Album - NN - Title
+        for i in range(1, len(parts) - 1):
+            if re.fullmatch(r'\d{1,3}', parts[i]):
+                guesses.append((parts[0], ' - '.join(parts[i + 1:])))
+                break
+        # Artist - Title
+        guesses.append((parts[0], ' - '.join(parts[1:])))
+    return guesses
 
 
 def _staging_title_variants(title: Any, normalize: Callable[[str], str]) -> list[str]:
@@ -197,9 +232,21 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
 
     from difflib import SequenceMatcher
     normalize = deps.matching_engine.normalize_string
+    version_detector = getattr(type(deps.matching_engine), 'detect_version_type', None)
+    wanted_version = (
+        deps.matching_engine.detect_version_type(track_title)[0]
+        if callable(version_detector) else None
+    )
     norm_title = normalize(track_title)
     norm_artist = normalize(track_artist)
     title_variants = _staging_title_variants(track_title, normalize) or [norm_title]
+    same_named_version = wanted_version not in (None, 'original')
+    score_title_variants = title_variants
+    if same_named_version:
+        score_title_variants = [
+            re.sub(r'\bversion\b', ' ', value).strip()
+            for value in title_variants
+        ]
 
     best_match = None
     best_score = 0.0
@@ -220,12 +267,59 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             continue
 
         # Title similarity (primary)
+        candidate_version = (
+            deps.matching_engine.detect_version_type(sf['title'])[0]
+            if callable(version_detector) else None
+        )
+        if wanted_version is not None and candidate_version != wanted_version:
+            logger.debug(
+                "[Staging] Skip candidate %s — version mismatch (%s vs %s)",
+                os.path.basename(sf.get('full_path', '?')),
+                wanted_version,
+                candidate_version,
+            )
+            continue
+        score_candidate_variants = sf_title_variants
+        if same_named_version:
+            score_candidate_variants = [
+                re.sub(r'\bversion\b', ' ', value).strip()
+                for value in sf_title_variants
+            ]
+
         title_sim = max(
             SequenceMatcher(None, expected, candidate).ratio()
-            for expected in title_variants
-            for candidate in sf_title_variants
+            for expected in score_title_variants
+            for candidate in score_candidate_variants
         )
-        if title_sim < 0.80:
+
+        # an untagged file: try reading the artist and title out of the
+        # filename. only kept when the guessed artist matches, so this can
+        # add a match but never loosen one
+        guessed = None
+        if (norm_artist and not sf_norm_artist and not sf.get('track_artist')
+                and sf['title'] == os.path.splitext(
+                    os.path.basename(str(sf.get('full_path') or '')))[0]):
+            for g_artist, g_title in _filename_artist_title_guesses(sf['title']):
+                g_artist_sim = SequenceMatcher(None, norm_artist, normalize(g_artist)).ratio()
+                if g_artist_sim < 0.80:
+                    continue
+                g_variants = _staging_title_variants(g_title, normalize)
+                if same_named_version:
+                    g_variants = [re.sub(r'\bversion\b', ' ', v).strip() for v in g_variants]
+                if not g_variants:
+                    continue
+                g_title_sim = max(
+                    SequenceMatcher(None, expected, candidate).ratio()
+                    for expected in score_title_variants
+                    for candidate in g_variants
+                )
+                if g_title_sim < 0.80:
+                    continue
+                g_combined = (g_title_sim * 0.55) + (g_artist_sim * 0.45)
+                if guessed is None or g_combined > guessed[2]:
+                    guessed = (g_title_sim, g_artist_sim, g_combined)
+
+        if title_sim < 0.80 and guessed is None:
             logger.debug(
                 "[Staging] Skip candidate %s — title_sim=%.2f below 0.80 threshold (%s vs %s)",
                 os.path.basename(sf.get('full_path', '?')),
@@ -234,10 +328,14 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             candidate_scores.append((sf, title_sim, None, 0.0))
             continue
 
-        # Artist similarity (secondary)
+        # Artist similarity (secondary). the per-track artist counts too, so a
+        # compilation file tagged 'Various Artists' still matches its performer
+        sf_track_artist = normalize(sf.get('track_artist') or '')
         artist_sim = 0.0
         if norm_artist and sf_norm_artist:
             artist_sim = SequenceMatcher(None, norm_artist, sf_norm_artist).ratio()
+            if sf_track_artist and sf_track_artist != sf_norm_artist:
+                artist_sim = max(artist_sim, SequenceMatcher(None, norm_artist, sf_track_artist).ratio())
         elif not norm_artist and not sf_norm_artist:
             artist_sim = 0.5  # Both unknown — neutral
         elif norm_artist and not sf_norm_artist:
@@ -251,6 +349,11 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             combined = (title_sim * 0.55) + (artist_sim * 0.45)
         else:
             combined = (title_sim * 0.80) + (artist_sim * 0.20)
+        if title_sim < 0.80:
+            combined = 0.0      # the whole-stem reading failed, only the guess can count
+
+        if guessed is not None and guessed[2] > combined:
+            title_sim, artist_sim, combined = guessed
 
         candidate_scores.append((sf, title_sim, artist_sim, combined))
 

@@ -3,7 +3,7 @@
 from core.library2.maintenance_subjects import active_album_subjects
 from core.library2.maintenance_subjects import subject_details
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_tagged
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.cover_art")
@@ -56,7 +56,10 @@ class MissingCoverArtJob(RepairJob):
             context.config_manager.get("metadata_enhancement.cover_art_download", True)
             if context.config_manager else True
         )
-        albums = active_album_subjects(context.db, context.config_manager)
+        # hand-tagged: the user typed this release, a name search would give a
+        # bootleg the studio cover
+        albums = drop_hand_tagged(
+            context, active_album_subjects(context.db, context.config_manager), path_key="rep_path")
         total = len(albums)
         for index, subject in enumerate(albums):
             if context.check_stop() or (index % 10 == 0 and context.wait_if_paused()):

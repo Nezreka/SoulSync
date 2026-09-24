@@ -51,10 +51,13 @@ def find_existing_soulsync_album_id(
     album_source_col: Optional[str] = None,
     album_source_id: Optional[str] = None,
     source: Optional[str] = None,
+    release_id: Optional[str] = None,
 ) -> Optional[int]:
     """Resolve the catalogue album row a track should join, or None.
 
     Match precedence:
+      0. ``release_id`` — the MusicBrainz release this import IS. The sharpest
+         edition identity there is, and the only one a MusicBrainz import has.
       1. ``name_key_id`` — the stable name hash the import mints, kept as the
          row's ``server_id`` (a re-import with the identical name hits its own
          row).
@@ -64,12 +67,34 @@ def find_existing_soulsync_album_id(
          ``external_ids``.
       3. ``(title, artist)`` — the name match, kept so nothing that grouped
          before stops grouping now.
+
+    1 to 3 skip a row that already carries a DIFFERENT release id. Two
+    releases can share a title and an artist and differ only by MusicBrainz's
+    disambiguation (#1299); matching them by name merged both into one album
+    with every shared song twice. A row with no release id yet still matches.
     """
+    release = (release_id or "").strip().casefold()
+
+    def _usable(row) -> bool:
+        if not row:
+            return False
+        stored = str(row[1] or "").strip().casefold()
+        return not (release and stored and stored != release)
+
+    if release:
+        row = cursor.execute(
+            "SELECT id FROM lib2_albums WHERE LOWER(musicbrainz_id) = ? LIMIT 1",
+            (release,),
+        ).fetchone()
+        if row:
+            return int(row[0])
+
     row = cursor.execute(
-        "SELECT id FROM lib2_albums WHERE server_source = 'soulsync' AND server_id = ?",
+        "SELECT id, musicbrainz_id FROM lib2_albums"
+        " WHERE server_source = 'soulsync' AND server_id = ?",
         (str(name_key_id),),
     ).fetchone()
-    if row:
+    if _usable(row):
         return int(row[0])
 
     provider = (source or '').strip().lower()
@@ -81,17 +106,19 @@ def find_existing_soulsync_album_id(
             where = f"json_extract(external_ids, '$.{provider}') = ?"
         try:
             row = cursor.execute(
-                f"SELECT id FROM lib2_albums WHERE {where} LIMIT 1",
+                f"SELECT id, musicbrainz_id FROM lib2_albums WHERE {where} LIMIT 1",
                 (album_source_id,),
             ).fetchone()
-            if row:
+            if _usable(row):
                 return int(row[0])
         except Exception as exc:
             logger.debug("album source-id lookup skipped (%s): %s", provider, exc)
 
-    row = cursor.execute(
-        "SELECT id FROM lib2_albums WHERE title COLLATE NOCASE = ? "
-        "  AND primary_artist_id = ? LIMIT 1",
+    for row in cursor.execute(
+        "SELECT id, musicbrainz_id FROM lib2_albums WHERE title COLLATE NOCASE = ? "
+        "  AND primary_artist_id = ? ORDER BY id",
         (album_name, artist_id),
-    ).fetchone()
-    return int(row[0]) if row else None
+    ).fetchall():
+        if _usable(row):
+            return int(row[0])
+    return None

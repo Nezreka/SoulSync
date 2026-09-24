@@ -368,7 +368,7 @@ def test_mb_release_title_floor(db):
     query, bad_title = "Night Visions", "Visions of the Night People"
     similarity = service._calculate_similarity(query, bad_title)
     assert 0.30 <= similarity < 0.6
-    service.mb_client.search_release = lambda name, artist, limit=5: [{
+    service.mb_client.search_release = lambda name, artist, limit=5, raise_on_error=False: [{
         "id": "mbid-bad",
         "title": bad_title,
         "score": 100,
@@ -376,7 +376,7 @@ def test_mb_release_title_floor(db):
     }]
     assert service.match_release(query, "Imagine Dragons") is None
 
-    service.mb_client.search_release = lambda name, artist, limit=5: [{
+    service.mb_client.search_release = lambda name, artist, limit=5, raise_on_error=False: [{
         "id": "mbid-good",
         "title": "Evolve",
         "score": 100,

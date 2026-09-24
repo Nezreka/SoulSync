@@ -15,7 +15,14 @@ from difflib import SequenceMatcher
 from typing import Any, Dict, Optional
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
+from core.repair_jobs.base import (
+    JobContext,
+    JobResult,
+    RepairJob,
+    hand_tagged_path_keys,
+    is_hand_tagged_path,
+    scoped_file_subjects,
+)
 from utils.logging_config import get_logger
 from core.matching.audio_verification import fingerprint_is_ambiguous, Decision
 from core.matching.acoustid_candidates import duration_mismatches_strongly
@@ -156,6 +163,8 @@ class AcoustIDScannerJob(RepairJob):
         if context.update_progress:
             context.update_progress(0, total)
 
+        hand_tagged = hand_tagged_path_keys(context.db)
+
         batch_count = 0
         for i, (track_id, track_info) in enumerate(track_list):
             if context.check_stop():
@@ -204,6 +213,9 @@ class AcoustIDScannerJob(RepairJob):
                         log_type="skip",
                     )
                 continue
+
+            if track_info.get('metadata_locked') or is_hand_tagged_path(resolved, hand_tagged):
+                track_info['hand_tagged'] = True
 
             result.scanned += 1
             batch_count += 1
@@ -267,6 +279,16 @@ class AcoustIDScannerJob(RepairJob):
 
         # A human decision is checked BEFORE fingerprinting — the answer cannot
         # change and the API call would be spent for nothing.
+        if expected.get('hand_tagged'):
+            # hand-tagged: the user typed this release (a live set, a
+            # bootleg). it will never fingerprint as the studio cut, and
+            # retag/redownload/delete would undo what they asked for. same
+            # standing as a human-verified file
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'Skipped (hand-tagged): {fname}', log_type='skip')
+            return
+
         file_verif_status = None
         try:
             from core.tag_writer import read_file_tags as _rft

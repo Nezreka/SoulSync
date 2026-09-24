@@ -215,3 +215,95 @@ def test_prepare_logger_is_in_soulsync_namespace():
         f"prepare logger '{sp.logger.name}' is outside the soulsync.* namespace "
         "— its output never reaches app.log"
     )
+
+
+# ---------------------------------------------------------------------------
+# Deezer streaming resolution & cleanup
+# ---------------------------------------------------------------------------
+
+def test_deezer_stream_uses_status_file_path_directly(tmp_path):
+    """When download_status has file_path, prepare_stream_task uses it without disk walk."""
+    download_path = tmp_path / 'downloads'
+    download_path.mkdir()
+    deezer_file = download_path / 'Artist - Song.flac'
+    deezer_file.write_bytes(b'audio-bytes')
+
+    cancelled = []
+
+    class _OrchestratorWithCancel:
+        async def download(self, username, filename, size):
+            return 'dz-123'
+
+        async def get_all_downloads(self):
+            return []
+
+        async def cancel_download(self, download_id, username, remove=True):
+            cancelled.append((download_id, username, remove))
+            return True
+
+    download_status = {
+        'id': 'dz-123',
+        'state': 'Completed, Succeeded',
+        'percentComplete': 100,
+        'size': 11,
+        'bytesTransferred': 11,
+        'file_path': str(deezer_file),
+    }
+
+    deps = _build_deps(
+        soulseek=_OrchestratorWithCancel(),
+        project_root=str(tmp_path),
+        find_streaming_result=download_status,
+        find_downloaded_result=None,  # Not used because file_path was present
+    )
+
+    track_data = {'username': 'deezer_dl', 'filename': '99999||Artist - Song', 'size': 11}
+    sp.prepare_stream_task(track_data, deps)
+
+    assert deps._state['status'] == 'ready'
+    assert deps._state['progress'] == 100
+    assert (tmp_path / 'Stream' / 'Artist - Song.flac').exists()
+    assert cancelled == [('dz-123', 'deezer_dl', True)]
+
+
+def test_find_downloaded_file_deezer(tmp_path):
+    """web_server._find_downloaded_file finds Deezer files with encoded id||title format."""
+    from web_server import _find_downloaded_file
+
+    dl_dir = tmp_path / 'downloads'
+    dl_dir.mkdir()
+    song_file = dl_dir / 'Artist - Cool Song.flac'
+    song_file.write_bytes(b'x' * 2048)
+
+    track_data = {'username': 'deezer_dl', 'filename': '123456||Artist - Cool Song'}
+    found = _find_downloaded_file(str(dl_dir), track_data)
+    assert found == str(song_file)
+
+
+def test_find_streaming_download_deezer_alias_match():
+    """web_server._find_streaming_download_in_all_downloads matches deezer vs deezer_dl."""
+    from web_server import _find_streaming_download_in_all_downloads
+    from core.download_plugins.types import DownloadStatus
+
+    status = DownloadStatus(
+        id='dz-1',
+        filename='12345||Artist - Title',
+        username='deezer_dl',
+        state='Completed, Succeeded',
+        progress=100.0,
+        size=5000,
+        transferred=5000,
+        speed=1000,
+        file_path='/downloads/Artist - Title.mp3',
+    )
+
+    # Target uses 'deezer', status uses 'deezer_dl'
+    matched = _find_streaming_download_in_all_downloads(
+        [status],
+        {'username': 'deezer', 'filename': '12345||Artist - Title'},
+    )
+    assert matched is not None
+    assert matched['id'] == 'dz-1'
+    assert matched['file_path'] == '/downloads/Artist - Title.mp3'
+    assert matched['percentComplete'] == 100.0
+

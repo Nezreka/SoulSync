@@ -207,7 +207,7 @@ class Album:
             id=str(album_data.get('collectionId', '')),
             name=_clean_itunes_album_name(album_data.get('collectionName', '')),
             artists=[album_data.get('artistName', 'Unknown Artist')],
-            release_date=album_data.get('releaseDate', ''),
+            release_date=(album_data.get('releaseDate') or '').split('T')[0],
             total_tracks=track_count,
             album_type=album_type,
             image_url=image_url,
@@ -499,7 +499,7 @@ class iTunesClient:
                     'id': str(cached.get('collectionId', '')),
                     'name': _clean_itunes_album_name(cached.get('collectionName', '')),
                     'total_tracks': cached.get('trackCount', 0),
-                    'release_date': cached.get('releaseDate', ''),
+                    'release_date': (cached.get('releaseDate') or '').split('T')[0],
                     'album_type': 'album',
                     'artists': [clean_artist_name]
                 },
@@ -535,7 +535,7 @@ class iTunesClient:
                         'id': str(track_data.get('collectionId', '')),
                         'name': _clean_itunes_album_name(track_data.get('collectionName', '')),
                         'total_tracks': track_data.get('trackCount', 0),
-                        'release_date': track_data.get('releaseDate', ''),
+                        'release_date': (track_data.get('releaseDate') or '').split('T')[0],
                         'album_type': 'album',  # iTunes doesn't distinguish clearly
                         'artists': [clean_artist_name]
                     },

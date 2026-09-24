@@ -5,7 +5,9 @@ from core.library2.maintenance_subjects import subject_details
 from core.library2.maintenance_subjects import active_file_subjects
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
-from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob, scoped_file_subjects
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, drop_hand_tagged, get_scope_artist, scoped_file_subjects,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.metadata_gap")
@@ -54,7 +56,8 @@ class MetadataGapFillerJob(RepairJob):
         scope_key = scope_artist.casefold() if scope_artist else None
 
         subjects: Dict[int, Dict[str, Any]] = {}
-        for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)):
+        for subject in drop_hand_tagged(context, scoped_file_subjects(
+                context, active_file_subjects(context.db, context.config_manager))):
             track_id = int(subject["track_id"])
             if track_id in subjects and not subject.get("is_primary"):
                 continue
@@ -180,7 +183,8 @@ class MetadataGapFillerJob(RepairJob):
     def estimate_scope(self, context: JobContext) -> int:
         try:
             track_ids = set()
-            for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)):
+            for subject in drop_hand_tagged(context, scoped_file_subjects(
+                context, active_file_subjects(context.db, context.config_manager))):
                 ids = subject.get("track_source_ids") or {}
                 if not subject.get("isrc") or not ids.get("musicbrainz"):
                     track_ids.add(int(subject["track_id"]))

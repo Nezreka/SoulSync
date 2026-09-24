@@ -373,7 +373,7 @@ def test_get_top_artists_enriches_from_the_native_catalogue(db, fix_url, monkeyp
         lastfm_listeners=5000000, lastfm_playcount=100000000, soul_id="soul-pf",
     )
 
-    monkeypatch.setattr(db, "get_top_artists", lambda tr, lim: [{'name': 'Pink Floyd', 'play_count': 42}])
+    monkeypatch.setattr(db, "get_top_artists", lambda tr, lim, profile_id=None: [{'name': 'Pink Floyd', 'play_count': 42}])
 
     result = queries.get_top_artists(db, fix_url, time_range='all', limit=10)
     assert result[0]['name'] == 'Pink Floyd'
@@ -385,7 +385,7 @@ def test_get_top_artists_enriches_from_the_native_catalogue(db, fix_url, monkeyp
 
 
 def test_get_top_artists_no_match_leaves_record_unenriched(db, fix_url, monkeypatch):
-    monkeypatch.setattr(db, "get_top_artists", lambda tr, lim: [{'name': 'Unknown', 'play_count': 1}])
+    monkeypatch.setattr(db, "get_top_artists", lambda tr, lim, profile_id=None: [{'name': 'Unknown', 'play_count': 1}])
     result = queries.get_top_artists(db, fix_url, time_range='all', limit=10)
     assert result == [{'name': 'Unknown', 'play_count': 1}]
 
@@ -395,7 +395,7 @@ def test_get_top_artists_matches_on_the_normalized_name_key(db, fix_url, monkeyp
     SQLite's ASCII-only ``lower()`` — missed every non-Latin name (iss29-D13)."""
     aid = _seed_artist(db, "Björk", thumb="local://bjork.jpg")
     monkeypatch.setattr(db, "get_top_artists",
-                        lambda tr, lim: [{'name': 'BJÖRK', 'play_count': 3}])
+                        lambda tr, lim, profile_id=None: [{'name': 'BJÖRK', 'play_count': 3}])
 
     result = queries.get_top_artists(db, fix_url, time_range='all', limit=10)
     assert result[0]['id'] == aid
@@ -407,7 +407,7 @@ def test_get_top_artists_links_a_native_artist_like_any_other(db, fix_url, monke
     row — being native is no longer a reason to withhold it (§50.4.4.22)."""
     aid = _seed_artist(db, "Native Only", thumb="local://native.jpg", legacy_id=None)
     monkeypatch.setattr(db, "get_top_artists",
-                        lambda tr, lim: [{'name': 'Native Only', 'play_count': 9}])
+                        lambda tr, lim, profile_id=None: [{'name': 'Native Only', 'play_count': 9}])
 
     result = queries.get_top_artists(db, fix_url, time_range='all', limit=10)
     assert result[0]['image_url'] == 'FIXED::local://native.jpg'
@@ -433,11 +433,11 @@ def test_top_rows_never_hand_out_a_legacy_id(db, fix_url, monkeypatch):
     finally:
         conn.close()
     monkeypatch.setattr(db, "get_top_artists",
-                        lambda tr, lim: [{'name': 'Pink Floyd', 'play_count': 1}])
+                        lambda tr, lim, profile_id=None: [{'name': 'Pink Floyd', 'play_count': 1}])
     monkeypatch.setattr(db, "get_top_albums",
-                        lambda tr, lim: [{'name': 'DSOTM', 'play_count': 1}])
+                        lambda tr, lim, profile_id=None: [{'name': 'DSOTM', 'play_count': 1}])
     monkeypatch.setattr(db, "get_top_tracks",
-                        lambda tr, lim: [{'name': 'Time', 'artist': 'Pink Floyd',
+                        lambda tr, lim, profile_id=None: [{'name': 'Time', 'artist': 'Pink Floyd',
                                           'play_count': 1}])
 
     handed_out = set()
@@ -456,7 +456,7 @@ def test_get_top_albums_enriches_with_album_thumb(db, fix_url, monkeypatch):
     aid = _seed_artist(db, "Pink Floyd")
     alb = _seed_album(db, aid, "DSOTM", thumb="local://album.jpg")
 
-    monkeypatch.setattr(db, "get_top_albums", lambda tr, lim: [{'name': 'DSOTM', 'play_count': 5}])
+    monkeypatch.setattr(db, "get_top_albums", lambda tr, lim, profile_id=None: [{'name': 'DSOTM', 'play_count': 5}])
 
     result = queries.get_top_albums(db, fix_url, time_range='all', limit=10)
     assert result[0]['image_url'] == 'FIXED::local://album.jpg'
@@ -467,7 +467,7 @@ def test_get_top_albums_enriches_with_album_thumb(db, fix_url, monkeypatch):
 def test_get_top_albums_skips_empty_thumb(db, fix_url, monkeypatch):
     aid = _seed_artist(db, "X")
     _seed_album(db, aid, "Empty", thumb="")
-    monkeypatch.setattr(db, "get_top_albums", lambda tr, lim: [{'name': 'Empty', 'play_count': 1}])
+    monkeypatch.setattr(db, "get_top_albums", lambda tr, lim, profile_id=None: [{'name': 'Empty', 'play_count': 1}])
 
     result = queries.get_top_albums(db, fix_url, time_range='all', limit=10)
     assert 'image_url' not in result[0]
@@ -478,7 +478,7 @@ def test_get_top_tracks_enriches_with_album_thumb(db, fix_url, monkeypatch):
     alb = _seed_album(db, aid, "DSOTM", thumb="local://thumb.jpg")
     tid = _seed_track(db, alb, aid, "Money")
 
-    monkeypatch.setattr(db, "get_top_tracks", lambda tr, lim: [{'name': 'Money', 'artist': 'Pink Floyd'}])
+    monkeypatch.setattr(db, "get_top_tracks", lambda tr, lim, profile_id=None: [{'name': 'Money', 'artist': 'Pink Floyd'}])
 
     result = queries.get_top_tracks(db, fix_url, time_range='all', limit=10)
     assert result[0]['image_url'] == 'FIXED::local://thumb.jpg'
@@ -487,7 +487,7 @@ def test_get_top_tracks_enriches_with_album_thumb(db, fix_url, monkeypatch):
 
 
 def test_get_top_tracks_unmatched_record_passed_through(db, fix_url, monkeypatch):
-    monkeypatch.setattr(db, "get_top_tracks", lambda tr, lim: [{'name': 'Phantom', 'artist': 'Nobody'}])
+    monkeypatch.setattr(db, "get_top_tracks", lambda tr, lim, profile_id=None: [{'name': 'Phantom', 'artist': 'Nobody'}])
     result = queries.get_top_tracks(db, fix_url, time_range='all', limit=10)
     assert result == [{'name': 'Phantom', 'artist': 'Nobody'}]
 
@@ -540,36 +540,36 @@ def test_get_overview_delegates_to_db(monkeypatch):
     called = {}
 
     class _DB:
-        def get_listening_stats(self, time_range):
-            called['arg'] = time_range
+        def get_listening_stats(self, time_range, profile_id=None):
+            called['arg'] = (time_range, profile_id)
             return sentinel
 
-    assert queries.get_overview(_DB(), '7d') is sentinel
-    assert called['arg'] == '7d'
+    assert queries.get_overview(_DB(), '7d', profile_id=4) is sentinel
+    assert called['arg'] == ('7d', 4)
 
 
 def test_get_timeline_delegates_to_db():
     called = {}
 
     class _DB:
-        def get_listening_timeline(self, time_range, granularity):
-            called['args'] = (time_range, granularity)
+        def get_listening_timeline(self, time_range, granularity, profile_id=None):
+            called['args'] = (time_range, granularity, profile_id)
             return ['data']
 
-    assert queries.get_timeline(_DB(), '30d', 'week') == ['data']
-    assert called['args'] == ('30d', 'week')
+    assert queries.get_timeline(_DB(), '30d', 'week', profile_id=4) == ['data']
+    assert called['args'] == ('30d', 'week', 4)
 
 
 def test_get_genres_delegates_to_db():
     called = {}
 
     class _DB:
-        def get_genre_breakdown(self, time_range):
-            called['arg'] = time_range
+        def get_genre_breakdown(self, time_range, profile_id=None):
+            called['arg'] = (time_range, profile_id)
             return [{'genre': 'rock'}]
 
-    assert queries.get_genres(_DB(), 'all') == [{'genre': 'rock'}]
-    assert called['arg'] == 'all'
+    assert queries.get_genres(_DB(), 'all', profile_id=4) == [{'genre': 'rock'}]
+    assert called['arg'] == ('all', 4)
 
 
 def test_get_library_health_delegates_to_db():

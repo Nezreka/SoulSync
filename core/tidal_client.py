@@ -119,6 +119,46 @@ class Playlist:
         if self.external_urls is None:
             self.external_urls = {}
 
+# Tidal's v2 search used to take the query as a path segment
+# (/searchResults/{query}). tidal retired that route: it now answers 400
+# INVALID_RESOURCE_ID for every search, which read as "not found" for every
+# artist, album and track (#1290). the query is a filter[query] param now.
+# the spec caps it at 256 chars and rejects an empty one.
+_SEARCH_QUERY_MAX = 256
+
+
+def _clean_search_query(query) -> str:
+    """Collapse whitespace and cap the length Tidal accepts for filter[query]."""
+    cleaned = ' '.join(str(query or '').split())
+    return cleaned[:_SEARCH_QUERY_MAX].strip()
+
+
+def _order_included_by_relevance(data, include: str):
+    """Put `included` in the order the search ranked it.
+
+    the collection response lists the ranked hits as ids under
+    data[0].relationships.<include>.data; `included` carries the resources
+    themselves and json:api promises no order for it. anything the ranking
+    does not mention keeps its place at the end.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get('included'), list):
+        return data
+    try:
+        ranked = data['data'][0]['relationships'][include]['data']
+        rank = {str(r.get('id')): i for i, r in enumerate(ranked)}
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return data
+    if not rank:
+        return data
+    tail = len(rank)
+    data['included'] = sorted(
+        data['included'],
+        key=lambda r: rank.get(str(r.get('id')), tail)
+        if isinstance(r, dict) and r.get('type') == include else tail,
+    )
+    return data
+
+
 class TidalClient:
     """Tidal API client for fetching user playlists and track data"""
     
@@ -960,6 +1000,37 @@ class TidalClient:
             
         
     
+    def _search_results(self, query: str, include: str, label: str) -> Optional[Dict]:
+        """GET /searchResults?filter[query]= — the one request all four searches share.
+
+        They had drifted: only the track search logged the body Tidal sends
+        back, so the other three could report nothing but "failed: 400" and a
+        user's bug report could not be answered (Skowl, Sept 22 2026). The
+        status alone never says which parameter Tidal objected to.
+        """
+        cleaned = _clean_search_query(query)
+        if not cleaned:
+            # tidal 400s an empty filter[query]; nothing to search for anyway
+            return None
+
+        response = self.session.get(
+            f"{self.base_url}/searchResults",
+            params={'filter[query]': cleaned, 'countryCode': 'US', 'include': include},
+            timeout=10
+        )
+
+        if response.status_code == 429:
+            raise Exception(f"Rate limited (429) on {label}")
+        if response.status_code == 200:
+            return _order_included_by_relevance(response.json(), include)
+
+        # warning, not debug: a non-200 here means the feature silently did
+        # nothing, and debug does not reach app.log.
+        logger.warning(
+            f"Tidal {label} failed: {response.status_code} - {response.text[:300]}"
+        )
+        return None
+
     @rate_limited
     def search_tracks(self, query: str, limit: int = 10) -> List[Track]:
         """Search for tracks using Tidal's search API"""
@@ -968,24 +1039,8 @@ class TidalClient:
                 logger.error("Not authenticated with Tidal")
                 return []
 
-            from urllib.parse import quote
-            encoded_query = quote(query, safe='')
-            params = {
-                'countryCode': 'US',
-                'include': 'tracks',
-                'limit': limit
-            }
-
-            response = self.session.get(
-                f"{self.base_url}/searchResults/{encoded_query}",
-                params=params,
-                timeout=10
-            )
-            
-            if response.status_code == 429:
-                raise Exception("Rate limited (429) on search_tracks")
-            if response.status_code == 200:
-                data = response.json()
+            data = self._search_results(query, 'tracks', 'search_tracks')
+            if data is not None:
                 tracks = []
 
                 # Handle V2 JSON:API response formats
@@ -997,7 +1052,8 @@ class TidalClient:
                 elif 'included' in data:
                     items = [r for r in data['included'] if r.get('type') == 'tracks']
 
-                for item in items:
+                # no limit param on the collection endpoint; trim here
+                for item in items[:limit]:
                     # Flatten JSON:API resource if needed
                     if 'attributes' in item and 'id' in item:
                         flat = dict(item['attributes'])
@@ -1009,9 +1065,7 @@ class TidalClient:
 
                 logger.info(f"Found {len(tracks)} Tidal tracks for query: '{query}'")
                 return tracks
-            else:
-                logger.error(f"Tidal search failed: {response.status_code} - {response.text}")
-                return []
+            return []
 
         except Exception as e:
             if "429" in str(e):
@@ -1028,24 +1082,10 @@ class TidalClient:
             if not self._ensure_valid_token():
                 return None
 
-            from urllib.parse import quote
             from difflib import SequenceMatcher
-            encoded_query = quote(name, safe='')
-            params = {
-                'countryCode': 'US',
-                'include': 'artists',
-            }
 
-            response = self.session.get(
-                f"{self.base_url}/searchResults/{encoded_query}",
-                params=params,
-                timeout=10
-            )
-
-            if response.status_code == 429:
-                raise Exception("Rate limited (429) on search_artist")
-            if response.status_code == 200:
-                data = response.json()
+            data = self._search_results(name, 'artists', 'search_artist')
+            if data is not None:
                 # JSON:API format: included artists in 'artists' or nested in relationships
                 items = []
                 if 'artists' in data and isinstance(data['artists'], list):
@@ -1070,8 +1110,6 @@ class TidalClient:
                             best_score = score
                             best_item = flat
                     return best_item
-            else:
-                logger.debug(f"Tidal artist search failed: {response.status_code}")
             return None
 
         except Exception as e:
@@ -1087,24 +1125,10 @@ class TidalClient:
             if not self._ensure_valid_token():
                 return None
 
-            from urllib.parse import quote
             query = f"{artist} {title}" if artist else title
-            encoded_query = quote(query, safe='')
-            params = {
-                'countryCode': 'US',
-                'include': 'albums',
-            }
 
-            response = self.session.get(
-                f"{self.base_url}/searchResults/{encoded_query}",
-                params=params,
-                timeout=10
-            )
-
-            if response.status_code == 429:
-                raise Exception("Rate limited (429) on search_album")
-            if response.status_code == 200:
-                data = response.json()
+            data = self._search_results(query, 'albums', 'search_album')
+            if data is not None:
                 items = []
                 if 'albums' in data and isinstance(data['albums'], list):
                     items = data['albums']
@@ -1136,8 +1160,6 @@ class TidalClient:
                             best_score = score
                             best_item = flat
                     return best_item
-            else:
-                logger.debug(f"Tidal album search failed: {response.status_code}")
             return None
 
         except Exception as e:
@@ -1153,24 +1175,10 @@ class TidalClient:
             if not self._ensure_valid_token():
                 return None
 
-            from urllib.parse import quote
             query = f"{artist} {title}" if artist else title
-            encoded_query = quote(query, safe='')
-            params = {
-                'countryCode': 'US',
-                'include': 'tracks',
-            }
 
-            response = self.session.get(
-                f"{self.base_url}/searchResults/{encoded_query}",
-                params=params,
-                timeout=10
-            )
-
-            if response.status_code == 429:
-                raise Exception("Rate limited (429) on search_track")
-            if response.status_code == 200:
-                data = response.json()
+            data = self._search_results(query, 'tracks', 'search_track')
+            if data is not None:
                 items = []
                 if 'tracks' in data and isinstance(data['tracks'], list):
                     items = data['tracks']
@@ -1202,8 +1210,6 @@ class TidalClient:
                             best_score = score
                             best_item = flat
                     return best_item
-            else:
-                logger.debug(f"Tidal track search failed: {response.status_code}")
             return None
 
         except Exception as e:

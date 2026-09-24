@@ -271,6 +271,33 @@ def test_parts_can_resolve_via_api_when_not_in_library(tmp_path, monkeypatch):
     assert [p['verified_via'] for p in res] == ['library', 'deezer']
 
 
+def test_scan_skips_a_file_already_split_without_an_api_call(tmp_path, monkeypatch):
+    """after the fix, the display artist is still "Camellia; Toby Fox" so the
+    scan would re-flag the file on every run forever. the split list in
+    ``artists`` marks it done, before any api lookup is spent."""
+    db = _db(tmp_path)
+    f = str(tmp_path / "a.flac")
+    _make_flac(f, {'artist': 'Camellia; Toby Fox', 'artists': ['Camellia', 'Toby Fox'],
+                   'title': 'Flower Man'})
+    _add_track(db, 'T1', DUMMY, f)
+    client = _FakeArtistClient(known=[])
+    result, findings = _run(db, monkeypatch, {'spotify': client}, tmp_path)
+    assert findings == []
+    assert result.skipped == 1
+    assert client.calls == [], 'an already-split file must not cost an api lookup'
+
+
+def test_scan_still_flags_a_display_only_tag(tmp_path, monkeypatch):
+    """negative twin: "A; B" WITHOUT the split list is a real finding."""
+    db = _db(tmp_path)
+    f = str(tmp_path / "a.flac")
+    _make_flac(f, {'artist': 'Camellia; Toby Fox', 'title': 'Flower Man'})
+    _add_track(db, 'T1', DUMMY, f)
+    result, findings = _run(db, monkeypatch, {'spotify': _FakeArtistClient(known=[])}, tmp_path)
+    assert len(findings) == 1
+    assert findings[0]['details']['split_artists'] == ['Camellia', 'Toby Fox']
+
+
 def test_dedup_counts_when_create_finding_returns_false(tmp_path, monkeypatch):
     db = _db(tmp_path)
     file_path = str(tmp_path / 'a.flac')
@@ -425,17 +452,94 @@ def test_fix_stale_tag_guard_skips_edited_file(tmp_path):
     assert FLAC(str(f))['artist'] == ['Camellia']   # untouched
 
 
-def test_fix_already_multivalue_counts_as_stale(tmp_path):
+def test_fix_already_multivalue_resolves_without_touching_the_file(tmp_path):
+    """a picard-style multi-value artist already IS the split. the finding
+    resolves (success, nothing written) instead of erroring as stale."""
     from mutagen.flac import FLAC
     db = _db(tmp_path)
     f = tmp_path / "a.flac"
     _make_flac(f, {'artist': ['Camellia', 'Toby Fox']})   # already split
     _add_track(db, 'T1', DUMMY, str(f))
+    before = f.read_bytes()
+
+    result = _worker(db, tmp_path)._fix_comma_artist_split('artist', f'lib2:{DUMMY}', None, _details(str(f)))
+    assert result['success'] is True
+    assert result['action'] == 'artists_split'
+    assert result['fixed'] == 0
+    assert 'already' in result['message']
+    assert f.read_bytes() == before
+    assert FLAC(str(f))['artist'] == ['Camellia', 'Toby Fox']
+
+
+def test_fix_stale_result_carries_the_retire_flag(tmp_path):
+    """a stale-only result is marked 'stale' so fix_finding retires the
+    finding (#1143 path) instead of leaving it pending to fail every run."""
+    db = _db(tmp_path)
+    f = tmp_path / "a.flac"
+    _make_flac(f, {'artist': 'Camellia'})
+    _add_track(db, 'T1', DUMMY, str(f))
 
     result = _worker(db, tmp_path)._fix_comma_artist_split(
         'artist', f'lib2:{DUMMY}', None, _details(str(f)))
     assert result['success'] is False
-    assert FLAC(str(f))['artist'] == ['Camellia', 'Toby Fox']
+    assert result.get('stale') is True
+
+
+def _make_mp3(path, tpe1_text):
+    """real-enough mp3 (frames + id3v2.4) whose TPE1 holds exactly the
+    given value list. a trailing '' is what mutagen hands back for a
+    zero-padded frame written by another tagger."""
+    from mutagen.id3 import ID3, TPE1, TIT2
+    path = Path(path)
+    # mpeg-1 layer iii 128k/44.1k: one frame is exactly 417 bytes, and the
+    # atomic save re-parses the stream so the frames have to line up
+    path.write_bytes((b'\xff\xfb\x90\x64' + b'\x00' * 413) * 8)
+    tags = ID3()
+    tags.add(TPE1(encoding=3, text=list(tpe1_text)))
+    tags.add(TIT2(encoding=3, text=['Flower Man']))
+    tags.save(str(path), v2_version=4)
+
+
+def test_zero_padded_id3_tpe1_is_fixed_not_stale(tmp_path):
+    """the eN1gma loop: 178 findings, every fix "no longer carry" forever.
+
+    mutagen reads a zero-padded id3v2.4 TPE1 as ['A; B', ''] (it only strips
+    the padding for v2.3, its #276). the scan takes text[0] and flags the
+    file; the old fix demanded exactly ONE value and called it stale. the two
+    must accept the same file."""
+    from mutagen.id3 import ID3
+    db = _db(tmp_path)
+    f = tmp_path / "a.mp3"
+    _make_mp3(f, ['Camellia, Toby Fox', ''])
+    assert ID3(str(f))['TPE1'].text == ['Camellia, Toby Fox', ''], 'fixture must reproduce the padding'
+    _add_track(db, 'T1', DUMMY, str(f))
+
+    result = _worker(db, tmp_path)._fix_comma_artist_split('artist', f'lib2:{DUMMY}', None, _details(str(f)))
+    assert result['success'] is True, result
+    assert result['fixed'] == 1
+
+    tags = ID3(str(f))
+    assert tags['TPE1'].text == ['Camellia; Toby Fox']
+    assert tags.getall('TXXX:Artists')[0].text == ['Camellia', 'Toby Fox']
+
+
+def test_fix_is_idempotent_on_its_own_output(tmp_path):
+    """a second fix on a file we already split is a success with nothing
+    written, so a re-run never churns the file or re-errors."""
+    from mutagen.id3 import ID3
+    db = _db(tmp_path)
+    f = tmp_path / "a.mp3"
+    _make_mp3(f, ['Camellia, Toby Fox'])
+    _add_track(db, 'T1', DUMMY, str(f))
+    w = _worker(db, tmp_path)
+    assert w._fix_comma_artist_split('artist', f'lib2:{DUMMY}', None, _details(str(f)))['fixed'] == 1
+    after_first = f.read_bytes()
+
+    second = w._fix_comma_artist_split('artist', f'lib2:{DUMMY}', None, _details(str(f)))
+    assert second['success'] is True
+    assert second['fixed'] == 0
+    assert f.read_bytes() == after_first
+    assert ID3(str(f))['TPE1'].text == ['Camellia; Toby Fox']
 
 
 def test_fix_no_tracks_resolves_as_already_gone(tmp_path):

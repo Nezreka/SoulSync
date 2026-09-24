@@ -419,7 +419,9 @@ export function liveDetailLines(dl: AdlDownload): Array<[string, string]> {
   if (!d) return [];
   const lines: Array<[string, string]> = [];
 
-  if (d.source && !d.username) lines.push(['Searching', d.source]);
+  if (d.source && !d.username) {
+    lines.push([dl.status === 'searching' ? 'Searching' : 'Source', d.source]);
+  }
   if (d.query) {
     const ladder = d.query_count ? ` (${(d.query_index ?? 0) + 1}/${d.query_count})` : '';
     lines.push(['Query', `"${d.query}"${ladder}`]);
@@ -438,9 +440,11 @@ export function liveDetailLines(dl: AdlDownload): Array<[string, string]> {
   if (d.username) {
     // Streaming plugins use the source name as the username, so repeating it
     // says nothing; a Soulseek row names the actual peer.
-    const isPeer = (d.source || '') === 'Soulseek';
+    const isPeer =
+      (d.source || '') === 'Soulseek' || (d.source || '').toLowerCase().includes('soulseek');
     lines.push(['Source', isPeer ? `Soulseek · peer ${d.username}` : d.source || d.username]);
   }
+  if (d.release_title) lines.push(['Release', d.release_title]);
   if (d.filename) lines.push(['File', d.filename]);
   if (d.candidate_count) {
     lines.push(['Candidate', `${(d.candidate_index ?? 0) + 1} of ${d.candidate_count}`]);
@@ -472,5 +476,6 @@ export function liveDetailLines(dl: AdlDownload): Array<[string, string]> {
   }
   if (d.tried_sources) lines.push(['Tried', `${d.tried_sources} peer/file pairs so far`]);
   if (d.exhausted_sources?.length) lines.push(['Exhausted', d.exhausted_sources.join(' · ')]);
+  if (d.held_reason) lines.push(['Held', d.held_reason]);
   return lines;
 }

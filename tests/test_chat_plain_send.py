@@ -39,6 +39,16 @@ def test_a_plain_message_goes_out_as_readable_text(chat_app):
     assert _wire(state) == "anyone got the FLAC?"
 
 
+def test_a_plain_file_link_goes_out_as_clickable_url_on_wire(chat_app):
+    """File attachments in plain mode send the plain filepost URL so all clients
+    receive the clickable link directly."""
+    http, state = chat_app
+    url = "https://cdn.filepost.dev/abc/song.flac"
+    r = http.post("/api/chat/room/message", json={"message": url, "plain": True})
+    assert r.status_code == 200 and r.get_json()["plain"] is True
+    assert _wire(state) == url
+
+
 def test_it_carries_no_marker_at_all(chat_app):
     """The marker IS the thing other clients cannot read."""
     http, state = chat_app

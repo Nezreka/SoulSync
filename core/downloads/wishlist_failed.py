@@ -80,6 +80,13 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
             _check_and_remove_from_wishlist,
         )
         
+        # basic search batches: the user picked one exact file. if it failed,
+        # that FILE failed. wishlisting would send SoulSync off hunting the
+        # song elsewhere, which nobody asked for
+        if batch.get('skip_failed_wishlist'):
+            logger.info(f"[Wishlist Processing] Batch {batch_id} opts out of failed-track wishlisting")
+            return {'tracks_added': 0, 'errors': 0}
+
         # STEP 1: Add cancelled tracks that were missing to permanently_failed_tracks (replicating sync.py)
         # This matches sync.py's logic for adding cancelled missing tracks to the failed list
         if cancelled_tracks:

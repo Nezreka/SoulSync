@@ -93,7 +93,16 @@ def test_search_kind_artists_returns_normalized_dicts():
         'source': 'spotify',
         'image_url': 'thumb.jpg',
         'external_urls': {'spotify': 'url'},
+        'followers': None,
     }]
+
+
+def test_search_kind_artists_carries_the_fan_count():
+    """three deezer artists all called U2: the fan count is how you tell."""
+    artist = _Artist('id1', 'U2')
+    artist.followers = 9_800_000
+    result = sources.search_kind(_Client(artists=[artist]), 'u2', 'artists', 'deezer')
+    assert result[0]['followers'] == 9_800_000
 
 
 def test_search_kind_artists_handles_none_external_urls():

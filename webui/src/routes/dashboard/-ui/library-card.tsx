@@ -22,6 +22,8 @@
  * cannot tell those apart.
  */
 
+import type { RefObject } from 'react';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fetchReviewQueueSummary } from '@/routes/active-downloads/-adl.api';
@@ -328,323 +330,213 @@ async function backupNow(): Promise<void> {
   }
 }
 
+const MORE_ICON = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <circle cx="5" cy="12" r="1.8" />
+    <circle cx="12" cy="12" r="1.8" />
+    <circle cx="19" cy="12" r="1.8" />
+  </svg>
+);
+
+/** Closes an open menu on an outside click or Escape. */
+function useDismiss(open: boolean, close: () => void, ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, close, ref]);
+}
+
+/**
+ * The library, as the hero's status line: whose library, how fresh, one
+ * primary action (Scan) and everything else behind "⋯". The page links that
+ * only repeated the sidebar (wishlist, downloads, discover, sync) are gone.
+ * Every id the state machine and the scan flows write into is kept; the menu
+ * stays mounted (just hidden) so those ids always resolve.
+ */
 export function LibraryCard() {
   const { dbStats, dbStatsSeen, status, scanning, progress, scan, deepScan } = useLibraryCard();
   const reviewCount = useReviewCount();
   const view = dbStatsSeen ? libraryCardView(dbStats, status, scanning, new Date()) : CHECKING;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  useDismiss(menuOpen, closeMenu, menuRef);
+  const reviewWaiting = reviewCount !== null && reviewCount > 0;
+
+  const pick = (action: () => void) => () => {
+    setMenuOpen(false);
+    action();
+  };
 
   return (
-    // A full-width STRIP in the stats band's language, not a tall card: four
-    // numbers and two buttons were rattling around a card whose height the
-    // Services card set. The outer head went with the box — the inner
-    // library-status-card already carries its own title/subtitle/actions.
-    <article className="dash-card dash-card--strip" data-card="library">
-      <div className="dash-card__body">
-        <div className={view.cardClass} id="library-status-card">
-          <div className="library-status-glow"></div>
-          <div className="library-status-header">
-            <div className="library-status-icon" id="library-status-icon">
+    <div className="dash-hero-library" data-card="library">
+      <div className={view.cardClass} id="library-status-card">
+        <div className="library-status-header">
+          <div className="library-status-info">
+            <span className="library-status-dot" aria-hidden="true"></span>
+            <h4 className="library-status-title" id="library-status-title">
+              {view.title}
+            </h4>
+            <p className="library-status-subtitle" id="library-status-subtitle">
+              {view.subtitle}
+            </p>
+          </div>
+          <div className="library-status-actions" id="library-status-actions" ref={menuRef}>
+            <button
+              className={view.scanScanning ? 'library-status-btn scanning' : 'library-status-btn'}
+              id="library-status-scan-btn"
+              style={view.scanVisible ? undefined : { display: 'none' }}
+              onClick={() => void scan(false)}
+            >
               <svg
-                width="24"
-                height="24"
+                width="14"
+                height="14"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+                strokeWidth="2.5"
               >
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                <line x1="9" y1="7" x2="16" y2="7" />
-                <line x1="9" y1="11" x2="14" y2="11" />
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
               </svg>
-            </div>
-            <div className="library-status-info">
-              <h4 className="library-status-title" id="library-status-title">
-                {view.title}
-              </h4>
-              <p className="library-status-subtitle" id="library-status-subtitle">
-                {view.subtitle}
-              </p>
-            </div>
-            <div className="library-status-actions" id="library-status-actions">
+              <span id="library-status-scan-label">{view.scanLabel}</span>
+            </button>
+            <button
+              type="button"
+              className={
+                reviewWaiting
+                  ? 'library-status-more library-status-more--attention'
+                  : 'library-status-more'
+              }
+              aria-label="More library actions"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              {MORE_ICON}
+            </button>
+            <div className="library-status-menu" role="menu" hidden={!menuOpen}>
               <button
-                className={view.scanScanning ? 'library-status-btn scanning' : 'library-status-btn'}
-                id="library-status-scan-btn"
-                style={view.scanVisible ? undefined : { display: 'none' }}
-                onClick={() => void scan(false)}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                >
-                  <polyline points="23 4 23 10 17 10" />
-                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                </svg>
-                <span id="library-status-scan-label">{view.scanLabel}</span>
-              </button>
-              <button
-                className="library-status-btn library-status-btn-secondary"
+                role="menuitem"
+                className="library-status-menu-item"
                 id="library-status-deep-btn"
                 style={view.deepVisible ? undefined : { display: 'none' }}
-                onClick={() => void deepScan()}
+                onClick={pick(() => void deepScan())}
               >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                  <line x1="11" y1="8" x2="11" y2="14" />
-                  <line x1="8" y1="11" x2="14" y2="11" />
-                </svg>
-                Deep Scan
+                Deep scan
+                <span className="library-status-menu-hint">re-read every file</span>
               </button>
-              {/* The strip went purely operational — these are the rest of the
-                  library's verbs (Boulder picked all four): go there, check
-                  the matches, repair it, back it up. */}
               <button
-                className="library-status-btn library-status-btn-secondary"
+                role="menuitem"
+                className="library-status-menu-item"
                 id="library-status-browse-btn"
-                onClick={() => void window.navigateToPage?.('library')}
+                onClick={pick(() => void window.navigateToPage?.('library'))}
               >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M3 6h18M3 12h18M3 18h18" />
-                </svg>
-                Browse
+                Browse library
               </button>
               <button
-                className="library-status-btn library-status-btn-secondary"
+                role="menuitem"
+                className="library-status-menu-item"
                 id="library-status-verify-btn"
                 title="Open the enrichment manager's Verify Matches repair flow"
-                onClick={() => window.openEnrichmentManager?.()}
+                onClick={pick(() => window.openEnrichmentManager?.())}
               >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                  <polyline points="22 4 12 14.01 9 11.01" />
-                </svg>
-                Verify Matches
+                Verify matches
               </button>
               <button
-                className="library-status-btn library-status-btn-secondary"
+                role="menuitem"
+                className="library-status-menu-item"
                 id="library-status-repair-btn"
                 title="Open the Tools maintenance center"
-                onClick={() => void window.navigateToPage?.('tools')}
+                onClick={pick(() => void window.navigateToPage?.('tools'))}
               >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-                </svg>
                 Repair
               </button>
               <button
-                className="library-status-btn library-status-btn-secondary"
+                role="menuitem"
+                className="library-status-menu-item"
                 id="library-status-backup-btn"
                 title="Back up the SoulSync database now"
-                onClick={() => void backupNow()}
+                onClick={pick(() => void backupNow())}
               >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <ellipse cx="12" cy="5" rx="9" ry="3" />
-                  <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-                  <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-                </svg>
-                Backup
+                Back up now
               </button>
-              {/* everything above acts ON the library. everything below just
-                  takes you somewhere. the divider is so ten buttons don't read
-                  as one wall. */}
-              <span className="library-status-divider" aria-hidden="true" />
               <button
+                role="menuitem"
                 className={
-                  reviewCount
-                    ? 'library-status-btn library-status-btn-secondary library-status-btn-attention'
-                    : 'library-status-btn library-status-btn-secondary'
+                  reviewWaiting
+                    ? 'library-status-menu-item library-status-btn-attention'
+                    : 'library-status-menu-item'
                 }
                 id="library-status-review-btn"
                 title={
-                  reviewCount
-                    ? `${reviewCount} downloaded file${reviewCount === 1 ? '' : 's'} waiting on you to approve or delete`
-                    : 'Downloads that failed verification, or imported without a hard match'
+                  reviewWaiting
+                    ? `${reviewCount} downloads waiting for you to look at them`
+                    : 'Downloads waiting for review'
                 }
-                onClick={() => void window.navigateToPage?.('active-downloads')}
+                onClick={pick(() => void window.navigateToPage?.('active-downloads'))}
               >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                </svg>
-                Review
-                {reviewCount ? (
+                Review downloads
+                {reviewWaiting ? (
                   <span className="library-status-btn-badge">{reviewCount}</span>
                 ) : null}
               </button>
-              <button
-                className="library-status-btn library-status-btn-secondary"
-                id="library-status-wishlist-btn"
-                title="Tracks SoulSync is still trying to find"
-                onClick={() => void window.navigateToPage?.('wishlist')}
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21.2l7.8-7.7 1-1.1a5.5 5.5 0 0 0 0-7.8z" />
-                </svg>
-                Wishlist
-              </button>
-              <button
-                className="library-status-btn library-status-btn-secondary"
-                id="library-status-downloads-btn"
-                title="Active and queued downloads"
-                onClick={() => void window.navigateToPage?.('active-downloads')}
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                Downloads
-              </button>
-              <button
-                className="library-status-btn library-status-btn-secondary"
-                id="library-status-discover-btn"
-                title="Find music you don't have yet"
-                onClick={() => void window.navigateToPage?.('discover')}
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
-                </svg>
-                Discover
-              </button>
-              <button
-                className="library-status-btn library-status-btn-secondary"
-                id="library-status-sync-btn"
-                title="Playlists and their sync schedules"
-                onClick={() => void window.navigateToPage?.('sync')}
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <polyline points="23 4 23 10 17 10" />
-                  <polyline points="1 20 1 14 7 14" />
-                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                </svg>
-                Sync
-              </button>
             </div>
-          </div>
-          {/* The four-stat row lived here until the header's hello strip
-              took tracks/artists; albums + db size moved into the subtitle.
-              The strip is now purely operational: status, scan buttons,
-              progress. */}
-          <div
-            className="library-status-progress"
-            id="library-status-progress"
-            style={view.progressVisible ? undefined : { display: 'none' }}
-          >
-            <div className="library-status-phase" id="library-status-phase">
-              {progress.phase}
-            </div>
-            <div className="library-status-bar">
-              <div
-                className="library-status-bar-fill"
-                id="library-status-bar-fill"
-                style={{ width: `${progress.width}%` }}
-              ></div>
-            </div>
-            <div className="library-status-progress-detail" id="library-status-progress-detail">
-              {progress.detail}
-            </div>
-          </div>
-          <div
-            className="library-status-message"
-            id="library-status-message"
-            style={view.message ? undefined : { display: 'none' }}
-          >
-            {view.message?.kind === 'no-server' ? (
-              <>
-                SoulSync needs a media server to manage your library. Go to <SettingsLink /> to
-                connect Plex, Jellyfin, or Navidrome.
-              </>
-            ) : view.message?.kind === 'disconnected' ? (
-              <>
-                Your {view.message.serverName} server is configured but not responding. Check that
-                it&apos;s running and the connection details are correct in <SettingsLink />.
-              </>
-            ) : view.message?.kind === 'empty' ? (
-              <>
-                Your server is connected but SoulSync hasn&apos;t imported your library yet. Click{' '}
-                <strong>Scan Now</strong> to pull your artists, albums, and tracks into SoulSync.
-              </>
-            ) : null}
           </div>
         </div>
+        <div
+          className="library-status-progress"
+          id="library-status-progress"
+          style={view.progressVisible ? undefined : { display: 'none' }}
+        >
+          <div className="library-status-phase" id="library-status-phase">
+            {progress.phase}
+          </div>
+          <div className="library-status-bar">
+            <div
+              className="library-status-bar-fill"
+              id="library-status-bar-fill"
+              style={{ width: `${progress.width}%` }}
+            ></div>
+          </div>
+          <div className="library-status-progress-detail" id="library-status-progress-detail">
+            {progress.detail}
+          </div>
+        </div>
+        <div
+          className="library-status-message"
+          id="library-status-message"
+          style={view.message ? undefined : { display: 'none' }}
+        >
+          {view.message?.kind === 'no-server' ? (
+            <>
+              SoulSync needs a media server to manage your library. Go to <SettingsLink /> to
+              connect Plex, Jellyfin, or Navidrome.
+            </>
+          ) : view.message?.kind === 'disconnected' ? (
+            <>
+              Your {view.message.serverName} server is configured but not responding. Check that
+              it&apos;s running and the connection details are correct in <SettingsLink />.
+            </>
+          ) : view.message?.kind === 'empty' ? (
+            <>
+              Your server is connected but SoulSync hasn&apos;t imported your library yet. Click{' '}
+              <strong>Scan Now</strong> to pull your artists, albums, and tracks into SoulSync.
+            </>
+          ) : null}
+        </div>
       </div>
-    </article>
+    </div>
   );
 }

@@ -52,17 +52,81 @@ logger = get_logger("downloads.atomic_album_publish")
 # writable BY CONSTRUCTION: if the library is not writable, there is nothing to
 # publish into anyway. The dot prefix keeps it out of media-server scans, and
 # SoulSync's own scan prunes dot-directories for the same reason.
-_STAGING_DIRNAME = ".soulsync_atomic_staging"
+#
+# Public: the manifest and the startup recovery both need to name this folder,
+# and a private that three modules import is not private.
+STAGING_DIRNAME = ".soulsync_atomic_staging"
 
 _AUDIO_EXTS = {'.flac', '.mp3', '.m4a', '.mp4', '.ogg', '.oga', '.opus',
                '.wav', '.aiff', '.aif', '.wma', '.alac'}
+
+# The batch manifest (#1289) lives INSIDE the batch's staging root so one
+# directory is one self-describing unit: discard takes it with the audio, and a
+# startup reconciliation finds it by walking the staging tree alone, with no
+# surviving in-memory state to consult. It is deliberately NOT a publishable
+# file -- iter_staged_files skips it and a successful publish deletes it, so it
+# can never land in the user's library or block the staging prune.
+MANIFEST_NAME = ".soulsync_batch.json"
+
+
+def contains_staging_segment(path: str) -> bool:
+    """True when any component of ``path`` is the staging directory.
+
+    The transfer-dir-relative :func:`is_staged_path` needs to know which library
+    root a path belongs to. Callers deciding whether a file is safe to treat as
+    PUBLISHED often do not -- a completion callback holds a path and nothing
+    else -- and for that question the directory name alone is conclusive: the
+    only thing that ever creates this component is staging_root_for_batch."""
+    if not path:
+        return False
+    try:
+        parts = os.path.normpath(str(path)).replace('\\', os.sep).split(os.sep)
+    except (OSError, ValueError, AttributeError):
+        return False
+    return STAGING_DIRNAME in parts
+
+
+def split_staged_path(path: str) -> Optional[Tuple[str, str, str]]:
+    """Take a staged file apart into ``(transfer_dir, staging_root, relpath)``.
+
+    The staging layout is self-describing -- ``<transfer>/.soulsync_atomic_staging/
+    <batch id>/<library-relative path>`` -- so a staged path alone is enough to
+    say which library it belongs to and where in it the file goes. That is what
+    lets recovery work from nothing but the tree on disk, after the batch state
+    that would normally answer those questions has gone with the process.
+
+    None when ``path`` is not a staged file.
+    """
+    if not path:
+        return None
+    try:
+        norm = os.path.normpath(str(path))
+        parts = norm.split(os.sep)
+    except (OSError, ValueError, AttributeError):
+        return None
+    try:
+        idx = parts.index(STAGING_DIRNAME)
+    except ValueError:
+        return None
+    # <transfer>/<staging>/<batch>/<rel...> -- need at least a batch and one rel part
+    if len(parts) < idx + 3:
+        return None
+    # A path whose FIRST component is the staging dir has no library above it,
+    # so there is no transfer dir to report. Returning os.sep here would name
+    # the filesystem root as the library and map every file into it.
+    if idx == 0:
+        return None
+    transfer_dir = os.sep.join(parts[:idx])
+    staging_root = os.sep.join(parts[:idx + 2])
+    rel = os.sep.join(parts[idx + 2:])
+    return transfer_dir, staging_root, rel
 
 
 def staging_root_for_batch(transfer_dir: str, batch_id: str) -> str:
     """The private staging root for a batch — a hidden folder INSIDE the
     transfer dir (same filesystem → atomic publish; dot-prefixed so scanners
-    skip it). See the note on _STAGING_DIRNAME for why not a sibling."""
-    return os.path.join(os.path.normpath(transfer_dir), _STAGING_DIRNAME, str(batch_id))
+    skip it). See the note on STAGING_DIRNAME for why not a sibling."""
+    return os.path.join(os.path.normpath(transfer_dir), STAGING_DIRNAME, str(batch_id))
 
 
 def is_staged_path(path: str, transfer_dir: str) -> bool:
@@ -74,7 +138,7 @@ def is_staged_path(path: str, transfer_dir: str) -> bool:
     try:
         path_n = os.path.normpath(os.path.abspath(path))
         root_n = os.path.normpath(os.path.abspath(
-            os.path.join(os.path.normpath(transfer_dir), _STAGING_DIRNAME)))
+            os.path.join(os.path.normpath(transfer_dir), STAGING_DIRNAME)))
     except (OSError, ValueError):
         return False
     return path_n == root_n or path_n.startswith(root_n + os.sep)
@@ -166,6 +230,13 @@ def iter_staged_files(staging_root: str) -> List[str]:
         return out
     for root, _dirs, files in os.walk(staging_root):
         for name in files:
+            # startswith, not ==: the manifest is replaced atomically through a
+            # sibling temp file (mkstemp prefixes it with MANIFEST_NAME), and a
+            # hard kill between mkstemp and os.replace — the exact case this
+            # feature exists for — leaves one behind. Matching the exact name
+            # only would publish that temp file into the library root.
+            if name.startswith(MANIFEST_NAME):
+                continue  # bookkeeping, not album content — never publish it
             out.append(os.path.join(root, name))
     # SORTED, and it is load-bearing. os.walk hands back directory order, which
     # is the filesystem's business and differs between machines: the same album
@@ -293,11 +364,46 @@ def publish_album_batch(
         rollback_failed = _roll_back()
         published = []
     else:
-        # Remove the staging tree only when everything published.
-        _prune_empty_tree(staging_root)
+        # Remove the staging tree only when everything published. The manifest
+        # has outlived its purpose at this point and would otherwise keep the
+        # root non-empty, so the prune could never remove it.
+        for leftover in os.listdir(staging_root) if os.path.isdir(staging_root) else []:
+            if leftover.startswith(MANIFEST_NAME):
+                try:
+                    os.remove(os.path.join(staging_root, leftover))
+                except OSError:
+                    pass
+        prune_empty_tree(staging_root)
 
     return {"success": not failed, "published": published, "failed": failed,
             "rollback_failed": rollback_failed}
+
+
+def should_discard_staging(batch: Optional[Dict[str, object]]) -> Tuple[bool, str]:
+    """Whether a finished batch's staging tree may be deleted, and why.
+
+    Returns ``(discard, reason)``.
+
+    A staging root is not scratch space. Every file in it is a completed,
+    tagged, correctly-named download that cost the user bandwidth and a Soulseek
+    slot, and -- before #1289 -- had already had its wishlist row deleted, so
+    deleting the tree destroyed both the audio and the only record that anyone
+    ever wanted it. The same lesson was learned once already for album-bundle
+    staging (#1210), where the fix was to stop deleting and start quarantining.
+
+    So the rule is inverted from what it was: discard ONLY when the user
+    explicitly cancelled the batch, because that is the one case where "throw
+    the download away" is what was actually asked for. A batch that errored,
+    exhausted its publish retries, wedged, or simply went stale keeps its files
+    for the startup reconciliation to publish or recover.
+    """
+    if not batch:
+        return False, "no batch"
+    if not batch.get('_atomic_active') or not batch.get('_atomic_staging_root'):
+        return False, "not a staged batch"
+    if batch.get('phase') == 'cancelled':
+        return True, "user cancelled the batch"
+    return False, f"phase={batch.get('phase')!r} — keeping staged audio for recovery"
 
 
 def discard_staging_root(staging_root: Optional[str]) -> bool:
@@ -306,7 +412,7 @@ def discard_staging_root(staging_root: Optional[str]) -> bool:
     they re-download). Returns True if a directory was removed.
 
     Guarded: only ever removes a path whose immediate parent is the dedicated
-    ``_STAGING_DIRNAME`` folder, so a blank/misconfigured value can never rmtree
+    ``STAGING_DIRNAME`` folder, so a blank/misconfigured value can never rmtree
     anything but a genuine staging root. Best-effort; a successfully-published
     batch already had its staging pruned, so this is a no-op there."""
     if not staging_root:
@@ -314,7 +420,7 @@ def discard_staging_root(staging_root: Optional[str]) -> bool:
     import shutil
     try:
         norm = os.path.normpath(staging_root)
-        if os.path.basename(os.path.dirname(norm)) != _STAGING_DIRNAME:
+        if os.path.basename(os.path.dirname(norm)) != STAGING_DIRNAME:
             return False  # not a staging root — refuse
         if not os.path.isdir(norm):
             return False
@@ -324,8 +430,11 @@ def discard_staging_root(staging_root: Optional[str]) -> bool:
         return False
 
 
-def _prune_empty_tree(root: str) -> None:
-    """Remove ``root`` and any now-empty subdirs. Best-effort; leaves anything
+def prune_empty_tree(root: str) -> None:
+    """Remove ``root`` and any now-empty subdirs.
+
+    Public for the startup recovery, which drains a staging tree it did not
+    publish and needs the same cleanup. Best-effort; leaves anything
     still holding files untouched."""
     if not os.path.isdir(root):
         return
@@ -337,6 +446,12 @@ def _prune_empty_tree(root: str) -> None:
 
 
 __all__ = [
+    "MANIFEST_NAME",
+    "STAGING_DIRNAME",
+    "prune_empty_tree",
+    "contains_staging_segment",
+    "split_staged_path",
+    "should_discard_staging",
     "staging_root_for_batch",
     "to_staging_path",
     "to_final_path",

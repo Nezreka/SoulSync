@@ -5,17 +5,7 @@ import { server } from '@/test/msw';
 
 import type { BasicAlbum, BasicTrack } from './-basic.types';
 
-import {
-  downloadAlbum,
-  downloadAlbumTrack,
-  downloadTrack,
-  downloadUnmatched,
-  matchedDownloadAlbum,
-  matchedDownloadAlbumTrack,
-  matchedDownloadTrack,
-  streamAlbumTrack,
-  streamTrack,
-} from './-basic.actions';
+import { downloadAlbum, downloadAlbumTrack, downloadTrack, startDownload } from './-basic.actions';
 
 let toasts: { message: string; type?: string }[] = [];
 
@@ -24,20 +14,12 @@ beforeEach(() => {
   window.showToast = vi.fn((message: string, type?: string) => {
     toasts.push({ message, type });
   });
-  window.openMatchingModal = vi.fn();
-  window.startStream = vi.fn();
-  window.getFileExtension = (filename: string) => filename.split('.').pop() ?? '';
-  // Default: everything plays. Individual tests override.
-  window.isAudioFormatSupported = () => true;
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
   delete window.showToast;
-  delete window.openMatchingModal;
-  delete (window as Partial<Window>).startStream;
-  delete window.getFileExtension;
-  delete window.isAudioFormatSupported;
+  Reflect.deleteProperty(window, 'showConfirmDialog');
   vi.restoreAllMocks();
 });
 
@@ -158,157 +140,85 @@ describe('downloadAlbumTrack', () => {
   });
 });
 
-describe('matched downloads', () => {
-  // These three are declared twice in the vanilla — downloads.js and
-  // wishlist-tools.js, with different behaviour. wishlist-tools.js loads
-  // second, so ITS versions are the ones that have been running.
-  it('sends a single track with no album context', () => {
-    const row = track();
-    matchedDownloadTrack(row);
-    expect(window.openMatchingModal).toHaveBeenCalledWith(row, false, null);
-  });
+/** a blocklisted artist: 409 {blocked} first, then whatever the override gets */
+function stubBlocked(after: Record<string, unknown> = { success: true }) {
+  const bodies: Record<string, unknown>[] = [];
+  server.use(
+    http.post('/api/download', async ({ request }) => {
+      const body = (await request.json()) as Record<string, unknown>;
+      bodies.push(body);
+      if (!body.ignore_blocklist) {
+        return HttpResponse.json(
+          {
+            success: false,
+            blocked: true,
+            blocked_entity_type: 'artist',
+            blocked_name: 'Aphex Twin',
+          },
+          { status: 409 },
+        );
+      }
+      return HttpResponse.json(after);
+    }),
+  );
+  return bodies;
+}
 
-  it('identifies an album by its FIRST TRACK, with the album as context', () => {
-    // A folder has no tags worth matching on; the modal searches with a real
-    // track's metadata and applies the answer to the album.
-    const row = album();
-    matchedDownloadAlbum(row);
-    expect(window.openMatchingModal).toHaveBeenCalledWith(row.tracks[0], true, row);
-  });
-
-  it('falls back to the album itself when it carries no tracks', () => {
-    const row = album({ tracks: [] });
-    matchedDownloadAlbum(row);
-    expect(window.openMatchingModal).toHaveBeenCalledWith(row, true, row);
-  });
-
-  it('treats an album track as a single track, album passed only as context', () => {
-    // `false` matters: `true` would make the modal ask the user to choose an
-    // album for a file they already located inside one.
-    const row = album();
-    matchedDownloadAlbumTrack(row, 1);
-    expect(window.openMatchingModal).toHaveBeenCalledWith(row.tracks[1], false, row);
-  });
-
-  it('ignores a track index that is not there', () => {
-    matchedDownloadAlbumTrack(album(), 99);
-    expect(window.openMatchingModal).not.toHaveBeenCalled();
-  });
-});
-
-describe('streamTrack', () => {
-  it('streams a playable file', async () => {
-    const row = track();
-    await streamTrack(row);
-    expect(window.startStream).toHaveBeenCalledWith(row);
-  });
-
-  it('refuses a format the browser cannot play, naming it', async () => {
-    window.isAudioFormatSupported = () => false;
-    await streamTrack(track({ filename: 'music/a.wma' }));
-    expect(window.startStream).not.toHaveBeenCalled();
-    expect(toasts[0].message).toContain('WMA');
-    expect(toasts[0].message).toContain('not supported');
-  });
-
-  it('skips the codec check for streaming sources', async () => {
-    // Their "filename" is an opaque id with no extension, so the check would
-    // reject every one of them.
-    window.isAudioFormatSupported = () => false;
-    for (const username of ['youtube', 'tidal', 'qobuz', 'hifi']) {
-      await streamTrack(track({ username, filename: 'abc123' }));
-    }
-    expect(window.startStream).toHaveBeenCalledTimes(4);
-    expect(toasts).toEqual([]);
-  });
-
-  it('streams a result with no filename rather than checking nothing', async () => {
-    window.isAudioFormatSupported = () => false;
-    await streamTrack(track({ filename: '' }));
-    expect(window.startStream).toHaveBeenCalled();
-  });
-
-  it('reports a player failure', async () => {
-    window.startStream = vi.fn(() => {
-      throw new Error('player down');
-    });
-    await streamTrack(track());
-    expect(toasts).toEqual([{ message: 'Failed to start track stream', type: 'error' }]);
-  });
-});
-
-describe('streamAlbumTrack', () => {
-  it('streams the track, filling gaps from the album', async () => {
-    const row = album();
-    await streamAlbumTrack(row, 1);
-    expect(window.startStream).toHaveBeenCalledWith(
-      expect.objectContaining({ filename: 'music/b.mp3', username: 'peer', artist: 'Aphex Twin' }),
+describe('blocklisted downloads', () => {
+  it('asks, and on yes sends it again with ignore_blocklist', async () => {
+    const bodies = stubBlocked();
+    window.showConfirmDialog = vi.fn(async () => true);
+    await downloadTrack(track());
+    expect(window.showConfirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('Aphex Twin') }),
     );
-  });
-
-  it("falls back to the album's artist and title for a bare track", async () => {
-    const row = album({
-      artist: 'Album Artist',
-      album_title: 'The Album',
-      tracks: [track({ artist: null, album: null, username: '' })],
-    });
-    await streamAlbumTrack(row, 0);
-    expect(window.startStream).toHaveBeenCalledWith(
-      expect.objectContaining({ artist: 'Album Artist', album: 'The Album', username: 'peer' }),
-    );
-  });
-
-  it('treats a streaming-source result as the track itself', async () => {
-    // Those sources return FLAT rows — the "album" IS the track, with no
-    // tracks array — so indexing into one would find nothing.
-    const flat = album({ username: 'youtube', tracks: [] }) as unknown as Record<string, unknown>;
-    flat.title = 'Some Video';
-    flat.filename = 'yt-id-123';
-
-    await streamAlbumTrack(flat as unknown as BasicAlbum, 0);
-
-    expect(window.startStream).toHaveBeenCalledWith(
-      expect.objectContaining({ filename: 'yt-id-123', album: 'Some Video' }),
-    );
-  });
-
-  it('says so when the track is not in the album', async () => {
-    await streamAlbumTrack(album(), 99);
-    expect(window.startStream).not.toHaveBeenCalled();
-    expect(toasts).toEqual([{ message: 'Track not found in album', type: 'error' }]);
-  });
-
-  it('refuses an unplayable album track', async () => {
-    window.isAudioFormatSupported = () => false;
-    await streamAlbumTrack(album({ tracks: [track({ filename: 'a.ape' })] }), 0);
-    expect(window.startStream).not.toHaveBeenCalled();
-    expect(toasts[0].message).toContain('APE');
-  });
-});
-
-describe('downloadUnmatched', () => {
-  // The "Skip Matching" button. Its old path could not work for three
-  // independent reasons — see the doc comment on downloadUnmatched.
-  it('downloads a track', async () => {
-    const bodies = stubDownload();
-    await downloadUnmatched(track());
-    expect(bodies[0].result_type).toBe('track');
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toMatchObject({ ignore_blocklist: true, filename: 'music/a.mp3' });
     expect(toasts).toEqual([{ message: 'Download started: Xtal', type: 'success' }]);
   });
 
-  it('actually downloads an album instead of only claiming to', async () => {
-    // The vanilla's album branch toasted "Starting album download (unmatched)"
-    // above a comment reading "This would need to be implemented".
-    const bodies = stubDownload({ success: true, message: 'Started 2 tracks' });
-    await downloadUnmatched(album());
+  it('on no, skips it and says why instead of a generic failure', async () => {
+    const bodies = stubBlocked();
+    window.showConfirmDialog = vi.fn(async () => false);
+    await downloadTrack(track());
     expect(bodies).toHaveLength(1);
-    expect(bodies[0].result_type).toBe('album');
-    expect(toasts).toEqual([{ message: 'Started 2 tracks', type: 'success' }]);
+    expect(toasts).toEqual([{ message: 'Skipped, Aphex Twin is blocklisted', type: 'info' }]);
   });
 
-  it('does nothing when handed nothing', async () => {
+  it('works for a track taken out of an album too', async () => {
+    const bodies = stubBlocked();
+    window.showConfirmDialog = vi.fn(async () => true);
+    await downloadAlbumTrack(album(), 1);
+    expect(bodies[1]).toMatchObject({ ignore_blocklist: true, result_type: 'track', title: 'Tha' });
+  });
+
+  it('a 409 without blocked is still a failure', async () => {
+    server.use(
+      http.post('/api/download', () => HttpResponse.json({ error: 'conflict' }, { status: 409 })),
+    );
+    await downloadTrack(track());
+    expect(toasts).toEqual([{ message: 'Failed to start download', type: 'error' }]);
+  });
+});
+
+describe('startDownload', () => {
+  it('a track posts the download', async () => {
     const bodies = stubDownload();
-    await downloadUnmatched(null as unknown as BasicTrack);
-    expect(bodies).toEqual([]);
+    startDownload({ kind: 'track', track: track() });
+    await vi.waitFor(() => expect(bodies).toHaveLength(1));
+  });
+
+  it('an album posts the whole album', async () => {
+    const bodies = stubDownload({ success: true, message: 'Started 2 downloads' });
+    startDownload({ kind: 'album', album: album() });
+    await vi.waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toMatchObject({ result_type: 'album' });
+  });
+
+  it('a track out of an album posts just that track', async () => {
+    const bodies = stubDownload();
+    startDownload({ kind: 'albumTrack', album: album(), trackIndex: 1 });
+    await vi.waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toMatchObject({ result_type: 'track', title: 'Tha' });
   });
 });

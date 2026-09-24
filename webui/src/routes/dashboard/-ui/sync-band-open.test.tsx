@@ -29,6 +29,7 @@ const schedule = {
   cadence: 'Every 6 hours',
   enabled: true,
   nextRun: null,
+  nextRunAt: null,
   coverage: null,
   lastRun: null,
   running: null,

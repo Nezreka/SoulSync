@@ -1,3 +1,4 @@
+import time
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -44,7 +45,7 @@ class _FakeWishlistService:
     def get_wishlist_tracks_for_download(self, profile_id=1):
         return list(self._tracks)
 
-    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1):
+    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1, **kwargs):
         return True
 
 
@@ -628,6 +629,34 @@ def test_process_wishlist_automatically_skips_when_wishlist_batch_is_already_act
     assert guard_events == ["enter", "exit"]
     assert [kwargs.get("progress") for _args, kwargs in progress_calls if "progress" in kwargs] == [10]
     assert any("already active in another batch" in msg for msg in logger.info_messages)
+
+
+def test_wishlist_guard_does_not_expire_a_healthy_long_running_batch():
+    batch_map = {
+        "batch-active": {
+            "playlist_id": "wishlist", "phase": "downloading",
+            "active_count": 2, "queue": ["t1", "t2"], "queue_index": 2,
+            "_stale_detected_at": time.time() - 3700,
+        }
+    }
+    runtime, _service, _profiles_db, music_db, executor, logger, progress_calls, guard_events = _build_runtime(
+        tracks=[{"name": "Single Track", "artists": [{"name": "Artist B"}],
+                 "spotify_data": {"album": {"album_type": "single"}}}],
+        cycle_value="singles", count=1, batch_map=batch_map,
+    )
+    process_wishlist_automatically(runtime, automation_id="auto-active")
+    assert batch_map["batch-active"]["phase"] == "downloading"
+    assert not batch_map["batch-active"].get("completion_time")
+    assert not executor.submissions
+    # A queue waiting for global slots is not proof of a phantom either.
+    batch_map["batch-active"].update(active_count=0, queue_index=0)
+    process_wishlist_automatically(runtime, automation_id="auto-held")
+    assert batch_map["batch-active"]["phase"] == "downloading"
+    assert not executor.submissions
+    # Once the state-aware healer has finished it, processing can proceed.
+    batch_map["batch-active"].update(phase="error", completion_time=time.time())
+    process_wishlist_automatically(runtime, automation_id="auto-recovered")
+    assert len(executor.submissions) == 1
 
 
 # --- #740: album-bundle batches must route to the dedicated pool ------------

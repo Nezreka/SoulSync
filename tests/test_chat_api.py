@@ -746,3 +746,116 @@ def test_link_preview_returns_metadata(chat_app, monkeypatch):
     assert res.status_code == 200
     assert res.get_json() == fake_data
 
+
+# ── link preview hardening ───────────────────────────────────────────────────
+# previews fire on their own for every link on screen, so whatever a stranger
+# posts in a soulseek room decides what every watching soulsync server fetches.
+
+class _FakeResp:
+    def __init__(self, status=200, headers=None, body="<html><head><title>t</title></head></html>"):
+        self.status_code = status
+        self.headers = {"content-type": "text/html; charset=utf-8",
+                        **{k.lower(): v for k, v in (headers or {}).items()}}
+        self.is_redirect = status in (301, 302, 303, 307, 308)
+        self._body = body
+
+    def raise_for_status(self):
+        pass
+
+    def iter_content(self, chunk_size=8192, decode_unicode=True):
+        yield self._body
+
+    def close(self):
+        pass
+
+
+class _CaseInsensitive(dict):
+    def get(self, k, d=None):
+        return super().get(k.lower(), d)
+
+
+@pytest.fixture()
+def preview_net(monkeypatch):
+    """fake dns + fake http. every fetched url is recorded."""
+    import requests
+    chat_api._LINK_PREVIEW_CACHE.clear()
+    dns = {"public.example": ["93.184.216.34"], "evil.example": ["93.184.216.35"],
+           "sneaky.example": ["192.168.1.1"], "127.0.0.1.nip.io": ["127.0.0.1"]}
+    pages = {}
+    fetched = []
+
+    def resolve(host, port):
+        if host in dns:
+            return dns[host]
+        return [host]     # ip literals resolve to themselves
+
+    def get(url, **kw):
+        assert kw.get("allow_redirects") is False, "redirects must be walked by hand"
+        fetched.append(url)
+        r = pages.get(url) or _FakeResp()
+        r.headers = _CaseInsensitive(r.headers)
+        return r
+
+    monkeypatch.setattr(chat_api, "_resolve_host", resolve)
+    monkeypatch.setattr(requests, "get", get)
+    yield pages, fetched
+    chat_api._LINK_PREVIEW_CACHE.clear()
+
+
+def test_link_preview_does_not_follow_a_redirect_into_the_lan(preview_net):
+    pages, fetched = preview_net
+    pages["https://evil.example/r"] = _FakeResp(302, {"Location": "http://192.168.1.1/admin"})
+    assert chat_api._fetch_link_preview("https://evil.example/r") is None
+    assert fetched == ["https://evil.example/r"]
+
+
+def test_link_preview_still_follows_a_public_redirect(preview_net):
+    pages, fetched = preview_net
+    pages["https://evil.example/r"] = _FakeResp(301, {"Location": "https://public.example/page"})
+    data = chat_api._fetch_link_preview("https://evil.example/r")
+    assert data and data["title"] == "t"
+    assert fetched == ["https://evil.example/r", "https://public.example/page"]
+
+
+@pytest.mark.parametrize("url", [
+    "http://sneaky.example/",        # public-looking name, lan address
+    "http://127.0.0.1.nip.io/",      # wildcard dns to loopback
+    "http://[::ffff:127.0.0.1]/",    # ipv4-mapped loopback
+    "http://100.64.0.1/",            # carrier-grade nat, not public
+])
+def test_link_preview_checks_what_the_name_resolves_to(preview_net, url):
+    _, fetched = preview_net
+    assert chat_api._fetch_link_preview(url) is None
+    assert fetched == []
+
+
+def test_decimal_ip_form_is_caught_by_the_real_resolver():
+    """"http://2130706433/" is 127.0.0.1. getaddrinfo parses it locally, no dns."""
+    assert chat_api._is_safe_preview_url("http://2130706433/") is False
+
+
+@pytest.mark.parametrize("color,kept", [
+    ("#1db954", "#1db954"),
+    ("#fff", "#fff"),
+    ("red;position:fixed;inset:0", ""),
+    ("#000;background:url(x)", ""),
+])
+def test_theme_color_cannot_inject_css(preview_net, color, kept):
+    pages, _ = preview_net
+    pages["https://public.example/c"] = _FakeResp(
+        body=f'<html><head><title>t</title><meta name="theme-color" content="{color}"></head></html>')
+    assert chat_api._fetch_link_preview("https://public.example/c")["theme_color"] == kept
+
+
+@pytest.mark.parametrize("headers,frameable", [
+    ({}, True),
+    ({"X-Frame-Options": "DENY"}, False),
+    ({"X-Frame-Options": "SAMEORIGIN"}, False),
+    ({"Content-Security-Policy": "default-src 'self'; frame-ancestors 'self'"}, False),
+    ({"Content-Security-Policy": "frame-ancestors *"}, True),
+    ({"Content-Security-Policy": "default-src 'self'"}, True),
+])
+def test_preview_says_whether_the_page_can_be_framed(preview_net, headers, frameable):
+    pages, _ = preview_net
+    pages["https://public.example/f"] = _FakeResp(headers=headers)
+    assert chat_api._fetch_link_preview("https://public.example/f")["frameable"] is frameable

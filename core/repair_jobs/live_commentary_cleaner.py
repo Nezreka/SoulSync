@@ -9,7 +9,7 @@ from core.library2.maintenance_subjects import (
 from collections import defaultdict
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.live_commentary_cleaner")
@@ -128,7 +128,10 @@ class LiveCommentaryCleanerJob(RepairJob):
         if not enabled_types:
             return result
         scan_album_titles = settings.get("scan_album_titles", True)
-        subjects = scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager))
+        # hand-tagged: the user typed this live/bootleg release on purpose,
+        # flagging it would offer to delete exactly what they asked for
+        subjects = drop_hand_tagged(context, scoped_file_subjects(
+            context, active_file_subjects(context.db, context.config_manager)))
         for subject in subjects:
             if context.check_stop():
                 return result

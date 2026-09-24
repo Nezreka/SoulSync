@@ -105,38 +105,24 @@ def cleanup_wishlist_after_db_update(config_manager) -> None:
             if not track_name or not artists or not spotify_track_id:
                 continue
 
-            # Check each artist
-            found_in_db = False
-            for artist in artists:
-                # Handle both string format and dict format
-                if isinstance(artist, str):
-                    artist_name = artist
-                elif isinstance(artist, dict) and 'name' in artist:
-                    artist_name = artist['name']
-                else:
-                    artist_name = str(artist)
+            # Check each artist. A match whose library row still points into
+            # atomic-publish staging is not ownership (#1289) — the file is
+            # quarantined and may never publish, so the request has to stand.
+            from core.wishlist.library_match import find_owned_match
+            from core.wishlist.removal_guard import REASON_ALREADY_OWNED
 
-                try:
-                    db_track, confidence = db.check_track_exists(
-                        track_name, artist_name,
-                        confidence_threshold=0.7,
-                        server_source=active_server,
-                        album=track_album,
-                    )
-
-                    if db_track and confidence >= 0.7:
-                        found_in_db = True
-                        logger.info(f"[Auto Cleanup] Track found in database: '{track_name}' by {artist_name} (confidence: {confidence:.2f})")
-                        break
-
-                except Exception as db_error:
-                    logger.error(f"[Auto Cleanup] Error checking database for track '{track_name}': {db_error}")
-                    continue
+            match = find_owned_match(
+                db, track_name, artists, track_album, active_server,
+                log=logger, log_prefix="[Auto Cleanup]")
 
             # If found in database, remove from wishlist
-            if found_in_db:
+            if match:
+                db_track, _confidence, _artist = match
                 try:
-                    removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+                    removed = wishlist_service.mark_track_download_result(
+                        spotify_track_id, success=True,
+                        audit={'reason': REASON_ALREADY_OWNED,
+                               'final_path': getattr(db_track, 'file_path', '') or ''})
                     if removed:
                         removed_count += 1
                         logger.info(f"[Auto Cleanup] Removed track from wishlist: '{track_name}' ({spotify_track_id})")

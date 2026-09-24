@@ -1,6 +1,12 @@
 /**
  * DashboardHeader — the artefact differential against the RECORDED vanilla
- * region (dash-vanilla-fixture.html's .dashboard-header) plus the click seams.
+ * orb strip (dash-vanilla-fixture.html's .header-actions) plus the click seams.
+ *
+ * The Sept 2026 redesign rebuilt the header around it (a hero with the
+ * greeting and library on the left, the orbs on their own stage on the
+ * right, watchlist/wishlist moved to the rail as tiles). What worker-orbs.js
+ * reads every frame, the orb containers, their buttons and tooltips, stays
+ * pinned 1:1, now inside `.orb-stage`.
  *
  * The differential walks both trees and compares tag, id, class list, the
  * attributes that matter (src/alt/title/aria-hidden/style.display) and
@@ -15,12 +21,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useDashboardHeader } from '../-dash.header';
 import { vanillaDashboardHtml } from './dash-artefact';
-import { DashboardHeader } from './dashboard-header';
+import { DashboardHeaderView, QuickNavTiles } from './dashboard-header';
 
-function extractVanillaHeader(): string {
+function extractVanillaOrbStrip(): string {
   const html = vanillaDashboardHtml();
-  const start = html.indexOf('<div class="dashboard-header">');
+  const start = html.indexOf('<div class="header-actions">');
   expect(start).toBeGreaterThan(-1);
   const re = /<div\b|<\/div>/g;
   re.lastIndex = start;
@@ -29,7 +36,7 @@ function extractVanillaHeader(): string {
     depth += m[0] === '<div' ? 1 : -1;
     if (depth === 0) return html.slice(start, m.index + '</div>'.length);
   }
-  throw new Error('unbalanced dashboard-header region');
+  throw new Error('unbalanced header-actions region');
 }
 
 const normalize = (text: string | null) => (text ?? '').replace(/\s+/g, ' ').trim();
@@ -51,13 +58,6 @@ function ownText(el: Element): string {
 const ATTRS = ['src', 'alt', 'title', 'aria-hidden'] as const;
 
 function compareTrees(vanilla: Element, ported: Element, path: string) {
-  // CARVE-OUT: the title block became the hello strip (greeting + live stats,
-  // the Aug 2026 header redesign) — the ONE region of this header that
-  // intentionally diverged from the vanilla fixture. Its behaviour is covered
-  // by -dash.hello.test.ts and the hello-strip cases below; everything else,
-  // above all the orb containers worker-orbs.js reads every frame, stays
-  // pinned 1:1.
-  if (vanilla.classList.contains('header-text')) return;
   expect(`${path} tag:${ported.tagName}`).toBe(`${path} tag:${vanilla.tagName}`);
   expect(`${path} id:${ported.id}`).toBe(`${path} id:${vanilla.id}`);
   expect(`${path} class:${Array.from(ported.classList).join('.')}`).toBe(
@@ -99,27 +99,61 @@ afterEach(() => {
   delete window.openWishlistFromHero;
   delete window.isJiosaavnExperimentalEnabled;
   delete window.SoulSyncWebRouter;
-  delete (window as Partial<Window>).navigateToPage;
+  Reflect.deleteProperty(window, 'navigateToPage');
 });
+
+/** The hero plus the rail's tiles, sharing one header hook the way the page
+ *  does. */
+function HeaderAndTiles() {
+  const header = useDashboardHeader();
+  return (
+    <>
+      <DashboardHeaderView header={header} />
+      <QuickNavTiles header={header} />
+    </>
+  );
+}
 
 async function mountHeader() {
   let view: ReturnType<typeof render>;
   await act(async () => {
-    view = render(<DashboardHeader />);
+    view = render(<HeaderAndTiles />);
   });
   return view!;
 }
 
 describe('the artefact differential', () => {
-  it('renders the vanilla region 1:1 in its initial state', async () => {
+  it('renders the vanilla orb strip 1:1, on the stage', async () => {
     const parser = new DOMParser();
-    const vanillaDoc = parser.parseFromString(extractVanillaHeader(), 'text/html');
+    const vanillaDoc = parser.parseFromString(extractVanillaOrbStrip(), 'text/html');
     const vanilla = vanillaDoc.body.firstElementChild!;
 
     const view = await mountHeader();
-    const ported = view.container.firstElementChild!;
+    const ported = view.container.querySelector('.dashboard-header .orb-stage > .header-actions')!;
+    expect(ported).not.toBeNull();
 
-    compareTrees(vanilla, ported, 'dashboard-header');
+    compareTrees(vanilla, ported, 'header-actions');
+  });
+});
+
+describe('the orb stage', () => {
+  it('is the anchor worker-orbs.js looks for, with the strip inside it', async () => {
+    // the vanilla orb layer and the React stage have to agree on these
+    // selectors or the orbs silently fall back to the whole header
+    const orbs = readFileSync(resolve(process.cwd(), 'static/worker-orbs.js'), 'utf8');
+    expect(orbs).toContain("document.querySelector('#dashboard-page .orb-stage')");
+    expect(orbs).toContain("dashboardHeader.querySelector('.header-actions')");
+
+    const view = await mountHeader();
+    const stage = view.container.querySelector('.dashboard-header > .orb-stage')!;
+    expect(stage.querySelector(':scope > .header-actions')).not.toBeNull();
+    // the greeting lives outside the stage, so orbs never drift over it
+    expect(stage.querySelector('.hello-greeting')).toBeNull();
+  });
+
+  it('says how many workers are busy', async () => {
+    const view = await mountHeader();
+    expect(view.container.querySelector('.orb-stage-caption')!.textContent).toBe('Workers resting');
   });
 });
 
@@ -129,7 +163,7 @@ describe('the hello strip', () => {
     const view = await mountHeader();
     const greeting = view.container.querySelector('.hello-greeting span')!;
     expect(greeting.textContent).toMatch(
-      /^(good (morning|afternoon|evening)|up late\?), BoulderBadgeDad$/,
+      /^(good (morning|afternoon|evening), BoulderBadgeDad|up late, BoulderBadgeDad\?)$/,
     );
     view.unmount();
 
@@ -215,7 +249,7 @@ describe('state rendering', () => {
     expect(status.style.color).toBe('rgb(255, 193, 7)');
   });
 
-  it('renders the quick-nav counts, classes and countdown title', async () => {
+  it('renders the rail tiles counts, classes and countdown title', async () => {
     const view = await mountHeader();
     act(() => {
       window.dispatchEvent(
@@ -234,13 +268,17 @@ describe('state rendering', () => {
     );
     expect(view.container.querySelector('#watchlist-badge')!.textContent).toBe('4');
     const wishlistButton = view.container.querySelector<HTMLElement>('#wishlist-button')!;
-    expect(wishlistButton.className).toBe('header-button wishlist-button wishlist-inactive');
+    expect(wishlistButton.className).toBe(
+      'header-button wishlist-button wishlist-inactive dash-tile',
+    );
     act(() => {
       window.dispatchEvent(
         new CustomEvent('ss:dashboard-wishlist-count', { detail: { count: 6 } }),
       );
     });
-    expect(wishlistButton.className).toBe('header-button wishlist-button wishlist-active');
+    expect(wishlistButton.className).toBe(
+      'header-button wishlist-button wishlist-active dash-tile',
+    );
     expect(view.container.querySelector('#wishlist-badge')!.textContent).toBe('6');
   });
 });

@@ -355,7 +355,7 @@ def _discover_genre_taste(database, profile_id):
     profile = {}
     try:
         from core.discovery.listening_recommendations import build_genre_taste_profile
-        top = database.get_top_artists('all', 300) or []
+        top = database.get_top_artists('all', 300, profile_id=profile_id) or []
         genres_by_name = database.get_artist_genres_by_name([t.get('name') for t in top if t.get('name')])
         weighted = [(genres_by_name.get((t.get('name') or '').strip().lower(), []),
                      t.get('play_count', 1) or 1) for t in top]
@@ -1170,10 +1170,13 @@ def get_discover_because_you_listen_to():
         history_scope = 'shared'
         history_note = None
         try:
-            history_scope = database.listening_history_scope()
+            history_scope = database.listening_history_scope(pid)
             if history_scope == 'shared' and _profile_count(database) > 1:
                 history_note = ('Listening history is shared across profiles on '
                                 'this install.')
+                # a profile can have its own now (#1293), the admin can't
+                if pid and pid != 1:
+                    history_note += ' Connect your own ListenBrainz in your settings to make it yours.'
         except Exception as e:  # noqa: BLE001 - the note is not the feature
             logger.debug("listening scope probe failed: %s", e)
 
@@ -1275,7 +1278,7 @@ def get_discover_undiscovered_albums():
         active_source = _get_active_discovery_source()
 
         # Get top played artists
-        top = database.get_top_artists('all', 25)
+        top = database.get_top_artists('all', 25, profile_id=get_current_profile_id())
         artist_names = [a['name'] for a in top if a.get('name')]
         if not artist_names:
             return jsonify({'success': True, 'albums': []})
@@ -1306,7 +1309,7 @@ def get_discover_genre_new_releases():
     try:
         database = get_database()
         cache = get_metadata_cache()
-        genres = database.get_genre_breakdown('all')
+        genres = database.get_genre_breakdown('all', profile_id=get_current_profile_id())
         genre_names = [g['genre'] for g in (genres or [])[:10] if g.get('genre')]
         if not genre_names:
             return jsonify({'success': True, 'albums': []})
@@ -1351,7 +1354,7 @@ def get_discover_deep_cuts():
     try:
         database = get_database()
         cache = get_metadata_cache()
-        top = database.get_top_artists('all', 15)
+        top = database.get_top_artists('all', 15, profile_id=get_current_profile_id())
         artist_names = [a['name'] for a in top if a.get('name')]
         active_source = _get_active_discovery_source()
         if not artist_names:
@@ -1378,7 +1381,7 @@ def get_discover_genre_explorer():
     try:
         database = get_database()
         cache = get_metadata_cache()
-        genres = database.get_genre_breakdown('all')
+        genres = database.get_genre_breakdown('all', profile_id=get_current_profile_id())
         user_genres = {g['genre'] for g in (genres or []) if g.get('genre')}
         allowed = _get_genre_allowed_sources()
         data = cache.get_genre_explorer(user_genres, sources=allowed)

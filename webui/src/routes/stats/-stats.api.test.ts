@@ -4,11 +4,14 @@ import { HttpResponse, http, server } from '@/test/msw';
 
 import {
   fetchListeningStatsStatus,
+  fetchListenbrainzListeningImportStatus,
   fetchStatsCached,
   fetchStatsListeningEvents,
   fetchStatsDbStorage,
   fetchStatsLibraryDiskUsage,
   resolveStatsTrack,
+  runLastfmListeningImport,
+  runListenbrainzListeningImport,
   streamStatsTrack,
   triggerListeningStatsSync,
 } from './-stats.api';
@@ -172,5 +175,44 @@ describe('stats api', () => {
     await expect(streamStatsTrack('Track', 'Artist', 'Album')).resolves.toEqual({
       stream_url: '/api/stream/1',
     });
+  });
+
+  it('fetches listenbrainz listening import status and runs import', async () => {
+    server.use(
+      http.get('/api/listenbrainz/listening-import/status', () =>
+        HttpResponse.json({
+          success: true,
+          username: 'lbuser',
+          status: 'idle',
+          token_configured: true,
+        }),
+      ),
+      http.post('/api/listenbrainz/listening-import/run', async ({ request }) => {
+        const body = (await request.json()) as { username?: string; enabled?: boolean };
+        expect(body).toEqual({ username: 'lbuser', enabled: true });
+        return HttpResponse.json({ success: true, status: 'started' });
+      }),
+    );
+
+    await expect(fetchListenbrainzListeningImportStatus()).resolves.toMatchObject({
+      success: true,
+      username: 'lbuser',
+    });
+    await expect(runListenbrainzListeningImport('lbuser')).resolves.toMatchObject({
+      success: true,
+      status: 'started',
+    });
+  });
+  it('uses saved settings when either history sync is started without a username', async () => {
+    for (const service of ['lastfm', 'listenbrainz']) {
+      server.use(
+        http.post(`/api/${service}/listening-import/run`, async ({ request }) => {
+          expect(await request.json()).toEqual({ enabled: true });
+          return HttpResponse.json({ success: true, status: 'started' });
+        }),
+      );
+    }
+    await runLastfmListeningImport();
+    await runListenbrainzListeningImport();
   });
 });

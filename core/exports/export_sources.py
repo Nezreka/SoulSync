@@ -7,17 +7,30 @@ source and assembles the ``resolve_fn`` the export job uses:
 2. **DB** — a text-matched library track's ``tracks.musicbrainz_recording_id``.
 3. **file** — ``MUSICBRAINZ_RECORDING_ID`` tag of that track's file (when the DB row had
    no recording id but the file was tagged on import).
-4. **MusicBrainz** — live ``match_recording(track, artist)`` (rate-limited tail).
+4. **ISRC** — discovery already pinned this row to a Deezer track id (``extra_data``);
+   fetch that track's ISRC and resolve it to a recording MBID via MusicBrainz's exact
+   ``/isrc/`` lookup. Script/language independent, so it catches dual-title and
+   romanised-name tracks the live text search below misses.
+5. **MusicBrainz** — live ``match_recording(track, artist)`` (rate-limited tail).
 
 Every source is wrapped so any failure (missing table, unreadable file, MB timeout) returns
 None — the waterfall just falls through, the export never breaks. ``build_resolve_fn`` also
 writes a fresh non-cache hit back to the cache so the next export of the same song is free.
+
+The DB and file rungs are gated: ``tracks.musicbrainz_recording_id`` is populated verbatim
+from file tags at import (``core/imports/side_effects.py``), so a mis-tagged file poisons
+both rungs identically. Before accepting either rung's MBID, ``build_resolve_fn`` rejects
+it when the ``mbid_mismatch_detector`` repair job already has a pending finding against
+that track/file — that job has already checked the MBID against MusicBrainz and found it
+names a different recording. A rejected rung is a miss, so the waterfall falls through
+instead of exporting the wrong recording. No network call is added to the cheap rungs.
 """
 
 from __future__ import annotations
 
 import json
 import threading
+from difflib import SequenceMatcher
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from utils.logging_config import get_logger
@@ -26,11 +39,11 @@ from core.exports.mbid_resolver import (
     SRC_CACHE,
     SRC_DB,
     SRC_FILE,
+    SRC_ISRC,
     SRC_MUSICBRAINZ,
     normalize_key,
     resolve_recording_mbid,
 )
-
 logger = get_logger("exports.export_sources")
 
 
@@ -41,7 +54,7 @@ logger = get_logger("exports.export_sources")
 # MusicBrainz tail. The title keeps ``LOWER()``: lib2 has no folded title key,
 # and inventing one here would only move the same limitation.
 _MATCHED_TRACK_SQL = """
-    SELECT t.musicbrainz_id, t.spotify_id, t.external_ids,
+    SELECT t.musicbrainz_id, t.spotify_id, t.external_ids, t.id,
            (SELECT f.path FROM lib2_track_files f
              WHERE f.track_id = t.id
                AND COALESCE(f.file_state, 'active') = 'active'
@@ -85,7 +98,8 @@ def _matched_track(artist: str, title: str) -> Optional[Dict[str, Any]]:
                 "musicbrainz_id": row[0],
                 "spotify_id": row[1],
                 "external_ids": row[2],
-                "file_path": row[3],
+                "track_id": row[3],
+                "file_path": row[4],
             }
         finally:
             try:
@@ -97,13 +111,17 @@ def _matched_track(artist: str, title: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _db_match(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
-    """Text-match a library track by (artist, title); return (recording_mbid, file_path).
-    Either may be None. Fail-safe — any DB error returns (None, None)."""
+def _db_match(artist: str, title: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Text-match a library track by (artist, title); return (recording_mbid, file_path,
+    track_id). Any may be None. Fail-safe — any DB error returns (None, None, None).
+    ``track_id`` is the lib2 track the repair jobs key their findings on, used to
+    cross-check the finding the mbid_mismatch job may already have on file for it."""
     row = _matched_track(artist, title)
     if not row:
-        return (None, None)
-    return ((row["musicbrainz_id"] or None), (row["file_path"] or None))
+        return (None, None, None)
+    track_id = row.get("track_id")
+    return ((row["musicbrainz_id"] or None), (row["file_path"] or None),
+            (str(track_id) if track_id is not None else None))
 
 
 def db_recording_mbid(artist: str, title: str) -> Optional[str]:
@@ -140,11 +158,12 @@ def db_service_track_id(artist: str, title: str, service: str) -> Optional[str]:
         return None
 
 
-def build_service_resolve_fn(service: str) -> Callable[[str, str], Tuple[Optional[str], Optional[str]]]:
-    """resolve_fn for service-playlist export: ``(artist, title) -> (service_track_id, 'library')``.
-    Plugs into ``resolve_playlist_tracks(..., id_key='service_track_id')`` exactly like the
-    MBID resolver plugs in for ListenBrainz."""
-    def resolve_fn(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+def build_service_resolve_fn(service: str) -> Callable[..., Tuple[Optional[str], Optional[str]]]:
+    """resolve_fn for service-playlist export: ``(artist, title, track=None) ->
+    (service_track_id, 'library')``. Plugs into ``resolve_playlist_tracks(...,
+    id_key='service_track_id')`` exactly like the MBID resolver plugs in for ListenBrainz;
+    the row itself is not needed here."""
+    def resolve_fn(artist: str, title: str, track: Optional[Dict[str, Any]] = None) -> Tuple[Optional[str], Optional[str]]:
         tid = db_service_track_id(artist, title, service)
         return (tid, "library" if tid else None)
     return resolve_fn
@@ -282,7 +301,7 @@ def search_service_track_id(
 
 def file_recording_mbid(artist: str, title: str) -> Optional[str]:
     """Recording MBID read from the matched track's file tag (set on import post-processing)."""
-    _mbid, fpath = _db_match(artist, title)
+    _mbid, fpath, _track_id = _db_match(artist, title)
     if not fpath:
         return None
     try:
@@ -312,6 +331,117 @@ def file_recording_mbid(artist: str, title: str) -> Optional[str]:
     except Exception as exc:
         logger.debug(f"export file_recording_mbid failed for {fpath}: {exc}")
     return None
+
+
+def _deezer_extra_data(track: Any) -> Optional[Dict[str, Any]]:
+    """Parsed ``extra_data`` for a track discovery pinned to a Deezer match, or ``None``
+    if the track wasn't discovered, wasn't discovered on Deezer, or is a Wing It stub
+    (``provider == 'wing_it_fallback'`` never equals ``'deezer'``, so it's excluded by
+    the same provider check ``service_id_from_extra_data`` uses — no separate
+    ``wing_it_`` prefix check needed here beyond that)."""
+    raw = track.get("extra_data") if isinstance(track, dict) else None
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return None
+    if not isinstance(data, dict) or not data.get("discovered"):
+        return None
+    if str(data.get("provider") or "").lower() != "deezer":
+        return None
+    return data
+
+
+def _pick_recording_mbid(recordings: List[Dict[str, Any]], title: str) -> Optional[str]:
+    """Among recordings sharing one ISRC (usually 1, occasionally a handful of
+    remasters/duplicate masters), pick the one whose title is closest to ours; falls
+    back to the first recording that has an id at all."""
+    best_id: Optional[str] = None
+    best_score = -1.0
+    for rec in recordings or []:
+        if not isinstance(rec, dict):
+            continue
+        rid = rec.get("id")
+        if not rid:
+            continue
+        if best_id is None:
+            best_id = rid  # first-with-id fallback
+        if not title:
+            continue
+        score = SequenceMatcher(None, title.lower(), str(rec.get("title") or "").lower()).ratio()
+        if score > best_score:
+            best_score = score
+            best_id = rid
+    return best_id
+
+
+_deezer_client = None
+_deezer_client_lock = threading.Lock()
+
+
+def _get_deezer_client():
+    """Shared DeezerClient, created lazily (same pattern as ``_get_mb_service``)."""
+    global _deezer_client
+    if _deezer_client is None:
+        with _deezer_client_lock:
+            if _deezer_client is None:
+                from core.deezer_client import DeezerClient
+                _deezer_client = DeezerClient()
+    return _deezer_client
+
+
+def isrc_recording_mbid(
+    track: Any,
+    *,
+    deezer_track_fn: Optional[Callable[[Any], Optional[Dict[str, Any]]]] = None,
+    isrc_lookup_fn: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
+) -> Optional[str]:
+    """The ISRC rung: an exact, script-independent recording MBID for a track discovery
+    already pinned to a Deezer id (#903 review — the export ignored discovery's own
+    matched id entirely).
+
+    An ISRC identifies one specific recording regardless of what script/language its
+    title is stored in, so this catches the cases a live text search misses — dual
+    '原題 - Romanization' titles, romanised Japanese artist names, etc. Deezer-only,
+    same guard as ``service_id_from_extra_data``/``resolve_service_track_ids``: a
+    non-Deezer provider (including the ``wing_it_fallback`` stub) is skipped rather
+    than risk calling Deezer with an id that isn't one of theirs.
+
+    Uses ``matched_data['isrc']`` directly when discovery already stored it; otherwise
+    fetches it via ``deezer_track_fn`` (defaults to the shared ``DeezerClient``). Every
+    step is wrapped so a bad/missing field, a Deezer error, or a MusicBrainz miss all
+    fall through to ``None`` — the waterfall just tries the next (more expensive) rung.
+    """
+    try:
+        data = _deezer_extra_data(track)
+        if not data:
+            return None
+        matched = data.get("matched_data")
+        if not isinstance(matched, dict):
+            return None
+        deezer_id = matched.get("id")
+        if not deezer_id or str(deezer_id).startswith("wing_it_"):
+            return None
+
+        isrc = matched.get("isrc")
+        if not isrc:
+            fetch = deezer_track_fn or (lambda tid: _get_deezer_client().get_track_raw(tid))
+            payload = fetch(deezer_id)
+            isrc = payload.get("isrc") if isinstance(payload, dict) else None
+        if not isrc or not isinstance(isrc, str):
+            return None
+
+        lookup = isrc_lookup_fn or (lambda code: _get_mb_service().mb_client.lookup_recordings_by_isrc(code))
+        recordings = lookup(isrc) or []
+        if not recordings:
+            return None
+
+        title = _track_field(track, "title", "track_name", "name")
+        return _pick_recording_mbid(recordings, title)
+    except Exception as exc:
+        logger.debug(f"export isrc_recording_mbid failed: {exc}")
+        return None
 
 
 _mb_service = None
@@ -347,30 +477,154 @@ def musicbrainz_recording_mbid(artist: str, title: str) -> Optional[str]:
     return None
 
 
+def mbid_flagged_by_repair_finding(track_id: Optional[str], file_path: Optional[str]) -> bool:
+    """Default ``mbid_flagged_fn`` for ``build_resolve_fn``: True when the
+    ``mbid_mismatch_detector`` repair job (``core/repair_jobs/mbid_mismatch_detector.py``)
+    already has a PENDING ``mbid_mismatch`` finding against this track — by its DB row id,
+    or by its file path. That job already proved (via a live MusicBrainz lookup + title
+    comparison) that the file's/DB's embedded MBID points at the wrong recording, so the DB
+    and file rungs here must not trust it either.
+
+    Takes the already-resolved ``track_id``/``file_path`` rather than an (artist, title)
+    pair and re-querying the library itself — ``build_resolve_fn`` resolves that once per
+    (artist, title) via ``track_lookup_fn`` and passes it in here.
+
+    Fail-safe: any DB error is treated as "not flagged" — this is a defensive extra check,
+    never the reason an export breaks."""
+    if track_id is None and not file_path:
+        return False
+    try:
+        from database.music_database import get_database
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            if file_path:
+                cur.execute(
+                    "SELECT 1 FROM repair_findings WHERE finding_type = 'mbid_mismatch' "
+                    "AND status = 'pending' AND "
+                    "((entity_type = 'track' AND entity_id = ?) OR file_path = ?) LIMIT 1",
+                    (str(track_id) if track_id is not None else None, file_path),
+                )
+            else:
+                cur.execute(
+                    "SELECT 1 FROM repair_findings WHERE finding_type = 'mbid_mismatch' "
+                    "AND status = 'pending' AND entity_type = 'track' AND entity_id = ? LIMIT 1",
+                    (str(track_id),),
+                )
+            return cur.fetchone() is not None
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: S110
+                pass
+    except Exception as exc:
+        logger.debug(f"export mbid_flagged lookup failed for track {track_id}: {exc}")
+        return False
+
+
+def _default_track_lookup(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+    """Default ``track_lookup_fn`` for ``build_resolve_fn``: the (track_id, file_path) of
+    the library track (artist, title) text-matches, via the same ``_db_match`` the DB/file
+    rungs already use."""
+    _mbid, file_path, track_id = _db_match(artist, title)
+    return (track_id, file_path)
+
+
 def build_resolve_fn(
     *,
     db_fn: Callable[[str, str], Optional[str]] = db_recording_mbid,
     file_fn: Callable[[str, str], Optional[str]] = file_recording_mbid,
+    isrc_fn: Callable[[Any], Optional[str]] = isrc_recording_mbid,
     mb_fn: Callable[[str, str], Optional[str]] = musicbrainz_recording_mbid,
     cache_lookup: Optional[Callable[[str], Optional[str]]] = None,
     cache_record: Optional[Callable[[str, str], bool]] = None,
-) -> Callable[[str, str], Tuple[Optional[str], Optional[str]]]:
-    """Assemble the export ``resolve_fn(artist, title) -> (mbid, source_label)``.
+    mbid_flagged_fn: Optional[Callable[[Optional[str], Optional[str]], bool]] = None,
+    track_lookup_fn: Optional[Callable[[str, str], Tuple[Optional[str], Optional[str]]]] = None,
+) -> Callable[..., Tuple[Optional[str], Optional[str]]]:
+    """Assemble the export ``resolve_fn(artist, title, track=None) -> (mbid, source_label)``.
 
-    Runs cache -> DB -> file -> MusicBrainz, and writes a fresh (non-cache) hit back to the
-    persistent cache. All sources are injectable so the wiring is unit-testable; defaults
-    use the real cache module.
+    Runs cache -> DB -> file -> ISRC -> MusicBrainz, and writes a fresh (non-cache) hit
+    back to the persistent cache. All sources are injectable so the wiring is
+    unit-testable; defaults use the real cache module. The cache rung (rung 1,
+    ``recording_mbid_cache``) is deliberately NOT gated below — see the note at the bottom
+    of this docstring.
+
+    ``track`` is the full mirrored-playlist row ``resolve_playlist_tracks`` passes, so the
+    ISRC rung can read its ``extra_data`` (discovery's own matched id). It is optional so
+    the 2-arg call (``resolve_fn(artist, title)``) still works; without a ``track`` the
+    ISRC rung has nothing to key off and is skipped, same as any other miss.
+
+    Before a DB or file MBID is accepted, one extra gate runs (a mis-tagged file poisons
+    both the DB column and the file tag it was copied from at import, and the export
+    waterfall used to trust either blindly): ``mbid_flagged_fn(track_id, file_path) ->
+    bool`` — True when the repair job already flagged this track as wrong (a pending
+    ``mbid_mismatch`` finding). Defaults to ``mbid_flagged_by_repair_finding`` (a DB read,
+    no network). ``track_id``/``file_path`` come from ``track_lookup_fn(artist, title)``
+    (default ``_default_track_lookup``), resolved once per (artist, title) and memoized —
+    not re-queried per rung.
+
+    A flagged MBID turns the rung into a miss, so the waterfall falls through (to file,
+    then ISRC, then live MusicBrainz search) exactly as if that rung had returned nothing.
+    The gate and the track lookup are memoized per ``resolve_fn`` (i.e. per export run).
+
+    NOTE — the cache rung (``recording_mbid_cache``, populated by a fresh non-cache hit
+    below) is NOT gated: it's a plain (artist,title)->mbid store with no track_id/file_path
+    to flag-check. A row written by an EARLIER export, before this fix shipped, could still
+    be poisoned — a one-off cache purge is a follow-up, not done here.
     """
     if cache_lookup is None or cache_record is None:
         from core.exports import recording_mbid_cache as _cache
         cache_lookup = cache_lookup or _cache.lookup
         cache_record = cache_record or _cache.record
+    mbid_flagged_fn = mbid_flagged_fn or mbid_flagged_by_repair_finding
+    track_lookup_fn = track_lookup_fn or _default_track_lookup
 
-    def resolve_fn(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+    _track_memo: Dict[Tuple[str, str], Tuple[Optional[str], Optional[str]]] = {}
+    _flagged_memo: Dict[Tuple[str, str], bool] = {}
+
+    def _track_ids(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+        key = (artist, title)
+        if key not in _track_memo:
+            try:
+                _track_memo[key] = track_lookup_fn(artist, title)
+            except Exception as exc:
+                logger.debug(f"export track_lookup_fn raised for '{artist} - {title}': {exc}")
+                _track_memo[key] = (None, None)
+        return _track_memo[key]
+
+    def _flagged(artist: str, title: str) -> bool:
+        key = (artist, title)
+        if key not in _flagged_memo:
+            track_id, file_path = _track_ids(artist, title)
+            try:
+                _flagged_memo[key] = bool(mbid_flagged_fn(track_id, file_path))
+            except Exception as exc:  # a flagged-check error must never block the rung
+                logger.debug(f"export mbid_flagged_fn raised for '{artist} - {title}': {exc}")
+                _flagged_memo[key] = False
+        return _flagged_memo[key]
+
+    def _gated(fn: Callable[[str, str], Optional[str]]) -> Callable[[str, str], Optional[str]]:
+        """Wrap a DB/file rung so a repair-flagged MBID is a miss."""
+        def gated(a: str, t: str) -> Optional[str]:
+            mbid = fn(a, t)
+            if not mbid or _flagged(a, t):
+                return None
+            return mbid
+        return gated
+
+    db_fn_gated = _gated(db_fn)
+    file_fn_gated = _gated(file_fn)
+
+    def resolve_fn(artist: str, title: str, track: Optional[Dict[str, Any]] = None) -> Tuple[Optional[str], Optional[str]]:
         sources = [
             (SRC_CACHE, lambda a, t: cache_lookup(normalize_key(a, t))),
-            (SRC_DB, db_fn),
-            (SRC_FILE, file_fn),
+            (SRC_DB, db_fn_gated),
+            (SRC_FILE, file_fn_gated),
+            # ISRC needs the full track row (extra_data), not just artist/title — closes
+            # over `track` from the outer call instead of using the (a, t) it's handed,
+            # so the `Source = Callable[[str, str], Optional[str]]` contract still holds.
+            (SRC_ISRC, lambda a, t: isrc_fn(track) if track is not None else None),
             (SRC_MUSICBRAINZ, mb_fn),
         ]
         mbid, label = resolve_recording_mbid(artist, title, sources)
@@ -388,5 +642,7 @@ __all__ = [
     "build_resolve_fn",
     "db_recording_mbid",
     "file_recording_mbid",
+    "isrc_recording_mbid",
     "musicbrainz_recording_mbid",
+    "mbid_flagged_by_repair_finding",
 ]

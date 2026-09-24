@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Any
 from utils.logging_config import get_logger
 from core.settings import config_manager
 import time
+from urllib.parse import quote
 
 logger = get_logger("listenbrainz_client")
 
@@ -84,6 +85,14 @@ class ListenBrainzClient:
     def is_authenticated(self):
         """Check if client is authenticated"""
         return bool(self.token and self.username)
+
+    def get_authenticated_username(self) -> Optional[str]:
+        """Return username if authenticated, or attempt validation."""
+        if self.username:
+            return self.username
+        if self.token and self._validate_and_get_username():
+            return self.username
+        return None
 
     def submit_listens(self, listens: List[Dict]) -> bool:
         """Submit play events to ListenBrainz.
@@ -497,3 +506,134 @@ class ListenBrainzClient:
         except Exception as e:
             logger.error(f"Error searching playlists: {e}")
             return []
+
+    def get_user_listens(
+        self,
+        username: str,
+        min_ts: Optional[int] = None,
+        max_ts: Optional[int] = None,
+        count: int = 100,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch user's scrobble/listen history.
+
+        Args:
+            username: ListenBrainz user name
+            min_ts: Optional unix timestamp. Returns listens with listened_at > min_ts.
+            max_ts: Optional unix timestamp. Returns listens with listened_at < max_ts.
+            count: Number of listens to return (up to 1000).
+
+        Returns:
+            Dict representing the API response payload. Raises on request or payload errors.
+        """
+        if not username:
+            return None
+
+        if self._maloja_base_url():
+            return self._get_maloja_listens(min_ts, max_ts, count)
+
+        url = f"{self.base_url}/user/{quote(username, safe='')}/listens"
+        params: Dict[str, Any] = {"count": max(1, min(1000, count))}
+        if max_ts is not None:
+            params["max_ts"] = int(max_ts)
+        elif min_ts is not None:
+            params["min_ts"] = int(min_ts)
+
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Token {self.token}"
+
+        response = self._make_request_with_retry("get", url, headers=headers, params=params, timeout=20)
+        data = self._history_response(response)
+        payload = data.get("payload")
+        if not isinstance(payload, dict) or not isinstance(payload.get("listens"), list):
+            raise ValueError("ListenBrainz history response is missing payload.listens")
+        return data
+
+    @staticmethod
+    def _history_response(response):
+        if response is None:
+            raise RuntimeError("History API returned no response")
+        if response.status_code != 200:
+            raise RuntimeError(f"History API returned HTTP {response.status_code}")
+        data = response.json()
+        if not isinstance(data, dict) or data.get("error") or data.get("status") in ("error", "failure"):
+            raise ValueError("History API returned an error or invalid response")
+        return data
+
+    def _maloja_base_url(self):
+        # Preserve reverse-proxy prefixes; only recognize documented Maloja paths.
+        for suffix in ("/apis/listenbrainz/1", "/apis/lbrnz/1"):
+            if self.base_url.endswith(suffix):
+                return self.base_url[:-len(suffix)] + "/apis/mlj_1"
+        return None
+
+    def _get_maloja_listens(self, min_ts, max_ts, count):
+        """Adapt zero-based native pages to descending ListenBrainz listens.
+
+        Native date filters have day precision. Apply timestamp bounds locally
+        and retain unread records when the requested page ends within a native page.
+        """
+        count = max(1, min(1000, count))
+        if not hasattr(self, "_maloja_buffer"):
+            self._maloja_buffer = []
+            self._maloja_page = 0
+            self._maloja_exhausted = False
+        self._maloja_buffer = [item for item in self._maloja_buffer
+                               if (max_ts is None or item["listened_at"] < max_ts)
+                               and (min_ts is None or item["listened_at"] > min_ts)]
+        while len(self._maloja_buffer) < count and not self._maloja_exhausted:
+            response = self._make_request_with_retry(
+                "get", self._maloja_base_url() + "/scrobbles",
+                headers={"Authorization": f"Token {self.token}"} if self.token else {},
+                params={"page": self._maloja_page, "perpage": 1000}, timeout=20,
+            )
+            data = self._history_response(response)
+            rows = data.get("list")
+            if data.get("status") != "ok" or not isinstance(rows, list):
+                raise ValueError("Maloja history response is missing its scrobble list")
+            batch = []
+            reached_min = False
+            for row in rows:
+                timestamp = int(row["time"])
+                track = row["track"]
+                album = track.get("album") or {}
+                item = {
+                    "listened_at": timestamp,
+                    "track_metadata": {
+                        "track_name": track["title"],
+                        "artist_name": ", ".join(track["artists"]),
+                        "release_name": album.get("albumtitle", ""),
+                        "additional_info": {"duration": track.get("length") or row.get("duration") or 0},
+                    },
+                }
+                if min_ts is not None and timestamp <= min_ts:
+                    reached_min = True
+                elif max_ts is None or timestamp < max_ts:
+                    batch.append(item)
+            self._maloja_buffer.extend(batch)
+            self._maloja_page += 1
+            self._maloja_exhausted = len(rows) < 1000 or reached_min
+        listens = self._maloja_buffer[:count]
+        self._maloja_buffer = self._maloja_buffer[count:]
+        return {"payload": {"listens": listens, "count": len(listens)}}
+
+    def get_user_listen_count(self, username: str) -> Optional[int]:
+        """Fetch total scrobble count for a user if supported by the server."""
+        if not username:
+            return None
+        if self._maloja_base_url():
+            return None  # Native pagination does not need an estimated total.
+        try:
+            url = f"{self.base_url}/user/{quote(username, safe='')}/listen-count"
+            headers = {}
+            if self.token:
+                headers["Authorization"] = f"Token {self.token}"
+            response = self._make_request_with_retry("get", url, headers=headers, timeout=10)
+            if response and response.status_code == 200:
+                data = response.json()
+                payload = data.get("payload") or {}
+                if "count" in payload:
+                    return int(payload["count"])
+        except Exception as e:
+            logger.debug(f"Failed to fetch user listen count: {e}")
+        return None

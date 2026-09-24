@@ -166,8 +166,14 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
                  title: str, year=None, image_url: Optional[str] = None,
                  genres_json: Optional[str] = None,
                  track_count=None, duration=None,
-                 allow_create: bool = False) -> Optional[int]:
-    """Map a server release; imports alone may create/own the row."""
+                 allow_create: bool = False,
+                 title_fallback: bool = True) -> Optional[int]:
+    """Map a server release; imports alone may create/own the row.
+
+    ``title_fallback=False`` skips the (artist, title) match for a caller that
+    already did it with more knowledge -- an import that carries a release id
+    and has decided this is a different release of the same name (#1299).
+    """
     mapped_id = resolve_mapping(cursor, "album", server_source, server_id)
     row = ((mapped_id,) if mapped_id is not None else cursor.execute(
         "SELECT id FROM lib2_albums WHERE server_source=? AND server_id=? AND (? OR"
@@ -175,7 +181,7 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
         " WHERE t.album_id=lib2_albums.id AND f.file_state='active' AND TRIM(f.path)<>''))",
         (server_source, str(server_id), allow_create),
     ).fetchone())
-    if row is None:
+    if row is None and title_fallback:
         candidates = cursor.execute(
             "SELECT id FROM lib2_albums"
             " WHERE primary_artist_id=? AND LOWER(title)=LOWER(?)"

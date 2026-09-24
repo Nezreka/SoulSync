@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { BasicAlbum, BasicTrack } from '../-basic.types';
 import type {
   SearchAlbum,
   SearchArtist,
@@ -9,18 +8,9 @@ import type {
   SearchTrack,
 } from '../-search.types';
 import type { LibraryCheckTrack } from '../-search.types';
+import type { ResultFilter } from './search-results';
 
-import {
-  downloadAlbum,
-  downloadAlbumTrack,
-  downloadTrack,
-  downloadUnmatched,
-  matchedDownloadAlbum,
-  matchedDownloadAlbumTrack,
-  matchedDownloadTrack,
-  streamAlbumTrack,
-  streamTrack,
-} from '../-basic.actions';
+import { startDownload } from '../-basic.actions';
 import { useBasicSearchController } from '../-basic.use-controller';
 import {
   openSearchAlbum,
@@ -41,75 +31,46 @@ import {
   SEARCH_DEBOUNCE_MS,
   shouldSearch,
   sourceLabel,
-  splitAlbums,
 } from '../-search.helpers';
 import { useArtistImages } from '../-search.use-artist-images';
 import { activeResults, getPersistedQuery, useSearchController } from '../-search.use-controller';
-import { useDismissOnOutsideClick } from '../-search.use-dismiss';
 import { useLibraryCheck } from '../-search.use-library-check';
 import { useVideoDownloads } from '../-search.use-video-downloads';
 import { BasicSearch } from './basic-search';
 import { PlaylistPreviewModal } from './playlist-preview-modal';
 import { SearchBar } from './search-bar';
-import { SearchResults } from './search-results';
-import { SourceRow } from './source-row';
+import { ClockIcon } from './search-icons';
+import { FilterPills, resultCounts, SearchResults } from './search-results';
+import styles from './search.module.css';
+import { catalogSources, ModeTabs, modeOf, SourcePicker } from './source-row';
 
+/** the idle page's browse tiles. quiet two-stop gradients, no emoji */
 const EXPLORE_CATEGORIES = [
-  {
-    id: 'trending',
-    label: 'Top Trending',
-    icon: '🔥',
-    query: 'Trending',
-    gradient: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
-  },
+  { id: 'trending', label: 'Top trending', query: 'Trending', from: '#7a1f3d', to: '#3b0f1f' },
   {
     id: 'new_releases',
-    label: 'New Releases',
-    icon: '✨',
+    label: 'New releases',
     query: 'New Releases',
-    gradient: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+    from: '#3a3a8c',
+    to: '#1c1c48',
   },
   {
     id: 'electronic',
-    label: 'Electronic & Dance',
-    icon: '🎧',
+    label: 'Electronic & dance',
     query: 'Electronic',
-    gradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
+    from: '#0f5e6e',
+    to: '#082f38',
   },
-  {
-    id: 'rock',
-    label: 'Rock & Alternative',
-    icon: '🎸',
-    query: 'Rock',
-    gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-  },
-  {
-    id: 'hiphop',
-    label: 'Hip-Hop & Rap',
-    icon: '🎤',
-    query: 'Hip Hop',
-    gradient: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-  },
-  {
-    id: 'chill',
-    label: 'Lo-Fi & Chill',
-    icon: '☕',
-    query: 'Chill',
-    gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-  },
-  {
-    id: 'jazz',
-    label: 'Jazz & Soul',
-    icon: '🎷',
-    query: 'Jazz',
-    gradient: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)',
-  },
+  { id: 'rock', label: 'Rock & alternative', query: 'Rock', from: '#7a4a12', to: '#3d250a' },
+  { id: 'hiphop', label: 'Hip-hop & rap', query: 'Hip Hop', from: '#5a2d8c', to: '#2c1646' },
+  { id: 'chill', label: 'Lo-fi & chill', query: 'Chill', from: '#1f6b4f', to: '#0f3528' },
+  { id: 'jazz', label: 'Jazz & soul', query: 'Jazz', from: '#80305e', to: '#401830' },
   {
     id: 'soundtracks',
-    label: 'Soundtracks & Score',
-    icon: '🎬',
+    label: 'Soundtracks & score',
     query: 'Soundtrack',
-    gradient: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+    from: '#284f8c',
+    to: '#142846',
   },
 ];
 
@@ -133,7 +94,7 @@ export function SearchPage() {
   // Seeded from the restored cache: coming back to results sitting above an
   // empty search box reads as a bug even when the results are right.
   const [query, setQuery] = useState(getPersistedQuery);
-  const [idValue, setIdValue] = useState('');
+  const [filter, setFilter] = useState<ResultFilter>('all');
   const [dismissed, setDismissed] = useState(false);
   const [labels, setLabels] = useState<SearchLabel[]>([]);
   const [idLookupPending, setIdLookupPending] = useState(false);
@@ -160,37 +121,15 @@ export function SearchPage() {
   const results = activeResults(state);
   const soulseekActive = state.activeSource === 'soulseek';
 
-  const basicActions = useMemo(
-    () => ({
-      onDownloadTrack: (track: BasicTrack) => void downloadTrack(track),
-      onStreamTrack: (track: BasicTrack) => void streamTrack(track),
-      onMatchedTrack: (track: BasicTrack) => matchedDownloadTrack(track),
-      onDownloadAlbum: (albumRow: BasicAlbum) => void downloadAlbum(albumRow),
-      onMatchedAlbum: (albumRow: BasicAlbum) => matchedDownloadAlbum(albumRow),
-      onDownloadAlbumTrack: (albumRow: BasicAlbum, _albumIndex: number, trackIndex: number) =>
-        void downloadAlbumTrack(albumRow, trackIndex),
-      onStreamAlbumTrack: (albumRow: BasicAlbum, _albumIndex: number, trackIndex: number) =>
-        void streamAlbumTrack(albumRow, trackIndex),
-      onMatchedAlbumTrack: (albumRow: BasicAlbum, _albumIndex: number, trackIndex: number) =>
-        matchedDownloadAlbumTrack(albumRow, trackIndex),
-    }),
-    [],
-  );
+  // Catalog returns to the metadata source the user was last on, not the default
+  const catalogRef = useRef('');
+  if (modeOf(state.activeSource) === 'catalog') catalogRef.current = state.activeSource;
+  const catalogSource = catalogRef.current || catalogSources(state)[0] || 'spotify';
 
-  /**
-   * The matched-download modal's "Skip Matching" button reaches back here.
-   *
-   * That modal is still vanilla (wishlist-tools.js) and has no way to run a
-   * download itself — the path it used to take was broken three ways over; see
-   * downloadUnmatched.
-   */
+  // a new question, or a new source, starts from All
   useEffect(() => {
-    window._basicDownloadUnmatched = (result) =>
-      void downloadUnmatched(result as Parameters<typeof downloadUnmatched>[0]);
-    return () => {
-      delete window._basicDownloadUnmatched;
-    };
-  }, []);
+    setFilter('all');
+  }, [state.query, state.activeSource]);
 
   const ownership = useLibraryCheck(results.albums, results.tracks);
   const artistImages = useArtistImages(results.db_artists, results.artists, state.activeSource);
@@ -230,8 +169,9 @@ export function SearchPage() {
   /**
    * Enter and the debounce share this.
    *
-   * A bare MusicBrainz UUID is an exact identifier, not a name, so it goes to
-   * the id resolver from BOTH paths rather than being fuzzy-searched.
+   * A bare MusicBrainz UUID or a pasted link is an exact identifier, not a
+   * name, so it goes to the id resolver from BOTH paths rather than being
+   * fuzzy-searched. that is why there is no separate link box any more.
    */
   const runSearch = useCallback(
     (raw: string) => {
@@ -300,9 +240,9 @@ export function SearchPage() {
     return hasSourceResults ? 'results' : 'empty';
   }, [dismissed, soulseekActive, idLookupPending, loading, cached, state.query, hasSourceResults]);
 
+  // results are the page now, not a dropdown over it, so a click elsewhere no
+  // longer throws them away. clearing the box does.
   const open = view !== 'hidden';
-  const onDismiss = useCallback(() => setDismissed(true), []);
-  useDismissOnOutsideClick(open, onDismiss);
 
   /**
    * The global download widget syncs its query here before clicking the
@@ -350,30 +290,41 @@ export function SearchPage() {
 
   const onLabelHref = (label: SearchLabel) => labelDetailPath(label.id ?? '', label.name);
 
+  const counts = resultCounts({
+    dbArtists: results.db_artists,
+    artists: results.artists,
+    albums: results.albums,
+    tracks: results.tracks,
+    playlists: results.playlists,
+    labels,
+    activeSource: state.activeSource,
+  });
+  const videosMode = state.activeSource === 'youtube_videos';
+  const idle = !open && !soulseekActive && !query.trim();
+
   return (
     <div className="downloads-content">
-      <div className="downloads-main-panel">
-        <div className={`downloads-header${open ? ' enh-results-active-hide' : ''}`}>
-          <div className="downloads-header-content">
-            <div className="downloads-header-text">
-              <h2 className="downloads-title">
-                <img src="/static/search.png" className="page-header-icon" alt="" />
-                <span>Search</span>
-              </h2>
-              <p className="downloads-subtitle">
-                Find artists, albums, and tracks from any metadata source
-              </p>
-            </div>
+      <div className={`downloads-main-panel ${styles.page}`}>
+        <header className={styles.head} id="search-head">
+          <div>
+            <h1 className={styles.title}>Search</h1>
+            <p className={styles.subtitle}>
+              {soulseekActive
+                ? 'Raw files from Soulseek, grabbed exactly as shared'
+                : videosMode
+                  ? 'Music videos from YouTube, straight to your library'
+                  : 'Find any artist, album or track, then download it tagged and filed'}
+            </p>
           </div>
-        </div>
+          <ModeTabs state={state} catalogSource={catalogSource} onSelect={setActiveSource} />
+        </header>
 
-        <SourceRow state={state} onSelect={setActiveSource} onOpenSettings={openSettings} />
-
-        <BasicSearch controller={basic} actions={basicActions} active={soulseekActive} />
+        <BasicSearch controller={basic} onDownload={startDownload} active={soulseekActive} />
 
         <div
           className={`search-section${soulseekActive ? '' : ' active'}`}
           id="enhanced-search-section"
+          style={soulseekActive ? undefined : { display: 'flex', flexDirection: 'column', gap: 18 }}
         >
           <SearchBar
             query={query}
@@ -383,23 +334,30 @@ export function SearchPage() {
               setQuery('');
               setDismissed(true);
             }}
-            idValue={idValue}
-            onIdChange={setIdValue}
-            onIdSubmit={() => void runIdLookup(idValue)}
+            searching={loading}
+            placeholder={
+              videosMode ? 'Search music videos' : 'Artists, albums, tracks, or paste a link'
+            }
+            picker={
+              <SourcePicker
+                state={state}
+                onSelect={setActiveSource}
+                onOpenSettings={openSettings}
+              />
+            }
           />
 
-          {/* Recent searches & Explore categories — the idle surface. Shown only when
-              nothing else is: no open results, no soulseek panel, nothing typed. */}
-          {!open && !soulseekActive && !query.trim() ? (
-            <div className="enh-idle-hub">
+          {/* the idle page: recent searches and browse tiles. only when nothing
+              else is showing and nothing is typed */}
+          {idle ? (
+            <div className={styles.idle}>
               {recents.length > 0 ? (
-                <div className="enh-recent" id="enh-recent-searches">
-                  <div className="enh-section-header">
-                    <h4 className="enh-section-title">Recent searches</h4>
+                <section id="enh-recent-searches">
+                  <div className={styles.sectionHead}>
+                    <h2 className={styles.sectionTitle}>Recent</h2>
                     <button
                       type="button"
-                      className="enh-recent-clear-btn"
-                      title="Clear recent searches"
+                      className={styles.textLink}
                       onClick={() => {
                         try {
                           window.localStorage.removeItem('soulsyncRecentSearches');
@@ -410,166 +368,143 @@ export function SearchPage() {
                       Clear all
                     </button>
                   </div>
-                  <div className="enh-recent-chips">
+                  <div className={styles.chips}>
                     {recents.map((entry) => (
-                      <span key={entry} className="enh-recent-chip">
+                      <span key={entry} className={styles.chip}>
                         <button
                           type="button"
-                          className="enh-recent-chip-label"
+                          className={styles.chipLabel}
                           onClick={() => {
                             setQuery(entry);
                             runSearch(entry);
                           }}
                         >
-                          <span className="enh-recent-chip-icon" aria-hidden="true">
-                            🕒
-                          </span>
+                          <ClockIcon />
                           {entry}
                         </button>
                         <button
                           type="button"
-                          className="enh-recent-chip-x"
-                          title="Remove from recent searches"
+                          className={styles.chipX}
+                          aria-label={`Remove ${entry} from recent searches`}
+                          title="Remove"
                           onClick={() => setRecents(removeRecentSearch(entry))}
                         >
-                          ✕
+                          ×
                         </button>
                       </span>
                     ))}
                   </div>
-                </div>
+                </section>
               ) : null}
 
-              <div className="enh-explore-section" id="enh-explore-section">
-                <div className="enh-section-header">
-                  <h4 className="enh-section-title">Explore &amp; browse</h4>
-                </div>
-                <div className="enh-explore-grid">
-                  {EXPLORE_CATEGORIES.map((cat) => (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      className="enh-explore-card"
-                      style={{ background: cat.gradient }}
-                      onClick={() => {
-                        setQuery(cat.query);
-                        runSearch(cat.query);
-                      }}
-                    >
-                      <span className="enh-explore-label">{cat.label}</span>
-                      <span className="enh-explore-icon" aria-hidden="true">
-                        {cat.icon}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {!videosMode ? (
+                <section id="enh-explore-section">
+                  <div className={styles.sectionHead}>
+                    <h2 className={styles.sectionTitle}>Browse</h2>
+                  </div>
+                  <div className={styles.explore}>
+                    {EXPLORE_CATEGORIES.map((cat) => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        className={styles.tile}
+                        style={{ background: `linear-gradient(135deg, ${cat.from}, ${cat.to})` }}
+                        onClick={() => {
+                          setQuery(cat.query);
+                          runSearch(cat.query);
+                        }}
+                      >
+                        <b>{cat.label}</b>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
             </div>
           ) : null}
 
-          <div id="enhanced-dropdown" className={`enhanced-dropdown${open ? '' : ' hidden'}`}>
-            <div className="enhanced-dropdown-content">
-              <button
-                id="enhanced-dropdown-close"
-                className="enhanced-dropdown-close"
-                type="button"
-                onClick={(event) => {
-                  // The document-level dismiss would fire on this same click.
-                  event.stopPropagation();
-                  setDismissed(true);
-                }}
-              >
-                <span>✕</span> Close Results
-              </button>
-
-              <div
-                className={`enhanced-loading${view === 'loading' ? '' : ' hidden'}`}
-                id="enhanced-loading"
-              >
-                <div className="spinner" />
-                {/* Skeleton ghosts in the shapes the results will take. */}
-                <div className="enh-skel-strip" aria-hidden="true">
+          <div id="enhanced-dropdown" className={open ? undefined : 'hidden'}>
+            {view === 'loading' ? (
+              <div className={styles.state} id="enhanced-loading" role="status">
+                <div className={styles.skeletons} aria-hidden="true">
                   {[0, 1, 2, 3, 4].map((i) => (
-                    <span key={`c${i}`} className="enh-skel enh-skel--circle" />
+                    <span
+                      key={i}
+                      className={`${styles.skel}${i < 2 ? ` ${styles.skelRound}` : ''}`}
+                    />
                   ))}
                 </div>
-                <div className="enh-skel-strip" aria-hidden="true">
-                  {[0, 1, 2, 3, 4].map((i) => (
-                    <span key={`s${i}`} className="enh-skel enh-skel--square" />
-                  ))}
-                </div>
-                <p id="enhanced-loading-text">
+                <p className={styles.stateText} id="enhanced-loading-text" style={{ margin: 0 }}>
                   {idLookupPending
-                    ? 'Resolving link…'
-                    : `Searching ${sourceLabel(state.activeSource)} and your library...`}
+                    ? 'Looking up that link…'
+                    : `Searching ${sourceLabel(state.activeSource)}…`}
                 </p>
-                <span className="enh-loading-subtext">Fetching matches, artwork and metadata</span>
               </div>
+            ) : null}
 
-              <div
-                className={`enhanced-empty${view === 'empty' ? '' : ' hidden'}`}
-                id="enhanced-empty"
-              >
-                <div className="empty-icon">🔍</div>
-                <p>No results found</p>
-                <p className="enh-empty-subtitle">
-                  {query.trim() ? `No matches found for "${query.trim()}".` : 'No results found.'}
+            {view === 'empty' ? (
+              <div className={styles.state} id="enhanced-empty">
+                <p className={styles.stateTitle}>
+                  {query.trim() ? `Nothing for “${query.trim()}”` : 'No results'}
                 </p>
-                <div className="enh-empty-tips">
-                  <span>
-                    💡 Tip: Check spelling, try broader keywords, or switch metadata sources above.
-                  </span>
-                </div>
+                <p className={styles.stateText}>
+                  Check the spelling, try fewer words, or search another source.
+                </p>
               </div>
+            ) : null}
 
-              <div
-                id="enhanced-results-container"
-                className={`enhanced-results-container${view === 'results' ? '' : ' hidden'}`}
-              >
-                <div
-                  id="enh-fallback-banner"
-                  className={`enh-fallback-banner${served ? '' : ' hidden'}`}
-                >
-                  {served ? fallbackBannerText(state.activeSource, served) : null}
+            <div
+              id="enhanced-results-container"
+              className={view === 'results' ? styles.results : 'hidden'}
+            >
+              {served ? (
+                <div className={styles.notice} id="enh-fallback-banner">
+                  {fallbackBannerText(state.activeSource, served)}
                 </div>
+              ) : null}
 
-                {view === 'results' ? (
-                  <JumpChips
-                    artists={results.db_artists.length + results.artists.length}
-                    albums={splitAlbums(results.albums).albums.length}
-                    singles={splitAlbums(results.albums).singlesAndEps.length}
-                    tracks={results.tracks.length}
-                    playlists={results.playlists.length}
-                    labels={labels.length}
-                  />
-                ) : null}
-
-                <SearchResults
-                  activeSource={state.activeSource}
-                  dbArtists={results.db_artists}
-                  artists={results.artists}
-                  albums={results.albums}
-                  tracks={results.tracks}
-                  playlists={results.playlists}
-                  labels={labels}
-                  videos={results.videos}
-                  videoProgress={videoProgress}
-                  ownership={ownership}
-                  artistImages={artistImages}
-                  onArtistHref={onArtistHref}
-                  onLabelHref={onLabelHref}
-                  onAlbumClick={(album: SearchAlbum) =>
-                    void openSearchAlbum(album, state.activeSource)
-                  }
-                  onTrackClick={(track: SearchTrack) => void openSearchTrack(track)}
-                  onPlaylistClick={(playlist: SearchPlaylist) => setPreviewPlaylist(playlist)}
-                  onTrackPlay={(track: SearchTrack, row: LibraryCheckTrack | undefined) => {
-                    if (row) playOwnedTrack(row);
-                    else void streamSearchTrack(track);
+              {view === 'results' && !videosMode ? (
+                <FilterPills
+                  counts={counts}
+                  filter={filter}
+                  onFilter={(next) => {
+                    setFilter(next);
+                    document
+                      .getElementById('enhanced-results-container')
+                      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   }}
-                  onVideoDownload={downloadVideo}
+                  servedBy={served ? sourceLabel(served) : sourceLabel(state.activeSource)}
                 />
-              </div>
+              ) : null}
+
+              <SearchResults
+                activeSource={state.activeSource}
+                dbArtists={results.db_artists}
+                artists={results.artists}
+                albums={results.albums}
+                tracks={results.tracks}
+                playlists={results.playlists}
+                labels={labels}
+                query={state.query}
+                videos={results.videos}
+                videoProgress={videoProgress}
+                ownership={ownership}
+                artistImages={artistImages}
+                filter={filter}
+                onFilter={setFilter}
+                onArtistHref={onArtistHref}
+                onLabelHref={onLabelHref}
+                onAlbumClick={(album: SearchAlbum) =>
+                  void openSearchAlbum(album, state.activeSource)
+                }
+                onTrackClick={(track: SearchTrack) => void openSearchTrack(track)}
+                onPlaylistClick={(playlist: SearchPlaylist) => setPreviewPlaylist(playlist)}
+                onTrackPlay={(track: SearchTrack, row: LibraryCheckTrack | undefined) => {
+                  if (row) playOwnedTrack(row);
+                  else void streamSearchTrack(track);
+                }}
+                onVideoDownload={downloadVideo}
+              />
             </div>
           </div>
 
@@ -597,68 +532,6 @@ export function SearchPage() {
       {previewPlaylist && (
         <PlaylistPreviewModal playlist={previewPlaylist} onClose={() => setPreviewPlaylist(null)} />
       )}
-    </div>
-  );
-}
-
-/** The chip row that scrolls to a section — rendered only for sections with
- *  rows, anchored on the section ids the results already carry. */
-function JumpChips({
-  artists,
-  albums,
-  singles,
-  tracks,
-  playlists = 0,
-  labels,
-}: {
-  artists: number;
-  albums: number;
-  singles: number;
-  tracks: number;
-  playlists?: number;
-  labels: number;
-}) {
-  const [activeChip, setActiveChip] = useState<string>('all');
-  const chips: [string, number, string][] = [
-    ['Artists', artists, 'enh-spotify-artists-section'],
-    ['Albums', albums, 'enh-albums-section'],
-    ['Singles & EPs', singles, 'enh-singles-section'],
-    ['Tracks', tracks, 'enh-tracks-section'],
-    ['Playlists', playlists, 'enh-playlists-section'],
-    ['Labels', labels, 'enh-labels-section'],
-  ];
-  const visible = chips.filter(([, count]) => count > 0);
-  if (visible.length < 2) return null;
-  return (
-    <div className="enh-jump-chips" id="enh-jump-chips">
-      <button
-        type="button"
-        className={`enh-jump-chip${activeChip === 'all' ? ' enh-jump-chip--active' : ''}`}
-        onClick={() => {
-          setActiveChip('all');
-          document
-            .getElementById('enhanced-results-container')
-            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }}
-      >
-        All
-      </button>
-      {visible.map(([label, count, sectionId]) => (
-        <button
-          key={sectionId}
-          type="button"
-          className={`enh-jump-chip${activeChip === sectionId ? ' enh-jump-chip--active' : ''}`}
-          onClick={() => {
-            setActiveChip(sectionId);
-            document
-              .getElementById(sectionId)
-              ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }}
-        >
-          <span>{label}</span>
-          <span className="enh-jump-chip-count">{count}</span>
-        </button>
-      ))}
     </div>
   );
 }

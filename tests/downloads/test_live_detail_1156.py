@@ -136,6 +136,21 @@ def test_malformed_task_degrades_to_partial_detail_never_raises():
     assert 'query_count' not in d
 
 
+def test_importing_detail_carries_held_reason_and_release_title():
+    task = {
+        'username': 'scottthompson',
+        'download_source': 'Audiobook (soulseek)',
+        'release_title': 'Fantastic Beasts And Where To Find Them',
+        'held_reason': 'Only 98 of 114 minutes present — about 15 minutes short',
+    }
+    d = build_live_detail(task, None, 'importing')
+    assert d is not None
+    assert d['source'] == 'Soulseek'
+    assert d['username'] == 'scottthompson'
+    assert d['release_title'] == 'Fantastic Beasts And Where To Find Them'
+    assert d['held_reason'] == 'Only 98 of 114 minutes present — about 15 minutes short'
+
+
 def test_source_label_resolution():
     assert resolve_source_label('tidal') == 'Tidal'
     assert resolve_source_label('random_slsk_peer') == 'Soulseek'

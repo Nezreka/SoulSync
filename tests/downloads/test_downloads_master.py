@@ -813,6 +813,168 @@ def test_soulseek_album_preflight_scores_release_folder_over_larger_wrong_editio
     assert download_batches['B22']['source_folder_tracks'] == correct_tracks
 
 
+def test_soulseek_album_score_rejects_partial_folder_despite_good_metadata():
+    from core.downloads.master import _score_album_folder
+
+    expected = [
+        {'name': f'Track {number}', 'artists': ['Artist'], 'track_number': number}
+        for number in range(1, 11)
+    ]
+    partial = [_slsk_track(f'Track {number}', number, folder='Artist/Test Album')
+               for number in range(1, 6)]
+    album = _album_result('peer', 'Artist/Test Album', 'Test Album', partial,
+                          quality_score=1.0)
+    assert _score_album_folder(
+        album, {'name': 'Test Album', 'total_tracks': 10}, {'name': 'Artist'},
+        expected, partial,
+    ) == 0.0
+
+
+def test_soulseek_album_score_accepts_complete_artistless_folder():
+    from core.downloads.master import _score_album_folder
+
+    expected = [
+        {'name': f'Track {number}', 'artists': ['Queen'], 'track_number': number}
+        for number in range(1, 4)
+    ]
+    tracks = [_slsk_track(f'Track {number}', number, folder='Music/A Night at the Opera (1975) [FLAC]')
+              for number in range(1, 4)]
+    album = _album_result('peer', 'Music/A Night at the Opera (1975) [FLAC]',
+                          'A Night at the Opera', tracks, artist='', year='1975')
+
+    assert _score_album_folder(
+        album, {'name': 'A Night at the Opera', 'total_tracks': 3}, {'name': 'Queen'},
+        expected, tracks,
+    ) >= 0.62
+
+
+def test_soulseek_album_score_reads_artist_from_a_parent_directory():
+    from core.downloads.master import _score_album_folder
+
+    expected = [
+        {'name': f'Track {number}', 'artists': ['Doves'], 'track_number': number}
+        for number in range(1, 4)
+    ]
+    tracks = [_slsk_track(f'Track {number}', number, folder='Doves/(2000) Lost Souls')
+              for number in range(1, 4)]
+    with_parent = _album_result('peer', 'Doves/(2000) Lost Souls', 'Lost Souls', tracks,
+                                artist='', year='2000')
+    without = _album_result('peer', 'Shared/(2000) Lost Souls', 'Lost Souls', tracks,
+                            artist='', year='2000')
+    context = ({'name': 'Lost Souls', 'total_tracks': 3}, {'name': 'Doves'})
+
+    assert _score_album_folder(with_parent, *context, expected, tracks) > \
+        _score_album_folder(without, *context, expected, tracks)
+
+
+def test_soulseek_album_title_similarity_keeps_existing_baseline():
+    from core.downloads.master import _album_title_similarity, _similarity
+
+    assert _album_title_similarity('', 'Artist', '2020', 'Album', 'Artist/Album') == 0.0
+    assert _album_title_similarity('Album', 'Artist', '2020', 'Album', '') == 1.0
+    assert _album_title_similarity('Album', 'Artist', '2020', 'Other', 'Other') == _similarity('Album', 'Other')
+
+
+@pytest.mark.parametrize(('artist', 'year', 'text'), [
+    ('Artist', '', 'Artist Album'),
+    ('', '2020', 'Album 2020'),
+    ('Artist', '2020', 'Artist Album 2020'),
+    ('Artist', '2020', 'Artist A-B 2020'),
+])
+def test_soulseek_album_title_similarity_removes_distinct_metadata(artist, year, text):
+    from core.downloads.master import _album_title_similarity
+
+    album = 'A-B' if 'A-B' in text else 'Album'
+    assert _album_title_similarity(album, artist, year, text, '') == 1.0
+
+
+def test_soulseek_album_title_similarity_can_use_path_metadata():
+    from core.downloads.master import _album_title_similarity
+
+    assert _album_title_similarity('Album', 'Artist', '2020', '', 'Artist/Album/2020') == 1.0
+
+
+def test_soulseek_album_title_similarity_repeated_spans_preserve_length_ratio():
+    from core.downloads.master import _album_title_similarity
+
+    assert _album_title_similarity('Album', 'Artist', '2020',
+                                   'Album Artist 2020 Album', '') == 5 / 11
+
+
+@pytest.mark.parametrize(('artist', 'year', 'text'), [
+    ('Artist', '', 'Artist Artist Album'),
+    ('', '2020', '2020 Album 2020'),
+    ('Summer 2020', '2020', 'Summer 2020 Album'),
+    ('AlbumArtist', '', 'AlbumArtist Album'),
+])
+def test_soulseek_album_title_similarity_removes_all_distinct_metadata(artist, year, text):
+    from core.downloads.master import _album_title_similarity
+
+    assert _album_title_similarity('Album', artist, year, text, '') == 1.0
+
+
+def test_soulseek_album_title_similarity_requires_whole_words_and_distinct_spans():
+    from core.downloads.master import _album_title_similarity, _similarity
+
+    assert _album_title_similarity('Album', 'One', '', 'Someone Album', '') == _similarity('Album', 'Someone Album')
+    assert _album_title_similarity('Album', '', '2020', 'Album 20205', '') == _similarity('Album', 'Album 20205')
+    assert _album_title_similarity('One', 'One', '', 'One Bonus', '') == _similarity('One', 'One Bonus')
+    assert _album_title_similarity('One', 'One', '', 'One One', '') == 1.0
+    assert _album_title_similarity('Summer 1999', '', '1999', 'Summer 1999 Bonus', '') == _similarity(
+        'Summer 1999', 'Summer 1999 Bonus')
+
+
+def test_soulseek_album_title_similarity_does_not_guess_release_labels():
+    from core.downloads.master import _album_title_similarity, _similarity
+
+    title = 'GUNSHIP - Album - 2015 - GUNSHIP'
+    score = _album_title_similarity('GUNSHIP', 'Gunship', '2015', title, '')
+    assert _similarity('GUNSHIP', title) < score < 0.65
+
+
+def test_soulseek_eponymous_album_search_uses_year_instead_of_duplicate_name():
+    from core.downloads.master import _album_search_queries
+
+    assert _album_search_queries('Gunship', 'GUNSHIP', '2015') == [
+        'Gunship 2015', 'GUNSHIP',
+    ]
+    assert _album_search_queries('Gunship', 'GUNSHIP', '') == ['GUNSHIP']
+    assert _album_search_queries('Massive Attack', 'Mezzanine', '1998') == [
+        'Massive Attack Mezzanine', 'Mezzanine',
+    ]
+
+
+def test_soulseek_album_preflight_prefers_available_peer_in_equivalent_band(monkeypatch):
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    expected = [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}]
+    slow_tracks = [_slsk_track('T1', 1, folder='Artist/Test Album')]
+    fast_tracks = [_slsk_track('T1', 1, folder='Artist/Test Album')]
+    slow = _album_result('slow', 'Artist/Test Album', 'Test Album', slow_tracks,
+                         quality_score=0.91)
+    slow.free_upload_slots = 0
+    slow.queue_length = 8
+    slow.upload_speed = 50_000
+    fast = _album_result('fast', 'Artist/Test Album', 'Test Album', fast_tracks,
+                         quality_score=0.90)
+    fast.free_upload_slots = 1
+    fast.queue_length = 0
+    fast.upload_speed = 2_000_000
+    slsk = _FakeSoulseek(album_results=[slow, fast], browse_files=None,
+                         parsed_tracks=fast_tracks)
+    deps = _build_deps(
+        config=_FakeConfig({'download_source.mode': 'soulseek'}),
+        soulseek=_FakeSoulseekWrapper(slsk),
+    )
+    _seed_batch('B29', is_album_download=True,
+                album_context={'name': 'Test Album', 'total_tracks': 1},
+                artist_context={'name': 'Artist'})
+
+    mw.run_full_missing_tracks_process('B29', 'album:1', expected, deps)
+
+    assert download_batches['B29']['last_good_source']['username'] == 'fast'
+
+
 def test_soulseek_album_preflight_runs_when_soulseek_is_hybrid_primary(monkeypatch):
     """Album preflight runs for hybrid album downloads when Soulseek is first."""
     db = _FakeDB()
@@ -892,7 +1054,7 @@ def test_soulseek_album_bundle_runs_after_missing_analysis(monkeypatch):
     album, artist, staging, kwargs = plugin.calls[0]
     assert (album, artist) == ('Test Album', 'Artist')
     assert staging.replace('\\', '/').endswith('storage/album_bundle_staging/B25')
-    assert kwargs == {}
+    assert kwargs == {'expected_tracks': tracks}
     assert download_batches['B25']['album_bundle_source'] == 'soulseek'
     assert download_batches['B25']['album_bundle_private_staging'] is True
     assert download_batches['B25']['album_bundle_state'] == 'staged'
@@ -957,11 +1119,13 @@ def test_soulseek_album_bundle_uses_preflight_source_without_preloading_reuse(mo
 
     assert len(slsk.calls) == 1
     assert slsk.calls[0][3] == {
+        'expected_tracks': tracks,
         'preferred_source': {
             'username': 'peer',
             'folder_path': 'Artist/Test Album',
         },
         'preferred_tracks': folder_tracks,
+        'preferred_alternatives': [],
     }
     assert download_batches['B28']['album_bundle_private_staging'] is True
     assert 'last_good_source' not in download_batches['B28']

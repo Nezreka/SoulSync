@@ -139,6 +139,10 @@ export interface ListeningStatsStatus {
 
 export interface LastfmListeningImportStatus {
   success: boolean;
+  /** 'profile' when this profile's stats come from its own account (#1293). */
+  history_scope?: 'profile' | 'shared';
+  /** true when this card runs the profile's own account on this service. */
+  own_account?: boolean;
   enabled?: boolean;
   api_key_configured?: boolean;
   authenticated_user_available?: boolean;
@@ -151,6 +155,33 @@ export interface LastfmListeningImportStatus {
   inserted?: number;
   duplicates?: number;
   total_scrobbles?: number | null;
+  page?: number;
+  total_pages?: number | null;
+  last_success_at?: string | null;
+  last_imported_at?: string | null;
+  next_run_in_seconds?: number;
+  error?: string;
+}
+
+export interface ListenbrainzListeningImportStatus {
+  success: boolean;
+  /** 'profile' when this profile's stats come from its own account (#1293). */
+  history_scope?: 'profile' | 'shared';
+  /** true when this card runs the profile's own account on this service. */
+  own_account?: boolean;
+  enabled?: boolean;
+  token_configured?: boolean;
+  authenticated_user_available?: boolean;
+  username?: string | null;
+  running?: boolean;
+  status?: 'idle' | 'running' | 'complete' | 'error' | 'cancelled' | 'skipped' | string;
+  phase?: string | null;
+  progress?: number | null;
+  imported?: number;
+  inserted?: number;
+  duplicates?: number;
+  total_scrobbles?: number | null;
+  total_listens?: number | null;
   page?: number;
   total_pages?: number | null;
   last_success_at?: string | null;

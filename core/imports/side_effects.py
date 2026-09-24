@@ -550,6 +550,22 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         if not artist_name or artist_name in ("Unknown", "Unknown Artist"):
             return
 
+        # A compilation is imported one track at a time, and `artist_name` here
+        # is whoever the DOWNLOAD was for — so one contributor's track filed the
+        # whole soundtrack under them, over and over, until 45 compilations sat
+        # on one guitarist (sassmastawillis). When the album's own metadata says
+        # various artists, the ALBUM goes there; the track keeps its real artist
+        # through `track_artist` below, which exists for exactly this.
+        from core.imports.compilation import compilation_album_artist
+        _va_artist = compilation_album_artist(album_ctx, artist_name)
+        if _va_artist:
+            logger.info(
+                "[Import] '%s' is a various-artists release — filing the album "
+                "under %s instead of %s (the track keeps its own artist)",
+                album_ctx.get("name", "") or "album", _va_artist, artist_name,
+            )
+            artist_name = _va_artist
+
         album_name = ""
         if album_info and isinstance(album_info, dict):
             album_name = album_info.get("album_name", "")
@@ -681,16 +697,35 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # string), so differently-named imports of the SAME release land in
             # one album row instead of splitting — which left the repair jobs
             # dressing each split row in its own cover art (Sokhi).
+            #
+            # A MusicBrainz release id is the sharpest edition identity there
+            # is. Two releases can share a title and an artist and differ only
+            # by the disambiguation (#1299); the grouping keys on it whenever
+            # the import carries one, and never folds one release into another.
             from core.imports.album_grouping import find_existing_soulsync_album_id
+            from core.metadata.musicbrainz_tags import selected_release_id
+            mb_release_id = (selected_release_id(album_ctx) or "").strip()
             existing_album = find_existing_soulsync_album_id(
                 cursor, name_key_id=album_id, artist_id=catalogue_artist,
-                album_name=album_name, album_source_id=album_source_id, source=source)
+                album_name=album_name, album_source_id=album_source_id, source=source,
+                release_id=mb_release_id)
+            album_server_id = str(album_id)
+            if mb_release_id:
+                holder = cursor.execute(
+                    "SELECT id FROM lib2_albums WHERE server_source='soulsync' AND server_id=?",
+                    (album_server_id,)).fetchone()
+                if holder and (existing_album is None or int(holder[0]) != existing_album):
+                    # The name-hash id is held by a different release of the
+                    # same name. A release-scoped id keeps each release its own
+                    # row, so a third one cannot collide either.
+                    album_server_id = str(_stable_soulsync_id(
+                        f"{artist_name}::{album_name}::{mb_release_id}".lower().strip()))
             if existing_album is not None:
                 cursor.execute(
                     "UPDATE lib2_albums SET server_source='soulsync', server_id=?,"
                     "                       origin='library', updated_at=CURRENT_TIMESTAMP"
                     " WHERE id=? AND (server_id IS NULL OR server_source='soulsync')",
-                    (str(album_id), existing_album))
+                    (album_server_id, existing_album))
                 catalogue_album = existing_album
                 _fill_empty_columns(
                     cursor, table="lib2_albums", row_id=catalogue_album,
@@ -699,13 +734,19 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                             "duration": album_total_duration_ms})
             else:
                 catalogue_album = upsert_album(
-                    cursor, server_source="soulsync", server_id=album_id,
+                    cursor, server_source="soulsync", server_id=album_server_id,
                     artist_id=catalogue_artist, title=album_name, year=year,
                     image_url=image_url or None, genres_json=genres_json or None,
                     track_count=total_tracks or None,
                     duration=album_total_duration_ms or None,
-                    allow_create=True)
+                    allow_create=True,
+                    # The grouping above already did the name match, release
+                    # aware. The writer's own title fallback would fold a
+                    # second release of the same name straight back in.
+                    title_fallback=not mb_release_id)
             _fill_external_id(cursor, "lib2_albums", catalogue_album, source, album_source_id)
+            if mb_release_id:
+                _fill_external_id(cursor, "lib2_albums", catalogue_album, "musicbrainz", mb_release_id)
 
             catalogue_track = upsert_track(
                 cursor, server_source="soulsync", server_id=track_id,

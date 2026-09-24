@@ -125,3 +125,52 @@ def test_musicbrainz_release_id_grouping(cur):
         cur, name_key_id="nk2", artist_id=1, album_name="Album (Remaster)",
         album_source_id="mb-123", source="musicbrainz")
     assert got == row
+
+
+# ── #1299: same-named releases stay apart ────────────────────────────────────
+# кис-кис's "юность в стиле панк" exists as 55c7242f (original) and 3b98979b
+# ("baby punk version"): same title, artist and release group. On lib2 the
+# release id is ``lib2_albums.musicbrainz_id`` and the import passes it as
+# ``release_id``.
+
+ORIGINAL = "55c7242f-1b4b-485d-b5f2-d6a8feeee088"
+BABY_PUNK = "3b98979b-6494-4a7c-8de6-2165902f8a87"
+ALBUM = "юность в стиле панк"
+
+
+def _find(cur, release):
+    return find_existing_soulsync_album_id(
+        cur, name_key_id="nk", artist_id=1, album_name=ALBUM, release_id=release)
+
+
+def test_same_name_different_release_does_not_join_the_name_hash_row(cur):
+    _add(cur, server_id="nk", title=ALBUM, musicbrainz_id=ORIGINAL)
+    assert _find(cur, BABY_PUNK) is None
+
+
+def test_same_name_different_release_does_not_join_by_title(cur):
+    _add(cur, server_id="orig", title=ALBUM, musicbrainz_id=ORIGINAL)
+    assert _find(cur, BABY_PUNK) is None
+
+
+def test_each_release_finds_its_own_row(cur):
+    nk = _add(cur, server_id="nk", title=ALBUM, musicbrainz_id=ORIGINAL)
+    bp = _add(cur, server_id="bp", title=ALBUM, musicbrainz_id=BABY_PUNK)
+    assert _find(cur, ORIGINAL) == nk
+    assert _find(cur, BABY_PUNK) == bp
+
+
+def test_title_match_skips_the_other_release_and_finds_an_unknown_row(cur):
+    _add(cur, server_id="orig", title=ALBUM, musicbrainz_id=ORIGINAL)
+    legacy = _add(cur, server_id="legacy", title=ALBUM)  # imported before ids were stored
+    assert _find(cur, BABY_PUNK) == legacy
+
+
+def test_row_without_an_id_still_groups_by_name(cur):
+    nk = _add(cur, server_id="nk", title=ALBUM)
+    assert _find(cur, BABY_PUNK) == nk
+
+
+def test_release_id_compare_ignores_case(cur):
+    nk = _add(cur, server_id="nk", title=ALBUM, musicbrainz_id=BABY_PUNK.upper())
+    assert _find(cur, BABY_PUNK) == nk

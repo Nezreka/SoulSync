@@ -56,6 +56,11 @@ logger = get_logger("downloads.lifecycle")
 # cut off mid-flight (the old 5-min cutoff falsely "completed" queued tasks).
 _POST_PROCESSING_STUCK_TIMEOUT = 1800  # 30 minutes
 
+# Maximum number of atomic album publish attempts before forcing the batch to
+# 'error' phase. Each attempt is spaced by the 30s healing loop. 3 attempts =
+# ~90 seconds of retries before we give up and unblock wishlist processing (#1277).
+_ATOMIC_PUBLISH_MAX_ATTEMPTS = 3
+
 
 def _resolve_stuck_post_processing_status(task: dict) -> str:
     """Decide the terminal status for a task stuck in post_processing.
@@ -77,6 +82,36 @@ def _safe_batch_dirname(batch_id: str) -> str:
 
 
 _ALBUM_BUNDLE_CLEANED_SOURCES = ('soulseek', 'torrent', 'usenet')
+
+
+def _settle_deferred_wishlist(batch_id: str, batch: dict, pubmap: dict) -> int:
+    """Remove the wishlist rows deferred by this batch's staged tracks.
+
+    Only reachable from a SUCCESSFUL publish, and each row is still checked
+    against a file that exists at its final path — the roster says what the
+    batch intended to publish, the filesystem says what it did.
+
+    The roster is cleared whether or not every entry cleared, so a later healing
+    pass over an already-published batch cannot replay removals. Anything left
+    unremoved stays on the wishlist, which is the self-healing direction: the
+    already-owned cleanup clears a track that really is in the library, and
+    nothing clears one that is not.
+    """
+    pending = batch.get('_wishlist_pending') or []
+    if not pending:
+        return 0
+    try:
+        from core.wishlist.resolution import remove_published_wishlist_entries
+        removed = remove_published_wishlist_entries(pending, pubmap or {}, batch_id=batch_id)
+        logger.info("[Atomic Publish] Batch %s: cleared %d/%d deferred wishlist entries",
+                    batch_id, removed, len(pending))
+        return removed
+    except Exception as e:  # noqa: BLE001 — a publish that worked must not be undone by this
+        logger.error("[Atomic Publish] Batch %s: deferred wishlist removal failed "
+                     "(entries stay on the wishlist): %s", batch_id, e, exc_info=True)
+        return 0
+    finally:
+        batch['_wishlist_pending'] = []
 
 
 def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
@@ -102,38 +137,12 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
 
         db = MusicDatabase()
 
-        def _db_update(staged_path: str, final_path: str) -> int:
-            # The tracks were imported FROM staging, so the Library-v2 file row
-            # holds the staging path — inside the tree this publish is about to
-            # delete. Repointing only the legacy row left it naming a file that
-            # exists nowhere, which is also the one state path_drift_reconcile
-            # cannot repair (it finds the file by that stored path).
-            #
-            # L2-002: the rowcount is returned, not discarded. repoint_file_path
-            # reports it precisely so a caller can tell "the catalogue did not
-            # know this file" from "done", and that first case IS the state
-            # above — a row naming a staging path that is about to stop
-            # existing. The publish treats a zero for an audio file as a failed
-            # publish and rolls the album back.
-            #
-            # Upstream gates this proof on the active media server being
-            # 'soulsync', because there the staged row comes from
-            # record_soulsync_library_entry and a Plex/Navidrome/Jellyfin
-            # install legitimately has none (3934742fd — atomic albums stranded
-            # in staging). That gate does not belong here: the file row this
-            # repoints is written by require_library_v2_registration, which the
-            # import pipeline runs on EVERY install regardless of media server.
-            # A zero is therefore real evidence on this branch, and dropping it
-            # would disable the L2-002 guard rather than fix anything.
-            from core.library2.track_files import repoint_file_path
-
-            conn = db._get_connection()
-            try:
-                repointed = repoint_file_path(conn, staged_path, final_path)
-                conn.commit()
-                return repointed
-            finally:
-                conn.close()
+        # Repoint one file, returning how many library rows moved with it --
+        # the publish's proof that the catalogue knows where the file went
+        # (L2-002). Shared with the startup recovery (#1289); the reasoning for
+        # why a zero is evidence on this branch lives with the helper.
+        from core.downloads.atomic_recovery import make_db_path_updater
+        _db_update = make_db_path_updater(db)
 
         result = publish_album_batch(staging_root, transfer_dir, safe_move_file, _db_update)
 
@@ -143,6 +152,17 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
         for fi in (batch.get('_consistency_files') or []):
             if fi.get('path') in pubmap:
                 fi['path'] = pubmap[fi['path']]
+
+        # Each task recorded where its import landed, which for a staged batch
+        # is the staging path this publish just emptied. Everything downstream
+        # reads that field and would be pointing at a file that no longer
+        # exists: playlist materialization collects it to build the playlist
+        # folder (core/playlists/materialize_service.py), the downloads API
+        # reports it, and the stuck-task resolver checks it for existence.
+        for _task_id in (batch.get('queue') or []):
+            _task = download_tasks.get(_task_id)
+            if _task and _task.get('final_file_path') in pubmap:
+                _task['final_file_path'] = pubmap[_task['final_file_path']]
 
         # Per-track work registered the STAGING album folder with the repair
         # worker (now emptied by the publish above), so track-number repair would
@@ -168,6 +188,12 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
             return False
         logger.info("[Atomic Publish] Batch %s: published %d file(s)",
                     batch_id, len(pubmap))
+
+        # #1289: the album is live NOW, so this is the first moment the wishlist
+        # rows for its tracks are safe to delete. Per-track completion deferred
+        # them here precisely so that a batch which never reached this line
+        # leaves every request intact and retryable.
+        _settle_deferred_wishlist(batch_id, batch, pubmap)
         return True
     except Exception as e:
         logger.error("[Atomic Publish] Batch %s publish failed (staged files kept): %s",
@@ -955,7 +981,20 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                             'track_info': track_info,
                             'original_search_result': track_info,  # fallback
                         }
-                        deps.check_and_remove_from_wishlist(context)
+                        # #1289: this context is built from track_info alone, so
+                        # it never carried any evidence the download actually
+                        # reached the library — which is how a file still in the
+                        # downloads folder (the verification worker's no-context
+                        # branch) and a file still in atomic staging both got
+                        # their wishlist rows deleted. final_file_path is set by
+                        # the importer only when a file really landed; the guard
+                        # in check_and_remove_from_wishlist refuses without it.
+                        deps.check_and_remove_from_wishlist(
+                            context,
+                            published_path=task.get('final_file_path'),
+                            batch_id=batch_id,
+                            quiet_refusal=True,
+                        )
                 except Exception as wishlist_error:
                     logger.error(f"[Batch Manager] Error checking wishlist removal for successful download: {wishlist_error}")
 
@@ -1034,22 +1073,41 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
             # Check if this is an auto-initiated batch
             is_auto_batch = batch.get('auto_initiated', False)
 
-            # FIXED: Ensure batch is not already marked as complete to prevent duplicate processing
-            if batch.get('phase') != 'complete':
+            # Terminal batches must not publish again after exhaustion or cancellation.
+            if batch.get('phase') not in ('complete', 'error', 'cancelled', 'failed'):
                 # #999 atomic album publish (opt-in, no-op unless staged): move
                 # the staged album into the live library BEFORE anything is
                 # marked complete, so Plex sees the whole album at once.
                 #
-                # L2-002: the publish decides whether this batch IS complete. It
-                # used to run after the phase flip and its result was only
-                # logged, so a failed publish still produced a Complete batch
-                # with history, scan and completion events for an album that was
-                # never published. A failure leaves the phase alone; the batch
-                # stays in monitoring and the next completion check retries.
+                # L2-002: the publish decides whether this batch IS complete. A
+                # failed publish leaves staged files in place for retry. We allow
+                # up to _ATOMIC_PUBLISH_MAX_ATTEMPTS retries (spaced by the 30s
+                # healing loop) before forcing 'error' so the batch never blocks
+                # wishlist processing permanently (#1277).
                 if not _publish_atomic_album(batch_id, batch, deps):
+                    attempts = batch.get('_atomic_publish_attempts', 0) + 1
+                    batch['_atomic_publish_attempts'] = attempts
+                    if attempts < _ATOMIC_PUBLISH_MAX_ATTEMPTS:
+                        logger.error(
+                            "[Batch Manager] Batch %s: atomic album publish failed "
+                            "(attempt %d/%d) — staged files kept for retry on next "
+                            "healing pass", batch_id, attempts, _ATOMIC_PUBLISH_MAX_ATTEMPTS)
+                        return
+                    # Max attempts reached — force to error so wishlist isn't blocked
+                    # forever. Staged files stay on disk; the user can recover manually.
                     logger.error(
-                        "[Batch Manager] Batch %s: atomic album publish failed — "
-                        "not marking complete, staged files kept for retry", batch_id)
+                        "[Batch Manager] Batch %s: atomic album publish failed "
+                        "%d times — forcing 'error' phase to unblock wishlist. "
+                        "Staged files left in place for manual recovery.",
+                        batch_id, attempts)
+                    batch['phase'] = 'error'
+                    batch['completion_time'] = time.time()
+                    from database.music_database import MusicDatabase
+                    try:
+                        record_sync_history_completion(MusicDatabase(), batch_id, batch)
+                    except Exception as _hist_err:
+                        logger.warning("[Batch Manager] Could not write sync history on "
+                                       "publish-failed error: %s", _hist_err)
                     return
 
                 completion = _mark_batch_complete(
@@ -1151,8 +1209,8 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
             is_auto_batch = False
             completion = None
             if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
-                # FIXED: Ensure batch is not already marked as complete to prevent duplicate processing
-                if batch.get('phase') != 'complete':
+                # Terminal batches must not publish again after exhaustion or cancellation.
+                if batch.get('phase') not in ('complete', 'error', 'cancelled', 'failed'):
                     logger.info(f"[Completion Check V2] Batch {batch_id} is complete - marking as finished")
 
                     # Check if this is an auto-initiated batch
@@ -1162,19 +1220,38 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                     # publish the staged album into the live library before the
                     # batch is marked complete. L2-002: a failed publish must not
                     # produce a Complete batch for an album that is still staged.
+                    # After _ATOMIC_PUBLISH_MAX_ATTEMPTS failures, force 'error'
+                    # so the batch never blocks wishlist processing (#1277).
                     if not _publish_atomic_album(batch_id, batch, deps):
+                        attempts = batch.get('_atomic_publish_attempts', 0) + 1
+                        batch['_atomic_publish_attempts'] = attempts
+                        if attempts < _ATOMIC_PUBLISH_MAX_ATTEMPTS:
+                            logger.error(
+                                "[Completion Check V2] Batch %s: atomic album publish "
+                                "failed (attempt %d/%d) — staged files kept for retry",
+                                batch_id, attempts, _ATOMIC_PUBLISH_MAX_ATTEMPTS)
+                            return False
                         logger.error(
                             "[Completion Check V2] Batch %s: atomic album publish "
-                            "failed — not marking complete, staged files kept for "
-                            "retry", batch_id)
+                            "failed %d times — forcing 'error' phase to unblock wishlist. "
+                            "Staged files left in place for manual recovery.",
+                            batch_id, attempts)
+                        batch['phase'] = 'error'
+                        batch['completion_time'] = time.time()
+                        from database.music_database import MusicDatabase
+                        try:
+                            record_sync_history_completion(MusicDatabase(), batch_id, batch)
+                        except Exception as _hist_err:
+                            logger.warning("[Completion Check V2] Could not write sync "
+                                           "history on publish-failed error: %s", _hist_err)
                         return False
 
                     completion = _mark_batch_complete(
                         batch_id, batch, deps, queue=queue, finished_count=finished_count,
                         tag='[Completion Check V2]')
                 else:
-                    logger.warning(f"[Completion Check V2] Batch {batch_id} already marked complete - skipping duplicate processing")
-                    return True  # Already complete
+                    logger.debug("[Completion Check V2] Batch %s already terminal (%s)", batch_id, batch.get("phase"))
+                    return batch.get("phase") == "complete"
 
         # Process wishlist outside of the lock to prevent threading issues
         if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:

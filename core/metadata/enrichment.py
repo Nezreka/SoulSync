@@ -219,7 +219,16 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 )]
                 audio_file["disk"] = [(_disc_num, 0)]
 
-            embed_source_ids(audio_file, metadata, context, runtime=runtime)
+            from core.metadata.manual import is_manual_context, manual_cover_path, write_manual_marker
+            if is_manual_context(context):
+                # the user typed this release in. no name-based id lookups:
+                # they'd embed a studio release's ids and replace the user's
+                # date with a musicbrainz one
+                metadata['_manual'] = True
+                metadata['_manual_cover_path'] = manual_cover_path(context)
+                write_manual_marker(audio_file, symbols)
+            else:
+                embed_source_ids(audio_file, metadata, context, runtime=runtime)
 
             if album_info is not None and metadata.get("musicbrainz_release_id"):
                 album_info["musicbrainz_release_id"] = metadata["musicbrainz_release_id"]

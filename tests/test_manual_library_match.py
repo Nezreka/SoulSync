@@ -334,7 +334,10 @@ def test_wishlist_skips_manual_matched_track():
         )
 
     assert removed == 1
-    mock_wishlist_svc.mark_track_download_result.assert_called_once_with("spotify-track-123", success=True, profile_id=1)
+    # #1289: scoped to the owning profile, and stamped with why it was removed.
+    mock_wishlist_svc.mark_track_download_result.assert_called_once_with(
+        "spotify-track-123", success=True, profile_id=1, profile_ids=[1],
+        audit={"reason": "manual_match"})
     mock_music_db.check_track_exists.assert_not_called()
 
 

@@ -316,6 +316,176 @@ def test_the_final_path_builder_uses_the_profiles_root(db, monkeypatch, tmp_path
     assert str(dest).startswith(str(tmp_path / 'Transfer')), dest
 
 
+def test_import_profile_id_resolves_nested_and_top_level():
+    from core.imports import paths
+    from core.runtime_state import download_batches
+    # Top-level profile_id
+    assert paths.import_profile_id({'profile_id': 2}) == 2
+    assert paths.import_profile_id({'profile_id': '3'}) == 3
+    # Nested in search_result, original_search_result, track_info (#1279 defensive check)
+    assert paths.import_profile_id({'search_result': {'profile_id': 4}}) == 4
+    assert paths.import_profile_id({'original_search_result': {'profile_id': 5}}) == 5
+    assert paths.import_profile_id({'track_info': {'profile_id': 6}}) == 6
+    # Batch ID resolution
+    download_batches['b-test-profile'] = {'profile_id': 7}
+    try:
+        assert paths.import_profile_id({'batch_id': 'b-test-profile'}) == 7
+    finally:
+        download_batches.pop('b-test-profile', None)
+    # Empty / none
+    assert paths.import_profile_id({}) is None
+    assert paths.import_profile_id(None) is None
+
+
+def test_transfer_root_for_search_download_context_uses_profile_library(db, monkeypatch, tmp_path):
+    from core.imports import paths
+    monkeypatch.setattr(paths, '_get_config_manager', lambda: SimpleNamespace(get=lambda k, d=None: str(tmp_path / 'Transfer')))
+    kim = db.create_profile(name='kim'); db.set_profile_library(kim, 'own', str(tmp_path / 'kim'))
+    sam = db.create_profile(name='sam')
+
+    # Search download contexts with profile_id stamped (#1279)
+    kim_search_ctx = {
+        'profile_id': kim,
+        'search_result': {'username': 'u1', 'filename': 'u1/song.flac', 'is_simple_download': True}
+    }
+    sam_search_ctx = {
+        'profile_id': sam,
+        'search_result': {'username': 'u1', 'filename': 'u1/song.flac', 'is_simple_download': True}
+    }
+    admin_search_ctx = {
+        'profile_id': 1,
+        'search_result': {'username': 'u1', 'filename': 'u1/song.flac', 'is_simple_download': True}
+    }
+
+    assert paths.transfer_root_for_context(kim_search_ctx) == str(tmp_path / 'kim')
+    assert paths.transfer_root_for_context(sam_search_ctx) == str(tmp_path / 'Transfer')
+    assert paths.transfer_root_for_context(admin_search_ctx) == str(tmp_path / 'Transfer')
+
+
+def test_register_matched_download_context_helper(monkeypatch):
+    import web_server
+    from core.runtime_state import matched_downloads_context
+
+    monkeypatch.setattr(web_server, 'get_current_profile_id', lambda: 42)
+    ctx_key = "test_user::test/file.flac"
+    test_ctx = {'search_result': {'title': 'Test'}}
+
+    try:
+        web_server._register_matched_download_context(ctx_key, test_ctx)
+        assert matched_downloads_context[ctx_key]['profile_id'] == 42
+        assert matched_downloads_context[ctx_key]['search_result']['title'] == 'Test'
+
+        # Existing explicit profile_id is preserved
+        ctx_key2 = "test_user::test/file2.flac"
+        test_ctx2 = {'profile_id': 99, 'search_result': {'title': 'Test 2'}}
+        web_server._register_matched_download_context(ctx_key2, test_ctx2)
+        assert matched_downloads_context[ctx_key2]['profile_id'] == 99
+    finally:
+        matched_downloads_context.pop(ctx_key, None)
+        matched_downloads_context.pop(ctx_key2, None)
+
+
+def test_search_download_endpoints_route_to_profile_own_library(db, monkeypatch, tmp_path):
+    """End-to-end test for issue #1279: interactive downloads carry profile and route to profile library."""
+    from unittest.mock import patch
+    import web_server
+    from core.imports import paths
+    from core.runtime_state import matched_downloads_context
+
+    def _fake_run_async(coro):
+        if hasattr(coro, 'close'):
+            coro.close()
+        return "dl-mock-id"
+
+    monkeypatch.setattr(paths, '_get_config_manager', lambda: SimpleNamespace(get=lambda k, d=None: str(tmp_path / 'Transfer')))
+    kim = db.create_profile(name='kim'); db.set_profile_library(kim, 'own', str(tmp_path / 'kim'))
+    web_server.app.config["TESTING"] = True
+    client = web_server.app.test_client()
+
+    monkeypatch.setattr(web_server, "get_current_profile_id", lambda: kim)
+    monkeypatch.setattr("core.profile_context.get_current_profile_id", lambda: kim)
+
+    # basic search downloads are pinned batches now: run each task inline so
+    # the real candidate handoff writes its context before we look, with the
+    # monitor off and the network stubbed by run_async below
+    _real_deps = web_server._pinned_batch_deps
+
+    def _inline_deps():
+        deps = _real_deps()
+        deps.start_monitoring = lambda _bid: None
+        deps.submit = lambda fn, *args: fn(*args)
+        return deps
+    monkeypatch.setattr(web_server, "_pinned_batch_deps", _inline_deps)
+
+    # 1. Single track download via /api/download
+    single_key = web_server._make_context_key("peer_kim", "music/song.mp3")
+    try:
+        with patch.object(web_server, "run_async", side_effect=_fake_run_async):
+            res = client.post("/api/download", json={
+                "result_type": "track",
+                "username": "peer_kim",
+                "filename": "music/song.mp3",
+                "size": 5000000,
+                "title": "Song",
+                "artist": "Artist"
+            })
+            assert res.status_code == 200
+            assert single_key in matched_downloads_context
+            ctx = matched_downloads_context[single_key]
+            # a pinned batch carries it on track_info, the resolver is the contract
+            assert paths.import_profile_id(ctx) == kim
+            assert paths.transfer_root_for_context(ctx) == str(tmp_path / 'kim')
+    finally:
+        matched_downloads_context.pop(single_key, None)
+
+    # 2. Album download via /api/download
+    album_key = web_server._make_context_key("peer_kim", "music/album/track01.mp3")
+    try:
+        with patch.object(web_server, "run_async", side_effect=_fake_run_async):
+            res = client.post("/api/download", json={
+                "result_type": "album",
+                "album_name": "Kim Album",
+                "tracks": [{
+                    "username": "peer_kim",
+                    "filename": "music/album/track01.mp3",
+                    "size": 5000000,
+                    "title": "Track 01",
+                    "artist": "Artist"
+                }]
+            })
+            assert res.status_code == 200
+            assert album_key in matched_downloads_context
+            ctx = matched_downloads_context[album_key]
+            # a pinned batch carries it on track_info, the resolver is the contract
+            assert paths.import_profile_id(ctx) == kim
+            assert paths.transfer_root_for_context(ctx) == str(tmp_path / 'kim')
+    finally:
+        matched_downloads_context.pop(album_key, None)
+
+    # 3. Matched single download via /api/download/matched
+    matched_key = web_server._make_context_key("peer_kim", "music/matched_song.flac")
+    try:
+        with patch.object(web_server, "run_async", side_effect=_fake_run_async):
+            res = client.post("/api/download/matched", json={
+                "is_single_track": True,
+                "search_result": {
+                    "username": "peer_kim",
+                    "filename": "music/matched_song.flac",
+                    "size": 6000000
+                },
+                "spotify_artist": {"name": "Artist"},
+                "spotify_track": {"name": "Matched Song", "track_number": 1, "album": {"name": "Album"}}
+            })
+            assert res.status_code == 200
+            assert matched_key in matched_downloads_context
+            ctx = matched_downloads_context[matched_key]
+            # a pinned batch carries it on track_info, the resolver is the contract
+            assert paths.import_profile_id(ctx) == kim
+            assert paths.transfer_root_for_context(ctx) == str(tmp_path / 'kim')
+    finally:
+        matched_downloads_context.pop(matched_key, None)
+
+
 # ── the owner index and the planner ─────────────────────────────────────────
 #
 # on boulder's live db (308k tracks) the first cut's bare owner index made

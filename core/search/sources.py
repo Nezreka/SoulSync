@@ -45,6 +45,8 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                     "source": source_name or "",
                     "image_url": artist.image_url,
                     "external_urls": artist.external_urls or {},
+                    # the search page tells same-named artists apart by it
+                    "followers": getattr(artist, "followers", None) or None,
                 })
         except Exception as e:
             logger.debug(f"Artist search failed for {source_label}: {e}")

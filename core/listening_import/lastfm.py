@@ -15,6 +15,9 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.lastfm_client import LastFMClient
+from core.listening_import.dedup import insert_import_events
+from core.listening_import.profiles import ProfileImportWorkers
+from core.listening_scope import SHARED_OWNER, owner_key
 from utils.logging_config import get_logger
 
 logger = get_logger("lastfm_import")
@@ -46,6 +49,10 @@ class LastFMListeningImportWorker:
     run buttons, and future settings toggles can all call ``start_import``; if
     a run is already active they get a skipped response instead of creating a
     second paginated crawl.
+
+    profile_id is the pile it fills (#1293). the shared one uses the account in
+    Settings, any other profile the last.fm username it saved itself, read with
+    the app's api key.
     """
 
     def __init__(
@@ -55,11 +62,14 @@ class LastFMListeningImportWorker:
         *,
         cache_builder: Optional[Callable[[], Any]] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        profile_id: int = SHARED_OWNER,
     ):
         self.db = database
         self.config_manager = config_manager
         self.cache_builder = cache_builder
         self.progress_callback = progress_callback
+        self.profile_id = int(profile_id)
+        self._state_key = owner_key(STATE_KEY, self.profile_id)
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._cancel = threading.Event()
@@ -108,7 +118,7 @@ class LastFMListeningImportWorker:
                 target=self._run,
                 args=(target, full),
                 daemon=True,
-                name="lastfm-listening-import",
+                name=f"lastfm-listening-import-{self.profile_id}",
             )
             self._thread.start()
             return {"status": "started", "username": target}
@@ -145,11 +155,7 @@ class LastFMListeningImportWorker:
         last_cursor = _int(previous.get("last_imported_ts")) if use_incremental else 0
         from_ts = max(0, last_cursor - RECENT_OVERLAP_SECONDS) if last_cursor else None
         start_page = 1 if use_incremental or full else max(1, previous_page + 1 if looks_like_interrupted_backfill else 1)
-        client = LastFMClient(
-            api_key=self.config_manager.get("lastfm.api_key", ""),
-            api_secret=self.config_manager.get("lastfm.api_secret", ""),
-            session_key=self.config_manager.get("lastfm.session_key", ""),
-        )
+        client = self._client()
 
         self._set_state(
             status="running",
@@ -333,7 +339,26 @@ class LastFMListeningImportWorker:
             time.sleep(1)
         return not self._cancel.is_set()
 
+    def _client(self) -> LastFMClient:
+        """the app's key always. a profile's pile reads public scrobbles, so it
+        never gets the admin's session."""
+        if self.profile_id != SHARED_OWNER:
+            return LastFMClient(api_key=self.config_manager.get("lastfm.api_key", ""))
+        return LastFMClient(
+            api_key=self.config_manager.get("lastfm.api_key", ""),
+            api_secret=self.config_manager.get("lastfm.api_secret", ""),
+            session_key=self.config_manager.get("lastfm.session_key", ""),
+        )
+
     def _resolve_username(self, username: Optional[str]) -> str:
+        if self.profile_id != SHARED_OWNER:
+            # a profile imports the name it saved, never one someone typed in
+            try:
+                saved = (self.db.get_profile_lastfm(self.profile_id) or {}).get("username") or ""
+            except Exception as e:
+                logger.debug("profile %s last.fm lookup failed: %s", self.profile_id, e)
+                saved = ""
+            return str(saved).strip()
         configured = username or self.config_manager.get("lastfm.username", "")
         if configured:
             return str(configured).strip()
@@ -407,74 +432,11 @@ class LastFMListeningImportWorker:
             conn.close()
 
     def _insert_events_deduped(self, events: Iterable[Dict[str, Any]]) -> int:
-        clean = [ev for ev in events if ev.get("title") and ev.get("played_at")]
-        if not clean:
-            return 0
-        conn = self.db._get_connection()
-        try:
-            cursor = conn.cursor()
-            duplicates = self._probable_duplicate_keys(cursor, clean)
-            inserted = 0
-            for ev in clean:
-                if _event_key(ev) in duplicates:
-                    continue
-                cursor.execute(
-                    """
-                    INSERT OR IGNORE INTO listening_history
-                        (track_id, title, artist, album, played_at, duration_ms,
-                         server_source, lib2_track_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        ev.get("track_id"),
-                        ev.get("title", ""),
-                        ev.get("artist", ""),
-                        ev.get("album", ""),
-                        ev.get("played_at"),
-                        ev.get("duration_ms", 0),
-                        SOURCE,
-                        ev.get("lib2_track_id"),
-                    ),
-                )
-                inserted += 1 if cursor.rowcount > 0 else 0
-            conn.commit()
-            return inserted
-        finally:
-            conn.close()
-
-    @staticmethod
-    def _probable_duplicate_keys(cursor, events: List[Dict[str, Any]]) -> set[tuple[str, str, int]]:
-        windows = [(_event_key(ev), _played_at_ts(ev.get("played_at"))) for ev in events]
-        windows = [(key, ts) for key, ts in windows if ts > 0]
-        if not windows:
-            return set()
-        min_ts = min(ts for _key, ts in windows) - 120
-        max_ts = max(ts for _key, ts in windows) + 120
-        cursor.execute(
-            """
-            SELECT LOWER(title), LOWER(COALESCE(artist, '')), strftime('%s', played_at)
-            FROM listening_history
-            WHERE played_at >= datetime(?, 'unixepoch')
-              AND played_at <= datetime(?, 'unixepoch')
-            """,
-            (min_ts, max_ts),
-        )
-        existing = []
-        for title_l, artist_l, played_ts in cursor.fetchall():
-            try:
-                existing.append((title_l or "", artist_l or "", int(played_ts)))
-            except (TypeError, ValueError):
-                continue
-        duplicates = set()
-        for key, ts in windows:
-            title_l, artist_l, _ = key
-            if any(title_l == ex_title and artist_l == ex_artist and abs(ex_ts - ts) <= 120 for ex_title, ex_artist, ex_ts in existing):
-                duplicates.add(key)
-        return duplicates
+        return insert_import_events(self.db, events, SOURCE, profile_id=self.profile_id)
 
     def _load_state(self) -> Dict[str, Any]:
         try:
-            raw = self.db.get_metadata(STATE_KEY)
+            raw = self.db.get_metadata(self._state_key)
             return json.loads(raw) if raw else {"status": "idle", "source": SOURCE}
         except Exception:
             return {"status": "idle", "source": SOURCE}
@@ -483,7 +445,7 @@ class LastFMListeningImportWorker:
         state = {**(self._state or {}), **updates, "source": SOURCE, "updated_at": _now_iso()}
         self._state = state
         try:
-            self.db.set_metadata(STATE_KEY, json.dumps(state))
+            self.db.set_metadata(self._state_key, json.dumps(state))
         except Exception as e:
             logger.debug("Could not persist Last.fm import state: %s", e)
         if self.progress_callback:
@@ -515,14 +477,6 @@ def normalize_lastfm_scrobble(track: Dict[str, Any]) -> Optional[Dict[str, Any]]
         "server_source": SOURCE,
         "lib2_track_id": None,
     }
-
-
-def _event_key(ev: Dict[str, Any]) -> tuple[str, str, int]:
-    return (
-        (ev.get("title") or "").strip().lower(),
-        (ev.get("artist") or "").strip().lower(),
-        _played_at_ts(ev.get("played_at")),
-    )
 
 
 def _text(value: Any) -> str:
@@ -574,3 +528,10 @@ def _progress(page: int, total_pages: Optional[int]) -> int:
         return 0
     return max(0, min(99, round((page / max(total_pages, 1)) * 100)))
 
+
+class LastFMImportWorkers(ProfileImportWorkers):
+    """one last.fm importer per pile, see core/listening_import/profiles.py."""
+
+    worker_cls = LastFMListeningImportWorker
+    source = SOURCE
+    redact = staticmethod(_safe_error_message)

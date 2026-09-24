@@ -17,7 +17,6 @@ from core.imports.file_ops import (
     create_lossy_copy,
     downsample_hires_flac,
     get_audio_quality_string,
-    get_quality_tier_from_extension,
     probe_audio_quality,
     safe_move_file,
 )
@@ -27,10 +26,13 @@ from core.imports.context import (
     extract_artist_name,
     get_import_clean_artist,
     get_import_clean_title,
+    get_import_context_album,
     get_import_context_artist,
     get_import_has_clean_metadata,
     get_import_original_search,
+    get_import_search_result,
     get_import_source,
+    get_import_source_ids,
     get_import_track_info,
     normalize_import_context,
 )
@@ -58,6 +60,9 @@ from core.imports.side_effects import (
     record_soulsync_library_entry,
     require_library_v2_registration,
 )
+from core.downloads.atomic_album_publish import split_staged_path
+from core.wishlist.library_match import artist_names
+from core.wishlist.removal_guard import STAGED as GUARD_STAGED, classify_publication
 from core.wishlist.resolution import check_and_remove_from_wishlist
 from core.runtime_state import (
     add_activity_item,
@@ -74,11 +79,13 @@ from core.runtime_state import (
 from core.metadata.artwork import download_cover_art
 from core.metadata.common import wipe_source_tags
 from core.imports.tag_policy import should_wipe_tags_on_enhancement_failure
+from core.imports.quality_replace import is_profile_upgrade
 from core.metadata.enrichment import enhance_file_metadata
 from core.imports.paths import (
     build_final_path_for_track,
     build_simple_download_destination,
     docker_resolve_path,
+    import_profile_id,
 )
 from core.imports.album_naming import resolve_album_group
 from core.metadata.lyrics import generate_lrc_file
@@ -150,7 +157,32 @@ def _batch_force_replace(context: dict) -> bool:
         return False
 
 
+def _record_manual_lock(context: dict, final_path: str) -> None:
+    """remember a hand-tagged file so enrichment and the maintenance jobs leave
+    its album alone, now and after any future library scan"""
+    from core.metadata.manual import is_manual_context
+    if not is_manual_context(context):
+        return
+    try:
+        from database.music_database import get_database
+        album = get_import_context_album(context) or {}
+        artist = get_import_context_artist(context) or {}
+        get_database().record_manual_metadata_file(
+            context.get('_final_processed_path') or final_path,
+            album_title=album.get('name') or '',
+            album_artist=artist.get('name') or '',
+        )
+    except Exception as lock_err:  # noqa: BLE001 - the file is imported either way
+        logger.error("[Manual] could not record the manual lock: %s", lock_err)
+
+
 def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
+    # a hand-tagged download (bootleg, live set) fails the studio fingerprint
+    # by design, acoustid has nothing true to say about it
+    if check_name == 'acoustid':
+        from core.metadata.manual import is_manual_context
+        if is_manual_context(context):
+            return True
     bypass = context.get('_skip_quarantine_check')
     if bypass == 'all':
         return True
@@ -730,6 +762,92 @@ def build_import_pipeline_runtime(
 
 
 
+def _wishlist_context_snapshot(context):
+    """The slice of an import context a later wishlist removal actually needs.
+
+    Stored on the batch and in the on-disk manifest, so it has to stay small and
+    JSON-clean. These six keys are exactly what ``get_import_source_ids`` and the
+    metadata fallback read, so a snapshot resolves to the same track id the live
+    context would.
+    """
+    return {
+        'source': context.get('source') or context.get('_source') or '',
+        'artist': get_import_context_artist(context),
+        'album': get_import_context_album(context),
+        'track_info': get_import_track_info(context),
+        'original_search_result': get_import_original_search(context),
+        'search_result': get_import_search_result(context),
+        'batch_id': context.get('batch_id') or context.get('_atomic_publish_batch_id'),
+    }
+
+
+def _settle_wishlist_for_completed_track(context, completed_path):
+    """Clear this track's wishlist row — or defer it until the album publishes.
+
+    #1289. Atomic album publishing (#999) moved the moment a track becomes
+    visible in the library from here to batch completion, but the wishlist
+    removal stayed here, so between the two a track was in neither the library
+    nor the wishlist. That gap is not a millisecond: it lasts until the LAST
+    track of the album finishes, and a restart, a failed publish or a cancel
+    inside it left the user with no file and no request to retry it.
+
+    A staged track is recorded instead — on the batch, for the publish to act
+    on, and in the on-disk manifest, so a process that never reaches the publish
+    can still be reconciled by the next one. Returns True when deferred.
+    """
+    state = classify_publication(completed_path)
+    if state != GUARD_STAGED:
+        check_and_remove_from_wishlist(context, published_path=completed_path)
+        return False
+
+    staged_path = os.path.normpath(str(completed_path))
+    split = split_staged_path(staged_path)
+    transfer_dir, staging_root, rel = split if split else (None, None, None)
+    final_path = os.path.join(transfer_dir, rel) if (transfer_dir and rel) else ''
+
+    track_info = get_import_track_info(context)
+    entry = {
+        'staged_path': staged_path,
+        'final_path': final_path,
+        'track_name': track_info.get('name', '') or '',
+        # artist_names, not artists[0]: a bare-string 'Band' indexes to 'B', and
+        # that is what would land in the manifest and, on the recovery path, in
+        # the context its metadata fallback matches on.
+        'artist_name': next(iter(artist_names(track_info.get('artists'))), ''),
+        'context': _wishlist_context_snapshot(context),
+    }
+
+    batch_id = context.get('batch_id') or context.get('_atomic_publish_batch_id')
+    with tasks_lock:
+        batch = download_batches.get(batch_id) if batch_id else None
+        if batch is not None:
+            batch.setdefault('_wishlist_pending', []).append(entry)
+            staging_root = batch.get('_atomic_staging_root') or staging_root
+
+    if staging_root:
+        try:
+            from core.downloads.atomic_manifest import record_staged_track
+            record_staged_track(
+                staging_root,
+                staged_path=staged_path,
+                final_path=final_path,
+                source=entry['context']['source'],
+                source_ids=get_import_source_ids(context),
+                track_name=entry['track_name'],
+                artist_name=entry['artist_name'],
+                profile_id=import_profile_id(context),
+            )
+        except Exception as man_err:  # noqa: BLE001 - bookkeeping never fails a download
+            logger.warning("[Atomic Publish] Could not record %r in the batch manifest: %s",
+                           entry['track_name'] or staged_path, man_err)
+
+    logger.info(
+        "[Wishlist] Deferring removal for %r — staged for atomic album publish "
+        "(batch=%s, staged=%s, final=%s)",
+        entry['track_name'] or os.path.basename(staged_path), batch_id, staged_path, final_path)
+    return True
+
+
 def _maybe_stage_album_track(context, final_path):
     """#999 atomic album publishing (opt-in, default off). When this track belongs
     to a FRESH whole-album batch and ``album_downloads.atomic_publish`` is on,
@@ -801,6 +919,18 @@ def _maybe_stage_album_track(context, final_path):
                             logger.info("[Atomic Publish] Batch %s: STAGING album until complete "
                                         "(album=%r, transfer=%s)", batch_id,
                                         os.path.basename(album_folder), transfer_dir)
+                            # #1289: put the batch's identity on disk NOW. Everything
+                            # that knows what this directory is lives in a dict in
+                            # this process; if the process goes away mid-album the
+                            # tree becomes anonymous audio that no scanner looks at.
+                            try:
+                                from core.downloads.atomic_manifest import begin_batch
+                                begin_batch(_staging_root, batch_id=batch_id,
+                                            transfer_dir=transfer_dir,
+                                            profile_id=batch.get('profile_id'),
+                                            album_name=os.path.basename(album_folder))
+                            except Exception as _man_err:  # noqa: BLE001
+                                logger.debug("[Atomic Publish] manifest header failed: %s", _man_err)
                     else:
                         logger.info("[Atomic Publish] Batch %s: album folder already has tracks "
                                     "(completeness fill) — publishing directly: %s",
@@ -1671,7 +1801,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             # automation; fail open when the engine isn't available.
             _auto_scan_on = (automation_engine is None
                              or automation_engine.is_event_action_enabled('batch_complete', 'scan_library'))
-            if web_scan_manager and _auto_scan_on:
+            # a simple download inside a batch (basic search as-is) gets its
+            # scan from batch_complete, scanning here too would run it twice
+            if web_scan_manager and _auto_scan_on and not context.get('batch_id'):
                 threading.Thread(
                     target=lambda: web_scan_manager.request_scan("Simple download completed"),
                     daemon=True,
@@ -1689,7 +1821,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             context['_simple_download_completed'] = True
             context['_pipeline_import_succeeded'] = True
             try:
-                check_and_remove_from_wishlist(context)
+                check_and_remove_from_wishlist(context, published_path=str(destination))
             except Exception as wishlist_error:
                 logger.error(f"[Simple Download] Error checking wishlist removal: {wishlist_error}")
             return
@@ -1857,6 +1989,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     "onto track 1)", scan_order,
                 )
                 track_number = scan_order
+            elif (album_info.get('is_album') and
+                  get_import_context_album(context).get('album_type') in ('compilation', 'compile')):
+                logger.warning("No reliable compilation track number; preserving unknown position")
+                track_number = 0
             else:
                 logger.error(f"Invalid track number ({track_number}), defaulting to 1")
                 track_number = 1
@@ -1876,10 +2012,27 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             logger.info(f"[FIX] Updated album_info disc_number to {_resolved_disc} for consistent metadata")
         album_info['disc_number'] = _resolved_disc
 
+        _enhance_source_info = get_import_track_info(context).get('source_info') or {}
+        if isinstance(_enhance_source_info, str):
+            try:
+                _enhance_source_info = json.loads(_enhance_source_info)
+            except (json.JSONDecodeError, TypeError):
+                _enhance_source_info = {}
+        if not isinstance(_enhance_source_info, dict):
+            _enhance_source_info = {}
+        is_enhance_download = _enhance_source_info.get('enhance', False)
+        # Finder-approved wishlist items already persist this per-track job
+        # provenance. It authorizes a measured upgrade, never a blanket force
+        # overwrite of the batch (ordinary wishlist items stay protected).
+        is_quality_upgrade = _enhance_source_info.get('job') == 'quality_upgrade'
+
         final_path, _ = build_final_path_for_track(context, artist_context, album_info, file_ext)
         # #999 atomic album publish (opt-in): redirect to a private staging mirror
         # for fresh whole-album batches; returns final_path unchanged otherwise.
-        final_path = _maybe_stage_album_track(context, final_path)
+        # Upgrades publish at the live destination before retiring an old copy;
+        # a private album staging path is not a completed replacement.
+        if not is_quality_upgrade:
+            final_path = _maybe_stage_album_track(context, final_path)
         logger.info(f"Resolved path: '{final_path}'")
         context['_final_processed_path'] = final_path
 
@@ -1954,13 +2107,6 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             if _upgrade_decision.applicable:
                 logger.info("[Upgrade] %s", _upgrade_decision.reason)
 
-        _enhance_source_info = context.get('track_info', {}).get('source_info') or {}
-        if isinstance(_enhance_source_info, str):
-            try:
-                _enhance_source_info = json.loads(_enhance_source_info)
-            except (json.JSONDecodeError, TypeError):
-                _enhance_source_info = {}
-        is_enhance_download = _enhance_source_info.get('enhance', False)
         # "Force download" is replace-intent: the user explicitly re-downloaded
         # something they already own, so the metadata-protection skip must not
         # discard it (#1045). Rides the same replace path as enhance — the
@@ -2037,19 +2183,22 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         os.path.basename(final_path),
                     )
                 elif has_metadata and not is_enhance_download and not force_replace:
-                    _replace_lower = _resolve_context_quality_profile(context).get(
+                    _quality_profile = _resolve_context_quality_profile(context)
+                    _replace_lower = _quality_profile.get(
                         'replace_lower_quality',
                         config_manager.get('import.replace_lower_quality', False))
                     if _replace_lower:
-                        _existing_tier = get_quality_tier_from_extension(final_path)
-                        _incoming_tier = get_quality_tier_from_extension(file_path)
-                        if _incoming_tier[1] < _existing_tier[1]:
-                            logger.info(f"[Quality Replace] Replacing {_existing_tier[0]} with {_incoming_tier[0]}: {os.path.basename(final_path)}")
+                        # #1270: ranked against the quality profile, not by
+                        # extension -- an off-profile FLAC must never replace
+                        # the MP3 an MP3-only profile asked for, and a probe
+                        # that cannot tell is not evidence of an improvement.
+                        if is_profile_upgrade(final_path, file_path, _quality_profile):
+                            logger.info("[Quality Replace] Verified profile improvement: %s", os.path.basename(final_path))
                             _replace_reason = "quality_upgrade"
                         else:
                             logger.info(
-                                f"[Protection] Existing file is same or better quality ({_existing_tier[0]} vs {_incoming_tier[0]}) - skipping: "
-                                f"{os.path.basename(final_path)}"
+                                "[Protection] Incoming file is not a verified improvement under the quality profile - skipping: %s",
+                                os.path.basename(final_path),
                             )
                             try:
                                 os.remove(file_path)
@@ -2239,6 +2388,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         _record_completed_import_side_effects(
             context, artist_context, album_info, automation_engine,
         )
+        _record_manual_lock(context, final_path)
 
         try:
             completed_path = context.get('_final_processed_path', final_path)
@@ -2272,7 +2422,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         if context.get('_library_reorganize') is not True:
             try:
-                check_and_remove_from_wishlist(context)
+                _settle_wishlist_for_completed_track(
+                    context, context.get('_final_processed_path', final_path))
             except Exception as wishlist_error:
                 logger.error(f"[Post-Process] Error checking wishlist removal: {wishlist_error}")
 

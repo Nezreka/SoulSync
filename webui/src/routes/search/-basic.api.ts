@@ -1,3 +1,5 @@
+import { HTTPError } from 'ky';
+
 import { apiClient, readJson } from '@/app/api-client';
 
 import type { BasicResult, BasicSource, BasicSourcesResponse } from './-basic.types';
@@ -64,6 +66,10 @@ export interface DownloadResponse {
   success?: boolean;
   message?: string;
   error?: string;
+  /** set on the 409 the blocklist answers with, see postDownload */
+  blocked?: boolean;
+  blocked_entity_type?: string;
+  blocked_name?: string;
 }
 
 /**
@@ -75,10 +81,20 @@ export interface DownloadResponse {
  * reconstructing a dataclass, so passing the result through untouched is both
  * the contract and safe against new fields.
  */
-export function postDownload(
+export async function postDownload(
   payload: BasicResult | (Record<string, unknown> & { result_type: string }),
 ): Promise<DownloadResponse> {
-  return readJson<DownloadResponse>(apiClient.post('download', { json: payload }));
+  try {
+    return await readJson<DownloadResponse>(apiClient.post('download', { json: payload }));
+  } catch (error) {
+    // a blocklisted artist comes back as a 409 carrying {blocked, blocked_name}.
+    // that's a question for the user, not a failure, so hand the body back
+    if (error instanceof HTTPError && error.response.status === 409) {
+      const body = error.data as DownloadResponse | undefined;
+      if (body?.blocked) return body;
+    }
+    throw error;
+  }
 }
 
 /** The chip label for a source, falling back to its raw name. */

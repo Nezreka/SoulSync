@@ -51,6 +51,17 @@ def test_group_handles_garbage():
     assert group_video_files([{"nope": 1}, "junk"]) == []
 
 
+def test_group_uses_current_boolean_free_slot_field():
+    responses = [{
+        "username": "current",
+        "hasFreeUploadSlot": True,
+        "freeUploadSlots": 0,
+        "files": [{"filename": "Movie/movie.mkv", "size": 100}],
+    }]
+
+    assert group_video_files(responses)[0]["slots"] == 1
+
+
 def test_group_exposes_pack_contents():
     """A season-pack card carries the chosen peer's full video-file list so the UI
     can expand it and a pack grab can pull the whole folder (non-video excluded)."""

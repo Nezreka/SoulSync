@@ -41,12 +41,16 @@ clear_profile_tidal_client = None
 _download_orchestrator = lambda: None   # noqa: E731 - rebindable boot global
 _media_server_engine = lambda: None     # noqa: E731
 _spotify_client = lambda: None          # noqa: E731 - rebound on reconnect
+_listenbrainz_import_workers = lambda: None  # noqa: E731
+_lastfm_import_workers = lambda: None  # noqa: E731
 
 
 def configure(*, get_database, config_manager, get_current_profile_id, VALID_PAGE_IDS,
               _login_limiter, _launch_pin_limiter, _require_login_enabled,
               metadata_fallback_source, download_orchestrator_getter,
-              media_server_engine_getter, spotify_client_getter, tidal_client_clearer):
+              media_server_engine_getter, spotify_client_getter, tidal_client_clearer,
+              listenbrainz_import_workers_getter=lambda: None,
+              lastfm_import_workers_getter=lambda: None):
     globals()['get_database'] = get_database
     globals()['config_manager'] = config_manager
     globals()['get_current_profile_id'] = get_current_profile_id
@@ -59,6 +63,8 @@ def configure(*, get_database, config_manager, get_current_profile_id, VALID_PAG
     globals()['_media_server_engine'] = media_server_engine_getter
     globals()['_spotify_client'] = spotify_client_getter
     globals()['clear_profile_tidal_client'] = tidal_client_clearer
+    globals()['_listenbrainz_import_workers'] = listenbrainz_import_workers_getter
+    globals()['_lastfm_import_workers'] = lastfm_import_workers_getter
 
 
 def create_blueprint():
@@ -174,17 +180,63 @@ def _disconnect_profile_tidal(pid):
     clear_profile_tidal_client(pid)
 
 
+def _listening_import_workers(service):
+    return _lastfm_import_workers() if service == 'lastfm' else _listenbrainz_import_workers()
+
+
+def _listening_import_connected(pid, previous_username, username, service='listenbrainz'):
+    """their own listenbrainz or last.fm makes their listening history their
+    own (#1293), start importing it now. never fails the save."""
+    try:
+        workers = _listening_import_workers(service)
+        if workers is not None:
+            workers.on_connected(pid, previous_username, username)
+    except Exception as e:
+        logger.warning("could not start %s listening import for profile %s: %s", service, pid, e)
+
+
+def _listening_import_disconnected(pid, service='listenbrainz'):
+    try:
+        workers = _listening_import_workers(service)
+        if workers is not None:
+            workers.on_disconnected(pid)
+    except Exception as e:
+        logger.debug("could not stop %s listening import for profile %s: %s", service, pid, e)
+
+
+def _profile_lastfm_connection(profile_id):
+    """(connected, username) for a profile's OWN last.fm."""
+    if not profile_id or profile_id == 1:
+        return (False, None)
+    try:
+        name = (get_database().get_profile_lastfm(profile_id) or {}).get('username')
+        return (bool(name), name or None)
+    except Exception as e:
+        logger.debug("profile %s last.fm connection check failed: %s", profile_id, e)
+        return (False, None)
+
+
+def _disconnect_profile_lastfm(pid):
+    try:
+        get_database().clear_profile_lastfm(pid)
+    except Exception as e:
+        logger.debug("could not clear profile last.fm: %s", e)
+    _listening_import_disconnected(pid, 'lastfm')
+
+
 def _disconnect_profile_listenbrainz(pid):
     try:
         get_database().clear_profile_listenbrainz(pid)
     except Exception as e:
         logger.debug("could not clear profile listenbrainz: %s", e)
+    _listening_import_disconnected(pid)
 
 
 _PROFILE_DISCONNECTORS = {
     'spotify': _disconnect_profile_spotify,
     'tidal': _disconnect_profile_tidal,
     'listenbrainz': _disconnect_profile_listenbrainz,
+    'lastfm': _disconnect_profile_lastfm,
 }
 
 
@@ -500,7 +552,11 @@ def update_profile(profile_id):
             root = str(data.get('library_root') or '').strip()
             if mode == 'own':
                 if config_manager.get_active_media_server() not in ('plex', 'jellyfin'):
-                    return jsonify({'success': False, 'error': 'Own libraries require Plex or Jellyfin. Switch this profile to the shared library for Navidrome or Standalone.'}), 400
+                    existing_lib = database.get_profile_library(profile_id)
+                    is_already_own = (existing_lib.get('mode') == 'own' and
+                                      str(existing_lib.get('root') or '').strip() == root)
+                    if not is_already_own:
+                        return jsonify({'success': False, 'error': 'Own libraries require Plex or Jellyfin. Switch this profile to the shared library for Navidrome or Standalone.'}), 400
                 if not root:
                     return jsonify({'success': False, 'error': 'An own library needs an output folder'}), 400
                 shared_root = str(config_manager.get('soulseek.transfer_path', '') or '').strip().rstrip('/\\')
@@ -515,6 +571,11 @@ def update_profile(profile_id):
             library_result = database.set_profile_library(profile_id, mode, root or None)
             from core.library_scope import invalidate_library_scope_cache
             invalidate_library_scope_cache()
+            try:
+                from core.imports.paths import reset_own_library_fallback_notifications
+                reset_own_library_fallback_notifications()
+            except Exception:  # noqa: S110 — resetting notification state is best-effort
+                pass
 
         success = database.update_profile(profile_id, **kwargs) if kwargs else True
         if library_result is False:
@@ -826,9 +887,11 @@ def save_profile_listenbrainz():
         username = result
         profile_id = get_current_profile_id()
         db = get_database()
+        previous_username = (db.get_profile_listenbrainz(profile_id) or {}).get('username') or ''
         success = db.set_profile_listenbrainz(profile_id, token, base_url, username)
 
         if success:
+            _listening_import_connected(profile_id, previous_username, username)
             return jsonify({'success': True, 'username': username})
         return jsonify({'success': False, 'error': 'Failed to save credentials'}), 500
     except Exception as e:
@@ -841,9 +904,74 @@ def delete_profile_listenbrainz():
         profile_id = get_current_profile_id()
         db = get_database()
         db.clear_profile_listenbrainz(profile_id)
+        _listening_import_disconnected(profile_id)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+# --- Per-Profile Last.fm (#1293) ---
+# just a username. scrobbles are public, the app's api key reads them, so
+# there's no login and nothing secret to store.
+
+def _check_lastfm_user(username):
+    """(ok, canonical name or error). reads one page of their scrobbles, which
+    proves the name exists AND that their listening isn't hidden."""
+    api_key = config_manager.get('lastfm.api_key', '')
+    if not api_key:
+        return False, "Last.fm isn't set up on this server yet, ask the admin to add an API key in Settings."
+    try:
+        from core.lastfm_client import LastFMClient
+        data = LastFMClient(api_key=api_key).get_user_recent_tracks(username, limit=1)
+    except Exception as e:
+        return False, f"Couldn't reach Last.fm: {e}"
+    recent = (data or {}).get('recenttracks')
+    if not isinstance(recent, dict):
+        return False, "Couldn't read that Last.fm user's scrobbles. Check the name, and that recent listening isn't hidden."
+    return True, (recent.get('@attr') or {}).get('user') or username
+
+
+@bp.route('/api/profiles/me/lastfm', methods=['GET'])
+def get_profile_lastfm():
+    try:
+        connected, username = _profile_lastfm_connection(get_current_profile_id())
+        return jsonify({'success': True, 'connected': connected, 'username': username})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/lastfm', methods=['POST'])
+def save_profile_lastfm():
+    try:
+        data = request.json or {}
+        username = str(data.get('username') or data.get('token') or '').strip()
+        if not username:
+            return jsonify({'success': False, 'error': 'Last.fm username is required'}), 400
+        profile_id = get_current_profile_id()
+        if not profile_id or profile_id == 1:
+            return jsonify({'success': False, 'error': 'The admin account is managed in Settings'}), 400
+        ok, result = _check_lastfm_user(username)
+        if not ok:
+            return jsonify({'success': False, 'error': result}), 400
+        db = get_database()
+        previous = (db.get_profile_lastfm(profile_id) or {}).get('username') or ''
+        if not db.set_profile_lastfm(profile_id, result):
+            return jsonify({'success': False, 'error': 'Failed to save'}), 500
+        _listening_import_connected(profile_id, previous, result, 'lastfm')
+        return jsonify({'success': True, 'username': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/lastfm', methods=['DELETE'])
+def delete_profile_lastfm():
+    try:
+        profile_id = get_current_profile_id()
+        if profile_id and profile_id != 1:
+            _disconnect_profile_lastfm(profile_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @bp.route('/api/profiles/me/listenbrainz/test', methods=['POST'])
 def test_profile_listenbrainz():
@@ -872,13 +1000,21 @@ def get_my_connections():
         sp_connected, sp_account = _profile_spotify_connection(pid)
         td_connected, td_account = _profile_tidal_connection(pid)
         lb_connected, lb_account = _profile_listenbrainz_connection(pid)
+        fm_connected, fm_account = _profile_lastfm_connection(pid)
         return jsonify({
             'success': True,
             'is_admin': pid == 1,
+            # whose listening this profile's stats read (#1293), for the card
+            # at the top of My Account
+            'listening': {
+                'scope': get_database().listening_history_scope(pid),
+                'sources': [s for s, on in (('listenbrainz', lb_connected), ('lastfm', fm_connected)) if on],
+            },
             'connections': {
                 'spotify': {'connected': sp_connected, 'account': sp_account},
                 'tidal': {'connected': td_connected, 'account': td_account},
                 'listenbrainz': {'connected': lb_connected, 'account': lb_account},
+                'lastfm': {'connected': fm_connected, 'account': fm_account},
             },
         })
     except Exception as e:

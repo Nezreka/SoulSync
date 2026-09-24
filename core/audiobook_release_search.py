@@ -353,7 +353,13 @@ def title_relevance(release_title: Optional[str], book_title: Optional[str],
     if author_tokens:
         author_hits = sum(1 for token in author_tokens if token in haystack)
         author_score = author_hits / len(author_tokens)
-        score = (score * 0.75) + (author_score * 0.25)
+        if len(wanted) == 1:
+            # Single-word book titles (e.g. "Infortunio") have a high risk of false
+            # collisions with track names or unrelated albums. Require the author to match
+            # rather than letting a 1-word title alone clear min_relevance.
+            score = (score * 0.40) + (author_score * 0.60)
+        else:
+            score = (score * 0.75) + (author_score * 0.25)
     return round(min(1.0, score), 4)
 
 
@@ -653,6 +659,14 @@ class AudiobookRelease:
     # A full-cast dramatisation rather than a reading. Its runtime bears no
     # relation to the book's, so the completeness gate must not measure it.
     dramatized: bool = False
+    # Populated when a source (like Soulseek/slskd) provides file durations in search results.
+    duration_seconds: Optional[float] = None
+    # "match" | "mismatch" | "unknown" against the series volume/sequence that was wanted.
+    series_verdict: str = "unknown"
+    # True if the release is identified as a music soundtrack / film score.
+    is_soundtrack: bool = False
+    # "normal" | "short" | "severely_short" | "overshoot" when duration is available.
+    duration_verdict: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -681,7 +695,64 @@ class AudiobookRelease:
             "quality_note": self.quality_note,
             "short_warning": self.short_warning,
             "dramatized": self.dramatized,
+            "duration_seconds": self.duration_seconds,
+            "series_verdict": self.series_verdict,
+            "is_soundtrack": self.is_soundtrack,
+            "duration_verdict": self.duration_verdict,
         }
+
+
+_SOUNDTRACK_PATTERN = re.compile(
+    r"\b(soundtrack|ost|original motion picture score|motion picture soundtrack|film score|original soundtrack|original score)\b",
+    re.IGNORECASE,
+)
+
+_SEQ_PATTERNS = (
+    re.compile(r"\b(?:Book|Vol(?:ume)?)\.?\s*#?\s*(\d{1,2})\b", re.IGNORECASE),
+    re.compile(r"[\(\[\{](\d{1,2})[\)\]\}]"),
+    re.compile(r"\b#(\d{1,2})\b"),
+    re.compile(r"\b0(\d)\b"),
+)
+
+
+def expected_series_sequence(book: Dict[str, Any]) -> Optional[str]:
+    """Extract expected book volume number in a series, if known."""
+    seq = book.get("series_sequence")
+    if seq is not None and str(seq).strip():
+        val = str(seq).strip()
+        try:
+            return str(int(float(val)))
+        except ValueError:
+            return val
+    for item in (book.get("series") or []):
+        if isinstance(item, dict) and item.get("sequence") is not None:
+            val = str(item["sequence"]).strip()
+            if val:
+                try:
+                    return str(int(float(val)))
+                except ValueError:
+                    return val
+    title = str(book.get("title") or "")
+    m = re.search(r"\bBook\s*(\d+)\b", title, re.IGNORECASE)
+    if m:
+        return str(int(m.group(1)))
+    return None
+
+
+def extract_release_sequences(title: str) -> List[str]:
+    """Extract potential volume/sequence numbers from a release title."""
+    found: List[str] = []
+    for pat in _SEQ_PATTERNS:
+        for m in pat.finditer(title):
+            try:
+                num = int(m.group(1))
+                if 1 <= num <= 50:
+                    s = str(num)
+                    if s not in found:
+                        found.append(s)
+            except ValueError:
+                pass
+    return found
 
 
 def score_release(
@@ -731,6 +802,75 @@ def score_release(
         )
         reasons.append("dramatised adaptation, not the audiobook")
         score -= 50.0
+
+    # 1. Soundtrack / Music Score detection
+    if _SOUNDTRACK_PATTERN.search(release.title):
+        release.is_soundtrack = True
+        score -= 100.0
+        warnings.append("This appears to be a music soundtrack/score rather than an audiobook.")
+        reasons.append("soundtrack / music score, not an audiobook -100")
+
+    # 2. Series volume conflict guard
+    expected_seq = expected_series_sequence(book)
+    if expected_seq:
+        found_seqs = extract_release_sequences(release.title)
+        if found_seqs:
+            if expected_seq in found_seqs:
+                release.series_verdict = "match"
+                score += 15.0
+                reasons.append(f"series volume matches (#{expected_seq}) +15")
+            else:
+                release.series_verdict = "mismatch"
+                score -= 120.0
+                seq_str = "/".join(found_seqs)
+                warnings.append(
+                    f"Volume mismatch: wanted book #{expected_seq} in series, but release appears to be #{seq_str}."
+                )
+                reasons.append(f"series volume conflict: wanted #{expected_seq}, release has #{seq_str} -120")
+
+    # 3. Pre-download duration check (from sources providing length, like Soulseek)
+    if release.duration_seconds is not None and release.duration_seconds > 0:
+        expected_minutes = book.get("runtime_minutes")
+        if expected_minutes:
+            try:
+                expected_sec = float(expected_minutes) * 60.0
+                if expected_sec > 0:
+                    dur_ratio = release.duration_seconds / expected_sec
+                    dur_min = round(release.duration_seconds / 60.0, 1)
+                    if not release.abridged and not release.dramatized:
+                        if dur_ratio < 0.75:
+                            release.duration_verdict = "severely_short"
+                            score -= 100.0
+                            short_min = max(0, int(float(expected_minutes) - dur_min))
+                            warnings.append(
+                                f"Reported duration ({dur_min:.0f}m) is far short of {expected_minutes}m book "
+                                f"(about {short_min}m short)."
+                            )
+                            reasons.append(f"duration severely short ({int(dur_ratio * 100)}%) -100")
+                        elif dur_ratio < 0.85:
+                            release.duration_verdict = "short"
+                            score -= 50.0
+                            short_min = max(0, int(float(expected_minutes) - dur_min))
+                            warnings.append(
+                                f"Reported duration ({dur_min:.0f}m) is short of {expected_minutes}m book "
+                                f"(about {short_min}m short)."
+                            )
+                            reasons.append(f"duration short ({int(dur_ratio * 100)}%) -50")
+                        elif dur_ratio > 1.60:
+                            release.duration_verdict = "overshoot"
+                            score -= 80.0
+                            warnings.append(
+                                f"Reported duration ({dur_min:.0f}m) is far longer than {expected_minutes}m book."
+                            )
+                            reasons.append(f"duration overshoot ({int(dur_ratio * 100)}%) -80")
+                        elif 0.90 <= dur_ratio <= 1.25:
+                            release.duration_verdict = "normal"
+                            score += 15.0
+                            reasons.append(f"duration matches runtime (~{dur_min:.0f}m) +15")
+                        else:
+                            release.duration_verdict = "normal"
+            except (TypeError, ValueError):
+                pass
 
     # A title that says it is one piece of a set. This is the cheapest catch
     # there is and needs no bitrate: the uploader already told us.
@@ -864,6 +1004,13 @@ def rank_releases(
     # catalogue names the edition AND the release names its own, and most
     # releases name nothing.
     keep = [r for r in keep if r.abridgement_verdict != "mismatch"]
+    # Nor is a different volume in a series. Book 4 is not a worse copy of Book 5,
+    # it is a completely different book.
+    keep = [r for r in keep if getattr(r, "series_verdict", "unknown") != "mismatch"]
+    # Nor is a music soundtrack or film score.
+    keep = [r for r in keep if not getattr(r, "is_soundtrack", False)]
+    # Nor is a release with reported duration less than 75% of expected runtime.
+    keep = [r for r in keep if getattr(r, "duration_verdict", "") != "severely_short"]
     # Releases the user has blocked, or that failed badly enough to be blocked
     # automatically. Without this the wishlist re-grabs the same broken posting
     # forever: it fails, returns to the wishlist, and is found again next pass.

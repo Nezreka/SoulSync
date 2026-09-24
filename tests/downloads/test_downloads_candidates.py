@@ -205,6 +205,37 @@ def test_candidates_tried_in_confidence_order():
     assert deps.download_orchestrator.download_calls[0][1] == "high.flac"
 
 
+def test_observed_speed_fallback_is_retried_only_after_alternatives():
+    class _SequentialSoulseek(_FakeSoulseek):
+        async def download(self, username, filename, size, *, quality_profile_id=None):
+            self.download_calls.append((username, filename, size))
+            self.download_profile_calls.append(quality_profile_id)
+            return 'dl-slow' if filename == 'slow.flac' else None
+
+    soulseek = _SequentialSoulseek()
+    deps = _build_deps(soulseek=soulseek)
+    _seed_task('slow-fallback', used_sources={'slow_slow.flac'})
+    download_tasks['slow-fallback']['_slow_fallback_source_key'] = 'slow_slow.flac'
+    download_tasks['slow-fallback']['_slow_fallback_speed_bps'] = 100_000
+    candidates = [
+        _Candidate(username='slow', filename='slow.flac', confidence=0.99),
+        _Candidate(username='alternative', filename='alternative.flac', confidence=0.5),
+    ]
+
+    result = dc.attempt_download_with_candidates(
+        'slow-fallback', candidates, _Track(), batch_id='b1', deps=deps,
+    )
+
+    assert result is True
+    assert [call[1] for call in soulseek.download_calls] == [
+        'alternative.flac',
+        'slow.flac',
+    ]
+    assert download_tasks['slow-fallback']['download_id'] == 'dl-slow'
+    assert download_tasks['slow-fallback']['_observed_speed_exempt'] is True
+    assert '_slow_fallback_source_key' not in download_tasks['slow-fallback']
+
+
 # ---------------------------------------------------------------------------
 # used_sources dedupe
 # ---------------------------------------------------------------------------

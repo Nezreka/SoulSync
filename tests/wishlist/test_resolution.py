@@ -3,6 +3,14 @@ from types import SimpleNamespace
 from core.wishlist import resolution
 
 
+def _published(tmp_path, name="01 - Song.mp3"):
+    """A file that really is in the library — the proof a download-completion
+    removal now has to supply (#1289)."""
+    path = tmp_path / name
+    path.write_bytes(b"AUDIO")
+    return str(path)
+
+
 class _FakeWishlistService:
     def __init__(self, tracks):
         self.tracks = tracks
@@ -11,12 +19,12 @@ class _FakeWishlistService:
     def get_wishlist_tracks_for_download(self, profile_id=1):
         return list(self.tracks)
 
-    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1):
+    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1, **kwargs):
         self.removed.append((spotify_track_id, success, error_message, profile_id))
         return True
 
 
-def test_check_and_remove_from_wishlist_uses_search_result_fallback():
+def test_check_and_remove_from_wishlist_uses_search_result_fallback(tmp_path):
     fake_db = SimpleNamespace(get_all_profiles=lambda: [{"id": 1}])
     wishlist_service = _FakeWishlistService(
         [
@@ -44,12 +52,13 @@ def test_check_and_remove_from_wishlist_uses_search_result_fallback():
         context,
         wishlist_service=wishlist_service,
         database=fake_db,
+        published_path=_published(tmp_path),
     )
 
     assert wishlist_service.removed == [("sp-track-1", True, None, 1)]
 
 
-def test_check_and_remove_from_wishlist_uses_spotify_source_id():
+def test_check_and_remove_from_wishlist_uses_spotify_source_id(tmp_path):
     fake_db = SimpleNamespace(get_all_profiles=lambda: [{"id": 1}])
     wishlist_service = _FakeWishlistService(
         [
@@ -78,12 +87,13 @@ def test_check_and_remove_from_wishlist_uses_spotify_source_id():
         context,
         wishlist_service=wishlist_service,
         database=fake_db,
+        published_path=_published(tmp_path),
     )
 
     assert wishlist_service.removed == [("sp-track-1", True, None, 1)]
 
 
-def test_check_and_remove_from_wishlist_uses_non_spotify_source_id():
+def test_check_and_remove_from_wishlist_uses_non_spotify_source_id(tmp_path):
     fake_db = SimpleNamespace(get_all_profiles=lambda: [{"id": 1}])
     wishlist_service = _FakeWishlistService(
         [
@@ -112,12 +122,13 @@ def test_check_and_remove_from_wishlist_uses_non_spotify_source_id():
         context,
         wishlist_service=wishlist_service,
         database=fake_db,
+        published_path=_published(tmp_path),
     )
 
     assert wishlist_service.removed == [("dz-track-1", True, None, 1)]
 
 
-def test_check_and_remove_from_wishlist_uses_wishlist_id_lookup():
+def test_check_and_remove_from_wishlist_uses_wishlist_id_lookup(tmp_path):
     fake_db = SimpleNamespace(get_all_profiles=lambda: [{"id": 1}])
     wishlist_service = _FakeWishlistService(
         [
@@ -142,6 +153,7 @@ def test_check_and_remove_from_wishlist_uses_wishlist_id_lookup():
         context,
         wishlist_service=wishlist_service,
         database=fake_db,
+        published_path=_published(tmp_path),
     )
 
     assert wishlist_service.removed == [("sp-track-2", True, None, 1)]

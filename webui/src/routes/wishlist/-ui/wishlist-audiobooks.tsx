@@ -14,19 +14,20 @@ import {
   removeFromWishlist,
   retryWishlistEntry,
   runWishlistPass,
+  searchWishlistBook,
   setNarratorMode,
 } from '@/routes/audiobooks/-audiobooks.api';
 import { AudiobookReleasesModal } from '@/routes/audiobooks/-ui/audiobook-releases-modal';
 
 import styles from './wishlist-audiobooks.module.css';
 
-const FILTERS: { key: AudiobookWishlistStatus | 'all'; label: string }[] = [
+const FILTERS: { key: AudiobookWishlistStatus | 'all'; label: string; dotClass?: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'wanted', label: 'Looking' },
-  { key: 'grabbed', label: 'In progress' },
-  { key: 'done', label: 'Got it' },
-  { key: 'cancelled', label: 'Cancelled' },
-  { key: 'failed', label: 'Not found yet' },
+  { key: 'wanted', label: 'Looking', dotClass: styles.dotLooking },
+  { key: 'grabbed', label: 'In progress', dotClass: styles.dotActive },
+  { key: 'done', label: 'In library', dotClass: styles.dotDone },
+  { key: 'failed', label: 'Not found yet', dotClass: styles.dotFailed },
+  { key: 'cancelled', label: 'Cancelled', dotClass: styles.dotCancelled },
 ];
 
 const STATUS_LABELS: Record<AudiobookWishlistStatus, string> = {
@@ -49,27 +50,66 @@ function relativeTime(seconds: number): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+function getStatusBadgeClass(status: AudiobookWishlistStatus): string {
+  switch (status) {
+    case 'done':
+      return styles.badgeDone;
+    case 'grabbed':
+      return styles.badgeActive;
+    case 'searching':
+      return styles.badgeSearching;
+    case 'wanted':
+      return styles.badgeLooking;
+    case 'failed':
+      return styles.badgeFailed;
+    default:
+      return '';
+  }
+}
+
 /**
  * The audiobooks half of the wishlist page.
  *
- * A separate list from music on purpose — the same isolation the video side
- * keeps between movies, shows and channels. They share the page and nothing
- * else: different database, different search, different acquisition chain.
- *
- * It is deliberately honest about waiting. An audiobook is usually not on any
- * indexer the day it is wanted, so every row shows how many times it has been
- * looked for and when it was last tried; without that, "nothing found yet" and
- * "nothing is happening" look identical, and only one of them is a bug.
+ * Designed with a premium aesthetic featuring:
+ * - Glassmorphic command hero with live automation status
+ * - Interactive status chips with glowing indicator dots
+ * - Dual view modes: Gallery Grid & Bookshelf List
+ * - 3D book cover depth with spine sheen and hover elevation
+ * - Narrator lock toggles and series badges
  */
-export function WishlistAudiobooks() {
+export function WishlistAudiobooks({
+  onCountChange,
+}: {
+  onCountChange?: (count: number) => void;
+} = {}) {
   const [items, setItems] = useState<AudiobookWishlistEntry[]>([]);
   const [counts, setCounts] = useState<AudiobookWishlistCounts | null>(null);
   const [worker, setWorker] = useState<AudiobookWishlistSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<AudiobookWishlistStatus | 'all'>('all');
+  const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
+  const [searchingAsin, setSearchingAsin] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [releasesFor, setReleasesFor] = useState<AudiobookWishlistEntry | null>(null);
+
+  const [viewMode, setViewMode] = useState<'grid' | 'shelf'>(() => {
+    try {
+      const stored = window.localStorage.getItem('audiobookWishlistView');
+      return stored === 'shelf' ? 'shelf' : 'grid';
+    } catch {
+      return 'grid';
+    }
+  });
+
+  const handleSetViewMode = (mode: 'grid' | 'shelf') => {
+    setViewMode(mode);
+    try {
+      window.localStorage.setItem('audiobookWishlistView', mode);
+    } catch {
+      // ignore local storage errors
+    }
+  };
 
   const load = useCallback(async () => {
     const view = await fetchWishlist();
@@ -77,7 +117,8 @@ export function WishlistAudiobooks() {
     setCounts(view.counts);
     setWorker(view.worker);
     setLoading(false);
-  }, []);
+    onCountChange?.(view.counts?.total ?? view.items.length);
+  }, [onCountChange]);
 
   useEffect(() => {
     void load();
@@ -85,10 +126,25 @@ export function WishlistAudiobooks() {
     return () => window.clearInterval(timer);
   }, [load]);
 
-  const shown = useMemo(
-    () => (filter === 'all' ? items : items.filter((item) => item.status === filter)),
-    [items, filter],
-  );
+  const shown = useMemo(() => {
+    let list = items;
+    if (filter !== 'all') {
+      list = list.filter((item) => item.status === filter);
+    }
+    const q = query.trim().toLowerCase();
+    if (q) {
+      list = list.filter((item) => {
+        const title = (item.title || '').toLowerCase();
+        const authors = (item.authors || []).join(' ').toLowerCase();
+        const narrators = (item.narrators || []).join(' ').toLowerCase();
+        const series = (item.series_title || '').toLowerCase();
+        return (
+          title.includes(q) || authors.includes(q) || narrators.includes(q) || series.includes(q)
+        );
+      });
+    }
+    return list;
+  }, [items, filter, query]);
 
   const searchNow = async () => {
     setSearching(true);
@@ -108,15 +164,23 @@ export function WishlistAudiobooks() {
     await load();
   };
 
-  /**
-   * Loosening or tightening which reading will do.
-   *
-   * This lives here rather than behind a dialog when the book is added: almost
-   * everyone wants the reading they just picked, and a question on every heart
-   * click taxes the commonest action to serve the rarest intent. A book that is
-   * not turning up is visible on this row, which is exactly the moment someone
-   * decides they would take another narrator after all.
-   */
+  const searchBook = async (asin: string) => {
+    setSearchingAsin(asin);
+    setNotice('');
+    const res = await searchWishlistBook(asin);
+    setSearchingAsin(null);
+    if (!res.success) {
+      setNotice(`Search failed for ${asin}: ${res.error || 'Unknown error'}`);
+    } else if (res.outcome?.grabbed) {
+      setNotice('Found and sent to downloads!');
+    } else if (res.outcome?.found && res.outcome.found > 0) {
+      setNotice(`Found ${res.outcome.found} releases (not grabbed).`);
+    } else {
+      setNotice('No releases found for this title yet.');
+    }
+    await load();
+  };
+
   const changeNarratorMode = async (asin: string, mode: AudiobookNarratorMode) => {
     setItems((current) =>
       current.map((item) => (item.asin === asin ? { ...item, narrator_mode: mode } : item)),
@@ -131,8 +195,6 @@ export function WishlistAudiobooks() {
     await load();
   };
 
-  // the way back from cancelled, and past the backoff on a miss. the row
-  // shows "Looking" at once; the next pass (or Search now) picks it up first
   const lookAgain = async (asin: string) => {
     setItems((current) =>
       current.map((item) =>
@@ -149,100 +211,243 @@ export function WishlistAudiobooks() {
 
   return (
     <div className={styles.panel}>
-      <header className={styles.head}>
-        <div className={styles.headText}>
-          <p className={styles.blurb}>
-            Searched on a schedule by the{' '}
-            <strong>{worker?.automation_name ?? 'audiobook wishlist'}</strong> automation
-            {backoffHours > 0 && (
-              <>
-                {' '}
-                — each book then waits {backoffHours} hours between attempts, so one that isn't out
-                yet can't crowd out the rest
-              </>
-            )}
-            . Change how often it runs on the Automations page.
+      {/* ── Glassmorphic Command Hero ───────────────────────────────────── */}
+      <section className={styles.heroBanner}>
+        <div className={styles.heroContent}>
+          <div className={styles.heroTagline}>
+            <span className={styles.heroPill}>
+              <span className={styles.heroPulseDot} />
+              Automation Active
+            </span>
+            <span className={styles.heroTitle}>
+              {worker?.automation_name ?? 'Auto-Process Audiobook Wishlist'}
+            </span>
+          </div>
+
+          <p className={styles.heroDesc}>
+            Searches indexers on a schedule
+            {backoffHours > 0 &&
+              ` — each title waits ${backoffHours} hours between attempts to prevent rate-limiting`}
+            . Customise frequency anytime on the Automations page.
           </p>
+
+          {counts && (
+            <div className={styles.heroStats}>
+              <div className={styles.heroStatItem}>
+                <span className={styles.heroStatVal}>{counts.total}</span>
+                <span className={styles.heroStatLabel}>Total</span>
+              </div>
+              <div className={styles.heroStatItem}>
+                <span className={styles.heroStatVal}>{counts.wanted ?? 0}</span>
+                <span className={styles.heroStatLabel}>Looking</span>
+              </div>
+              <div className={styles.heroStatItem}>
+                <span className={styles.heroStatVal}>
+                  {(counts.searching ?? 0) + (counts.grabbed ?? 0)}
+                </span>
+                <span className={styles.heroStatLabel}>In Flight</span>
+              </div>
+              <div className={styles.heroStatItem}>
+                <span className={styles.heroStatVal}>{counts.done ?? 0}</span>
+                <span className={styles.heroStatLabel}>In Library</span>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className={styles.headActions}>
+        <div className={styles.heroActions}>
           <button
             type="button"
             className={styles.searchNow}
             onClick={() => void searchNow()}
             disabled={searching}
+            aria-label="Search now"
           >
-            {searching ? 'Searching…' : 'Search now'}
+            {searching ? (
+              <>
+                <span className={styles.searchNowSpinner} />
+                Searching…
+              </>
+            ) : (
+              <>⚡ Search now</>
+            )}
           </button>
         </div>
-      </header>
+      </section>
 
       {notice && <p className={styles.notice}>{notice}</p>}
 
-      {counts && counts.total > 0 && (
-        <nav className={styles.filters} aria-label="Filter by status">
-          {FILTERS.map((entry) => {
-            const total = entry.key === 'all' ? counts.total : (counts[entry.key] ?? 0);
-            if (entry.key !== 'all' && total === 0) return null;
-            return (
-              <button
-                key={entry.key}
-                type="button"
-                className={`${styles.filter} ${filter === entry.key ? styles.filterOn : ''}`}
-                onClick={() => setFilter(entry.key)}
-              >
-                {entry.label}
-                <span className={styles.filterCount}>{total}</span>
-              </button>
-            );
-          })}
-        </nav>
-      )}
+      {/* ── Interactive Toolbar ────────────────────────────────────────── */}
+      <div className={styles.toolbar}>
+        <div className={styles.searchBar}>
+          <span className={styles.searchIcon}>🔍</span>
+          <input
+            type="text"
+            className={styles.searchInput}
+            placeholder="Filter by title, author, narrator, or series…"
+            aria-label="Filter audiobook wishlist"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {query && (
+            <button
+              type="button"
+              className={styles.searchClear}
+              onClick={() => setQuery('')}
+              title="Clear filter"
+              aria-label="Clear filter"
+            >
+              ✕
+            </button>
+          )}
+        </div>
 
+        <div className={styles.controlsRow}>
+          {counts && counts.total > 0 && (
+            <nav className={styles.filters} aria-label="Filter by status">
+              {FILTERS.map((entry) => {
+                const total = entry.key === 'all' ? counts.total : (counts[entry.key] ?? 0);
+                if (entry.key !== 'all' && total === 0) return null;
+                const isSelected = filter === entry.key;
+                return (
+                  <button
+                    key={entry.key}
+                    type="button"
+                    className={`${styles.filter} ${isSelected ? styles.filterOn : ''}`}
+                    onClick={() => setFilter(entry.key)}
+                  >
+                    <span className={`${styles.filterDot} ${entry.dotClass || ''}`} />
+                    {entry.label}
+                    <span className={styles.filterCount}>{total}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          )}
+
+          {/* View Mode Switcher */}
+          <div className={styles.viewSwitch} role="group" aria-label="View mode">
+            <button
+              type="button"
+              className={`${styles.viewBtn} ${viewMode === 'grid' ? styles.viewBtnActive : ''}`}
+              onClick={() => handleSetViewMode('grid')}
+              title="Poster Gallery View"
+            >
+              ⊞ Grid
+            </button>
+            <button
+              type="button"
+              className={`${styles.viewBtn} ${viewMode === 'shelf' ? styles.viewBtnActive : ''}`}
+              onClick={() => handleSetViewMode('shelf')}
+              title="Detailed Shelf View"
+            >
+              ☰ Shelf
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Content Presentation ───────────────────────────────────────── */}
       {loading ? (
         <div className={styles.skeleton} aria-hidden="true" />
       ) : shown.length === 0 ? (
         <div className={styles.empty}>
-          <h3>{items.length === 0 ? 'No audiobooks wanted yet' : 'Nothing in this state'}</h3>
+          <div className={styles.emptyIcon}>🎧</div>
+          <h3>
+            {items.length === 0
+              ? 'No audiobooks wanted yet'
+              : query
+                ? `No audiobooks matching "${query}"`
+                : 'Nothing in this state'}
+          </h3>
           <p>
             {items.length === 0
-              ? 'Add a book from anywhere in the catalogue and it will keep looking until it turns up.'
-              : 'Try another filter.'}
+              ? 'Add an audiobook from the catalogue and SoulSync will continually look across your indexers.'
+              : query
+                ? 'Try adjusting your search query or clear the filter.'
+                : 'Try selecting a different status filter above.'}
           </p>
-          <Link to="/audiobooks" className={styles.browseLink}>
-            Browse audiobooks
-          </Link>
+          {items.length === 0 ? (
+            <Link to="/audiobooks" className={styles.browseLink}>
+              Browse audiobooks
+            </Link>
+          ) : query ? (
+            <button type="button" className={styles.browseLink} onClick={() => setQuery('')}>
+              Clear filter
+            </button>
+          ) : null}
         </div>
-      ) : (
-        <ul className={styles.grid}>
+      ) : viewMode === 'shelf' ? (
+        /* ── Bookshelf Detailed List View ─────────────────────────────── */
+        <ul className={styles.shelfList}>
           {shown.map((item) => (
-            <li className={styles.card} key={item.asin}>
-              <Link
-                to="/audiobooks/$asin"
-                params={{ asin: item.asin }}
-                className={styles.coverLink}
-                aria-label={item.title}
-              >
-                <div className={styles.art}>
+            <li className={styles.shelfRow} key={item.asin}>
+              <div className={styles.shelfThumb}>
+                <Link to="/audiobooks/$asin" params={{ asin: item.asin }}>
                   {item.cover_url ? (
-                    <img className={styles.cover} src={item.cover_url} alt="" loading="lazy" />
+                    <img className={styles.shelfCover} src={item.cover_url} alt="" loading="lazy" />
                   ) : (
                     <span className={styles.coverBlank} aria-hidden="true">
                       &#9835;
                     </span>
                   )}
-                  <span className={styles.scrim} aria-hidden="true" />
-                  <span
-                    className={`${styles.badge} ${
-                      item.status === 'done'
-                        ? styles.badgeDone
-                        : item.status === 'grabbed'
-                          ? styles.badgeActive
-                          : item.status === 'failed'
-                            ? styles.badgeFailed
-                            : ''
-                    }`}
-                  >
+                </Link>
+              </div>
+
+              <div className={styles.shelfInfo}>
+                <Link
+                  to="/audiobooks/$asin"
+                  params={{ asin: item.asin }}
+                  className={styles.shelfTitle}
+                >
+                  {item.title}
+                </Link>
+                <div className={styles.shelfMeta}>
+                  <span>{item.authors.join(', ')}</span>
+                  {item.narrators.length > 0 && (
+                    <button
+                      type="button"
+                      className={`${styles.narratorPill} ${
+                        item.narrator_mode === 'exact' ? styles.narratorLocked : styles.narratorAny
+                      }`}
+                      onClick={() =>
+                        void changeNarratorMode(
+                          item.asin,
+                          item.narrator_mode === 'exact' ? 'any' : 'exact',
+                        )
+                      }
+                      title={
+                        item.narrator_mode === 'exact'
+                          ? `Narrator locked to ${item.narrators[0]} — click to accept any`
+                          : 'Any narrator accepted — click to lock'
+                      }
+                    >
+                      🎙️ {item.narrators[0]} {item.narrator_mode === 'exact' ? '🔒' : ''}
+                    </button>
+                  )}
+                  {item.series_title && (
+                    <span className={styles.series}>
+                      <span className={styles.seriesBadge}>
+                        {item.series_sequence ? `Book ${item.series_sequence} of ` : ''}
+                      </span>
+                      {item.series_title}
+                    </span>
+                  )}
+                  <span className={styles.trail} title={item.last_error || undefined}>
+                    {item.attempt_count === 0
+                      ? 'Not looked for yet'
+                      : `Looked ${item.attempt_count}\u00d7 \u00b7 last ${relativeTime(item.last_attempt_at)}`}
+                    {item.last_error && (
+                      <span className={styles.trailError}> · {item.last_error}</span>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              <div className={styles.shelfDetails}>
+                <div className={styles.shelfBadgeCol}>
+                  <span className={`${styles.badge} ${getStatusBadgeClass(item.status)}`}>
+                    <span className={styles.badgePulse} />
                     {item.status === 'grabbed'
                       ? {
                           downloading: 'Downloading',
@@ -256,30 +461,165 @@ export function WishlistAudiobooks() {
                       : (STATUS_LABELS[item.status] ?? item.status)}
                   </span>
                 </div>
-              </Link>
+
+                <div className={styles.shelfActions}>
+                  <button
+                    type="button"
+                    className={`${styles.action} ${styles.actionPrimary}`}
+                    title="Search indexers and grab now"
+                    aria-label={`Search for ${item.title} now`}
+                    disabled={searchingAsin === item.asin}
+                    onClick={() => void searchBook(item.asin)}
+                  >
+                    {searchingAsin === item.asin ? 'Searching…' : 'Search'}
+                  </button>
+                  {(item.status === 'failed' || item.status === 'cancelled') && (
+                    <button
+                      type="button"
+                      className={styles.action}
+                      title="Look again on next pass"
+                      onClick={() => void lookAgain(item.asin)}
+                    >
+                      Look again
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={styles.action}
+                    onClick={() => setReleasesFor(item)}
+                  >
+                    Find releases
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.action} ${styles.actionDanger}`}
+                    onClick={() => void remove(item.asin)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        /* ── Gallery Poster Grid View ─────────────────────────────────── */
+        <ul className={styles.grid}>
+          {shown.map((item) => (
+            <li className={styles.card} key={item.asin}>
+              <div className={styles.coverContainer}>
+                <Link
+                  to="/audiobooks/$asin"
+                  params={{ asin: item.asin }}
+                  className={styles.coverLink}
+                  aria-label={item.title}
+                >
+                  <div className={styles.art}>
+                    {item.cover_url ? (
+                      <img className={styles.cover} src={item.cover_url} alt="" loading="lazy" />
+                    ) : (
+                      <span className={styles.coverBlank} aria-hidden="true">
+                        &#9835;
+                      </span>
+                    )}
+                    {/* 3D book spine gradient sheen */}
+                    <span className={styles.spineSheen} aria-hidden="true" />
+                    <span className={styles.scrim} aria-hidden="true" />
+                    <span className={`${styles.badge} ${getStatusBadgeClass(item.status)}`}>
+                      <span className={styles.badgePulse} />
+                      {item.status === 'grabbed'
+                        ? {
+                            downloading: 'Downloading',
+                            queued: 'Queued',
+                            paused: 'Paused',
+                            unavailable: 'Waiting for client',
+                            staged: 'Checking files',
+                            importing: 'Importing',
+                            cancelled: 'Cancelled',
+                          }[item.download_status || ''] || 'Waiting for client'
+                        : (STATUS_LABELS[item.status] ?? item.status)}
+                    </span>
+                  </div>
+                </Link>
+                <button
+                  type="button"
+                  className={styles.quickRemove}
+                  title="Remove from wishlist"
+                  aria-label={`Remove ${item.title} from wishlist`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void remove(item.asin);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
 
               <div className={styles.info}>
                 <Link to="/audiobooks/$asin" params={{ asin: item.asin }} className={styles.title}>
                   {item.title}
                 </Link>
                 <span className={styles.byline}>{item.authors.join(', ')}</span>
+
+                {item.narrators.length > 0 && (
+                  <button
+                    type="button"
+                    className={`${styles.narratorPill} ${
+                      item.narrator_mode === 'exact' ? styles.narratorLocked : styles.narratorAny
+                    }`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void changeNarratorMode(
+                        item.asin,
+                        item.narrator_mode === 'exact' ? 'any' : 'exact',
+                      );
+                    }}
+                    title={
+                      item.narrator_mode === 'exact'
+                        ? `Narrator locked to ${item.narrators[0]} — click to accept any narrator`
+                        : 'Any narrator accepted — click to lock'
+                    }
+                  >
+                    🎙️ {item.narrators[0]} {item.narrator_mode === 'exact' ? '🔒' : ''}
+                  </button>
+                )}
+
                 {item.series_title && (
                   <span className={styles.series}>
-                    {item.series_sequence ? `Book ${item.series_sequence} of ` : ''}
+                    <span className={styles.seriesBadge}>
+                      {item.series_sequence ? `Book ${item.series_sequence} of ` : ''}
+                    </span>
                     {item.series_title}
                   </span>
                 )}
+
                 <span className={styles.trail} title={item.last_error || undefined}>
                   {item.attempt_count === 0
                     ? 'Not looked for yet'
                     : `Looked ${item.attempt_count}\u00d7 \u00b7 last ${relativeTime(item.last_attempt_at)}`}
-                  {item.last_error ? ` \u00b7 ${item.last_error}` : ''}
+                  {item.last_error && (
+                    <span className={styles.trailError}> · {item.last_error}</span>
+                  )}
                 </span>
               </div>
 
-              {/* the controls stay off the artwork and appear on hover, the way
-                  the video wishlist keeps its poster clean */}
-              <div className={styles.actions}>
+              <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className={`${styles.action} ${styles.actionPrimary}`}
+                  title="Search indexers and grab now"
+                  aria-label={`Search for ${item.title} now`}
+                  disabled={searchingAsin === item.asin}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void searchBook(item.asin);
+                  }}
+                >
+                  {searchingAsin === item.asin ? 'Searching…' : 'Search'}
+                </button>
                 {item.narrators.length > 0 && (
                   <button
                     type="button"
@@ -289,12 +629,14 @@ export function WishlistAudiobooks() {
                         ? `Only ${item.narrators[0]}'s reading will do \u2014 click to accept any narrator`
                         : 'Any narrator will do \u2014 click to hold out for the one you picked'
                     }
-                    onClick={() =>
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
                       void changeNarratorMode(
                         item.asin,
                         item.narrator_mode === 'exact' ? 'any' : 'exact',
-                      )
-                    }
+                      );
+                    }}
                   >
                     {item.narrator_mode === 'exact' ? 'Narrator locked' : 'Any narrator'}
                   </button>
@@ -308,7 +650,11 @@ export function WishlistAudiobooks() {
                         ? 'Cancelled downloads are never retried on their own \u2014 want it again'
                         : 'Skip the wait and look on the next pass'
                     }
-                    onClick={() => void lookAgain(item.asin)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void lookAgain(item.asin);
+                    }}
                   >
                     Look again
                   </button>
@@ -316,14 +662,22 @@ export function WishlistAudiobooks() {
                 <button
                   type="button"
                   className={styles.action}
-                  onClick={() => setReleasesFor(item)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setReleasesFor(item);
+                  }}
                 >
                   Find releases
                 </button>
                 <button
                   type="button"
                   className={`${styles.action} ${styles.actionDanger}`}
-                  onClick={() => void remove(item.asin)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void remove(item.asin);
+                  }}
                 >
                   Remove
                 </button>

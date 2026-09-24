@@ -19,6 +19,7 @@ import {
   switchBlocklistTab,
   unblockEntry,
 } from './blocklist';
+import { patchChatMessages } from './chat-morph';
 import {
   _handoffLibrarySearchToEnhancedSearch,
   _updateSidebarLibraryBreadcrumb,
@@ -41,6 +42,7 @@ import {
   closeMyAccountsModal,
   disconnectMyAccount,
   openMyAccountsModal,
+  openPersonalSettings,
   saveMyAccountToken,
 } from './my-accounts';
 import {
@@ -52,6 +54,7 @@ import {
   toggleOriginEntry,
   toggleOriginGroup,
 } from './origin-history';
+import './server-activity';
 import {
   closeServiceSwitchModal,
   openServiceSwitchModal,
@@ -59,7 +62,6 @@ import {
   setDownloadMode,
   switchServiceSwitchTab,
 } from './service-switch';
-import './server-activity';
 import { closeTrackDetail, openTrackDetail } from './track-detail';
 import {
   closeWatchlistHistoryModal,
@@ -94,6 +96,8 @@ export const SHELL_WINDOW_EXPORTS = {
   connectMyAccount,
   saveMyAccountToken,
   disconnectMyAccount,
+  // the old My Settings entry point, now the same modal
+  openPersonalSettings,
   // service-switch.js (ported aug 26)
   openServiceSwitchModal,
   closeServiceSwitchModal,
@@ -119,6 +123,8 @@ export const SHELL_WINDOW_EXPORTS = {
   _mlmSaveMatch,
   _mlmDeleteMatch,
   // server-activity.js (ported aug 26): self-assigns window.ServerActivity
+  // chat.js renderMessages patches the list instead of rebuilding it (sept 24)
+  patchChatMessages,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);

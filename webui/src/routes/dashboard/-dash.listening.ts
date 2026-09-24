@@ -33,6 +33,8 @@ export interface RecentPlay {
   source: string;
   /** Library artist PK when the play was matched; null → resolve by name. */
   artistDbId: number | string | null;
+  /** back to back plays of the same song fold into one card, this counts them. */
+  plays: number;
 }
 
 /** "just now" → "3h ago" → "2d ago". Coarse on purpose: the band is a vibe,
@@ -62,24 +64,44 @@ export function sourceLabel(source: string | null | undefined): string {
   return SOURCE_LABELS[source.toLowerCase()] ?? source;
 }
 
+const sameSong = (a: RecentPlay, title: string, artist: string) =>
+  a.title.toLocaleLowerCase() === title.toLocaleLowerCase() &&
+  a.artist.toLocaleLowerCase() === artist.toLocaleLowerCase();
+
 /** Shape the API rows for the rail. Untitled rows are dropped — a play with
- *  no title renders as an empty tile and says nothing. */
+ *  no title renders as an empty tile and says nothing. a song played again
+ *  right after itself folds into the card before it (the newest play keeps
+ *  its time), so a repeat doesn't eat the rail. only back to back though, a
+ *  song you came back to later still gets its own card. */
 export function toRecentPlays(rows: RecentPlayRow[], now: Date, limit: number): RecentPlay[] {
   const out: RecentPlay[] = [];
   for (const row of rows) {
     const title = (row.title ?? '').trim();
     if (!title) continue;
+    const artist = (row.artist ?? '').trim();
+    const last = out[out.length - 1];
+    if (last && sameSong(last, title, artist)) {
+      last.plays += 1;
+      continue;
+    }
+    if (out.length >= limit) break;
     out.push({
       key: `${title}|${row.artist ?? ''}|${row.played_at ?? ''}`,
       title,
-      artist: (row.artist ?? '').trim(),
+      artist,
       album: (row.album ?? '').trim(),
       imageUrl: row.image_url || null,
       ago: timeAgo(row.played_at, now),
       source: sourceLabel(row.server_source),
       artistDbId: row.artist_db_id ?? null,
+      plays: 1,
     });
-    if (out.length >= limit) break;
   }
   return out;
+}
+
+/** the card's corner: "3h ago", or "3h ago · ×2" for a folded repeat. */
+export function playsCaption(play: Pick<RecentPlay, 'ago' | 'plays'>): string {
+  const times = play.plays > 1 ? `×${play.plays}` : '';
+  return [play.ago, times].filter(Boolean).join(' · ');
 }

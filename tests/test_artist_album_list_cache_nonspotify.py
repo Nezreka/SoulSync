@@ -163,3 +163,40 @@ def test_deezer_complete_multipage_is_cached(monkeypatch):
     second = client.get_artist_albums('7', limit=200)               # served from cache
     assert len(second) == 150
     assert client._api_get.call_count == 2                          # no refetch → cached
+
+def test_deezer_new_release_shows_once_the_list_ages_out(monkeypatch):
+    """discord (koven, "just to breathe"): the artist's list was cached before the
+    single dropped and served for 30 days, so only apple music, never cached,
+    had it. a list older than the max age has to be refetched."""
+    import core.metadata.artist_album_cache as aac
+    cache = MemoryCache()
+    monkeypatch.setattr(deezer_mod, 'get_metadata_cache', lambda: cache)
+    client = deezer_mod.DeezerClient.__new__(deezer_mod.DeezerClient)
+    new_single = {**_deezer_album(2), 'title': 'juST to breAThE', 'record_type': 'single'}
+    client._api_get = MagicMock(side_effect=[
+        {'data': [_deezer_album(1)]},
+        {'data': [new_single, _deezer_album(1)]},
+    ])
+
+    now = [1_000_000.0]
+    monkeypatch.setattr(aac.time, 'time', lambda: now[0])
+
+    assert [a.name for a in client.get_artist_albums('7', limit=200)] == ['Album 1']
+    now[0] += aac.ARTIST_ALBUM_LIST_MAX_AGE_S - 60
+    assert [a.name for a in client.get_artist_albums('7', limit=200)] == ['Album 1']
+    assert client._api_get.call_count == 1                     # still fresh, cached
+
+    now[0] += 120
+    names = [a.name for a in client.get_artist_albums('7', limit=200)]
+    assert 'juST to breAThE' in names
+    assert client._api_get.call_count == 2
+
+
+def test_unstamped_list_from_before_the_fix_is_stale():
+    """rows written before lists carried a fetch time are exactly the frozen ones."""
+    cache = MemoryCache()
+    key = make_artist_album_cache_key('artist-1', 'album,single', 200)
+    cache.entities[('deezer', 'artist', key)] = {'name': 'albums_artist-1', '_albums': [{'id': 'old'}]}
+
+    assert get_cached_artist_album_items(cache, 'deezer', 'artist-1', limit=200) is None
+    assert get_cached_artist_album_payload(cache, 'deezer', 'artist-1', limit=200) is None

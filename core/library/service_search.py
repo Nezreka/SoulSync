@@ -182,6 +182,112 @@ def _mb_direct_lookup(entity_type, mbid):
     return []
 
 
+def _deezer_get(kind, entity_id):
+    """Public-API GET ``/{album|track|artist}/{id}``. None on any failure."""
+    import requests as req_lib
+    try:
+        from core.deezer_throttle import wait_for_slot
+        wait_for_slot()
+        resp = req_lib.get(
+            f'https://api.deezer.com/{kind}/{entity_id}', timeout=10,
+        )
+        data = resp.json()
+    except Exception as e:
+        logger.debug("Deezer direct %s %s failed: %s", kind, entity_id, e)
+        return None
+    if not isinstance(data, dict) or data.get('error') or not data.get('id'):
+        return None
+    return data
+
+
+def _deezer_shape_artist(a):
+    return {
+        'id': str(a.get('id', '')),
+        'name': a.get('name', ''),
+        'image': a.get('picture_medium'),
+        'extra': f"Direct ID match · {a.get('nb_fan', 0)} fans",
+    }
+
+
+def _deezer_shape_album(a):
+    artist = a.get('artist', {}) if isinstance(a.get('artist'), dict) else {}
+    artist_name = artist.get('name', '')
+    return {
+        'id': str(a.get('id', '')),
+        'name': a.get('title', ''),
+        'image': a.get('cover_medium'),
+        'extra': f"Direct ID match{' · ' + artist_name if artist_name else ''}",
+    }
+
+
+def _deezer_shape_track(t):
+    artist = t.get('artist', {}) if isinstance(t.get('artist'), dict) else {}
+    album = t.get('album', {}) if isinstance(t.get('album'), dict) else {}
+    artist_name = artist.get('name', '')
+    album_name = album.get('title', '')
+    bits = ' · '.join(b for b in (artist_name, album_name) if b)
+    return {
+        'id': str(t.get('id', '')),
+        'name': t.get('title', ''),
+        'image': album.get('cover_medium'),
+        'extra': f"Direct ID match{' · ' + bits if bits else ''}",
+    }
+
+
+def _deezer_direct_lookup(entity_type, deezer_id, query=''):
+    """Confirm a pasted Deezer URL/id and return a one-item result list.
+
+    Album/track URLs can resolve across kinds: a track URL while matching an
+    album returns the parent album (remix singles live on album pages); an
+    album URL while matching a track returns the first track. Failed lookups
+    return [] so the caller can fall through to fuzzy search.
+    """
+    from core.library.direct_id import extract_deezer_link
+    link = extract_deezer_link(query)
+    url_kind = link[0] if link else entity_type
+
+    if url_kind == 'album':
+        album = _deezer_get('album', deezer_id)
+        if not album:
+            return []
+        if entity_type == 'album':
+            return [_deezer_shape_album(album)]
+        if entity_type == 'track':
+            tracks = (album.get('tracks') or {}).get('data') or []
+            first = tracks[0] if tracks else None
+            tid = first.get('id') if isinstance(first, dict) else None
+            if not tid:
+                return []
+            track = _deezer_get('track', tid) or first
+            return [_deezer_shape_track(track)]
+        return []
+
+    if url_kind == 'track':
+        track = _deezer_get('track', deezer_id)
+        if not track:
+            return []
+        if entity_type == 'track':
+            return [_deezer_shape_track(track)]
+        if entity_type == 'album':
+            album_obj = track.get('album') if isinstance(track.get('album'), dict) else {}
+            album_id = album_obj.get('id')
+            if not album_id:
+                return []
+            album = _deezer_get('album', album_id)
+            if not album:
+                album = album_obj
+            return [_deezer_shape_album(album)] if album.get('id') else []
+        return []
+
+    if url_kind == 'artist' or entity_type == 'artist':
+        if entity_type != 'artist':
+            return []
+        artist = _deezer_get('artist', deezer_id)
+        return [_deezer_shape_artist(artist)] if artist else []
+
+    return []
+
+
 def _search_service(service, entity_type, query):
     """Search a service and return normalized results."""
     import requests as req_lib
@@ -197,6 +303,10 @@ def _search_service(service, entity_type, query):
         try:
             if service == 'musicbrainz':
                 hit = _mb_direct_lookup(entity_type, direct_id)
+                if hit:
+                    return hit
+            elif service == 'deezer':
+                hit = _deezer_direct_lookup(entity_type, direct_id, query)
                 if hit:
                     return hit
         except Exception as e:
