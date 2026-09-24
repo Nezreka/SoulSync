@@ -7547,7 +7547,7 @@
     // set and is bounds-checked everywhere it crosses the wire — it must never
     // be interpolated into a path. Unknown/absent falls back to initials, so a
     // missing file or an old client never renders broken.
-    var CHAT_AVATARS = 100;
+    var CHAT_AVATARS = 244;   // 1-99 cartoons, 100 reserved, 101-244 games. api/chat.py AVATAR_COUNT too
     // Avatars only their owner may wear (id -> slskd username, casefolded).
     // Hidden from everyone else's picker AND refused at render, because the
     // envelope is client-controlled — otherwise anyone could forge the id and

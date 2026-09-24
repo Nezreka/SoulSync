@@ -33,7 +33,7 @@ _MAX_MESSAGE_LEN = 1000
 # Preset chat avatars live at webui/static/avatar/1.png .. <AVATAR_COUNT>.png.
 # The id is only ever an INDEX into that fixed set — remote input must never
 # reach a filesystem path.
-AVATAR_COUNT = 100
+AVATAR_COUNT = 244  # 101-244 are the games set. chat.js CHAT_AVATARS must match
 # Avatars only their owner may wear. The picker hides them from everyone else,
 # but the envelope is client-controlled, so ownership is ALSO enforced on send
 # here and on render in chat.js — a forged id can't put someone else's face on
