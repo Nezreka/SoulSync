@@ -24,6 +24,9 @@ interface MaService {
   type?: 'token';
   saveUrl?: string;
   hint?: string;
+  /** what the text box holds: a secret token (default) or a plain username */
+  field?: 'token' | 'username';
+  placeholder?: string;
   connect?: (pid: number) => string;
 }
 
@@ -45,7 +48,18 @@ const _MA_SERVICES: MaService[] = [
     logo: '/static/img/brands/listenbrainz.png',
     type: 'token',
     saveUrl: '/api/profiles/me/listenbrainz',
-    hint: 'Paste your token from listenbrainz.org/profile',
+    // connecting it also makes your listening history your own (#1293)
+    hint: 'Paste your token from listenbrainz.org/profile. Your stats and recommendations will use your own listening.',
+  },
+  {
+    // just a username, scrobbles are public and the app's key reads them (#1293)
+    id: 'lastfm', name: 'Last.fm', brand: '#d51007',
+    logo: '/static/img/brands/lastfm.png',
+    type: 'token',
+    field: 'username',
+    placeholder: 'Last.fm username',
+    saveUrl: '/api/profiles/me/lastfm',
+    hint: 'Your Last.fm username. Your stats and recommendations will use your own listening.',
   },
 ];
 
@@ -138,8 +152,9 @@ function _maRender(body: HTMLElement | null, data: MaConnections): void {
                 <button class="ma-btn ma-btn--ghost" onclick="disconnectMyAccount('${svc.id}')">Disconnect</button>`;
     } else if (svc.type === 'token') {
       action = `
-                <input type="password" class="ma-token-input" id="ma-token-${svc.id}" placeholder="Paste token"
-                       title="${escapeHtml(svc.hint || '')}">
+                <input type="${svc.field === 'username' ? 'text' : 'password'}" class="ma-token-input"
+                       id="ma-token-${svc.id}" placeholder="${escapeHtml(svc.placeholder || 'Paste token')}"
+                       autocomplete="off" title="${escapeHtml(svc.hint || '')}">
                 <button class="ma-btn ma-btn--connect" onclick="saveMyAccountToken('${svc.id}')">Save</button>`;
     } else {
       action = `<button class="ma-btn ma-btn--connect" onclick="connectMyAccount('${svc.id}')">Connect</button>`;
@@ -183,17 +198,22 @@ export async function saveMyAccountToken(serviceId: string): Promise<void> {
   const input = document.getElementById(`ma-token-${serviceId}`) as HTMLInputElement | null;
   const token = ((input && input.value) || '').trim();
   if (!token) {
-    toast('Paste a token first', 'info');
+    toast(svc.field === 'username' ? 'Type your username first' : 'Paste a token first', 'info');
     return;
   }
   try {
     const res = await fetch(svc.saveUrl, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
+      body: JSON.stringify(svc.field === 'username' ? { username: token } : { token }),
     });
     const data = (await res.json()) as { success?: boolean; error?: string };
     if (data.success) {
-      toast(`${svc.name} connected`, 'success');
+      toast(
+        serviceId === 'listenbrainz' || serviceId === 'lastfm'
+          ? `${svc.name} connected, importing your listening history`
+          : `${svc.name} connected`,
+        'success',
+      );
       void _maLoad();
     } else {
       toast(data.error || 'Could not connect', 'error');

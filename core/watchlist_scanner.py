@@ -3830,18 +3830,18 @@ class WatchlistScanner:
         Falls back to empty/default values if no listening data exists.
         """
         try:
-            stats = self.database.get_listening_stats('30d')
+            stats = self.database.get_listening_stats('30d', profile_id=profile_id)
             if not stats or stats.get('total_plays', 0) == 0:
                 return {'has_data': False, 'top_artist_names': set(), 'top_genres': set(),
                         'genre_weights': {}, 'artist_play_counts': {}, 'avg_daily_plays': 0, 'listening_diversity': 0}
 
-            top_artists = self.database.get_top_artists('30d', 20)
+            top_artists = self.database.get_top_artists('30d', 20, profile_id=profile_id)
             top_artist_names = {a['name'].lower() for a in top_artists}
 
             # Build play count lookup for artist penalty scoring
             artist_play_counts = {a['name'].lower(): a['play_count'] for a in top_artists}
 
-            genre_breakdown = self.database.get_genre_breakdown('30d')
+            genre_breakdown = self.database.get_genre_breakdown('30d', profile_id=profile_id)
             top_genres = {g['genre'].lower() for g in genre_breakdown[:5]} if genre_breakdown else set()
             genre_weights = {g['genre'].lower(): g['percentage'] for g in genre_breakdown} if genre_breakdown else {}
 
@@ -4272,8 +4272,7 @@ class WatchlistScanner:
             logger.info("Building 'Because You Listen To' generation %s...", generation_id[:8])
 
             # seeds: recent listening first, lifetime when nothing is recent.
-            # profile_id is passed even though today's history is shared - the
-            # payload reports which scope it actually got.
+            # profile_id picks the pile, the payload reports which one it got.
             top_played = self.database.get_top_artists('30d', MAX_SHELVES, profile_id=profile_id)
             if not top_played:
                 top_played = self.database.get_top_artists('all', MAX_SHELVES, profile_id=profile_id)
@@ -4407,10 +4406,11 @@ class WatchlistScanner:
             )
 
             # Recency-weighted seeds: lifetime top artists, boosted by recent (30d) plays.
-            lifetime = [s for s in (self.database.get_top_artists('all', 30) or []) if s.get('name')]
+            lifetime = [s for s in (self.database.get_top_artists('all', 30, profile_id=profile_id) or [])
+                        if s.get('name')]
             if not lifetime:
                 return
-            recent_rows = self.database.get_top_artists('30d', 50) or []
+            recent_rows = self.database.get_top_artists('30d', 50, profile_id=profile_id) or []
             recent_counts = {r['name'].lower(): r.get('play_count', 0)
                              for r in recent_rows if r.get('name')}
             seeds = build_recency_weighted_seeds(lifetime, recent_counts)

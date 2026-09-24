@@ -160,7 +160,11 @@ class AutomationDeps:
 
     # --- Listening-history importers ---
     lastfm_import_worker: Optional[Any] = None
+    # one importer per pile (#1293), .shared is lastfm_import_worker
+    lastfm_import_workers: Optional[Any] = None
     listenbrainz_import_worker: Optional[Any] = None
+    # one importer per pile (#1293), .shared is listenbrainz_import_worker
+    listenbrainz_import_workers: Optional[Any] = None
 
     # --- Unified PlaylistSource registry ---
     # Optional so test fixtures that don't exercise refresh_mirrored

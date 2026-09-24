@@ -1104,6 +1104,7 @@ class MusicDatabase:
             self._add_profile_recovery_support(cursor)
             self._add_profile_service_credentials(cursor)
             self._add_profile_navidrome_login(cursor)
+            self._add_profile_lastfm_username(cursor)
             self._add_profile_plex_home_user(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
@@ -5755,6 +5756,38 @@ class MusicDatabase:
             logger.error(f"Error clearing ListenBrainz credentials for profile {profile_id}: {e}")
             return False
 
+    def reset_listening_pile(self, profile_id: int, source: str = 'listenbrainz') -> int:
+        """drop one source's plays from a profile's own pile, plus its caches and
+        that source's import state. for when it switches listenbrainz or last.fm
+        accounts: the old account's history isn't this person's anymore (#1293).
+
+        plays from anywhere else (the web player) stay, they're still theirs.
+        never touches the shared pile. returns rows removed."""
+        from core.listening_scope import SHARED_OWNER, owner_key, pile_cache_keys
+        try:
+            pid = int(profile_id)
+        except (TypeError, ValueError):
+            return 0
+        if pid == SHARED_OWNER:
+            return 0
+        # the other service's resume state is still good, only this one's goes
+        keys = pile_cache_keys(pid) + [owner_key(f'{source}_listening_import_state', pid)]
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM listening_import_events WHERE profile_id = ? AND source = ?",
+                               (pid, source))
+                cursor.execute("DELETE FROM listening_history WHERE profile_id = ? AND server_source = ?",
+                               (pid, source))
+                removed = cursor.rowcount
+                for key in keys:
+                    cursor.execute("DELETE FROM metadata WHERE key = ?", (key,))
+                conn.commit()
+                return removed
+        except Exception as e:
+            logger.error(f"Error resetting listening pile for profile {pid}: {e}")
+            return 0
+
     def get_profiles_with_listenbrainz(self) -> List[Dict[str, Any]]:
         """Get all profiles that have ListenBrainz tokens configured"""
         try:
@@ -5835,6 +5868,42 @@ class MusicDatabase:
                 cursor.execute(sql)
             except sqlite3.OperationalError:
                 pass  # Column already exists
+
+    def _add_profile_lastfm_username(self, cursor):
+        """a last.fm username per profile (#1293). reading someone's scrobbles
+        only takes the app's api key and their name, so there's no token."""
+        try:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN lastfm_username TEXT DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+    def set_profile_lastfm(self, profile_id: int, username: Optional[str]) -> bool:
+        """save (or with an empty name clear) a profile's own last.fm username."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET lastfm_username = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    ((username or '').strip() or None, profile_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting Last.fm username for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_lastfm(self, profile_id: int) -> Dict[str, Any]:
+        """{'username': ...} for a profile's own last.fm, '' when it has none."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute("SELECT lastfm_username FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+                return {'username': (row[0] or '') if row else ''}
+        except Exception as e:
+            logger.error(f"Error getting Last.fm username for profile {profile_id}: {e}")
+            return {'username': ''}
+
+    def clear_profile_lastfm(self, profile_id: int) -> bool:
+        return self.set_profile_lastfm(profile_id, None)
 
     def set_profile_navidrome_login(self, profile_id: int, username: Optional[str], password: Optional[str]) -> bool:
         """save (or with empty values clear) a profile's own navidrome login."""
@@ -6406,7 +6475,7 @@ class MusicDatabase:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_artist ON listening_history (artist)")
-            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup ON listening_history (track_id, played_at, server_source)")
+            self._add_listening_history_owner(cursor)
 
             # Add play_count and last_played to tracks table
             cursor.execute("PRAGMA table_info(tracks)")
@@ -6431,17 +6500,43 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error creating listening_history table: {e}")
 
+    def _add_listening_history_owner(self, cursor):
+        """#1293: whose pile each play is in. every existing row is the shared
+        pile (1), because that's the only pile there was.
+
+        the dedup key gets the owner too, or two profiles on the same
+        listenbrainz collide and the second one's play never lands."""
+        cursor.execute("PRAGMA table_info(listening_history)")
+        if 'profile_id' not in [c[1] for c in cursor.fetchall()]:
+            cursor.execute("ALTER TABLE listening_history ADD COLUMN profile_id INTEGER NOT NULL DEFAULT 1")
+            logger.info("Added profile_id column to listening_history")
+        cursor.execute("DROP INDEX IF EXISTS idx_listening_dedup")
+        # the same index under its first name, only ever on dev installs
+        cursor.execute("DROP INDEX IF EXISTS idx_listening_dedup_owner")
+        # owner LAST: this index is for the insert's exact lookup, it must never
+        # look like an owner index to the planner
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup_pile "
+            "ON listening_history (track_id, played_at, server_source, profile_id)"
+        )
+        from core.listening_import.dedup import ensure_import_events_table
+        ensure_import_events_table(cursor.connection)
+
     def insert_listening_events(self, events):
-        """Insert server/player events through the same matcher as history imports."""
+        """Insert server/player events through the same matcher as history imports.
+
+        an event's profile_id is its pile, none means the shared one."""
         from core.listening_import.dedup import insert_import_events
+        from core.listening_scope import SHARED_OWNER
 
         grouped = {}
         for event in events or []:
-            grouped.setdefault(event.get('server_source') or '', []).append(event)
+            owner = event.get('profile_id') or SHARED_OWNER
+            grouped.setdefault((event.get('server_source') or '', owner), []).append(event)
         inserted = 0
-        for source, batch in grouped.items():
+        for (source, owner), batch in grouped.items():
             try:
-                inserted += insert_import_events(self, batch, source)
+                inserted += insert_import_events(self, batch, source, profile_id=owner)
             except Exception as e:
                 logger.error(f"Error inserting listening events: {e}")
         return inserted
@@ -6500,16 +6595,18 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_listening_stats(self, time_range='all'):
+    def get_listening_stats(self, time_range='all', profile_id=None):
         """Get aggregate listening stats for a time range.
 
         Args:
             time_range: '7d', '30d', '12m', or 'all'
+            profile_id: whose plays, see core/listening_scope.py
 
         Returns:
             Dict with total_plays, total_time_ms, unique_artists, unique_albums, unique_tracks
         """
-        return self._listening_overview(self._listening_time_filter(time_range))
+        return self._listening_overview(
+            self._listening_time_filter(time_range, owner=self._listening_owner(profile_id)))
 
     _EMPTY_OVERVIEW = {'total_plays': 0, 'total_time_ms': 0, 'unique_artists': 0,
                        'unique_albums': 0, 'unique_tracks': 0}
@@ -6564,14 +6661,14 @@ class MusicDatabase:
     # offset. Pre-existing, affects every range-scoped stat, and deliberately
     # not changed here — see STATS_PAGE_PLAN.md.)
 
-    def get_listening_clock(self, time_range='all'):
+    def get_listening_clock(self, time_range='all', profile_id=None):
         """Plays by weekday x hour — the shape of a listening week.
 
         Returns a dict with a dense 7x24 ``grid`` (weekday 0=Sunday, matching
         strftime %w) plus the peak cell. Dense on purpose: a heatmap needs a
         value for every cell, and making the UI fill gaps is how an empty hour
         becomes an undefined square."""
-        where = self._listening_time_filter(time_range)
+        where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
         grid = [[0] * 24 for _ in range(7)]
         conn = None
         try:
@@ -6606,13 +6703,13 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_listening_rhythm(self, time_range='all'):
+    def get_listening_rhythm(self, time_range='all', profile_id=None):
         """Streaks and the biggest day — listening as a habit, not a total.
 
         ``current_streak`` counts back from today, and tolerates today having
         no plays yet: a streak should not read as broken at 9am just because
         you have not put anything on."""
-        where = self._listening_time_filter(time_range)
+        where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
         empty = {'current_streak': 0, 'longest_streak': 0,
                  'busiest_day': {'date': None, 'plays': 0}, 'active_days': 0}
         conn = None
@@ -6678,69 +6775,50 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_listening_stats_previous(self, time_range='all'):
+    def get_listening_stats_previous(self, time_range='all', profile_id=None):
         """The overview for the period immediately BEFORE ``time_range``.
 
         Returns None when there is no previous window ('all'), so the UI omits
         the comparison instead of rendering a delta against nothing."""
-        where = self._listening_previous_filter(time_range)
+        where = self._listening_previous_filter(time_range, owner=self._listening_owner(profile_id))
         if not where:
             return None
         return self._listening_overview(where)
 
-    def listening_history_scope(self) -> str:
-        """'profile' or 'shared' - who the listening history belongs to.
+    def listening_history_scope(self, profile_id=None) -> str:
+        """'profile' or 'shared' - whose listening history this profile reads.
 
-        listening_history carries no profile column, so on every install today
-        the answer is 'shared': every profile's plays land in one table and any
-        feature built on it is personal to the INSTALL, not to the profile.
-        the recommendation payloads carry this string so the product can say so
-        instead of implying a personal history it does not have. the moment the
-        column exists the filter below engages and this reads 'profile'.
+        'profile' when it has its own listenbrainz and reads only its own plays.
+        'shared' for the admin and every profile without one: they all read the
+        one install-wide pile. the recommendation payloads carry this string so
+        the product can say so instead of implying a personal history it does
+        not have.
         """
-        conn = None
+        from core.listening_scope import SHARED_OWNER
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(listening_history)")
-            return 'profile' if any(r[1] == 'profile_id' for r in cursor.fetchall()) else 'shared'
-        except Exception as e:
-            logger.debug(f"listening history scope probe failed: {e}")
+            pid = int(profile_id) if profile_id is not None else SHARED_OWNER
+        except (TypeError, ValueError):
             return 'shared'
-        finally:
-            if conn:
-                conn.close()
+        if pid == SHARED_OWNER:
+            return 'shared'
+        return 'profile' if self._listening_owner(pid) == pid else 'shared'
 
     def get_top_artists(self, time_range='all', limit=10, profile_id=None):
-        """Get top artists by play count.
-
-        profile_id scopes the read WHEN the history can be attributed (see
-        listening_history_scope). passing one on a shared history is not an
-        error and does not silently pretend to filter - the caller reports the
-        scope it actually got.
-        """
+        """Get top artists by play count, from the pile profile_id reads."""
         conn = None
         try:
+            where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range)
-            params = []
-            scope_clause = ''
-            if profile_id is not None:
-                cursor.execute("PRAGMA table_info(listening_history)")
-                if any(r[1] == 'profile_id' for r in cursor.fetchall()):
-                    scope_clause = ' AND profile_id = ?'
-                    params.append(profile_id)
-
             cursor.execute(f"""
                 SELECT artist, COUNT(*) as play_count
                 FROM listening_history
                 {where}
-                AND artist IS NOT NULL AND artist != ''{scope_clause}
+                AND artist IS NOT NULL AND artist != ''
                 GROUP BY LOWER(artist)
                 ORDER BY play_count DESC
                 LIMIT ?
-            """, (*params, limit))
+            """, (limit,))
             return [{'name': row[0], 'play_count': row[1]} for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error getting top artists: {e}")
@@ -6749,13 +6827,13 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_top_albums(self, time_range='all', limit=10):
+    def get_top_albums(self, time_range='all', limit=10, profile_id=None):
         """Get top albums by play count."""
         conn = None
         try:
+            where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range)
 
             cursor.execute(f"""
                 SELECT album, artist, COUNT(*) as play_count
@@ -6774,13 +6852,13 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_top_tracks(self, time_range='all', limit=10):
+    def get_top_tracks(self, time_range='all', limit=10, profile_id=None):
         """Get top tracks by play count."""
         conn = None
         try:
+            where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range)
 
             cursor.execute(f"""
                 SELECT title, artist, album, COUNT(*) as play_count
@@ -6799,13 +6877,13 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_listening_timeline(self, time_range='30d', granularity='day'):
+    def get_listening_timeline(self, time_range='30d', granularity='day', profile_id=None):
         """Get play count per time period for chart rendering."""
         conn = None
         try:
+            where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range)
 
             if granularity == 'month':
                 date_fmt = '%Y-%m'
@@ -6829,13 +6907,13 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_genre_breakdown(self, time_range='all'):
+    def get_genre_breakdown(self, time_range='all', profile_id=None):
         """Get genre distribution by play count (joins listening_history to tracks/artists)."""
         conn = None
         try:
+            where = self._listening_time_filter(time_range, alias='lh', owner=self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range, alias='lh')
 
             cursor.execute(f"""
                 SELECT a.genres, COUNT(*) as play_count
@@ -6911,7 +6989,7 @@ class MusicDatabase:
             if name:
                 genre_counts[name] = genre_counts.get(name, 0) + weight
 
-    def get_genre_own_vs_play(self, time_range='all', limit=12):
+    def get_genre_own_vs_play(self, time_range='all', limit=12, profile_id=None):
         """What share of the library each genre is, against what share of plays.
 
         Both sides are percentages of the GENRE-KNOWN population (tracks whose
@@ -6923,6 +7001,7 @@ class MusicDatabase:
         biggest genre, which you already know."""
         conn = None
         try:
+            owner = self._listening_owner(profile_id)
             conn = self._get_connection()
             cursor = conn.cursor()
 
@@ -6938,7 +7017,7 @@ class MusicDatabase:
                 self._accumulate_genres(owned, genres_str, count)
 
             played = {}
-            where = self._listening_time_filter(time_range, alias='lh')
+            where = self._listening_time_filter(time_range, alias='lh', owner=owner)
             cursor.execute(f"""
                 SELECT a.genres, COUNT(*) AS plays
                 FROM listening_history lh
@@ -7086,7 +7165,7 @@ class MusicDatabase:
                 leaders[month] = (artist, plays)
         return {month: name for month, (name, _) in leaders.items()}
 
-    def get_year_in_listening(self, now=None, months=12):
+    def get_year_in_listening(self, now=None, months=12, profile_id=None):
         """The whole Year in Listening story in one payload.
 
         ``now`` is injectable so the story is reproducible in tests — every
@@ -7121,9 +7200,11 @@ class MusicDatabase:
 
         conn = None
         try:
+            from core.listening_scope import owner_clause
+            scope = owner_clause(self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            window = "WHERE date(played_at) >= ? AND date(played_at) <= ?"
+            window = f"WHERE date(played_at) >= ? AND date(played_at) <= ? AND {scope}"
             span = (start_date, end_date)
 
             cursor.execute(f"""
@@ -7228,13 +7309,13 @@ class MusicDatabase:
             # window — an artist you first played in 2019 and came back to this
             # year is a rediscovery, not a discovery, and calling it one would
             # be the single most obviously wrong number on the page.
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT artist, first_play, plays FROM (
                     SELECT artist,
                            MIN(date(played_at)) AS first_play,
                            COUNT(*) AS plays
                     FROM listening_history
-                    WHERE artist IS NOT NULL AND artist != ''
+                    WHERE artist IS NOT NULL AND artist != '' AND {scope}
                     GROUP BY LOWER(artist)
                 )
                 WHERE first_play >= ? AND first_play <= ?
@@ -7481,18 +7562,28 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    def _listening_owner(self, profile_id=None):
+        """the pile a profile reads, see core/listening_scope.py."""
+        from core.listening_scope import listening_owner
+        return listening_owner(self, profile_id)
+
     @staticmethod
-    def _listening_time_filter(time_range, alias=''):
-        """Build a WHERE clause for time-range filtering."""
+    def _listening_time_filter(time_range, alias='', owner=None):
+        """Build a WHERE clause for time-range filtering.
+
+        always scoped to one pile. no owner means the shared one, so a caller
+        that forgets can never read a profile's private plays."""
+        from core.listening_scope import owner_clause
         prefix = f"{alias}." if alias else ""
+        scope = owner_clause(owner, alias)
         if time_range == '7d':
-            return f"WHERE {prefix}played_at >= datetime('now', '-7 days')"
+            return f"WHERE {prefix}played_at >= datetime('now', '-7 days') AND {scope}"
         elif time_range == '30d':
-            return f"WHERE {prefix}played_at >= datetime('now', '-30 days')"
+            return f"WHERE {prefix}played_at >= datetime('now', '-30 days') AND {scope}"
         elif time_range == '12m':
-            return f"WHERE {prefix}played_at >= datetime('now', '-12 months')"
+            return f"WHERE {prefix}played_at >= datetime('now', '-12 months') AND {scope}"
         else:
-            return "WHERE 1=1"
+            return f"WHERE {scope}"
 
     # The window of the SAME length immediately before the current one, so a
     # stat can say "vs last month" instead of standing alone. A total with no
@@ -7507,19 +7598,21 @@ class MusicDatabase:
     }
 
     @staticmethod
-    def _listening_previous_filter(time_range, alias=''):
+    def _listening_previous_filter(time_range, alias='', owner=None):
         """WHERE clause for the period immediately BEFORE ``time_range``.
 
         Returns None for 'all' (and anything unrecognised) — there is no
         "before everything", and a caller that gets None must omit the
         comparison rather than compare against nothing."""
+        from core.listening_scope import owner_clause
         window = MusicDatabase._PREVIOUS_WINDOW.get(time_range)
         if not window:
             return None
         start, end = window
         prefix = f"{alias}." if alias else ""
         return (f"WHERE {prefix}played_at >= datetime('now', '{start}') "
-                f"AND {prefix}played_at < datetime('now', '{end}')")
+                f"AND {prefix}played_at < datetime('now', '{end}') "
+                f"AND {owner_clause(owner, alias)}")
 
     def set_profile_spotify(self, profile_id: int, client_id: str, client_secret: str,
                             redirect_uri: str = '') -> bool:
@@ -8296,6 +8389,12 @@ class MusicDatabase:
                         logger.debug("Failed to delete from %s for profile: %s", table, e)
                 # its own library's rows go with it (#1199)
                 self._delete_own_library_rows(cursor, profile_id)
+                # and its listening pile's caches (#1293). the rows went with
+                # the profile_id sweep, these are metadata keys, and a reused
+                # id must never open on the last person's stats
+                from core.listening_scope import pile_keys
+                for key in pile_keys(profile_id):
+                    cursor.execute("DELETE FROM metadata WHERE key = ?", (key,))
                 cursor.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
                 conn.commit()
                 return cursor.rowcount > 0
@@ -16616,30 +16715,23 @@ class MusicDatabase:
         return out
 
     def get_play_counts_by_name(self, names, profile_id: int = 1):
-        """Map lowercased artist name -> play count from ``listening_history`` for the given profile.
+        """Map lowercased artist name -> play count from the pile ``profile_id`` reads.
         Feeds the Discover novelty signal (demote recs you've already heard). Fail-soft -> {}."""
+        from core.listening_scope import owner_clause
         out = {}
         clean = [str(n).strip().lower() for n in (names or []) if str(n or '').strip()]
         if not clean:
             return out
         placeholders = ','.join('?' for _ in clean)
         try:
+            scope = owner_clause(self._listening_owner(profile_id))
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                # profile_id is migration-added — fall back to an unscoped count if the column isn't
-                # there yet (a fresh / pre-migration DB), so novelty still works everywhere.
-                try:
-                    cursor.execute(
-                        f"SELECT LOWER(artist) AS n, COUNT(*) AS plays FROM listening_history "
-                        f"WHERE profile_id = ? AND LOWER(artist) IN ({placeholders}) GROUP BY LOWER(artist)",
-                        [profile_id] + clean,
-                    )
-                except Exception:
-                    cursor.execute(
-                        f"SELECT LOWER(artist) AS n, COUNT(*) AS plays FROM listening_history "
-                        f"WHERE LOWER(artist) IN ({placeholders}) GROUP BY LOWER(artist)",
-                        clean,
-                    )
+                cursor.execute(
+                    f"SELECT LOWER(artist) AS n, COUNT(*) AS plays FROM listening_history "
+                    f"WHERE {scope} AND LOWER(artist) IN ({placeholders}) GROUP BY LOWER(artist)",
+                    clean,
+                )
                 for row in cursor.fetchall():
                     out[row['n']] = row['plays']
         except Exception as e:

@@ -134,6 +134,46 @@ describe('stats route', () => {
     expect(screen.queryByRole('button', { name: 'Sync listening stats' })).not.toBeInTheDocument();
   });
 
+  // #1293: a profile with its own history only sees the import cards for the
+  // accounts it connected. the admin and shared profiles see both, as before
+  it.each([
+    ['own listenbrainz only', 'profile', false, true, true, false],
+    ['own last.fm only', 'profile', true, false, false, true],
+    ['both of its own', 'profile', true, true, true, true],
+    ['the shared history', 'shared', false, false, true, true],
+  ] as const)(
+    'a profile on %s sees the right import cards',
+    async (_label, scope, ownFm, ownLb, showLb, showFm) => {
+      server.use(
+        http.get('/api/lastfm/listening-import/status', () =>
+          HttpResponse.json({
+            success: true,
+            api_key_configured: true,
+            username: 'kim_fm',
+            history_scope: scope,
+            own_account: ownFm,
+          }),
+        ),
+        http.get('/api/listenbrainz/listening-import/status', () =>
+          HttpResponse.json({
+            success: true,
+            token_configured: true,
+            username: 'kim_lb',
+            history_scope: scope,
+            own_account: ownLb,
+          }),
+        ),
+      );
+
+      renderStatsRoute();
+
+      await waitFor(() => expect(screen.getByTestId('stats-page')).toBeInTheDocument());
+      await screen.findByText(showLb ? 'kim_lb' : 'kim_fm');
+      expect(!!screen.queryByRole('group', { name: 'ListenBrainz history sync' })).toBe(showLb);
+      expect(!!screen.queryByRole('group', { name: 'Last.fm history sync' })).toBe(showFm);
+    },
+  );
+
   it('stores the time range in route search state', async () => {
     const { history } = renderStatsRoute();
 

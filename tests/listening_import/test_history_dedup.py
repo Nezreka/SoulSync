@@ -20,7 +20,8 @@ def db(tmp_path):
         id INTEGER PRIMARY KEY AUTOINCREMENT, track_id TEXT, title TEXT, artist TEXT,
         album TEXT, played_at TEXT, duration_ms INTEGER, server_source TEXT, db_track_id INTEGER,
         scrobbled_lastfm INTEGER DEFAULT 0, scrobbled_listenbrainz INTEGER DEFAULT 0,
-        UNIQUE(track_id, played_at, server_source))""")
+        profile_id INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(track_id, played_at, server_source, profile_id))""")
     conn.close()
     return SimpleNamespace(_get_connection=connect, get_metadata=lambda _: None)
 

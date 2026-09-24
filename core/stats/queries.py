@@ -15,22 +15,28 @@ import time
 import traceback
 from typing import Any, Callable, Optional
 
+from core.listening_scope import listening_owner, owner_clause, owner_key
+
 logger = logging.getLogger(__name__)
 
 ImageUrlFixer = Callable[[Optional[str]], Optional[str]]
 
 
-def get_cached_stats(database, image_url_fixer: ImageUrlFixer, time_range: str) -> dict:
-    """Read pre-computed stats cache for a time range. Instant response."""
+def get_cached_stats(database, image_url_fixer: ImageUrlFixer, time_range: str,
+                     profile_id: Optional[int] = None) -> dict:
+    """Read pre-computed stats cache for a time range. Instant response.
+
+    the cache for the pile profile_id reads (#1293)."""
+    owner = listening_owner(database, profile_id)
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
 
-        cursor.execute("SELECT value FROM metadata WHERE key = ?", (f'stats_cache_{time_range}',))
+        cursor.execute("SELECT value FROM metadata WHERE key = ?", (owner_key(f'stats_cache_{time_range}', owner),))
         row = cursor.fetchone()
         data = json.loads(row[0]) if row and row[0] else {}
 
-        cursor.execute("SELECT value FROM metadata WHERE key = 'stats_cache_recent'")
+        cursor.execute("SELECT value FROM metadata WHERE key = ?", (owner_key('stats_cache_recent', owner),))
         row = cursor.fetchone()
         recent = json.loads(row[0]) if row and row[0] else []
 
@@ -52,7 +58,8 @@ def get_cached_stats(database, image_url_fixer: ImageUrlFixer, time_range: str) 
     }
 
 
-def get_year_in_listening(database, image_url_fixer: ImageUrlFixer) -> dict:
+def get_year_in_listening(database, image_url_fixer: ImageUrlFixer,
+                          profile_id: Optional[int] = None) -> dict:
     """The Year in Listening story — cached by the worker, computed on miss.
 
     The miss path is the one that matters: the worker rebuilds every 30
@@ -62,10 +69,11 @@ def get_year_in_listening(database, image_url_fixer: ImageUrlFixer) -> dict:
     from the user's side. Computing it costs one pass over listening_history.
     """
     data = None
+    owner = listening_owner(database, profile_id)
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT value FROM metadata WHERE key = 'stats_cache_year'")
+        cursor.execute("SELECT value FROM metadata WHERE key = ?", (owner_key('stats_cache_year', owner),))
         row = cursor.fetchone()
         if row and row[0]:
             data = json.loads(row[0])
@@ -75,7 +83,7 @@ def get_year_in_listening(database, image_url_fixer: ImageUrlFixer) -> dict:
         conn.close()
 
     if not data:
-        data = database.get_year_in_listening()
+        data = database.get_year_in_listening(profile_id=owner)
         # The cached copy was enriched by the worker; a live one has to earn
         # its artwork here or the story renders name-only on exactly the
         # installs that hit this path.
@@ -149,14 +157,15 @@ def get_album_play_tracks(database, album_id, image_url_fixer: ImageUrlFixer) ->
     ]
 
 
-def get_overview(database, time_range: str) -> dict:
+def get_overview(database, time_range: str, profile_id: Optional[int] = None) -> dict:
     """Aggregate listening stats for a time range."""
-    return database.get_listening_stats(time_range)
+    return database.get_listening_stats(time_range, profile_id=profile_id)
 
 
-def get_top_artists(database, image_url_fixer: ImageUrlFixer, time_range: str, limit: int) -> list[dict]:
+def get_top_artists(database, image_url_fixer: ImageUrlFixer, time_range: str, limit: int,
+                    profile_id: Optional[int] = None) -> list[dict]:
     """Top artists by play count, enriched with image / Last.fm stats / soul_id."""
-    artists = database.get_top_artists(time_range, limit)
+    artists = database.get_top_artists(time_range, limit, profile_id=profile_id)
 
     for artist in artists:
         try:
@@ -187,9 +196,10 @@ def get_top_artists(database, image_url_fixer: ImageUrlFixer, time_range: str, l
     return artists
 
 
-def get_top_albums(database, image_url_fixer: ImageUrlFixer, time_range: str, limit: int) -> list[dict]:
+def get_top_albums(database, image_url_fixer: ImageUrlFixer, time_range: str, limit: int,
+                   profile_id: Optional[int] = None) -> list[dict]:
     """Top albums by play count, enriched with album thumb."""
-    albums = database.get_top_albums(time_range, limit)
+    albums = database.get_top_albums(time_range, limit, profile_id=profile_id)
 
     for album in albums:
         try:
@@ -217,9 +227,10 @@ def get_top_albums(database, image_url_fixer: ImageUrlFixer, time_range: str, li
     return albums
 
 
-def get_top_tracks(database, image_url_fixer: ImageUrlFixer, time_range: str, limit: int) -> list[dict]:
+def get_top_tracks(database, image_url_fixer: ImageUrlFixer, time_range: str, limit: int,
+                   profile_id: Optional[int] = None) -> list[dict]:
     """Top tracks by play count, enriched with album thumb."""
-    tracks = database.get_top_tracks(time_range, limit)
+    tracks = database.get_top_tracks(time_range, limit, profile_id=profile_id)
 
     for track in tracks:
         try:
@@ -249,14 +260,14 @@ def get_top_tracks(database, image_url_fixer: ImageUrlFixer, time_range: str, li
     return tracks
 
 
-def get_timeline(database, time_range: str, granularity: str) -> Any:
+def get_timeline(database, time_range: str, granularity: str, profile_id: Optional[int] = None) -> Any:
     """Play count per time period for chart rendering."""
-    return database.get_listening_timeline(time_range, granularity)
+    return database.get_listening_timeline(time_range, granularity, profile_id=profile_id)
 
 
-def get_genres(database, time_range: str) -> Any:
+def get_genres(database, time_range: str, profile_id: Optional[int] = None) -> Any:
     """Genre distribution by play count."""
-    return database.get_genre_breakdown(time_range)
+    return database.get_genre_breakdown(time_range, profile_id=profile_id)
 
 
 def get_library_health(database) -> dict:
@@ -280,7 +291,8 @@ def get_library_disk_usage(database) -> dict:
     return database.get_library_disk_usage()
 
 
-def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFixer] = None) -> list[dict]:
+def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFixer] = None,
+                      profile_id: Optional[int] = None) -> list[dict]:
     """Recently played tracks from listening_history.
 
     Joins album art through db_track_id when the play was matched to a
@@ -289,11 +301,12 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
     None). Art passes through ``image_url_fixer`` because server-synced thumb
     URLs need auth and die in the browser — same treatment as resolve_track.
     """
+    scope = owner_clause(listening_owner(database, profile_id), 'lh')
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            """
+            f"""
             SELECT lh.title, lh.artist, lh.album, lh.played_at, lh.duration_ms,
                    lh.server_source, al.thumb_url, t.artist_id
             FROM listening_history lh
@@ -303,6 +316,7 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
             -- whole tracks table (54 s per dashboard load on 300k tracks)
             LEFT JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
             LEFT JOIN albums al ON al.id = t.album_id
+            WHERE {scope}
             ORDER BY lh.played_at DESC
             LIMIT ?
             """,
@@ -339,10 +353,12 @@ def get_listening_events(
     weekday: Optional[int] = None,
     hour: Optional[int] = None,
     limit: int = 100,
+    profile_id: Optional[int] = None,
 ) -> dict:
     """Listening-history rows behind a clicked stats chart segment."""
     limit = max(1, min(int(limit or 100), 250))
-    where = database._listening_time_filter(time_range, alias='lh')
+    where = database._listening_time_filter(time_range, alias='lh',
+                                            owner=listening_owner(database, profile_id))
     clauses: list[str] = []
     params: list[Any] = []
     title = 'Listening details'
