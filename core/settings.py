@@ -846,6 +846,27 @@ class ConfigManager:
                     # series, exactly as the podcast season folder does.
                     "audiobook_path": "$author/$series/$seriespos - $title",
                 },
+                # $atypes — beets-compatible release-type labels for folder
+                # names. Empty for a plain album, bracketed and concatenated
+                # for anything that carries qualifiers ("[EP][Live]"). Only
+                # used by templates that mention $atypes, so this is inert
+                # unless a user opts in. Shapes match the beets albumtypes
+                # plugin so a config can be pasted across: "types" also accepts
+                # beets' list-of-single-key-maps form.
+                "album_types": {
+                    "types": {
+                        "ep": "EP",
+                        "single": "Single",
+                        "soundtrack": "OST",
+                        "live": "Live",
+                        "compilation": "Anthology",
+                        "remix": "Remix",
+                    },
+                    "bracket": "[]",
+                    # A various-artists compilation already lives under
+                    # Compilations/; repeating the qualifier is noise.
+                    "ignore_va": ["compilation"],
+                },
                 "detect_multi_artist_compilations": True,
             },
             "wishlist": {
