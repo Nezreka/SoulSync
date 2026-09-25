@@ -137,7 +137,12 @@ def _release_type_tokens(value: Any) -> List[str]:
     values = value if isinstance(value, (list, tuple, set)) else [value]
     out: List[str] = []
     for entry in values:
-        for part in str(entry or "").replace(";", "/").split("/"):
+        # ID3 packs a multi-value frame into ONE string separated by NUL, so an
+        # mp3 tagged [album, remix, soundtrack] arrives as
+        # "album\x00remix\x00soundtrack" where the FLAC equivalent arrives as a
+        # list. Splitting only on the human separators would leave that blob as
+        # a single unrecognised token and drop every label the file carries.
+        for part in str(entry or "").replace("\x00", "/").replace(";", "/").split("/"):
             token = part.strip().lower()
             if token and token not in out:
                 out.append(token)

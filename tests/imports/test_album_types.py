@@ -551,3 +551,38 @@ def test_the_single_path_gets_the_labels_too(tmp_path, monkeypatch):
     path, _ = paths.build_final_path_for_track(
         ctx, ctx["artist"], None, ".flac", create_dirs=False)
     assert "[Single]" in path, path
+
+
+def test_id3_packs_multiple_release_types_into_one_nul_separated_string():
+    """A FLAC gives mutagen a list; an mp3 gives one string with NUL between
+    the values. Splitting only on human separators leaves that blob as a single
+    unrecognised token, so every label the file carries is dropped — which on a
+    real library silently un-labelled the mp3-tagged albums while the FLAC ones
+    worked."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _release_type_tokens, _secondary_album_types)
+
+    packed = "album\x00remix\x00soundtrack"
+    assert _release_type_tokens(packed) == ["album", "remix", "soundtrack"]
+    primary = _normalize_album_type(packed)
+    assert primary == "album"
+    assert format_album_types(
+        {"album_type": primary, "secondary_types": _secondary_album_types(packed, primary)},
+        BEETS_CONFIG) == "[OST][Remix]"
+
+    # and the mp3 and flac spellings of the same release agree
+    as_list = ["album", "remix", "soundtrack"]
+    assert _release_type_tokens(packed) == _release_type_tokens(as_list)
+
+
+def test_an_unmapped_qualifier_is_simply_not_labelled():
+    """'demo' has no entry in the types table, so an EP demo is [EP] and not
+    [EP][Demo] — matching what beets wrote for the same release."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _secondary_album_types)
+
+    tag = "ep\x00demo"
+    primary = _normalize_album_type(tag)
+    assert format_album_types(
+        {"album_type": primary, "secondary_types": _secondary_album_types(tag, primary)},
+        BEETS_CONFIG) == "[EP]"
