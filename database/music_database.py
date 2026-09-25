@@ -15533,12 +15533,24 @@ class MusicDatabase:
                 result = cursor.fetchone()
                 artist_name = result['artist_name'] if result else "Unknown"
 
-                from core.watchlist_sources import ARTIST_ID_COLUMNS, artist_id_match_sql
+                from core.watchlist_sources import (ARTIST_ID_COLUMNS, artist_id_match_sql,
+                                                    library_artist_provider_ids)
                 cursor.execute(
                     "DELETE FROM watchlist_artists WHERE "
                     + artist_id_match_sql() + " AND profile_id = ?",
                     [artist_id] * len(ARTIST_ID_COLUMNS) + [profile_id],
                 )
+                if cursor.rowcount == 0:
+                    # a library artist row id: remove by the provider ids it
+                    # carries, the ones add stored (#1308)
+                    for provider_id in library_artist_provider_ids(cursor, artist_id):
+                        cursor.execute(
+                            "DELETE FROM watchlist_artists WHERE "
+                            + artist_id_match_sql() + " AND profile_id = ?",
+                            [provider_id] * len(ARTIST_ID_COLUMNS) + [profile_id],
+                        )
+                        if cursor.rowcount > 0:
+                            break
 
                 if cursor.rowcount > 0:
                     conn.commit()
@@ -15575,8 +15587,21 @@ class MusicDatabase:
                         id_params + [profile_id],
                     )
                 result = cursor.fetchone()
+                if result is not None:
+                    return True
 
-                return result is not None
+                # a library artist row id: check the provider ids it carries,
+                # the ones add actually stored (#1308)
+                from core.watchlist_sources import library_artist_provider_ids
+                for provider_id in library_artist_provider_ids(cursor, artist_id):
+                    cursor.execute(
+                        "SELECT 1 FROM watchlist_artists WHERE "
+                        + artist_id_match_sql() + " AND profile_id = ? LIMIT 1",
+                        [provider_id] * len(ARTIST_ID_COLUMNS) + [profile_id],
+                    )
+                    if cursor.fetchone() is not None:
+                        return True
+                return False
 
         except Exception as e:
             logger.error(f"Error checking if artist is in watchlist (ID: {artist_id}): {e}")
