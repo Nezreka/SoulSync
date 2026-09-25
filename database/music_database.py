@@ -1976,11 +1976,29 @@ class MusicDatabase:
             like = '%' + name.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
             try:
                 rows = cursor.execute(
-                    "SELECT path FROM lib2_track_files WHERE path LIKE ? ESCAPE '\\'"
-                    " AND COALESCE(file_state, 'active') = 'active'", (like,)).fetchall()
+                    "SELECT f.path, f.track_id, t.album_id FROM lib2_track_files f"
+                    " JOIN lib2_tracks t ON t.id = f.track_id"
+                    " WHERE f.path LIKE ? ESCAPE '\\'"
+                    " AND COALESCE(f.file_state, 'active') = 'active'", (like,)).fetchall()
             except Exception:  # noqa: BLE001 - no catalogue yet, the file is remembered
                 rows = []
-            return sum(1 for (fp,) in rows if self.manual_path_key(fp) == key)
+            named = [(track_id, album_id) for (fp, track_id, album_id) in rows
+                     if self.manual_path_key(fp) == key]
+            # upstream marks every match status 'manual': no enrichment worker
+            # may rematch a hand-tagged release to the studio one
+            try:
+                from core.library2.match_status import SERVICES
+                from core.library2.provider_attempts import record_attempt
+                for track_id, album_id in named:
+                    for service, _label, fields in SERVICES:
+                        for entity, entity_id in (("track", track_id), ("album", album_id)):
+                            if entity in fields and entity_id:
+                                record_attempt(conn, entity_type=entity, entity_id=int(entity_id),
+                                               service=service, status="manual")
+                conn.commit()
+            except Exception as exc:  # noqa: BLE001 - the file lock stands either way
+                logger.debug("manual match stand-down not recorded: %s", exc)
+            return len(named)
         finally:
             conn.close()
 

@@ -220,6 +220,10 @@ def _merge_artist(cursor: Any, survivor: Any, duplicate: Any) -> None:
     cursor.execute(
         "DELETE FROM lib2_monitor_rules WHERE entity_type='artist' AND entity_id=?",
         (duplicate_id,))
+    # an own library's twin carries that library's server id (#1199)
+    cursor.execute(
+        "UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? "
+        "WHERE entity_type='artist' AND entity_id=?", (survivor_id, duplicate_id))
     cursor.execute("DELETE FROM lib2_artists WHERE id=?", (duplicate_id,))
 
 

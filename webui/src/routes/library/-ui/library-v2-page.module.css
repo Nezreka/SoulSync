@@ -176,6 +176,17 @@
   font-size: 13px;
 }
 
+/* what this profile may do here: a line above the page, not an empty state */
+.accessNote {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .scopeBadge {
   display: inline-flex;
   align-items: center;

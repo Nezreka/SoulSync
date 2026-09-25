@@ -1,6 +1,6 @@
 import { Tooltip } from '@base-ui/react/tooltip';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { useNavigate as useRouterNavigate } from '@tanstack/react-router';
+import { getRouteApi, useNavigate as useRouterNavigate } from '@tanstack/react-router';
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -15,7 +15,7 @@ import {
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
 import { thumb } from '@/platform/artwork-thumb';
-import { getShellBridge, SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
+import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import { bitrateKbps, formatBitrate } from '../-bitrate';
@@ -60,7 +60,6 @@ import {
   LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
   libraryScopesQueryOptions,
-  setLibraryScope,
   invalidateLibraryV2,
   isLibraryV2ImportAlreadyCompleted,
   libraryV2AlbumMatchStatusQueryOptions,
@@ -141,7 +140,6 @@ import {
 import { computeTrackEditValues } from '../-metadata-edit';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
 import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
-import { Route } from '../route';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import {
@@ -163,6 +161,10 @@ import { AlbumReorganizeModal, ArtistRenamePreviewModal } from './reorganize-mod
 import { RetagModal } from './retag-modal';
 import { LibraryToolDialog } from './tool-dialog';
 import { WatchAllModal } from './watch-all-modal';
+
+// not the route module: it imports this page, and the cycle only held while nothing
+// read the route at import time
+const Route = getRouteApi('/library');
 
 /** Row/toolbar action dispatch: the label drives the behaviour, the optional
  *  entity ref carries WHICH lib2 track/album the action is for so grabs keep
@@ -536,7 +538,7 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
 // --- shared building blocks --------------------------------------------------
 
 function useNavigate() {
-  return useRouterNavigate({ from: Route.fullPath });
+  return useRouterNavigate({ from: '/library' });
 }
 
 const LOCAL_ARTWORK_PREFIX = '/api/library/v2/artwork/';
@@ -835,7 +837,8 @@ export function ActionButton({
     <button
       type="button"
       className={`${styles.toolButton} ${tone === 'danger' ? styles.toolDanger : ''}`}
-      data-requires-write={requiresWrite ? '' : undefined}
+      data-requires-write={requiresWrite && !requiresWish ? '' : undefined}
+      data-requires-wish={requiresWish ? '' : undefined}
       disabled={busy || disabled || writeBlocked}
       title={writeBlocked ? 'Library changes require the admin profile' : title}
       onClick={() => {
@@ -875,7 +878,8 @@ function IconActionButton({
       className={`${styles.iconAction} ${tone === 'danger' ? styles.toolDanger : ''}`}
       aria-label={title}
       title={writeBlocked ? 'Library changes require the admin profile' : title}
-      data-requires-write={requiresWrite ? '' : undefined}
+      data-requires-write={requiresWrite && !requiresWish ? '' : undefined}
+      data-requires-wish={requiresWish ? '' : undefined}
       disabled={disabled || writeBlocked}
       onClick={(e) => {
         e.stopPropagation();
@@ -915,9 +919,9 @@ export function ArtistRefreshButton({ artistId }: { artistId: number }) {
       if (state.error) throw new Error(state.error);
       return state;
     },
+    // the job poll already refreshed the library when the job settled
     onSuccess: (state) => {
       window.showToast?.(refreshSummary(state.result), 'success');
-      return queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
     },
   });
 
@@ -2170,7 +2174,6 @@ function MonitoredArtistSettings({
       const jobId = await bulkMonitorLibraryV2Releases(artist.id, scope, monitored);
       const error = await awaitBulkJob(queryClient, jobId);
       if (error) throw new Error(error);
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       setBulkMessage({ tone: 'ok', text: `${label} applied.` });
     } catch (caught) {
       setBulkMessage({
@@ -2984,8 +2987,7 @@ export function AlbumOverflowMenu({
       const jobError = await awaitBulkJob(queryClient, jobId);
       if (jobError) throw new Error(jobError);
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+    onSuccess: () => {
       window.showToast?.('Album ReplayGain analyzed and written.', 'success');
     },
     onError: (error) => {
@@ -3544,58 +3546,63 @@ export function MaintenanceModal({
           </div>
         </section>
 
-        {(['artist', 'library'] as const).map((scope) => (
-          <section key={scope} className={styles.maintenanceSection}>
-            <div className={styles.maintenanceSectionHeader}>
-              <div>
-                <strong>{scope === 'artist' ? 'Artist files & tags' : 'Library-wide scans'}</strong>
-                <span>
-                  {scope === 'artist'
-                    ? `Only files linked to ${artistName}.`
-                    : 'Potentially checks every monitored catalog entry.'}
+        {(['artist', 'library'] as const)
+          // a scope without a job is not drawn: an empty card read as broken
+          .filter((scope) => MAINTENANCE_JOBS.some((job) => job.scope === scope))
+          .map((scope) => (
+            <section key={scope} className={styles.maintenanceSection}>
+              <div className={styles.maintenanceSectionHeader}>
+                <div>
+                  <strong>
+                    {scope === 'artist' ? 'Artist files & tags' : 'Library-wide scans'}
+                  </strong>
+                  <span>
+                    {scope === 'artist'
+                      ? `Only files linked to ${artistName}.`
+                      : 'Potentially checks every monitored catalog entry.'}
+                  </span>
+                </div>
+                <span
+                  className={`${styles.maintenanceScopeBadge} ${
+                    scope === 'artist' ? styles.maintenanceScopeArtist : ''
+                  }`}
+                >
+                  {scope === 'artist' ? 'This artist' : 'Entire library'}
                 </span>
               </div>
-              <span
-                className={`${styles.maintenanceScopeBadge} ${
-                  scope === 'artist' ? styles.maintenanceScopeArtist : ''
-                }`}
-              >
-                {scope === 'artist' ? 'This artist' : 'Entire library'}
-              </span>
-            </div>
-            <div className={styles.qpList}>
-              {MAINTENANCE_JOBS.filter((job) => job.scope === scope).map((job) => (
-                <button
-                  key={job.id}
-                  type="button"
-                  className={styles.qpOption}
-                  data-requires-write=""
-                  disabled={state[job.id] === 'queued' || !canWrite}
-                  onClick={() => {
-                    if (!canWrite) return;
-                    void runRepairJob(
-                      job.id,
-                      job.scope === 'artist' ? { id: artistId, name: artistName } : undefined,
-                    )
-                      .then(() => setState((s) => ({ ...s, [job.id]: 'queued' })))
-                      .catch(() => setState((s) => ({ ...s, [job.id]: 'error' })));
-                  }}
-                >
-                  <span className={styles.qpName}>
-                    {job.label}
-                    {state[job.id] === 'queued' ? (
-                      <span className={styles.statusOk}>queued</span>
-                    ) : null}
-                    {state[job.id] === 'error' ? (
-                      <span className={styles.statusWarn}>failed to queue</span>
-                    ) : null}
-                  </span>
-                  <span className={styles.qpDesc}>{job.desc}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        ))}
+              <div className={styles.qpList}>
+                {MAINTENANCE_JOBS.filter((job) => job.scope === scope).map((job) => (
+                  <button
+                    key={job.id}
+                    type="button"
+                    className={styles.qpOption}
+                    data-requires-write=""
+                    disabled={state[job.id] === 'queued' || !canWrite}
+                    onClick={() => {
+                      if (!canWrite) return;
+                      void runRepairJob(
+                        job.id,
+                        job.scope === 'artist' ? { id: artistId, name: artistName } : undefined,
+                      )
+                        .then(() => setState((s) => ({ ...s, [job.id]: 'queued' })))
+                        .catch(() => setState((s) => ({ ...s, [job.id]: 'error' })));
+                    }}
+                  >
+                    <span className={styles.qpName}>
+                      {job.label}
+                      {state[job.id] === 'queued' ? (
+                        <span className={styles.statusOk}>queued</span>
+                      ) : null}
+                      {state[job.id] === 'error' ? (
+                        <span className={styles.statusWarn}>failed to queue</span>
+                      ) : null}
+                    </span>
+                    <span className={styles.qpDesc}>{job.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
       </div>
     </ModalShell>
   );
@@ -4398,7 +4405,7 @@ export function LibraryV2Page() {
       <LibraryV2CanWishContext.Provider value={canWish}>
         <MirrorStatusBanner />
         {!canWrite ? (
-          <div className={styles.emptyState}>
+          <div className={styles.accessNote} role="note">
             {canWish
               ? 'Your library: you can monitor and search here; other changes are up to the admin.'
               : 'Read-only: library changes require the admin profile.'}
@@ -4503,7 +4510,14 @@ export function MirrorStatusBanner() {
  */
 function UnmatchedImportsBanner() {
   const navigate = useNavigate();
-  const { data } = useQuery({ ...libraryV2UnmatchedQueryOptions(), retry: false });
+  // matching an import is the admin's work, and the summary counts every
+  // library: a profile would be sent to an artist it cannot open (#1199)
+  const canWrite = useLibraryV2CanWrite();
+  const { data } = useQuery({
+    ...libraryV2UnmatchedQueryOptions(),
+    retry: false,
+    enabled: canWrite,
+  });
   const count = data?.count ?? 0;
   if (count <= 0 || !data?.artist_id) return null;
   const artistId = data.artist_id;
@@ -4809,59 +4823,21 @@ export function librarySectionSearch<T extends Record<string, unknown>>(
   };
 }
 
-/** Which library the page is showing (#1199).
- *
- *  For an admin with more than one library, the same switch as the one under
- *  the profile in the sidebar, as a segmented control -- picking here or there
- *  is one pick, kept in the server session and announced with
- *  SHELL_LIBRARY_SCOPE_CHANGED_EVENT so both controls and every cached query
- *  follow it. A profile with a library of its own just sees its name. On an
- *  install with one library nothing is drawn and the toolbar is what it was.
- *
- *  It is not only a view filter: what is selected is also where a grab lands.
+/** Which library the page is showing (#1199): its name, whenever it is not
+ *  the shared one. Switching lives in one place -- the sidebar, for an admin
+ *  -- so there is one control and one code path for it. On an install with
+ *  one library nothing is drawn and the toolbar is what it was.
  */
 function LibraryScopePicker() {
-  const { data, refetch } = useQuery(libraryScopesQueryOptions());
-  if (!data?.separated) return null;
-  if (!data.switchable) {
-    if (data.current === 'shared') return null;
-    return (
-      <span className={styles.scopeBadge} title="The library you are looking at">
-        {data.currentName}
-      </span>
-    );
-  }
+  const { data } = useQuery(libraryScopesQueryOptions());
+  if (!data?.separated || data.current === 'shared') return null;
   return (
-    <div className={styles.viewToggle} role="radiogroup" aria-label="Library">
-      {data.options.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          role="radio"
-          aria-checked={data.current === option.id}
-          className={data.current === option.id ? styles.viewActive : ''}
-          title={option.root ? `${option.name} — ${option.root}` : option.name}
-          onClick={() => {
-            if (data.current === option.id) return;
-            void setLibraryScope(option.id).then((ok) => {
-              if (ok) {
-                window.dispatchEvent(
-                  new CustomEvent(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, {
-                    detail: { scope: option.id },
-                  }),
-                );
-                return;
-              }
-              // Refused -- demoted mid-session, or the library stopped being
-              // one between the GET and the POST: show what the server has.
-              void refetch();
-            });
-          }}
-        >
-          {option.name}
-        </button>
-      ))}
-    </div>
+    <span
+      className={styles.scopeBadge}
+      title={data.switchable ? 'Switch libraries in the sidebar' : 'The library you are looking at'}
+    >
+      {data.currentName}
+    </span>
   );
 }
 
@@ -7168,6 +7144,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const attemptedDiscographyFetchRef = useRef(false);
 
   async function updateDiscography() {
+    if (!canWish) return; // a read-only profile browses what is there
     setDiscographyBusy(true);
     await runBannerTask(async ({ sequence }) => {
       publishBanner(sequence, {
@@ -7228,6 +7205,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       return;
     }
     if (
+      canWish &&
       shouldAutoFetchDiscography({
         discographyCount: artist?.discography_count,
         discographyBusy,
@@ -7839,7 +7817,6 @@ export function SectionBulkMonitorButton({
       const jobId = await bulkMonitorLibraryV2Releases(artistId, scope, targetMonitored, albumIds);
       const jobError = await awaitBulkJob(queryClient, jobId);
       if (jobError) throw new Error(jobError);
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
     } catch (caught) {
       setError(mutationErrorMessage(caught, `Could not update ${title.toLowerCase()}`));
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
@@ -9138,7 +9115,12 @@ export function TrackTableBulkBar({
     ids: number[],
     apply: (id: number) => Promise<unknown>,
   ): Promise<Settled> {
-    const outcomes = await Promise.allSettled(ids.map((id) => apply(id)));
+    // four at a time: a hundred selected tracks were a hundred simultaneous
+    // requests (ReplayGain runs ffmpeg inside each one) on one SQLite writer
+    const outcomes: PromiseSettledResult<unknown>[] = [];
+    for (let start = 0; start < ids.length; start += 4) {
+      outcomes.push(...(await Promise.allSettled(ids.slice(start, start + 4).map(apply))));
+    }
     const failed = outcomes.flatMap((outcome, index) =>
       outcome.status === 'rejected'
         ? [
@@ -9521,7 +9503,9 @@ export function AlbumTrackTable({
   });
   const queueTracks = queueStatusTracks ?? ownQueueStatusQuery.data?.tracks ?? {};
   const preferencesMutation = useUiPreferencesMutation();
-  useRefreshLibraryWhenQueueDrains(Object.keys(queueTracks).length);
+  // a table fed by its artist view leaves the drain refresh to that view:
+  // every expanded album refreshing the whole library at once was a storm
+  useRefreshLibraryWhenQueueDrains(queueStatusTracks ? 0 : Object.keys(queueTracks).length);
   const album = albumQuery.data;
   const [sort, setSort] = useState<TrackSort | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());

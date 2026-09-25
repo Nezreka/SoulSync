@@ -62,11 +62,13 @@ _LEGACY = {
 # next cycle. Matches the legacy workers' own refresh thinking.
 DEFAULT_RETRY_AFTER_DAYS = 30
 
-STATUSES = frozenset({"matched", "not_found", "error", "skipped"})
+# "manual": the user tagged it by hand ("tag it yourself", upstream sets every
+# *_match_status to it) -- no worker may rematch it to a studio release.
+STATUSES = frozenset({"matched", "not_found", "error", "skipped", "manual"})
 # Statuses that mean "settled — do not come back for this one". Rendered into SQL
 # from this one constant so the batch query and the attempt-counter reset cannot
 # disagree about what counts as success.
-_SETTLED = ("matched",)
+_SETTLED = ("matched", "manual")
 _SETTLED_SQL = ", ".join(f"'{status}'" for status in _SETTLED)
 
 

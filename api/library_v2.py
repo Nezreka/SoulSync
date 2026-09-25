@@ -82,6 +82,9 @@ _OWN_LIBRARY_WISH_ENDPOINTS = frozenset({
     "lib2_discovery_track",
     # a missing album slot becomes a track row so it can be monitored
     "lib2_materialize_missing_track",
+    # "All Releases" of an artist in the library: browsable, unmonitored
+    # catalogue rows -- what a wish is made from, no file touched
+    "lib2_discography_refresh",
 })
 _PROFILE_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 
@@ -3987,20 +3990,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             ):
                 return jsonify({"success": False, "error": "album_ids must contain positive integers"}), 400
             album_allowlist = sorted(set(requested_album_ids))
+        from core.library2.sql_util import owner_clause
         type_filter = {
             "albums": "al.album_type NOT IN ('single','ep')",
             "eps": "al.album_type = 'ep'",
             "singles": "al.album_type = 'single'",
             "all": "1=1",
-            # Lidarr's "Monitor missing": only releases that are incomplete.
-            "missing": """(
+            # Lidarr's "Monitor missing": only releases that are incomplete --
+            # in the library this runs in (#1199): complete in the house is
+            # not complete in Kim's
+            "missing": f"""(
                 COALESCE(al.expected_track_count,
                          (SELECT COUNT(*) FROM lib2_tracks t2 WHERE t2.album_id = al.id)) >
                 (SELECT COUNT(DISTINCT t3.id) FROM lib2_tracks t3
                    JOIN lib2_track_files tf3 ON tf3.track_id = t3.id
                   WHERE t3.album_id = al.id
                     AND COALESCE(tf3.file_state,'active')
-                        NOT IN ('missing_confirmed','deleted'))
+                        NOT IN ('missing_confirmed','deleted')
+                    {owner_clause(column="tf3.owner_profile_id")})
             )""",
         }.get(scope)
         if not type_filter:

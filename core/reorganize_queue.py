@@ -213,7 +213,7 @@ class ReorganizeQueue:
         library = _library_for_new_item()
         with self._cond:
             for existing in self._items:
-                if (existing.album_id == album_id and existing.library == library
+                if (existing.album_id == album_id and _covers(existing.library, library)
                         and existing.status in ('queued', 'running')):
                     return {
                         'queued': False,
@@ -277,7 +277,7 @@ class ReorganizeQueue:
             # rescan self._items per row.
             blocked = {
                 i.album_id for i in self._items
-                if i.status in ('queued', 'running') and i.library == library
+                if i.status in ('queued', 'running') and _covers(i.library, library)
             }
             for raw in items:
                 album_id = str(raw['album_id'])
@@ -586,6 +586,12 @@ _singleton: Optional[ReorganizeQueue] = None
 _singleton_lock = threading.Lock()
 
 
+def _covers(queued_library, library) -> bool:
+    """Does a queued item already do this library's run? One queued for every
+    library (None) covers each of them."""
+    return queued_library is None or queued_library == library
+
+
 def _library_for_new_item():
     """The library an album queued right now is reorganized in (#1199).
 
@@ -639,7 +645,11 @@ def get_queue() -> ReorganizeQueue:
             # caller cannot see a half-restored queue.
             _singleton = ReorganizeQueue(store=_DatabaseQueueStore())
             try:
-                _singleton.restore()
+                # a backlog from before the Library v2 upgrade names legacy
+                # albums; it waits for the import that carries it over
+                from core.library2.migration_gate import defer_or_call
+                from database.music_database import get_database
+                defer_or_call(_singleton.restore, get_database(), "reorganize backlog")
             except Exception as e:
                 logger.error(f"[Queue] Restore failed, starting empty: {e}")
         return _singleton

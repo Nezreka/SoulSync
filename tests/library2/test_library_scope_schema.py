@@ -203,8 +203,13 @@ class TestTheUpgradePath:
         finally:
             connection.close()
 
-    def test_a_legacy_owner_lands_on_the_file(self, legacy_db):
+    def test_a_legacy_owner_lands_on_the_file(self, legacy_db, monkeypatch):
+        from core import library_scope
         from core.library2.importer import import_legacy_library
+
+        # profile 4 still has its own library; one that went back to the
+        # shared library imports as shared (test_two_libraries_import)
+        monkeypatch.setattr(library_scope, "own_library_ids", lambda: frozenset({4}))
 
         connection = sqlite3.connect(legacy_db.path)
         connection.execute("ALTER TABLE tracks ADD COLUMN owner_profile_id INTEGER")

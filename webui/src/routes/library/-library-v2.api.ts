@@ -1598,7 +1598,9 @@ export function libraryV2QueueStatusQueryOptions(
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'queue-status', entity, id],
     queryFn: () => fetchLibraryV2QueueStatus(entity, id),
     enabled: id > 0,
-    refetchInterval: 3000,
+    // brisk while something is in flight, a slow heartbeat on an idle page
+    refetchInterval: (query) =>
+      Object.keys(query.state.data?.tracks ?? {}).length > 0 ? 3000 : 15000,
     // A nice-to-have overlay must never surface as a page error or a
     // console-visible failure — callers read `.data?.tracks ?? {}` and treat
     // "no data yet" the same as "nothing in flight."
@@ -2047,6 +2049,8 @@ const NO_SCOPES: LibraryScopes = {
 async function fetchLibraryScopes(signal?: AbortSignal): Promise<LibraryScopes> {
   // with a signal the shared GET dedupe never replays an answer from before a switch
   const res = await fetch('/api/library/v2/scopes', { signal });
+  // a server error is retried, not remembered as "one library"
+  if (res.status >= 500) throw new Error(`Library scopes failed (${res.status})`);
   if (!res.ok) return NO_SCOPES;
   const data = await res.json();
   const text = (value: unknown, fallback: string) =>
@@ -2067,18 +2071,6 @@ export function libraryScopesQueryOptions() {
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'scopes'],
     queryFn: ({ signal }) => fetchLibraryScopes(signal),
   });
-}
-
-/** Point this session at one directory. Everything the page then does -- what
- *  it shows AND where a grab lands -- follows it, so the caller invalidates
- *  the whole library query key afterwards. */
-export async function setLibraryScope(scope: string): Promise<boolean> {
-  const res = await fetch('/api/library/v2/scope', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scope }),
-  });
-  return res.ok;
 }
 
 export function libraryV2EnabledQueryOptions() {

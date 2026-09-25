@@ -200,3 +200,17 @@ def test_a_hand_tagged_file_is_never_queued_as_an_upgrade(pipeline_db):
             payload = track_wishlist_payload(conn, tid)
     assert payload["_should_queue"] is False
     assert payload["_source_info"]["quality_evaluation"] == "hand_tagged"
+
+
+def test_a_hand_tagged_release_is_settled_for_every_enrichment_worker(pipeline_db):
+    """upstream marks every match status 'manual' when a file is tagged by
+    hand; the lib2 ledger says the same, so no worker rematches it."""
+    lib = pipeline_db
+    from core.library2.provider_attempts import due_entities
+    path = os.path.join(lib.shared, "A", "B", "01.mp3")
+    tid = _track(lib.db, (path, 128))
+    assert lib.db.record_manual_metadata_file(path, "B", "A") == 1
+    with lib.db._get_connection() as conn:
+        album = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (tid,)).fetchone()[0]
+        assert album not in due_entities(conn, entity_type="album", service="spotify")
+        assert tid not in due_entities(conn, entity_type="track", service="deezer")

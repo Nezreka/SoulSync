@@ -132,7 +132,7 @@ def resolve_mapping(cursor: Any, entity_type: str, server_source: Any,
 
 def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
                    server_source: Any, server_id: Any,
-                   server_library_id: Any = "") -> None:
+                   server_library_id: Any = "", *, compat: bool = True) -> None:
     """Record one positive recognition, safely handling a server re-key.
 
     Everything here is scoped to ONE server library. Without that, mapping an
@@ -168,6 +168,8 @@ def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
     )
     # Compatibility only.  New code reads the mapping table, so replacing this
     # snapshot cannot erase another server's durable mapping.
+    if not compat:
+        return
     table = ENTITY_TABLES[entity_type]
     cursor.execute(
         f"UPDATE {table} SET server_source=?,server_id=?,updated_at=CURRENT_TIMESTAMP "

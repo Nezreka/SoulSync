@@ -28,8 +28,9 @@ describe('Library v2 maintenance tools', () => {
     expect(screen.getByRole('dialog', { name: 'Library Health & Repair' })).toBeInTheDocument();
     expect(screen.getByText('Catalog & monitoring')).toBeInTheDocument();
     expect(screen.getByText('Artist files & tags')).toBeInTheDocument();
-    expect(screen.getByText('Library-wide scans')).toBeInTheDocument();
-    expect(screen.getAllByText('Entire library')).toHaveLength(2);
+    // no library-wide scan job is left, so that section is not drawn empty
+    expect(screen.queryByText('Library-wide scans')).toBeNull();
+    expect(screen.getAllByText('Entire library')).toHaveLength(1);
     expect(screen.getByText('This artist')).toBeInTheDocument();
 
     expect(screen.getByRole('button', { name: /Match Unmapped Artists/ })).toBeInTheDocument();

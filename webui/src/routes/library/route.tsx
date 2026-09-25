@@ -4,6 +4,7 @@ import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import {
   libraryV2AlbumQueryOptions,
+  libraryV2ArtistQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
   libraryV2WantedQueryOptions,
@@ -22,6 +23,7 @@ export const Route = createFileRoute('/library')({
     page: search.page,
     monitored: search.monitored,
     album: search.album,
+    artist: search.artist,
     discover: search.discover,
     discoverAlbum: search.discoverAlbum,
     section: search.section,
@@ -39,6 +41,8 @@ export const Route = createFileRoute('/library')({
       );
     } else if (deps.album) {
       void context.queryClient.prefetchQuery(libraryV2AlbumQueryOptions(deps.album));
+    } else if (deps.artist) {
+      void context.queryClient.prefetchQuery(libraryV2ArtistQueryOptions(deps.artist));
     } else if (!deps.discover && !deps.discoverAlbum) {
       void context.queryClient.prefetchQuery(libraryV2ArtistsQueryOptions(deps));
     }

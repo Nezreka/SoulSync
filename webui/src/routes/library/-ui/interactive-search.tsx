@@ -15,6 +15,7 @@ import {
   fetchLibraryV2QueueStatus,
   fetchLibraryV2TrackHistory,
   LIBRARY_V2_QUERY_KEY,
+  libraryScopesQueryOptions,
   libraryV2QualityProfilesQueryOptions,
   listSearchSources,
   rankSearchResultQuality,
@@ -465,6 +466,8 @@ export function InteractiveSearchModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  // where a grab from this window lands, when libraries are separated (#1199)
+  const { data: scopes } = useQuery(libraryScopesQueryOptions());
   const [query, setQuery] = useState(initialQuery);
   // An empty set means the explicit "All sources" choice. Once a user clicks
   // a source chip, the set becomes the exact subset to search. This makes a
@@ -1123,6 +1126,12 @@ export function InteractiveSearchModal({
 
         <div className={styles.modalFootNote}>
           Downloads appear in your library automatically after processing.
+          {scopes?.separated ? (
+            <>
+              {' '}
+              They land in <strong>{scopes.targetName}</strong>.
+            </>
+          ) : null}
         </div>
       </div>
     </DialogFrame>

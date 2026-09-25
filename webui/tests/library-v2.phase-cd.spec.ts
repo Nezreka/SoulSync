@@ -178,7 +178,8 @@ test('Library v2 capability response makes every exposed mutation read-only', as
   await expect(
     page.getByText(/Read-only: library changes require the admin profile/),
   ).toBeVisible();
-  const controls = page.locator('[data-requires-write]');
+  // with no wish right either, the monitor/search controls are locked too
+  const controls = page.locator('[data-requires-write], [data-requires-wish]');
   await expect(controls.first()).toBeVisible();
   const count = await controls.count();
   for (let index = 0; index < count; index += 1) await expect(controls.nth(index)).toBeDisabled();

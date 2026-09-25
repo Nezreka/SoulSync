@@ -3,6 +3,6 @@
   "_upgrade_note": "Migrations that only ever run against a database created before the cutover are marked in place with the legacy-upgrade-only markers and counted with the resumable importer; they go when the legacy tables do.",
   "reads": 0,
   "writes": 0,
-  "upgrade_reads": 13,
-  "upgrade_writes": 3
+  "upgrade_reads": 17,
+  "upgrade_writes": 4
 }

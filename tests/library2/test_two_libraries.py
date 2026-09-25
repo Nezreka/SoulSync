@@ -364,6 +364,33 @@ class TestRemovalDetection:
         assert left == 0
 
 
+class TestUpgradingAnInstall:
+    """The legacy import on an install that already had own libraries
+    (upstream 3.4.4): Kim's files become Kim's intent, not the house's."""
+
+    def test_import_monitoring_is_derived_per_library(self, lib):
+        from core.library2.importer import reconcile_import_monitoring
+        _, _, kims = _album_with_file(lib.db, artist="Kims Band", album="Mine", title="K",
+                                      path=os.path.join(lib.kim_root, "Kims Band", "Mine", "01.flac"),
+                                      key="k")
+        _, _, house = _album_with_file(lib.db, artist="House Band", album="House", title="S",
+                                       path=os.path.join(lib.shared, "House Band", "House", "01.flac"),
+                                       key="h")
+        with lib.db._get_connection() as conn:
+            conn.execute("UPDATE lib2_tracks SET monitored=0")
+            reconcile_import_monitoring(conn.cursor(), profile_id=1)
+            reconcile_import_monitoring(conn.cursor(), profile_id=lib.kim)
+            conn.commit()
+            rules = {(r[0], r[1]): r[2] for r in conn.execute(
+                "SELECT entity_id, profile_id, provenance FROM lib2_monitor_rules"
+                " WHERE entity_type='track'")}
+            flags = dict(conn.execute("SELECT id, monitored FROM lib2_tracks").fetchall())
+        assert rules.get((house, 1)) == "file_import"
+        assert (kims, 1) not in rules            # the house does not want Kim's copy
+        assert rules.get((kims, lib.kim)) == "file_import"
+        assert flags[house] == 1 and flags[kims] == 0   # global flag = shared library
+
+
 # ── where a download lands (E-04) ────────────────────────────────────────────
 
 class TestWhereADownloadLands:

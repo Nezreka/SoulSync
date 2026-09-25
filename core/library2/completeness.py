@@ -624,9 +624,12 @@ def _persist_tracklist_tracks(
     # provably complete (every track covered by a file or Wishlist rule).  Keep
     # the derived parent state and every child's wanted projection coherent.
     from core.library2.importer import reconcile_import_monitoring
-    reconcile_import_monitoring(conn.cursor(), album_ids=[album_id])
     from core.library2.wanted import recompute_wanted_for_entity
-    recompute_wanted_for_entity(conn, "album", album_id)
+    from core.library_scope import own_library_ids
+    # each library judges completeness by its own files (#1199)
+    for profile_id in (1, *sorted(own_library_ids())):
+        reconcile_import_monitoring(conn.cursor(), profile_id=profile_id, album_ids=[album_id])
+        recompute_wanted_for_entity(conn, "album", album_id, profile_id=profile_id)
     return changed
 
 

@@ -232,3 +232,33 @@ def test_a_second_admin_may_edit_metadata(world):
                              (world.ids["h"],)).fetchone()[0]
     r = world.client.post(f"/api/library/v2/albums/{album}/edit", json={"album_type": "ep"})
     assert r.status_code == 200, r.get_json()
+
+
+def test_monitor_missing_counts_the_files_of_her_library(world):
+    """An album complete in the house but half-missing in Kim's library is
+    "missing" for Kim."""
+    import time
+    with world.db._get_connection() as conn:
+        album = conn.execute("SELECT id FROM lib2_albums WHERE primary_artist_id=?",
+                             (world.ids["k"],)).fetchone()[0]
+        extra = seed_track(conn, server_id="t-k2", title="Song 2", album_id=album,
+                           artist_id=world.ids["k"], server_source="soulsync")
+        # the house has track 2 of Kim's album; Kim does not
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, file_state) VALUES(?,?,'active')",
+                     (extra, os.path.join(str(world.db.database_path).rsplit("/", 1)[0],
+                                          "Transfer", "Kims Band", "LP", "02.flac")))
+        conn.execute("UPDATE lib2_albums SET expected_track_count=2 WHERE id=?", (album,))
+        conn.commit()
+    world.as_profile(world.kim)
+    r = world.client.post(f"/api/library/v2/artists/{world.ids['k']}/releases/monitor",
+                          json={"scope": "missing", "monitored": True})
+    assert r.status_code == 200, r.get_json()
+    job_id = r.get_json()["job_id"]
+    for _ in range(300):
+        status = world.client.get("/api/library/v2/jobs/status",
+                                  query_string={"job_id": job_id}).get_json()
+        if not status["running"]:
+            break
+        time.sleep(0.01)
+    assert status["error"] is None
+    assert status["result"]["albums"] == 1

@@ -56,6 +56,20 @@ from utils.logging_config import get_logger
 logger = get_logger("downloads.atomic_recovery")
 
 
+def _repoint_legacy_before_import(db, conn, old_path: str, new_path: str) -> None:
+    """An upgrade whose Library v2 import has not run yet still reads the
+    legacy rows; left on the staging path, the album comes over missing."""
+    try:
+        from core.library2.migration_gate import migration_required
+        if migration_required(db):
+            # legacy-upgrade-only-begin
+            conn.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
+                         (new_path, old_path))
+            # legacy-upgrade-only-end
+    except Exception as exc:  # noqa: BLE001 - no legacy table on this install
+        logger.debug("[Atomic Recovery] legacy repoint skipped: %s", exc)
+
+
 def make_db_path_updater(db, *, count_is_evidence: bool = True):
     """``fn(old_path, new_path) -> rows | None`` repointing a library file row.
 
@@ -78,6 +92,7 @@ def make_db_path_updater(db, *, count_is_evidence: bool = True):
         conn = db._get_connection()
         try:
             repointed = repoint_file_path(conn, old_path, new_path)
+            _repoint_legacy_before_import(db, conn, old_path, new_path)
             conn.commit()
         finally:
             conn.close()
