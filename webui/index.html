@@ -105,6 +105,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='watchlist-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='chat-overhaul.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='profiles.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='docs.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
         :root {
             --accent-rgb: {{ initial_accent_rgb }};
@@ -9735,8 +9736,7 @@
                     <nav class="docs-sidebar" id="docs-sidebar">
                         <div class="docs-sidebar-header">
                             <h3>Documentation</h3>
-                            <input type="text" class="docs-search" id="docs-search-input" placeholder="Filter docs…"
-                                autocomplete="off">
+                            <!-- Search trigger injected by docs.js -->
                         </div>
                         <div class="docs-nav" id="docs-nav">
                             <!-- Populated by JS -->
@@ -9745,6 +9745,7 @@
                     <main class="docs-content" id="docs-content">
                         <!-- Populated by JS -->
                     </main>
+                    <!-- Right "On this page" TOC injected by docs.js -->
                 </div>
             </div>
 
@@ -11435,6 +11436,22 @@
     </button>
 
     <script src="{{ url_for('static', filename='docs.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/01-getting-started.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/02-guides.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/03-dashboard.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/04-search.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/05-sync.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/06-discover.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/07-artists.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/08-automations.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/09-library.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/10-import-player.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/11-settings.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/12-profiles.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/13-troubleshooting.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/14-video.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/15-video.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/16-api.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='helper.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='particles.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='worker-orbs.js', v=static_v) }}"></script>
