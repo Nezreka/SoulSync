@@ -54,6 +54,7 @@ import {
   toggleOriginEntry,
   toggleOriginGroup,
 } from './origin-history';
+import './library-switch';
 import './server-activity';
 import {
   closeServiceSwitchModal,

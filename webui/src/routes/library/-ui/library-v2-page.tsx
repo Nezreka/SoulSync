@@ -15,7 +15,7 @@ import {
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
 import { thumb } from '@/platform/artwork-thumb';
-import { getShellBridge } from '@/platform/shell/bridge';
+import { getShellBridge, SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import { bitrateKbps, formatBitrate } from '../-bitrate';
@@ -650,7 +650,7 @@ export function Artwork({
 
 function useMonitorMutation() {
   const queryClient = useQueryClient();
-  const canWrite = useLibraryV2CanWrite();
+  const canWrite = useLibraryV2CanWish();
   return useMutation({
     mutationFn: async (v: {
       entity: 'artists' | 'albums' | 'tracks';
@@ -726,7 +726,7 @@ export function MonitorToggle({
   prominent?: boolean;
 }) {
   const mutation = useMonitorMutation();
-  const canWrite = useLibraryV2CanWrite();
+  const canWrite = useLibraryV2CanWish();
   const nextMonitored = !monitored;
   return (
     <span className={styles.monitorControl} onClick={(e) => e.stopPropagation()}>
@@ -794,9 +794,16 @@ export function MonitorToggle({
  * on click. Missing capability data must fail closed.
  */
 export const LibraryV2CanWriteContext = createContext(false);
+/** E-13: monitor and Automatic Search -- the admin anywhere, a profile in a
+ *  library of its own. Everything else stays behind LibraryV2CanWriteContext. */
+export const LibraryV2CanWishContext = createContext(false);
 
 export function useLibraryV2CanWrite(): boolean {
   return useContext(LibraryV2CanWriteContext);
+}
+
+export function useLibraryV2CanWish(): boolean {
+  return useContext(LibraryV2CanWishContext) || useContext(LibraryV2CanWriteContext);
 }
 
 export function ActionButton({
@@ -807,6 +814,7 @@ export function ActionButton({
   busy,
   disabled,
   requiresWrite = true,
+  requiresWish = false,
   tone = 'default',
 }: {
   icon: IconName;
@@ -816,10 +824,13 @@ export function ActionButton({
   busy?: boolean;
   disabled?: boolean;
   requiresWrite?: boolean;
+  /** E-13: monitor/search -- also a profile in a library of its own */
+  requiresWish?: boolean;
   tone?: 'default' | 'danger';
 }) {
   const canWrite = useLibraryV2CanWrite();
-  const writeBlocked = requiresWrite && !canWrite;
+  const canWish = useLibraryV2CanWish();
+  const writeBlocked = requiresWish ? !canWish : requiresWrite && !canWrite;
   return (
     <button
       type="button"
@@ -843,6 +854,7 @@ function IconActionButton({
   onClick,
   disabled,
   requiresWrite = false,
+  requiresWish = false,
   tone = 'default',
 }: {
   icon: IconName;
@@ -850,10 +862,13 @@ function IconActionButton({
   onClick: () => void;
   disabled?: boolean;
   requiresWrite?: boolean;
+  /** E-13: monitor/search -- also a profile in a library of its own */
+  requiresWish?: boolean;
   tone?: 'default' | 'danger';
 }) {
   const canWrite = useLibraryV2CanWrite();
-  const writeBlocked = requiresWrite && !canWrite;
+  const canWish = useLibraryV2CanWish();
+  const writeBlocked = requiresWish ? !canWish : requiresWrite && !canWrite;
   return (
     <button
       type="button"
@@ -4376,42 +4391,47 @@ export function LibraryV2Page() {
       : null;
 
   const canWrite = enabledQuery.data?.canWrite === true;
+  const canWish = enabledQuery.data?.canWish === true;
 
   return (
     <LibraryV2CanWriteContext.Provider value={canWrite}>
-      <MirrorStatusBanner />
-      {!canWrite ? (
-        <div className={styles.emptyState}>
-          Read-only: library changes require the admin profile.
-        </div>
-      ) : null}
-      {search.album ? (
-        <AlbumDetailView albumId={search.album} />
-      ) : discoverAlbum && discover ? (
-        <DiscoveryAlbumView
-          source={discoverAlbum.source}
-          providerId={discoverAlbum.providerId}
-          name={search.discoverAlbumName ?? ''}
-          albumType={search.discoverAlbumType ?? 'album'}
-          imageUrl={search.discoverAlbumImage ?? ''}
-          releaseDate={search.discoverAlbumDate ?? ''}
-          artistSource={discover.source}
-          artistProviderId={discover.providerId}
-          artistName={discover.name}
-        />
-      ) : discover && !search.artist ? (
-        <DiscoveryArtistView
-          source={discover.source}
-          providerId={discover.providerId}
-          name={discover.name}
-        />
-      ) : search.artist ? (
-        <ArtistDetailView artistId={search.artist} />
-      ) : search.section === 'wanted' ? (
-        <WantedIndexView />
-      ) : (
-        <ArtistIndexView />
-      )}
+      <LibraryV2CanWishContext.Provider value={canWish}>
+        <MirrorStatusBanner />
+        {!canWrite ? (
+          <div className={styles.emptyState}>
+            {canWish
+              ? 'Your library: you can monitor and search here; other changes are up to the admin.'
+              : 'Read-only: library changes require the admin profile.'}
+          </div>
+        ) : null}
+        {search.album ? (
+          <AlbumDetailView albumId={search.album} />
+        ) : discoverAlbum && discover ? (
+          <DiscoveryAlbumView
+            source={discoverAlbum.source}
+            providerId={discoverAlbum.providerId}
+            name={search.discoverAlbumName ?? ''}
+            albumType={search.discoverAlbumType ?? 'album'}
+            imageUrl={search.discoverAlbumImage ?? ''}
+            releaseDate={search.discoverAlbumDate ?? ''}
+            artistSource={discover.source}
+            artistProviderId={discover.providerId}
+            artistName={discover.name}
+          />
+        ) : discover && !search.artist ? (
+          <DiscoveryArtistView
+            source={discover.source}
+            providerId={discover.providerId}
+            name={discover.name}
+          />
+        ) : search.artist ? (
+          <ArtistDetailView artistId={search.artist} />
+        ) : search.section === 'wanted' ? (
+          <WantedIndexView />
+        ) : (
+          <ArtistIndexView />
+        )}
+      </LibraryV2CanWishContext.Provider>
     </LibraryV2CanWriteContext.Provider>
   );
 }
@@ -4789,50 +4809,59 @@ export function librarySectionSearch<T extends Record<string, unknown>>(
   };
 }
 
-/** Which directory the page is showing.
+/** Which library the page is showing (#1199).
  *
- *  Rendered only when the server says `switchable`, which means: an admin, and
- *  more than one directory exists. On a single-library install -- every install
- *  today -- nothing is drawn and the toolbar is exactly what it was.
+ *  For an admin with more than one library, the same switch as the one under
+ *  the profile in the sidebar, as a segmented control -- picking here or there
+ *  is one pick, kept in the server session and announced with
+ *  SHELL_LIBRARY_SCOPE_CHANGED_EVENT so both controls and every cached query
+ *  follow it. A profile with a library of its own just sees its name. On an
+ *  install with one library nothing is drawn and the toolbar is what it was.
  *
- *  It is not only a view filter. What is selected here is also where a grab
- *  started from this page lands, so switching invalidates the whole library
- *  query key rather than just the list.
+ *  It is not only a view filter: what is selected is also where a grab lands.
  */
 function LibraryScopePicker() {
-  const queryClient = useQueryClient();
   const { data, refetch } = useQuery(libraryScopesQueryOptions());
-  // `switchable` already means admin AND at least one own directory, so the
-  // server never sends fewer than two options when it is true.
-  if (!data?.switchable) return null;
+  if (!data?.separated) return null;
+  if (!data.switchable) {
+    if (data.current === 'shared') return null;
+    return (
+      <span className={styles.scopeBadge} title="The library you are looking at">
+        {data.currentName}
+      </span>
+    );
+  }
   return (
-    <label className={styles.viewToggle} aria-label="Library directory">
-      <select
-        aria-label="Library directory"
-        value={data.current}
-        onChange={(event) => {
-          const next = event.target.value;
-          void setLibraryScope(next).then((ok) => {
-            if (ok) {
-              void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-              return;
-            }
-            // Refused -- demoted mid-session, or the directory stopped being
-            // one between the GET and the POST. Without this the controlled
-            // value never changes, so React does not re-render and the DOM
-            // keeps a selection the server rejected while the page still
-            // shows (and writes to) the old one.
-            void refetch();
-          });
-        }}
-      >
-        {data.options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className={styles.viewToggle} role="radiogroup" aria-label="Library">
+      {data.options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          role="radio"
+          aria-checked={data.current === option.id}
+          className={data.current === option.id ? styles.viewActive : ''}
+          title={option.root ? `${option.name} — ${option.root}` : option.name}
+          onClick={() => {
+            if (data.current === option.id) return;
+            void setLibraryScope(option.id).then((ok) => {
+              if (ok) {
+                window.dispatchEvent(
+                  new CustomEvent(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, {
+                    detail: { scope: option.id },
+                  }),
+                );
+                return;
+              }
+              // Refused -- demoted mid-session, or the library stopped being
+              // one between the GET and the POST: show what the server has.
+              void refetch();
+            });
+          }}
+        >
+          {option.name}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -4892,7 +4921,7 @@ export function formatWantedFileQuality(file: LibraryV2WantedRow['file']): strin
 
 function WantedIndexView() {
   const navigate = useNavigate();
-  const canWrite = useLibraryV2CanWrite();
+  const canWish = useLibraryV2CanWish();
   const search = Route.useSearch();
   const wantedFilter = useUrlSyncedFilter(
     search.q,
@@ -4916,7 +4945,7 @@ function WantedIndexView() {
   }
 
   function runSearch(trackId: number) {
-    if (searchBusy || !canWrite) return;
+    if (searchBusy || !canWish) return;
     runScoped('tracks', trackId);
   }
 
@@ -5042,7 +5071,7 @@ function WantedIndexView() {
                     <IconActionButton
                       icon="automatic"
                       title="Search this track"
-                      requiresWrite
+                      requiresWish
                       // dd28-16: one banner is shared by every row, so a second
                       // search must not start until the first has reported.
                       disabled={searchBusy}
@@ -5303,7 +5332,7 @@ function ArtistTable({
 
 function AlbumDetailView({ albumId }: { albumId: number }) {
   const navigate = useNavigate();
-  const canWrite = useLibraryV2CanWrite();
+  const canWish = useLibraryV2CanWish();
   const previousArtist = Route.useSearch().artist;
   // `resolve` materializes the provider tracklist for a release that has no
   // track rows yet. The inline expand always did this; opening the same
@@ -5325,7 +5354,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
   } = useScopedSearchBanner();
 
   function handleAction(action: string, entity?: Lib2EntityRef) {
-    if (!canWrite) return;
+    if (!canWish) return;
     if (INTERACTIVE_RE.test(action)) {
       setModalAction({ action, entity });
       return;
@@ -5461,7 +5490,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
               )}
               qualityProfile={album.quality_profile}
               entity={modalAction.entity}
-              canWrite={canWrite}
+              canWrite={canWish}
               onClose={() => setModalAction(null)}
             />
           ) : null}
@@ -6559,7 +6588,8 @@ function DiscoveryAlbumView({
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const canWrite = useLibraryV2CanWrite();
+  // bookmarking a release is wishing (E-13)
+  const canWrite = useLibraryV2CanWish();
   const [monitoring, setMonitoring] = useState(false);
   const [monitored, setMonitored] = useState(false);
   const [monitoringTrack, setMonitoringTrack] = useState<string | null>(null);
@@ -7077,7 +7107,7 @@ function CatalogueArtistHero({
 
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
-  const canWrite = useLibraryV2CanWrite();
+  const canWish = useLibraryV2CanWish();
   const search = Route.useSearch();
   const releasesMode = search.releases;
   const showVideos = search.artistView === 'videos';
@@ -7213,7 +7243,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
    *  server-side search (deep-dive C1) — the entity ref decides whether it
    *  searches this one track, this one album, or the whole artist. */
   function handleAction(action: string, entity?: Lib2EntityRef) {
-    if (!canWrite) return;
+    if (!canWish) return;
     if (INTERACTIVE_RE.test(action)) {
       setModalAction({ action, entity });
       return;
@@ -7269,6 +7299,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <ActionButton
                 icon="automatic"
                 label="Automatic Search"
+                requiresWish
                 title="Search missing/upgradable tracks for this artist"
                 // dd28-16: a double click double-POSTed; the server answered
                 // 409 (job already running) and the client rendered that as
@@ -7279,6 +7310,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <ActionButton
                 icon="interactive"
                 label="Interactive Search"
+                requiresWish
                 title="Manually select from search results across all configured sources"
                 onClick={() => handleAction('Interactive Search')}
               />
@@ -7569,7 +7601,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               initialQuery={buildSearchQuery(artist.name, modalAction.action, modalAction.entity)}
               qualityProfile={artist.quality_profile}
               entity={modalAction.entity}
-              canWrite={canWrite}
+              canWrite={canWish}
               onClose={() => setModalAction(null)}
             />
           ) : null}
@@ -7792,13 +7824,13 @@ export function SectionBulkMonitorButton({
   albumIds: number[];
 }) {
   const queryClient = useQueryClient();
-  const canWrite = useLibraryV2CanWrite();
+  const canWish = useLibraryV2CanWish();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const targetMonitored = !allMonitored;
 
   async function apply() {
-    if (!canWrite) return;
+    if (!canWish) return;
     setBusy(true);
     setError(null);
     try {
@@ -7820,7 +7852,7 @@ export function SectionBulkMonitorButton({
         type="button"
         className={styles.sectionBulk}
         data-requires-write=""
-        disabled={busy || !canWrite}
+        disabled={busy || !canWish}
         title={
           allMonitored
             ? `Stop monitoring all ${title.toLowerCase()}`
@@ -8036,7 +8068,7 @@ function AlbumBlock({
           <IconActionButton
             icon="automatic"
             title="Automatic Search — search missing/upgradable tracks on this album"
-            requiresWrite
+            requiresWish
             onClick={() =>
               onAction(`Automatic Search: ${album.title}`, {
                 albumId: album.id,
@@ -8047,7 +8079,7 @@ function AlbumBlock({
           <IconActionButton
             icon="interactive"
             title="Interactive Search"
-            requiresWrite
+            requiresWish
             onClick={() =>
               onAction(`Interactive Search: ${album.title}`, {
                 albumId: album.id,
@@ -9044,6 +9076,7 @@ export function TrackTableBulkBar({
 }) {
   const queryClient = useQueryClient();
   const canWrite = useLibraryV2CanWrite();
+  const canWish = useLibraryV2CanWish();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState<{
@@ -9064,7 +9097,8 @@ export function TrackTableBulkBar({
   };
 
   async function run(label: string, fn: () => Promise<void | Settled>) {
-    if (!canWrite) return;
+    // each button below is gated by what it needs; monitoring is a wish (E-13)
+    if (!canWish) return;
     setBusy(label);
     setError(null);
     try {
@@ -9125,7 +9159,7 @@ export function TrackTableBulkBar({
         type="button"
         className={styles.bulkBarButton}
         data-requires-write=""
-        disabled={busy !== null || !canWrite}
+        disabled={busy !== null || !canWish}
         onClick={() =>
           void run('Monitor', () =>
             fanOut('Monitor', trackIds, (id) => setLibraryV2Monitored('tracks', id, true)),
@@ -9138,7 +9172,7 @@ export function TrackTableBulkBar({
         type="button"
         className={styles.bulkBarButton}
         data-requires-write=""
-        disabled={busy !== null || !canWrite}
+        disabled={busy !== null || !canWish}
         onClick={() =>
           void run('Unmonitor', () =>
             fanOut('Unmonitor', trackIds, (id) => setLibraryV2Monitored('tracks', id, false)),
@@ -10560,14 +10594,14 @@ function TrackRow({
         <IconActionButton
           icon="automatic"
           title="Automatic Search — search missing/upgradable for this track"
-          requiresWrite
+          requiresWish
           disabled={!track.id}
           onClick={() => onAction(`Search: ${label} (${albumTitle})`, entity)}
         />
         <IconActionButton
           icon="interactive"
           title="Interactive Search — pick the source yourself"
-          requiresWrite
+          requiresWish
           disabled={!track.id}
           onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
         />

@@ -31,6 +31,9 @@ export type ShellBridge = NonNullable<typeof window.SoulSyncWebShellBridge>;
 
 export const SHELL_BRIDGE_READY_EVENT = 'ss:webui-shell-bridge-ready';
 export const SHELL_PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
+/** The header's library switcher picked another library (#1199). What every
+ *  page lists and where downloads land changed with it. */
+export const SHELL_LIBRARY_SCOPE_CHANGED_EVENT = 'ss:webui-library-scope-changed';
 
 export function getShellBridge(): ShellBridge | null {
   return window.SoulSyncWebShellBridge ?? null;

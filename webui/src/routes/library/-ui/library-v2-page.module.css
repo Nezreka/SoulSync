@@ -176,6 +176,18 @@
   font-size: 13px;
 }
 
+.scopeBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgb(250, 204, 21);
+  background: rgba(250, 204, 21, 0.1);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+}
+
 .viewActive {
   background: rgba(var(--accent-rgb), 0.85) !important;
   color: #06140b !important;

@@ -2,7 +2,7 @@ import '@vitejs/plugin-react/preamble';
 import { createRoot } from 'react-dom/client';
 
 import { mountLibraryDiscographySourceSelector } from '@/features/settings/library-discography-source';
-import { bindWindowWebRouter } from '@/platform/shell/bridge';
+import { bindWindowWebRouter, SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
 import { ROUTER_ROOT_ID } from '@/platform/shell/route-controllers';
 
 import { createAppQueryClient } from './query-client';
@@ -48,6 +48,11 @@ export async function bootstrapApp() {
   const router = createAppRouter({ queryClient });
 
   bindWindowWebRouter(router);
+  // #1199: another library was picked in the header. Every cached answer --
+  // lists, "already in your library", download targets -- was for the old one.
+  window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, () => {
+    void queryClient.invalidateQueries();
+  });
   createRoot(container).render(<AppRouterProvider router={router} queryClient={queryClient} />);
 
   return { queryClient, router };

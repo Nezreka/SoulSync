@@ -40,12 +40,16 @@ interface EnabledResponse {
   enabled: boolean;
   /** iss29-C10: whether THIS profile may mutate the catalogue at all. */
   can_write?: boolean;
+  /** E-13: whether it may monitor and search in the library it looks at. */
+  can_wish?: boolean;
 }
 
 export interface LibraryV2Availability {
   enabled: boolean;
   /** False for a non-admin profile: every mutating endpoint answers 403. */
   canWrite: boolean;
+  /** True for the admin, and for a profile in a library of its own (#1199). */
+  canWish: boolean;
 }
 interface ArtistsResponse {
   success: boolean;
@@ -80,6 +84,7 @@ export async function fetchLibraryV2Enabled(): Promise<LibraryV2Availability> {
     enabled: Boolean(payload.enabled),
     // Missing capability data is not permission to mutate.
     canWrite: payload.can_write === true,
+    canWish: payload.can_wish === true || payload.can_write === true,
   };
 }
 
@@ -2009,22 +2014,49 @@ export function libraryV2ImportStatusQueryOptions(refetchIntervalMs = 1000) {
   });
 }
 
-export type LibraryScopeOption = { id: string; name: string; root?: string | null };
+export type LibraryScopeOption = {
+  id: string;
+  name: string;
+  root?: string | null;
+  files?: number;
+};
 
 export type LibraryScopes = {
   /** false unless the caller is an admin AND more than one directory exists */
   switchable: boolean;
+  /** anything to tell apart at all: some profile keeps a library of its own */
+  separated: boolean;
   current: string;
+  currentName: string;
+  /** where a download started now would land */
+  target: string;
+  targetName: string;
   options: LibraryScopeOption[];
+};
+
+const NO_SCOPES: LibraryScopes = {
+  switchable: false,
+  separated: false,
+  current: 'shared',
+  currentName: 'Shared library',
+  target: 'shared',
+  targetName: 'Shared library',
+  options: [],
 };
 
 async function fetchLibraryScopes(): Promise<LibraryScopes> {
   const res = await fetch('/api/library/v2/scopes');
-  if (!res.ok) return { switchable: false, current: 'shared', options: [] };
+  if (!res.ok) return NO_SCOPES;
   const data = await res.json();
+  const text = (value: unknown, fallback: string) =>
+    typeof value === 'string' && value ? value : fallback;
   return {
     switchable: data?.switchable === true,
-    current: typeof data?.current === 'string' ? data.current : 'shared',
+    separated: data?.separated === true,
+    current: text(data?.current, 'shared'),
+    currentName: text(data?.current_name, 'Shared library'),
+    target: text(data?.target, 'shared'),
+    targetName: text(data?.target_name, 'Shared library'),
     options: Array.isArray(data?.options) ? data.options : [],
   };
 }

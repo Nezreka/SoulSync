@@ -64,6 +64,21 @@
   font-size: 14px;
 }
 
+.libraryTarget {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--sp-muted);
+}
+
+.libraryTarget strong {
+  color: rgb(250, 204, 21);
+  font-weight: 600;
+}
+
+.libraryTarget[data-library-target='shared'] strong {
+  color: rgb(var(--accent-light-rgb));
+}
+
 .modes {
   display: inline-flex;
   padding: 3px;
