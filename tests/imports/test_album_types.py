@@ -297,8 +297,8 @@ def test_reorganize_reads_a_multi_valued_releasetype_tag():
 
     tag = ["album", "compilation", "live"]
     primary = _normalize_album_type(tag)
-    assert primary == "compilation", "the qualifier wins over the bare primary"
-    assert _secondary_album_types(tag, primary) == ["album", "live"]
+    assert primary == "album", "MusicBrainz writes the primary FIRST"
+    assert _secondary_album_types(tag, primary) == ["compilation", "live"]
 
 
 def test_a_single_valued_tag_still_reads_as_before():
@@ -350,5 +350,51 @@ def test_the_tag_reader_surfaces_secondary_types(tmp_path):
             "releasetype": ["album", "compilation", "live"],
         }})
     assert err is None
-    assert album_meta["album_type"] == "compilation"
-    assert album_meta["secondary_types"] == ["album", "live"]
+    assert album_meta["album_type"] == "album"
+    assert album_meta["secondary_types"] == ["compilation", "live"]
+
+
+def test_reading_the_tag_does_not_change_where_reorganize_files_an_album():
+    """The regression this nearly shipped with. Teaching the reader about
+    multi-valued tags means reorganize now SEES a type where it used to see
+    nothing, and resolved_record_type routes 'compilation' to compilation_path.
+    Taking the most specific token would therefore have swept every
+    single-artist greatest-hits record into Compilations/ on the next
+    reorganize — 38 folders on the library this was written against.
+
+    The primary is the first token because that is the order MusicBrainz
+    writes; the qualifiers are the rest.
+    """
+    from core.library.reorganize_tag_source import _normalize_album_type
+
+    def routes_to(tag_album_type, raw_db_type="album"):
+        # mirrors resolved_record_type in core/library_reorganize.py
+        if raw_db_type in ("compilation",) or tag_album_type in ("compilation",):
+            return "compilation_path"
+        return "album_path"
+
+    # a single artist's anthology stays with the artist, as it did before
+    assert routes_to(_normalize_album_type(["album", "compilation"])) == "album_path"
+    assert routes_to(_normalize_album_type(["album", "compilation", "live"])) == "album_path"
+    # a release whose PRIMARY type is compilation still routes as it always did
+    assert routes_to(_normalize_album_type("compilation")) == "compilation_path"
+    assert routes_to(_normalize_album_type(["compilation"])) == "compilation_path"
+
+
+def test_the_beets_folders_this_was_built_for_round_trip():
+    """Real folder names from a beets-organised library, rebuilt from the tags
+    those files actually carry."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _secondary_album_types)
+
+    cases = [
+        (["album", "compilation", "live"], "[Live][Anthology]"),   # Tool / Salival
+        (["album", "compilation"], "[Anthology]"),                 # 3 Doors Down / Greatest Hits
+        (["ep", "live"], "[EP][Live]"),                            # Slothrust / Audiotree Live
+        (["album"], ""),                                           # a plain album
+    ]
+    for tag, expected in cases:
+        primary = _normalize_album_type(tag)
+        ctx = {"album_type": primary, "record_type": primary,
+               "secondary_types": _secondary_album_types(tag, primary)}
+        assert format_album_types(ctx, BEETS_CONFIG) == expected, tag

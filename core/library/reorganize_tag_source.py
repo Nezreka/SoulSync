@@ -145,24 +145,30 @@ def _release_type_tokens(value: Any) -> List[str]:
 
 
 def _normalize_album_type(value: Any) -> str:
-    """The single canonical token for the ``releasetype`` tag, or ''.
+    """The PRIMARY canonical token for the ``releasetype`` tag, or ''.
 
-    Multi-valued tags resolve to the most specific canonical token present,
-    preferring the qualifier over the bare primary: a release tagged
-    ``[album, compilation]`` IS a compilation, and reporting 'album' for it
-    would put it in the wrong bin. Non-canonical qualifiers (live, remix,
-    soundtrack) are not returned here — they have no bin of their own — but
-    they survive in :func:`_secondary_album_types` for ``$atypes``.
+    Order matters and is not arbitrary: MusicBrainz writes the primary type
+    first and its qualifiers after it, so the first canonical token IS the
+    primary. Taking the most SPECIFIC token instead looks tidier and silently
+    re-routes libraries — ``[album, compilation]`` is a single artist's own
+    anthology with a Compilation qualifier, and answering 'compilation' sends
+    it to compilation_path, moving every greatest-hits record a user owns into
+    Compilations/ on the next reorganize.
+
+    The qualifiers are not discarded, they are just not the answer to THIS
+    question; :func:`_secondary_album_types` keeps them for ``$atypes``.
     """
-    tokens = _release_type_tokens(value)
-    for preferred in ("compilation", "ep", "single", "album"):
-        if preferred in tokens:
-            return preferred
+    for token in _release_type_tokens(value):
+        if token in _VALID_ALBUM_TYPES:
+            return token
     return ''
 
 
 def _secondary_album_types(value: Any, primary: str) -> List[str]:
     """The release-type tokens that are not the resolved primary.
+
+    For ``[album, compilation, live]`` that is ``[compilation, live]`` — the
+    qualifiers, which is exactly what ``$atypes`` labels a folder with.
 
     These are what ``$atypes`` needs: Live, Soundtrack, Remix and the like
     exist only as secondary types, so a reorganize that kept just the primary
