@@ -524,6 +524,11 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     download_batches[batch_id].get('source_playlist_ref') or ''
                 ).strip()
                 batch_skip_acoustid = bool(download_batches[batch_id].get('skip_acoustid', False))
+        # a Library v2 wishlist -- the admin's, or one filling a profile's own
+        # library (#1199) -- carries upgrade intents; asked once, off the lock
+        from core.library_scope import library_scope_for_profile
+        _lib2_wishlist = (int(batch_profile_id or 1) == 1
+                          or library_scope_for_profile(batch_profile_id) == int(batch_profile_id))
 
         # Most album requests carry one explicit/mirrored profile on the batch.
         # For older/internal callers, recover the same intent from the first
@@ -1645,7 +1650,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 if (
                     not is_upgrade_intent(_upgrade_intent)
                     and playlist_id == 'wishlist'
-                    and int(batch_profile_id or 1) == 1
+                    and _lib2_wishlist
                 ):
                     _upgrade_source = track_info.get('source_info') or {}
                     if isinstance(_upgrade_source, str):

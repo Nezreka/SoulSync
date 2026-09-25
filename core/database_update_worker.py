@@ -1314,8 +1314,12 @@ class DatabaseUpdateWorker:
             return False  # Assume no changes if we can't check
     
     def _library_artist_id(self, artist_id):
-        from core.library_scope import library_artist_id
-        return library_artist_id(artist_id, self.server_type, self.owner_profile_id)
+        # Library v2 stores the server's native id: an own library's rows are
+        # told apart by the mapping's server library (media_server_sync.
+        # scan_library_id), not by a prefix. Prefixed, the deep-scan fences
+        # and the removal diff never matched a stored id.
+        from core.library_scope import native_jellyfin_artist_id
+        return native_jellyfin_artist_id(artist_id)
 
     def _clear_phantom_artist_thumbs(self):
         """null the server-built photo url of every artist the server says has
@@ -1474,7 +1478,8 @@ class DatabaseUpdateWorker:
                          f"{len(removed_album_ids)} albums no longer on server...")
 
         results = self.database.delete_removed_content(
-            removed_artist_ids, removed_album_ids, self.server_type)
+            removed_artist_ids, removed_album_ids, self.server_type,
+            owner_profile_id=self.owner_profile_id)
 
         self._removal_results = results
         return results

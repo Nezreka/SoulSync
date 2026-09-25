@@ -1001,6 +1001,11 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             from core.library2.wanted import recompute_wanted
             recompute_wanted(conn, profile_id=ADMIN_PROFILE_ID,
                              track_ids=[track_id])
+            # and the intent of the library the file went into (#1199)
+            _owner = conn.execute("SELECT owner_profile_id FROM lib2_track_files WHERE id=?",
+                                  (file_id,)).fetchone()
+            if _owner and _owner[0]:
+                recompute_wanted(conn, profile_id=int(_owner[0]), track_ids=[track_id])
             conn.commit()
             # perf25-04: an artist/album born from a finished download is not
             # covered by the last precache run, so warm its artwork now instead

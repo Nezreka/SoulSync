@@ -1937,6 +1937,15 @@ class MusicDatabase:
                                "WHERE service = 'tidal' AND status = 'not_found'")
                 if cursor.rowcount:
                     logger.info("Tidal search fix (#1290): requeued %d not_found lookups", cursor.rowcount)
+            # an install upgrading from the legacy tables copies their misses
+            # into lib2 later (the bootstrap backfill): clear them at the source
+            # too, as upstream did, or they come back for the full 30 days
+            for table in ("artists", "albums", "tracks"):
+                cursor.execute("SELECT 1 FROM pragma_table_info(?) WHERE name='tidal_match_status'",
+                               (table,))
+                if cursor.fetchone():
+                    cursor.execute(f"UPDATE {table} SET tidal_match_status = NULL"
+                                   " WHERE tidal_match_status = 'not_found'")
             cursor.execute("CREATE TABLE _tidal_search_1290_requeued (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
             self._record_migration(cursor, 'tidal_search_1290_requeue')
         except Exception as e:  # noqa: BLE001 - a migration never costs the start
@@ -8011,16 +8020,35 @@ class MusicDatabase:
 
     # --- Removal detection helpers ---
 
+    @staticmethod
+    def _scan_library_filter(owner_profile_id, separated: str) -> Tuple[str, list]:
+        """`` AND m.server_library_id = ?`` for the library a scan reads, when
+        libraries are separated at all (``separated`` is a non-empty scope
+        clause) -- an own-library scan keeps its ids under ``own:<pid>``."""
+        if not separated:
+            return "", []
+        from core.library2.media_server_sync import scan_library_id
+        return " AND m.server_library_id = ?", [scan_library_id(owner_profile_id)]
+
     def get_all_artist_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
         """Get all artist IDs stored in the database for a specific server (and
         library owner: None = the shared library's rows)."""
+        # the scan reads ONE library: another library's artists are not
+        # stale for it (#1199). No clause on a single-library install.
+        from core.library2.sql_util import in_library_sql
+        scope = "shared" if owner_profile_id is None else int(owner_profile_id)
+        owned = in_library_sql("artist", "a", scope=scope)
+        library, library_params = self._scan_library_filter(owner_profile_id, owned)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT server_id FROM lib2_media_server_mappings "
-                               "WHERE entity_type='artist' AND server_source=? UNION "
-                               "SELECT server_id FROM lib2_artists WHERE server_source=? "
-                               "AND server_id IS NOT NULL", (server_source, server_source))
+                cursor.execute("SELECT m.server_id FROM lib2_media_server_mappings m "
+                               "JOIN lib2_artists a ON a.id = m.entity_id "
+                               "WHERE m.entity_type='artist' AND m.server_source=?" + library
+                               + owned +
+                               " UNION SELECT a.server_id FROM lib2_artists a "
+                               "WHERE a.server_source=? AND a.server_id IS NOT NULL" + owned,
+                               (server_source, *library_params, server_source))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting artist IDs for {server_source}: {e}")
@@ -8082,13 +8110,20 @@ class MusicDatabase:
     def get_all_album_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
         """Get all album IDs stored in the database for a specific server (and
         library owner: None = the shared library's rows)."""
+        from core.library2.sql_util import in_library_sql
+        scope = "shared" if owner_profile_id is None else int(owner_profile_id)
+        owned = in_library_sql("album", "al", scope=scope)
+        library, library_params = self._scan_library_filter(owner_profile_id, owned)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT server_id FROM lib2_media_server_mappings "
-                               "WHERE entity_type='album' AND server_source=? UNION "
-                               "SELECT server_id FROM lib2_albums WHERE server_source=? "
-                               "AND server_id IS NOT NULL", (server_source, server_source))
+                cursor.execute("SELECT m.server_id FROM lib2_media_server_mappings m "
+                               "JOIN lib2_albums al ON al.id = m.entity_id "
+                               "WHERE m.entity_type='album' AND m.server_source=?" + library
+                               + owned +
+                               " UNION SELECT al.server_id FROM lib2_albums al "
+                               "WHERE al.server_source=? AND al.server_id IS NOT NULL" + owned,
+                               (server_source, *library_params, server_source))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting album IDs for {server_source}: {e}")
@@ -8113,6 +8148,9 @@ class MusicDatabase:
                  "              WHERE f.track_id = t.id"
                  "                AND COALESCE(f.file_state,'active') <> 'deleted'"
                  + owner_clause(scope, column="f.owner_profile_id") + ")")
+        from core.library2.sql_util import owner_clause as _separated
+        library, library_params = self._scan_library_filter(
+            owner_profile_id, _separated(scope))
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -8120,10 +8158,10 @@ class MusicDatabase:
                     "SELECT m.server_id FROM lib2_media_server_mappings m "
                     "  JOIN lib2_tracks t ON t.id = m.entity_id "
                     " WHERE m.entity_type='track' AND m.server_source=? "
-                    "   AND TRIM(m.server_id) <> ''" + owned + " UNION "
+                    "   AND TRIM(m.server_id) <> ''" + library + owned + " UNION "
                     "SELECT t.server_id FROM lib2_tracks t WHERE t.server_source=? "
                     "  AND t.server_id IS NOT NULL AND TRIM(t.server_id) <> ''" + owned,
-                    (server_source, server_source))
+                    (server_source, *library_params, server_source))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting track IDs for {server_source}: {e}")
@@ -8258,10 +8296,16 @@ class MusicDatabase:
         'title_norm', 'created_at', 'updated_at',
     })
 
-    @staticmethod
     def delete_removed_content(self, removed_artist_ids: set, removed_album_ids: set,
-                               server_source: str):
-        """Detach artists/albums removed from a server, preserving shared state."""
+                               server_source: str, owner_profile_id=_ANY_OWNER):
+        """Detach artists/albums removed from a server, preserving shared state.
+
+        ``owner_profile_id``: the library the scan read (None = shared). With
+        libraries separated, the detach only reaches that library's tracks; on
+        a single-library install it is the whole server, as it always was."""
+        from core.library_scope import any_own_library_exists
+        if not any_own_library_exists():
+            owner_profile_id = MusicDatabase._ANY_OWNER
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -8277,7 +8321,8 @@ class MusicDatabase:
                     for i in range(0, len(artist_list), batch_size):
                         batch = artist_list[i:i + batch_size]
                         detached = self._detach_server_contribution(
-                            cursor, server_source, "artist", batch)
+                            cursor, server_source, "artist", batch,
+                            owner_profile_id=owner_profile_id)
                         tracks_removed += detached['tracks_removed']
                         albums_removed += detached['albums_removed']
                         artists_removed += detached['artists_removed']
@@ -8288,7 +8333,8 @@ class MusicDatabase:
                     for i in range(0, len(album_list), batch_size):
                         batch = album_list[i:i + batch_size]
                         detached = self._detach_server_contribution(
-                            cursor, server_source, "album", batch)
+                            cursor, server_source, "album", batch,
+                            owner_profile_id=owner_profile_id)
                         tracks_removed += detached['tracks_removed']
                         albums_removed += detached['albums_removed']
 
@@ -8845,6 +8891,14 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+            # with libraries separated: the tracks the caller's library has,
+            # with its file (#1199) -- "do we have this album's tracks" and
+            # "which folder is it in" are both questions about one library
+            from core.library2.sql_util import (
+                in_library_sql, owner_clause, scoped_primary_file_join,
+            )
+            _file_on = (scoped_primary_file_join("t", "f") if owner_clause()
+                        else f"f.track_id = t.id AND f.is_primary = 1 AND {_LIVE_FILE}")
 
             cursor.execute(f"""
                 SELECT t.*, al.primary_artist_id AS artist_id,
@@ -8852,8 +8906,8 @@ class MusicDatabase:
                 FROM lib2_tracks t
                 JOIN lib2_albums al ON al.id = t.album_id
                 LEFT JOIN lib2_track_files f
-                       ON f.track_id = t.id AND f.is_primary = 1 AND {_LIVE_FILE}
-                WHERE t.album_id = ?
+                       ON {_file_on}
+                WHERE t.album_id = ?{in_library_sql("track", "t")}
                 ORDER BY t.track_number, t.title
             """, (album_id,))
             rows = cursor.fetchall()
@@ -9109,7 +9163,9 @@ class MusicDatabase:
         if not where_conditions:
             return []
 
-        where_clause = " AND ".join(where_conditions)
+        # "do we already have this" asks the caller's library (#1199)
+        from core.library2.sql_util import in_library_sql, scoped_primary_file_join
+        where_clause = " AND ".join(where_conditions) + in_library_sql("track", "tracks")
 
         # Relevance ordering. The old `ORDER BY tracks.title` was case-SENSITIVE
         # (SQLite BINARY collation sorts 'B' before 'b'), so a lowercase exact
@@ -9159,8 +9215,7 @@ class MusicDatabase:
             JOIN lib2_albums albums ON albums.id = tracks.album_id
             JOIN lib2_artists artists ON artists.id = albums.primary_artist_id
             LEFT JOIN lib2_track_files files
-                   ON files.track_id = tracks.id AND files.is_primary = 1
-                  AND COALESCE(files.file_state, 'active') <> 'deleted'
+                   ON {scoped_primary_file_join("tracks", "files")}
             WHERE {where_clause}
             ORDER BY {order_by}
             LIMIT ?
@@ -9234,7 +9289,8 @@ class MusicDatabase:
                 "OR tracks.server_source=?)")
             params.extend((server_source, server_source))
 
-        where_clause = " AND ".join(where_parts)
+        from core.library2.sql_util import in_library_sql, scoped_primary_file_join
+        where_clause = " AND ".join(where_parts) + in_library_sql("track", "tracks")
         params.append(limit * 3)
 
         mapping_projection = "NULL AS requested_server_id"
@@ -9257,8 +9313,7 @@ class MusicDatabase:
             JOIN lib2_albums albums ON albums.id = tracks.album_id
             JOIN lib2_artists artists ON artists.id = albums.primary_artist_id
             LEFT JOIN lib2_track_files files
-                   ON files.track_id = tracks.id AND files.is_primary = 1
-                  AND COALESCE(files.file_state, 'active') <> 'deleted'
+                   ON {scoped_primary_file_join("tracks", "files")}
             WHERE {where_clause}
             ORDER BY tracks.title, artists.name
             LIMIT ?
@@ -9364,7 +9419,8 @@ class MusicDatabase:
                 # If no search criteria, return empty list
                 return []
 
-            where_clause = " AND ".join(where_conditions)
+            from core.library2.sql_util import in_library_sql
+            where_clause = " AND ".join(where_conditions) + in_library_sql("album", "albums")
             params.append(limit)
 
             cursor.execute(f"""
@@ -9970,6 +10026,8 @@ class MusicDatabase:
                                "AND m.server_source=?) OR albums.server_source = ?)")
                         params.extend((server_source, server_source))
                     params.append(limit)
+                    from core.library2.sql_util import in_library_sql
+                    src += in_library_sql("album", "albums")
                     cursor.execute(f"""
                         SELECT albums.*, albums.primary_artist_id AS artist_id,
                                albums.image_url AS thumb_url, albums.added_at AS created_at,
@@ -10039,6 +10097,12 @@ class MusicDatabase:
                           "AND m.server_source=?) OR t.server_source=?)")
                 params.extend((server_source, server_source))
             params.append(limit)
+            from core.library2.sql_util import (
+                in_library_sql, owner_clause, scoped_primary_file_join,
+            )
+            where += in_library_sql("track", "t")  # this library's (#1199)
+            _file_on = (scoped_primary_file_join("t", "f") if owner_clause()
+                        else f"f.track_id = t.id AND f.is_primary = 1 AND {_LIVE_FILE}")
 
             mapping_projection = "NULL AS requested_server_id"
             mapping_params = []
@@ -10060,7 +10124,7 @@ class MusicDatabase:
                 JOIN lib2_albums al ON al.id = t.album_id
                 JOIN lib2_artists a ON a.id = al.primary_artist_id
                 LEFT JOIN lib2_track_files f
-                       ON f.track_id = t.id AND f.is_primary = 1 AND {_LIVE_FILE}
+                       ON {_file_on}
                 WHERE {where}
                 LIMIT ?
             """, [*mapping_params, *params])
@@ -10082,6 +10146,8 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             placeholders = ','.join('?' for _ in album_ids)
+            # the tracks this library has (#1199), with this library's file
+            from core.library2.sql_util import in_library_sql, scoped_primary_file_join
             cursor.execute(f"""
                 SELECT t.*, al.primary_artist_id AS artist_id,
                        a.name as artist_name, al.title as album_title,
@@ -10091,9 +10157,8 @@ class MusicDatabase:
                 JOIN lib2_albums al ON al.id = t.album_id
                 JOIN lib2_artists a ON a.id = al.primary_artist_id
                 LEFT JOIN lib2_track_files f
-                       ON f.track_id = t.id AND f.is_primary = 1
-                      AND COALESCE(f.file_state, 'active') <> 'deleted'
-                WHERE t.album_id IN ({placeholders})
+                       ON {scoped_primary_file_join("t", "f")}
+                WHERE t.album_id IN ({placeholders}){in_library_sql("track", "t")}
             """, list(album_ids))
             rows = cursor.fetchall()
             tracks: List[DatabaseTrack] = []
@@ -15700,8 +15765,10 @@ class MusicDatabase:
         in_library = owned_sql('artist', 'a', scope='shared')
         if scope != 'shared':
             in_library = f"({in_library} OR {owned_sql('artist', 'a', scope=scope)})"
+        # provider ids only: a lib2 row id is never a similar_artists source
+        # id, and a numeric collision would count a stray edge as chosen
         cursor.execute(f"""
-            SELECT a.id, a.spotify_id, a.musicbrainz_id,
+            SELECT a.spotify_id, a.musicbrainz_id,
                    json_extract(a.external_ids, '$.itunes'),
                    json_extract(a.external_ids, '$.deezer')
             FROM lib2_artists a WHERE {in_library}

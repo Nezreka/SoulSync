@@ -753,6 +753,7 @@ def reconcile_artist_watchlist(
         }
         affected_tracks: set[int] = set()
         outbox_ids: List[int] = []
+        shared_intent = int(profile_id) == 1
         for row in rows:
             artist_id = int(row["id"])
             ids = source_ids_from_values(
@@ -768,14 +769,20 @@ def reconcile_artist_watchlist(
             explicit = row["rule_provenance"] == PROVENANCE_USER
             desired = bool(row["rule_monitored"]) if explicit else on_watchlist
 
-            if bool(row["monitored"]) != desired:
-                conn.execute(
-                    "UPDATE lib2_artists SET monitored=?, "
-                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (1 if desired else 0, artist_id),
-                )
+            # the global flag is the shared library's intent; a profile with
+            # a library of its own has only its rules (#1199)
+            current = bool(row["monitored"]) if shared_intent else bool(row["rule_monitored"])
+            if current != desired:
+                if shared_intent:
+                    conn.execute(
+                        "UPDATE lib2_artists SET monitored=?, "
+                        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (1 if desired else 0, artist_id),
+                    )
                 stats["monitor_flags_changed"] += 1
                 affected_tracks.update(entity_track_ids(conn, "artist", artist_id))
+            if not shared_intent and row["rule_provenance"] is None and not desired:
+                continue  # no rule already reads "not monitored" there
             if not explicit:
                 # Skip the no-op rewrite when the legacy rule already matches
                 # (right provenance AND value): a full hourly reconcile

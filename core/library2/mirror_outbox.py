@@ -108,13 +108,16 @@ def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
     the monitor-flag change. Returns the created outbox row ids.
     """
     from core.library2.wishlist_mirror import track_wishlist_payload
+    from core.library_scope import library_scope, library_scope_for_profile
 
     outbox_ids: List[int] = []
     for tid in track_ids:
         # Payload construction is part of the authoritative monitor mutation's
         # transaction boundary.  Propagate failures so the caller can roll back
         # instead of committing a flag change with no retryable outbox intent.
-        payload = track_wishlist_payload(conn, tid)
+        # Judged in the library this profile's wishlist fills (#1199).
+        with library_scope(library_scope_for_profile(profile_id)):
+            payload = track_wishlist_payload(conn, tid)
         if not payload:
             continue
         stype = "single" if payload.pop("_album_type", "") == "single" else "album"

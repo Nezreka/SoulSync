@@ -92,11 +92,21 @@ def primary_order(alias: str = "") -> str:
     return f"{p}is_primary DESC, {quality_order(alias)}"
 
 
-def primary_file_row(conn, track_id: int) -> Optional[Dict[str, Any]]:
-    """The track's primary file row (dict), or None when it has no file."""
+def primary_file_row(conn, track_id: int, *, scoped: bool = False) -> Optional[Dict[str, Any]]:
+    """The track's primary file row (dict), or None when it has no file.
+
+    ``scoped``: the primary among the files of the library the caller works
+    in (#1199) -- what an upgrade, a tag read or a tag edit must act on. The
+    flag is one per track across every library, so unscoped it can name
+    another library's copy.
+    """
+    owner = ""
+    if scoped:
+        from core.library2.sql_util import owner_clause
+        owner = owner_clause(column="owner_profile_id")
     row = conn.execute(
         f"SELECT * FROM lib2_track_files WHERE track_id=? "
-        f"AND COALESCE(file_state,'active')<>'deleted' "
+        f"AND COALESCE(file_state,'active')<>'deleted'{owner} "
         f"ORDER BY {primary_order()} LIMIT 1",
         (int(track_id),),
     ).fetchone()
@@ -156,14 +166,17 @@ def writable_file_rows(conn, track_id: int) -> list:
     metadata write is about the *recording*, so it belongs on all of them.
 
     Excludes states whose file must not be touched (``deleted``,
-    ``missing_confirmed``, ``quarantined``).
+    ``missing_confirmed``, ``quarantined``), and another library's copies: a
+    write started in one library stays in it (#1199, E-14).
     """
+    from core.library2.sql_util import owner_clause
     return conn.execute(
         f"""SELECT id, path, file_state, is_primary, format
               FROM lib2_track_files
              WHERE track_id=? AND path IS NOT NULL AND path <> ''
                AND COALESCE(file_state,'active')
                    NOT IN ('missing_confirmed','deleted','quarantined')
+               {owner_clause(column="owner_profile_id")}
              ORDER BY {primary_order()}""",
         (int(track_id),),
     ).fetchall()

@@ -505,10 +505,19 @@ def _load_upgrade_snapshot(track_id: int) -> _UpgradeSnapshot:
 
     conn = get_database()._get_connection()
     try:
-        profile = effective_track_profile(conn, track_id)
-        primary = primary_file_row(conn, track_id)
+        profile = dict(effective_track_profile(conn, track_id) or {})
+        # the file of the library this import fills (it runs under that
+        # scope): an upgrade is measured against, and retires, that copy only
+        primary = primary_file_row(conn, track_id, scoped=True)
     finally:
         conn.close()
+    # the row keeps ranked_targets as JSON; every stage after this one reads
+    # the parsed shape load_profile_by_id hands out
+    if isinstance(profile.get("ranked_targets"), str):
+        try:
+            profile["ranked_targets"] = json.loads(profile["ranked_targets"])
+        except ValueError:
+            profile["ranked_targets"] = []
     path = str(primary.get("path") or "") if primary else None
     resolved = None
     if path:
@@ -2048,7 +2057,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
         # for fresh whole-album batches; returns final_path unchanged otherwise.
         # Upgrades publish at the live destination before retiring an old copy;
         # a private album staging path is not a completed replacement.
-        if not is_quality_upgrade:
+        if not is_quality_upgrade and _upgrade_snapshot is None:
             final_path = _maybe_stage_album_track(context, final_path)
         logger.info(f"Resolved path: '{final_path}'")
         context['_final_processed_path'] = final_path
@@ -2086,7 +2095,8 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             file_ext = os.path.splitext(file_path)[1]
             final_path, _ = build_final_path_for_track(
                 context, artist_context, album_info, file_ext)
-            final_path = _maybe_stage_album_track(context, final_path)
+            # an upgrade publishes at the live destination, never into album
+            # staging: the old copy is retired as soon as it lands
             context['_final_processed_path'] = final_path
             _upgrade_decision = _decide_snapshot_upgrade(
                 _upgrade_snapshot, file_path)
@@ -2185,50 +2195,54 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                     if context_key in matched_downloads_context:
                         del matched_downloads_context[context_key]
                 return
+            _same_path_upgrade = bool(
+                _upgrade_old_local
+                and os.path.normcase(os.path.normpath(_upgrade_old_local))
+                == os.path.normcase(os.path.normpath(final_path))
+            )
+            _quality_profile = _resolve_context_quality_profile(context)
+            _replace_lower = _quality_profile.get(
+                'replace_lower_quality',
+                config_manager.get('import.replace_lower_quality', False))
+            # #1270: ranked against the quality profile, not by extension -- an
+            # off-profile FLAC must never replace the MP3 an MP3-only profile
+            # asked for, and a probe that cannot tell is not evidence of an
+            # improvement. Outside the metadata check below: neither missing
+            # tags nor a read error may turn a failed comparison into a
+            # permitted overwrite.
+            if (_replace_lower and not _same_path_upgrade and not is_enhance_download
+                    and not force_replace
+                    and not is_profile_upgrade(final_path, file_path, _quality_profile)):
+                logger.info(
+                    "[Protection] Incoming file is not a verified improvement under the quality profile - skipping: %s",
+                    os.path.basename(final_path),
+                )
+                try:
+                    os.remove(file_path)
+                except FileNotFoundError:
+                    pass
+                except Exception as e:
+                    logger.error(f"[Protection] Error removing redundant file: {e}")
+                if os.path.exists(file_path):
+                    context['_context_failure_msg'] = 'could not remove redundant import source'
+                else:
+                    _confirm_existing_file_bookkeeping(
+                        context, artist_context, album_info)
+                return
             try:
                 from mutagen import File as MutagenFile
                 existing_file = MutagenFile(final_path)
                 has_metadata = existing_file is not None and len(existing_file.tags or {}) > 2
-                _same_path_upgrade = bool(
-                    _upgrade_old_local
-                    and os.path.normcase(os.path.normpath(_upgrade_old_local))
-                    == os.path.normcase(os.path.normpath(final_path))
-                )
                 if _same_path_upgrade:
                     logger.info(
                         "[Upgrade] Atomically replacing %s after real-quality comparison",
                         os.path.basename(final_path),
                     )
                 elif has_metadata and not is_enhance_download and not force_replace:
-                    _quality_profile = _resolve_context_quality_profile(context)
-                    _replace_lower = _quality_profile.get(
-                        'replace_lower_quality',
-                        config_manager.get('import.replace_lower_quality', False))
                     if _replace_lower:
-                        # #1270: ranked against the quality profile, not by
-                        # extension -- an off-profile FLAC must never replace
-                        # the MP3 an MP3-only profile asked for, and a probe
-                        # that cannot tell is not evidence of an improvement.
-                        if is_profile_upgrade(final_path, file_path, _quality_profile):
-                            logger.info("[Quality Replace] Verified profile improvement: %s", os.path.basename(final_path))
-                            _replace_reason = "quality_upgrade"
-                        else:
-                            logger.info(
-                                "[Protection] Incoming file is not a verified improvement under the quality profile - skipping: %s",
-                                os.path.basename(final_path),
-                            )
-                            try:
-                                os.remove(file_path)
-                            except FileNotFoundError:
-                                pass
-                            except Exception as e:
-                                logger.error(f"[Protection] Error removing redundant file: {e}")
-                            if os.path.exists(file_path):
-                                context['_context_failure_msg'] = 'could not remove redundant import source'
-                            else:
-                                _confirm_existing_file_bookkeeping(
-                                    context, artist_context, album_info)
-                            return
+                        # verified above
+                        logger.info("[Quality Replace] Verified profile improvement: %s", os.path.basename(final_path))
+                        _replace_reason = "quality_upgrade"
                     else:
                         logger.info(f"[Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
                         logger.info(f"[Protection] Removing redundant download file: {os.path.basename(file_path)}")
@@ -2562,6 +2576,14 @@ def post_process_matched_download_with_verification(context_key, context, file_p
     try:
         original_task_id = context.pop('task_id', None)
         original_batch_id = context.pop('batch_id', None)
+        # #1199: the batch's library must survive the pop -- import_owner_id
+        # reads it from the context once batch_id is gone
+        if original_batch_id:
+            from core.library_scope import BATCH_OWNER_KEY
+            from core.runtime_state import download_batches
+            _batch = download_batches.get(original_batch_id) or {}
+            if BATCH_OWNER_KEY in _batch and BATCH_OWNER_KEY not in context:
+                context[BATCH_OWNER_KEY] = _batch[BATCH_OWNER_KEY]
         # #999: the atomic-publish stage redirect runs inside the inner pipeline
         # and needs the batch id — which we just popped so the inner batch
         # accounting stays owned by this wrapper. Stash it under a dedicated key

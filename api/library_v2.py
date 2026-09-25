@@ -2310,7 +2310,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = _conn()
         try:
             downloads = track_source_info(conn, track_id)
-            file_row = primary_file_row(conn, track_id)
+            file_row = primary_file_row(conn, track_id, scoped=True)
             manual_skips = skip_history_for_path(conn, file_row["path"]) if file_row else []
         finally:
             conn.close()
@@ -2332,7 +2332,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2.track_files import primary_file_row
         conn = _conn()
         try:
-            file_row = primary_file_row(conn, track_id)
+            file_row = primary_file_row(conn, track_id, scoped=True)
         finally:
             conn.close()
         if not file_row or not file_row.get("path"):
@@ -2370,7 +2370,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2.track_files import primary_file_row
         conn = _conn()
         try:
-            file_row = primary_file_row(conn, track_id)
+            file_row = primary_file_row(conn, track_id, scoped=True)
         finally:
             conn.close()
         if not file_row or not file_row.get("path"):
@@ -5117,7 +5117,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 conn = db._get_connection()
                 try:
                     from core.library2.wishlist_mirror import upgrade_candidate_track_ids
-                    track_ids = upgrade_candidate_track_ids(conn)
+                    # the wanted rows -- and the files -- of the library it runs for
+                    track_ids = upgrade_candidate_track_ids(conn, profile_id=active_profile)
                     _job_registry.update(job_id, total=len(track_ids))
                     # _mirror_tracks_wishlist re-checks upgrade_candidate per
                     # track and only queues genuine upgrade candidates.
@@ -5175,7 +5176,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
         active_profile = _intent_profile()
         try:
-            job = _job_registry.start(f"search:{entity}:{eid}")
+            # one search per entity AND library: Kim's is not the house's (#1199)
+            job = _job_registry.start(f"search:{entity}:{eid}"
+                                      + (f":{active_profile}" if active_profile != 1 else ""))
         except JobAlreadyRunning as exc:
             return jsonify({
                 "success": False,

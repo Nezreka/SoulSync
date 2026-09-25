@@ -300,7 +300,8 @@ def set_field_override(
     entity_id = int(entity_id)
     if entity_id <= 0:
         raise MetadataOverrideError("entity_id must be positive")
-    if int(profile_id) != 1:
+    from core.acquisition.requests import actor_is_admin
+    if not actor_is_admin(conn, profile_id):  # a second admin is an admin (86d5e4682)
         raise MetadataOverrideError("metadata overrides are admin-only", status=403)
     if conn.execute(
         f"SELECT 1 FROM {_ENTITY_TABLES[entity_type]} WHERE id=?", (entity_id,)
@@ -350,7 +351,8 @@ def clear_field_override(
     """Remove one override so the current provider baseline becomes visible."""
     entity_type = _entity_type(entity_type)
     field_name, _spec = _field(entity_type, field_name)
-    if int(profile_id) != 1:
+    from core.acquisition.requests import actor_is_admin
+    if not actor_is_admin(conn, profile_id):  # a second admin is an admin (86d5e4682)
         raise MetadataOverrideError("metadata overrides are admin-only", status=403)
     result = conn.execute(
         """DELETE FROM lib2_metadata_overrides

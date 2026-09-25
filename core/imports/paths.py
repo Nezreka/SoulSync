@@ -311,7 +311,14 @@ def transfer_root_for_context(context) -> str:
     decide, and with neither it is the configured transfer folder -- which is
     every download on an install without own directories.
     """
-    return library_root_for_profile(import_owner_id(context)) or shared_transfer_root()
+    owner = import_owner_id(context)
+    if owner is None:
+        # a profile whose own library the media server cannot isolate lands in
+        # the shared folder -- and is told so, once (#1276)
+        from core.library_scope import own_library_supported
+        if not own_library_supported():
+            library_root_for_profile(import_profile_id(context))
+    return library_root_for_profile(owner) or shared_transfer_root()
 
 
 def build_simple_download_destination(context, file_path: str):

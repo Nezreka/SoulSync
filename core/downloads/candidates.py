@@ -792,6 +792,15 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         "track_info": track_info,  # Add track_info for playlist folder mode
                         "_download_username": username,  # Source username for AcoustID skip logic
                     }
+                    # #1199: the library the batch fills rides with the file --
+                    # the verification wrapper pops batch_id before the import
+                    # asks where the file goes. A plain dict read, no lock.
+                    from core.library_scope import BATCH_OWNER_KEY
+                    from core.runtime_state import download_batches
+                    _batch = download_batches.get(batch_id) or {}
+                    if BATCH_OWNER_KEY in _batch:
+                        matched_downloads_context[context_key][BATCH_OWNER_KEY] = _batch[BATCH_OWNER_KEY]
+                        matched_downloads_context[context_key].setdefault('profile_id', _batch.get('profile_id'))
                     from core.imports.upgrade_intent import attach_upgrade_intent
                     attach_upgrade_intent(
                         matched_downloads_context[context_key],

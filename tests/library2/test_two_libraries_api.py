@@ -220,3 +220,15 @@ def test_the_admin_monitoring_in_kims_library_writes_kims_intent(world):
             "SELECT profile_id FROM lib2_monitor_rules WHERE entity_type='artist' "
             "AND entity_id=?", (world.ids["k"],)).fetchall()
     assert [r[0] for r in rules] == [world.kim]
+
+
+def test_a_second_admin_may_edit_metadata(world):
+    """upstream 86d5e4682: any profile with is_admin is an admin -- the
+    override layer checked the literal id 1 and refused them."""
+    ann = world.db.create_profile("Ann", is_admin=True)
+    world.as_profile(ann)
+    with world.db._get_connection() as conn:
+        album = conn.execute("SELECT id FROM lib2_albums WHERE primary_artist_id=?",
+                             (world.ids["h"],)).fetchone()[0]
+    r = world.client.post(f"/api/library/v2/albums/{album}/edit", json={"album_type": "ep"})
+    assert r.status_code == 200, r.get_json()

@@ -22,8 +22,31 @@ from utils.logging_config import get_logger
 logger = get_logger("library2.wishlist_mirror")
 
 
+def _hand_tagged(conn, path: Any, keys: Optional[set] = None) -> bool:
+    """Is this the file the user tagged by hand ("tag it yourself")? Its
+    release is deliberately not the service's; an upgrade would fetch the
+    studio cut and replace it."""
+    if not path:
+        return False
+    from database.music_database import MusicDatabase
+    key = MusicDatabase.manual_path_key(path)
+    if keys is not None:
+        return key in keys
+    try:
+        return conn.execute("SELECT 1 FROM manual_metadata_files WHERE path_key=?",
+                            (key,)).fetchone() is not None
+    except Exception:  # noqa: BLE001 - old schema: nothing is hand-tagged
+        return False
+
+
 def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
-    """Build the wishlist payload for a lib2 track (or None when unknown)."""
+    """Build the wishlist payload for a lib2 track (or None when unknown).
+
+    "Has a file" and the file an upgrade is measured against are the ones of
+    the library the caller works in (#1199): another library's copy neither
+    satisfies this one nor gets replaced for it.
+    """
+    from core.library2.sql_util import owner_clause
     t = conn.execute(
         """SELECT t.id AS track_id, t.spotify_id, t.musicbrainz_id,
                   t.external_ids, t.isrc, t.title, t.track_number,
@@ -38,9 +61,9 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
                          WHERE tf.track_id = t.id
                            AND tf.path IS NOT NULL AND tf.path <> ''
                            AND COALESCE(tf.file_state,'active')
-                               NOT IN ('missing_confirmed','deleted')) has_file
+                               NOT IN ('missing_confirmed','deleted'){owner}) has_file
            FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
-           WHERE t.id = ?""",
+           WHERE t.id = ?""".format(owner=owner_clause(column="tf.owner_profile_id")),
         (track_id,),
     ).fetchone()
     if not t:
@@ -100,7 +123,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     # The PRIMARY file (ADR-03) is what upgrade decisions are made against —
     # never an arbitrary sibling copy of the recording.
     from core.library2.track_files import primary_file_row
-    file_info = primary_file_row(conn, track_id)
+    file_info = primary_file_row(conn, track_id, scoped=True)
     from core.library2.quality_eval import audio_quality_from_file, effective_track_profile
     profile_info = effective_track_profile(conn, track_id)
     original_quality = audio_quality_from_file(file_info)
@@ -108,7 +131,9 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     from core.library2.quality_eval import is_upgrade_policy
     should_queue = not bool(t["has_file"])
     quality_evaluation = "not_applicable"
-    if t["has_file"] and is_upgrade_policy(profile_info["upgrade_policy"]):
+    if t["has_file"] and _hand_tagged(conn, (file_info or {}).get("path")):
+        quality_evaluation = "hand_tagged"
+    elif t["has_file"] and is_upgrade_policy(profile_info["upgrade_policy"]):
         try:
             from core.library2.quality_eval import evaluate_file, profile_targets
             targets, upgrade_policy, cutoff = profile_targets(profile_info)
@@ -305,12 +330,17 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
     from core.library2.wanted import PROJECTION_VERSION
     from core.library2.track_files import primary_order
+    from core.library2.sql_util import owner_clause
+    from core.library_scope import library_scope_for_profile
+    # the files of the library this profile's wishes fill (#1199)
+    library = library_scope_for_profile(profile_id)
     rows = conn.execute(
         f"""SELECT t.id,
                   (SELECT tf.path FROM lib2_track_files tf
                     WHERE tf.track_id=t.id AND tf.path IS NOT NULL AND tf.path<>''
                       AND COALESCE(tf.file_state,'active')
                           NOT IN ('missing_confirmed','deleted')
+                      {owner_clause(library, column="tf.owner_profile_id")}
                     ORDER BY {primary_order('tf')} LIMIT 1) AS path
              FROM lib2_tracks t
            JOIN lib2_wanted_tracks wt ON wt.track_id=t.id
@@ -319,7 +349,8 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
             AND EXISTS (SELECT 1 FROM lib2_track_files f
                          WHERE f.track_id=t.id AND f.path IS NOT NULL AND f.path<>''
                            AND COALESCE(f.file_state,'active')
-                               NOT IN ('missing_confirmed','deleted'))""",
+                               NOT IN ('missing_confirmed','deleted')
+                           {owner_clause(library, column="f.owner_profile_id")})""",
         (int(profile_id), PROJECTION_VERSION),
     ).fetchall()
     from core.library2.manual_skips import active_skip_paths
@@ -327,9 +358,13 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
     protected = active_skip_paths(
         conn, ("quality", "bit_depth"), profile_id=profile_id
     )
+    try:
+        hand_tagged = {r[0] for r in conn.execute("SELECT path_key FROM manual_metadata_files")}
+    except Exception:  # noqa: BLE001 - old schema: nothing is hand-tagged
+        hand_tagged = set()
     candidates = set()
     for row in rows:
-        if row["path"] in protected:
+        if row["path"] in protected or _hand_tagged(conn, row["path"], hand_tagged):
             continue
         try:
             profile = effective_track_profile(conn, int(row["id"]))

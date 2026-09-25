@@ -29,12 +29,35 @@ from typing import Any, Dict, Optional
 from utils.logging_config import get_logger
 from core.library2.media_mappings import (
     is_media_server_source,
-    resolve_mapping,
-    upsert_mapping,
+    resolve_mapping as _resolve_mapping,
+    upsert_mapping as _upsert_mapping,
 )
 from core.library2.track_files import elect_primary_file
 
 logger = get_logger("library2.media_server_sync")
+
+
+def scan_library_id(owner_profile_id: Any = None) -> str:
+    """The server library a scan reads (#1199): '' for the shared one,
+    ``own:<pid>`` for a profile's own. One catalogue row seen by both scans
+    keeps both ids side by side instead of each scan overwriting the other's.
+    Without an argument: the library the running scan was scoped to."""
+    if owner_profile_id is None:
+        from core.library_scope import _explicit_scope
+        owner_profile_id = _explicit_scope.get()
+    if isinstance(owner_profile_id, int) and not isinstance(owner_profile_id, bool):
+        return f"own:{owner_profile_id}"
+    return ""
+
+
+def resolve_mapping(cursor: Any, entity_type: str, server_source: Any, server_id: Any):
+    return _resolve_mapping(cursor, entity_type, server_source, server_id, scan_library_id())
+
+
+def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
+                   server_source: Any, server_id: Any) -> None:
+    _upsert_mapping(cursor, entity_type, entity_id, server_source, server_id,
+                    scan_library_id())
 
 
 def _name_key(name: Any) -> str:

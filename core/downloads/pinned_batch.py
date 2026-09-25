@@ -96,6 +96,11 @@ def candidate_from_result(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# a caller that names no library leaves the decision to the batch registry,
+# which makes it while the request (and an admin's pick) still exists (#1199)
+_UNDECIDED = object()
+
+
 def create_pinned_batch(
     files: List[PinnedFile],
     *,
@@ -104,7 +109,7 @@ def create_pinned_batch(
     is_album: bool = False,
     album_context: Optional[Dict[str, Any]] = None,
     artist_context: Optional[Dict[str, Any]] = None,
-    library_owner_id: Any = None,
+    library_owner_id: Any = _UNDECIDED,
 ) -> tuple[str, List[str]]:
     """Write the batch and its tasks. one short lock, no I/O inside it.
     returns (batch_id, task_ids) in file order."""
@@ -113,7 +118,7 @@ def create_pinned_batch(
     now = time.time()
     playlist_id = f'basic_search_{batch_id[:8]}'
     with tasks_lock:
-        download_batches[batch_id] = {
+        batch = {
             'queue': list(task_ids),
             # every task is dispatched at once below, so the queue is already
             # walked and every slot is taken. the old direct route also sent
@@ -132,9 +137,6 @@ def create_pinned_batch(
             'permanently_failed_tracks': [],
             'auto_initiated': False,
             'profile_id': profile_id,
-            # the library the request had selected, decided while a request
-            # still existed; every later stage reads it back (#1199)
-            'library_owner_id': library_owner_id,
             'is_album_download': bool(is_album),
             'album_context': album_context or {},
             'artist_context': artist_context or {},
@@ -142,6 +144,11 @@ def create_pinned_batch(
             # failed, not that the song should be hunted down elsewhere
             'skip_failed_wishlist': True,
         }
+        if library_owner_id is not _UNDECIDED:
+            # the library the request had selected, decided while a request
+            # still existed; every later stage reads it back (#1199)
+            batch['library_owner_id'] = library_owner_id
+        download_batches[batch_id] = batch
         for index, (task_id, pinned) in enumerate(zip(task_ids, files, strict=True)):
             # the profile rides on track_info too: post-processing reads it
             # from there (import_profile_id) even if the batch is gone by then,

@@ -93,28 +93,32 @@ class MonitoringListReconcileJob(RepairJob):
             result.errors += int(pending["failed"])
             result.scanned += int(pending["done"]) + int(pending["failed"])
 
-            if context.check_stop() or context.wait_if_paused():
-                return result
-            artist_stats = reconcile_artist_watchlist(
-                context.db, profile_id=ADMIN_PROFILE_ID,
-            )
-            result.scanned += int(artist_stats["scanned"])
-            result.auto_fixed += (
-                int(artist_stats["monitor_flags_changed"])
-                + int(artist_stats["mirrored"])
-            )
+            # every library's lists (E-14): the shared one's, and each own
+            # library's under its profile
+            from core.library_scope import own_library_ids
+            for profile_id in (ADMIN_PROFILE_ID, *sorted(own_library_ids())):
+                if context.check_stop() or context.wait_if_paused():
+                    return result
+                artist_stats = reconcile_artist_watchlist(
+                    context.db, profile_id=profile_id,
+                )
+                result.scanned += int(artist_stats["scanned"])
+                result.auto_fixed += (
+                    int(artist_stats["monitor_flags_changed"])
+                    + int(artist_stats["mirrored"])
+                )
 
-            if context.check_stop() or context.wait_if_paused():
-                return result
-            wishlist_stats = reconcile_track_wishlist(
-                context.db,
-                profile_id=ADMIN_PROFILE_ID,
-                batch=settings["batch_size"],
-                should_stop=lambda: context.check_stop() or context.wait_if_paused(),
-                progress=context.update_progress,
-            )
-            result.scanned += int(wishlist_stats["scanned"])
-            result.auto_fixed += int(wishlist_stats["mirrored"])
+                if context.check_stop() or context.wait_if_paused():
+                    return result
+                wishlist_stats = reconcile_track_wishlist(
+                    context.db,
+                    profile_id=profile_id,
+                    batch=settings["batch_size"],
+                    should_stop=lambda: context.check_stop() or context.wait_if_paused(),
+                    progress=context.update_progress,
+                )
+                result.scanned += int(wishlist_stats["scanned"])
+                result.auto_fixed += int(wishlist_stats["mirrored"])
 
             conn = context.db._get_connection()
             try:

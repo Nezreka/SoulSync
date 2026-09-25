@@ -3082,11 +3082,18 @@ class RepairWorker:
         conn = None
         try:
             from core.library2 import ADMIN_PROFILE_ID
+            from core.library2.library_roots import load_roots, owner_for_path
             from core.library2.wishlist_mirror import mirror_projected_tracks_wishlist
 
             conn = self.db._get_connection()
+            # the finding's file decides whose upgrade it is (#1199): a file in
+            # Kim's folder goes onto Kim's wishlist, into Kim's library
+            _known, owner = owner_for_path(load_roots(conn), file_path)
+            if owner:
+                from core.library2.wanted import recompute_wanted
+                recompute_wanted(conn, profile_id=owner, track_ids=[native_track_id])
             queued = mirror_projected_tracks_wishlist(
-                self.db, conn, [native_track_id], profile_id=ADMIN_PROFILE_ID,
+                self.db, conn, [native_track_id], profile_id=owner or ADMIN_PROFILE_ID,
             )
         except Exception as e:
             logger.error("quality_below_cutoff fix failed for %s: %s", entity_id, e)

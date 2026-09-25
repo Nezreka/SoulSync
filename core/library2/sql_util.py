@@ -322,5 +322,34 @@ def owned_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
     return _OWNED[key].format(alias=alias, owner=owner_clause(scope))
 
 
-__all__ = ["ANY_OWNER", "intent_profile_id", "monitored_sql", "owned_sql", "owner_clause",
+def in_library_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
+    """`` AND <alias has a live file in this library>`` for the "do we already
+    have this" matchers, or "" when nothing separates libraries or the caller
+    asks for all of them -- then the matcher reads exactly as before (#1199).
+    The catalogue row is shared; having it means having a file of it here."""
+    if not owner_clause(scope):
+        return ""
+    return f" AND {owned_sql(entity_type, alias, scope=scope)}"
+
+
+def scoped_primary_file_join(track_alias: str, file_alias: str, *, scope=_AMBIENT) -> str:
+    """The ON condition joining a track to the file a matcher reports: the
+    primary flag, or -- when libraries are separated -- the best file of THIS
+    library, since the flag is one per track across all of them."""
+    for alias in (track_alias, file_alias):
+        if not _VALID_IDENTIFIER.match(alias):
+            raise ValueError(f"Invalid alias: {alias!r}")
+    owner = owner_clause(scope, column="pf.owner_profile_id")
+    if not owner:
+        return (f"{file_alias}.track_id = {track_alias}.id AND {file_alias}.is_primary = 1"
+                f" AND COALESCE({file_alias}.file_state, 'active') <> 'deleted'")
+    from core.library2.track_files import primary_order
+    return (f"{file_alias}.id = (SELECT pf.id FROM lib2_track_files pf"
+            f" WHERE pf.track_id = {track_alias}.id"
+            f" AND COALESCE(pf.file_state, 'active') <> 'deleted'{owner}"
+            f" ORDER BY {primary_order('pf')} LIMIT 1)")
+
+
+__all__ = ["ANY_OWNER", "in_library_sql", "intent_profile_id", "monitored_sql", "owned_sql",
+           "owner_clause", "scoped_primary_file_join",
            "scope_visibility_sql", "scoped_monitored", "select_existing_ids"]

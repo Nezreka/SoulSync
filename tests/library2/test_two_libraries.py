@@ -197,6 +197,89 @@ class TestWhatEachLibraryLists:
         assert house == []
 
 
+class TestDoWeHaveIt:
+    """The matchers every "already have this" answer ends in (download
+    analysis, wishlist cleanup, watchlist scan) ask the caller's library."""
+
+    @pytest.fixture
+    def two(self, lib):
+        _album_with_file(lib.db, artist="House Band", album="House", title="Admin Song",
+                         path=os.path.join(lib.shared, "House Band", "House", "01.flac"),
+                         key="h")
+        _album_with_file(lib.db, artist="Kims Band", album="Mine", title="Kim Song",
+                         path=os.path.join(lib.kim_root, "Kims Band", "Mine", "01.flac"),
+                         key="k")
+        return lib
+
+    @pytest.mark.parametrize("scope, title, artist, has", [
+        ("kim", "Admin Song", "House Band", False),
+        ("kim", "Kim Song", "Kims Band", True),
+        ("shared", "Kim Song", "Kims Band", False),
+        ("shared", "Admin Song", "House Band", True),
+        (None, "Kim Song", "Kims Band", True),
+    ])
+    def test_a_track(self, two, scope, title, artist, has):
+        with library_scope.library_scope(two.kim if scope == "kim" else scope):
+            track, _conf = two.db.check_track_exists(title, artist, confidence_threshold=0.7)
+        assert (track is not None) is has
+
+    def test_an_album_and_its_tracks(self, two):
+        with library_scope.library_scope(two.kim):
+            album, _conf = two.db.check_album_exists("House", "House Band")
+            assert album is None
+            album, _conf = two.db.check_album_exists("Mine", "Kims Band")
+            assert album is not None
+            [track] = two.db.get_tracks_by_album(album.id)
+            assert track.file_path.startswith(two.kim_root)
+
+
+class TestRemovalDetection:
+    """A full refresh of the shared server detaches what that server lost --
+    and nothing another library holds (#1199)."""
+
+    def _mapped(self, lib, artist, album, key, root, library=""):
+        """Seed a row the way a scan of that server library maps it."""
+        artist_id, album_id, _ = _album_with_file(
+            lib.db, artist=artist, album=album, title="T",
+            path=os.path.join(root, artist, album, "01.flac"), key=key)
+        with lib.db._get_connection() as conn:
+            conn.executemany(
+                "INSERT INTO lib2_media_server_mappings(entity_type, entity_id, server_source,"
+                " server_library_id, server_id) VALUES(?,?,?,?,?)",
+                [("artist", artist_id, "plex", library, f"ar-{key}"),
+                 ("album", album_id, "plex", library, f"al-{key}")])
+            conn.commit()
+
+    def test_an_own_library_scan_maps_beside_the_shared_one(self, lib):
+        from core.library2.media_server_sync import upsert_artist
+        self._mapped(lib, "Both Band", "Both", "b", lib.shared)
+        with lib.db._get_connection() as conn:
+            with library_scope.library_scope(lib.kim):
+                upsert_artist(conn.cursor(), server_source="plex", server_id="ar-kims-copy",
+                              name="Both Band")
+            conn.commit()
+            ids = dict(conn.execute(
+                "SELECT server_library_id, server_id FROM lib2_media_server_mappings"
+                " WHERE entity_type='artist'").fetchall())
+        assert ids == {"": "ar-b", f"own:{lib.kim}": "ar-kims-copy"}
+
+    def test_the_shared_refresh_sees_only_the_shared_librarys_ids(self, lib):
+        self._mapped(lib, "House Band", "House", "h", lib.shared)
+        self._mapped(lib, "Kims Band", "Mine", "k", lib.kim_root, library=f"own:{lib.kim}")
+        assert lib.db.get_all_artist_ids_for_server("plex") == {"ar-h"}
+        assert lib.db.get_all_album_ids_for_server("plex") == {"al-h"}
+        assert lib.db.get_all_artist_ids_for_server("plex", owner_profile_id=lib.kim) == {"ar-k"}
+
+    def test_removed_content_is_detached_on_a_real_database(self, lib):
+        self._mapped(lib, "House Band", "House", "h", lib.shared)
+        result = lib.db.delete_removed_content({"ar-h"}, set(), "plex", owner_profile_id=None)
+        assert result["artists_removed"] == 1
+        with lib.db._get_connection() as conn:
+            left = conn.execute("SELECT COUNT(*) FROM lib2_media_server_mappings"
+                                " WHERE entity_type='artist' AND server_id='ar-h'").fetchone()[0]
+        assert left == 0
+
+
 # ── where a download lands (E-04) ────────────────────────────────────────────
 
 class TestWhereADownloadLands:
@@ -227,6 +310,30 @@ class TestWhereADownloadLands:
         import core.imports.paths as paths
         ctx = {"library_owner_id": lib.kim}
         assert paths.transfer_root_for_context(ctx) == lib.kim_root
+
+    def test_a_pinned_batch_that_names_no_library_gets_the_one_selected(self, lib):
+        """Enriched search and "tag it yourself" create pinned batches without
+        naming a library; they must not be filed as shared on purpose."""
+        from core.downloads.pinned_batch import PinnedFile, create_pinned_batch
+        from core.runtime_state import download_batches, download_tasks
+        pinned = [PinnedFile(candidate={"username": "u", "filename": "f.flac"},
+                             track_info={"name": "One"})]
+        with library_scope.library_scope(lib.kim):
+            batch_id, task_ids = create_pinned_batch(pinned, name="x", profile_id=1)
+        try:
+            assert download_batches[batch_id]["library_owner_id"] == lib.kim
+        finally:
+            download_batches.pop(batch_id, None)
+            for task_id in task_ids:
+                download_tasks.pop(task_id, None)
+
+    def test_a_server_without_own_libraries_says_where_kims_downloads_go(self, lib, monkeypatch):
+        import core.imports.paths as paths
+        monkeypatch.setattr(library_scope, "own_library_supported", lambda: False)
+        library_scope.invalidate_library_scope_cache()
+        paths.reset_own_library_fallback_notifications()
+        assert paths.transfer_root_for_context({"profile_id": lib.kim}) == lib.shared
+        assert lib.kim in paths._notified_own_lib_fallback
 
     def test_a_scope_set_for_a_unit_of_work_decides_a_new_file(self, lib):
         with library_scope.library_scope(lib.kim):
