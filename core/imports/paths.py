@@ -12,9 +12,9 @@ from utils.logging_config import get_logger
 
 # Album grouping lives in core.imports.album_naming; this module keeps the
 # imported helper because the path builder still needs it.
+from core.imports.album_naming import resolve_album_group
 from core.imports.album_types import album_types_config, format_album_types
 from core.imports.compilation import is_various_artists_credit
-from core.imports.album_naming import resolve_album_group
 from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
     extract_artist_name,

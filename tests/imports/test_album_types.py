@@ -418,3 +418,23 @@ def test_the_m3u_folder_refuses_a_path_outside_the_library(tmp_path, monkeypatch
                         lambda *a, **k: str(stray))
 
     assert web_server._album_folder_from_track_path(str(stray)) is None
+
+
+def test_the_shipped_defaults_are_the_ones_the_code_falls_back_to():
+    """The setting only lands in a config file on a FRESH install; an existing
+    install falls back to the module constants. Two copies of the table would
+    let those two disagree about what $atypes emits, so settings.py builds its
+    default from these."""
+    import core.settings as settings_mod
+    from core.imports.album_types import album_types_config
+
+    assert settings_mod._ATYPE_DEFAULT_TYPES is DEFAULT_TYPES
+
+    class _NoStoredConfig:
+        def get(self, _key, _default=None):
+            return None
+
+    from_fallback = format_album_types({"album_type": "ep"}, album_types_config(_NoStoredConfig()))
+    from_shipped = format_album_types({"album_type": "ep"},
+                                      {"types": dict(DEFAULT_TYPES), "bracket": "[]"})
+    assert from_fallback == from_shipped == "[EP]"
