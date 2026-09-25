@@ -67,6 +67,8 @@ _RETAG_CONFLICT_WAIT_SECONDS = 10.0
 _RETAG_CONFLICT_POLL_SECONDS = 0.2
 
 _MONITOR_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
+# the switcher's per-library file counts: {id(database): (monotonic time, {owner: n})}
+_scope_file_counts: Dict[int, Any] = {}
 
 # E-13: the writes a profile with a library of its own may make in it -- wishing
 # (monitoring, Automatic Search, bookmarking from discovery), never changing
@@ -517,18 +519,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         switchable = bool(admin and owners)
         files: Dict[Any, int] = {}
         if switchable:
-            conn = _conn()
-            try:
-                for owner, count in conn.execute(
-                        "SELECT owner_profile_id, COUNT(*) FROM lib2_track_files"
-                        " WHERE COALESCE(file_state,'active')='active'"
-                        "   AND path IS NOT NULL AND path<>''"
-                        " GROUP BY owner_profile_id"):
-                    files[owner] = int(count)
-            except Exception as exc:  # noqa: BLE001 - counts are decoration
-                logger.debug("library file counts unavailable: %s", exc)
-            finally:
-                conn.close()
+            # decoration, and a full pass over the files table: asked once a
+            # minute at most, not on every page the shell draws
+            cache_key = id(get_database())
+            cached = _scope_file_counts.get(cache_key)
+            if cached and time.monotonic() - cached[0] < 60:
+                files = dict(cached[1])
+            else:
+                conn = _conn()
+                try:
+                    for owner, count in conn.execute(
+                            "SELECT owner_profile_id, COUNT(*) FROM lib2_track_files"
+                            " WHERE COALESCE(file_state,'active')='active'"
+                            "   AND path IS NOT NULL AND path<>''"
+                            " GROUP BY owner_profile_id"):
+                        files[owner] = int(count)
+                    _scope_file_counts[cache_key] = (time.monotonic(), dict(files))
+                except Exception as exc:  # noqa: BLE001 - counts are decoration
+                    logger.debug("library file counts unavailable: %s", exc)
+                finally:
+                    conn.close()
         from core.imports.paths import library_root_for_profile, shared_transfer_root
         options = [{"id": "shared", "name": "Shared library",
                     "root": shared_transfer_root(), "files": files.get(None, 0)}]

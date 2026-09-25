@@ -80,7 +80,9 @@ def find_library_artist_for_source(
                 (str(source_artist_id),),
             )
             rows = cursor.fetchall()
-            if len(rows) == 1:
+            # only an artist of the caller's library is theirs to open (#1199)
+            from core.library2.sql_util import entity_visible
+            if len(rows) == 1 and entity_visible(conn, "artist", rows[0][0]):
                 return rows[0][0]
             if len(rows) > 1:
                 # Same source id on multiple artists — corrupt mapping. Don't
@@ -106,7 +108,7 @@ def find_library_artist_for_source(
                     (normalize_name(artist_name), active_server, active_server),
                 )
                 row = cursor.fetchone()
-                if row:
+                if row and entity_visible(conn, "artist", row[0]):
                     return row[0]
     except Exception as e:
         logger.debug(

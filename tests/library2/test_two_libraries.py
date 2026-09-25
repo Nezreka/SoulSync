@@ -223,6 +223,16 @@ class TestDoWeHaveIt:
             track, _conf = two.db.check_track_exists(title, artist, confidence_threshold=0.7)
         assert (track is not None) is has
 
+    def test_a_source_artist_opens_in_the_library_only_when_it_is_there(self, two):
+        from core.artist_source_lookup import find_library_artist_for_source
+        with two.db._get_connection() as conn:
+            conn.execute("UPDATE lib2_artists SET spotify_id='sp-house' WHERE name='House Band'")
+            conn.execute("UPDATE lib2_artists SET spotify_id='sp-kim' WHERE name='Kims Band'")
+            conn.commit()
+        with library_scope.library_scope(two.kim):
+            assert find_library_artist_for_source(two.db, "spotify", "sp-house") is None
+            assert find_library_artist_for_source(two.db, "spotify", "sp-kim") is not None
+
     def test_an_album_and_its_tracks(self, two):
         with library_scope.library_scope(two.kim):
             album, _conf = two.db.check_album_exists("House", "House Band")
