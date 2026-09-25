@@ -365,8 +365,7 @@ class MbidMismatchDetectorJob(RepairJob):
         if context.update_progress:
             context.update_progress(0, total)
         if context.report_progress:
-            context.report_progress(
-                phase=f'Scanning {total} tracks for MBID mismatches...', total=total)
+            context.report_progress(phase=f'Scanning {total} tracks for MBID mismatches...', total=total)
 
         mb_client = context.mb_client
         if not mb_client:
@@ -381,7 +380,8 @@ class MbidMismatchDetectorJob(RepairJob):
             if context.report_progress:
                 context.report_progress(
                     log_line='MusicBrainz client not available — cannot verify MBIDs',
-                    log_type='error')
+                    log_type='error'
+                )
             return result
 
         checked = 0
@@ -414,7 +414,8 @@ class MbidMismatchDetectorJob(RepairJob):
                     scanned=i + 1, total=total,
                     phase=f'Verifying MBIDs ({checked} checked, {i + 1}/{total} files)',
                     log_line=f'Checking: {title or "Unknown"} — {artist_name or "Unknown"}',
-                    log_type='info')
+                    log_type='info'
+                )
 
             try:
                 # Rate limit: MusicBrainz allows ~1 req/sec
@@ -426,7 +427,8 @@ class MbidMismatchDetectorJob(RepairJob):
                     self._create_mismatch_finding(
                         context, result, subject, resolved, mbid,
                         mb_title='[MBID not found]', mb_artist='[Unknown]',
-                        reason='MBID does not exist in MusicBrainz')
+                        reason='MBID does not exist in MusicBrainz'
+                    )
                     result.scanned += 1
                     continue
 
@@ -463,7 +465,8 @@ class MbidMismatchDetectorJob(RepairJob):
 
         if context.report_progress:
             context.report_progress(
-                scanned=total, total=total, phase='Complete',
+                scanned=total, total=total,
+                phase='Complete',
                 log_line=(
                     f'Verified {checked} track MBIDs ({track_findings} mismatches) — '
                     f'album consistency check found {album_findings} dissenters'),

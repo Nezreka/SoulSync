@@ -747,6 +747,9 @@ class SoulIDWorker:
                          WHERE al.primary_artist_id = ?
                            AND al.title IS NOT NULL AND al.title != ''
                     """, (artist_id,))
+                    # Every album, not just today's alphabetically-first one:
+                    # the library may have gained or lost releases since the id
+                    # was minted, and only an exact reproduction proves the path.
                     for (title,) in cursor.fetchall():
                         if stored == generate_soul_id(name, title):
                             path = 'album'

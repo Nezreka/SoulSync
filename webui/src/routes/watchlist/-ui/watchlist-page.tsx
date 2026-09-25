@@ -1189,18 +1189,8 @@ function WatchlistAttentionStrip({
   }[] = [
     { id: 'all', label: 'Watched artists', value: total, tone: 'neutral' },
     { id: 'fresh', label: 'Fresh releases', value: recentCount, tone: 'green' },
-    {
-      id: 'never',
-      label: 'Never scanned',
-      value: neverScanned,
-      tone: neverScanned > 0 ? 'amber' : 'neutral',
-    },
-    {
-      id: 'stale',
-      label: 'Stale scans',
-      value: staleArtists,
-      tone: staleArtists > 0 ? 'amber' : 'neutral',
-    },
+    { id: 'never', label: 'Never scanned', value: neverScanned, tone: neverScanned > 0 ? 'amber' : 'neutral' },
+    { id: 'stale', label: 'Stale scans', value: staleArtists, tone: staleArtists > 0 ? 'amber' : 'neutral' },
     {
       id: 'custom',
       label: 'Custom rules',

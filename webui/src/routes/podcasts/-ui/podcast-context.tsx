@@ -8,14 +8,6 @@ import {
   type ReactNode,
 } from 'react';
 
-import type {
-  ActivePlaybackState,
-  PodcastDownloadItem,
-  PodcastEpisodeItem,
-  PodcastShowDetail,
-  PodcastShowSummary,
-} from '../-podcasts.types';
-
 import {
   addPodcastToWatchlist,
   downloadPodcastEpisode,
@@ -23,6 +15,13 @@ import {
   fetchWatchlistPodcasts,
   removePodcastFromWatchlist,
 } from '../-podcasts.api';
+import type {
+  ActivePlaybackState,
+  PodcastDownloadItem,
+  PodcastEpisodeItem,
+  PodcastShowDetail,
+  PodcastShowSummary,
+} from '../-podcasts.types';
 
 export interface PodcastContextValue {
   // Playback
@@ -34,11 +33,7 @@ export interface PodcastContextValue {
 
   // Downloads
   downloads: Record<string, PodcastDownloadItem>;
-  handleDownloadEpisode: (
-    ep: PodcastEpisodeItem,
-    showTitle: string,
-    showArtwork?: string | null,
-  ) => void;
+  handleDownloadEpisode: (ep: PodcastEpisodeItem, showTitle: string, showArtwork?: string | null) => void;
   downloadsCount: number;
 
   // Watchlist
@@ -86,9 +81,7 @@ export function PodcastProvider({ children }: { children: ReactNode }) {
   }, [watchlist]);
 
   const getShowKey = (item: { feed_url?: string | null; itunes_id?: number | null }): string => {
-    return (
-      (item.feed_url && item.feed_url.trim()) || (item.itunes_id ? String(item.itunes_id) : '')
-    );
+    return (item.feed_url && item.feed_url.trim()) || (item.itunes_id ? String(item.itunes_id) : '');
   };
 
   const isWatchingShow = useCallback(
@@ -222,7 +215,9 @@ export function PodcastProvider({ children }: { children: ReactNode }) {
   };
 
   const updateProgress = (cur: number, dur: number) => {
-    setActivePlayback((prev) => (prev ? { ...prev, currentTime: cur, duration: dur } : null));
+    setActivePlayback((prev) =>
+      prev ? { ...prev, currentTime: cur, duration: dur } : null,
+    );
   };
 
   const handleDownloadEpisode = async (

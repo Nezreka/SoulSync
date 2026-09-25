@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { PodcastEpisodeItem, PodcastShowDetail } from '../-podcasts.types';
 
 import { fetchPodcastShow } from '../-podcasts.api';
-import { PodcastBillboard } from './podcast-billboard';
 import { usePodcastContext } from './podcast-context';
+import { PodcastBillboard } from './podcast-billboard';
 import { PodcastEpisodeList } from './podcast-episode-list';
 import { PodcastSeasonTabs } from './podcast-season-tabs';
 import { PodcastShowNotesModal } from './podcast-show-notes-modal';
@@ -15,8 +15,12 @@ interface PodcastDetailPageProps {
 }
 
 export function PodcastDetailPage({ podcastId }: PodcastDetailPageProps) {
-  const { activePlayback, handlePlayEpisode, handleDownloadEpisode, downloads } =
-    usePodcastContext();
+  const {
+    activePlayback,
+    handlePlayEpisode,
+    handleDownloadEpisode,
+    downloads,
+  } = usePodcastContext();
 
   const [show, setShow] = useState<PodcastShowDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -125,7 +129,10 @@ export function PodcastDetailPage({ podcastId }: PodcastDetailPageProps) {
   return (
     <>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24, width: '100%' }}>
-        <PodcastBillboard show={show} onPlayEpisode={onPlayEpisode} />
+        <PodcastBillboard
+          show={show}
+          onPlayEpisode={onPlayEpisode}
+        />
 
         <PodcastSeasonTabs
           seasons={availableSeasons}

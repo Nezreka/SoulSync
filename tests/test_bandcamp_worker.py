@@ -251,8 +251,7 @@ def test_stored_url_refresh_failure_preserves_match_without_searching(worker):
     conn.commit()
     conn.close()
     worker.client = _FakeClient(release=None, search_result={
-        'id': 1, 'url': 'https://other.bandcamp.com/album/z', 'title': 'Y',
-        'tags': [], 'label': None,
+        'id': 1, 'url': 'https://other.bandcamp.com/album/z', 'title': 'Y', 'tags': [], 'label': None,
     })
 
     worker._process_album(1, 'Y', 'Artist')

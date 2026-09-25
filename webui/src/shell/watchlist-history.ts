@@ -78,15 +78,13 @@ async function _wlhLoadRuns(): Promise<void> {
 function _wlhRenderRuns(): void {
   const body = document.getElementById('wlh-modal-body')!;
   if (!_wlhRuns.length) {
-    body.innerHTML =
-      '<div class="origin-modal-empty">No scans recorded yet. Run a watchlist scan and it will appear here.</div>';
+    body.innerHTML = '<div class="origin-modal-empty">No scans recorded yet. Run a watchlist scan and it will appear here.</div>';
     return;
   }
-  body.innerHTML = _wlhRuns
-    .map((r) => {
-      const when = _wlhFormatDate(r.completed_at || r.started_at);
-      const cancelled = r.status === 'cancelled';
-      return `<div class="wlh-run" data-run="${escapeHtml(r.run_id)}">
+  body.innerHTML = _wlhRuns.map((r) => {
+    const when = _wlhFormatDate(r.completed_at || r.started_at);
+    const cancelled = r.status === 'cancelled';
+    return `<div class="wlh-run" data-run="${escapeHtml(r.run_id)}">
             <button type="button" class="wlh-run-header" onclick="toggleWatchlistHistoryRun('${escapeHtml(r.run_id)}', this)">
                 <span class="origin-group-caret">▸</span>
                 <span class="wlh-run-when">${escapeHtml(when)}</span>
@@ -99,8 +97,7 @@ function _wlhRenderRuns(): void {
             </button>
             <div class="wlh-run-body" style="display: none;"></div>
         </div>`;
-    })
-    .join('');
+  }).join('');
 }
 
 export async function toggleWatchlistHistoryRun(runId: string, btn: HTMLElement): Promise<void> {
@@ -121,7 +118,7 @@ export async function toggleWatchlistHistoryRun(runId: string, btn: HTMLElement)
     try {
       const resp = await fetch(`/api/watchlist/scan/history/${encodeURIComponent(runId)}/tracks`);
       const data = (await resp.json()) as { success?: boolean; events?: WlhEvent[] };
-      _wlhEventsCache.set(runId, data.success ? data.events || [] : []);
+      _wlhEventsCache.set(runId, data.success ? (data.events || []) : []);
     } catch {
       _wlhEventsCache.set(runId, []);
     }
@@ -143,22 +140,17 @@ function _wlhRenderEvents(events: WlhEvent[]): string {
                 <div class="watchlist-live-addition-item-track">${escapeHtml(e.track_name || '')}</div>
                 <div class="watchlist-live-addition-item-artist">${escapeHtml(e.artist_name || '')}${e.album_name ? ' — ' + escapeHtml(e.album_name) : ''}</div>
             </div>
-            ${
-              e.status === 'added'
+            ${e.status === 'added'
                 ? '<span class="watchlist-scan-track-badge added">added</span>'
-                : '<span class="watchlist-scan-track-badge skipped">skipped</span>'
-            }
+                : '<span class="watchlist-scan-track-badge skipped">skipped</span>'}
         </div>`;
 
-  const section = (label: string, list: WlhEvent[]) =>
-    list.length
-      ? `<div class="watchlist-scan-tracks-section">${label} (${list.length})</div>${list.map(row).join('')}`
-      : '';
+  const section = (label: string, list: WlhEvent[]) => list.length
+    ? `<div class="watchlist-scan-tracks-section">${label} (${list.length})</div>${list.map(row).join('')}`
+    : '';
 
-  return (
-    section('Added to wishlist', added) +
-    section('Found but skipped — already queued or blocklisted', skipped)
-  );
+  return section('Added to wishlist', added)
+    + section('Found but skipped — already queued or blocklisted', skipped);
 }
 
 function _wlhFormatDate(ts: string | undefined): string {
@@ -167,10 +159,8 @@ function _wlhFormatDate(ts: string | undefined): string {
     const d = new Date(ts);
     if (isNaN(d.getTime())) return ts;
     return d.toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
+      month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
     });
   } catch {
     return ts;

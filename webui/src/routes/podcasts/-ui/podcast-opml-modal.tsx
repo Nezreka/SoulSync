@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from 'react';
-
 import {
   parseOpmlFile,
   subscribeOpmlFeeds,
@@ -131,16 +130,7 @@ export function PodcastOpmlModal({
         <div className={styles.modalHeader}>
           <div className={styles.modalTitleGroup}>
             <div className={styles.modalIcon}>
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
               </svg>
@@ -207,21 +197,9 @@ export function PodcastOpmlModal({
                   />
                   <div className={styles.opmlDropzoneIcon}>
                     {isParsing ? (
-                      <div
-                        className={styles.spinner}
-                        style={{ width: 28, height: 28, borderWidth: 3 }}
-                      />
+                      <div className={styles.spinner} style={{ width: 28, height: 28, borderWidth: 3 }} />
                     ) : (
-                      <svg
-                        width="36"
-                        height="36"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
+                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                         <polyline points="17 8 12 3 7 8" />
                         <line x1="12" y1="3" x2="12" y2="15" />
@@ -232,8 +210,7 @@ export function PodcastOpmlModal({
                     {isParsing ? 'Parsing OPML File…' : 'Drop an .opml or .xml file here'}
                   </h3>
                   <p className={styles.opmlDropzoneText}>
-                    or click to browse from your computer. Exported from Pocket Casts, Apple
-                    Podcasts, Overcast, AntennaPod, etc.
+                    or click to browse from your computer. Exported from Pocket Casts, Apple Podcasts, Overcast, AntennaPod, etc.
                   </p>
                 </div>
               ) : (
@@ -312,7 +289,9 @@ export function PodcastOpmlModal({
                       disabled={isSubscribing || selectedUrls.size === 0}
                       onClick={handleImportSelected}
                     >
-                      {isSubscribing ? 'Importing…' : `Import ${selectedUrls.size} to Watchlist`}
+                      {isSubscribing
+                        ? 'Importing…'
+                        : `Import ${selectedUrls.size} to Watchlist`}
                     </button>
                   </div>
                 </div>
@@ -326,16 +305,7 @@ export function PodcastOpmlModal({
           {activeTab === 'export' && (
             <div className={styles.opmlExportContainer}>
               <div className={styles.opmlExportIcon}>
-                <svg
-                  width="40"
-                  height="40"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
@@ -343,9 +313,8 @@ export function PodcastOpmlModal({
               </div>
               <h3 className={styles.opmlExportTitle}>Export Subscribed Podcasts</h3>
               <p className={styles.opmlExportText}>
-                Download a standard OPML 2.0 XML file containing all your SoulSync podcast
-                subscriptions. You can import this file into Apple Podcasts, Pocket Casts, Overcast,
-                or any other player.
+                Download a standard OPML 2.0 XML file containing all your SoulSync podcast subscriptions.
+                You can import this file into Apple Podcasts, Pocket Casts, Overcast, or any other player.
               </p>
               <a
                 href={getOpmlExportUrl()}

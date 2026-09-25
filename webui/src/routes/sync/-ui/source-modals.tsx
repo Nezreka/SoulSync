@@ -186,12 +186,7 @@ export function SourceModals({
                 const body =
                   discoveryStartBody?.(state) ??
                   (config.discovery.startBody === 'playlist'
-                    ? {
-                        playlist: {
-                          name: state.playlist?.name,
-                          tracks: statePlaylistTracks(state),
-                        },
-                      }
+                    ? { playlist: { name: state.playlist?.name, tracks: statePlaylistTracks(state) } }
                     : undefined);
                 void vertical.startDiscovery(openId, body);
               }

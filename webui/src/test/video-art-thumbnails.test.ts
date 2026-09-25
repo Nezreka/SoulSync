@@ -40,7 +40,10 @@ function source(file: string): string {
 function extract(file: string, name: string): (url: string | null, w: number) => string {
   const body = extractFunction(name, source(file));
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  return new Function(`${body}\n return ${name};`)() as (url: string | null, w: number) => string;
+  return new Function(`${body}\n return ${name};`)() as (
+    url: string | null,
+    w: number,
+  ) => string;
 }
 
 describe('the thumbnail helper', () => {
@@ -54,9 +57,7 @@ describe('the thumbnail helper', () => {
 
     it(`${page}: keeps an existing query string intact`, () => {
       const sized = extract(file, name);
-      expect(sized('/api/video/poster/show/12?x=1', 342)).toBe(
-        '/api/video/poster/show/12?x=1&w=342',
-      );
+      expect(sized('/api/video/poster/show/12?x=1', 342)).toBe('/api/video/poster/show/12?x=1&w=342');
     });
 
     it(`${page}: rewrites a TMDB size segment rather than appending a param`, () => {
@@ -79,26 +80,21 @@ describe('the thumbnail helper', () => {
 
 describe('the grids use it', () => {
   it('the watchlist card image is sized', () => {
-    expect(source(FILES.watchlist)).toContain('src="\' + esc(sized(it.poster_url, 342))');
+    expect(source(FILES.watchlist)).toContain("src=\"' + esc(sized(it.poster_url, 342))");
   });
 
   it("the detail page's season rail and episode thumbs are sized", () => {
     const text = source(FILES.detail);
-    expect(text).toContain('src="\' + sizedArt(art, 342)');
-    expect(text).toContain('src="\' + sizedArt(stillSrc, 342)');
+    expect(text).toContain("src=\"' + sizedArt(art, 342)");
+    expect(text).toContain("src=\"' + sizedArt(stillSrc, 342)");
   });
 
   it('no video grid asks for an unsized proxy poster in an <img>', () => {
     // The regression that started this: an <img src> pointing straight at
     // /api/video/poster/... with no width.
     for (const file of Object.values(FILES)) {
-      const offenders = [
-        ...source(file).matchAll(/src="[^"]*\+ ?'?\/api\/video\/(poster|backdrop)\//g),
-      ];
-      expect(
-        offenders.map((m) => m[0]),
-        `${file} builds an unsized <img src>`,
-      ).toEqual([]);
+      const offenders = [...source(file).matchAll(/src="[^"]*\+ ?'?\/api\/video\/(poster|backdrop)\//g)];
+      expect(offenders.map((m) => m[0]), `${file} builds an unsized <img src>`).toEqual([]);
     }
   });
 });

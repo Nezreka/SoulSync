@@ -215,7 +215,9 @@ export function lbCoverageCounts(input: LbProgressInput): LbCoverageCounts | nul
     matched,
     failed: Math.max(0, total - matched),
     percentage:
-      total > 0 ? Math.min(100, Math.round((matched / total) * 100)) : input.discoveryProgress || 0,
+      total > 0
+        ? Math.min(100, Math.round((matched / total) * 100))
+        : input.discoveryProgress || 0,
   };
 }
 

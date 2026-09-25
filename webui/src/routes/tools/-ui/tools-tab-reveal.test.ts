@@ -16,7 +16,10 @@ import { describe, expect, it } from 'vitest';
  * All of them were silently broken by the tab change until this hook existed.
  */
 
-const PAGE = readFileSync(resolve(process.cwd(), 'src/routes/tools/-ui/tools-page.tsx'), 'utf8');
+const PAGE = readFileSync(
+  resolve(process.cwd(), 'src/routes/tools/-ui/tools-page.tsx'),
+  'utf8',
+);
 const HELPER = readFileSync(resolve(process.cwd(), 'static/helper.js'), 'utf8');
 
 describe('the tools page publishes a way to reveal a hidden tab', () => {
@@ -28,7 +31,7 @@ describe('the tools page publishes a way to reveal a hidden tab', () => {
   it('finds the panel by walking up from the target, not by a hardcoded list', () => {
     // A list of "which cards live in which tab" would rot the moment a card
     // moves. The DOM already knows.
-    expect(PAGE).toContain('closest<HTMLElement>(\'[role="tabpanel"]\')');
+    expect(PAGE).toContain("closest<HTMLElement>('[role=\"tabpanel\"]')");
   });
 
   it('only switches when the panel is actually hidden', () => {

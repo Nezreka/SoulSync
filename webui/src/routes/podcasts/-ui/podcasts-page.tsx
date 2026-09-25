@@ -1,17 +1,20 @@
-import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 
 import type { PodcastShowSummary } from '../-podcasts.types';
 
-import { fetchFeaturedPodcasts, searchPodcasts } from '../-podcasts.api';
+import {
+  fetchFeaturedPodcasts,
+  searchPodcasts,
+} from '../-podcasts.api';
+import { usePodcastContext } from './podcast-context';
 import { PodcastCategoryModal } from './podcast-category-modal';
 import { PodcastCategoryPills } from './podcast-category-pills';
-import { usePodcastContext } from './podcast-context';
 import { PodcastGrid } from './podcast-grid';
-import { PodcastOpmlModal } from './podcast-opml-modal';
-import { PodcastRssModal } from './podcast-rss-modal';
 import { PodcastSearchBar } from './podcast-search-bar';
 import { PodcastSpotlight } from './podcast-spotlight';
+import { PodcastRssModal } from './podcast-rss-modal';
+import { PodcastOpmlModal } from './podcast-opml-modal';
 
 /**
  * Browse view for /podcasts (the index route).

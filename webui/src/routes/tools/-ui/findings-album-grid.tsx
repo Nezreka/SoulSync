@@ -83,8 +83,8 @@ export function FindingsAlbumGrid({
   if (!groups.length) {
     return (
       <div className="repair-album-grid-empty">
-        Nothing to group here. This view needs findings that recorded an album and artist, which
-        today means the quality jobs.
+        Nothing to group here. This view needs findings that recorded an album and
+        artist, which today means the quality jobs.
       </div>
     );
   }

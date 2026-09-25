@@ -1202,8 +1202,7 @@ class MusicBrainzService:
                 columns={'aliases': json.dumps(aliases) if aliases else '[]'},
             )
             conn.commit()
-            logger.debug("Updated artist %s aliases (%d entries)",
-                         artist_id, len(aliases or []))
+            logger.debug("Updated artist %s aliases (%d entries)", artist_id, len(aliases or []))
         except Exception as e:
             logger.error(f"Error updating artist aliases for {artist_id}: {e}")
             if conn:

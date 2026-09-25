@@ -422,11 +422,7 @@
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  background: linear-gradient(
-    135deg,
-    rgb(var(--accent-rgb)) 0%,
-    rgba(var(--accent-rgb), 0.84) 100%
-  );
+  background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgba(var(--accent-rgb), 0.84) 100%);
   color: #ffffff;
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 9999px;
@@ -442,11 +438,7 @@
 
 .spotlightCard:hover .spotlightListenBtn,
 .spotlightListenBtn:hover {
-  background: linear-gradient(
-    135deg,
-    rgb(var(--accent-rgb)) 0%,
-    rgba(var(--accent-rgb), 0.96) 100%
-  );
+  background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgba(var(--accent-rgb), 0.96) 100%);
   color: #ffffff;
   border-color: rgba(255, 255, 255, 0.45);
   box-shadow:
@@ -485,9 +477,7 @@
   background: rgba(34, 197, 94, 0.22) !important;
   border-color: rgba(74, 222, 128, 0.55) !important;
   color: #4ade80 !important;
-  box-shadow:
-    0 0 20px rgba(74, 222, 128, 0.25),
-    0 4px 14px rgba(0, 0, 0, 0.35) !important;
+  box-shadow: 0 0 20px rgba(74, 222, 128, 0.25), 0 4px 14px rgba(0, 0, 0, 0.35) !important;
 }
 
 .spotlightWatchlistBtnActive:hover {
@@ -718,11 +708,7 @@
 }
 
 .showCard {
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.045) 0%,
-    rgba(255, 255, 255, 0.015) 100%
-  );
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.015) 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-top: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 20px;
@@ -739,11 +725,7 @@
 }
 
 .showCard:hover {
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.085) 0%,
-    rgba(255, 255, 255, 0.035) 100%
-  );
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.085) 0%, rgba(255, 255, 255, 0.035) 100%);
   border-color: rgba(var(--accent-rgb), 0.45);
   border-top-color: rgba(255, 255, 255, 0.3);
   transform: translateY(-5px) scale(1.012);
@@ -1704,9 +1686,7 @@
 
 .episodeRow:hover .episodeThumbWrapper {
   border-color: rgba(var(--accent-rgb), 0.45);
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.5),
-    0 0 14px rgba(var(--accent-rgb), 0.2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 14px rgba(var(--accent-rgb), 0.2);
 }
 
 .episodeThumb {
@@ -1835,22 +1815,14 @@
 }
 
 .episodePlayPill:hover {
-  background: linear-gradient(
-    135deg,
-    rgb(var(--accent-rgb)) 0%,
-    rgba(var(--accent-rgb), 0.85) 100%
-  );
+  background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgba(var(--accent-rgb), 0.85) 100%);
   border-color: rgba(255, 255, 255, 0.3);
   box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.45);
   transform: scale(1.03);
 }
 
 .episodePlayPillActive {
-  background: linear-gradient(
-    135deg,
-    rgb(var(--accent-rgb)) 0%,
-    rgba(var(--accent-rgb), 0.9) 100%
-  ) !important;
+  background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgba(var(--accent-rgb), 0.9) 100%) !important;
   border-color: rgba(255, 255, 255, 0.35) !important;
   color: #ffffff !important;
   box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.5);
@@ -1950,11 +1922,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px 22px;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.04) 0%,
-    rgba(255, 255, 255, 0.015) 100%
-  );
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.015) 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-top: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
@@ -3963,12 +3931,8 @@
 }
 
 @keyframes modalFadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .modalDialog {
@@ -4437,3 +4401,4 @@
   transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
 }
+

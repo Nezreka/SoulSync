@@ -177,9 +177,12 @@ class AmazonWorker:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
         if not norm_query or not norm_result:
-            raw_query = (query_name or '').strip().lower()
-            raw_result = (result_name or '').strip().lower()
-            return bool(raw_query) and raw_query == raw_result
+            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
+            # "...") would compare at SequenceMatcher ratio 1.0 against any
+            # other such title — fall back to exact raw comparison instead.
+            raw_q = (query_name or '').strip().lower()
+            raw_r = (result_name or '').strip().lower()
+            return bool(raw_q) and raw_q == raw_r
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
         return similarity >= self.name_similarity_threshold
@@ -282,15 +285,17 @@ class AmazonWorker:
             log_prefix='Amazon',
         )
         if _stored:
-            # L2-005: a stored id the provider could not confirm right now is
-            # NOT released to the fuzzy name search below — a transient failure
-            # is not evidence that the id is wrong, and searching overwrote
-            # deliberately chosen matches with whatever came back.
+            # L2-005: a stored ID the source could not confirm right now is
+            # NOT released to a fuzzy name search below — a transient provider
+            # failure is not evidence that the ID is wrong, and searching
+            # overwrote deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
-        # A stored/manual id whose provider refresh temporarily failed must not
-        # fall through to fuzzy search and be replaced by a different result.
+        # honor_stored_match also returns False when the stored id failed to
+        # re-fetch (transient error / rate limit). Don't fall through to a
+        # name search — it could clobber a manual match. Only search when
+        # there's genuinely no stored id (the Bandcamp guard, applied here).
         if self._get_existing_id('album', album_id):
             logger.debug(
                 "Preserving Amazon match for album '%s' despite a refresh miss",
@@ -336,13 +341,17 @@ class AmazonWorker:
             log_prefix='Amazon',
         )
         if _stored:
-            # L2-005: a stored id the provider could not confirm right now is
-            # NOT released to the fuzzy name search below — a transient failure
-            # is not evidence that the id is wrong, and searching overwrote
-            # deliberately chosen matches with whatever came back.
+            # L2-005: a stored ID the source could not confirm right now is
+            # NOT released to a fuzzy name search below — a transient provider
+            # failure is not evidence that the ID is wrong, and searching
+            # overwrote deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
+        # honor_stored_match also returns False when the stored id failed to
+        # re-fetch (transient error / rate limit). Don't fall through to a
+        # name search — it could clobber a manual match. Only search when
+        # there's genuinely no stored id (the Bandcamp guard, applied here).
         if self._get_existing_id('track', track_id):
             logger.debug(
                 "Preserving Amazon match for track '%s' despite a refresh miss",

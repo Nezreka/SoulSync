@@ -73,9 +73,7 @@ describe('createAppRouter', () => {
 
   it('loads a prefixed deep link without changing logical route IDs', async () => {
     const meta = document.createElement('meta');
-    meta.name = 'soulsync-url-base';
-    meta.content = '/soulsync';
-    document.head.append(meta);
+    meta.name = 'soulsync-url-base'; meta.content = '/soulsync'; document.head.append(meta);
     window.SoulSyncWebShellBridge = createShellBridge();
     const queryClient = createTestQueryClient();
     const history = createMemoryHistory({ initialEntries: ['/soulsync/issues'] });
@@ -85,9 +83,7 @@ describe('createAppRouter', () => {
       await waitFor(() => expect(screen.getByTestId('issues-board')).toBeInTheDocument());
       expect(window.SoulSyncWebShellBridge?.showReactHost).toHaveBeenCalledWith('issues');
       expect(history.location.pathname).toBe('/soulsync/issues');
-    } finally {
-      meta.remove();
-    }
+    } finally { meta.remove(); }
   });
 
   it('renders migrated React routes directly and updates shell chrome', async () => {

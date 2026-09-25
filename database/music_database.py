@@ -12600,11 +12600,6 @@ class MusicDatabase:
                     # back to see its own write (R2-09).
                     return self._wishlist_outcome("updated", insert_track_id)
 
-                # (The second `if existing is not None:` block that used to sit
-                # here was unreachable — the branch above returns under the
-                # identical condition and nothing in between rebinds `existing`
-                # — and it returned a bare False into a function that returns an
-                # outcome dict. Removed with the 2026-09-05 review.)
                 # Insert the track
                 cursor.execute("""
                     INSERT OR REPLACE INTO wishlist_tracks
@@ -16891,8 +16886,7 @@ class MusicDatabase:
                             f"({','.join('?' * len(wl_itunes))}))")
                         match_params.extend(wl_itunes)
                     if wl_names:
-                        match_parts.append(
-                            f"LOWER(a.name) IN ({','.join('?' * len(wl_names))})")
+                        match_parts.append(f"LOWER(a.name) IN ({','.join('?' * len(wl_names))})")
                         match_params.extend(wl_names)
                     if match_parts:
                         combined = ' OR '.join(match_parts)

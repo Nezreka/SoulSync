@@ -39,7 +39,7 @@ describe('the card', () => {
     // Finding out after the click that half the layers paint nothing feels
     // like a broken import.
     expect(BLOCK).toContain('chat-overlay-warn');
-    expect(BLOCK).toContain('you may not have');
+    expect(BLOCK).toContain("you may not have");
   });
 
   it('says nothing about images when the template needs none', () => {
@@ -50,10 +50,7 @@ describe('the card', () => {
   it('colours the warning amber, not red', () => {
     // Missing art is a thing to know, not a failure: the template still
     // imports and still renders everything else.
-    const rule = CSS.slice(
-      CSS.indexOf('.chat-overlay-warn'),
-      CSS.indexOf('.chat-overlay-warn') + 160,
-    );
+    const rule = CSS.slice(CSS.indexOf('.chat-overlay-warn'), CSS.indexOf('.chat-overlay-warn') + 160);
     expect(rule).toContain('#f1c40f');
   });
 });
@@ -63,7 +60,7 @@ describe('the definition has to survive from render to click', () => {
     // A few KB of JSON cannot ride a data- attribute the way the file card's
     // url can.
     expect(BLOCK).toContain('_rememberOverlayShare');
-    expect(BLOCK).toContain('data-chat-overlay-add="\' + key + \'"');
+    expect(BLOCK).toContain("data-chat-overlay-add=\"' + key + '\"");
   });
 
   it('bounds that registry', () => {

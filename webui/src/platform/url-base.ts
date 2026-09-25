@@ -5,13 +5,6 @@ export function getURLBase(): string {
 }
 export function appURL(path: string): string {
   const base = getURLBase();
-  if (
-    !base ||
-    !path.startsWith('/') ||
-    path.startsWith('//') ||
-    path === base ||
-    path.startsWith(base + '/')
-  )
-    return path;
+  if (!base || !path.startsWith('/') || path.startsWith('//') || path === base || path.startsWith(base + '/')) return path;
   return base + path;
 }

@@ -71,7 +71,7 @@ describe('it names the thing that fixes this', () => {
   });
 
   it('reads the job so it can report the schedule and last run', () => {
-    expect(MODAL).toContain('/api/repair/jobs');
+    expect(MODAL).toContain("/api/repair/jobs");
     expect(MODAL).toContain("j.job_id === 'cache_evictor'");
     expect(MODAL).toContain('last run');
   });
@@ -90,7 +90,7 @@ describe('it names the thing that fixes this', () => {
 describe('and gives a way to act on it', () => {
   it('offers a button that runs the cleanup job', () => {
     expect(MODAL).toContain('id="cache-cleanup-now"');
-    expect(JS).toContain('/api/repair/jobs/cache_evictor/run');
+    expect(JS).toContain("/api/repair/jobs/cache_evictor/run");
   });
 
   it('does not refuse the click just because the schedule is disabled', () => {

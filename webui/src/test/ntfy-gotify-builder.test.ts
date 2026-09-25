@@ -37,14 +37,8 @@ describe.each(['ntfy', 'gotify'])('%s in the automation builder', (type) => {
 
 describe('the two services are not treated as interchangeable', () => {
   it('gives ntfy its own 1-5 priority and gotify its own 0-10', () => {
-    const ntfy = JS.slice(
-      JS.indexOf("if (blockType === 'ntfy')"),
-      JS.indexOf("if (blockType === 'gotify')"),
-    );
-    const gotify = JS.slice(
-      JS.indexOf("if (blockType === 'gotify')"),
-      JS.indexOf("if (blockType === 'webhook')"),
-    );
+    const ntfy = JS.slice(JS.indexOf("if (blockType === 'ntfy')"), JS.indexOf("if (blockType === 'gotify')"));
+    const gotify = JS.slice(JS.indexOf("if (blockType === 'gotify')"), JS.indexOf("if (blockType === 'webhook')"));
     // ntfy: a named 5-step scale
     expect(ntfy).toContain("'Urgent'");
     expect(ntfy).not.toContain('max="10"');
@@ -54,18 +48,12 @@ describe('the two services are not treated as interchangeable', () => {
   });
 
   it('asks gotify for an APP token, since a client token silently fails', () => {
-    const gotify = JS.slice(
-      JS.indexOf("if (blockType === 'gotify')"),
-      JS.indexOf("if (blockType === 'webhook')"),
-    );
+    const gotify = JS.slice(JS.indexOf("if (blockType === 'gotify')"), JS.indexOf("if (blockType === 'webhook')"));
     expect(gotify).toContain('APP token');
   });
 
   it('does not trim the ntfy password, which may start or end with a space', () => {
-    const coll = JS.slice(
-      JS.indexOf("if (type === 'ntfy') {"),
-      JS.indexOf("if (type === 'gotify') {"),
-    );
+    const coll = JS.slice(JS.indexOf("if (type === 'ntfy') {"), JS.indexOf("if (type === 'gotify') {"));
     expect(coll).toMatch(/password: document\.getElementById\([^)]*\)\?\.value \|\| ''/);
   });
 });

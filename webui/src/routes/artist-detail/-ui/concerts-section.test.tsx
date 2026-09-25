@@ -181,13 +181,14 @@ describe('a setlist', () => {
     await waitFor(() => expect(window.playTrackList).toHaveBeenCalled());
 
     const [queue, context] = (window.playTrackList as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(queue.map((t: { file_path: string }) => t.file_path)).toEqual([
-      '/m/xtal.flac',
-      '/m/ageis.flac',
-    ]);
+    expect(queue.map((t: { file_path: string }) => t.file_path))
+      .toEqual(['/m/xtal.flac', '/m/ageis.flac']);
     expect(context).toContain('Berghain');
     // and says what it could not play, rather than quietly playing a short set
-    expect(window.showToast).toHaveBeenCalledWith(expect.stringContaining('2 of 3'), 'info');
+    expect(window.showToast).toHaveBeenCalledWith(
+      expect.stringContaining('2 of 3'),
+      'info',
+    );
   });
 
   it('says so plainly when you own none of it', async () => {
@@ -198,7 +199,10 @@ describe('a setlist', () => {
 
     fireEvent.click(await screen.findByTitle(/Play the songs from this show/));
     await waitFor(() => expect(window.showToast).toHaveBeenCalled());
-    expect(window.showToast).toHaveBeenCalledWith(expect.stringContaining("don't own any"), 'info');
+    expect(window.showToast).toHaveBeenCalledWith(
+      expect.stringContaining("don't own any"),
+      'info',
+    );
     expect(window.playTrackList).not.toHaveBeenCalled();
   });
 });

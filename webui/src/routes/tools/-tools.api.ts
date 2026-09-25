@@ -226,7 +226,9 @@ export interface FindingAlbumQuery {
  * `fetchFindingGroups` does: a grouped view that cannot load should leave the
  * flat list usable instead of taking the whole surface down with it.
  */
-export async function fetchFindingAlbums(query: FindingAlbumQuery): Promise<FindingAlbumGroup[]> {
+export async function fetchFindingAlbums(
+  query: FindingAlbumQuery,
+): Promise<FindingAlbumGroup[]> {
   try {
     const params = new URLSearchParams({ group_by: query.groupBy });
     if (query.jobId) params.set('job_id', query.jobId);

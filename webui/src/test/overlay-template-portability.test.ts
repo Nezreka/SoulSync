@@ -15,7 +15,10 @@ import { describe, expect, it } from 'vitest';
  * looks finished until you click it.
  */
 
-const JS = readFileSync(resolve(process.cwd(), 'static/video/video-overlay-editor.js'), 'utf8');
+const JS = readFileSync(
+  resolve(process.cwd(), 'static/video/video-overlay-editor.js'),
+  'utf8',
+);
 const COLLECTIONS = readFileSync(
   resolve(process.cwd(), 'static/video/video-collection-editor.js'),
   'utf8',
@@ -24,21 +27,14 @@ const COLLECTIONS = readFileSync(
 describe('the studio offers both halves', () => {
   it('puts them in the top bar, beside Apply', () => {
     // Not buried in a per-card menu: this acts on the whole library of designs.
-    const topbar = JS.slice(
-      JS.indexOf('\'<div class="voe-topbar">\''),
-      JS.indexOf('voe-gallery-head'),
-    );
+    const topbar = JS.slice(JS.indexOf("'<div class=\"voe-topbar\">'"), JS.indexOf('voe-gallery-head'));
     expect(topbar).toContain('data-voe-export');
     expect(topbar).toContain('data-voe-import');
   });
 
   it('wires each button to its handler', () => {
-    expect(JS).toContain(
-      "overlay.querySelector('[data-voe-export]').addEventListener('click', exportTemplates)",
-    );
-    expect(JS).toContain(
-      "overlay.querySelector('[data-voe-import]').addEventListener('click', importTemplates)",
-    );
+    expect(JS).toContain("overlay.querySelector('[data-voe-export]').addEventListener('click', exportTemplates)");
+    expect(JS).toContain("overlay.querySelector('[data-voe-import]').addEventListener('click', importTemplates)");
   });
 
   it('names the file so it is recognisable a year later', () => {
@@ -65,10 +61,7 @@ describe('import feedback', () => {
   });
 
   it('refreshes the gallery so the new cards appear without a reload', () => {
-    const imp = JS.slice(
-      JS.indexOf('function importTemplates'),
-      JS.indexOf('function openStarterPicker'),
-    );
+    const imp = JS.slice(JS.indexOf('function importTemplates'), JS.indexOf('function openStarterPicker'));
     expect(imp).toContain('loadGallery()');
   });
 
@@ -80,11 +73,7 @@ describe('import feedback', () => {
 
 describe('it matches the studio that already had this', () => {
   it('uses the same download-a-blob approach as Collection Studio', () => {
-    for (const marker of [
-      'new Blob(',
-      'URL.createObjectURL',
-      "inp.accept = '.json,application/json'",
-    ]) {
+    for (const marker of ['new Blob(', 'URL.createObjectURL', "inp.accept = '.json,application/json'"]) {
       expect(JS, `overlay studio is missing ${marker}`).toContain(marker);
       expect(COLLECTIONS, `collection studio is missing ${marker}`).toContain(marker);
     }

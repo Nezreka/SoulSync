@@ -40,11 +40,9 @@ const C = (status: string, label: string) => ({ id: label, label, status, detail
 
 describe('the health symbols', () => {
   it('counts each severity it actually has', () => {
-    const host = symbols({
-      checks: [C('error', 'a'), C('warning', 'b'), C('ok', 'c'), C('ok', 'd')],
-    });
+    const host = symbols({ checks: [C('error', 'a'), C('warning', 'b'), C('ok', 'c'), C('ok', 'd')] });
     const text = host.textContent ?? '';
-    expect(text).toContain('1'); // one error
+    expect(text).toContain('1');   // one error
     expect(host.querySelector('.notif-health-sym--error')?.textContent).toContain('1');
     expect(host.querySelector('.notif-health-sym--warn')?.textContent).toContain('1');
     expect(host.querySelector('.notif-health-sym--ok')?.textContent).toContain('2');
@@ -59,19 +57,12 @@ describe('the health symbols', () => {
   });
 
   it('takes its colour from the worst thing present', () => {
-    expect(
-      symbols({ checks: [C('ok', 'a'), C('error', 'b')] }).querySelector(
-        '.notif-health-btn--error',
-      ),
-    ).not.toBeNull();
-    expect(
-      symbols({ checks: [C('ok', 'a'), C('warning', 'b')] }).querySelector(
-        '.notif-health-btn--warning',
-      ),
-    ).not.toBeNull();
-    expect(
-      symbols({ checks: [C('ok', 'a')] }).querySelector('.notif-health-btn--ok'),
-    ).not.toBeNull();
+    expect(symbols({ checks: [C('ok', 'a'), C('error', 'b')] })
+      .querySelector('.notif-health-btn--error')).not.toBeNull();
+    expect(symbols({ checks: [C('ok', 'a'), C('warning', 'b')] })
+      .querySelector('.notif-health-btn--warning')).not.toBeNull();
+    expect(symbols({ checks: [C('ok', 'a')] })
+      .querySelector('.notif-health-btn--ok')).not.toBeNull();
   });
 
   it('renders nothing at all before health has loaded', () => {
@@ -136,12 +127,8 @@ describe('the dashboard no longer carries it', () => {
   });
 
   it('styles everything the new UI emits', () => {
-    for (const cls of [
-      '.notif-health-btn',
-      '.notif-health-sym--error',
-      '.notif-health-row',
-      '.notif-health-detail',
-    ]) {
+    for (const cls of ['.notif-health-btn', '.notif-health-sym--error',
+                       '.notif-health-row', '.notif-health-detail']) {
       expect(CSS, `${cls} is emitted but never styled`).toContain(cls);
     }
   });

@@ -174,7 +174,9 @@ class TestDirectLookupFailureMarksError:
             lookup_artist_by_id=MagicMock(),
             lookup_album_by_id=MagicMock(),
             lookup_track_by_id=MagicMock(return_value={
-                'idTrack': '111', 'strTrack': 'T', 'idArtist': '999',
+                'idTrack': '111',
+                'strTrack': 'T',
+                'idArtist': '999',
             }),
         )
         worker = _make_worker(db, fake_client)

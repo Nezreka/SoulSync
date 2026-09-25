@@ -23,16 +23,10 @@ if (typeof Node === 'function' && Node.prototype) {
     return originalRemoveChild.call(this, child) as T;
   };
   const originalInsertBefore = Node.prototype.insertBefore;
-  Node.prototype.insertBefore = function <T extends Node>(
-    newNode: T,
-    referenceNode: Node | null,
-  ): T {
+  Node.prototype.insertBefore = function <T extends Node>(newNode: T, referenceNode: Node | null): T {
     if (referenceNode && referenceNode.parentNode !== this) {
       if (typeof console !== 'undefined' && console.warn) {
-        console.warn(
-          'Cannot insert before: reference node is not a child of this node',
-          referenceNode,
-        );
+        console.warn('Cannot insert before: reference node is not a child of this node', referenceNode);
       }
       return newNode;
     }
@@ -52,9 +46,7 @@ export async function bootstrapApp() {
   // lists, "already in your library", download targets -- was for the old one.
   window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, () => {
     // the shared GET dedupe (static/fetch-dedupe.js) would replay old answers
-    (
-      window as { _apiGetDedupe?: { entries?: Map<string, unknown> } }
-    )._apiGetDedupe?.entries?.clear();
+    (window as { _apiGetDedupe?: { entries?: Map<string, unknown> } })._apiGetDedupe?.entries?.clear();
     void queryClient.invalidateQueries();
   });
   createRoot(container).render(<AppRouterProvider router={router} queryClient={queryClient} />);

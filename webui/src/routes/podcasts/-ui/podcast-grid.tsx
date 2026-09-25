@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 
 import type { PodcastShowSummary } from '../-podcasts.types';
-
 import { usePodcastContext } from './podcast-context';
+
 import styles from './podcasts-page.module.css';
 
 interface PodcastGridProps {
@@ -99,9 +99,7 @@ export function PodcastGrid({ title, shows, isLoading, onSelectShow }: PodcastGr
           </h2>
           <span className={styles.sectionCount}>{shows.length} shows</span>
           {isSearch && (
-            <p className={styles.searchSubtitle}>
-              Showing top matches from the global podcast directory
-            </p>
+            <p className={styles.searchSubtitle}>Showing top matches from the global podcast directory</p>
           )}
         </div>
 

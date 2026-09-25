@@ -311,12 +311,7 @@ function FooterActions(props: DiscoveryModalProps) {
   if (state.phase === 'fresh') {
     return (
       <>
-        <button
-          key="start-discovery-btn"
-          type="button"
-          className="modal-btn modal-btn-primary"
-          onClick={onStartDiscovery}
-        >
+        <button key="start-discovery-btn" type="button" className="modal-btn modal-btn-primary" onClick={onStartDiscovery}>
           🔍 Start Discovery
         </button>
         <WingItButton key="wing-it-btn" config={config} state={state} onClose={onClose} />
@@ -325,11 +320,7 @@ function FooterActions(props: DiscoveryModalProps) {
   }
 
   if (state.phase === 'discovering') {
-    return (
-      <div key="discovering-info" className="modal-info">
-        🔍 Discovering {metadataSourceLabel()} matches...
-      </div>
-    );
+    return <div key="discovering-info" className="modal-info">🔍 Discovering {metadataSourceLabel()} matches...</div>;
   }
 
   if (state.phase === 'syncing') {
@@ -337,12 +328,7 @@ function FooterActions(props: DiscoveryModalProps) {
     const percent = syncPercent(config.sync.percentFormula, progress);
     return (
       <>
-        <button
-          key="cancel-sync-btn"
-          type="button"
-          className="modal-btn modal-btn-danger"
-          onClick={onCancelSync}
-        >
+        <button key="cancel-sync-btn" type="button" className="modal-btn modal-btn-danger" onClick={onCancelSync}>
           ❌ Cancel Sync
         </button>
         <div key="sync-status" className="playlist-modal-sync-status" style={{ display: 'flex' }}>
@@ -376,12 +362,7 @@ function FooterActions(props: DiscoveryModalProps) {
   return (
     <>
       {hasMatches && !standalone && (
-        <button
-          key="sync-playlist-btn"
-          type="button"
-          className="modal-btn modal-btn-primary"
-          onClick={onStartSync}
-        >
+        <button key="sync-playlist-btn" type="button" className="modal-btn modal-btn-primary" onClick={onStartSync}>
           🔄 Sync This Playlist
         </button>
       )}
@@ -406,22 +387,12 @@ function FooterActions(props: DiscoveryModalProps) {
           </button>
         ))}
       {config.id === 'mirrored' && failedCount > 0 && onRetryFailed && (
-        <button
-          key="retry-failed-btn"
-          type="button"
-          className="modal-btn modal-btn-secondary"
-          onClick={onRetryFailed}
-        >
+        <button key="retry-failed-btn" type="button" className="modal-btn modal-btn-secondary" onClick={onRetryFailed}>
           🔄 Retry Failed ({failedCount})
         </button>
       )}
       {config.api.reset && onRediscover && (
-        <button
-          key="rediscover-btn"
-          type="button"
-          className="modal-btn modal-btn-secondary"
-          onClick={onRediscover}
-        >
+        <button key="rediscover-btn" type="button" className="modal-btn modal-btn-secondary" onClick={onRediscover}>
           🔄 Rediscover
         </button>
       )}

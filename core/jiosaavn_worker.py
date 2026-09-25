@@ -298,10 +298,10 @@ class JioSaavnWorker:
             log_prefix='JioSaavn',
         )
         if _stored:
-            # L2-005: a stored id the provider could not confirm right now is
-            # NOT released to the fuzzy name search below — a transient failure
-            # is not evidence that the id is wrong, and searching overwrote
-            # deliberately chosen matches with whatever came back.
+            # L2-005: a stored ID the source could not confirm right now is
+            # NOT released to a fuzzy name search below — a transient provider
+            # failure is not evidence that the ID is wrong, and searching
+            # overwrote deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -355,10 +355,10 @@ class JioSaavnWorker:
             log_prefix='JioSaavn',
         )
         if _stored:
-            # L2-005: a stored id the provider could not confirm right now is
-            # NOT released to the fuzzy name search below — a transient failure
-            # is not evidence that the id is wrong, and searching overwrote
-            # deliberately chosen matches with whatever came back.
+            # L2-005: a stored ID the source could not confirm right now is
+            # NOT released to a fuzzy name search below — a transient provider
+            # failure is not evidence that the ID is wrong, and searching
+            # overwrote deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return

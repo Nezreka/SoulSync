@@ -145,9 +145,7 @@ async function _mlmSourceSearch(q: string): Promise<void> {
   }
   el.innerHTML = '<p class="mlm-hint">Searching&hellip;</p>';
   try {
-    const res = await fetch(
-      `/api/manual-library-matches/source-search?q=${encodeURIComponent(q)}&limit=15`,
-    );
+    const res = await fetch(`/api/manual-library-matches/source-search?q=${encodeURIComponent(q)}&limit=15`);
     const data = (await res.json()) as { tracks?: MlmSourceTrack[] };
     _mlmRenderSourceResults(data.tracks || []);
   } catch {
@@ -164,9 +162,7 @@ async function _mlmLibrarySearch(q: string): Promise<void> {
   }
   el.innerHTML = '<p class="mlm-hint">Searching&hellip;</p>';
   try {
-    const res = await fetch(
-      `/api/manual-library-matches/library-search?q=${encodeURIComponent(q)}&limit=15`,
-    );
+    const res = await fetch(`/api/manual-library-matches/library-search?q=${encodeURIComponent(q)}&limit=15`);
     const data = (await res.json()) as { tracks?: MlmLibraryTrack[] };
     _mlmRenderLibraryResults(data.tracks || []);
   } catch {
@@ -183,19 +179,14 @@ function _mlmRenderSourceResults(tracks: MlmSourceTrack[]): void {
     el.innerHTML = '<p class="mlm-hint">No results</p>';
     return;
   }
-  el.innerHTML = tracks
-    .map((t, i) => {
-      const sel =
-        _mlmSelectedSource && _mlmSelectedSource.source_track_id === t.source_track_id
-          ? 'mlm-row-selected'
-          : '';
-      return `<div class="mlm-result-row ${sel}" data-idx="${i}" onclick="_mlmSelectSource(${i})">
+  el.innerHTML = tracks.map((t, i) => {
+    const sel = _mlmSelectedSource && _mlmSelectedSource.source_track_id === t.source_track_id ? 'mlm-row-selected' : '';
+    return `<div class="mlm-result-row ${sel}" data-idx="${i}" onclick="_mlmSelectSource(${i})">
             <div class="mlm-row-title">${_mlmEsc(t.title || '—')}</div>
             <div class="mlm-row-sub">${_mlmEsc(t.artist || '')}${t.album ? ' · ' + _mlmEsc(t.album) : ''}</div>
             <div class="mlm-row-ctx">${_mlmEsc(t.context || t.source || '')}</div>
         </div>`;
-    })
-    .join('');
+  }).join('');
   el._mlmTracks = tracks as MlmResultsEl['_mlmTracks'];
 }
 
@@ -206,17 +197,15 @@ function _mlmRenderLibraryResults(tracks: MlmLibraryTrack[]): void {
     el.innerHTML = '<p class="mlm-hint">No results</p>';
     return;
   }
-  el.innerHTML = tracks
-    .map((t, i) => {
-      const sel = _mlmSelectedLibrary && _mlmSelectedLibrary.id === t.id ? 'mlm-row-selected' : '';
-      const path = t.file_path ? t.file_path.split(/[/\\]/).pop() : '';
-      return `<div class="mlm-result-row ${sel}" data-idx="${i}" onclick="_mlmSelectLibrary(${i})">
+  el.innerHTML = tracks.map((t, i) => {
+    const sel = _mlmSelectedLibrary && _mlmSelectedLibrary.id === t.id ? 'mlm-row-selected' : '';
+    const path = t.file_path ? t.file_path.split(/[/\\]/).pop() : '';
+    return `<div class="mlm-result-row ${sel}" data-idx="${i}" onclick="_mlmSelectLibrary(${i})">
             <div class="mlm-row-title">${_mlmEsc(t.title || '—')}</div>
             <div class="mlm-row-sub">${_mlmEsc(t.artist_name || '')}${t.album_title ? ' · ' + _mlmEsc(t.album_title) : ''}</div>
             <div class="mlm-row-ctx">${_mlmEsc(path)}${t.bitrate ? ' · ' + t.bitrate + 'kbps' : ''}</div>
         </div>`;
-    })
-    .join('');
+  }).join('');
   el._mlmTracks = tracks as MlmResultsEl['_mlmTracks'];
 }
 
@@ -224,9 +213,7 @@ export function _mlmSelectSource(idx: number): void {
   const el = document.getElementById('mlm-source-results') as MlmResultsEl | null;
   if (!el || !el._mlmTracks) return;
   _mlmSelectedSource = el._mlmTracks[idx];
-  el.querySelectorAll('.mlm-result-row').forEach((r, i) =>
-    r.classList.toggle('mlm-row-selected', i === idx),
-  );
+  el.querySelectorAll('.mlm-result-row').forEach((r, i) => r.classList.toggle('mlm-row-selected', i === idx));
   _mlmUpdateSaveBtn();
 }
 
@@ -234,9 +221,7 @@ export function _mlmSelectLibrary(idx: number): void {
   const el = document.getElementById('mlm-library-results') as MlmResultsEl | null;
   if (!el || !el._mlmTracks) return;
   _mlmSelectedLibrary = el._mlmTracks[idx] as MlmLibraryTrack;
-  el.querySelectorAll('.mlm-result-row').forEach((r, i) =>
-    r.classList.toggle('mlm-row-selected', i === idx),
-  );
+  el.querySelectorAll('.mlm-result-row').forEach((r, i) => r.classList.toggle('mlm-row-selected', i === idx));
   _mlmUpdateSaveBtn();
 }
 
@@ -290,14 +275,9 @@ async function _mlmLoadMatches(): Promise<void> {
     const res = await fetch('/api/manual-library-matches');
     const data = (await res.json()) as {
       matches?: Array<{
-        id: number;
-        source: string;
-        source_track_id: string | number;
-        source_title?: string;
-        source_artist?: string;
-        library_track_id: number;
-        library_title?: string;
-        library_artist?: string;
+        id: number; source: string; source_track_id: string | number;
+        source_title?: string; source_artist?: string;
+        library_track_id: number; library_title?: string; library_artist?: string;
       }>;
     };
     const matches = data.matches || [];
@@ -309,16 +289,12 @@ async function _mlmLoadMatches(): Promise<void> {
     }
     el.innerHTML = `<table class="mlm-matches-table">
             <thead><tr><th>Source Track</th><th>Library Track</th><th>Source</th><th></th></tr></thead>
-            <tbody>${matches
-              .map(
-                (m) => `<tr>
+            <tbody>${matches.map((m) => `<tr>
                 <td><div class="mlm-row-title">${_mlmEsc(m.source_title || m.source_track_id)}</div><div class="mlm-row-sub">${_mlmEsc(m.source_artist || '')}</div></td>
                 <td><div class="mlm-row-title">${_mlmEsc(m.library_title || String(m.library_track_id))}</div><div class="mlm-row-sub">${_mlmEsc(m.library_artist || '')}</div></td>
                 <td><span class="mlm-source-badge">${_mlmEsc(m.source)}</span></td>
                 <td><button class="mlm-remove-btn" onclick="_mlmDeleteMatch(${m.id})" title="Remove match">&#x2715;</button></td>
-            </tr>`,
-              )
-              .join('')}</tbody>
+            </tr>`).join('')}</tbody>
         </table>`;
   } catch {
     el.innerHTML = '<p class="mlm-hint mlm-error">Failed to load matches</p>';

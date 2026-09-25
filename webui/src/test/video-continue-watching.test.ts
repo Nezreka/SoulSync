@@ -23,7 +23,10 @@ import { extractFunction } from './vanilla-extract';
  *   watching" is worse than no rail.
  */
 
-const JS = readFileSync(resolve(process.cwd(), 'static/video/video-dashboard.js'), 'utf8');
+const JS = readFileSync(
+  resolve(process.cwd(), 'static/video/video-dashboard.js'),
+  'utf8',
+);
 const CSS = readFileSync(resolve(process.cwd(), 'static/video/video-side.css'), 'utf8');
 const HTML = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 
@@ -100,7 +103,7 @@ describe('the rail', () => {
     // so clicking a card did nothing at all. Every other video surface links
     // with a plain href, and a button swallows middle-click, ctrl-click and
     // "open in new tab".
-    expect(JS).toContain('\'<a class="vcw-card" href="\' + href + \'" \'');
+    expect(JS).toContain("'<a class=\"vcw-card\" href=\"' + href + '\" '");
     expect(JS).toContain("'/video-detail/library/'");
     expect(JS).not.toContain('window.openVideoDetail');
   });

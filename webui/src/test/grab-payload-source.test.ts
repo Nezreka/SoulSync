@@ -19,9 +19,15 @@ import { describe, expect, it } from 'vitest';
  * failed rather than one being fixed.
  */
 
-const JS = readFileSync(resolve(process.cwd(), 'static/video/video-download-view.js'), 'utf8');
+const JS = readFileSync(
+  resolve(process.cwd(), 'static/video/video-download-view.js'),
+  'utf8',
+);
 
-const BUILD = JS.slice(JS.indexOf('function buildGrabPayload'), JS.indexOf('function sendGrab'));
+const BUILD = JS.slice(
+  JS.indexOf('function buildGrabPayload'),
+  JS.indexOf('function sendGrab'),
+);
 
 describe('the grab payload', () => {
   it('starts from the source the panel actually searched', () => {

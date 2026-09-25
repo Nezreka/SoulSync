@@ -246,17 +246,10 @@ def _all_name_matchers(db):
     from core.tidal_worker import TidalWorker
 
     return [
-        DeezerWorker(database=db),
-        QobuzWorker(database=db),
-        TidalWorker(database=db),
-        iTunesWorker(database=db),
-        LastFMWorker(database=db),
-        AudioDBWorker(database=db),
-        DiscogsWorker(database=db),
-        GeniusWorker(database=db),
-        AmazonWorker(database=db),
-        BandcampWorker(database=db),
-        JioSaavnWorker(database=db),
+        DeezerWorker(database=db), QobuzWorker(database=db), TidalWorker(database=db),
+        iTunesWorker(database=db), LastFMWorker(database=db), AudioDBWorker(database=db),
+        DiscogsWorker(database=db), GeniusWorker(database=db), AmazonWorker(database=db),
+        BandcampWorker(database=db), JioSaavnWorker(database=db),
     ]
 
 

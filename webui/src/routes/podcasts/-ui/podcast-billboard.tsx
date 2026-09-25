@@ -1,9 +1,9 @@
-import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 
 import type { PodcastEpisodeItem, PodcastShowDetail } from '../-podcasts.types';
-
 import { usePodcastContext } from './podcast-context';
+
 import styles from './podcasts-page.module.css';
 
 interface PodcastBillboardProps {
@@ -60,11 +60,7 @@ export function PodcastBillboard({ show, onPlayEpisode }: PodcastBillboardProps)
 
   return (
     <div className={styles.detailContainer}>
-      <button
-        type="button"
-        className={styles.backBtn}
-        onClick={() => void navigate({ to: '/podcasts' })}
-      >
+      <button type="button" className={styles.backBtn} onClick={() => void navigate({ to: '/podcasts' })}>
         <svg
           width="16"
           height="16"
@@ -220,9 +216,7 @@ export function PodcastBillboard({ show, onPlayEpisode }: PodcastBillboardProps)
                     </svg>
                   )}
                 </span>
-                <span className={styles.actionBtnText}>
-                  {copiedFeed ? 'Feed URL Copied' : 'RSS Feed'}
-                </span>
+                <span className={styles.actionBtnText}>{copiedFeed ? 'Feed URL Copied' : 'RSS Feed'}</span>
               </button>
             )}
 

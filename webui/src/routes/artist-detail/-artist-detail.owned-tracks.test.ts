@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkTracksBody, mergeOwnership, ownedCount } from './-artist-detail.owned-tracks';
+import {
+  checkTracksBody,
+  mergeOwnership,
+  ownedCount,
+} from './-artist-detail.owned-tracks';
 
 /**
  * Why the play button needs an ownership lookup at all.

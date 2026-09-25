@@ -20,9 +20,9 @@ import { extractFunction } from './vanilla-extract';
 const SRC = readFileSync(resolve(process.cwd(), 'static/video/video-detail.js'), 'utf8');
 
 // eslint-disable-next-line @typescript-eslint/no-implied-eval
-const accentFg = new Function(`${extractFunction('accentFg', SRC)}\nreturn accentFg;`)() as (
-  rgb: number[],
-) => string;
+const accentFg = new Function(
+  `${extractFunction('accentFg', SRC)}\nreturn accentFg;`,
+)() as (rgb: number[]) => string;
 
 const DARK = '#fff';
 const LIGHT = '#0b0b0f';
@@ -48,12 +48,7 @@ describe('text on a poster-sampled accent', () => {
   });
 
   it('never returns something a stylesheet cannot use', () => {
-    for (const rgb of [
-      [0, 0, 0],
-      [255, 255, 255],
-      [17, 200, 90],
-      [200, 30, 30],
-    ]) {
+    for (const rgb of [[0, 0, 0], [255, 255, 255], [17, 200, 90], [200, 30, 30]]) {
       expect(accentFg(rgb)).toMatch(/^#[0-9a-f]{3,8}$/);
     }
   });
@@ -65,9 +60,8 @@ describe('the accent contrast is actually wired up', () => {
   it('gives every accent-backed control the derived foreground', () => {
     // A hard-coded `color: #fff` on an accent background is the original bug.
     const accentBacked = CSS.split('\n').filter(
-      (l) =>
-        l.includes('background: rgb(var(--vd-accent-rgb))') ||
-        l.includes('background: rgba(var(--vd-accent-rgb), 0.85)'),
+      (l) => l.includes('background: rgb(var(--vd-accent-rgb))') ||
+             l.includes('background: rgba(var(--vd-accent-rgb), 0.85)'),
     );
     expect(accentBacked.length).toBeGreaterThan(0);
     for (const rule of ['.vd-trailer-btn', '.vd-vt-btn--active']) {

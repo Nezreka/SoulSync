@@ -255,6 +255,19 @@ class DatabaseUpdateWorker:
                 # For full refresh, get all artists
                 artists_to_process = self._get_all_artists()
                 if not artists_to_process:
+                    # 5BILLION, round 4. An empty answer used to abort here
+                    # unconditionally — which RETURNS BEFORE the stale-removal
+                    # phase below, so "Refresh completes but doesn't remove the
+                    # previous artists" was exactly what the code did. The three
+                    # earlier fixes all went into run_deep_scan(); this path,
+                    # which is what the Refresh button runs, still had the
+                    # original behaviour.
+                    #
+                    # A VERIFIED empty library is a legitimate state (the user
+                    # emptied it, or switched the selection to an empty one) and
+                    # must fall through to removal. An UNVERIFIED empty is a
+                    # failed fetch and must still abort — never delete a
+                    # library's rows because the API had a bad minute.
                     if not getattr(self, '_artists_fetch_verified', False):
                         self._emit_signal(
                             'error',

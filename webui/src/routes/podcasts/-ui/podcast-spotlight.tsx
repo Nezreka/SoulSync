@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { PodcastShowSummary } from '../-podcasts.types';
-
 import { usePodcastContext } from './podcast-context';
+
 import styles from './podcasts-page.module.css';
 
 interface PodcastSpotlightProps {

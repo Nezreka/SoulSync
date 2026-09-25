@@ -105,24 +105,12 @@ describe('the detail health band', () => {
   });
 
   it('does not show healthy library ids in the hero', () => {
-    const { chips: c } = band({
-      kind: 'movie',
-      source: 'library',
-      id: 9,
-      tmdb_id: 27205,
-      imdb_id: 'tt1375666',
-    });
+    const { chips: c } = band({ kind: 'movie', source: 'library', id: 9, tmdb_id: 27205, imdb_id: 'tt1375666' });
     expect(c).toEqual([]);
   });
 
   it('leaves TVDB out for a movie', () => {
-    const { host } = band({
-      kind: 'movie',
-      source: 'library',
-      id: 9,
-      tmdb_id: 27205,
-      imdb_id: null,
-    });
+    const { host } = band({ kind: 'movie', source: 'library', id: 9, tmdb_id: 27205, imdb_id: null });
     expect(labels(host)).toEqual(['IMDb']);
   });
 
@@ -142,13 +130,7 @@ describe('the detail health band', () => {
     // video-detail.js already refuses to print "N videos" in the meta line:
     // youtube does not expose a number worth trusting. A "Missing 811 videos"
     // verdict derived from that number is the same lie with a scarier face.
-    const { host } = band({
-      kind: 'channel',
-      source: 'youtube',
-      id: 'UCabc',
-      episode_owned: 1,
-      episode_total: 812,
-    });
+    const { host } = band({ kind: 'channel', source: 'youtube', id: 'UCabc', episode_owned: 1, episode_total: 812 });
     expect(labels(host)).not.toContain('Videos');
     expect(labels(host)).not.toContain('Missing');
   });
@@ -184,10 +166,7 @@ describe('youtube owned counts', () => {
       `${preamble}\n${bodies}\nreturn { ytOwnedCount: ytOwnedCount, ytPlaylistToShow: ytPlaylistToShow, ytFlatSeason: ytFlatSeason };`,
     )() as {
       ytOwnedCount: (v: unknown[]) => number;
-      ytPlaylistToShow: (r: unknown) => {
-        episode_owned: number;
-        seasons: { episode_owned: number }[];
-      };
+      ytPlaylistToShow: (r: unknown) => { episode_owned: number; seasons: { episode_owned: number }[] };
       ytFlatSeason: (v: unknown[]) => { episode_owned: number };
     };
   }
@@ -225,11 +204,11 @@ describe('youtube owned counts', () => {
       ] } };
       var ytFilter = { q: '', sort: 'newest', state: 'missing', duration: 'long' };
     `;
-    const bodies = ['ytDurSecs', 'ytVisibleVideos'].map((n) => extractFunction(n, SRC)).join('\n');
+    const bodies = ['ytDurSecs', 'ytVisibleVideos']
+      .map((n) => extractFunction(n, SRC))
+      .join('\n');
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const visible = new Function(
-      `${preamble}\n${bodies}\nreturn ytVisibleVideos;`,
-    )() as () => Array<{ youtube_id: string }>;
+    const visible = new Function(`${preamble}\n${bodies}\nreturn ytVisibleVideos;`)() as () => Array<{ youtube_id: string }>;
     expect(visible().map((v) => v.youtube_id)).toEqual(['b']);
   });
 });
@@ -244,10 +223,7 @@ describe('the health band is mounted and reset', () => {
   it('is hidden on load so it cannot show the previous title', () => {
     // resetExtras runs before the fetch; without the band in that list the
     // chips from the last page stay up while the next one loads.
-    const reset = SRC.slice(
-      SRC.indexOf('function resetExtras'),
-      SRC.indexOf('function resetExtras') + 1200,
-    );
+    const reset = SRC.slice(SRC.indexOf('function resetExtras'), SRC.indexOf('function resetExtras') + 1200);
     expect(reset).toContain('[data-vd-health]');
   });
 });

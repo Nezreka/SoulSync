@@ -22,7 +22,10 @@ import { describe, expect, it } from 'vitest';
  * that matters here is structural.
  */
 
-const PAGE = readFileSync(resolve(process.cwd(), 'src/routes/tools/-ui/tools-page.tsx'), 'utf8');
+const PAGE = readFileSync(
+  resolve(process.cwd(), 'src/routes/tools/-ui/tools-page.tsx'),
+  'utf8',
+);
 const HERO = readFileSync(
   resolve(process.cwd(), 'src/routes/tools/-ui/maintenance-hero.tsx'),
   'utf8',

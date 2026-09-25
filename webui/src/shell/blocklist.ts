@@ -53,9 +53,7 @@ let _blEntityType: BlocklistEntityType = 'artist'; // active tab
 let _blSearchSeq = 0; // guards against out-of-order search results
 
 export function openBlocklistModal(initialType?: string): void {
-  _blEntityType = (['artist', 'album', 'track'] as const).includes(
-    initialType as BlocklistEntityType,
-  )
+  _blEntityType = (['artist', 'album', 'track'] as const).includes(initialType as BlocklistEntityType)
     ? (initialType as BlocklistEntityType)
     : 'artist';
   let overlay = document.getElementById('blocklist-modal-overlay');
@@ -118,9 +116,8 @@ export function switchBlocklistTab(type: string): void {
 }
 
 function _blRefreshTabs(): void {
-  document
-    .querySelectorAll<HTMLElement>('.blocklist-tab')
-    .forEach((b) => b.classList.toggle('active', b.dataset.bl === _blEntityType));
+  document.querySelectorAll<HTMLElement>('.blocklist-tab').forEach((b) =>
+    b.classList.toggle('active', b.dataset.bl === _blEntityType));
   const input = document.getElementById('blocklist-search-input') as HTMLInputElement | null;
   if (input) input.placeholder = `Search ${_blEntityType}s to block…`;
 }
@@ -143,9 +140,7 @@ async function _blRunSearch(): Promise<void> {
   const seq = ++_blSearchSeq;
   spinner.classList.add('spinning');
   try {
-    const res = await fetch(
-      `/api/blocklist/search?type=${_blEntityType}&q=${encodeURIComponent(q)}`,
-    );
+    const res = await fetch(`/api/blocklist/search?type=${_blEntityType}&q=${encodeURIComponent(q)}`);
     const data = (await res.json()) as BlocklistSearchResponse;
     if (seq !== _blSearchSeq) return; // a newer search superseded this
     if (!data.success) throw new Error(data.error || 'Search failed');
@@ -154,20 +149,15 @@ async function _blRunSearch(): Promise<void> {
       box.innerHTML = '<div class="blocklist-empty">No matches.</div>';
       return;
     }
-    box.innerHTML = results
-      .map((r) => {
-        const img = r.image
-          ? `<img class="blocklist-row-img${_blEntityType === 'artist' ? ' artist' : ''}" src="${_esc(r.image)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`
-          : `<div class="blocklist-row-img${_blEntityType === 'artist' ? ' artist' : ''} placeholder">🎵</div>`;
-        const payload = encodeURIComponent(
-          JSON.stringify({
-            name: r.name || 'Unknown',
-            source: r.provider || data.source,
-            source_id: r.id,
-            parent_name: r.extra || '',
-          }),
-        );
-        return `<div class="blocklist-row">
+    box.innerHTML = results.map((r) => {
+      const img = r.image
+        ? `<img class="blocklist-row-img${_blEntityType === 'artist' ? ' artist' : ''}" src="${_esc(r.image)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`
+        : `<div class="blocklist-row-img${_blEntityType === 'artist' ? ' artist' : ''} placeholder">🎵</div>`;
+      const payload = encodeURIComponent(JSON.stringify({
+        name: r.name || 'Unknown', source: r.provider || data.source,
+        source_id: r.id, parent_name: r.extra || '',
+      }));
+      return `<div class="blocklist-row">
                 ${img}
                 <div class="blocklist-row-info">
                     <div class="blocklist-row-name">${_esc(r.name || 'Unknown')}</div>
@@ -175,11 +165,9 @@ async function _blRunSearch(): Promise<void> {
                 </div>
                 <button class="blocklist-block-btn" onclick="blockFromSearch('${payload}')">Block</button>
             </div>`;
-      })
-      .join('');
+    }).join('');
   } catch (e) {
-    if (seq === _blSearchSeq)
-      box.innerHTML = `<div class="blocklist-empty">Couldn't search: ${_esc((e as Error).message)}</div>`;
+    if (seq === _blSearchSeq) box.innerHTML = `<div class="blocklist-empty">Couldn't search: ${_esc((e as Error).message)}</div>`;
   } finally {
     if (seq === _blSearchSeq) spinner.classList.remove('spinning');
   }
@@ -225,16 +213,13 @@ async function _blLoadCurrent(): Promise<void> {
       box.innerHTML = `<div class="blocklist-empty">No blocked ${_blEntityType}s yet.</div>`;
       return;
     }
-    box.innerHTML = entries
-      .map((e) => {
-        const sources = (
-          ['spotify_id', 'itunes_id', 'deezer_id', 'musicbrainz_id'] as const
-        ).filter((k) => e[k]).length;
-        const matchTag =
-          e.match_status === 'matched' || sources >= 2
-            ? `<span class="blocklist-match matched" title="Matched across ${sources} sources">${sources}★</span>`
-            : `<span class="blocklist-match pending" title="Matching other sources…">●</span>`;
-        return `<div class="blocklist-current-row">
+    box.innerHTML = entries.map((e) => {
+      const sources = (['spotify_id', 'itunes_id', 'deezer_id', 'musicbrainz_id'] as const)
+        .filter((k) => e[k]).length;
+      const matchTag = e.match_status === 'matched' || sources >= 2
+        ? `<span class="blocklist-match matched" title="Matched across ${sources} sources">${sources}★</span>`
+        : `<span class="blocklist-match pending" title="Matching other sources…">●</span>`;
+      return `<div class="blocklist-current-row">
                 <div class="blocklist-row-info">
                     <div class="blocklist-row-name">${_esc(e.name)}</div>
                     ${e.parent_name ? `<div class="blocklist-row-extra">${_esc(e.parent_name)}</div>` : ''}
@@ -242,8 +227,7 @@ async function _blLoadCurrent(): Promise<void> {
                 ${matchTag}
                 <button class="blocklist-unblock-btn" onclick="unblockEntry(${e.id})" title="Remove">✕</button>
             </div>`;
-      })
-      .join('');
+    }).join('');
   } catch (e) {
     box.innerHTML = `<div class="blocklist-empty">Couldn't load: ${_esc((e as Error).message)}</div>`;
   }

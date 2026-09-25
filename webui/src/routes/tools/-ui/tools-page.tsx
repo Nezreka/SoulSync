@@ -94,12 +94,10 @@ export function ToolsPage() {
           the page like everything else.
           Defaults to Operations: that is the half that has work waiting in it. */}
       <div className="tools-tabs" role="tablist" aria-label="Tools sections">
-        {(
-          [
-            ['operations', 'Operations'],
-            ['tools', 'Tools'],
-          ] as const
-        ).map(([value, label]) => (
+        {([
+          ['operations', 'Operations'],
+          ['tools', 'Tools'],
+        ] as const).map(([value, label]) => (
           <button
             type="button"
             key={value}

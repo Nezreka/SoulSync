@@ -45,11 +45,6 @@ tools/ffprobe*
 Staging/
 Transfer/
 
-# Graphify-generated knowledge graph (regenerate with `graphify .`; never source)
-graphify-out/
-**/graphify-out/
-docker-compose.local-image.yml
-*-container-inspect.json
 # Any hidden folders
 **/.*/
 # …except GitHub Actions: CI gates (route-tree drift, tests) only run if
@@ -66,10 +61,3 @@ Stream/
 # Music video library — the ./MusicVideos bind mount from docker-compose.yml.
 # Instance data like /downloads/, including half-finished *.part files.
 MusicVideos/
-
-# Review scaffolding. Twice now a review workspace has ridden into the diff:
-# 78 files on 6 September, and on 16 September another 1.2 MB of reports,
-# repro scripts, merge-preview dumps and UI screenshots of a real library.
-# It documents a review, not the product — keep it local.
-docs/reviews/
-docs/ui-library-audit/

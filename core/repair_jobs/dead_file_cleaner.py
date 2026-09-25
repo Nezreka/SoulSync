@@ -8,12 +8,6 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.dead_files")
 
-# `_resolve_file_path` used to live here as a "compatibility helper retained for
-# non-catalogue file fixers". It was a verbatim pass-through to
-# `core.library.path_resolver.resolve_library_file_path` and, after this
-# branch's rewrite of this job, had zero callers anywhere -- including the tests
-# that name `_resolve_file_path`, which patch `core.repair_worker`'s own copy.
-
 
 @register_job
 class DeadFileCleanerJob(RepairJob):

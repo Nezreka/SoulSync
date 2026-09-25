@@ -235,6 +235,11 @@ class AudioDBWorker:
             return True
 
         if str(result_artist_id) != str(parent_audiodb_id):
+            # Guard: only correct on a POSITIVE name match. The old check
+            # skipped only on a CONFIRMED mismatch — a payload without
+            # strArtist fell through and rewrote the parent artist's
+            # audiodb_id unconditionally. Same failure the Deezer #988 fix
+            # closed: no name means no verification, so no correction.
             parent_name = item.get('artist') or ''
             result_artist_name = result.get('strArtist') or ''
             if not (result_artist_name and parent_name
@@ -299,9 +304,12 @@ class AudioDBWorker:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
         if not norm_query or not norm_result:
-            raw_query = (query_name or '').strip().lower()
-            raw_result = (result_name or '').strip().lower()
-            return bool(raw_query) and raw_query == raw_result
+            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
+            # "...") would compare at SequenceMatcher ratio 1.0 against any
+            # other such title — fall back to exact raw comparison instead.
+            raw_q = (query_name or '').strip().lower()
+            raw_r = (result_name or '').strip().lower()
+            return bool(raw_q) and raw_q == raw_r
 
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")

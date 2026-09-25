@@ -84,8 +84,7 @@ def resolve_playable_tracks(db, wanted: List[Dict[str, Any]]) -> Dict[str, Any]:
             )
             for candidate in cursor.fetchall():
                 candidate = dict(candidate)
-                candidates.setdefault(
-                    (_norm(candidate["title"]), _norm(candidate["artist"])), candidate)
+                candidates.setdefault((_norm(candidate["title"]), _norm(candidate["artist"])), candidate)
         seen_paths = set()
         for item in wanted:
             title = _norm(str(item.get("title") or item.get("name") or ""))
