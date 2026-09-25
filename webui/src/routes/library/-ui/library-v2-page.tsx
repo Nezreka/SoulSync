@@ -5847,7 +5847,7 @@ function ProviderMonitorButton({
   busy: boolean;
   onClick: () => void;
 }) {
-  const canWrite = useLibraryV2CanWrite();
+  const canWish = useLibraryV2CanWish();
   return (
     <div className={styles.cardMonitor} onClick={(event) => event.stopPropagation()}>
       <button
@@ -5856,7 +5856,7 @@ function ProviderMonitorButton({
         aria-label={monitored ? 'Monitored' : busy ? 'Starting monitoring' : 'Start monitoring'}
         aria-pressed={monitored}
         title={monitored ? 'Monitored' : 'Monitor this release'}
-        disabled={!canWrite || busy || monitored}
+        disabled={!canWish || busy || monitored}
         onClick={onClick}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -6711,6 +6711,7 @@ function DiscoveryAlbumView({
                   icon="monitor"
                   label={monitored ? 'Monitored' : monitoring ? 'Adding…' : 'Monitor'}
                   title="Monitor this release"
+                  requiresWish
                   busy={monitoring}
                   disabled={monitored}
                   onClick={() => void monitor()}
@@ -6975,6 +6976,7 @@ function DiscoveryArtistView({
             icon="monitor"
             label={adopting ? 'Adding…' : 'Monitor artist'}
             title="Monitor this artist"
+            requiresWish
             busy={adopting}
             onClick={() => void monitorArtist()}
           />
@@ -9272,7 +9274,10 @@ export function TrackTableBulkBar({
             <button
               type="button"
               className={styles.inlineRetry}
-              disabled={busy !== null || !canWrite}
+              // a retry needs what the action it retries needed
+              disabled={
+                busy !== null || !(/^(Un)?[Mm]onitor$/.test(retry.label) ? canWish : canWrite)
+              }
               onClick={() =>
                 void run(`Retry ${retry.label}`, () => fanOut(retry.label, retry.ids, retry.apply))
               }

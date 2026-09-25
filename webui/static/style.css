@@ -50552,6 +50552,8 @@ html[data-library-scope="own"] .library-switch-icon { color: rgb(250, 204, 21); 
 .library-switch-menu {
     /* on <body>, placed under the trigger by library-switch.ts */
     position: fixed;
+    max-height: min(70vh, 480px);
+    overflow-y: auto;
     min-width: 260px;
     max-width: 340px;
     z-index: 1200;

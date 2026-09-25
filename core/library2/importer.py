@@ -1897,6 +1897,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 ).fetchall()
             )
         _rebuild_album_artist_credits(cursor, dirty_credit_album_ids)
+        # the upsert above may stamp a legacy owner on a row it did not move;
+        # the folder a file sits in decides its library (#1199)
+        from core.library2.library_roots import rederive_owners
+        rederive_owners(cursor)
         if track_from is not None:
             checkpoint("tracks", track_total, track_total)
 

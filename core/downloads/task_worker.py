@@ -435,8 +435,8 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         return _download_track_worker(task_id, batch_id, deps)
     from core.library_scope import batch_scope, library_scope
     with tasks_lock:
-        scope = batch_scope(download_batches.get(batch_id) or {})
-    with library_scope(scope):
+        batch = dict(download_batches.get(batch_id) or {})
+    with library_scope(batch_scope(batch)):
         return _download_track_worker(task_id, batch_id, deps)
 
 

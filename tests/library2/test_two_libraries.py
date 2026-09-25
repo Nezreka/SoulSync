@@ -342,6 +342,39 @@ class TestJobsWorkInOneLibrary:
         item.library = two.kim
         assert _libraries_for(two.db, item) == [(two.kim, two.kim_root)]
 
+    @pytest.mark.parametrize("scope_name, kim_primary", [
+        ("kim", False), ("shared", True)])
+    def test_a_reorganize_plans_the_copy_of_the_library_it_runs_in(self, lib, scope_name,
+                                                                   kim_primary):
+        """Whichever copy is primary, a pass for one library moves that
+        library's file into that library's folder -- never the other copy."""
+        from core.imports.paths import transfer_root_for_context
+        from core.library2.reorganize_plan import plan_album_reorganize
+        shared_path = os.path.join(lib.shared, "A", "B", "01.flac")
+        kim_path = os.path.join(lib.kim_root, "A", "B", "01.flac")
+        _, album_id, track_id = _album_with_file(lib.db, artist="A", album="B", title="S",
+                                                 path=shared_path, key="x")
+        with lib.db._get_connection() as conn:
+            conn.execute("INSERT INTO lib2_track_files(track_id, path, is_primary, file_state)"
+                         " VALUES(?,?,0,'active')", (track_id, kim_path))
+            conn.execute("UPDATE lib2_track_files SET is_primary = (path = ?) WHERE track_id=?",
+                         (kim_path if kim_primary else shared_path, track_id))
+            conn.commit()
+
+        def build(context, *_a, **_k):
+            return os.path.join(transfer_root_for_context(context), "X", "Y", "01.flac"), True
+
+        scope, root, mine = ((lib.kim, lib.kim_root, kim_path) if scope_name == "kim"
+                             else ("shared", lib.shared, shared_path))
+        with library_scope.library_scope(scope):
+            with lib.db._get_connection() as conn:
+                plan = plan_album_reorganize(conn, album_id, build_final_path_fn=build,
+                                             transfer_dir=root,
+                                             resolve_file_path_fn=lambda p: p)
+        item = plan["tracks"][0]
+        assert item["current_path_abs"] == mine
+        assert item["new_path_abs"].startswith(root)
+
     def test_a_retag_writes_the_file_of_the_library_it_runs_in(self, two):
         from core.library2.retag import _track_rows
         with two.db._get_connection() as conn:

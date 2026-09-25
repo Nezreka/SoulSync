@@ -466,8 +466,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
     # pool thread with no request context.
     from core.library_scope import batch_scope, library_scope
     with tasks_lock:
-        _scope = batch_scope(download_batches.get(batch_id) or {})
-    with library_scope(_scope):
+        _batch = dict(download_batches.get(batch_id) or {})
+    with library_scope(batch_scope(_batch)):
         return _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps, serialize)
 
 

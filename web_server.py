@@ -6567,10 +6567,12 @@ def start_download():
             build_lib2_import_pipeline_fields,
             build_lib2_track_info,
             names_lib2_entity,
+            profile_may_grab,
             resolve_lib2_grab_context,
         )
         from core.download_plugins.candidate_store import candidate_binding
-        if names_lib2_entity(raw_data) and not is_admin_request():
+        if names_lib2_entity(raw_data) and not is_admin_request() \
+                and not profile_may_grab(get_database(), get_current_profile_id(), raw_data):
             return jsonify({
                 "success": False,
                 "error": "Admin access required",

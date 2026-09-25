@@ -118,6 +118,21 @@ def library_scope_for_profile(profile_id: Optional[int]) -> Scope:
     return scope
 
 
+def wishes_in_own_library(profile_id: Optional[int], db=None) -> bool:
+    """E-13: may this non-admin profile wish -- monitor, search, grab -- in
+    the library it reads? Only in one of its own, and only when it may
+    download at all. Whether the caller is an admin is the caller's call."""
+    try:
+        if not profile_id or library_scope_for_profile(profile_id) != int(profile_id):
+            return False
+        if db is None:
+            from database.music_database import get_database
+            db = get_database()
+        return bool((db.get_profile(int(profile_id)) or {}).get("can_download", 1))
+    except Exception:  # noqa: BLE001 - unreadable mode: no wishing
+        return False
+
+
 def current_library_scope() -> Scope:
     """the scope of whoever is asking right now."""
     forced = _explicit_scope.get()
@@ -297,6 +312,8 @@ def batch_library_owner(batch: Any) -> Optional[int]:
             return int(owner) if owner is not None else None
         except (TypeError, ValueError):
             return None
+    if not any_own_library_exists():
+        return None  # one library: no per-profile lookup, often under tasks_lock
     return owner_for_scope(library_scope_for_profile(batch.get("profile_id")))
 
 

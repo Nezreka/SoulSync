@@ -27,6 +27,26 @@ def names_lib2_entity(data: Mapping[str, Any]) -> bool:
             or data.get("lib2_album_id") is not None)
 
 
+def profile_may_grab(db, profile_id, data: Mapping[str, Any]) -> bool:
+    """E-13: a non-admin grab for a named lib2 row is a wish -- allowed for a
+    profile in a library of its own, and only for a row of that library."""
+    from core.library_scope import wishes_in_own_library
+    from core.library2.sql_util import entity_visible
+
+    if not wishes_in_own_library(profile_id, db):
+        return False
+    conn = db._get_connection()
+    try:
+        for key, entity in (("lib2_track_id", "track"), ("lib2_album_id", "album")):
+            if data.get(key) is not None and not entity_visible(conn, entity, int(data[key])):
+                return False
+        return True
+    except (TypeError, ValueError, sqlite3.Error):
+        return False
+    finally:
+        conn.close()
+
+
 def build_lib2_track_info(
     data: Mapping[str, Any],
     lib2_context: Optional[Mapping[str, Any]],

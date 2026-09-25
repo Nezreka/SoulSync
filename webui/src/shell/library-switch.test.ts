@@ -95,6 +95,28 @@ describe('the library switcher', () => {
     expect(document.getElementById('library-switch')?.textContent).toContain('Kim');
   });
 
+  it('closes the list at once and takes one pick at a time', async () => {
+    await refreshLibrarySwitch();
+    (document.querySelector('.library-switch-trigger') as HTMLButtonElement).click();
+    const first = pickLibrary('3');
+    expect(document.getElementById('library-switch-menu')?.hidden).toBe(true);
+    expect(await pickLibrary('all')).toBe(false);
+    expect(await first).toBe(true);
+    expect(posted).toEqual([{ scope: '3' }]);
+  });
+
+  it('drops GETs the shared dedupe kept for the old library', async () => {
+    const entries = new Map([['/api/library/v2/artists', {}]]);
+    (window as { _apiGetDedupe?: unknown })._apiGetDedupe = { entries };
+    try {
+      await refreshLibrarySwitch();
+      await pickLibrary('3');
+      expect(entries.size).toBe(0);
+    } finally {
+      delete (window as { _apiGetDedupe?: unknown })._apiGetDedupe;
+    }
+  });
+
   it('picking the library already current sends nothing', async () => {
     await refreshLibrarySwitch();
     expect(await pickLibrary('shared')).toBe(true);

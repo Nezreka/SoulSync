@@ -215,6 +215,34 @@ def scope_visibility_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str
     return f"(NOT {anyones} OR {mine} OR {has_intent})"
 
 
+def entity_visible(conn: Any, entity_type: str, entity_id: int, *, scope=_AMBIENT) -> bool:
+    """Does this scope see the row at all? (E-06, one row at a time.)
+
+    An artist is judged across its alias group, like the artist list is; a
+    release or track also shows when its artist is in the library -- the rest
+    of the discography is there to be wished for.
+    """
+    entity = str(entity_type or "").strip().lower().rstrip("s")
+    table = {"artist": "lib2_artists", "album": "lib2_albums", "track": "lib2_tracks"}[entity]
+    visible = scope_visibility_sql(entity, "e", scope=scope)
+    if not visible:
+        return True
+    artist_of = {"artist": "e.id", "album": "e.primary_artist_id",
+                 "track": "(SELECT al.primary_artist_id FROM lib2_albums al"
+                          " WHERE al.id = e.album_id)"}[entity]
+    artist_visible = (f"EXISTS (SELECT 1 FROM lib2_artists pa, lib2_artists va"
+                      f" WHERE pa.id = {artist_of}"
+                      f"   AND COALESCE(va.canonical_artist_id, va.id)"
+                      f"       = COALESCE(pa.canonical_artist_id, pa.id)"
+                      f"   AND {scope_visibility_sql('artist', 'va', scope=scope)})")
+    if entity != "artist":
+        visible = f"({visible}) OR {artist_visible}"
+    else:
+        visible = artist_visible
+    return conn.execute(f"SELECT 1 FROM {table} e WHERE e.id = ? AND ({visible})",
+                        (int(entity_id),)).fetchone() is not None
+
+
 def intent_profile_id(scope=_AMBIENT) -> int:
     """Whose monitoring/wanted state a query in this scope should read.
 

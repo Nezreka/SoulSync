@@ -96,12 +96,13 @@ def ensure_library_roots_schema(cursor: Any) -> None:
 
 
 def normalize_prefix(folder: Any) -> str:
-    """The prefix form of a folder: absolute, normalised, one trailing '/'.
+    """The prefix form of a folder: absolute, normalised, one trailing
+    separator -- the platform's, which is what stored paths are joined with.
     The separator is what stops ``/music/kim`` from claiming ``/music/kimberly``."""
     text = str(folder or "").strip()
     if not text:
         return ""
-    return os.path.normpath(text).rstrip("/\\") + "/"
+    return os.path.normpath(text).rstrip("/\\") + os.sep
 
 
 def desired_roots(shared_root: Optional[str],
@@ -140,17 +141,24 @@ def apply_roots(cursor: Any, roots: Dict[str, int]) -> int:
     cursor.executemany(
         "INSERT INTO lib2_library_roots(prefix, profile_id) VALUES(?, ?)",
         sorted(roots.items()))
+    moved = rederive_owners(cursor)
+    if moved:
+        logger.info("library folders changed: %d file row(s) re-assigned to the library "
+                    "whose folder holds them", moved)
+    return moved
+
+
+def rederive_owners(cursor: Any) -> int:
+    """Give every file under a known folder that folder's library again --
+    after a writer that set owners without moving anything (the legacy
+    import's upsert). Returns how many rows changed hands."""
     owner = _OWNER_OF.format(path="lib2_track_files.path")
     under = _UNDER_ANY.format(path="lib2_track_files.path")
     cursor.execute(
         f"UPDATE lib2_track_files SET owner_profile_id = {owner}"
         f" WHERE path IS NOT NULL AND {under}"
         f"   AND owner_profile_id IS NOT {owner}")
-    moved = max(int(cursor.rowcount or 0), 0)
-    if moved:
-        logger.info("library folders changed: %d file row(s) re-assigned to the library "
-                    "whose folder holds them", moved)
-    return moved
+    return max(int(cursor.rowcount or 0), 0)
 
 
 def owner_for_path(roots: Dict[str, int], path: Any) -> Tuple[bool, Optional[int]]:

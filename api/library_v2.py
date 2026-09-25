@@ -311,11 +311,35 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # the admin's. Everything that changes files or shared metadata
             # stays with the admin.
             if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
-                return None
+                return _named_row_hidden()
             return jsonify({
                 "success": False,
                 "error": "Library v2 changes require the admin profile",
             }), 403
+        # E-06: for a profile, another library's row does not exist -- its
+        # page, its tags, its history alike
+        return _named_row_hidden()
+
+    def _named_row_hidden():
+        """A 404 when the route names a row outside the caller's library, else
+        None. The row is named by <entity>/<eid>, track_id, album_id or
+        artist_id; anything else (discovery's provider rows, jobs) is not ours
+        to hide."""
+        args = request.view_args or {}
+        if "eid" in args:
+            entity, entity_id = str(args.get("entity") or "").rstrip("s"), args["eid"]
+        else:
+            entity, entity_id = next(((e, args[f"{e}_id"]) for e in ("track", "album", "artist")
+                                      if f"{e}_id" in args), ("", None))
+        if entity not in ("artist", "album", "track") or _is_admin():
+            return None
+        conn = _conn()
+        try:
+            hidden = _hidden_from_caller(conn, entity, int(entity_id))
+        finally:
+            conn.close()
+        if hidden:
+            return jsonify({"success": False, "error": f"{entity.capitalize()} not found"}), 404
         return None
 
     def _hidden_from_caller(conn, entity: str, entity_id: int) -> bool:
@@ -328,28 +352,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if _is_admin():
             return False
         try:
-            from core.library2.sql_util import scope_visibility_sql
-            table = {"artist": "lib2_artists", "album": "lib2_albums",
-                     "track": "lib2_tracks"}[entity]
-            visible = scope_visibility_sql(entity, "e")
-            if not visible:
-                return False
-            # an artist is judged across its alias group, like the artist list
-            # is; a release or track also shows when its artist is in the
-            # library -- the rest of the discography is there to be wished for
-            artist_of = {"artist": "e.id", "album": "e.primary_artist_id",
-                         "track": "(SELECT al.primary_artist_id FROM lib2_albums al"
-                                  " WHERE al.id = e.album_id)"}[entity]
-            artist_visible = (f"EXISTS (SELECT 1 FROM lib2_artists pa, lib2_artists va"
-                              f" WHERE pa.id = {artist_of}"
-                              f"   AND COALESCE(va.canonical_artist_id, va.id)"
-                              f"       = COALESCE(pa.canonical_artist_id, pa.id)"
-                              f"   AND {scope_visibility_sql('artist', 'va')})")
-            visible = (artist_visible if entity == "artist"
-                       else f"({visible}) OR {artist_visible}")
-            return conn.execute(
-                f"SELECT 1 FROM {table} e WHERE e.id = ? AND ({visible})",
-                (int(entity_id),)).fetchone() is None
+            from core.library2.sql_util import entity_visible
+            return not entity_visible(conn, entity, entity_id)
         except Exception as exc:  # noqa: BLE001 - an unanswerable check hides nothing
             logger.debug("scope visibility check failed for %s %s: %s", entity, entity_id, exc)
             return False
@@ -359,15 +363,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         The admin anywhere; any other profile only in a library of its own."""
         if _is_admin():
             return True
-        try:
-            from core.library_scope import library_scope_for_profile
-            if library_scope_for_profile(_profile()) != _profile():
-                return False
-            # wishing ends in downloads; a profile barred from those is barred here
-            profile = get_database().get_profile(_profile()) or {}
-            return bool(profile.get("can_download", 1))
-        except Exception:  # noqa: BLE001 - unreadable mode: no writes
-            return False
+        from core.library_scope import wishes_in_own_library
+        return wishes_in_own_library(_profile(), get_database())
 
     def _conn():
         return get_database()._get_connection()
@@ -2049,8 +2046,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2 import queries as Q
         conn = _conn()
         try:
-            data = (None if _hidden_from_caller(conn, "artist", artist_id)
-                    else Q.get_artist(conn, artist_id))
+            data = Q.get_artist(conn, artist_id)
         finally:
             conn.close()
         if data is None:
@@ -2222,12 +2218,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2 import queries as Q
         conn = _conn()
         try:
-            hidden = _hidden_from_caller(conn, "album", album_id)
             # ``?resolve=1``: materialize the provider tracklist first, so a
             # discography-only release (no track rows yet) shows its real
             # tracklist when the user expands it — Lidarr-style.
-            if (not hidden and request.args.get("resolve") == "1"
-                    and not _tracklist_resolve_pending(album_id)):
+            if request.args.get("resolve") == "1" and not _tracklist_resolve_pending(album_id):
                 from core.library2.provider_adapters import TRACKLIST_PARSER_VERSION
                 # Not "has ANY track": bookmarking one top track materializes
                 # exactly that recording, which left the release looking like a
@@ -2281,7 +2275,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         (album_id,))
                     conn.commit()
                     _schedule_tracklist_resolve(album_id)
-            data = None if hidden else Q.get_album(conn, album_id)
+            data = Q.get_album(conn, album_id)
         finally:
             conn.close()
         if data is None:
@@ -2297,8 +2291,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2 import queries as Q
         conn = _conn()
         try:
-            data = (None if _hidden_from_caller(conn, "track", track_id)
-                    else Q.get_track(conn, track_id))
+            data = Q.get_track(conn, track_id)
         finally:
             conn.close()
         if data is None:

@@ -59,14 +59,18 @@ def _track_rows(conn, album_id: int) -> List[Any]:
     A track with no usable file is not part of a reorganize — there is nothing
     to move — so the join is inner on purpose.
     """
+    from core.library2.sql_util import owner_clause
     from core.library2.track_files import primary_order
 
+    # the file of the library this runs in: a reorganize never moves another
+    # library's copy into this library's folder (#1199)
     return conn.execute(
         f"""SELECT t.id, t.title, t.track_number, t.disc_number,
                    (SELECT tf.path FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
                        AND COALESCE(tf.file_state,'active')
                            NOT IN ('missing_confirmed','deleted')
+                       {owner_clause(column="tf.owner_profile_id")}
                      ORDER BY {primary_order('tf')} LIMIT 1) AS file_path
               FROM lib2_tracks t
              WHERE t.album_id = ?

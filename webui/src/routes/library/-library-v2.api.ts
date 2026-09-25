@@ -2044,8 +2044,9 @@ const NO_SCOPES: LibraryScopes = {
   options: [],
 };
 
-async function fetchLibraryScopes(): Promise<LibraryScopes> {
-  const res = await fetch('/api/library/v2/scopes');
+async function fetchLibraryScopes(signal?: AbortSignal): Promise<LibraryScopes> {
+  // with a signal the shared GET dedupe never replays an answer from before a switch
+  const res = await fetch('/api/library/v2/scopes', { signal });
   if (!res.ok) return NO_SCOPES;
   const data = await res.json();
   const text = (value: unknown, fallback: string) =>
@@ -2064,7 +2065,7 @@ async function fetchLibraryScopes(): Promise<LibraryScopes> {
 export function libraryScopesQueryOptions() {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'scopes'],
-    queryFn: fetchLibraryScopes,
+    queryFn: ({ signal }) => fetchLibraryScopes(signal),
   });
 }
 

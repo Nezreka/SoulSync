@@ -163,6 +163,39 @@ def test_kim_may_wish_in_her_library(world):
     assert global_flag == 0
 
 
+def test_nothing_of_another_librarys_row_is_readable_by_a_profile(world):
+    with world.db._get_connection() as conn:
+        kims_track = conn.execute(
+            "SELECT t.id FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id"
+            " WHERE al.primary_artist_id=?", (world.ids["k"],)).fetchone()[0]
+    world.as_profile(world.sam)
+    for url in (f"/api/library/v2/tracks/{kims_track}",
+                f"/api/library/v2/tracks/{kims_track}/file-tags",
+                f"/api/library/v2/tracks/{kims_track}/source-info"):
+        assert world.client.get(url).status_code == 404, url
+
+
+def test_kim_may_not_wish_for_another_librarys_row(world):
+    world.as_profile(world.kim)
+    r = world.client.post(f"/api/library/v2/artists/{world.ids['h']}/monitor",
+                          json={"monitored": True})
+    assert r.status_code == 404
+
+
+def test_a_grab_for_a_row_is_hers_to_make_only_in_her_library(world):
+    from core.library2.grab_context import profile_may_grab
+    with world.db._get_connection() as conn:
+        track = {key: conn.execute(
+            "SELECT t.id FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id"
+            " WHERE al.primary_artist_id=?", (world.ids[key],)).fetchone()[0]
+            for key in ("h", "k")}
+    with library_scope.library_scope(world.kim):
+        assert profile_may_grab(world.db, world.kim, {"lib2_track_id": track["k"]})
+        assert not profile_may_grab(world.db, world.kim, {"lib2_track_id": track["h"]})
+    with library_scope.library_scope("shared"):
+        assert not profile_may_grab(world.db, world.sam, {"lib2_track_id": track["h"]})
+
+
 def test_kim_may_not_change_files(world):
     world.as_profile(world.kim)
     assert world.client.delete(f"/api/library/v2/artists/{world.ids['k']}").status_code == 403

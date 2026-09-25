@@ -34,6 +34,9 @@ const ROOT_ID = 'library-switch';
 const MENU_ID = 'library-switch-menu';
 let _state: ScopesPayload | null = null;
 let _open = false;
+let _picking = false;
+let _selfEvent = false;
+let _inflight: AbortController | null = null;
 
 const _ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5"/><path d="M8 19V5"/><path d="M12.5 19.5 16 5l4 1-3.5 14.5z"/></svg>`;
 const _CHEVRON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
@@ -52,9 +55,21 @@ function _root(): HTMLElement | null {
   return root;
 }
 
+function _trigger(): HTMLButtonElement | null {
+  return document.querySelector<HTMLButtonElement>(`#${ROOT_ID} .library-switch-trigger`);
+}
+
 function _files(n: number | undefined): string {
   if (!n) return 'empty';
   return `${n.toLocaleString()} file${n === 1 ? '' : 's'}`;
+}
+
+/** A GET the shared fetch dedupe (static/fetch-dedupe.js) answered for the
+ *  old library must not be replayed for the new one. */
+function _forgetSharedGets(): void {
+  (
+    window as { _apiGetDedupe?: { entries?: Map<string, unknown> } }
+  )._apiGetDedupe?.entries?.clear();
 }
 
 // The sidebar header clips (overflow: hidden) and its backdrop-filter traps
@@ -68,6 +83,7 @@ function _menu(): HTMLElement {
     menu.setAttribute('role', 'listbox');
     menu.setAttribute('aria-label', 'Choose a library');
     menu.hidden = true;
+    menu.addEventListener('keydown', _onMenuKey);
     document.body.appendChild(menu);
   }
   return menu;
@@ -78,6 +94,32 @@ function _closeMenu(): void {
   if (!menu) return;
   menu.hidden = true;
   menu.innerHTML = '';
+}
+
+function _close(focusTrigger = false): void {
+  if (!_open) return;
+  _open = false;
+  _render();
+  if (focusTrigger) _trigger()?.focus();
+}
+
+function _onMenuKey(e: KeyboardEvent): void {
+  const options = [
+    ...document.querySelectorAll<HTMLButtonElement>(`#${MENU_ID} .library-switch-option`),
+  ];
+  const at = options.indexOf(document.activeElement as HTMLButtonElement);
+  const move: Record<string, number> = {
+    ArrowDown: at + 1,
+    ArrowUp: at - 1,
+    Home: 0,
+    End: options.length - 1,
+  };
+  if (e.key in move && options.length) {
+    e.preventDefault();
+    options[(move[e.key]! + options.length) % options.length]?.focus();
+  } else if (e.key === 'Tab') {
+    _close();
+  }
 }
 
 function _renderMenu(
@@ -91,6 +133,7 @@ function _renderMenu(
     return;
   }
   const menu = _menu();
+  const wasOpen = !menu.hidden;
   menu.innerHTML = `${options
     .map(
       (o) => `
@@ -120,6 +163,12 @@ function _renderMenu(
       void pickLibrary(btn.dataset.scope || 'shared');
     });
   });
+  if (!wasOpen) {
+    (
+      menu.querySelector<HTMLButtonElement>('.library-switch-option.is-current') ??
+      menu.querySelector<HTMLButtonElement>('.library-switch-option')
+    )?.focus();
+  }
 }
 
 function _render(): void {
@@ -129,6 +178,7 @@ function _render(): void {
   if (!state?.switchable || !state.options?.length) {
     root.hidden = true;
     root.innerHTML = '';
+    _open = false;
     _closeMenu();
     document.documentElement.removeAttribute('data-library-scope');
     return;
@@ -141,43 +191,62 @@ function _render(): void {
     current === 'shared' ? 'shared' : current === 'all' ? 'all' : 'own',
   );
   root.hidden = false;
-  root.innerHTML = `
+  // drawn once and updated in place, so a keyboard user keeps focus on it
+  let trigger = _trigger();
+  if (!trigger) {
+    root.innerHTML = `
     <button type="button" class="library-switch-trigger" aria-haspopup="listbox"
-            aria-expanded="${_open ? 'true' : 'false'}"
+            aria-controls="${MENU_ID}"
             title="Library you are working in — what pages show and where downloads land">
       <span class="library-switch-icon">${_ICON}</span>
       <span class="library-switch-text">
         <span class="library-switch-caption">Library</span>
-        <span class="library-switch-name">${escapeHtml(label)}</span>
+        <span class="library-switch-name"></span>
       </span>
       <span class="library-switch-chevron">${_CHEVRON}</span>
     </button>`;
+    trigger = _trigger()!;
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _open = !_open;
+      _render();
+    });
+  }
+  trigger.setAttribute('aria-expanded', _open ? 'true' : 'false');
+  const name = trigger.querySelector('.library-switch-name');
+  if (name) name.textContent = label;
   _renderMenu(root, state.options, current, state.target_name);
-  root.querySelector('.library-switch-trigger')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    _open = !_open;
-    _render();
-  });
 }
 
-/** Re-read the switcher state from the server and redraw it. */
+/** Re-read the switcher state from the server and redraw it. A newer read
+ *  supersedes an older one still on the wire. */
 export async function refreshLibrarySwitch(): Promise<void> {
+  _inflight?.abort();
+  const ctl = new AbortController();
+  _inflight = ctl;
+  let next: ScopesPayload | null = null;
   try {
-    const res = await fetch('/api/library/v2/scopes');
-    _state = res.ok ? ((await res.json()) as ScopesPayload) : null;
+    // a signal also keeps the shared GET dedupe from replaying an old answer
+    const res = await fetch('/api/library/v2/scopes', { signal: ctl.signal });
+    next = res.ok ? ((await res.json()) as ScopesPayload) : null;
   } catch {
-    _state = null;
+    if (ctl.signal.aborted) return;
   }
+  if (_inflight !== ctl) return;
+  _inflight = null;
+  _state = next;
   _render();
 }
 
 /** Work in another library. Everything cached for the old one is stale. */
 export async function pickLibrary(scope: string): Promise<boolean> {
+  const wasOpen = _open;
   _open = false;
-  if (_state && scope === _state.current) {
-    _render();
-    return true;
-  }
+  _render(); // the list closes now, not after the round trip
+  if (wasOpen) _trigger()?.focus();
+  if (_state && scope === _state.current) return true;
+  if (_picking) return false; // one switch at a time
+  _picking = true;
   let ok = false;
   try {
     const res = await fetch('/api/library/v2/scope', {
@@ -188,11 +257,19 @@ export async function pickLibrary(scope: string): Promise<boolean> {
     ok = res.ok;
   } catch {
     ok = false;
+  } finally {
+    _picking = false;
   }
   if (!ok) window.showToast?.('Could not switch library', 'error');
+  if (ok) _forgetSharedGets();
   await refreshLibrarySwitch();
   if (ok) {
-    window.dispatchEvent(new CustomEvent(LIBRARY_SCOPE_CHANGED_EVENT, { detail: { scope } }));
+    _selfEvent = true;
+    try {
+      window.dispatchEvent(new CustomEvent(LIBRARY_SCOPE_CHANGED_EVENT, { detail: { scope } }));
+    } finally {
+      _selfEvent = false;
+    }
     const name = _state?.current_name;
     if (name) window.showToast?.(`Working in ${name}`, 'success');
   }
@@ -207,6 +284,8 @@ function _init(): void {
   });
   // the Library page's own control picks the same library; follow it
   window.addEventListener(LIBRARY_SCOPE_CHANGED_EVENT, () => {
+    if (_selfEvent) return;
+    _forgetSharedGets();
     void refreshLibrarySwitch();
   });
   document.addEventListener('click', (e) => {
@@ -215,20 +294,22 @@ function _init(): void {
       const el = document.getElementById(id);
       return el && e.target instanceof Node && el.contains(e.target);
     });
-    if (inside) return;
-    _open = false;
-    _render();
+    if (!inside) _close();
   });
-  window.addEventListener('resize', () => {
-    if (!_open) return;
-    _open = false;
-    _render();
-  });
+  // pinned under the trigger: anything that moves the trigger closes the list
+  window.addEventListener('resize', () => _close());
+  document.addEventListener(
+    'scroll',
+    (e) => {
+      const menu = document.getElementById(MENU_ID);
+      if (menu && e.target instanceof Node && menu.contains(e.target)) return;
+      _close();
+    },
+    true,
+  );
+  window.addEventListener('popstate', () => _close());
   document.addEventListener('keydown', (e) => {
-    if (_open && e.key === 'Escape') {
-      _open = false;
-      _render();
-    }
+    if (_open && e.key === 'Escape') _close(true);
   });
 }
 
