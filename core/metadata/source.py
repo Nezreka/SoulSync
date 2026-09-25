@@ -1042,6 +1042,18 @@ def _update_album_year_in_database(db, metadata: dict, release_year) -> None:
         logger.error("Could not update album year in DB: %s", exc)
 
 
+def _album_artist_names(artists) -> list:
+    """names off an album context's artist list, [] unless there are two or
+    more real ones."""
+    names = []
+    for a in artists or []:
+        name = a.get("name", "") if isinstance(a, dict) else (a if isinstance(a, str) else "")
+        name = (name or "").strip()
+        if name and name != "Unknown Artist" and name not in names:
+            names.append(name)
+    return names if len(names) > 1 else []
+
+
 def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> dict:
     if album_info is None:
         album_info = {}
@@ -1215,6 +1227,10 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                 except Exception as e:
                     logger.debug("itunes primary artist resolve failed: %s", e)
     metadata["album_artist"] = raw_album_artist
+    # every album artist, for the multi-value ALBUMARTISTS tag. only from an
+    # album context that names more than one. track artists aren't album
+    # artists, a feature doesn't make it a collab album
+    metadata["_album_artists_list"] = _album_artist_names(album_artists_for_collab)
 
     if album_info.get("is_album"):
         metadata["album"] = album_info.get("album_name", "Unknown Album")
