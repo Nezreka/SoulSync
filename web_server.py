@@ -13853,7 +13853,15 @@ def _album_folder_from_track_path(track_path):
         resolved = resolve_library_file_path(
             str(track_path), transfer_folder=transfer_dir, config_manager=config_manager)
         if resolved and os.path.isfile(resolved):
-            return os.path.dirname(resolved)
+            folder = os.path.dirname(os.path.abspath(resolved))
+            # Only inside the library. The resolver also probes the slskd
+            # download folder, and a track row still pointing there would put
+            # the playlist among the incoming files rather than in the library.
+            root = os.path.abspath(os.path.normpath(transfer_dir))
+            if folder == root or folder.startswith(root + os.sep):
+                return folder
+            logger.debug("[M3U] %s resolves outside the library (%s) — using the template",
+                         track_path, folder)
     except Exception as exc:  # noqa: BLE001 - fall back to the template
         logger.debug("[M3U] could not locate the album folder from %s: %s", track_path, exc)
     return None

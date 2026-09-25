@@ -398,3 +398,23 @@ def test_the_beets_folders_this_was_built_for_round_trip():
         ctx = {"album_type": primary, "record_type": primary,
                "secondary_types": _secondary_album_types(tag, primary)}
         assert format_album_types(ctx, BEETS_CONFIG) == expected, tag
+
+
+def test_the_m3u_folder_refuses_a_path_outside_the_library(tmp_path, monkeypatch):
+    """resolve_library_file_path also probes the slskd download folder. A track
+    row still pointing there must not drop the playlist among the incoming
+    files — fall back to the template instead."""
+    import web_server
+
+    library = tmp_path / "library"
+    downloads = tmp_path / "downloads" / "Artist - Album"
+    downloads.mkdir(parents=True)
+    library.mkdir()
+    stray = downloads / "01 - Song.flac"
+    stray.write_bytes(b"AUDIO")
+
+    monkeypatch.setattr(web_server, "docker_resolve_path", lambda p: str(library))
+    monkeypatch.setattr("core.library.path_resolver.resolve_library_file_path",
+                        lambda *a, **k: str(stray))
+
+    assert web_server._album_folder_from_track_path(str(stray)) is None
