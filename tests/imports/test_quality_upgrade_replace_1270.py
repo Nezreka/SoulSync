@@ -142,6 +142,25 @@ def test_replace_lower_never_takes_equal_worse_unwanted_or_unknown_audio(import_
     assert c.existing.read_bytes() == b"old audio"
 
 
+@pytest.mark.parametrize("metadata_readable", [True, False])
+def test_missing_tags_do_not_turn_a_failed_comparison_into_an_overwrite(
+        import_case, monkeypatch, metadata_readable):
+    """Upstream ran the ranking before the metadata check on purpose: an
+    existing file with no tags (or tags that cannot be read) is no reason to
+    let an equal-or-worse download replace it."""
+    c = import_case
+    c.context["track_info"].pop("source_info")
+    c.profile["replace_lower_quality"] = True
+    c.has_metadata = False
+    c.new_quality = AudioQuality("mp3", 128)   # not better than the existing 128
+    if not metadata_readable:
+        def unreadable(_path):
+            raise OSError("tags unreadable")
+        monkeypatch.setattr("mutagen.File", unreadable)
+    c.run()
+    assert c.existing.read_bytes() == b"old audio"
+
+
 def test_unknown_existing_bitrate_is_not_evidence_of_improvement(import_case):
     c = import_case
     c.context["track_info"].pop("source_info")
