@@ -3129,7 +3129,9 @@ def save_playlist_m3u():
 
         # Compute target folder using the template system
         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-        m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name, album_name, year)
+        m3u_folder = _compute_m3u_folder(
+            transfer_dir, context_type, playlist_name, artist_name, album_name, year,
+            sample_track_path=_first_m3u_entry(m3u_content))
         os.makedirs(m3u_folder, exist_ok=True)
 
         # Build M3U filename from playlist or album name
@@ -3292,7 +3294,9 @@ def generate_playlist_m3u():
         if save_to_disk and (force or config_manager.get('m3u_export.enabled', False)):
             transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
             m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
-                                              artist_name_ctx, album_name, year)
+                                              artist_name_ctx, album_name, year,
+                                              sample_track_path=next(
+                                                  (p for p in file_path_map.values() if p), None))
             os.makedirs(m3u_folder, exist_ok=True)
             if context_type == 'album' and artist_name_ctx and album_name:
                 safe_fn = _sanitize_filename(f'{artist_name_ctx} - {album_name}')
@@ -13825,7 +13829,38 @@ def parse_youtube_playlist(url):
 # FILE ORGANIZATION TEMPLATE ENGINE
 # ===================================================================
 
-def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='', album_name='', year=''):
+def _first_m3u_entry(m3u_content):
+    """The first real path in an M3U body, skipping #EXTM3U/#EXTINF/#STATUS."""
+    for line in str(m3u_content or "").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
+
+
+def _album_folder_from_track_path(track_path):
+    """The directory holding a track, or None when it can't be established.
+
+    Resolves through the shared library path resolver first: stored paths are
+    whatever the media server reported (``/music/...`` on a split-mount Docker
+    setup), which is not necessarily a path this process can see.
+    """
+    if not track_path:
+        return None
+    try:
+        from core.library.path_resolver import resolve_library_file_path
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        resolved = resolve_library_file_path(
+            str(track_path), transfer_folder=transfer_dir, config_manager=config_manager)
+        if resolved and os.path.isfile(resolved):
+            return os.path.dirname(resolved)
+    except Exception as exc:  # noqa: BLE001 - fall back to the template
+        logger.debug("[M3U] could not locate the album folder from %s: %s", track_path, exc)
+    return None
+
+
+def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='', album_name='', year='',
+                        sample_track_path=None):
     """
     Compute the target folder for an M3U file using the template system.
 
@@ -13835,6 +13870,20 @@ def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='
     Returns: absolute folder path
     """
     if context_type == 'album' and artist_name and album_name:
+        # Prefer the folder the album's audio is ACTUALLY in over re-deriving it
+        # from the template. The template is evaluated here with only
+        # artist/album/year — these callers are HTTP endpoints and hold nothing
+        # else — so any variable needing richer metadata renders empty and the
+        # M3U lands beside the album instead of inside it. $atypes is the live
+        # example: "[$year]$atypes $album" computes "[2017] Audiotree Live"
+        # while the audio sits in "[2017][EP][Live] Audiotree Live", and the
+        # os.makedirs below then CREATES the empty one, which a media server
+        # indexes as a second album. The tracks are already imported by the time
+        # an M3U is written, so their own directory is the answer, and it cannot
+        # drift from the template the way a re-derivation can.
+        located = _album_folder_from_track_path(sample_track_path)
+        if located:
+            return located
         template_context = {
             'artist': artist_name,
             'albumartist': artist_name,

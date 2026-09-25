@@ -244,3 +244,43 @@ def test_the_m3u_folder_uses_the_same_substitution():
     assert web_server._apply_path_template(
         tmpl, dict(ctx, atypes="[EP][Live]", album="Audiotree Live", year="2017")
     ) == "Julien Baker/[2017][EP][Live] Audiotree Live"
+
+
+def test_the_m3u_folder_follows_the_audio_not_the_template(tmp_path, monkeypatch):
+    """_compute_m3u_folder only receives artist/album/year from its HTTP
+    callers, so a template using $atypes renders it empty and the M3U would
+    land in "[2017] Audiotree Live" while the audio sits in
+    "[2017][EP][Live] Audiotree Live" — and os.makedirs would create the empty
+    one. Resolving from a real track path cannot drift from the template."""
+    import web_server
+
+    album = tmp_path / "Slothrust" / "[2017][EP][Live] Audiotree Live"
+    album.mkdir(parents=True)
+    track = album / "01 - Horseshoe Crab.flac"
+    track.write_bytes(b"AUDIO")
+
+    monkeypatch.setattr(web_server, "_album_folder_from_track_path",
+                        lambda p: str(album) if p else None)
+
+    assert web_server._compute_m3u_folder(
+        str(tmp_path), "album", "", "Slothrust", "Audiotree Live", "2017",
+        sample_track_path=str(track)) == str(album)
+
+
+def test_the_m3u_folder_falls_back_to_the_template_when_unlocatable(tmp_path, monkeypatch):
+    """No track path, or one that does not resolve, must not break export."""
+    import web_server
+
+    monkeypatch.setattr(web_server, "_album_folder_from_track_path", lambda p: None)
+    out = web_server._compute_m3u_folder(
+        str(tmp_path), "album", "", "Slothrust", "Audiotree Live", "2017")
+    assert out and str(tmp_path) in out
+
+
+def test_first_m3u_entry_skips_the_directives():
+    import web_server
+
+    body = "#EXTM3U\n#EXTINF:210,A - B\n#STATUS:FOUND_IN_LIBRARY\n/music/A/Album/01 - B.flac\n"
+    assert web_server._first_m3u_entry(body) == "/music/A/Album/01 - B.flac"
+    assert web_server._first_m3u_entry("#EXTM3U\n# NOT AVAILABLE: x\n") is None
+    assert web_server._first_m3u_entry("") is None
