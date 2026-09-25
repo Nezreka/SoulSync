@@ -7472,6 +7472,13 @@ class MusicDatabase:
         """Get database statistics filtered by server source"""
         if not server_source:
             return self.get_statistics()
+        # the library a scan reads (#1199): its removal safety threshold is
+        # measured against that library's rows, like the id sets it diffs
+        owner = ""
+        if owner_profile_id is not MusicDatabase._ANY_OWNER:
+            from core.library2.sql_util import owner_clause
+            owner = owner_clause("shared" if owner_profile_id is None else int(owner_profile_id),
+                                 column="f.owner_profile_id")
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7487,7 +7494,8 @@ class MusicDatabase:
                         "JOIN lib2_tracks t ON t.album_id=al.id JOIN lib2_track_files f "
                         "ON f.track_id=t.id WHERE al.primary_artist_id=a.id AND "
                         "f.path IS NOT NULL AND TRIM(f.path)<>'' AND "
-                        "COALESCE(f.file_state,'active')='active')", (server_source, server_source))
+                        "COALESCE(f.file_state,'active')='active'" + owner + ")",
+                        (server_source, server_source))
                     artist_count = cursor.fetchone()[0]
 
                     cursor.execute(
@@ -7496,7 +7504,8 @@ class MusicDatabase:
                         "AND m.entity_id=al.id AND m.server_source=?) OR al.server_source=?) AND "
                         "EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f "
                         "ON f.track_id=t.id WHERE t.album_id=al.id AND f.path IS NOT NULL "
-                        "AND TRIM(f.path)<>'' AND COALESCE(f.file_state,'active')='active')",
+                        "AND TRIM(f.path)<>'' AND COALESCE(f.file_state,'active')='active'"
+                        + owner + ")",
                         (server_source, server_source))
                     album_count = cursor.fetchone()[0]
 
