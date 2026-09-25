@@ -8,6 +8,7 @@ import {
   countForTab,
   filterRequestItems,
   parseServerTime,
+  quotaLine,
   relativeTime,
   statusText,
   subLine,
@@ -17,6 +18,7 @@ import {
 
 const list: MusicRequestList = {
   asksFirst: false,
+  quota: null,
   counts: { pending: 1, approved: 1, available: 1, declined: 1, removed: 1 },
   pending: [
     {
@@ -116,12 +118,41 @@ describe('requests helpers', () => {
 
   it('reads sqlite utc timestamps', () => {
     expect(parseServerTime('2026-09-25 11:00:00')).toBe(Date.parse('2026-09-25T11:00:00Z'));
-    expect(parseServerTime('2026-09-25T11:00:00+00:00')).toBe(
-      Date.parse('2026-09-25T11:00:00Z'),
-    );
+    expect(parseServerTime('2026-09-25T11:00:00+00:00')).toBe(Date.parse('2026-09-25T11:00:00Z'));
     expect(parseServerTime('nope')).toBeNull();
     expect(relativeTime('2026-09-25 11:59:40', NOW)).toBe('just now');
     expect(relativeTime('2026-09-25 09:00:00', NOW)).toBe('3 hours ago');
     expect(relativeTime(null, NOW)).toBe('');
+  });
+});
+
+describe('quotaLine', () => {
+  it('says what is left in the window', () => {
+    expect(quotaLine({ limit: 3, days: 7, used: 1, remaining: 2 })).toBe(
+      '2 of 3 requests left this week',
+    );
+    expect(quotaLine({ limit: 1, days: 1, used: 0, remaining: 1 })).toBe(
+      '1 of 1 request left today',
+    );
+    expect(quotaLine({ limit: 5, days: 30, used: 2, remaining: 3 })).toBe(
+      '3 of 5 requests left this month',
+    );
+    expect(quotaLine({ limit: 4, days: 14, used: 0, remaining: 4 })).toBe(
+      '4 of 4 requests left in the last 14 days',
+    );
+  });
+
+  it('says when it is used up', () => {
+    expect(quotaLine({ limit: 3, days: 7, used: 3, remaining: 0 })).toBe(
+      'You’ve used all 3 requests this week',
+    );
+    expect(quotaLine({ limit: 1, days: 1, used: 1, remaining: 0 })).toBe(
+      'You’ve used your request today',
+    );
+  });
+
+  it('is empty with no limit', () => {
+    expect(quotaLine(null)).toBe('');
+    expect(quotaLine(undefined)).toBe('');
   });
 });

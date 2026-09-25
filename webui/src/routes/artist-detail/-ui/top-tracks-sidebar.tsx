@@ -59,6 +59,8 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
   };
 
   const wishlist = async (track: ArtistDetailTrack) => {
+    // request limit used up: core.js says so instead of an add the server drops
+    if (window.checkMusicRequestQuota && !(await window.checkMusicRequestQuota())) return;
     try {
       const response = await fetch('/api/add-album-to-wishlist', {
         method: 'POST',

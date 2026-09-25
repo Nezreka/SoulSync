@@ -1106,6 +1106,7 @@ class MusicDatabase:
             self._add_profile_navidrome_login(cursor)
             self._add_profile_lastfm_username(cursor)
             self._add_profile_plex_home_user(cursor)
+            self._add_profile_controls(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
             self._add_service_credential_sets(cursor)
@@ -5609,6 +5610,71 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error in profile support v4 migration: {e}")
 
+    # columns this migration owns, with their defaults
+    _PROFILE_CONTROL_COLUMNS = (
+        ("request_limit", "INTEGER DEFAULT 0"),        # asks per window, 0 = no limit
+        ("request_limit_days", "INTEGER DEFAULT 7"),
+        ("hide_explicit", "INTEGER DEFAULT 0"),        # kids: explicit music stays out of sight
+        ("max_rating", "TEXT DEFAULT NULL"),           # kids: highest movie/tv rating, NULL = any
+        ("session_epoch", "INTEGER DEFAULT 0"),        # bump = every signed-in browser signs out
+    )
+
+    def _add_profile_controls(self, cursor):
+        """request quotas, kids content limits and the session epoch
+        (sept 25 2026), plus the admin audit log and invite links. idempotent
+        on columns, so a half-applied run finishes next boot."""
+        try:
+            cursor.execute("PRAGMA table_info(profiles)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if not cols:
+                return
+            for col, decl in self._PROFILE_CONTROL_COLUMNS:
+                if col not in cols:
+                    cursor.execute(f"ALTER TABLE profiles ADD COLUMN {col} {decl}")
+            # actor_id / target_id, never profile_id: the delete sweep removes
+            # every profile_id row, and the log is about deletions too
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS profile_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    actor_id INTEGER,
+                    actor_name TEXT,
+                    action TEXT NOT NULL,
+                    target_id INTEGER,
+                    target_name TEXT,
+                    detail TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profile_audit_created ON profile_audit (created_at)")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS profile_invites (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_by INTEGER,
+                    preset TEXT NOT NULL DEFAULT '{}',
+                    note TEXT,
+                    expires_at TIMESTAMP NOT NULL,
+                    used_at TIMESTAMP,
+                    used_by INTEGER,
+                    revoked_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        except Exception as e:
+            logger.error(f"Error in profile controls migration: {e}")
+
+    @staticmethod
+    def _profile_controls(row, columns) -> Dict[str, Any]:
+        def val(col, default):
+            return row[col] if col in columns and row[col] is not None else default
+        return {
+            'request_limit': int(val('request_limit', 0) or 0),
+            'request_limit_days': int(val('request_limit_days', 7) or 7),
+            'hide_explicit': bool(val('hide_explicit', 0)),
+            'max_rating': val('max_rating', None),
+            'session_epoch': int(val('session_epoch', 0) or 0),
+        }
+
     def _add_profile_sides(self, cursor):
         """Add the allowed_sides column ('music'|'video'|'both') to profiles.
 
@@ -8297,6 +8363,7 @@ class MusicDatabase:
                         'library_root': row['library_root'] if 'library_root' in columns else None,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
+                        **self._profile_controls(row, columns),
                     })
                 return results
         except Exception as e:
@@ -8333,6 +8400,7 @@ class MusicDatabase:
                         'library_root': row['library_root'] if 'library_root' in columns else None,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
+                        **self._profile_controls(row, columns),
                     }
                 return None
         except Exception as e:
@@ -8366,7 +8434,8 @@ class MusicDatabase:
 
     def update_profile(self, profile_id: int, **kwargs) -> bool:
         """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin, home_page, allowed_pages, can_download."""
-        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download', 'allowed_sides'}
+        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download', 'allowed_sides',
+                   'request_limit', 'request_limit_days', 'hide_explicit', 'max_rating'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         # Serialize allowed_pages list to JSON string for storage
         if 'allowed_pages' in updates:
@@ -8395,6 +8464,132 @@ class MusicDatabase:
             return False
         except Exception as e:
             logger.error(f"Error updating profile {profile_id}: {e}")
+            return False
+
+    def bump_profile_session_epoch(self, profile_id: int) -> Optional[int]:
+        """sign this profile out everywhere: every session carries the epoch it
+        was signed in under, and one that no longer matches has no profile."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._add_profile_controls(cursor)
+                cursor.execute("UPDATE profiles SET session_epoch = COALESCE(session_epoch, 0) + 1 WHERE id = ?",
+                               (int(profile_id),))
+                conn.commit()
+                cursor.execute("SELECT session_epoch FROM profiles WHERE id = ?", (int(profile_id),))
+                row = cursor.fetchone()
+                return int(row[0]) if row else None
+        except Exception as e:
+            logger.error(f"Error bumping session epoch for {profile_id}: {e}")
+            return None
+
+    # ── admin audit log ──────────────────────────────────────────────────
+    _AUDIT_KEEP = 5000
+
+    def add_profile_audit(self, *, actor_id, actor_name, action: str, target_id=None,
+                          target_name=None, detail: Optional[str] = None) -> None:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO profile_audit (actor_id, actor_name, action, target_id, target_name, detail) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (actor_id, actor_name, action, target_id, target_name, (detail or None) and str(detail)[:500]))
+                cursor.execute("DELETE FROM profile_audit WHERE id <= (SELECT MAX(id) - ? FROM profile_audit)",
+                               (self._AUDIT_KEEP,))
+                conn.commit()
+        except Exception as e:  # noqa: BLE001 - the log never fails the action it records
+            logger.debug("profile audit write failed: %s", e)
+
+    def list_profile_audit(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM profile_audit ORDER BY id DESC LIMIT ? OFFSET ?",
+                               (max(1, min(500, int(limit))), max(0, int(offset))))
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug("profile audit read failed: %s", e)
+            return []
+
+    # ── invite links ─────────────────────────────────────────────────────
+    def create_profile_invite(self, *, token_hash: str, created_by: int, preset: Dict[str, Any],
+                              note: Optional[str], expires_at: str) -> Optional[int]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO profile_invites (token_hash, created_by, preset, note, expires_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (token_hash, int(created_by), json.dumps(preset or {}), note, expires_at))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error creating invite: {e}")
+            return None
+
+    def get_profile_invite_by_hash(self, token_hash: str) -> Optional[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM profile_invites WHERE token_hash = ?", (token_hash,))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                d = dict(row)
+                try:
+                    d['preset'] = json.loads(d.get('preset') or '{}')
+                except (ValueError, TypeError):
+                    d['preset'] = {}
+                return d
+        except Exception as e:
+            logger.error(f"Error reading invite: {e}")
+            return None
+
+    def list_profile_invites(self) -> List[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, created_by, preset, note, expires_at, used_at, used_by, revoked_at, "
+                               "created_at FROM profile_invites ORDER BY id DESC LIMIT 100")
+                out = []
+                for r in cursor.fetchall():
+                    d = dict(r)
+                    try:
+                        d['preset'] = json.loads(d.get('preset') or '{}')
+                    except (ValueError, TypeError):
+                        d['preset'] = {}
+                    out.append(d)
+                return out
+        except Exception as e:
+            logger.error(f"Error listing invites: {e}")
+            return []
+
+    def claim_profile_invite(self, invite_id: int, used_by: int) -> bool:
+        """one use: only an unused, unrevoked, unexpired invite flips."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profile_invites SET used_at = CURRENT_TIMESTAMP, used_by = ? "
+                    "WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP",
+                    (int(used_by), int(invite_id)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error claiming invite: {e}")
+            return False
+
+    def revoke_profile_invite(self, invite_id: int) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE profile_invites SET revoked_at = CURRENT_TIMESTAMP "
+                               "WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL", (int(invite_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error revoking invite: {e}")
             return False
 
     def delete_profile(self, profile_id: int) -> bool:
@@ -13727,6 +13922,17 @@ class MusicDatabase:
                         track_id,
                     )
                     return self._wishlist_outcome("satisfied", track_id, reason="manual library match")
+
+                # a profile that asks first and has a request quota: a NEW ask
+                # past the quota is refused (more tracks of an album already
+                # asked for this window are part of that ask, not new ones)
+                try:
+                    if self._music_request_quota_blocks(cursor, profile_id, spotify_track_data,
+                                                        source_type, track_id):
+                        logger.info("Skipping wishlist add — profile %s is at its request limit", profile_id)
+                        return self._wishlist_outcome("rejected", track_id, reason="request_limit")
+                except Exception as _quota_exc:  # noqa: BLE001 - a broken quota check never blocks an add
+                    logger.debug("request quota check skipped: %s", _quota_exc)
 
                 track_name = spotify_track_data.get('name', 'Unknown Track')
                 artists = spotify_track_data.get('artists', [])
@@ -23820,6 +24026,46 @@ class MusicDatabase:
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_requests_profile ON music_requests (profile_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_requests_status ON music_requests (status)")
+
+    def music_request_asks_since(self, cursor, profile_id: int, days: int) -> set:
+        """the asks (album or single-track group keys) a profile made in the
+        last ``days`` days: what's on its wishlist from that window plus what
+        was approved/declined in it."""
+        from core.requests.music import group_key
+        self._ensure_music_request_schema(cursor)
+        window = f"-{int(days)} days"
+        keys = set()
+        cursor.execute("SELECT spotify_track_id, spotify_data, source_type FROM wishlist_tracks "
+                       "WHERE profile_id = ? AND date_added >= datetime('now', ?)", (int(profile_id), window))
+        for row in cursor.fetchall():
+            try:
+                data = json.loads(row['spotify_data'])
+            except (ValueError, TypeError):
+                data = {}
+            keys.add(group_key({'spotify_track_id': row['spotify_track_id'], 'spotify_data': data,
+                                'source_type': row['source_type']}))
+        cursor.execute("SELECT group_key FROM music_requests WHERE profile_id = ? "
+                       "AND created_at >= datetime('now', ?)", (int(profile_id), window))
+        keys.update(r[0] for r in cursor.fetchall())
+        return keys
+
+    def _music_request_quota_blocks(self, cursor, profile_id, track_data, source_type, track_id) -> bool:
+        from core.permissions import profile_can_download
+        from core.requests.music import group_key
+        from core.requests.quota import quota_for
+        profile = self.get_profile(profile_id)
+        quota = quota_for(profile)
+        if not quota or profile_can_download(profile):
+            return False
+        cursor.execute("SELECT 1 FROM wishlist_tracks WHERE profile_id = ? AND spotify_track_id = ? LIMIT 1",
+                       (int(profile_id), str(track_id)))
+        if cursor.fetchone():
+            return False      # a refresh of a row already asked for
+        key = group_key({'spotify_track_id': track_id, 'spotify_data': track_data, 'source_type': source_type})
+        asks = self.music_request_asks_since(cursor, profile_id, quota['days'])
+        if key in asks:
+            return False
+        return len(asks) >= quota['limit']
 
     def get_pending_request_rows(self, profile_id: int) -> List[Dict[str, Any]]:
         """the not-yet-approved wishlist rows of one profile."""

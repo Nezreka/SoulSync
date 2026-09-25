@@ -67,6 +67,8 @@ def auth_login():
         login_limiter.record_success(_ip, username)
         session['login_authenticated'] = True
         session['profile_id'] = profile['id']
+        # the epoch this sign-in counts under ("sign out everywhere" moves it)
+        session['profile_epoch'] = (database.get_profile(profile['id']) or {}).get('session_epoch', 0)
         # A fresh login also clears any stale launch-PIN flag.
         session.pop('launch_pin_verified', None)
         return jsonify({'success': True, 'profile': {
@@ -82,6 +84,7 @@ def auth_logout():
     try:
         session.pop('login_authenticated', None)
         session.pop('profile_id', None)
+        session.pop('profile_epoch', None)
         session.pop('launch_pin_verified', None)
         return jsonify({'success': True})
     except Exception as e:
@@ -132,8 +135,14 @@ def auth_recovery_reset():
 
         login_limiter.record_success(_ip, username)
         database.set_profile_password(profile['id'], new_password)
+        # a reset password signs out every other browser on that profile
+        database.bump_profile_session_epoch(profile['id'])
+        from core.security.session_epoch import forget
+        forget(profile['id'])
         session['login_authenticated'] = True
         session['profile_id'] = profile['id']
+        # the epoch this sign-in counts under ("sign out everywhere" moves it)
+        session['profile_epoch'] = (database.get_profile(profile['id']) or {}).get('session_epoch', 0)
         session.pop('launch_pin_verified', None)
         return jsonify({'success': True})
     except Exception as e:

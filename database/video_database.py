@@ -7634,6 +7634,20 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def count_video_requests_since(self, profile_id, days) -> int:
+        """how many requests a profile filed in the last ``days`` days (any
+        status: a declined ask still spent the quota)."""
+        conn = self._get_connection()
+        try:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM video_requests WHERE profile_id=? "
+                "AND created_at >= datetime('now', ?)",
+                (int(profile_id), f"-{int(days)} days")).fetchone()[0])
+        except (sqlite3.Error, TypeError, ValueError):
+            return 0
+        finally:
+            conn.close()
+
     def video_requests_pending_count(self, profile_id=None) -> int:
         conn = self._get_connection()
         try:
@@ -8861,6 +8875,51 @@ class VideoDatabase:
             return {"items": items, "total_size_bytes": total_size or 0, "pagination": {
                 "page": page, "total_pages": total_pages, "total_count": total,
                 "has_prev": page > 1, "has_next": page < total_pages}}
+        finally:
+            conn.close()
+
+    def content_ratings_by_id(self, kind: str, ids) -> dict:
+        """{library id: content_rating} for movies or shows. kids profiles
+        filter their lists by these (core/content_filter.py)."""
+        tbl = {"movie": "movies", "movies": "movies", "show": "shows", "shows": "shows"}.get(kind)
+        ids = [int(i) for i in (ids or []) if i is not None]
+        if not tbl or not ids:
+            return {}
+        out = {}
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                q = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                        f"SELECT id, content_rating FROM {tbl} WHERE id IN ({q})", chunk):
+                    out[r[0]] = r[1]
+            return out
+        finally:
+            conn.close()
+
+    def content_ratings_by_tmdb(self, kind: str, tmdb_ids) -> dict:
+        """{tmdb id: [content_rating, ...]} for movies or shows, every server's
+        row. the caller takes the strictest when servers disagree."""
+        tbl = {"movie": "movies", "movies": "movies", "show": "shows", "shows": "shows"}.get(kind)
+        ids = []
+        for t in (tmdb_ids or []):
+            try:
+                ids.append(int(t))
+            except (TypeError, ValueError):
+                continue
+        if not tbl or not ids:
+            return {}
+        out: dict = {}
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                q = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                        f"SELECT tmdb_id, content_rating FROM {tbl} WHERE tmdb_id IN ({q})", chunk):
+                    out.setdefault(r[0], []).append(r[1])
+            return out
         finally:
             conn.close()
 

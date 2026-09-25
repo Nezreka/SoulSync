@@ -21,7 +21,7 @@
     'use strict';
 
     var PAGE_ID = 'video-requests';
-    var state = { loaded: false, rows: [], tab: 'pending' };
+    var state = { loaded: false, rows: [], tab: 'pending', quota: null };
 
     function $(s) { return document.querySelector(s); }
     function esc(s) {
@@ -258,6 +258,54 @@
         host.innerHTML = '<div class="vreq-tabs" role="tablist">' + tabs + '</div>' + clear;
     }
 
+    // "2 of 3 requests left this week", or that they're used up
+    function quotaLine(q) {
+        if (!q || !(Number(q.limit) > 0)) return '';
+        var limit = Number(q.limit), left = Math.max(0, Number(q.remaining) || 0), days = Number(q.days) || 7;
+        var span = days === 1 ? 'today' : days === 7 ? 'this week' : days === 30 ? 'this month' : 'in the last ' + days + ' days';
+        var noun = limit === 1 ? 'request' : 'requests';
+        if (left <= 0) return limit === 1 ? 'You’ve used your request ' + span : 'You’ve used all ' + limit + ' requests ' + span;
+        return left + ' of ' + limit + ' ' + noun + ' left ' + span;
+    }
+
+    // the header: the quiet quota line for members, approve all for admins
+    function renderHead(groups) {
+        var head = $('.vreq-head');
+        if (!head) return;
+        var text = head.querySelector('.vreq-head-text');
+        if (!text) {
+            text = document.createElement('div');
+            text.className = 'vreq-head-text';
+            while (head.firstChild) text.appendChild(head.firstChild);
+            head.appendChild(text);
+        }
+        var quota = text.querySelector('.vreq-quota');
+        var line = isAdmin() ? '' : quotaLine(state.quota);
+        if (line && !quota) {
+            quota = document.createElement('p');
+            quota.className = 'vreq-quota';
+            text.appendChild(quota);
+        }
+        if (quota) { quota.textContent = line; quota.hidden = !line; }
+
+        var waiting = groups.filter(function (g) { return g.bucket === 'pending'; }).length;
+        var btn = head.querySelector('[data-vreq-approve-all]');
+        if (isAdmin() && waiting > 1) {
+            if (!btn) {
+                btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'vreq-btn';
+                btn.setAttribute('data-vreq-approve-all', '');
+                btn.textContent = 'Approve all';
+                head.appendChild(btn);
+            }
+            btn.hidden = false;
+            btn.setAttribute('data-count', String(waiting));
+        } else if (btn) {
+            btn.hidden = true;
+        }
+    }
+
     function render() {
         var subH = $('.vreq-sub-h');
         if (subH) {
@@ -267,6 +315,7 @@
         }
         var groups = groupRows(state.rows);
         state.groups = groups;
+        renderHead(groups);
         renderToolbar(groups);
         var host = $('[data-vreq-list]');
         if (!host) return;
@@ -296,6 +345,7 @@
             .then(function (d) {
                 if (!d || !d.success) return;
                 state.rows = d.requests || [];
+                state.quota = d.quota || null;
                 setBadge(d.pending || 0);
                 render();
             })
@@ -355,6 +405,27 @@
         Promise.all(g.rows.map(function (r) {
             return fetch('/api/video/requests/' + r.id, { method: 'DELETE' });
         })).then(load).catch(load);
+    }
+
+    // admin: every waiting title in one go, after a confirm naming the count
+    function approveAll(btn) {
+        var n = parseInt(btn.getAttribute('data-count'), 10) || 0;
+        var go = function () {
+            btn.disabled = true;
+            btn.textContent = 'Approving…';
+            act('/api/video/requests/approve-all', 'POST', {}, function (j) {
+                var ok = j.approved || 0, bad = j.failed || 0;
+                if (!ok && !bad) return 'Nothing was waiting';
+                return 'Approved ' + ok + ' request' + (ok === 1 ? '' : 's') +
+                    (bad ? ', ' + bad + ' couldn’t be added' : '. Everyone who asked will hear');
+            }).then(function () { btn.disabled = false; btn.textContent = 'Approve all'; });
+        };
+        if (typeof showConfirmDialog !== 'function') { go(); return; }
+        showConfirmDialog({
+            title: 'Approve all ' + n + ' requests?',
+            message: 'Everything waiting goes to the wishlist, and everyone who asked hears it’s on the way.',
+            confirmText: 'Approve all'
+        }).then(function (yes) { if (yes) go(); });
     }
 
     function clearResolved() {
@@ -455,6 +526,8 @@
                 return;
             }
             if (e.target.closest('[data-vreq-clear]')) { clearResolved(); return; }
+            var all = e.target.closest('[data-vreq-approve-all]');
+            if (all) { approveAll(all); return; }
             var ap = e.target.closest('[data-vreq-approve]');
             if (ap) {
                 var rowEl = ap.closest('[data-vreq-row]');

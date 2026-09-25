@@ -33,6 +33,12 @@ def register_routes(bp):
         except Exception:
             logger.exception("video search failed for %r", q)
             results = []
+        # kids profiles: only titles the library can vouch for (people pass)
+        from . import get_video_db
+        from .kids import filter_tmdb_items, video_cap
+        cap = video_cap()
+        if cap is not None:
+            results = filter_tmdb_items(get_video_db(), results, cap)
         return jsonify({"results": results, "query": q})
 
     @bp.route("/search/studios", methods=["GET"])
@@ -117,4 +123,9 @@ def register_routes(bp):
         except Exception:
             logger.exception("video trending failed")
             results = []
+        from . import get_video_db
+        from .kids import filter_tmdb_items, video_cap
+        cap = video_cap()
+        if cap is not None:
+            results = filter_tmdb_items(get_video_db(), results, cap)
         return jsonify({"results": results})

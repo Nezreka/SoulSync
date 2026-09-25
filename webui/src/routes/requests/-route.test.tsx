@@ -66,9 +66,12 @@ function renderRequests(isAdmin: boolean, entry = '/requests') {
 
 describe('requests route', () => {
   let calls: Array<{ url: string; method: string; body?: string }>;
+  let payload: Record<string, unknown>;
+  const originalConfirm = window.showConfirmDialog;
 
   beforeEach(() => {
     calls = [];
+    payload = listPayload;
     window.refreshMusicRequestsBadge = vi.fn();
     vi.stubGlobal(
       'fetch',
@@ -78,11 +81,17 @@ describe('requests route', () => {
         const method = (req?.method || init?.method || 'GET').toUpperCase();
         const body = req && method !== 'GET' ? await req.clone().text() : undefined;
         calls.push({ url, method, body });
-        if (url.includes('/api/requests/music/approve')) return json({ success: true, approved: 2 });
+        if (url.includes('/api/requests/music/approve-all'))
+          return json({ success: true, approved: 2 });
+        if (url.includes('/api/requests/music/approve'))
+          return json({ success: true, approved: 2 });
         if (url.includes('/api/requests/music/seen')) return json({ success: true, marked: 0 });
-        if (url.includes('/api/requests/music')) return json(listPayload);
+        if (url.includes('/api/requests/music')) return json(payload);
         if (url.includes('/api/issues/counts')) {
-          return json({ success: true, counts: { open: 0, in_progress: 0, resolved: 0, dismissed: 0, total: 0 } });
+          return json({
+            success: true,
+            counts: { open: 0, in_progress: 0, resolved: 0, dismissed: 0, total: 0 },
+          });
         }
         return json({ success: true });
       }),
@@ -93,13 +102,17 @@ describe('requests route', () => {
     vi.unstubAllGlobals();
     window.SoulSyncWebShellBridge = undefined;
     window.refreshMusicRequestsBadge = undefined;
+    window.showConfirmDialog = originalConfirm;
   });
 
   it('shows admins the waiting asks with one approve button', async () => {
     renderRequests(true);
 
     expect(await screen.findByText('Blue')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Waiting · 1' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Waiting · 1' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
     expect(screen.getByText(/Kim asked/)).toBeInTheDocument();
     // history rows are on other tabs
     expect(screen.queryByText('Court and Spark')).not.toBeInTheDocument();
@@ -127,7 +140,56 @@ describe('requests route', () => {
     expect(screen.getByText(/You asked/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(calls.some((c) => c.url.includes('/api/requests/music/seen') && c.method === 'POST')).toBe(true),
+      expect(
+        calls.some((c) => c.url.includes('/api/requests/music/seen') && c.method === 'POST'),
+      ).toBe(true),
     );
+  });
+
+  it('shows a member how many requests they have left', async () => {
+    payload = {
+      ...listPayload,
+      asks_first: true,
+      quota: { limit: 3, days: 7, used: 1, remaining: 2 },
+    };
+    renderRequests(false);
+
+    expect(await screen.findByText('2 of 3 requests left this week')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve all' })).not.toBeInTheDocument();
+  });
+
+  it('shows no quota line without a limit', async () => {
+    renderRequests(false);
+
+    expect(await screen.findByText('Blue')).toBeInTheDocument();
+    expect(screen.queryByText(/requests? left/)).not.toBeInTheDocument();
+  });
+
+  it('lets admins approve everything waiting after a confirm naming the count', async () => {
+    const second = { ...listPayload.pending[0], key: 'album:hejira', title: 'Hejira' };
+    payload = { ...listPayload, pending: [...listPayload.pending, second] };
+    const confirm = vi.fn(async (_options?: { title?: string }) => true);
+    window.showConfirmDialog = confirm;
+    renderRequests(true);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve all' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    expect(confirm.mock.calls[0]?.[0]).toMatchObject({ title: 'Approve all 2 requests?' });
+    await waitFor(() => {
+      const hit = calls.find((c) => c.url.includes('/approve-all'));
+      expect(hit?.method).toBe('POST');
+    });
+  });
+
+  it('sends nothing when the approve-all confirm is cancelled', async () => {
+    const second = { ...listPayload.pending[0], key: 'album:hejira', title: 'Hejira' };
+    payload = { ...listPayload, pending: [...listPayload.pending, second] };
+    const confirm = vi.fn(async (_options?: { title?: string }) => false);
+    window.showConfirmDialog = confirm;
+    renderRequests(true);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve all' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    expect(calls.some((c) => c.url.includes('/approve-all'))).toBe(false);
   });
 });

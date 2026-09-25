@@ -64,7 +64,7 @@ def _side():
 
     return issue_service.IssueSide(get=db.get_issue, create=create, update=db.update_issue,
                                    store=db.issue_threads, notify=_notify, categories=tuple(CATEGORIES),
-                                   strip_reporter_for_members=True)
+                                   strip_reporter_for_members=True, side="video")
 
 
 def _snapshot(db, entity_type: str, entity_id) -> dict:

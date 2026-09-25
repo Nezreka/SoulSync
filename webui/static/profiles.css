@@ -840,6 +840,141 @@ select.pf-input { appearance: auto; }
 .pf-link:hover { color: var(--pf-text); text-decoration: underline; }
 .pf-link:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 3px; border-radius: 4px; }
 
+/* ── kids & limits, this device: a row with a control on the right ── */
+
+.pf-card-limits { margin-top: 4px; font-size: 12.5px; line-height: 1.45; color: var(--pf-text-2); }
+
+.pf-action-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 16px;
+}
+
+.pf-action-row .pf-switch-title { cursor: default; }
+.pf-action-row label.pf-switch-title { cursor: pointer; }
+.pf-action-row .pf-btn { flex-shrink: 0; min-height: 36px; padding: 0 14px; font-size: 13.5px; }
+
+.pf-input--compact {
+    width: auto;
+    min-width: 76px;
+    height: 36px;
+    padding: 0 10px;
+    border-radius: 10px;
+    font-size: 14px;
+}
+
+.pf-select-pair { display: inline-flex; flex-shrink: 0; gap: 8px; }
+
+/* ── avatar upload ── */
+
+.pf-upload-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.pf-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+/* ── manage tabs, lists (invites, activity) ── */
+
+.pf-manage-tabs { max-width: 420px; margin-bottom: 20px; }
+.pf-presets--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.pf-rows {
+    margin: 0 0 12px;
+    padding: 0;
+    list-style: none;
+    border-radius: 16px;
+    border: 1px solid var(--pf-line);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.pf-rows > li + li { border-top: 1px solid var(--pf-line); }
+
+.pf-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 60px;
+    padding: 10px 10px 10px 16px;
+}
+
+.pf-row.is-quiet .pf-row-title { color: var(--pf-text-2); }
+.pf-row-main { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
+.pf-row-title { font-size: 14.5px; font-weight: 600; color: var(--pf-text); overflow-wrap: anywhere; }
+.pf-row-meta { font-size: 12.5px; line-height: 1.4; color: var(--pf-text-3); }
+.pf-row-spacer { width: 36px; flex-shrink: 0; }
+
+.pf-row--log { min-height: 48px; padding-right: 16px; }
+.pf-row--log .pf-row-title { flex: 1; min-width: 0; font-weight: 500; }
+.pf-row--log .pf-row-meta { flex-shrink: 0; }
+
+.pf-state {
+    flex-shrink: 0;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--pf-text-2);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.pf-state--open { color: var(--pf-accent); background: var(--pf-accent-soft); }
+
+.pf-empty {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 36px 20px;
+    border-radius: 16px;
+    border: 1px dashed var(--pf-line-strong);
+    text-align: center;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--pf-text-2);
+}
+
+.pf-empty strong { font-size: 15px; color: var(--pf-text); }
+.pf-more-row { display: flex; justify-content: center; padding-bottom: 12px; }
+
+.pf-link-row { display: flex; gap: 10px; margin-bottom: 8px; }
+.pf-link-field { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.pf-link-row .pf-btn { min-height: 44px; }
+
+.pf-btn--block { width: 100%; min-height: 46px; }
+
+/* ── invite landing ── */
+
+.pf-invite-card {
+    width: 100%;
+    max-width: 420px;
+    margin: auto;
+    text-align: center;
+    color: var(--pf-text);
+    animation: pfRise 0.3s var(--pf-ease);
+}
+
+.pf-invite-title {
+    margin: 0;
+    font-size: clamp(24px, 4vw, 32px);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+}
+
+.pf-invite-note {
+    margin: 14px auto 0;
+    padding: 10px 14px;
+    max-width: 360px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--pf-text);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.pf-invite-sub { margin: 10px 0 26px; }
+.pf-invite-form { text-align: left; }
+.pf-invite-form .pf-swatches { justify-content: flex-start; }
+.pf-invite-form .pf-btn--block { margin-top: 10px; }
+.pf-invite-loading { margin: 0; font-size: 14px; color: var(--pf-text-2); }
+.pf-invite-card > .pf-btn--block { margin-top: 8px; }
+
 @keyframes pfFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pfRise { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes pfPop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
@@ -852,7 +987,7 @@ select.pf-input { appearance: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .pf-picker, .pf-layer, .pf-modal, .pf-pin-card, .pf-popover, .pf-menu, .pf-pin-entry.is-shaking { animation: none; }
+    .pf-picker, .pf-layer, .pf-modal, .pf-pin-card, .pf-popover, .pf-menu, .pf-pin-entry.is-shaking, .pf-invite-card { animation: none; }
     .pf-tile, .pf-switch-thumb { transition: none; }
 }
 
@@ -869,6 +1004,9 @@ select.pf-input { appearance: auto; }
     .pf-modal-body { padding: 14px 20px 6px; }
     .pf-modal-foot { padding: 14px 20px 20px; }
     .pf-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pf-action-row { flex-wrap: wrap; }
+    .pf-action-row .pf-switch-text { flex-basis: 100%; }
+    .pf-manage-tabs { max-width: none; }
     .pf-keypad { grid-template-columns: repeat(3, 68px); gap: 14px 20px; }
     .pf-key { width: 68px; height: 68px; }
 }

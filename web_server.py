@@ -703,6 +703,24 @@ def _set_profile_context():
             return jsonify({"error": "profile_required", "profile_required": True}), 401
         return
 
+    # "sign out everywhere": a session signed in before the profile's epoch
+    # moved on has no profile any more
+    if _session_pid is not None:
+        from core.security.session_epoch import session_is_current
+        if not session_is_current(pid, session.get('profile_epoch', 0),
+                                  lambda p: (get_database().get_profile(p) or {}).get('session_epoch', 0)):
+            for _k in ('profile_id', 'profile_epoch', 'login_authenticated', 'launch_pin_verified'):
+                session.pop(_k, None)
+            g.profile_id = None
+            g.is_admin = False
+            g.can_download = False
+            g.profile_name = "No profile"
+            g.allowed_sides = 'none'
+            if no_profile_request_is_blocked(path, request.method):
+                return jsonify({"error": "profile_required", "profile_required": True,
+                                "signed_out": True}), 401
+            return
+
     # Validate session profile still exists (handles deleted profiles), and stash
     # download permission on g so isolated blueprints (video) can gate without a
     # music-DB read. Admin (1) is always allowed.
@@ -741,6 +759,16 @@ def _set_profile_context():
             # get_profile resolves defaults (non-admin NULL → 'music'), so the
             # video blueprint can gate off g without a second music-DB read.
             g.allowed_sides = (profile or {}).get('allowed_sides') or 'music'
+            # the request quota, for isolated blueprints (video) that can't
+            # read the music db themselves
+            g.request_limit = int((profile or {}).get('request_limit') or 0)
+            g.request_limit_days = int((profile or {}).get('request_limit_days') or 7)
+            # a page left off the profile's list: its own apis refuse too,
+            # not just the hidden nav button
+            from core.permissions import page_denied
+            if page_denied(path, (profile or {}).get('allowed_pages'), g.is_admin):
+                g.profile_id = pid
+                return jsonify({"success": False, "error": "page_not_allowed"}), 403
         except Exception as e:
             logger.debug("profile session validate: %s", e)
 
@@ -1557,6 +1585,13 @@ def _register_automation_handlers():
         _reg_fw(_notify_handle)
     except Exception:
         logger.exception("Could not wire video events -> notifications")
+    # issues + music requests publish through core.app_events (the video
+    # events have their own bus above)
+    try:
+        from core.app_events import register_forwarder as _reg_app_fw
+        _reg_app_fw(lambda etype, data: automation_engine.emit(etype, data or {}) if automation_engine else None)
+    except Exception:
+        logger.exception("Could not wire app events -> automation engine")
     # requests: a finished download may be the title somebody asked for
     try:
         from core.video.download_events import register_event_forwarder as _reg_fw_req
@@ -22251,6 +22286,16 @@ app.register_blueprint(_bp_is())
 from api.music_requests import configure as _cfg_mr, create_blueprint as _bp_mr
 _cfg_mr(get_database=get_database)
 app.register_blueprint(_bp_mr())
+
+# kids profiles: explicit music can't play and drops out of search/tracklists
+from api.content_guard import register as _reg_content_guard
+_reg_content_guard(app, get_database=get_database)
+
+# profile housekeeping: admin audit log, sign out everywhere, invites, avatars
+from api.profile_admin import configure as _cfg_pa, create_blueprint as _bp_pa
+_cfg_pa(get_database=get_database, config_manager=config_manager,
+        require_login_enabled=_require_login_enabled)
+app.register_blueprint(_bp_pa())
 
 # per-profile notes (request approved, issue answered): pushed to the
 # requester's profile room; core.profile_notify journals them too

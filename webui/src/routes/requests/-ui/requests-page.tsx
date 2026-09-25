@@ -11,6 +11,7 @@ import { useProfile, useReactPageShell } from '@/platform/shell/route-controller
 import type { RequestItem, RequestTab } from '../-requests.types';
 
 import {
+  approveAllMusicRequests,
   approveMusicRequest,
   declineMusicRequest,
   deleteMusicRequest,
@@ -30,6 +31,7 @@ import {
   itemKind,
   itemTitle,
   itemTracks,
+  quotaLine,
   statusText,
   subLine,
   tabLabel,
@@ -150,6 +152,37 @@ export function RequestsPage() {
     },
   });
 
+  const approveAll = useMutation({
+    mutationFn: () => approveAllMusicRequests(profileId),
+    onSuccess: (approved) => {
+      toast(
+        approved === 0
+          ? 'Nothing was waiting'
+          : `Approved ${approved} request${approved === 1 ? '' : 's'}. Everyone who asked will hear`,
+      );
+      afterChange();
+    },
+    onError: (error) => {
+      toast(error instanceof Error ? error.message : 'Could not approve those requests', 'error');
+      afterChange();
+    },
+  });
+
+  const waitingCount = listQuery.data?.pending.length ?? 0;
+
+  const confirmApproveAll = async () => {
+    const noun = waitingCount === 1 ? 'request' : 'requests';
+    const ok = window.showConfirmDialog
+      ? await window.showConfirmDialog({
+          title: `Approve all ${waitingCount} ${noun}?`,
+          message:
+            'Everything waiting starts downloading, and everyone who asked hears it’s on the way.',
+          confirmText: 'Approve all',
+        })
+      : true;
+    if (ok) approveAll.mutate();
+  };
+
   const confirmWithdraw = async (item: RequestItem) => {
     const ok = window.showConfirmDialog
       ? await window.showConfirmDialog({
@@ -166,17 +199,31 @@ export function RequestsPage() {
     void navigate({ to: Route.fullPath, search: { tab: next }, replace: true });
   };
 
-  const busy = approve.isPending || withdraw.isPending || remove.isPending;
+  const busy = approve.isPending || approveAll.isPending || withdraw.isPending || remove.isPending;
+  const quotaText = isAdmin ? '' : quotaLine(listQuery.data?.quota);
 
   return (
     <div className={styles.page}>
       <header className={styles.head}>
-        <h1 className={styles.title}>Requests</h1>
-        <p className={styles.subtitle}>
-          {isAdmin
-            ? 'What your household asked for. Approve once, everyone who asked hears about it.'
-            : 'What you asked for, and where it’s at.'}
-        </p>
+        <div className={styles.headText}>
+          <h1 className={styles.title}>Requests</h1>
+          <p className={styles.subtitle}>
+            {isAdmin
+              ? 'What your household asked for. Approve once, everyone who asked hears about it.'
+              : 'What you asked for, and where it’s at.'}
+          </p>
+          {quotaText ? <p className={styles.quota}>{quotaText}</p> : null}
+        </div>
+        {isAdmin && waitingCount > 1 ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={busy}
+            onClick={() => void confirmApproveAll()}
+          >
+            {approveAll.isPending ? 'Approving…' : 'Approve all'}
+          </Button>
+        ) : null}
       </header>
 
       <div className={styles.tabs} role="tablist" aria-label="Request status">
@@ -197,7 +244,11 @@ export function RequestsPage() {
       {listQuery.isError ? (
         <div className={styles.empty}>
           Couldn’t load requests.{' '}
-          <button type="button" className={styles.linkButton} onClick={() => void listQuery.refetch()}>
+          <button
+            type="button"
+            className={styles.linkButton}
+            onClick={() => void listQuery.refetch()}
+          >
             Try again
           </button>
         </div>
@@ -310,12 +361,18 @@ function RequestRow({
                   </Menu.Item>
                 ) : null}
                 {pending && isAdmin ? (
-                  <Menu.Item className={clsx(styles.menuItem, styles.menuDanger)} onClick={onDecline}>
+                  <Menu.Item
+                    className={clsx(styles.menuItem, styles.menuDanger)}
+                    onClick={onDecline}
+                  >
                     Decline…
                   </Menu.Item>
                 ) : null}
                 {pending && !isAdmin ? (
-                  <Menu.Item className={clsx(styles.menuItem, styles.menuDanger)} onClick={onWithdraw}>
+                  <Menu.Item
+                    className={clsx(styles.menuItem, styles.menuDanger)}
+                    onClick={onWithdraw}
+                  >
                     Withdraw
                   </Menu.Item>
                 ) : null}

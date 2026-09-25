@@ -14,6 +14,9 @@ declare global {
     /** core.js: after a wishlist add, tells a profile that asks first it went out as a
      *  request. true when it spoke, so the caller skips its own "added" toast. */
     announceWishlistRequest?: () => boolean;
+    /** core.js: before a wishlist add, false (after a toast) when a profile that asks
+     *  first has used its request limit. true otherwise, and on any doubt. */
+    checkMusicRequestQuota?: () => Promise<boolean>;
     showConfirmDialog?: (options?: {
       title?: string;
       message?: string;

@@ -3116,8 +3116,21 @@
             fetch('/api/video/requests', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body) })
-                .then(function (r) { return r.json().catch(function () { return null; }); })
+                .then(function (r) {
+                    return r.json().catch(function () { return null; }).then(function (j) {
+                        // request limit used up: the server's own words, calmly
+                        if (r.status === 429) {
+                            btn.disabled = false;
+                            if (typeof showToast === 'function') {
+                                showToast((j && j.error) || 'You’ve used your requests for now', 'warning');
+                            }
+                            return { _handled: true };
+                        }
+                        return j;
+                    });
+                })
                 .then(function (res) {
+                    if (res && res._handled) return;
                     if (res && res.in_library) {
                         if (typeof showToast === 'function') showToast('That’s already in your library', 'info');
                         d.owned = true;

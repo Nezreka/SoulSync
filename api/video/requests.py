@@ -29,6 +29,14 @@ def _is_admin():
     return bool(getattr(g, "is_admin", _me() == 1))
 
 
+def _profile_row(pid):
+    """the quota fields web_server's before_request stashed on g (the video
+    side never imports the music db)."""
+    return {"id": pid, "is_admin": _is_admin(),
+            "request_limit": getattr(g, "request_limit", 0),
+            "request_limit_days": getattr(g, "request_limit_days", 7)}
+
+
 def _notify(profile_id, message, kind="info"):
     try:
         from core.profile_notify import notify_profile
@@ -77,6 +85,16 @@ def register_routes(bp):
                             "in_library": True}), 409
         monitor = monitor_for_new_request(kind, body.get("monitor"))
         title = meta["title"]
+        # a limited profile's quota (asks per window, any outcome counts)
+        from core.requests.quota import over_quota, quota_for, quota_message, quota_state
+        quota = quota_for(_profile_row(_me()))
+        if quota:
+            used = get_video_db().count_video_requests_since(_me(), quota["days"])
+            already = any(int(r.get("tmdb_id") or 0) == tmdb_id and r.get("kind") == kind
+                          for r in get_video_db().list_video_requests(profile_id=_me(), status="pending"))
+            if over_quota(quota, used) and not already:
+                return jsonify({"success": False, "error": quota_message(quota),
+                                "quota": quota_state(quota, used)}), 429
         rid, created = get_video_db().add_video_request(
             profile_id=_me(), requester_name=getattr(g, "profile_name", None),
             kind=kind, tmdb_id=tmdb_id, title=title, year=meta["year"],
@@ -108,8 +126,12 @@ def register_routes(bp):
         rows = db.list_video_requests(profile_id=scope, status=status)
         db.annotate_requests_in_library(rows)
         counts = db.video_requests_status_counts(scope)
+        from core.requests.quota import quota_for, quota_state
+        quota = quota_for(_profile_row(_me())) if not _is_admin() else None
         return jsonify({"success": True, "requests": rows,
-                        "counts": counts, "pending": counts.get("pending", 0)})
+                        "counts": counts, "pending": counts.get("pending", 0),
+                        "quota": quota_state(quota, db.count_video_requests_since(_me(), quota["days"]))
+                        if quota else None})
 
     @bp.route("/requests/counts", methods=["GET"])
     def video_request_counts():
@@ -186,6 +208,29 @@ def register_routes(bp):
         return jsonify({"success": True, "wished": wished, "kind": req["kind"],
                         "approved": len(claimed)})
 
+    @bp.route("/requests/approve-all", methods=["POST"])
+    def video_request_approve_all():
+        """Approve every pending title (each with its own requested seasons)."""
+        from . import get_video_db
+        if not _is_admin():
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        db = get_video_db()
+        seen, approved, failed = set(), 0, 0
+        for r in db.list_video_requests(status="pending"):
+            key = (r["kind"], r["tmdb_id"])
+            if key in seen:
+                continue
+            seen.add(key)
+            # the single-approve route does the claim + acquisition + notes;
+            # the body here is empty, so each title keeps its requested seasons
+            resp = video_request_approve(r["id"])
+            code = resp[1] if isinstance(resp, tuple) else 200
+            if code == 200:
+                approved += 1
+            else:
+                failed += 1
+        return jsonify({"success": True, "approved": approved, "failed": failed})
+
     @bp.route("/requests/<int:request_id>/deny", methods=["POST"])
     def video_request_deny(request_id):
         """Declines the title for everyone who asked for it, with the note."""
@@ -205,6 +250,13 @@ def register_routes(bp):
         for r in claimed:
             _notify(r["profile_id"], f"{req['title']} was declined" + (f": {note}" if note else ""),
                     "warning")
+        try:      # 'Request Declined' automation trigger
+            from core.video.download_events import publish
+            publish("video_request_denied", {
+                "kind": req["kind"], "title": req["title"], "reason": note or "",
+                "requester": ", ".join(sorted({r.get("requester_name") or "" for r in claimed} - {""}))})
+        except Exception:   # noqa: BLE001 - events never disturb the decision
+            logger.exception("request-denied event publish failed")
         return jsonify({"success": True, "denied": len(claimed)})
 
     @bp.route("/requests/resolved", methods=["DELETE"])

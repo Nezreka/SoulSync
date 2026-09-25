@@ -87,5 +87,36 @@ def profile_view_for(profile: Dict[str, Any], *, viewer_id, viewer_is_admin: boo
     return {k: profile.get(k) for k in PUBLIC_PROFILE_FIELDS if k in profile}
 
 
+# api prefixes that belong to exactly one page. a profile whose page list
+# leaves the page out gets a 403 from these too, not just a hidden button.
+# shared apis (stats feed the dashboard, automations feed sync, podcasts feed
+# the watchlist) stay out: gating them would break the pages that are allowed.
+PAGE_EXCLUSIVE_APIS = (
+    ("/api/import", "import"),
+    ("/api/auto-import", "import"),
+    ("/api/playlist-explorer", "playlist-explorer"),
+    ("/api/listening-stats", "stats"),
+    ("/api/audiobooks", "audiobooks"),
+)
+
+
+def page_for_path(path: str):
+    path = path or ""
+    for prefix, page in PAGE_EXCLUSIVE_APIS:
+        if path == prefix or path.startswith(prefix + "/"):
+            return page
+    return None
+
+
+def page_denied(path: str, allowed_pages, is_admin: bool) -> bool:
+    """True when this api belongs to a page the profile isn't given.
+    None = every page (the default), admins always pass."""
+    if is_admin or allowed_pages is None:
+        return False
+    page = page_for_path(path)
+    return page is not None and page not in set(allowed_pages)
+
+
 __all__ = ["profile_can_download", "download_denied_reason", "DOWNLOADS_OFF", "NO_PROFILE",
-           "may_manage_profile", "profile_view_for", "PUBLIC_PROFILE_FIELDS"]
+           "may_manage_profile", "profile_view_for", "PUBLIC_PROFILE_FIELDS",
+           "PAGE_EXCLUSIVE_APIS", "page_for_path", "page_denied"]

@@ -2770,7 +2770,10 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 /* Requests page (P4) — the in-app Overseerr. calm rows: one primary action,
    the rest in a ⋯ menu, status as quiet text on the right. */
 .vreq-page { padding: 32px 24px 64px; max-width: 920px; margin: 0 auto; }
-.vreq-head { margin-bottom: 22px; }
+.vreq-head { margin-bottom: 22px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.vreq-head-text { min-width: 0; }
+.vreq-head [data-vreq-approve-all] { flex-shrink: 0; }
+.vreq-quota { margin: 4px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.42); }
 .vreq-title-h { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
 .vreq-sub-h { margin: 6px 0 0; font-size: 14px; color: rgba(255, 255, 255, 0.55); }
 .vreq-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px;

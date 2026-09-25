@@ -48,6 +48,9 @@ def login_request_is_blocked(path: str, method: str, *,
         return False
     if method == 'POST' and path in _ALLOWED_POST:
         return False
+    from core.security.session_profile import is_open_profile_path
+    if is_open_profile_path(path, method):
+        return False
 
     return True
 

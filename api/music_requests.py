@@ -31,6 +31,17 @@ def create_blueprint():
     return bp
 
 
+def _event(event_type, group, **extra):
+    """music_request_approved / _declined / _available for automations."""
+    try:
+        from core.app_events import publish
+        publish(event_type, {"kind": group.get("kind") or "", "title": group.get("title") or "",
+                             "artist": group.get("artist") or "",
+                             "requester": group.get("requester_name") or "", **extra})
+    except Exception:  # noqa: BLE001 - an automation hook never fails the request
+        logger.debug("music request event failed", exc_info=True)
+
+
 def _notify(profile_id, message, kind="info"):
     try:
         from core.profile_notify import notify_profile
@@ -90,6 +101,7 @@ def sweep_fulfillment(db, only_pid=None) -> int:
             changed += 1
             if state == "available":
                 _notify(pid, f"{describe(req)} is in your library now", "success")
+                _event("music_request_available", req)
     return changed
 
 
@@ -125,7 +137,34 @@ def list_music_requests():
         counts[h["status"]] = counts.get(h["status"], 0) + 1
     me = db.get_profile(pid) or {}
     return jsonify({"success": True, "pending": pending, "history": history, "counts": counts,
-                    "asks_first": not profile_can_download(me)})
+                    "asks_first": not profile_can_download(me), "quota": _quota(db, me)})
+
+
+def _quota(db, profile):
+    """{limit, days, used, remaining} for a limited asking profile, else None."""
+    from core.requests.quota import quota_for, quota_state
+    quota = quota_for(profile)
+    if not quota or profile_can_download(profile):
+        return None
+    try:
+        conn = db._get_connection()
+        try:
+            used = len(db.music_request_asks_since(conn.cursor(), profile["id"], quota["days"]))
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        return None
+    return quota_state(quota, used)
+
+
+@bp.route("/api/requests/music/quota", methods=["GET"])
+def music_request_quota():
+    """before an add: how many asks this profile has left (None = no limit)."""
+    db = get_database()
+    pid = get_current_profile_id()
+    if pid is None:
+        return jsonify({"success": False, "error": "profile_required"}), 401
+    return jsonify({"success": True, "quota": _quota(db, db.get_profile(pid) or {})})
 
 
 @bp.route("/api/requests/music/counts", methods=["GET"])
@@ -182,7 +221,34 @@ def approve_music_request():
                          tracks=group["tracks"], status="approved", resolved_by=get_current_profile_id(),
                          admin_response=(str(body.get("response") or "").strip()[:500] or None))
     _notify(owner, f"{describe(group)} was approved, it's on the way", "success")
+    _event("music_request_approved", group)
     return jsonify({"success": True, "approved": flipped})
+
+
+@bp.route("/api/requests/music/approve-all", methods=["POST"])
+def approve_all_music_requests():
+    """{profile_id?}: every waiting request (or one profile's) in one go."""
+    if not is_admin_request():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    db = get_database()
+    body = request.get_json(silent=True) or {}
+    only = body.get("profile_id")
+    try:
+        only = int(only) if only not in (None, "") else None
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "bad profile_id"}), 400
+    approved = 0
+    for group in _pending_groups(db, only_pid=only):
+        if db.approve_request_rows(group["profile_id"], group["track_ids"]):
+            db.add_music_request(profile_id=group["profile_id"], requester_name=group.get("requester_name"),
+                                 group_key=group["key"], kind=group["kind"], title=group["title"],
+                                 artist=group.get("artist"), image_url=group.get("image_url"),
+                                 tracks=group["tracks"], status="approved",
+                                 resolved_by=get_current_profile_id())
+            _notify(group["profile_id"], f"{describe(group)} was approved, it's on the way", "success")
+            _event("music_request_approved", group)
+            approved += 1
+    return jsonify({"success": True, "approved": approved})
 
 
 @bp.route("/api/requests/music/decline", methods=["POST"])
@@ -203,6 +269,7 @@ def decline_music_request():
                          tracks=group["tracks"], status="declined", resolved_by=get_current_profile_id(),
                          admin_response=reason)
     _notify(owner, f"{describe(group)} was declined" + (f": {reason}" if reason else ""), "warning")
+    _event("music_request_declined", group, reason=reason or "")
     return jsonify({"success": True})
 
 

@@ -54,6 +54,14 @@ export interface MusicRequestCounts {
   removed: number;
 }
 
+/** a member's request limit: asks per window, and how many are left. */
+export interface RequestQuota {
+  limit: number;
+  days: number;
+  used: number;
+  remaining: number;
+}
+
 export interface MusicRequestListResponse {
   success: boolean;
   error?: string;
@@ -61,6 +69,7 @@ export interface MusicRequestListResponse {
   history: MusicRequestRow[];
   counts: Partial<MusicRequestCounts>;
   asks_first: boolean;
+  quota?: Partial<RequestQuota> | null;
 }
 
 export interface MusicRequestList {
@@ -68,6 +77,7 @@ export interface MusicRequestList {
   history: MusicRequestRow[];
   counts: MusicRequestCounts;
   asksFirst: boolean;
+  quota: RequestQuota | null;
 }
 
 export interface MusicRequestBadgeCounts {
@@ -75,7 +85,13 @@ export interface MusicRequestBadgeCounts {
   updates: number;
 }
 
-export const REQUEST_TAB_VALUES = ['waiting', 'on-the-way', 'available', 'declined', 'all'] as const;
+export const REQUEST_TAB_VALUES = [
+  'waiting',
+  'on-the-way',
+  'available',
+  'declined',
+  'all',
+] as const;
 export type RequestTab = (typeof REQUEST_TAB_VALUES)[number];
 
 export const requestSearchSchema = z.object({

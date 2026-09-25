@@ -160,6 +160,8 @@ def test_search_kind_tracks_returns_full_shape():
         'image_url': 'm.jpg',
         'release_date': '1973-03-01',
         'external_urls': {'a': 'b'},
+        # kids profiles filter on it; a source that doesn't say gives None
+        'explicit': None,
     }]
 
 

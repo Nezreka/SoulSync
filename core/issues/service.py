@@ -26,6 +26,16 @@ class IssueSide:
     notify: Callable[[int, str, str], Any]
     categories: Sequence[str]
     strip_reporter_for_members: bool = False
+    side: str = "music"
+
+
+def _event(side: IssueSide, event_type: str, data: Dict[str, Any]) -> None:
+    """issue_created / issue_status_changed / issue_commented for automations."""
+    try:
+        from core.app_events import publish
+        publish(event_type, {"side": side.side, **data})
+    except Exception:  # noqa: BLE001, S110 - an automation hook never fails the issue
+        pass
 
 
 def _decorate(side: IssueSide, issue: Dict[str, Any], *, is_admin: bool) -> Dict[str, Any]:
@@ -56,6 +66,8 @@ def report(side: IssueSide, *, actor: int, actor_name: str, is_admin: bool, enti
                          fields["description"], snapshot(), fields["priority"], actor_name)
     if not new_id:
         return {"success": False, "error": "Could not file the report"}, 500
+    _event(side, "issue_created", {"issue_id": new_id, "category": category, "title": fields["title"],
+                                   "entity_type": entity_type, "reporter": actor_name or ""})
     return {"success": True, "id": new_id}, 201
 
 
@@ -86,6 +98,10 @@ def triage(side: IssueSide, *, actor: int, actor_name: str, is_admin: bool, issu
         return {"success": False, "error": err}, code
     if not side.update(issue_id, updates):
         return {"success": False, "error": "Could not update the issue"}, 500
+    if updates.get("status") and updates["status"] != issue.get("status"):
+        _event(side, "issue_status_changed", {
+            "issue_id": issue_id, "status": updates["status"], "category": issue.get("category") or "",
+            "title": issue.get("title") or "", "reporter": issue.get("reporter_name") or ""})
     if is_admin:
         events = timeline_events(issue, updates)
         for line in events:
@@ -115,6 +131,8 @@ def comment(side: IssueSide, *, actor: int, actor_name: str, is_admin: bool, iss
     if not text:
         return {"success": False, "error": "Write something first"}, 400
     cid = side.store.add_comment(issue_id, actor, actor_name, text)
+    _event(side, "issue_commented", {"issue_id": issue_id, "title": issue.get("title") or "",
+                                     "author": actor_name or "", "body": text[:500]})
     if is_admin:
         people = recipients(issue, followers, actor)
         if people:

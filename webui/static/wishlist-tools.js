@@ -976,6 +976,9 @@ async function handleAddToWishlist() {
     // this batch gets the SAME profile (P1-01).
     const qualityProfileId = currentWishlistModalQualityProfileId();
 
+    // request limit used up: say so instead of an add the server drops
+    if (typeof checkMusicRequestQuota === 'function' && !(await checkMusicRequestQuota())) return;
+
     try {
         // Show loading state
         if (addToWishlistBtn) {
@@ -1410,6 +1413,10 @@ async function addModalTracksToWishlist(playlistId) {
     // not for playlists, so we must NOT use it as a blanket default.
     const processArtist = process.artist || null;
     const album = process.album || process.playlist || { name: 'Playlist', id: playlistId };
+
+    // a profile that asks first and has used its request limit: say so here,
+    // the server would drop the add without a word
+    if (typeof checkMusicRequestQuota === 'function' && !(await checkMusicRequestQuota())) return;
 
     // Same control the modal's "Begin Analysis" reads, so both buttons in this
     // dialog agree on the Quality Profile (P1-01).

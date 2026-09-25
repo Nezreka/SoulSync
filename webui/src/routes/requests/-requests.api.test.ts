@@ -5,13 +5,16 @@ import { HttpResponse, http, server } from '@/test/msw';
 import type { MusicRequestGroup, MusicRequestRow } from './-requests.types';
 
 import {
+  approveAllMusicRequests,
   approveMusicRequest,
   declineMusicRequest,
   deleteMusicRequest,
   fetchMusicRequestCounts,
+  fetchMusicRequestQuota,
   fetchMusicRequests,
   markMusicRequestsSeen,
   normalizeCounts,
+  normalizeQuota,
   withdrawMusicRequest,
 } from './-requests.api';
 
@@ -69,6 +72,7 @@ describe('music requests api', () => {
       history: [row],
       counts: { pending: 1, approved: 1, available: 0, declined: 0, removed: 0 },
       asksFirst: true,
+      quota: null,
     });
   });
 
@@ -133,7 +137,7 @@ describe('music requests api', () => {
     const hits: string[] = [];
     server.use(
       http.post('/api/requests/music/withdraw', async ({ request }) => {
-        hits.push(`withdraw:${(await request.json() as { key: string }).key}`);
+        hits.push(`withdraw:${((await request.json()) as { key: string }).key}`);
         return HttpResponse.json({ success: true });
       }),
       http.delete('/api/requests/music/:id', ({ params }) => {
@@ -151,6 +155,80 @@ describe('music requests api', () => {
     await markMusicRequestsSeen(3);
 
     expect(hits).toEqual(['withdraw:album:abc', 'delete:9', 'seen']);
+  });
+
+  it('maps the member quota off the list', async () => {
+    server.use(
+      http.get('/api/requests/music', () =>
+        HttpResponse.json({
+          success: true,
+          pending: [],
+          history: [],
+          counts: {},
+          asks_first: true,
+          quota: { limit: 3, days: 7, used: 1, remaining: 2 },
+        }),
+      ),
+    );
+
+    const list = await fetchMusicRequests(3);
+    expect(list.quota).toEqual({ limit: 3, days: 7, used: 1, remaining: 2 });
+  });
+
+  it('reads the quota on its own', async () => {
+    server.use(
+      http.get('/api/requests/music/quota', ({ request }) => {
+        expect(request.headers.get('X-Profile-Id')).toBe('3');
+        return HttpResponse.json({
+          success: true,
+          quota: { limit: 5, days: 30, used: 5, remaining: 0 },
+        });
+      }),
+    );
+
+    await expect(fetchMusicRequestQuota(3)).resolves.toEqual({
+      limit: 5,
+      days: 30,
+      used: 5,
+      remaining: 0,
+    });
+  });
+
+  it('treats no limit as null', () => {
+    expect(normalizeQuota(null)).toBeNull();
+    expect(normalizeQuota(undefined)).toBeNull();
+    expect(normalizeQuota({ limit: 0, days: 7 })).toBeNull();
+    // remaining missing: worked out from used
+    expect(normalizeQuota({ limit: 3, days: 7, used: 5 })).toEqual({
+      limit: 3,
+      days: 7,
+      used: 5,
+      remaining: 0,
+    });
+  });
+
+  it('approves everything waiting, or one profile', async () => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.post('/api/requests/music/approve-all', async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({ success: true, approved: 4 });
+      }),
+    );
+
+    await expect(approveAllMusicRequests(1)).resolves.toBe(4);
+    await expect(approveAllMusicRequests(1, 3)).resolves.toBe(4);
+    expect(bodies).toEqual([{}, { profile_id: 3 }]);
+  });
+
+  it('surfaces an approve-all refusal', async () => {
+    server.use(
+      http.post('/api/requests/music/approve-all', () =>
+        HttpResponse.json({ success: false, error: 'Admin only' }, { status: 403 }),
+      ),
+    );
+
+    await expect(approveAllMusicRequests(3)).rejects.toThrow('Admin only');
   });
 
   it('fills missing counts with zero', () => {

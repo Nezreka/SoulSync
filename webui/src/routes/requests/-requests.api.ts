@@ -7,6 +7,7 @@ import type {
   MusicRequestCounts,
   MusicRequestList,
   MusicRequestListResponse,
+  RequestQuota,
 } from './-requests.types';
 
 export const REQUESTS_QUERY_KEY = ['music-requests'] as const;
@@ -33,6 +34,17 @@ export function normalizeCounts(raw: Partial<MusicRequestCounts> | undefined): M
   };
 }
 
+/** null when there is no limit (or the payload doesn't carry a usable one). */
+export function normalizeQuota(raw: Partial<RequestQuota> | null | undefined): RequestQuota | null {
+  if (!raw) return null;
+  const limit = Number(raw.limit) || 0;
+  if (limit <= 0) return null;
+  const used = Math.max(0, Number(raw.used) || 0);
+  const remaining =
+    raw.remaining == null ? Math.max(0, limit - used) : Math.max(0, Number(raw.remaining) || 0);
+  return { limit, days: Number(raw.days) || 7, used, remaining };
+}
+
 export async function fetchMusicRequests(profileId: number): Promise<MusicRequestList> {
   const payload = await readJson<MusicRequestListResponse>(
     apiClient.get('requests/music', {
@@ -46,7 +58,31 @@ export async function fetchMusicRequests(profileId: number): Promise<MusicReques
     history: payload.history ?? [],
     counts: normalizeCounts(payload.counts),
     asksFirst: payload.asks_first === true,
+    quota: normalizeQuota(payload.quota),
   };
+}
+
+export async function fetchMusicRequestQuota(profileId: number): Promise<RequestQuota | null> {
+  const payload = await readJson<Ok & { quota?: Partial<RequestQuota> | null }>(
+    apiClient.get('requests/music/quota', { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Failed to load your request limit');
+  return normalizeQuota(payload.quota);
+}
+
+/** admin: every waiting request in one go (or just one profile's). */
+export async function approveAllMusicRequests(
+  profileId: number,
+  onlyProfileId?: number,
+): Promise<number> {
+  const payload = await readJson<Ok & { approved?: number }>(
+    apiClient.post('requests/music/approve-all', {
+      headers: headersFor(profileId),
+      json: onlyProfileId == null ? {} : { profile_id: onlyProfileId },
+    }),
+  );
+  assertOk(payload, 'Could not approve those requests');
+  return Number(payload.approved) || 0;
 }
 
 export async function fetchMusicRequestCounts(profileId: number): Promise<MusicRequestBadgeCounts> {

@@ -63,6 +63,17 @@ _ALLOWED_POST = frozenset({
 })
 
 
+def is_open_profile_path(path: str, method: str) -> bool:
+    """paths every gate leaves open: accepting an invite link (the token is
+    the credential, an admin minted it) and a profile's avatar image, which
+    the picker draws before anyone is signed in."""
+    import re
+    method = (method or 'GET').upper()
+    if path.startswith('/api/invite/') and method in ('GET', 'POST'):
+        return True
+    return method == 'GET' and re.fullmatch(r'/api/profiles/\d+/avatar', path or '') is not None
+
+
 def no_profile_request_is_blocked(path: str, method: str) -> bool:
     """True when a request with no profile must be turned away."""
     path = path or ''
@@ -76,9 +87,11 @@ def no_profile_request_is_blocked(path: str, method: str) -> bool:
         return False
     if method == 'GET' and path in _ALLOWED_GET:
         return False
+    if is_open_profile_path(path, method):
+        return False
     if method == 'POST' and path in _ALLOWED_POST:
         return False
     return True
 
 
-__all__ = ['resolve_session_profile', 'no_profile_request_is_blocked']
+__all__ = ['resolve_session_profile', 'no_profile_request_is_blocked', 'is_open_profile_path']

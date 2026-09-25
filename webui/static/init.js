@@ -525,8 +525,19 @@ const PF_BOOT_PATH = (window.SoulSyncURL?.strip(window.location.pathname) ?? win
     const inner = window.fetch;
     if (typeof inner !== 'function') return;
     let reloading = false;
+    let restrictedToastAt = 0;
     window.fetch = function (...args) {
         return inner.apply(this, args).then((res) => {
+            // kids limits: the server says no to restricted titles with a
+            // 403 restricted. one quiet toast every few seconds, not one per call
+            if (res && res.status === 403) {
+                res.clone().json().then((body) => {
+                    if (!body || body.restricted !== true) return;
+                    if (Date.now() - restrictedToastAt < 4000) return;
+                    restrictedToastAt = Date.now();
+                    if (typeof showToast === 'function') showToast('Not available on this profile', 'info');
+                }).catch(() => { /* not json, not ours */ });
+            }
             if (res && res.status === 401 && currentProfile && !reloading) {
                 res.clone().json().then((body) => {
                     if (!body || !body.profile_required || reloading) return;
@@ -715,6 +726,28 @@ async function initProfileSystem() {
             }
 
             return true;
+        }
+
+        // "always open as me on this device": straight in, or straight to
+        // their pin. the picker is still one tap away in the quick switch.
+        const openAsId = pfOpenAsProfileId();
+        if (openAsId !== null) {
+            const openAs = profiles.find(p => Number(p.id) === openAsId);
+            if (!openAs) {
+                pfSetOpenAsProfile(null);
+            } else if (openAs.has_pin) {
+                showProfilePicker(profiles);
+                showPinDialog(openAs, 'pin');
+                return false;
+            } else if (await selectProfile(openAs.id)) {
+                const recheck = await fetch('/api/profiles/current');
+                const recheckData = await recheck.json();
+                if (recheckData.launch_pin_required) {
+                    showLaunchPinScreen();
+                    return false;
+                }
+                return true;
+            }
         }
 
         // Multiple profiles or PIN required — show picker
@@ -1240,6 +1273,73 @@ async function pfFetchProfiles() {
 
 async function pfReadJson(res) {
     try { return await res.json(); } catch (e) { return {}; }
+}
+
+// "always open as me on this device": a profile id kept in this browser
+const PF_OPEN_AS_KEY = 'ss_open_as_profile';
+
+function pfOpenAsProfileId() {
+    try {
+        const raw = localStorage.getItem(PF_OPEN_AS_KEY);
+        const id = raw ? parseInt(raw, 10) : NaN;
+        return Number.isFinite(id) && id > 0 ? id : null;
+    } catch (e) { return null; }
+}
+
+function pfSetOpenAsProfile(id) {
+    try {
+        if (id) localStorage.setItem(PF_OPEN_AS_KEY, String(id));
+        else localStorage.removeItem(PF_OPEN_AS_KEY);
+    } catch (e) { /* ignore */ }
+}
+
+// a picture uploaded to soulsync, not a link to somewhere else
+function pfIsUploadedAvatar(url) {
+    return /^\/api\/profiles\/\d+\/avatar(\?|$)/.test(String(url || ''));
+}
+
+// sqlite times are utc with no zone: "2h ago", "3 days ago"
+function pfAgo(value) {
+    if (!value) return '';
+    const text = String(value).trim();
+    const ms = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(text) ? text : text.replace(' ', 'T') + 'Z');
+    if (!Number.isFinite(ms)) return '';
+    const secs = Math.round((Date.now() - ms) / 1000);
+    if (secs < 0) return '';
+    if (secs < 60) return 'just now';
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.round(hours / 24);
+    if (days < 30) return days === 1 ? 'yesterday' : `${days} days ago`;
+    return new Date(ms).toLocaleDateString();
+}
+
+// "in 2 days", "in 5h" for something that runs out
+function pfUntil(value) {
+    if (!value) return '';
+    const text = String(value).trim();
+    const ms = Date.parse(text.replace(' ', 'T') + 'Z');
+    if (!Number.isFinite(ms)) return '';
+    const mins = Math.round((ms - Date.now()) / 60000);
+    if (mins <= 0) return '';
+    if (mins < 60) return `in ${mins}m`;
+    const hours = Math.round(mins / 60);
+    if (hours < 48) return `in ${hours}h`;
+    return `in ${Math.round(hours / 24)} days`;
+}
+
+// kids & limits: the choices and the words for them
+const PROFILE_RATINGS = ['G', 'PG', 'PG-13', 'R'];
+const PROFILE_LIMIT_PERIODS = [[1, 'day'], [7, 'week'], [30, 'month']];
+
+function pfLimitText(limit, days) {
+    const n = Number(limit) || 0;
+    if (n <= 0) return '';
+    const period = (PROFILE_LIMIT_PERIODS.find(([d]) => d === Number(days)) || [])[1];
+    const noun = n === 1 ? 'request' : 'requests';
+    return period ? `${n} ${noun}/${period}` : `${n} ${noun} per ${days} days`;
 }
 
 // ── layers: every profile modal goes through here, so escape, the focus
@@ -2114,20 +2214,73 @@ async function openProfileManager() {
     const layer = document.getElementById('profile-manage-panel');
     layer.innerHTML = '';
     const modal = pfEl('div', { class: 'pf-modal pf-modal--wide', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'profile-manage-title' });
-    const addBtn = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', id: 'create-profile-btn', html: PF_ICONS.plus + '<span>Add profile</span>' });
-    addBtn.addEventListener('click', () => openProfileEditor({ mode: 'create' }));
+    // one primary action per tab: add a profile, or make an invite link
+    const addBtn = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', id: 'create-profile-btn' });
+    let tab = 'people';
+    addBtn.addEventListener('click', () => {
+        if (tab === 'invites') openInviteCreator();
+        else openProfileEditor({ mode: 'create' });
+    });
     const closeBtn = pfEl('button', { type: 'button', class: 'pf-icon-btn', id: 'profile-manage-close', 'aria-label': 'Close', html: PF_ICONS.close });
     closeBtn.addEventListener('click', () => pfCloseLayer(layer));
+    const sub = pfEl('p', { class: 'pf-modal-sub' });
     modal.append(pfEl('div', { class: 'pf-modal-head' }, [
         pfEl('div', { class: 'pf-modal-titles' }, [
             pfEl('h2', { class: 'pf-modal-title', id: 'profile-manage-title', text: 'Profiles' }),
-            pfEl('p', { class: 'pf-modal-sub', text: 'Who uses SoulSync here, and what each of them can do.' }),
+            sub,
         ]),
         addBtn, closeBtn,
     ]));
-    const body = pfEl('div', { class: 'pf-modal-body', id: 'pf-manage-list' });
+
+    const tabDefs = [
+        ['people', 'People', 'Who uses SoulSync here, and what each of them can do.'],
+        ['invites', 'Invites', 'Send someone a link and they make their own profile.'],
+        ['activity', 'Activity', 'Who changed what, newest first.'],
+    ];
+    const tabBar = pfEl('div', { class: 'pf-steps pf-manage-tabs', role: 'tablist', 'aria-label': 'Profiles' });
+    const panes = {
+        people: pfEl('div', { id: 'pf-manage-list', role: 'tabpanel' }),
+        invites: pfEl('div', { id: 'pf-invite-list', role: 'tabpanel' }),
+        activity: pfEl('div', { id: 'pf-audit-list', role: 'tabpanel' }),
+    };
+    const tabButtons = tabDefs.map(([id, label]) => {
+        const btn = pfEl('button', { type: 'button', class: 'pf-step', role: 'tab', text: label, id: 'pf-manage-tab-' + id });
+        panes[id].setAttribute('aria-labelledby', btn.id);
+        btn.addEventListener('click', () => showTab(id));
+        // arrow keys move along the tabs
+        btn.addEventListener('keydown', (e) => {
+            const i = tabDefs.findIndex(t => t[0] === id);
+            let next = -1;
+            if (e.key === 'ArrowRight') next = (i + 1) % tabDefs.length;
+            else if (e.key === 'ArrowLeft') next = (i - 1 + tabDefs.length) % tabDefs.length;
+            if (next < 0) return;
+            e.preventDefault();
+            showTab(tabDefs[next][0]);
+            tabButtons[next].focus();
+        });
+        tabBar.append(btn);
+        return btn;
+    });
+    const loaded = {};
+    function showTab(id) {
+        tab = id;
+        tabDefs.forEach(([tid, , desc], i) => {
+            const on = tid === id;
+            tabButtons[i].setAttribute('aria-selected', String(on));
+            tabButtons[i].tabIndex = on ? 0 : -1;
+            panes[tid].style.display = on ? '' : 'none';
+            if (on) sub.textContent = desc;
+        });
+        addBtn.style.display = id === 'activity' ? 'none' : '';
+        addBtn.innerHTML = PF_ICONS.plus + (id === 'invites' ? '<span>Create invite link</span>' : '<span>Add profile</span>');
+        if (id === 'invites' && !loaded.invites) { loaded.invites = true; loadInviteList(); }
+        if (id === 'activity' && !loaded.activity) { loaded.activity = true; loadAuditList(true); }
+    }
+
+    const body = pfEl('div', { class: 'pf-modal-body' }, [tabBar, panes.people, panes.invites, panes.activity]);
     modal.append(body);
     layer.append(modal);
+    showTab('people');
     layer.onmousedown = (e) => { if (e.target === layer) pfCloseLayer(layer); };
     pfOpenLayer(layer, {
         focus: addBtn,
@@ -2207,6 +2360,7 @@ function _pfManageCard(p, loginMode) {
             summary.text,
             summary.warn ? pfEl('span', { class: 'pf-warn', text: ' · ' + summary.warn }) : null,
         ]),
+        pfLimitsLine(p) ? pfEl('span', { class: 'pf-card-limits', text: pfLimitsLine(p) }) : null,
     ]);
     main.addEventListener('click', () => openProfileEditor({ mode: isSelf ? 'self' : 'edit', profile: p }));
     const card = pfEl('div', { class: 'pf-card' + (isSelf ? ' is-current' : '') }, main);
@@ -2215,6 +2369,7 @@ function _pfManageCard(p, loginMode) {
     if (canEdit) items.push({ label: 'Edit', icon: PF_ICONS.edit, run: () => openProfileEditor({ mode: isSelf ? 'self' : 'edit', profile: p }) });
     if (!isSelf && !pfIsOwner(p) && p.has_pin) items.push({ label: 'Reset PIN', run: () => resetProfilePin(p) });
     if (!isSelf && !p.is_admin) items.push({ label: p.has_password ? 'Change login password' : 'Set login password', run: () => openProfilePasswordModal(p) });
+    if (canEdit) items.push({ label: isSelf ? 'Sign out other devices' : 'Sign out everywhere', icon: PF_ICONS.signout, run: () => signOutProfileEverywhere(p) });
     if (!isSelf && !pfIsOwner(p)) {
         if (items.length) items.push('sep');
         items.push({ label: 'Delete', danger: true, run: () => deleteProfile(p) });
@@ -2232,6 +2387,318 @@ function _pfManageCard(p, loginMode) {
         card.append(more);
     }
     return card;
+}
+
+// ── Invites: a link someone opens to make their own profile ────────────
+
+const PF_INVITE_EXPIRY = [[24, '1 day'], [72, '3 days'], [168, '1 week'], [720, '30 days']];
+const PF_INVITE_STATE = { open: 'Open', used: 'Used', revoked: 'Revoked', expired: 'Expired' };
+
+// what an invite's preset gives, in the words the editor uses
+function pfInvitePresetLine(preset) {
+    const pr = preset || {};
+    const match = pfPresetOf({
+        allowed_sides: pr.allowed_sides, can_download: pr.can_download !== false,
+        hide_explicit: !!pr.hide_explicit, max_rating: pr.max_rating || '',
+    });
+    const sides = pr.allowed_sides === 'both' ? 'Music & movies' : pr.allowed_sides === 'video' ? 'Movies & TV' : 'Music';
+    const bits = [match ? match.name : sides];
+    if (match) bits.push(sides.toLowerCase());
+    if (pr.max_rating && !match) bits.push(`up to ${pr.max_rating}`);
+    const limit = pfLimitText(pr.request_limit, pr.request_limit_days);
+    if (limit) bits.push(limit);
+    return bits.join(' · ');
+}
+
+function pfInviteUrl(path) {
+    const resolved = window.SoulSyncURL?.resolve ? window.SoulSyncURL.resolve(path) : path;
+    return window.location.origin + resolved;
+}
+
+async function loadInviteList() {
+    const list = document.getElementById('pf-invite-list');
+    if (!list) return;
+    let invites;
+    try {
+        const res = await fetch('/api/profiles/invites');
+        const data = await pfReadJson(res);
+        if (!res.ok || !data.success) throw new Error(data.error || '');
+        invites = data.invites || [];
+    } catch (e) {
+        list.innerHTML = '';
+        list.append(pfEl('p', { class: 'pf-form-error', text: "Couldn't load invites. Check the connection and try again." }));
+        return;
+    }
+    list.innerHTML = '';
+    if (!invites.length) {
+        list.append(pfEl('div', { class: 'pf-empty' }, [
+            pfEl('strong', { text: 'No invite links yet' }),
+            pfEl('span', { text: 'Make one and send it. They pick their own name and PIN, you pick what they can use.' }),
+        ]));
+        return;
+    }
+    const rows = pfEl('ul', { class: 'pf-rows' });
+    invites.forEach(inv => {
+        const state = PF_INVITE_STATE[inv.state] ? inv.state : 'expired';
+        let when = '';
+        if (state === 'open') when = pfUntil(inv.expires_at) ? `runs out ${pfUntil(inv.expires_at)}` : '';
+        else if (state === 'used') {
+            const who = (_pfProfilesCache.find(p => Number(p.id) === Number(inv.used_by)) || {}).name;
+            when = `${who ? 'used by ' + who : 'used'} ${pfAgo(inv.used_at)}`.trim();
+        } else if (state === 'revoked') when = `revoked ${pfAgo(inv.revoked_at)}`.trim();
+        else when = `made ${pfAgo(inv.created_at)}`.trim();
+        const row = pfEl('li', { class: 'pf-row' + (state === 'open' ? '' : ' is-quiet') }, [
+            pfEl('div', { class: 'pf-row-main' }, [
+                pfEl('span', { class: 'pf-row-title', text: inv.note || 'Invite link' }),
+                pfEl('span', { class: 'pf-row-meta', text: [pfInvitePresetLine(inv.preset), when].filter(Boolean).join(' · ') }),
+            ]),
+            pfEl('span', { class: 'pf-state pf-state--' + state, text: PF_INVITE_STATE[state] }),
+        ]);
+        if (state === 'open') {
+            const more = pfEl('button', {
+                type: 'button', class: 'pf-icon-btn', html: PF_ICONS.more,
+                'aria-label': `More for ${inv.note || 'this invite'}`, 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+            });
+            more.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (more.getAttribute('aria-expanded') === 'true') pfCloseMenus();
+                else pfOpenMenu(more, [{ label: 'Revoke', danger: true, run: () => revokeInvite(inv) }]);
+            });
+            row.append(more);
+        } else {
+            row.append(pfEl('span', { class: 'pf-row-spacer', 'aria-hidden': 'true' }));
+        }
+        rows.append(row);
+    });
+    list.append(rows);
+}
+
+async function revokeInvite(inv) {
+    const ok = await showConfirmDialog({
+        title: 'Revoke this invite?',
+        message: 'The link stops working. Anyone who already joined with it keeps their profile.',
+        confirmText: 'Revoke',
+        destructive: true,
+    });
+    if (!ok) return;
+    try {
+        const res = await fetch(`/api/profiles/invites/${inv.id}`, { method: 'DELETE' });
+        const data = await pfReadJson(res);
+        if (!res.ok || !data.success) throw new Error(data.error || "Couldn't revoke it");
+        showToast('Invite revoked', 'info');
+    } catch (e) {
+        showToast(e.message || 'Connection error', 'error');
+    }
+    loadInviteList();
+}
+
+function openInviteCreator() {
+    const modal = pfModal({
+        title: 'Create an invite link',
+        subtitle: 'Whoever opens it picks a name and joins with the access you choose here.',
+        size: 'small', layerClass: 'pf-layer--small',
+    });
+    let preset = PROFILE_PRESETS[0];
+    let hours = 72;
+
+    const presets = pfEl('div', { class: 'pf-presets pf-presets--2', role: 'radiogroup', 'aria-label': 'Access' });
+    const presetButtons = PROFILE_PRESETS.map(pr => {
+        const btn = pfEl('button', { type: 'button', class: 'pf-preset', role: 'radio' }, [
+            pfEl('span', { class: 'pf-preset-name', text: pr.name }),
+            pfEl('span', { class: 'pf-preset-desc', text: pr.desc }),
+        ]);
+        btn.addEventListener('click', () => { preset = pr; sync(); });
+        presets.append(btn);
+        return [btn, pr];
+    });
+    const noteId = 'pf-invite-note-' + (++_pfUid);
+    const note = pfEl('input', { type: 'text', id: noteId, class: 'pf-input', maxlength: '200', autocomplete: 'off', placeholder: 'For Kim' });
+    const expiry = pfEl('div', { class: 'pf-seg', role: 'group', 'aria-label': 'Runs out after' });
+    const expiryButtons = PF_INVITE_EXPIRY.map(([h, label]) => {
+        const btn = pfEl('button', { type: 'button', text: label });
+        btn.addEventListener('click', () => { hours = h; sync(); });
+        expiry.append(btn);
+        return [btn, h];
+    });
+    const error = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
+    const form = pfEl('div', {}, [
+        pfEl('div', { class: 'pf-section-title', text: 'Access' }), presets,
+        pfEl('div', { class: 'pf-field', style: 'margin-top:18px' }, [
+            pfEl('label', { class: 'pf-label', for: noteId, text: 'Note (optional)' }), note,
+            pfEl('p', { class: 'pf-help', text: 'Only you see it, to tell your links apart.' }),
+        ]),
+        pfEl('div', { class: 'pf-field' }, [pfEl('span', { class: 'pf-label', text: 'Runs out after' }), expiry]),
+        error,
+    ]);
+    modal.body.append(form);
+
+    function sync() {
+        presetButtons.forEach(([btn, pr]) => btn.setAttribute('aria-checked', String(pr === preset)));
+        expiryButtons.forEach(([btn, h]) => btn.setAttribute('aria-pressed', String(h === hours)));
+    }
+    sync();
+
+    const cancel = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Cancel', onclick: () => modal.close() });
+    const create = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Create link' });
+    create.addEventListener('click', async () => {
+        error.textContent = '';
+        create.disabled = true;
+        try {
+            const res = await fetch('/api/profiles/invites', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    preset: {
+                        allowed_sides: preset.sides, can_download: preset.can_download, allowed_pages: null,
+                        hide_explicit: preset.hide_explicit, max_rating: preset.max_rating || null,
+                        request_limit: 0, request_limit_days: 7,
+                    },
+                    note: note.value.trim() || undefined,
+                    expires_hours: hours,
+                }),
+            });
+            const data = await pfReadJson(res);
+            if (!res.ok || !data.success || !data.path) throw new Error(data.error || "Couldn't make the link");
+            showResult(pfInviteUrl(data.path), data.expires_hours || hours);
+            loadInviteList();
+        } catch (e) {
+            error.textContent = e.message || 'Connection error';
+            create.disabled = false;
+        }
+    });
+    note.addEventListener('keydown', (e) => { if (e.key === 'Enter') create.click(); });
+    modal.foot.append(cancel, create);
+
+    // the link is shown once: the server only keeps its hash
+    function showResult(url, h) {
+        modal.titleEl.textContent = 'Send this link';
+        const span = (PF_INVITE_EXPIRY.find(([x]) => x === h) || [0, `${h} hours`])[1];
+        modal.subEl.textContent = `It works once and runs out in ${span}. You won't see it again after closing this.`;
+        modal.subEl.style.display = '';
+        modal.body.innerHTML = '';
+        const field = pfEl('input', { type: 'text', class: 'pf-input pf-link-field', readonly: true, value: url, 'aria-label': 'Invite link', spellcheck: 'false' });
+        field.addEventListener('focus', () => field.select());
+        const copy = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Copy' });
+        copy.addEventListener('click', async () => {
+            let copied = false;
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(url);
+                    copied = true;
+                }
+            } catch (e) { /* fall through */ }
+            if (!copied) {
+                field.focus();
+                field.select();
+                try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+            }
+            if (copied) {
+                copy.textContent = 'Copied';
+                setTimeout(() => { copy.textContent = 'Copy'; }, 1800);
+            } else {
+                showToast('Select the link and copy it', 'info');
+            }
+        });
+        modal.body.append(pfEl('div', { class: 'pf-link-row' }, [field, copy]));
+        modal.foot.innerHTML = '';
+        const done = pfEl('button', { type: 'button', class: 'pf-btn', text: 'Done', onclick: () => modal.close() });
+        modal.foot.append(done);
+        setTimeout(() => copy.focus(), 0);
+    }
+
+    modal.open(() => presetButtons[0][0]);
+}
+
+// ── Activity: the admin log ────────────────────────────────────────────
+
+const PF_AUDIT_PAGE = 30;
+let _pfAuditOffset = 0;
+
+// "Boulder reset Kim's PIN". their own things read as "their".
+function pfAuditSentence(entry) {
+    const actor = entry.actor_name || 'Someone';
+    const self = entry.target_id != null && Number(entry.target_id) === Number(entry.actor_id);
+    const target = entry.target_name || 'a profile';
+    const theirs = self ? 'their' : `${target}'s`;
+    switch (entry.action) {
+        case 'profile_created': return `${actor} added ${target}`;
+        case 'profile_updated': {
+            const what = pfAuditFields(entry.detail);
+            return self ? `${actor} changed their ${what}` : `${actor} changed ${theirs} ${what}`;
+        }
+        case 'profile_deleted': return `${actor} deleted ${target}`;
+        case 'pin_reset': return self ? `${actor} changed their PIN` : `${actor} reset ${theirs} PIN`;
+        case 'pin_removed': return `${actor} removed ${theirs} PIN`;
+        case 'password_set': return `${actor} set ${theirs} login password`;
+        case 'admin_granted': return `${actor} made ${target} an admin`;
+        case 'admin_revoked': return `${actor} took admin away from ${target}`;
+        case 'signed_out_everywhere': return self ? `${actor} signed out their other devices` : `${actor} signed ${target} out everywhere`;
+        case 'invite_created': return `${actor} made an invite link`;
+        case 'invite_revoked': return `${actor} revoked an invite link`;
+        case 'invite_used': return `${entry.target_name || actor} joined with an invite link`;
+        case 'avatar_changed': return `${actor} changed ${theirs} picture`;
+        default: return `${actor}: ${String(entry.action || '').replace(/_/g, ' ')}`;
+    }
+}
+
+// the changed fields, in plain words: "access and request limit"
+function pfAuditFields(detail) {
+    const words = {
+        name: 'name', avatar_color: 'picture', avatar_url: 'picture', home_page: 'home page',
+        allowed_sides: 'access', allowed_pages: 'access', can_download: 'download rights',
+        hide_explicit: 'content limits', max_rating: 'content limits',
+        request_limit: 'request limit', request_limit_days: 'request limit',
+        library: 'library', library_mode: 'library', library_root: 'library', is_admin: 'admin rights',
+    };
+    const out = [];
+    String(detail || '').split(',').map(s => s.trim()).filter(Boolean).forEach(field => {
+        const word = words[field] || field.replace(/_/g, ' ');
+        if (!out.includes(word)) out.push(word);
+    });
+    if (!out.length) return 'profile';
+    if (out.length === 1) return out[0];
+    if (out.length > 3) return out.slice(0, 3).join(', ') + ' and more';
+    return out.slice(0, -1).join(', ') + ' and ' + out[out.length - 1];
+}
+
+async function loadAuditList(reset = false) {
+    const list = document.getElementById('pf-audit-list');
+    if (!list) return;
+    if (reset) { _pfAuditOffset = 0; list.innerHTML = ''; }
+    list.querySelector('.pf-more-row')?.remove();
+    let entries;
+    try {
+        const res = await fetch(`/api/profiles/audit?limit=${PF_AUDIT_PAGE}&offset=${_pfAuditOffset}`);
+        const data = await pfReadJson(res);
+        if (!res.ok || !data.success) throw new Error(data.error || '');
+        entries = data.entries || [];
+    } catch (e) {
+        list.append(pfEl('p', { class: 'pf-form-error', text: "Couldn't load the activity. Check the connection and try again." }));
+        return;
+    }
+    let rows = list.querySelector('.pf-rows');
+    if (!rows) {
+        if (!entries.length) {
+            list.append(pfEl('div', { class: 'pf-empty' }, [
+                pfEl('strong', { text: 'Nothing yet' }),
+                pfEl('span', { text: 'Profile changes, PIN resets and invites show up here.' }),
+            ]));
+            return;
+        }
+        rows = pfEl('ul', { class: 'pf-rows pf-rows--log' });
+        list.append(rows);
+    }
+    entries.forEach(entry => {
+        rows.append(pfEl('li', { class: 'pf-row pf-row--log' }, [
+            pfEl('span', { class: 'pf-row-title', text: pfAuditSentence(entry) }),
+            pfEl('span', { class: 'pf-row-meta', text: pfAgo(entry.created_at), title: entry.created_at ? entry.created_at + ' UTC' : null }),
+        ]));
+    });
+    _pfAuditOffset += entries.length;
+    if (entries.length === PF_AUDIT_PAGE) {
+        const more = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Load more' });
+        more.addEventListener('click', () => { more.disabled = true; loadAuditList(false); });
+        list.append(pfEl('div', { class: 'pf-more-row' }, more));
+    }
 }
 
 async function resetProfilePin(p) {
@@ -2252,6 +2719,31 @@ async function resetProfilePin(p) {
         loadProfileManageList();
     } catch (e) {
         showToast(e.message || 'Connection error', 'error');
+    }
+}
+
+// every browser signed in as this profile loses it. yourself: this one stays.
+async function signOutProfileEverywhere(p) {
+    const isSelf = !!(currentProfile && currentProfile.id === p.id);
+    const ok = await showConfirmDialog(isSelf ? {
+        title: 'Sign out other devices?',
+        message: 'Every other browser and phone signed in as you goes back to the profile picker. This one stays signed in.',
+        confirmText: 'Sign out others',
+    } : {
+        title: `Sign ${p.name} out everywhere?`,
+        message: `Every browser and phone signed in as ${p.name} goes back to the profile picker. Nothing else changes.`,
+        confirmText: 'Sign out',
+    });
+    if (!ok) return false;
+    try {
+        const res = await fetch(`/api/profiles/${p.id}/sign-out-everywhere`, { method: 'POST' });
+        const data = await pfReadJson(res);
+        if (!res.ok || !data.success) throw new Error(data.error || "Couldn't sign out");
+        showToast(isSelf ? 'Other devices are signed out' : `${p.name} is signed out everywhere`, 'success');
+        return true;
+    } catch (e) {
+        showToast(e.message || 'Connection error', 'error');
+        return false;
     }
 }
 
@@ -2352,14 +2844,38 @@ function openProfilePinModal(p) {
 
 // ── The profile editor: add, edit someone, or edit yourself ───────────
 // add is two steps (who, then what they can do); edit shows the same two
-// as tabs. content rating filters don't exist yet, so no preset claims one.
+// as tabs. kids and teen also set the content limits below.
 
 const PROFILE_PRESETS = [
-    { id: 'adult', name: 'Adult', desc: 'Music and movies, downloads anything', sides: 'both', can_download: true },
-    { id: 'teen', name: 'Teen', desc: 'Music and movies, asks before downloading', sides: 'both', can_download: false },
-    { id: 'kids', name: 'Kids', desc: 'Asks before downloading. Pick their pages below', sides: 'both', can_download: false },
-    { id: 'guest', name: 'Guest', desc: 'Listens to music, nothing else', sides: 'music', can_download: false },
+    { id: 'adult', name: 'Adult', desc: 'Music and movies, downloads anything', sides: 'both', can_download: true, hide_explicit: false, max_rating: '' },
+    { id: 'teen', name: 'Teen', desc: 'Movies up to PG-13, asks before downloading', sides: 'both', can_download: false, hide_explicit: false, max_rating: 'PG-13' },
+    { id: 'kids', name: 'Kids', desc: 'Clean music, movies up to PG, asks first', sides: 'both', can_download: false, hide_explicit: true, max_rating: 'PG' },
+    { id: 'guest', name: 'Guest', desc: 'Listens to music, nothing else', sides: 'music', can_download: false, hide_explicit: false, max_rating: '' },
 ];
+
+// which preset a profile's settings line up with, if any
+function pfPresetOf(p) {
+    if (!p || p.is_admin) return null;
+    const sides = _pfSidesOf(p);
+    const dl = !pfNoDownloads(p);
+    const explicit = !!p.hide_explicit;
+    const rating = p.max_rating || '';
+    return PROFILE_PRESETS.find(x => x.sides === sides && x.can_download === dl
+        && x.hide_explicit === explicit && x.max_rating === rating) || null;
+}
+
+// the quiet kids & limits line on a card: "Kids · up to PG · 5 requests/week"
+function pfLimitsLine(p) {
+    if (!p || p.is_admin) return '';
+    const bits = [];
+    const preset = pfPresetOf(p);
+    if (preset && (preset.id === 'kids' || preset.id === 'teen')) bits.push(preset.name);
+    if (p.hide_explicit && !(preset && preset.id === 'kids')) bits.push('clean music');
+    if (p.max_rating) bits.push(`up to ${p.max_rating}`);
+    const limit = pfLimitText(p.request_limit, p.request_limit_days);
+    if (limit) bits.push(limit);
+    return bits.join(' · ');
+}
 
 async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     pfCloseMenus(false);
@@ -2393,6 +2909,15 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         library_mode: p.library_mode === 'own' ? 'own' : 'shared',
         library_root: p.library_root || libraryHint || '',
         preset: isCreate ? 'adult' : null,
+        hide_explicit: !!p.hide_explicit,
+        max_rating: PROFILE_RATINGS.includes(p.max_rating) ? p.max_rating : '',
+        request_limit: Math.max(0, parseInt(p.request_limit, 10) || 0),
+        request_limit_days: PROFILE_LIMIT_PERIODS.some(([d]) => d === Number(p.request_limit_days)) ? Number(p.request_limit_days) : 7,
+        // an uploaded picture waits here until the profile exists
+        avatarFile: null,
+        avatarPreview: '',
+        avatarRemoveUpload: false,
+        openAsMe: !!(isSelf && pfOpenAsProfileId() === me.id),
     };
     const original = { ...st };
 
@@ -2421,7 +2946,7 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         preview.innerHTML = '';
         preview.append(pfAvatar({
             name: st.name.trim() || '?', avatar_color: st.avatar_color,
-            avatar_url: st.avatarKind === 'image' ? st.avatar_url.trim() : '',
+            avatar_url: st.avatarKind === 'image' ? (st.avatarPreview || st.avatar_url.trim()) : '',
         }, 'pf-avatar--lg'));
     };
     const nameId = 'pf-name-' + (++_pfUid);
@@ -2444,19 +2969,70 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         sw.addEventListener('click', () => { st.avatar_color = color; syncAvatarControls(); renderPreview(); });
         swatches.append(sw);
     });
-    const urlInput = pfEl('input', { type: 'url', class: 'pf-input', placeholder: 'https://…/photo.jpg', 'aria-label': 'Image URL', value: st.avatar_url });
-    urlInput.addEventListener('input', () => { st.avatar_url = urlInput.value; renderPreview(); });
-    const imageHelp = pfEl('p', { class: 'pf-help', text: "A link to a square picture. If it won't load, the initial shows instead." });
-    const imageBox = pfEl('div', {}, [urlInput, imageHelp]);
+    // an uploaded picture's url is ours, not something to show in the link box
+    const urlInput = pfEl('input', { type: 'url', class: 'pf-input', placeholder: 'or paste a link: https://…/photo.jpg', 'aria-label': 'Image URL', value: pfIsUploadedAvatar(st.avatar_url) ? '' : st.avatar_url });
+    urlInput.addEventListener('input', () => {
+        st.avatar_url = urlInput.value;
+        clearPicked();
+        imageError.textContent = '';
+        renderPreview();
+        syncAvatarControls();
+    });
+    const fileInput = pfEl('input', { type: 'file', accept: 'image/*', class: 'pf-file-input', tabindex: '-1', 'aria-hidden': 'true' });
+    const uploadBtn = pfEl('button', { type: 'button', class: 'pf-btn', text: 'Upload a picture' });
+    const removeBtn = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Remove' });
+    const imageError = pfEl('p', { class: 'pf-field-error', role: 'alert' });
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+        const file = fileInput.files && fileInput.files[0];
+        fileInput.value = '';
+        if (!file) return;
+        imageError.textContent = '';
+        if (!/^image\//.test(file.type || '')) { imageError.textContent = "That file isn't an image"; return; }
+        if (file.size > 3 * 1024 * 1024) { imageError.textContent = 'Pick a picture under 3 MB'; return; }
+        clearPicked();
+        st.avatarFile = file;
+        try { st.avatarPreview = URL.createObjectURL(file); } catch (e) { st.avatarPreview = ''; }
+        urlInput.value = '';
+        renderPreview();
+        syncAvatarControls();
+    });
+    removeBtn.addEventListener('click', () => {
+        if (pfIsUploadedAvatar(st.avatar_url)) st.avatarRemoveUpload = true;
+        clearPicked();
+        st.avatar_url = '';
+        urlInput.value = '';
+        st.avatarKind = 'initials';
+        renderPreview();
+        syncAvatarControls();
+    });
+    function clearPicked() {
+        if (st.avatarPreview) { try { URL.revokeObjectURL(st.avatarPreview); } catch (e) { /* ignore */ } }
+        st.avatarFile = null;
+        st.avatarPreview = '';
+    }
+    const imageHelp = pfEl('p', { class: 'pf-help' });
+    const imageBox = pfEl('div', {}, [
+        pfEl('div', { class: 'pf-upload-row' }, [uploadBtn, removeBtn, fileInput]),
+        imageError, urlInput, imageHelp,
+    ]);
     const syncAvatarControls = () => {
         segInitials.setAttribute('aria-pressed', String(st.avatarKind === 'initials'));
         segImage.setAttribute('aria-pressed', String(st.avatarKind === 'image'));
         swatches.style.display = st.avatarKind === 'initials' ? '' : 'none';
         imageBox.style.display = st.avatarKind === 'image' ? '' : 'none';
         swatches.querySelectorAll('.pf-swatch').forEach(sw => sw.setAttribute('aria-pressed', String(sw.dataset.color === st.avatar_color)));
+        const hasImage = !!(st.avatarFile || st.avatar_url.trim());
+        removeBtn.style.display = hasImage ? '' : 'none';
+        uploadBtn.textContent = hasImage ? 'Choose another' : 'Upload a picture';
+        imageHelp.textContent = st.avatarFile
+            ? `${st.avatarFile.name} is saved with the profile. It's cropped square.`
+            : pfIsUploadedAvatar(st.avatar_url)
+                ? 'Your uploaded picture.'
+                : "Any picture up to 3 MB, cropped square. A link works too; if it won't load, the initial shows.";
     };
     segInitials.addEventListener('click', () => { st.avatarKind = 'initials'; syncAvatarControls(); renderPreview(); });
-    segImage.addEventListener('click', () => { st.avatarKind = 'image'; syncAvatarControls(); renderPreview(); setTimeout(() => urlInput.focus(), 0); });
+    segImage.addEventListener('click', () => { st.avatarKind = 'image'; syncAvatarControls(); renderPreview(); setTimeout(() => uploadBtn.focus(), 0); });
 
     panes[0].append(
         preview,
@@ -2522,6 +3098,31 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             pfEl('div', { class: 'pf-section-title', text: 'Home' }),
             homeField,
         );
+        // this browser: skip the picker, and a way out for the others
+        const deviceRows = [];
+        if (!loginMode) {
+            const openAsSwitch = pfSwitch({
+                title: 'Always open as me on this device',
+                desc: 'Skips the profile picker here. Anyone can still switch from the sidebar.',
+                checked: st.openAsMe,
+                onChange: (on) => { st.openAsMe = on; },
+            });
+            deviceRows.push(openAsSwitch.row);
+        }
+        const signOutOthers = pfEl('button', { type: 'button', class: 'pf-btn', text: 'Sign out' });
+        signOutOthers.addEventListener('click', async () => {
+            signOutOthers.disabled = true;
+            await signOutProfileEverywhere(me);
+            signOutOthers.disabled = false;
+        });
+        deviceRows.push(pfEl('div', { class: 'pf-action-row' }, [
+            pfEl('span', { class: 'pf-switch-text' }, [
+                pfEl('span', { class: 'pf-switch-title', text: 'Sign out other devices' }),
+                pfEl('span', { class: 'pf-switch-desc', text: 'Every other browser and phone signed in as you goes back to the picker.' }),
+            ]),
+            signOutOthers,
+        ]));
+        pane2.append(pfEl('div', { class: 'pf-section-title', text: 'This device' }), pfEl('div', { class: 'pf-group' }, deviceRows));
     } else {
         // admin switch (editing someone else only)
         const accessBox = pfEl('div');
@@ -2545,6 +3146,8 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
                 st.preset = preset.id;
                 st.sides = preset.sides;
                 st.can_download = preset.can_download;
+                st.hide_explicit = preset.hide_explicit;
+                st.max_rating = preset.max_rating;
                 syncAccess();
             });
             presets.append(btn);
@@ -2565,6 +3168,43 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             desc: 'Covers music, podcasts, audiobooks and video. Off: what they add becomes a request you approve.',
             onChange: (on) => { st.can_download = on; st.preset = _pfMatchPreset(); syncAccess(); },
         });
+
+        // kids & limits: explicit music, a movie rating ceiling, a request cap
+        const explicitSwitch = pfSwitch({
+            title: 'Hide explicit music',
+            desc: 'Albums and tracks marked explicit are left out for them.',
+            onChange: (on) => { st.hide_explicit = on; st.preset = _pfMatchPreset(); syncAccess(); },
+        });
+        const ratingId = 'pf-rating-' + (++_pfUid);
+        const ratingSelect = pfEl('select', { class: 'pf-input pf-input--compact', id: ratingId, 'aria-describedby': ratingId + '-desc' });
+        ratingSelect.append(pfEl('option', { value: '', text: 'Any' }));
+        PROFILE_RATINGS.forEach(r => ratingSelect.append(pfEl('option', { value: r, text: r })));
+        ratingSelect.addEventListener('change', () => { st.max_rating = ratingSelect.value; st.preset = _pfMatchPreset(); syncAccess(); });
+        const ratingRow = pfEl('div', { class: 'pf-action-row' }, [
+            pfEl('span', { class: 'pf-switch-text' }, [
+                pfEl('label', { class: 'pf-switch-title', for: ratingId, text: 'Movies & TV up to' }),
+                pfEl('span', { class: 'pf-switch-desc', id: ratingId + '-desc', text: 'Titles without a rating are hidden too.' }),
+            ]),
+            ratingSelect,
+        ]);
+        const limitId = 'pf-limit-' + (++_pfUid);
+        const limitSelect = pfEl('select', { class: 'pf-input pf-input--compact', id: limitId, 'aria-describedby': limitId + '-desc' });
+        limitSelect.append(pfEl('option', { value: '0', text: 'Off' }));
+        for (let n = 1; n <= 20; n++) limitSelect.append(pfEl('option', { value: String(n), text: String(n) }));
+        // a limit set some other way (the api takes up to 1000) still shows
+        if (st.request_limit > 20) limitSelect.append(pfEl('option', { value: String(st.request_limit), text: String(st.request_limit) }));
+        const periodSelect = pfEl('select', { class: 'pf-input pf-input--compact', 'aria-label': 'Per' });
+        PROFILE_LIMIT_PERIODS.forEach(([d, label]) => periodSelect.append(pfEl('option', { value: String(d), text: 'per ' + label })));
+        limitSelect.addEventListener('change', () => { st.request_limit = parseInt(limitSelect.value, 10) || 0; syncAccess(); });
+        periodSelect.addEventListener('change', () => { st.request_limit_days = parseInt(periodSelect.value, 10) || 7; });
+        const limitDesc = pfEl('span', { class: 'pf-switch-desc', id: limitId + '-desc' });
+        const limitRow = pfEl('div', { class: 'pf-action-row' }, [
+            pfEl('span', { class: 'pf-switch-text' }, [
+                pfEl('label', { class: 'pf-switch-title', for: limitId, text: 'Request limit' }),
+                limitDesc,
+            ]),
+            pfEl('span', { class: 'pf-select-pair' }, [limitSelect, periodSelect]),
+        ]);
 
         function setSide(side, on) {
             const hasMusic = st.sides !== 'video';
@@ -2640,6 +3280,8 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             pfEl('div', { class: 'pf-group' }, [musicSwitch.row, videoSwitch.row, sideError]),
             pfEl('div', { class: 'pf-section-title', text: 'Downloads' }),
             pfEl('div', { class: 'pf-group' }, dlSwitch.row),
+            pfEl('div', { class: 'pf-section-title', text: 'Kids & limits' }),
+            pfEl('div', { class: 'pf-group' }, [explicitSwitch.row, ratingRow, limitRow]),
         ];
         accessBox.append(...accessParts);
         pane2.append(adminNote, accessBox);
@@ -2652,11 +3294,13 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         pane2.append(details);
 
         function _pfMatchPreset() {
+            const fits = (x) => x.sides === st.sides && x.can_download === st.can_download
+                && x.hide_explicit === st.hide_explicit && x.max_rating === st.max_rating;
             if (st.preset) {
                 const current = PROFILE_PRESETS.find(x => x.id === st.preset);
-                if (current && current.sides === st.sides && current.can_download === st.can_download) return st.preset;
+                if (current && fits(current)) return st.preset;
             }
-            const match = PROFILE_PRESETS.find(x => x.sides === st.sides && x.can_download === st.can_download);
+            const match = PROFILE_PRESETS.find(fits);
             return match ? match.id : null;
         }
 
@@ -2668,6 +3312,17 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             musicSwitch.set(st.sides !== 'video');
             videoSwitch.set(st.sides !== 'music');
             dlSwitch.set(st.can_download);
+            explicitSwitch.set(st.hide_explicit);
+            ratingSelect.value = st.max_rating;
+            limitSelect.value = String(st.request_limit);
+            periodSelect.value = String(st.request_limit_days);
+            periodSelect.style.display = st.request_limit > 0 ? '' : 'none';
+            // each limit only has something to act on when its side is on
+            explicitSwitch.row.style.display = st.sides === 'video' ? 'none' : '';
+            ratingRow.style.display = st.sides === 'music' ? 'none' : '';
+            limitDesc.textContent = st.can_download
+                ? 'Only counts when they ask first. Downloads without asking are never capped.'
+                : 'How many things they can ask for. An album or a movie is one ask.';
             renderPages();
             renderHomeOptions();
         }
@@ -2750,22 +3405,38 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         return true;
     }
 
-    function identityPayload() {
+    // payloads read a state, so an edit can send only what changed
+    function identityPayload(s = st) {
+        const out = {
+            name: s.name.trim(),
+            avatar_color: s.avatar_color,
+            avatar_url: s.avatarKind === 'image' ? (s.avatar_url.trim() || null) : null,
+            home_page: s.home_page || null,
+        };
+        // a picked file: the upload after the save sets the url
+        if (s.avatarFile) delete out.avatar_url;
+        return out;
+    }
+
+    function accessPayload(s = st) {
+        if (s.is_admin) return {};
         return {
-            name: st.name.trim(),
-            avatar_color: st.avatar_color,
-            avatar_url: st.avatarKind === 'image' ? (st.avatar_url.trim() || null) : null,
-            home_page: st.home_page || null,
+            allowed_sides: s.sides,
+            can_download: s.can_download,
+            allowed_pages: s.allowed_pages,
+            hide_explicit: s.hide_explicit,
+            max_rating: s.max_rating || null,
+            request_limit: s.request_limit,
+            request_limit_days: s.request_limit_days,
         };
     }
 
-    function accessPayload() {
-        if (st.is_admin) return {};
-        return {
-            allowed_sides: st.sides,
-            can_download: st.can_download,
-            allowed_pages: st.allowed_pages,
-        };
+    function changedOnly(body, before) {
+        const out = {};
+        Object.keys(body).forEach(key => {
+            if (JSON.stringify(body[key]) !== JSON.stringify(before[key])) out[key] = body[key];
+        });
+        return out;
     }
 
     async function send(url, method, body) {
@@ -2777,6 +3448,16 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             throw err;
         }
         return data;
+    }
+
+    // the picked picture goes up once the profile has an id
+    async function uploadAvatar(targetId) {
+        const form = new FormData();
+        form.append('file', st.avatarFile, st.avatarFile.name || 'avatar');
+        const res = await fetch(`/api/profiles/${targetId}/avatar`, { method: 'POST', body: form });
+        const data = await pfReadJson(res);
+        if (!res.ok || !data.success) throw new Error(data.error || "Couldn't upload the picture");
+        return data.avatar_url || '';
     }
 
     async function submit() {
@@ -2796,8 +3477,9 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             pin: st.pinOn ? st.pin : undefined,
             password: st.password || undefined,
         };
+        let created;
         try {
-            await send('/api/profiles', 'POST', body);
+            created = await send('/api/profiles', 'POST', body);
         } catch (e) {
             if (e.status === 409) {
                 nameError.textContent = 'Someone already has that name';
@@ -2809,36 +3491,83 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             }
             return;
         }
+        if (st.avatarFile && created.profile_id) {
+            try {
+                await uploadAvatar(created.profile_id);
+            } catch (e) {
+                // the profile is made; say so, and don't pretend the picture is too
+                modal.close();
+                showToast(`${body.name} is ready, but the picture didn't upload: ${e.message}`, 'warning');
+                _pfAfterSave();
+                return;
+            }
+        }
+        clearPicked();
         modal.close();
         showToast(`${body.name} is ready`, 'success');
         _pfAfterSave();
     }
 
-    // one PUT for the profile, then the pin and the password on their own.
-    // if a later one fails the earlier ones stay saved, and the message says
-    // exactly which is which.
+    // one PUT for what changed, then the picture, the pin and the password on
+    // their own. if a later one fails the earlier ones stay saved, and the
+    // message says exactly which is which.
     async function submitEdit() {
         const targetId = isSelf ? me.id : p.id;
         const saved = [];
         const failed = [];
-        const body = identityPayload();
+        let body = identityPayload();
+        let before = identityPayload(original);
         if (adminEditsOther) {
             Object.assign(body, accessPayload());
+            Object.assign(before, accessPayload(original));
             if (st.is_admin !== original.is_admin) body.is_admin = st.is_admin;
             if (!st.is_admin) {
-                body.library_mode = st.library_mode;
-                body.library_root = st.library_mode === 'own' ? st.library_root.trim() : '';
+                const root = st.library_mode === 'own' ? st.library_root.trim() : '';
+                const rootBefore = original.library_mode === 'own' ? original.library_root.trim() : '';
+                if (st.library_mode !== original.library_mode || root !== rootBefore) {
+                    body.library_mode = st.library_mode;
+                    body.library_root = root;
+                }
             }
         }
-        try {
-            const result = await send(`/api/profiles/${targetId}`, 'PUT', body);
-            saved.push('profile');
-            if (isSelf) {
-                setCurrentProfile({ ...currentProfile, ...body, ...(result.profile || {}) });
+        // a switch to admin sends no access fields, so there is nothing to diff against
+        body = changedOnly(body, before);
+        if (isSelf) {
+            if (st.openAsMe) pfSetOpenAsProfile(me.id);
+            else if (pfOpenAsProfileId() === me.id) pfSetOpenAsProfile(null);
+        }
+        if (Object.keys(body).length) {
+            try {
+                const result = await send(`/api/profiles/${targetId}`, 'PUT', body);
+                saved.push('profile');
+                if (isSelf) {
+                    setCurrentProfile({ ...currentProfile, ...body, ...(result.profile || {}) });
+                }
+            } catch (e) {
+                formError.textContent = e.message || 'Connection error';
+                return;
             }
-        } catch (e) {
-            formError.textContent = e.message || 'Connection error';
-            return;
+        }
+
+        if (st.avatarFile) {
+            try {
+                const url = await uploadAvatar(targetId);
+                saved.push('picture');
+                clearPicked();
+                if (isSelf && url) setCurrentProfile({ ...currentProfile, avatar_url: url });
+            } catch (e) {
+                failed.push(['picture', e.message]);
+            }
+        } else if (st.avatarRemoveUpload && !st.avatar_url.trim()) {
+            // the uploaded file goes too, not just the link to it
+            try {
+                const res = await fetch(`/api/profiles/${targetId}/avatar`, { method: 'DELETE' });
+                const data = await pfReadJson(res);
+                if (!res.ok || !data.success) throw new Error(data.error || "Couldn't remove the picture");
+                if (isSelf) setCurrentProfile({ ...currentProfile, avatar_url: null });
+            } catch (e) {
+                failed.push(['picture removal', e.message]);
+            }
         }
 
         const pinChanged = st.pinOn ? !!st.pin : !!p.has_pin;
@@ -2866,7 +3595,8 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         }
 
         if (failed.length) {
-            formError.textContent = `Saved: ${saved.join(', ')}. ` + failed.map(([what, why]) => `${what} didn't save: ${why}`).join(' ');
+            const savedText = saved.length ? `Saved: ${saved.join(', ')}. ` : '';
+            formError.textContent = savedText + failed.map(([what, why]) => `${what} didn't save: ${why}`).join(' ');
             _pfAfterSave();
             return;
         }
@@ -2900,8 +3630,187 @@ if ('serviceWorker' in navigator) {
     });
 }
 
+// ── Invite landing: /invite/<token> ────────────────────────────────────
+// someone opened an invite link. before anything else boots (setup, login,
+// the picker) they get one calm card: pick a name, join.
+
+function pfInviteToken() {
+    const match = /^\/invite\/([A-Za-z0-9_-]{8,200})\/?$/.exec(PF_BOOT_PATH || '');
+    return match ? match[1] : '';
+}
+
+function pfGoHome() {
+    const home = window.SoulSyncURL?.resolve ? window.SoulSyncURL.resolve('/') : '/';
+    window.location.replace(home);
+}
+
+async function showInviteLanding(token) {
+    document.body.classList.add('pf-invite-open');
+    const main = document.querySelector('.main-container');
+    if (main) main.style.display = 'none';
+    const page = pfEl('div', { class: 'pf-picker pf-invite', role: 'main' });
+    const inner = pfEl('div', { class: 'pf-invite-card' });
+    page.append(inner);
+    document.body.append(page);
+    inner.append(pfEl('p', { class: 'pf-invite-loading', text: 'Opening your invite…', role: 'status' }));
+
+    let invite = null;
+    let status = 0;
+    try {
+        const res = await fetch(`/api/invite/${encodeURIComponent(token)}`);
+        status = res.status;
+        const data = await pfReadJson(res);
+        if (res.ok && data.success) invite = data;
+    } catch (e) {
+        status = -1;
+    }
+    inner.innerHTML = '';
+    if (!invite) {
+        renderInviteProblem(inner, status);
+        return;
+    }
+
+    const st = { name: '', color: PROFILE_COLORS[0][0] };
+    const preview = pfEl('div', { class: 'pf-identity-preview' });
+    const renderPreview = () => {
+        preview.innerHTML = '';
+        preview.append(pfAvatar({ name: st.name.trim() || '?', avatar_color: st.color }, 'pf-avatar--lg'));
+    };
+    const titleId = 'pf-invite-title';
+    inner.setAttribute('aria-labelledby', titleId);
+    inner.append(preview, pfEl('h1', { class: 'pf-invite-title', id: titleId, text: "You're invited to SoulSync" }));
+    if (invite.note) inner.append(pfEl('p', { class: 'pf-invite-note', text: invite.note }));
+    const what = invite.sides === 'both' ? 'music, movies and TV' : invite.sides === 'video' ? 'movies and TV' : 'music';
+    inner.append(pfEl('p', { class: 'pf-modal-sub pf-invite-sub', text: `Make your profile for ${what}. It only takes a moment.` }));
+
+    const form = pfEl('form', { class: 'pf-invite-form', novalidate: true });
+    const nameId = 'pf-invite-name';
+    const nameInput = pfEl('input', { type: 'text', id: nameId, class: 'pf-input', maxlength: '20', autocomplete: 'nickname', required: true, 'aria-describedby': nameId + '-err' });
+    const nameError = pfEl('p', { class: 'pf-field-error', id: nameId + '-err', role: 'alert' });
+    nameInput.addEventListener('input', () => { st.name = nameInput.value; nameError.textContent = ''; nameInput.classList.remove('is-invalid'); renderPreview(); });
+
+    const swatches = pfEl('div', { class: 'pf-swatches', role: 'group', 'aria-label': 'Colour' });
+    PROFILE_COLORS.forEach(([color, colorName]) => {
+        const sw = pfEl('button', { type: 'button', class: 'pf-swatch', style: `background:${color}`, 'aria-label': colorName, 'data-color': color });
+        sw.addEventListener('click', () => { st.color = color; syncSwatches(); renderPreview(); });
+        swatches.append(sw);
+    });
+    const syncSwatches = () => swatches.querySelectorAll('.pf-swatch').forEach(sw => sw.setAttribute('aria-pressed', String(sw.dataset.color === st.color)));
+
+    const pinId = 'pf-invite-pin';
+    const pinInput = pfEl('input', { type: 'password', id: pinId, class: 'pf-input', inputmode: 'numeric', autocomplete: 'new-password', maxlength: String(PROFILE_PIN_MAX), 'aria-describedby': pinId + '-help ' + pinId + '-err' });
+    const pinError = pfEl('p', { class: 'pf-field-error', id: pinId + '-err', role: 'alert' });
+    pinInput.addEventListener('input', () => { pinError.textContent = ''; });
+
+    const fields = [
+        pfEl('div', { class: 'pf-field' }, [pfEl('label', { class: 'pf-label', for: nameId, text: 'Your name' }), nameInput, nameError]),
+        pfEl('div', { class: 'pf-field' }, [pfEl('span', { class: 'pf-label', text: 'Colour' }), swatches]),
+        pfEl('div', { class: 'pf-field' }, [
+            pfEl('label', { class: 'pf-label', for: pinId, text: 'PIN (optional)' }), pinInput, pinError,
+            pfEl('p', { class: 'pf-help', id: pinId + '-help', text: `${PROFILE_PIN_MIN} to ${PROFILE_PIN_MAX} digits, asked when your profile opens.` }),
+        ]),
+    ];
+    let passwordInput = null;
+    const passwordError = pfEl('p', { class: 'pf-field-error', role: 'alert' });
+    if (invite.password_required) {
+        const pwId = 'pf-invite-password';
+        passwordInput = pfEl('input', { type: 'password', id: pwId, class: 'pf-input', autocomplete: 'new-password', maxlength: '200', required: true, 'aria-describedby': pwId + '-help' });
+        passwordInput.addEventListener('input', () => { passwordError.textContent = ''; });
+        passwordError.id = pwId + '-err';
+        fields.push(pfEl('div', { class: 'pf-field' }, [
+            pfEl('label', { class: 'pf-label', for: pwId, text: 'Password' }), passwordInput, passwordError,
+            pfEl('p', { class: 'pf-help', id: pwId + '-help', text: 'At least 6 characters. You sign in with your name and this.' }),
+        ]));
+    }
+    const formError = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
+    const join = pfEl('button', { type: 'submit', class: 'pf-btn pf-btn--primary pf-btn--block', text: 'Join' });
+    form.append(...fields, formError, join);
+    inner.append(form);
+    renderPreview();
+    syncSwatches();
+    setTimeout(() => nameInput.focus(), 40);
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        formError.textContent = '';
+        const name = nameInput.value.trim();
+        if (!name) { nameError.textContent = 'Pick a name'; nameInput.classList.add('is-invalid'); nameInput.focus(); return; }
+        const pin = pinInput.value;
+        if (pin) {
+            const problem = profilePinError(pin);
+            if (problem) { pinError.textContent = problem; pinInput.focus(); return; }
+        }
+        const password = passwordInput ? passwordInput.value : '';
+        if (passwordInput && password.length < 6) {
+            passwordError.textContent = 'Use at least 6 characters';
+            passwordInput.focus();
+            return;
+        }
+        join.disabled = true;
+        join.textContent = 'Joining…';
+        try {
+            const res = await fetch(`/api/invite/${encodeURIComponent(token)}/accept`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, avatar_color: st.color, pin: pin || undefined, password: password || undefined }),
+            });
+            const data = await pfReadJson(res);
+            if (res.ok && data.success) {
+                if (pin) {
+                    try { localStorage.setItem(_pfPinLengthKey(data.profile_id), String(pin.length)); } catch (err) { /* ignore */ }
+                }
+                // signed in as the new profile: land on the app, not the link
+                try { history.replaceState(null, '', '/'); } catch (err) { /* ignore */ }
+                window.location.reload();
+                return;
+            }
+            if (res.status === 409) {
+                nameError.textContent = 'Someone here already has that name';
+                nameInput.classList.add('is-invalid');
+                nameInput.focus();
+            } else if (res.status === 404) {
+                inner.innerHTML = '';
+                renderInviteProblem(inner, 404);
+                return;
+            } else if (res.status === 429) {
+                formError.textContent = 'Too many tries. Wait a few minutes and try again.';
+            } else {
+                formError.textContent = data.error || "Couldn't join, try again";
+            }
+        } catch (err) {
+            formError.textContent = 'Connection error, try again';
+        }
+        join.disabled = false;
+        join.textContent = 'Join';
+    });
+}
+
+function renderInviteProblem(inner, status) {
+    const tooMany = status === 429;
+    const offline = status === -1;
+    inner.setAttribute('aria-labelledby', 'pf-invite-title');
+    inner.append(
+        pfEl('h1', { class: 'pf-invite-title', id: 'pf-invite-title', text: tooMany ? 'Too many tries' : offline ? "Couldn't reach SoulSync" : "This invite link doesn't work any more" }),
+        pfEl('p', {
+            class: 'pf-modal-sub pf-invite-sub',
+            text: tooMany ? 'Wait a few minutes, then open the link again.'
+                : offline ? 'Check the connection and open the link again.'
+                    : 'It may have been used already, or run out. Ask whoever sent it for a new one.',
+        }),
+    );
+    const go = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary pf-btn--block', text: 'Go to SoulSync', onclick: () => pfGoHome() });
+    inner.append(go);
+    setTimeout(() => go.focus(), 40);
+}
+
 document.addEventListener('DOMContentLoaded', async function () {
     console.log('SoulSync WebUI initializing...');
+
+    // an invite link comes before setup, login and the picker
+    const inviteToken = pfInviteToken();
+    if (inviteToken) {
+        showInviteLanding(inviteToken);
+        return;
+    }
 
     // Check if first-run setup wizard should be shown
     const params = new URLSearchParams(window.location.search);

@@ -2,6 +2,7 @@ import type {
   MusicRequestList,
   MusicRequestStatus,
   RequestItem,
+  RequestQuota,
   RequestTab,
 } from './-requests.types';
 
@@ -99,7 +100,11 @@ export function subLine(item: RequestItem): string {
   if (artist) bits.push(artist);
   if (itemKind(item) === 'album') {
     if (count) bits.push(`${count} track${count === 1 ? '' : 's'}`);
-  } else if (item.source === 'pending' && item.group.album && item.group.album !== item.group.title) {
+  } else if (
+    item.source === 'pending' &&
+    item.group.album &&
+    item.group.album !== item.group.title
+  ) {
     bits.push(item.group.album);
   }
   return bits.join(' · ');
@@ -152,4 +157,24 @@ export function emptyText(tab: RequestTab, isAdmin: boolean, asksFirst: boolean)
   if (tab === 'available') return 'Nothing has arrived yet.';
   if (tab === 'declined') return 'Nothing declined.';
   return isAdmin ? 'No requests yet.' : 'You haven’t asked for anything yet.';
+}
+
+function quotaSpan(days: number): string {
+  if (days === 1) return 'today';
+  if (days === 7) return 'this week';
+  if (days === 30) return 'this month';
+  return `in the last ${days} days`;
+}
+
+/** "2 of 3 requests left this week", or that they're used up. '' with no limit. */
+export function quotaLine(quota: RequestQuota | null | undefined): string {
+  if (!quota || quota.limit <= 0) return '';
+  const noun = quota.limit === 1 ? 'request' : 'requests';
+  const span = quotaSpan(quota.days);
+  if (quota.remaining <= 0) {
+    return quota.limit === 1
+      ? `You’ve used your request ${span}`
+      : `You’ve used all ${quota.limit} requests ${span}`;
+  }
+  return `${quota.remaining} of ${quota.limit} ${noun} left ${span}`;
 }

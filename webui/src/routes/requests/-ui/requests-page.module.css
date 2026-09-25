@@ -6,7 +6,15 @@
 }
 
 .head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 22px;
+}
+
+.headText {
+  min-width: 0;
 }
 
 .title {
@@ -20,6 +28,13 @@
   margin: 6px 0 0;
   font-size: 14px;
   color: rgba(255, 255, 255, 0.55);
+}
+
+/* a member's request limit, quiet under the subtitle */
+.quota {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.42);
 }
 
 .tabs {

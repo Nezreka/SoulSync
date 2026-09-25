@@ -72,6 +72,38 @@ def create_blueprint():
     return bp
 
 
+def _audit(action, target_id=None, target_name=None, detail=None):
+    from api.profile_admin import audit
+    audit(action, target_id, target_name, detail)
+
+
+_RATINGS = ('G', 'PG', 'PG-13', 'R')
+
+
+def _admin_controls(data):
+    """the admin-only access knobs on a profile, cleaned: request quota and
+    the kids limits. returns (kwargs, error)."""
+    out = {}
+    if 'request_limit' in data:
+        try:
+            out['request_limit'] = max(0, min(1000, int(data['request_limit'] or 0)))
+        except (TypeError, ValueError):
+            return None, 'request_limit must be a number'
+    if 'request_limit_days' in data:
+        try:
+            out['request_limit_days'] = max(1, min(365, int(data['request_limit_days'] or 7)))
+        except (TypeError, ValueError):
+            return None, 'request_limit_days must be a number'
+    if 'hide_explicit' in data:
+        out['hide_explicit'] = 1 if data['hide_explicit'] else 0
+    if 'max_rating' in data:
+        rating = data['max_rating'] or None
+        if rating is not None and rating not in _RATINGS:
+            return None, 'max_rating must be one of ' + ', '.join(_RATINGS)
+        out['max_rating'] = rating
+    return out, None
+
+
 # --- Per-Profile ListenBrainz Settings ---
 
 def _get_lb_credentials_for_profile(profile_id=None):
@@ -452,6 +484,10 @@ def create_profile():
                             'error': 'Login mode is on — give this profile a login '
                                      'password so they can sign in.'}), 400
 
+        _controls, control_error = _admin_controls(data)
+        if control_error:
+            return jsonify({'success': False, 'error': control_error}), 400
+
         # Profile settings: home_page, allowed_pages, can_download, allowed_sides
         home_page = data.get('home_page') or None
         allowed_pages = data.get('allowed_pages')  # list or None
@@ -484,6 +520,10 @@ def create_profile():
 
         if password:
             database.set_profile_password(profile_id, password)
+        controls, _err = _admin_controls(data)
+        if controls:
+            database.update_profile(profile_id, **controls)
+        _audit('profile_created', profile_id, name)
 
         return jsonify({'success': True, 'profile_id': profile_id})
     except Exception as e:
@@ -570,6 +610,10 @@ def update_profile(profile_id):
                 # resolves admins to 'both'.
                 sides = data['allowed_sides']
                 kwargs['allowed_sides'] = sides if sides in ('music', 'video', 'both') else None
+            controls, control_error = _admin_controls(data)
+            if control_error:
+                return jsonify({'success': False, 'error': control_error}), 400
+            kwargs.update(controls)
 
         # own library (#1199): admin only, never on the admin profile itself
         library_result = None
@@ -608,6 +652,14 @@ def update_profile(profile_id):
         success = database.update_profile(profile_id, **kwargs) if kwargs else True
         if library_result is False:
             return jsonify({'success': False, 'error': 'Failed to save the library setting'}), 500
+        if success and (kwargs or library_result is not None):
+            changed = sorted(set(kwargs) | ({'library'} if library_result is not None else set()))
+            if 'is_admin' in kwargs:
+                _audit('admin_granted' if kwargs['is_admin'] else 'admin_revoked', profile_id,
+                       (database.get_profile(profile_id) or {}).get('name'))
+            if int(profile_id) != int(current_pid) or set(changed) - {'name', 'avatar_color', 'avatar_url', 'home_page'}:
+                _audit('profile_updated', profile_id, (database.get_profile(profile_id) or {}).get('name'),
+                       ', '.join(changed))
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -633,6 +685,7 @@ def delete_profile(profile_id):
         if success:
             from api.profiles import _sweep_video_profile_data
             _sweep_video_profile_data(profile_id)
+            _audit('profile_deleted', profile_id, target.get('name'))
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -693,6 +746,8 @@ def select_profile():
                 pin_checked = True
 
         session['profile_id'] = profile_id
+        # the epoch this sign-in counts under ("sign out everywhere" moves it)
+        session['profile_epoch'] = profile.get('session_epoch', 0)
         # If the admin PIN was just validated, also mark launch PIN as
         # verified so the subsequent page reload doesn't ask again. only a pin
         # that was actually checked counts: this used to fire for ANY pin on a
@@ -859,6 +914,7 @@ def logout_profile():
     flags too: popping only the profile left an authenticated session with no
     profile, which resolved to the admin."""
     session.pop('profile_id', None)
+    session.pop('profile_epoch', None)
     session.pop('login_authenticated', None)
     session.pop('launch_pin_verified', None)
     return jsonify({'success': True})
@@ -884,6 +940,9 @@ def set_profile_pin(profile_id):
             pin_hash = None  # Remove PIN
 
         success = database.update_profile(profile_id, pin_hash=pin_hash)
+        if success and int(profile_id) != int(current_pid):
+            _audit('pin_reset' if pin_hash else 'pin_removed', profile_id,
+                   (database.get_profile(profile_id) or {}).get('name'))
         # the launch lock checks the admin's pin, and a profile with no pin
         # accepts any pin. clearing it with the lock still on left a lock
         # that anything opened, so the lock goes with it.
@@ -914,6 +973,16 @@ def set_profile_password_endpoint(profile_id):
                             'error': "Can't remove this password while login mode is on — "
                                      "that profile couldn't sign in."}), 400
         ok = database.set_profile_password(profile_id, password)
+        if ok:
+            # a new password signs out every other browser on that profile;
+            # the one that changed it (if it's the profile's own) stays in
+            epoch = database.bump_profile_session_epoch(profile_id)
+            from core.security.session_epoch import forget
+            forget(profile_id)
+            if int(profile_id) == int(current_pid) and epoch is not None:
+                session['profile_epoch'] = epoch
+            if int(profile_id) != int(current_pid):
+                _audit('password_set', profile_id, (database.get_profile(profile_id) or {}).get('name'))
         return jsonify({'success': bool(ok), 'has_password': database.profile_has_password(profile_id)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

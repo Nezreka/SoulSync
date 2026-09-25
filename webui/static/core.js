@@ -836,6 +836,31 @@ function announceWishlistRequest() {
 }
 window.announceWishlistRequest = announceWishlistRequest;
 
+// before a wishlist add from a profile that asks first: when their request
+// limit is used up the server quietly drops the add, so say it here instead.
+// resolves true when the add should go ahead (and on any doubt).
+function _requestLimitMessage(quota) {
+    const days = Number(quota.days) || 7;
+    const noun = Number(quota.limit) === 1 ? 'request' : 'requests';
+    const span = days === 1 ? 'for today' : days === 7 ? 'for this week' : days === 30 ? 'for this month' : `for the last ${days} days`;
+    return `You've used your ${quota.limit} ${noun} ${span}`;
+}
+async function checkMusicRequestQuota() {
+    if (typeof canDownload !== 'function' || canDownload()) return true;
+    try {
+        const res = await fetch('/api/requests/music/quota', { headers: { 'Accept': 'application/json' } });
+        if (!res.ok) return true;
+        const data = await res.json();
+        const quota = data && data.quota;
+        if (!quota || Number(quota.remaining) > 0) return true;
+        if (typeof showToast === 'function') showToast(_requestLimitMessage(quota), 'warning');
+        return false;
+    } catch (e) {
+        return true;
+    }
+}
+window.checkMusicRequestQuota = checkMusicRequestQuota;
+
 function initializeWebSocket() {
     if (typeof io === 'undefined') {
         console.warn('Socket.IO client not loaded — falling back to HTTP polling');
