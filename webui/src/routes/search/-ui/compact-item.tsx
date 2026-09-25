@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { acquireVerb } from '@/platform/shell/download-rights';
+
 import { splitTitleExtra } from '../-search.helpers';
 import { ChevronIcon, DiscIcon, DownloadIcon, PlayIcon } from './search-icons';
 import styles from './search.module.css';
@@ -206,6 +208,8 @@ export function TrackRow({
 }) {
   const img = useImage(image);
   const title = splitTitleExtra(name);
+  // a profile that can't download asks: the same modal, a request instead
+  const verb = acquireVerb();
   return (
     <div
       className={styles.trackRow}
@@ -259,8 +263,8 @@ export function TrackRow({
       <button
         type="button"
         className={styles.rowDownload}
-        aria-label={`Download ${name}`}
-        title="Download"
+        aria-label={`${verb} ${name}`}
+        title={verb}
         onClick={(event) => {
           event.stopPropagation();
           onOpen();

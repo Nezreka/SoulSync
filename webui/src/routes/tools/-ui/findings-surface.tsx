@@ -141,7 +141,7 @@ export interface FindingsSurfaceProps {
   trackCount: number | null;
   /** A jump from the run history: scope the surface to one job's open
    *  findings. The token re-fires the same job. */
-  focusJob?: { jobId: string; token: number } | null;
+  focusJob?: { jobId: string; token: number; query?: string } | null;
   /** `updateRepairStatus()` — refresh the pending badge after any mutation. */
   onStatusChanged: () => void;
 }
@@ -347,7 +347,8 @@ export function FindingsSurface({
     setJobFilter(focusJob.jobId);
     setStatusFilter('pending');
     setSeverityFilter('');
-    setQuery('');
+    // a jump from an issue carries the item it was about
+    setQuery(focusJob.query ?? '');
     setOpenType('');
     setPage(0);
   }, [focusJob]);

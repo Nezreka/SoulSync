@@ -107,6 +107,13 @@ def register_routes(bp):
                     kind, search=request.args.get("search", ""), sort=request.args.get("sort", "added"),
                     page=request.args.get("page", 1), limit=request.args.get("limit", 60))
                 _annotate_live_state(db, kind, res.get("items") or [])
+                from .kids import filter_tmdb_items, video_cap
+                cap = video_cap()
+                if cap is not None:
+                    tagged = [dict(it, kind=it.get("kind") if it.get("kind") in ("movie", "show")
+                                   else ("movie" if kind == "movie" else "show"))
+                              for it in res.get("items") or []]
+                    res = {**res, "items": filter_tmdb_items(db, tagged, cap)}
                 return jsonify({"success": True, "kind": kind, "counts": counts, **res})
             return jsonify({"success": True, "counts": counts})
         except Exception:

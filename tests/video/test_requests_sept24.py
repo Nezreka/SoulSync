@@ -131,3 +131,50 @@ def test_arrival_is_stamped_and_told_once(client):
     assert vreq.sweep_arrivals() == 0          # once
     assert db.get_video_request(rid)["available_at"]
     assert [m for pid, k, m in notes if pid == 2 and "in your library" in m]
+
+
+# ── sept 25 follow-up: progress, failed/partial, quality profile ─────────────
+
+def test_requests_carry_progress_and_a_failed_state(client):
+    c, db, _notes, _v = client
+    rid = _file(c, 2).get_json()["id"]
+    c.post(f"/api/video/requests/{rid}/approve")
+    row = next(r for r in c.get("/api/video/requests").get_json()["requests"] if r["id"] == rid)
+    assert row["state"] == "on_the_way" and row["progress"]["wanted"] == 1
+    conn = db._get_connection()
+    conn.execute("UPDATE video_wishlist SET status='failed' WHERE kind='movie' AND tmdb_id=438631")
+    conn.commit()
+    conn.close()
+    row = next(r for r in c.get("/api/video/requests").get_json()["requests"] if r["id"] == rid)
+    assert row["state"] == "failed"
+
+
+def test_show_request_progress_counts_episodes(client):
+    c, db, _notes, _v = client
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "tmdb_id": 55, "seasons": [
+        {"season_number": 1, "episodes": [
+            {"episode_number": 1, "title": "a", "file": {"relative_path": "/a.mkv", "size_bytes": 5}},
+            {"episode_number": 2, "title": "b"}]}]})
+    rid = _file(c, 2, kind="show", tmdb_id=55, title="Show").get_json()["id"]
+    c.post(f"/api/video/requests/{rid}/approve")
+    db.add_episodes_to_wishlist(55, "Show", [{"season_number": 1, "episode_number": 2}])
+    row = next(r for r in c.get("/api/video/requests").get_json()["requests"] if r["id"] == rid)
+    assert row["progress"]["owned"] == 1 and row["progress"]["wanted"] == 1
+    assert row["state"] == "partial"
+
+
+def test_request_quality_profile_lands_on_the_wishlist(client):
+    c, db, _notes, _v = client
+    conn = db._get_connection()
+    cur = conn.execute("INSERT INTO quality_profiles (name, cutoff, items) VALUES ('4K', '', '[]')")
+    qp = cur.lastrowid
+    conn.commit()
+    conn.close()
+    rid = _file(c, 2, quality_profile_id=qp).get_json()["id"]
+    assert db.get_video_request(rid)["quality_profile_id"] == qp
+    assert _file(c, 3, tmdb_id=9, title="x", quality_profile_id=99999).status_code == 200
+    c.post(f"/api/video/requests/{rid}/approve")
+    conn = db._get_connection()
+    got = conn.execute("SELECT quality_profile_id FROM video_wishlist WHERE tmdb_id=438631").fetchone()[0]
+    conn.close()
+    assert got == qp

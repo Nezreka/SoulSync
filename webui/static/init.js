@@ -1209,6 +1209,8 @@ const PF_ICONS = {
     edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
     people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 20a6.5 6.5 0 0 0-3-5.5"/></svg>',
     signout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>',
+    devices: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="10" rx="2"/><path d="M6 18h6"/><rect x="17" y="8" width="5" height="12" rx="1.5"/></svg>',
+    power: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></svg>',
 };
 
 let _pfUid = 0;
@@ -1547,12 +1549,14 @@ function showProfilePicker(profiles, canCancel = false) {
     const isAdmin = !!(currentProfile && currentProfile.is_admin);
 
     grid.innerHTML = '';
-    _pfProfilesCache.forEach(p => {
-        const meta = profileMetaLine(p);
+    pfPickerNote('');
+    // a turned-off profile is only there for admins, dimmed, to turn back on
+    _pfProfilesCache.filter(p => !p.disabled || isAdmin).forEach(p => {
+        const meta = p.disabled ? 'Off' : profileMetaLine(p);
         const isCurrent = !!(currentProfile && currentProfile.id === p.id);
         const tile = pfEl('button', {
             type: 'button',
-            class: 'pf-tile' + (isCurrent ? ' is-current' : ''),
+            class: 'pf-tile' + (isCurrent ? ' is-current' : '') + (p.disabled ? ' is-off' : ''),
             'aria-label': p.name + (meta ? ', ' + meta : '') + (isCurrent ? ', current profile' : ''),
         }, [
             pfAvatar(p, 'pf-avatar--tile'),
@@ -1596,6 +1600,18 @@ function showProfilePicker(profiles, canCancel = false) {
     });
 }
 
+// one quiet line under the picker grid ("This profile is turned off")
+function pfPickerNote(text) {
+    const grid = document.getElementById('profile-picker-grid');
+    if (!grid || !grid.parentNode) return;
+    let note = document.getElementById('profile-picker-note');
+    if (!note) {
+        note = pfEl('p', { id: 'profile-picker-note', class: 'pf-picker-note', role: 'status', 'aria-live': 'polite' });
+        grid.parentNode.insertBefore(note, grid.nextSibling);
+    }
+    note.textContent = text || '';
+}
+
 function hideProfilePicker() {
     const overlay = document.getElementById('profile-picker-overlay');
     pfCloseLayer(overlay);
@@ -1614,6 +1630,11 @@ async function handleProfileClick(profile, profileCount = 0) {
         hideProfilePicker();
         return;
     }
+    // the server says no to a turned-off profile (admins still get in)
+    if (profile.disabled && !profile.is_admin) {
+        pfPickerNote('This profile is turned off');
+        return;
+    }
     if (profileLoginMode && currentProfile) {
         showPinDialog(profile, 'password');
     } else if (profile.has_pin && profileCount > 1) {
@@ -1621,7 +1642,9 @@ async function handleProfileClick(profile, profileCount = 0) {
     } else {
         const ok = await selectProfile(profile.id);
         if (!ok) {
-            if (typeof showToast === 'function') showToast(`Couldn't open ${profile.name}`, 'error');
+            // turned off since the picker loaded
+            if (_pfLastSelect && _pfLastSelect.disabled) pfPickerNote('This profile is turned off');
+            else if (typeof showToast === 'function') showToast(`Couldn't open ${profile.name}`, 'error');
             return;
         }
         // always a fresh load: with 2+ profiles everything the page fetched
@@ -1898,7 +1921,11 @@ function showProfileForgotPin(profile) {
     pfOpenLayer(layer, { focus: input });
 }
 
+// the last select answer, so a failed pick can say why
+let _pfLastSelect = null;
+
 async function selectProfile(profileId) {
+    _pfLastSelect = null;
     try {
         const oldProfileId = currentProfile ? currentProfile.id : null;
         const res = await fetch('/api/profiles/select', {
@@ -1907,6 +1934,7 @@ async function selectProfile(profileId) {
             body: JSON.stringify({ profile_id: profileId })
         });
         const data = await res.json();
+        _pfLastSelect = data;
         if (data.success) {
             setCurrentProfile(data.profile);
             // Join profile-scoped WebSocket room for watchlist/wishlist count updates
@@ -1938,7 +1966,8 @@ function openProfileQuickSwitch(button, profiles) {
     pfCloseMenus(false);
     const me = currentProfile;
     if (!me) return;
-    const others = profiles.filter(p => p.id !== me.id);
+    // turned-off profiles can't be opened, so they aren't offered here
+    const others = profiles.filter(p => p.id !== me.id && !(p.disabled && !p.is_admin));
     const menu = pfEl('div', { class: 'pf-popover', id: 'profile-quick-switch', role: 'menu', 'aria-label': 'Profiles' });
 
     const item = (children, run, extra = '') => {
@@ -2198,6 +2227,7 @@ function _pfRoleLine(p) {
 }
 
 function _pfSummary(p, loginMode) {
+    if (p.disabled) return { text: 'Turned off. Everything is kept, nobody can open it.', warn: '' };
     if (p.is_admin) return { text: 'Everything, including settings' + (p.has_pin ? ' · PIN' : ''), warn: '' };
     const sides = _pfSidesOf(p);
     const bits = [sides === 'both' ? 'Music & movies' : sides === 'video' ? 'Movies & TV only' : 'Music only'];
@@ -2345,9 +2375,11 @@ function _pfManageCard(p, loginMode) {
     // profile 1 is only ever changed by itself
     const canEdit = !pfIsOwner(p) || pfIsOwner(me);
     const summary = _pfSummary(p, loginMode && !p.is_admin);
+    const isOff = !!p.disabled;
     const role = pfEl('span', { class: 'pf-card-role' }, [
         _pfRoleLine(p),
         isSelf ? pfEl('span', { class: 'pf-you', text: ' · You' }) : null,
+        isOff ? pfEl('span', { class: 'pf-off-pill', text: 'Off', title: 'Turned off: nobody can open it' }) : null,
     ]);
     const main = pfEl('button', {
         type: 'button', class: 'pf-card-main', disabled: !canEdit,
@@ -2363,13 +2395,18 @@ function _pfManageCard(p, loginMode) {
         pfLimitsLine(p) ? pfEl('span', { class: 'pf-card-limits', text: pfLimitsLine(p) }) : null,
     ]);
     main.addEventListener('click', () => openProfileEditor({ mode: isSelf ? 'self' : 'edit', profile: p }));
-    const card = pfEl('div', { class: 'pf-card' + (isSelf ? ' is-current' : '') }, main);
+    const card = pfEl('div', { class: 'pf-card' + (isSelf ? ' is-current' : '') + (isOff ? ' is-off' : '') }, main);
 
     const items = [];
     if (canEdit) items.push({ label: 'Edit', icon: PF_ICONS.edit, run: () => openProfileEditor({ mode: isSelf ? 'self' : 'edit', profile: p }) });
     if (!isSelf && !pfIsOwner(p) && p.has_pin) items.push({ label: 'Reset PIN', run: () => resetProfilePin(p) });
     if (!isSelf && !p.is_admin) items.push({ label: p.has_password ? 'Change login password' : 'Set login password', run: () => openProfilePasswordModal(p) });
+    items.push({ label: 'Devices', icon: PF_ICONS.devices, run: () => openProfileDevices(p) });
     if (canEdit) items.push({ label: isSelf ? 'Sign out other devices' : 'Sign out everywhere', icon: PF_ICONS.signout, run: () => signOutProfileEverywhere(p) });
+    // the owner and yourself can't be turned off: that would lock the door
+    if (!isSelf && !pfIsOwner(p)) {
+        items.push({ label: isOff ? 'Turn back on' : 'Turn off', icon: PF_ICONS.power, run: () => setProfileDisabled(p, !isOff) });
+    }
     if (!isSelf && !pfIsOwner(p)) {
         if (items.length) items.push('sep');
         items.push({ label: 'Delete', danger: true, run: () => deleteProfile(p) });
@@ -2405,6 +2442,7 @@ function pfInvitePresetLine(preset) {
     const bits = [match ? match.name : sides];
     if (match) bits.push(sides.toLowerCase());
     if (pr.max_rating && !match) bits.push(`up to ${pr.max_rating}`);
+    if (Array.isArray(pr.allowed_pages)) bits.push(`${pr.allowed_pages.length} pages`);
     const limit = pfLimitText(pr.request_limit, pr.request_limit_days);
     if (limit) bits.push(limit);
     return bits.join(' · ');
@@ -2507,10 +2545,32 @@ function openInviteCreator() {
             pfEl('span', { class: 'pf-preset-name', text: pr.name }),
             pfEl('span', { class: 'pf-preset-desc', text: pr.desc }),
         ]);
-        btn.addEventListener('click', () => { preset = pr; sync(); });
+        btn.addEventListener('click', () => {
+            preset = pr;
+            // a preset with other sides redraws the page list for them
+            const sidesChanged = more.sides !== pr.sides;
+            more.sides = pr.sides;
+            more.can_download = pr.can_download;
+            if (sidesChanged) pages.render();
+            limit.sync();
+            sync();
+        });
         presets.append(btn);
         return [btn, pr];
     });
+    // "more": the same page list and request limit the editor has
+    const more = {
+        sides: preset.sides, can_download: preset.can_download, allowed_pages: null,
+        request_limit: 0, request_limit_days: 7,
+    };
+    const pages = pfPagePicker(more);
+    const limit = pfLimitRow(more);
+    const moreBox = pfEl('details', { class: 'pf-details pf-invite-more' }, [
+        pfEl('summary', { text: 'More' }),
+        pfEl('div', { class: 'pf-section-title', text: 'Pages' }), pages.box,
+        pfEl('div', { class: 'pf-section-title', text: 'Limits' }),
+        pfEl('div', { class: 'pf-group' }, limit.row),
+    ]);
     const noteId = 'pf-invite-note-' + (++_pfUid);
     const note = pfEl('input', { type: 'text', id: noteId, class: 'pf-input', maxlength: '200', autocomplete: 'off', placeholder: 'For Kim' });
     const expiry = pfEl('div', { class: 'pf-seg', role: 'group', 'aria-label': 'Runs out after' });
@@ -2522,7 +2582,7 @@ function openInviteCreator() {
     });
     const error = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
     const form = pfEl('div', {}, [
-        pfEl('div', { class: 'pf-section-title', text: 'Access' }), presets,
+        pfEl('div', { class: 'pf-section-title', text: 'Access' }), presets, moreBox,
         pfEl('div', { class: 'pf-field', style: 'margin-top:18px' }, [
             pfEl('label', { class: 'pf-label', for: noteId, text: 'Note (optional)' }), note,
             pfEl('p', { class: 'pf-help', text: 'Only you see it, to tell your links apart.' }),
@@ -2548,9 +2608,9 @@ function openInviteCreator() {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     preset: {
-                        allowed_sides: preset.sides, can_download: preset.can_download, allowed_pages: null,
+                        allowed_sides: preset.sides, can_download: preset.can_download, allowed_pages: more.allowed_pages,
                         hide_explicit: preset.hide_explicit, max_rating: preset.max_rating || null,
-                        request_limit: 0, request_limit_days: 7,
+                        request_limit: more.request_limit, request_limit_days: more.request_limit_days,
                     },
                     note: note.value.trim() || undefined,
                     expires_hours: hours,
@@ -2636,6 +2696,13 @@ function pfAuditSentence(entry) {
         case 'invite_revoked': return `${actor} revoked an invite link`;
         case 'invite_used': return `${entry.target_name || actor} joined with an invite link`;
         case 'avatar_changed': return `${actor} changed ${theirs} picture`;
+        case 'profile_disabled': return `${actor} turned ${theirs} profile off`;
+        case 'profile_enabled': return `${actor} turned ${theirs} profile back on`;
+        case 'device_signed_out': {
+            // the device's label rides in detail when the server keeps it
+            const where = entry.detail ? ` on ${entry.detail}` : ' on one device';
+            return self ? `${actor} signed out one of their devices` : `${actor} signed ${target} out${where}`;
+        }
         default: return `${actor}: ${String(entry.action || '').replace(/_/g, ' ')}`;
     }
 }
@@ -2745,6 +2812,127 @@ async function signOutProfileEverywhere(p) {
         showToast(e.message || 'Connection error', 'error');
         return false;
     }
+}
+
+// off keeps everything but nobody gets in. turning it back on just opens the door again.
+async function setProfileDisabled(p, off) {
+    if (off) {
+        const ok = await showConfirmDialog({
+            title: `Turn off ${p.name}'s profile?`,
+            message: `Everything of theirs is kept, but nobody can open it until you turn it back on. Anyone using it right now is signed out.`,
+            confirmText: 'Turn off',
+            destructive: true,
+        });
+        if (!ok) return;
+    }
+    try {
+        const res = await fetch(`/api/profiles/${p.id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled: !!off }),
+        });
+        const data = await pfReadJson(res);
+        if (!res.ok || !data.success) throw new Error(data.error || "Couldn't change it");
+        showToast(off ? `${p.name}'s profile is off` : `${p.name}'s profile is back on`, off ? 'info' : 'success');
+    } catch (e) {
+        showToast(e.message || 'Connection error', 'error');
+    }
+    loadProfileManageList();
+}
+
+// every browser signed in as someone, and a way to sign one out
+function openProfileDevices(p) {
+    pfCloseMenus(false);
+    const isSelf = !!(currentProfile && currentProfile.id === p.id);
+    const modal = pfModal({
+        title: isSelf ? 'Your devices' : `${p.name}'s devices`,
+        subtitle: 'Browsers and phones signed in right now.',
+        size: 'small', layerClass: 'pf-layer--small',
+    });
+    const list = pfEl('div', { class: 'pf-devices', 'aria-live': 'polite' });
+    modal.body.append(list);
+
+    const everywhere = pfEl('button', {
+        type: 'button', class: 'pf-btn pf-btn--quiet', style: 'margin-right:auto',
+        text: isSelf ? 'Sign out other devices' : 'Sign out everywhere',
+    });
+    everywhere.addEventListener('click', async () => {
+        everywhere.disabled = true;
+        if (await signOutProfileEverywhere(p)) await load();
+        everywhere.disabled = false;
+    });
+    const done = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Done', onclick: () => modal.close() });
+    modal.foot.append(everywhere, done);
+
+    async function load() {
+        let devices;
+        try {
+            const res = await fetch(`/api/profiles/${p.id}/devices`);
+            const data = await pfReadJson(res);
+            if (!res.ok || !data.success) throw new Error(data.error || '');
+            devices = data.devices || [];
+        } catch (e) {
+            list.innerHTML = '';
+            list.append(pfEl('p', { class: 'pf-form-error', text: "Couldn't load the devices. Check the connection and try again." }));
+            return;
+        }
+        list.innerHTML = '';
+        if (!devices.length) {
+            list.append(pfEl('div', { class: 'pf-empty' }, [
+                pfEl('strong', { text: 'Nowhere right now' }),
+                pfEl('span', { text: 'A browser shows up here once it opens this profile.' }),
+            ]));
+            return;
+        }
+        const rows = pfEl('ul', { class: 'pf-rows' });
+        devices.forEach(d => {
+            const label = d.label || 'A browser';
+            const seen = pfAgo(d.last_seen);
+            const out = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet pf-btn--sm', text: 'Sign out', 'aria-label': `Sign out ${label}` });
+            out.addEventListener('click', () => revoke(d, label, out));
+            rows.append(pfEl('li', { class: 'pf-row pf-row--device' }, [
+                pfEl('div', { class: 'pf-row-main' }, [
+                    pfEl('span', { class: 'pf-row-title' }, [
+                        label,
+                        d.current ? pfEl('span', { class: 'pf-state pf-state--open pf-device-here', text: 'This device' }) : null,
+                    ]),
+                    pfEl('span', { class: 'pf-row-meta' }, [
+                        seen ? `Last seen ${seen}` : 'Signed in',
+                        d.ip ? pfEl('span', { class: 'pf-device-ip', text: ' · ' + d.ip }) : null,
+                    ]),
+                ]),
+                out,
+            ]));
+        });
+        list.append(rows);
+    }
+
+    async function revoke(d, label, btn) {
+        const ok = await showConfirmDialog(d.current ? {
+            title: 'Sign out this device?',
+            message: 'This browser goes back to the profile picker.',
+            confirmText: 'Sign out',
+        } : {
+            title: `Sign out ${label}?`,
+            message: `It goes back to the profile picker the next time it does anything. Other devices stay signed in.`,
+            confirmText: 'Sign out',
+        });
+        if (!ok) return;
+        btn.disabled = true;
+        try {
+            const res = await fetch(`/api/profiles/${p.id}/devices/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
+            const data = await pfReadJson(res);
+            if (!res.ok || !data.success) throw new Error(data.error || "Couldn't sign it out");
+            if (d.current) { window.location.reload(); return; }
+            showToast(`${label} is signed out`, 'success');
+            await load();
+        } catch (e) {
+            btn.disabled = false;
+            showToast(e.message || 'Connection error', 'error');
+        }
+    }
+
+    list.append(pfEl('p', { class: 'pf-help', text: 'Loading…' }));
+    modal.open(done);
+    load();
 }
 
 async function deleteProfile(p) {
@@ -2875,6 +3063,75 @@ function pfLimitsLine(p) {
     const limit = pfLimitText(p.request_limit, p.request_limit_days);
     if (limit) bits.push(limit);
     return bits.join(' · ');
+}
+
+// the page checklist, shared by the editor and the invite modal. st holds
+// sides and allowed_pages; every box ticked means "all pages" (null), which
+// also covers pages added later.
+function pfPagePicker(st, onChange = null) {
+    const box = pfEl('div');
+    let boxes = [];
+    const read = () => {
+        const shown = boxes.filter(cb => cb.checked).map(cb => cb.value);
+        if (shown.length === boxes.length) { st.allowed_pages = null; return; }
+        // pages of a side that's off keep whatever they were
+        const hiddenKept = (st.allowed_pages || []).filter(id => !_pfSidesAllow(st.sides, profilePageSide(id)));
+        st.allowed_pages = shown.concat(hiddenKept);
+    };
+    const render = () => {
+        box.innerHTML = '';
+        boxes = [];
+        const allowed = st.allowed_pages ? new Set(st.allowed_pages) : null;
+        PROFILE_PAGE_GROUPS.forEach(group => {
+            if (!_pfSidesAllow(st.sides, group.side)) return;
+            box.append(pfEl('div', { class: 'pf-pages-group', text: group.label }));
+            const grid = pfEl('div', { class: 'pf-pages' });
+            group.pages.forEach(pageId => {
+                const cb = pfEl('input', { type: 'checkbox', value: pageId });
+                cb.checked = allowed ? allowed.has(pageId) : true;
+                cb.addEventListener('change', () => { read(); if (onChange) onChange(); });
+                boxes.push(cb);
+                grid.append(pfEl('label', {}, [cb, _pfPlainPageLabel(pageId)]));
+            });
+            box.append(grid);
+        });
+        box.append(pfEl('p', { class: 'pf-help', text: 'Help and Issues are always there.' }));
+    };
+    render();
+    return { box, render };
+}
+
+// the request limit row: how many, and per what. st holds request_limit,
+// request_limit_days and can_download (the words change with it).
+function pfLimitRow(st) {
+    const limitId = 'pf-limit-' + (++_pfUid);
+    const limitSelect = pfEl('select', { class: 'pf-input pf-input--compact', id: limitId, 'aria-describedby': limitId + '-desc' });
+    limitSelect.append(pfEl('option', { value: '0', text: 'Off' }));
+    for (let n = 1; n <= 20; n++) limitSelect.append(pfEl('option', { value: String(n), text: String(n) }));
+    // a limit set some other way (the api takes up to 1000) still shows
+    if (st.request_limit > 20) limitSelect.append(pfEl('option', { value: String(st.request_limit), text: String(st.request_limit) }));
+    const periodSelect = pfEl('select', { class: 'pf-input pf-input--compact', 'aria-label': 'Per' });
+    PROFILE_LIMIT_PERIODS.forEach(([d, label]) => periodSelect.append(pfEl('option', { value: String(d), text: 'per ' + label })));
+    const desc = pfEl('span', { class: 'pf-switch-desc', id: limitId + '-desc' });
+    const row = pfEl('div', { class: 'pf-action-row' }, [
+        pfEl('span', { class: 'pf-switch-text' }, [
+            pfEl('label', { class: 'pf-switch-title', for: limitId, text: 'Request limit' }),
+            desc,
+        ]),
+        pfEl('span', { class: 'pf-select-pair' }, [limitSelect, periodSelect]),
+    ]);
+    const sync = () => {
+        limitSelect.value = String(st.request_limit);
+        periodSelect.value = String(st.request_limit_days);
+        periodSelect.style.display = st.request_limit > 0 ? '' : 'none';
+        desc.textContent = st.can_download
+            ? 'Only counts when they ask first. Downloads without asking are never capped.'
+            : 'How many things they can ask for. An album or a movie is one ask.';
+    };
+    limitSelect.addEventListener('change', () => { st.request_limit = parseInt(limitSelect.value, 10) || 0; sync(); });
+    periodSelect.addEventListener('change', () => { st.request_limit_days = parseInt(periodSelect.value, 10) || 7; });
+    sync();
+    return { row, sync };
 }
 
 async function openProfileEditor({ mode = 'create', profile = null } = {}) {
@@ -3044,7 +3301,6 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
 
     // ── step 2: access (or sign-in, for yourself) ──
     const pane2 = panes[1];
-    let pageBoxes = [];
     const homeSelect = pfEl('select', { class: 'pf-input', 'aria-label': 'Opens on' });
     const renderHomeOptions = () => {
         const sides = (isSelf || st.is_admin) ? (me.is_admin || st.is_admin ? 'both' : _pfSidesOf(me)) : st.sides;
@@ -3109,6 +3365,15 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             });
             deviceRows.push(openAsSwitch.row);
         }
+        const seeDevices = pfEl('button', { type: 'button', class: 'pf-btn', text: 'Devices' });
+        seeDevices.addEventListener('click', () => openProfileDevices(me));
+        deviceRows.push(pfEl('div', { class: 'pf-action-row' }, [
+            pfEl('span', { class: 'pf-switch-text' }, [
+                pfEl('span', { class: 'pf-switch-title', text: 'Where you are signed in' }),
+                pfEl('span', { class: 'pf-switch-desc', text: 'Every browser and phone on your profile. Sign one out if it isn’t yours.' }),
+            ]),
+            seeDevices,
+        ]));
         const signOutOthers = pfEl('button', { type: 'button', class: 'pf-btn', text: 'Sign out' });
         signOutOthers.addEventListener('click', async () => {
             signOutOthers.disabled = true;
@@ -3187,24 +3452,8 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             ]),
             ratingSelect,
         ]);
-        const limitId = 'pf-limit-' + (++_pfUid);
-        const limitSelect = pfEl('select', { class: 'pf-input pf-input--compact', id: limitId, 'aria-describedby': limitId + '-desc' });
-        limitSelect.append(pfEl('option', { value: '0', text: 'Off' }));
-        for (let n = 1; n <= 20; n++) limitSelect.append(pfEl('option', { value: String(n), text: String(n) }));
-        // a limit set some other way (the api takes up to 1000) still shows
-        if (st.request_limit > 20) limitSelect.append(pfEl('option', { value: String(st.request_limit), text: String(st.request_limit) }));
-        const periodSelect = pfEl('select', { class: 'pf-input pf-input--compact', 'aria-label': 'Per' });
-        PROFILE_LIMIT_PERIODS.forEach(([d, label]) => periodSelect.append(pfEl('option', { value: String(d), text: 'per ' + label })));
-        limitSelect.addEventListener('change', () => { st.request_limit = parseInt(limitSelect.value, 10) || 0; syncAccess(); });
-        periodSelect.addEventListener('change', () => { st.request_limit_days = parseInt(periodSelect.value, 10) || 7; });
-        const limitDesc = pfEl('span', { class: 'pf-switch-desc', id: limitId + '-desc' });
-        const limitRow = pfEl('div', { class: 'pf-action-row' }, [
-            pfEl('span', { class: 'pf-switch-text' }, [
-                pfEl('label', { class: 'pf-switch-title', for: limitId, text: 'Request limit' }),
-                limitDesc,
-            ]),
-            pfEl('span', { class: 'pf-select-pair' }, [limitSelect, periodSelect]),
-        ]);
+        const limit = pfLimitRow(st);
+        const limitRow = limit.row;
 
         function setSide(side, on) {
             const hasMusic = st.sides !== 'video';
@@ -3223,34 +3472,9 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         }
 
         // advanced: the page list, the home page, own library
-        const pagesBox = pfEl('div');
-        const renderPages = () => {
-            pagesBox.innerHTML = '';
-            pageBoxes = [];
-            const allowed = st.allowed_pages ? new Set(st.allowed_pages) : null;
-            PROFILE_PAGE_GROUPS.forEach(group => {
-                if (!_pfSidesAllow(st.sides, group.side)) return;
-                pagesBox.append(pfEl('div', { class: 'pf-pages-group', text: group.label }));
-                const grid = pfEl('div', { class: 'pf-pages' });
-                group.pages.forEach(pageId => {
-                    const cb = pfEl('input', { type: 'checkbox', value: pageId });
-                    cb.checked = allowed ? allowed.has(pageId) : true;
-                    cb.addEventListener('change', () => { readPages(); renderHomeOptions(); });
-                    pageBoxes.push(cb);
-                    grid.append(pfEl('label', {}, [cb, _pfPlainPageLabel(pageId)]));
-                });
-                pagesBox.append(grid);
-            });
-            pagesBox.append(pfEl('p', { class: 'pf-help', text: 'Help and Issues are always there.' }));
-        };
-        // every box ticked means "all pages", which also covers pages added later
-        const readPages = () => {
-            const shown = pageBoxes.filter(cb => cb.checked).map(cb => cb.value);
-            if (shown.length === pageBoxes.length) { st.allowed_pages = null; return; }
-            // pages of a side that's off keep whatever they were
-            const hiddenKept = (st.allowed_pages || []).filter(id => !_pfSidesAllow(st.sides, profilePageSide(id)));
-            st.allowed_pages = shown.concat(hiddenKept);
-        };
+        const pagePicker = pfPagePicker(st, () => renderHomeOptions());
+        const pagesBox = pagePicker.box;
+        const renderPages = pagePicker.render;
 
         const details = pfEl('details', { class: 'pf-details' }, [pfEl('summary', { text: 'Choose pages' })]);
         details.append(pagesBox, homeField);
@@ -3314,15 +3538,10 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             dlSwitch.set(st.can_download);
             explicitSwitch.set(st.hide_explicit);
             ratingSelect.value = st.max_rating;
-            limitSelect.value = String(st.request_limit);
-            periodSelect.value = String(st.request_limit_days);
-            periodSelect.style.display = st.request_limit > 0 ? '' : 'none';
+            limit.sync();
             // each limit only has something to act on when its side is on
             explicitSwitch.row.style.display = st.sides === 'video' ? 'none' : '';
             ratingRow.style.display = st.sides === 'music' ? 'none' : '';
-            limitDesc.textContent = st.can_download
-                ? 'Only counts when they ask first. Downloads without asking are never capped.'
-                : 'How many things they can ask for. An album or a movie is one ask.';
             renderPages();
             renderHomeOptions();
         }

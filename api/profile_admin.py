@@ -100,6 +100,39 @@ def sign_out_everywhere(profile_id):
     return jsonify({"success": True})
 
 
+# ── signed-in devices ────────────────────────────────────────────────────
+
+@bp.route("/api/profiles/<int:profile_id>/devices", methods=["GET"])
+def list_devices(profile_id):
+    """browsers signed in as this profile (yourself, or an admin)."""
+    pid, _name, is_admin = _actor()
+    if pid is None or not may_manage_profile(pid, is_admin, profile_id):
+        return jsonify({"success": False, "error": "Unauthorized"}), 403
+    rows = get_database().list_profile_devices(profile_id)
+    here = session.get("device_id")
+    for r in rows:
+        r["current"] = r["id"] == here
+    return jsonify({"success": True, "devices": rows})
+
+
+@bp.route("/api/profiles/<int:profile_id>/devices/<device_id>", methods=["DELETE"])
+def revoke_device(profile_id, device_id):
+    """sign one browser out. (this one too, if you pick it.)"""
+    pid, name, is_admin = _actor()
+    if pid is None or not may_manage_profile(pid, is_admin, profile_id):
+        return jsonify({"success": False, "error": "Unauthorized"}), 403
+    db = get_database()
+    label = (db.get_profile_device(device_id) or {}).get("label") or ""
+    if not db.revoke_profile_device(profile_id, device_id):
+        return jsonify({"success": False, "error": "Not found"}), 404
+    from core.security.devices import forget
+    forget(device_id)
+    if int(profile_id) != int(pid):
+        audit("device_signed_out", profile_id, (db.get_profile(profile_id) or {}).get("name"),
+              detail=label or None, actor=(pid, name, is_admin))
+    return jsonify({"success": True})
+
+
 # ── invites ──────────────────────────────────────────────────────────────
 
 _PRESET_KEYS = ("allowed_sides", "can_download", "allowed_pages", "hide_explicit", "max_rating",
@@ -249,6 +282,10 @@ def accept_invite(token):
         logger.debug("invite used_by write failed", exc_info=True)
     session["profile_id"] = new_id
     session["profile_epoch"] = 0
+    from core.security.devices import start_device
+    start_device(session, db.add_profile_device, new_id, request.headers.get("User-Agent", ""),
+                 request.remote_addr or "")
+    session["device_owner"] = new_id
     if _require_login_enabled():
         session["login_authenticated"] = True
     # an admin minted this link: it opens the launch lock for the person it

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { profileAsksFirst } from '@/platform/shell/download-rights';
+
 import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography, DiscographyBucket } from '../-artist-detail.types';
 
@@ -211,6 +213,7 @@ export function ArtistHero({
   const [watching, setWatching] = useState<boolean | null>(null);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [downloadingDiscog, setDownloadingDiscog] = useState(false);
+  const asksFirst = profileAsksFirst();
   /** A freshly applied photo shows immediately, as the vanilla swapped the
       hero img src in place (openArtistArtPicker apply, library.js:1966-1971). */
   const [appliedPhoto, setAppliedPhoto] = useState<string | null>(null);
@@ -426,10 +429,15 @@ export function ArtistHero({
                 type="button"
                 className="discog-download-btn discog-btn-compact"
                 id="discog-download-btn"
+                // a profile that can't download requests it instead: the
+                // attribute keeps the downloads-disabled rule from hiding it
+                data-request-action={asksFirst ? '' : undefined}
                 onClick={() => setDownloadingDiscog(true)}
               >
                 <span className="discog-btn-icon">⬇</span>
-                <span className="discog-btn-text">Download Discography</span>
+                <span className="discog-btn-text">
+                  {asksFirst ? 'Request Discography' : 'Download Discography'}
+                </span>
                 <span className="discog-btn-shimmer" />
               </button>
             </div>

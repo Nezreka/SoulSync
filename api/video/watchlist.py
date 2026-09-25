@@ -46,9 +46,18 @@ def register_routes(bp):
                     sort=request.args.get("sort", "default"),
                     page=request.args.get("page", 1), limit=request.args.get("limit", 60),
                     server_source=server)
+                from .kids import filter_tmdb_items, video_cap
+                cap = video_cap()
+                if cap is not None and kind == "show":
+                    res = {**res, "items": filter_tmdb_items(db, res.get("items") or [], cap)}
                 return jsonify({"success": True, "kind": kind, "counts": counts, **res})
             # No kind → grouped (counts + first-glance lists).
             rows = db.list_watchlist(server_source=server)
+            from .kids import filter_tmdb_items, video_cap
+            cap = video_cap()
+            if cap is not None:
+                rows = [r for r in rows if r.get("kind") != "show"] + \
+                    filter_tmdb_items(db, [r for r in rows if r.get("kind") == "show"], cap)
             shows = [r for r in rows if r.get("kind") == "show"]
             people = [r for r in rows if r.get("kind") == "person"]
             studios = [r for r in rows if r.get("kind") == "studio"]

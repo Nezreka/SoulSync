@@ -5617,6 +5617,7 @@ class MusicDatabase:
         ("hide_explicit", "INTEGER DEFAULT 0"),        # kids: explicit music stays out of sight
         ("max_rating", "TEXT DEFAULT NULL"),           # kids: highest movie/tv rating, NULL = any
         ("session_epoch", "INTEGER DEFAULT 0"),        # bump = every signed-in browser signs out
+        ("disabled", "INTEGER DEFAULT 0"),             # turned off: kept, but nobody can open it
     )
 
     def _add_profile_controls(self, cursor):
@@ -5646,6 +5647,20 @@ class MusicDatabase:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_profile_audit_created ON profile_audit (created_at)")
+            # one row per signed-in browser. owner_id, never profile_id (the
+            # delete sweep); delete_profile clears them itself
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS profile_devices (
+                    id TEXT PRIMARY KEY,
+                    owner_id INTEGER NOT NULL,
+                    label TEXT,
+                    ip TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    revoked_at TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profile_devices_by_profile ON profile_devices (owner_id)")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS profile_invites (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5673,6 +5688,7 @@ class MusicDatabase:
             'hide_explicit': bool(val('hide_explicit', 0)),
             'max_rating': val('max_rating', None),
             'session_epoch': int(val('session_epoch', 0) or 0),
+            'disabled': bool(val('disabled', 0)),
         }
 
     def _add_profile_sides(self, cursor):
@@ -8435,7 +8451,7 @@ class MusicDatabase:
     def update_profile(self, profile_id: int, **kwargs) -> bool:
         """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin, home_page, allowed_pages, can_download."""
         allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download', 'allowed_sides',
-                   'request_limit', 'request_limit_days', 'hide_explicit', 'max_rating'}
+                   'request_limit', 'request_limit_days', 'hide_explicit', 'max_rating', 'disabled'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         # Serialize allowed_pages list to JSON string for storage
         if 'allowed_pages' in updates:
@@ -8482,6 +8498,68 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error bumping session epoch for {profile_id}: {e}")
             return None
+
+    # ── signed-in devices ────────────────────────────────────────────────
+    def add_profile_device(self, device_id: str, owner_id: int, label: str, ip: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._add_profile_controls(cursor)
+                cursor.execute("INSERT OR REPLACE INTO profile_devices (id, owner_id, label, ip) VALUES (?, ?, ?, ?)",
+                               (device_id, int(owner_id), (label or '')[:200], (ip or '')[:64]))
+                # a browser that signs in again as someone else leaves no ghosts:
+                # keep the newest 50 per profile
+                cursor.execute("DELETE FROM profile_devices WHERE owner_id = ? AND id NOT IN "
+                               "(SELECT id FROM profile_devices WHERE owner_id = ? ORDER BY last_seen DESC LIMIT 50)",
+                               (int(owner_id), int(owner_id)))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.debug("add_profile_device failed: %s", e)
+            return False
+
+    def get_profile_device(self, device_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM profile_devices WHERE id = ?", (device_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.debug("get_profile_device failed: %s", e)
+            return None
+
+    def touch_profile_device(self, device_id: str) -> None:
+        try:
+            with self._get_connection() as conn:
+                conn.execute("UPDATE profile_devices SET last_seen = CURRENT_TIMESTAMP WHERE id = ?", (device_id,))
+                conn.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("touch_profile_device failed: %s", e)
+
+    def list_profile_devices(self, owner_id: int) -> List[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._add_profile_controls(cursor)
+                cursor.execute("SELECT id, label, ip, created_at, last_seen FROM profile_devices "
+                               "WHERE owner_id = ? AND revoked_at IS NULL ORDER BY last_seen DESC", (int(owner_id),))
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug("list_profile_devices failed: %s", e)
+            return []
+
+    def revoke_profile_device(self, owner_id: int, device_id: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE profile_devices SET revoked_at = CURRENT_TIMESTAMP "
+                               "WHERE id = ? AND owner_id = ? AND revoked_at IS NULL", (device_id, int(owner_id)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug("revoke_profile_device failed: %s", e)
+            return False
 
     # ── admin audit log ──────────────────────────────────────────────────
     _AUDIT_KEEP = 5000
@@ -8635,6 +8713,11 @@ class MusicDatabase:
                                             cursor.rowcount, table)
                     except Exception as e:
                         logger.debug("Failed to delete from %s for profile: %s", table, e)
+                # its signed-in devices (owner_id, so the sweep above skips them)
+                try:
+                    cursor.execute("DELETE FROM profile_devices WHERE owner_id = ?", (profile_id,))
+                except Exception as e:  # noqa: BLE001 - table may predate this install
+                    logger.debug("device cleanup on delete: %s", e)
                 # its own library's rows go with it (#1199)
                 self._delete_own_library_rows(cursor, profile_id)
                 # and its listening pile's caches (#1293). the rows went with

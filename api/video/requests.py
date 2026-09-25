@@ -37,6 +37,16 @@ def _profile_row(pid):
             "request_limit_days": getattr(g, "request_limit_days", 7)}
 
 
+def _quality_profile(value):
+    """a named quality profile id that exists, else None (the default)."""
+    from . import get_video_db
+    try:
+        qp = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return qp if qp > 0 and get_video_db().get_named_quality_profile(qp) else None
+
+
 def _notify(profile_id, message, kind="info"):
     try:
         from core.profile_notify import notify_profile
@@ -95,11 +105,12 @@ def register_routes(bp):
             if over_quota(quota, used) and not already:
                 return jsonify({"success": False, "error": quota_message(quota),
                                 "quota": quota_state(quota, used)}), 429
+        qp = _quality_profile(body.get("quality_profile_id"))
         rid, created = get_video_db().add_video_request(
             profile_id=_me(), requester_name=getattr(g, "profile_name", None),
             kind=kind, tmdb_id=tmdb_id, title=title, year=meta["year"],
             poster_url=meta["poster_url"], note=(body.get("note") or "")[:500] or None,
-            monitor=monitor)
+            monitor=monitor, quality_profile_id=qp)
         if rid is None:
             return jsonify({"success": False, "error": "Could not file the request."}), 500
         if created:
@@ -125,6 +136,7 @@ def register_routes(bp):
         scope = None if _is_admin() else _me()
         rows = db.list_video_requests(profile_id=scope, status=status)
         db.annotate_requests_in_library(rows)
+        db.annotate_request_progress(rows)
         counts = db.video_requests_status_counts(scope)
         from core.requests.quota import quota_for, quota_state
         quota = quota_for(_profile_row(_me())) if not _is_admin() else None
@@ -196,6 +208,10 @@ def register_routes(bp):
         if not ok:
             db.unclaim_video_requests([r["id"] for r in claimed])
             return jsonify({"success": False, "error": "Could not add the title — request left pending."}), 500
+        # the quality the request asked for (or the admin's pick on approve)
+        qp = _quality_profile(body.get("quality_profile_id")) or req.get("quality_profile_id")
+        if qp:
+            db.set_wishlist_quality_for_tmdb(req["tmdb_id"], qp)
         for r in claimed:
             _notify(r["profile_id"], f"{req['title']} was approved, it's on the way", "success")
         try:      # 'Request Approved' automation trigger

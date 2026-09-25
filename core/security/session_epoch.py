@@ -27,7 +27,10 @@ def _epoch(pid: int, load: Callable[[int], int]) -> int:
         hit = _cache.get(pid)
         if hit and now - hit[0] < _TTL:
             return hit[1]
-    value = int(load(pid) or 0)
+    raw = load(pid)
+    # only a real integer counts: anything else (a missing row, a stand-in
+    # object) reads as epoch 0, the value every session starts with
+    value = raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
     with _lock:
         _cache[pid] = (now, value)
     return value

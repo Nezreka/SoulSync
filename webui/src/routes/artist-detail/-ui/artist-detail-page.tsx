@@ -16,6 +16,7 @@ import {
   watchlistIdentity,
 } from '../-artist-detail.api';
 import { backButtonLabel, pushArtistOrigin, pushPageOrigin } from '../-artist-detail.back-label';
+import { peekArtistEdit } from '../-artist-detail.edit-focus';
 import {
   readEnhancedViewMode,
   showsEnhancedToggle,
@@ -128,7 +129,10 @@ export function ArtistDetailPage() {
    */
   const profile = useProfile();
   const canEnhance = showsEnhancedToggle(Boolean(profile?.isAdmin), sourceOnly);
-  const [enhanced, setEnhanced] = useState(() => readEnhancedViewMode(profile?.profileId));
+  // an issue's "edit details" lands here in the enhanced view, whatever was saved
+  const [enhanced, setEnhanced] = useState(
+    () => Boolean(peekArtistEdit(id)) || readEnhancedViewMode(profile?.profileId),
+  );
   const showEnhanced = canEnhance && enhanced;
   const enhancedState = useEnhancedData(payload?.artist?.id, showEnhanced);
 

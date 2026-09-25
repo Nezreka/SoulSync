@@ -179,6 +179,17 @@ def register_routes(bp):
             payload["error"] = "forbidden"
         return jsonify(payload), code
 
+    @bp.route("/issues/bulk", methods=["POST"])
+    def video_issues_bulk():
+        """admin: {ids, status?|priority?} or {ids, delete: true} in one go."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        payload, code = issue_service.bulk(_side(), actor=_pid(),
+                                           actor_name=getattr(g, "profile_name", None) or "",
+                                           is_admin=_is_admin(), ids=body.get("ids"), body=body,
+                                           delete=get_video_db().delete_issue)
+        return jsonify(payload), code
+
     @bp.route("/issues/<int:issue_id>/comments", methods=["POST"])
     def video_issues_comment(issue_id):
         """reply on an issue: its reporter, a follower, or an admin."""

@@ -6,12 +6,18 @@ through each one this hooks the app once (register(app)):
   hard block (before the route runs, 403 restricted)
     POST /api/library/play        body file_path / track_id
     GET  /stream/library-audio    ?path= / ?track_id=
+    POST /api/stream/start, GET /stream/audio
+                                  playing a soulseek search result: there's
+                                  no explicit data on a peer's file, so a
+                                  hide_explicit profile can't play them at all
 
   filtered (after the route, only for a hide_explicit profile)
     POST /api/enhanced-search                 spotify_tracks / spotify_albums
     POST /api/enhanced-search/source/<src>    ndjson tracks / albums lines
     GET  /api/album/<id>/tracks               tracks (all of them on an explicit album)
     GET  /api/library/artist/<id>/enhanced    albums and their tracks
+    POST /api/enhanced-search/by-id, GET /api/artist-detail/<id>,
+    GET  /api/artist/<id>/discography         any card flagged explicit, any depth
 
 explicit NULL is allowed on purpose: most libraries carry no explicit data,
 and hiding every unknown would empty them. only a truthy flag counts
@@ -38,6 +44,8 @@ _get_database = None
 _ALBUM_TRACKS = re.compile(r"^/api/album/[^/]+/tracks$")
 _ENHANCED_ARTIST = re.compile(r"^/api/library/artist/[^/]+/enhanced$")
 _SEARCH_SOURCE = re.compile(r"^/api/enhanced-search/source/[^/]+$")
+# payloads with explicit-flagged cards nested at any depth: cleaned whole
+_DEEP = re.compile(r"^(/api/enhanced-search/by-id|/api/artist-detail/[^/]+|/api/artist/[^/]+/discography)$")
 
 
 def _hide_explicit() -> bool:
@@ -83,8 +91,13 @@ def track_is_explicit(db, file_path=None, track_id=None) -> bool:
     return any(is_explicit(r[0]) or is_explicit(r[1]) for r in rows)
 
 
+_UNVOUCHED_STREAMS = {("/api/stream/start", "POST"), ("/stream/audio", "GET")}
+
+
 def _guard_play():
     path = request.path
+    if (path, request.method) in _UNVOUCHED_STREAMS:
+        return _restricted() if _hide_explicit() else None
     if path == "/api/library/play" and request.method == "POST":
         data = request.get_json(silent=True) or {}
         fp, tid = data.get("file_path"), data.get("track_id")
@@ -131,10 +144,19 @@ def _filter_line(line):
     return line
 
 
+def _deep_clean(value):
+    """drop explicit cards from every list, however deep."""
+    if isinstance(value, list):
+        return [_deep_clean(x) for x in value if not (isinstance(x, dict) and is_explicit(x.get("explicit")))]
+    if isinstance(value, dict):
+        return {k: _deep_clean(v) for k, v in value.items()}
+    return value
+
+
 def _filter_response(response):
     path = request.path
     wanted = (path == "/api/enhanced-search" or _SEARCH_SOURCE.match(path)
-              or _ALBUM_TRACKS.match(path) or _ENHANCED_ARTIST.match(path))
+              or _ALBUM_TRACKS.match(path) or _ENHANCED_ARTIST.match(path) or _DEEP.match(path))
     if not wanted or response.status_code != 200 or not _hide_explicit():
         return response
 
@@ -145,6 +167,9 @@ def _filter_response(response):
 
     data = response.get_json(silent=True)
     if not isinstance(data, dict):
+        return response
+    if _DEEP.match(path):
+        response.set_data(json.dumps(_deep_clean(data)))
         return response
     if path == "/api/enhanced-search" or _SEARCH_SOURCE.match(path):
         for key in ("spotify_tracks", "spotify_albums", "tracks", "albums"):

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 
+import { profileAsksFirst } from '@/platform/shell/download-rights';
+
 import type {
   DiscogAlbumUpdate,
   DiscogFilters,
@@ -87,7 +89,12 @@ export function DiscographyModal({
     visible: discogCardVisible(discogCardView(release, {}), release._type, filters),
   }));
   const visibleChecked = cards.filter((c) => c.visible && checked.has(String(c.release.id)));
-  const footer = discogFooter(visibleChecked.map((c) => ({ tracks: c.view.tracks })));
+  // a profile that can't download sends these as requests
+  const asksFirst = profileAsksFirst();
+  const footer = discogFooter(
+    visibleChecked.map((c) => ({ tracks: c.view.tracks })),
+    asksFirst,
+  );
 
   const toggleFilter = (key: keyof DiscogFilters) =>
     setFilters((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -104,6 +111,10 @@ export function DiscographyModal({
 
   const start = async () => {
     if (visibleChecked.length === 0 || !data) return;
+    // request limit used up: core.js says so instead of adds the server drops
+    if (asksFirst && window.checkMusicRequestQuota && !(await window.checkMusicRequestQuota())) {
+      return;
+    }
     // The download payload is built from VISIBLE checked cards (#877).
     const entries = visibleChecked.map((c) => ({
       id: c.release.id,
@@ -140,7 +151,11 @@ export function DiscographyModal({
                     },
           }));
         },
-        (finished) => setTotals(finished),
+        (finished) => {
+          setTotals(finished);
+          // a requester hears who it went to
+          if (asksFirst && finished.total_added > 0) window.announceWishlistRequest?.();
+        },
       );
     } catch (error) {
       window.showToast?.(`Discography download failed: ${(error as Error).message}`, 'error');
@@ -160,7 +175,9 @@ export function DiscographyModal({
           >
             <div className="discog-modal-hero-overlay" />
             <div className="discog-modal-hero-content">
-              <h2 className="discog-modal-title">Download Discography</h2>
+              <h2 className="discog-modal-title">
+                {asksFirst ? 'Request Discography' : 'Download Discography'}
+              </h2>
               <p className="discog-modal-artist">{artistName}</p>
             </div>
             <button className="discog-modal-close" type="button" onClick={onClose}>
@@ -290,7 +307,7 @@ export function DiscographyModal({
                   <button className="discog-cancel-btn" type="button" onClick={onClose}>
                     Close
                   </button>
-                  {totals && totals.total_added > 0 ? (
+                  {totals && totals.total_added > 0 && !asksFirst ? (
                     <button
                       className="discog-submit-btn"
                       type="button"

@@ -3099,59 +3099,24 @@
     }
 
     // Requests (P4): the no-download-rights acquisition path — ask an admin.
-    // a show asks which seasons first (VideoRequestSheet lives in video-requests.js).
+    // the flow (quota first, then the seasons + quality sheet, then the post)
+    // lives in video-requests.js as VideoRequests.request, shared with the cards.
     function sendRequest(btn) {
         if (!data || !data.tmdb_id || btn.disabled) return;
         var d = data;
-        var sheet = window.VideoRequestSheet;
-        var pick = (d.kind === 'show' && sheet && sheet.pickSeasons)
-            ? sheet.pickSeasons({ title: d.title || '', current: 'all' })
-            : Promise.resolve(null);
-        pick.then(function (monitor) {
-            if (d.kind === 'show' && sheet && sheet.pickSeasons && !monitor) return;   // cancelled
-            btn.disabled = true;
-            var body = { kind: d.kind, tmdb_id: d.tmdb_id, title: d.title, year: d.year,
-                poster_url: d.poster_url || d.poster || null };
-            if (monitor) body.monitor = monitor;
-            fetch('/api/video/requests', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body) })
-                .then(function (r) {
-                    return r.json().catch(function () { return null; }).then(function (j) {
-                        // request limit used up: the server's own words, calmly
-                        if (r.status === 429) {
-                            btn.disabled = false;
-                            if (typeof showToast === 'function') {
-                                showToast((j && j.error) || 'You’ve used your requests for now', 'warning');
-                            }
-                            return { _handled: true };
-                        }
-                        return j;
-                    });
-                })
-                .then(function (res) {
-                    if (res && res._handled) return;
-                    if (res && res.in_library) {
-                        if (typeof showToast === 'function') showToast('That’s already in your library', 'info');
-                        d.owned = true;
-                        if (data === d) renderActions(d);
-                        return;
-                    }
-                    if (!res || !res.success) throw new Error((res && res.error) || '');
-                    if (typeof showToast === 'function') {
-                        showToast(res.already ? 'Already requested. You’ll hear when it’s decided'
-                                              : 'Requested. You’ll hear when it’s decided', 'success');
-                    }
-                    d._req_pending = true;
-                    if (data === d) renderActions(d);
-                })
-                .catch(function (err) {
-                    btn.disabled = false;
-                    if (typeof showToast === 'function') {
-                        showToast((err && err.message) || 'Couldn’t send the request', 'error');
-                    }
-                });
-        });
+        if (!window.VideoRequests || !window.VideoRequests.request) {
+            if (typeof showToast === 'function') showToast('Couldn’t send the request', 'error');
+            return;
+        }
+        btn.disabled = true;
+        window.VideoRequests.request({ kind: d.kind, tmdb_id: d.tmdb_id, title: d.title, year: d.year,
+            poster_url: d.poster_url || d.poster || null })
+            .then(function (res) {
+                if (res && res.in_library) d.owned = true;
+                else if (res && res.ok) d._req_pending = true;
+                else { btn.disabled = false; return; }
+                if (data === d) renderActions(d);
+            });
     }
 
     function toggleMissing() {

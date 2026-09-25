@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { getShellBridge } from '@/platform/shell/bridge';
+import { profileAsksFirst } from '@/platform/shell/download-rights';
 
 import type { ArtistDetailTrack } from '../-artist-detail.types';
 
@@ -45,6 +46,8 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
   }, [artistId, artistName]);
 
   if (state.tracks.length === 0) return null;
+  // a profile that can't download: the same adds, sent as requests
+  const asksFirst = profileAsksFirst();
 
   const play = (track: ArtistDetailTrack) => {
     // Read at click time, not render time: the vanilla shell attaches the
@@ -132,7 +135,7 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
                 type="button"
                 className="hero-top-track-download"
                 data-index={index}
-                title="Add to wishlist"
+                title={asksFirst ? 'Request' : 'Add to wishlist'}
                 onClick={(e) => {
                   e.stopPropagation();
                   void wishlist(track);
@@ -157,7 +160,7 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
             downloadAll();
           }}
         >
-          Download All
+          {asksFirst ? 'Request All' : 'Download All'}
         </button>
       ) : null}
     </div>

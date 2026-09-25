@@ -222,6 +222,20 @@ def get_issue_counts():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@bp.route('/api/issues/bulk', methods=['POST'])
+def bulk_issues():
+    """admin: {ids, status?|priority?} or {ids, delete: true} in one go."""
+    try:
+        profile_id, is_admin = _caller()
+        body = request.get_json(silent=True) or {}
+        payload, code = issue_service.bulk(_side(), actor=profile_id, actor_name=_actor_name(),
+                                           is_admin=is_admin, ids=body.get('ids'), body=body,
+                                           delete=get_database().delete_issue)
+        return jsonify(payload), code
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/issues/<int:issue_id>/comments', methods=['POST'])
 def add_issue_comment(issue_id):
     """reply on an issue: its reporter, a follower, or an admin."""

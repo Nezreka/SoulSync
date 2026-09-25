@@ -4,6 +4,7 @@ import { thumb } from '@/platform/artwork-thumb';
 
 import type { EnhancedAlbum, EnhancedData, EnhancedTrack } from '../-artist-detail.enhanced';
 
+import { albumMatchesEdit, clearArtistEdit, peekArtistEdit } from '../-artist-detail.edit-focus';
 import {
   albumRowMeta,
   enhancedSectionsFor,
@@ -277,10 +278,32 @@ function EnhancedAlbumWrapper({
   onAlbumDeleted: () => void;
   onReload: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  // an issue's "edit details" asked for this album: open it, form and all
+  const [editFocus] = useState(() => {
+    const focus = peekArtistEdit(artist?.id as string | number | undefined);
+    return albumMatchesEdit(focus, albumProp) ? focus : null;
+  });
+  const [expanded, setExpanded] = useState(Boolean(editFocus));
   const [thumbBroken, setThumbBroken] = useState(false);
   // the album's metadata form is behind "edit details" now, not always open
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(Boolean(editFocus && isAdmin && !editFocus.trackId));
+
+  useEffect(() => {
+    if (!editFocus) return;
+    clearArtistEdit();
+    // after the panel has drawn: the track row if one was asked for, else the album
+    const timer = setTimeout(() => {
+      const row = editFocus.trackId
+        ? Array.from(document.querySelectorAll<HTMLElement>('tr[data-track-id]')).find(
+            (tr) => tr.dataset.trackId === editFocus.trackId,
+          )
+        : null;
+      const target =
+        row ?? document.getElementById(`enhanced-album-wrapper-${String(albumProp.id)}`);
+      target?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [editFocus, albumProp.id]);
 
   /**
    * A saved edit is applied here rather than refetching the whole artist. The

@@ -421,6 +421,9 @@ _COLUMN_MIGRATIONS = [
     # requests: when the approved title showed up in the library (the
     # requester gets told once, this is the once)
     ("video_requests", "available_at", "TEXT"),
+    # the quality profile a request asked for (NULL = the default); applied to
+    # the title's wishlist rows on approve
+    ("video_requests", "quality_profile_id", "INTEGER"),
 ]
 
 
@@ -7341,7 +7344,8 @@ class VideoDatabase:
 
     # ── requests (in-app Overseerr; arr-parity P4) ────────────────────────────
     def add_video_request(self, *, profile_id, requester_name, kind, tmdb_id, title,
-                          year=None, poster_url=None, note=None, monitor="future"):
+                          year=None, poster_url=None, note=None, monitor="future",
+                          quality_profile_id=None):
         """File a request. One PENDING request per (profile, kind, tmdb) —
         re-asking returns the existing id ('already'). Returns (id, created)."""
         conn = self._get_connection()
@@ -7353,9 +7357,10 @@ class VideoDatabase:
                 return row["id"], False
             cur = conn.execute(
                 "INSERT INTO video_requests (profile_id, requester_name, kind, tmdb_id, title, "
-                "year, poster_url, note, monitor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "year, poster_url, note, monitor, quality_profile_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (int(profile_id), requester_name, kind, int(tmdb_id), title, year,
-                 poster_url, note, monitor or "future"))
+                 poster_url, note, monitor or "future",
+                 int(quality_profile_id) if quality_profile_id else None))
             conn.commit()
             return cur.lastrowid, True
         except sqlite3.Error:
@@ -7602,6 +7607,68 @@ class VideoDatabase:
         except sqlite3.Error:
             logger.exception("unclaim_video_requests failed")
             return 0
+        finally:
+            conn.close()
+
+    def set_wishlist_quality_for_tmdb(self, tmdb_id, quality_profile_id) -> int:
+        """stamp every wishlist row of one title (the movie, or a show's
+        episodes) with a quality profile. returns rows touched."""
+        if not quality_profile_id:
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE video_wishlist SET quality_profile_id=? WHERE tmdb_id=? "
+                               "AND kind IN ('movie','episode')", (int(quality_profile_id), int(tmdb_id)))
+            conn.commit()
+            return cur.rowcount
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.exception("set_wishlist_quality_for_tmdb failed")
+            return 0
+        finally:
+            conn.close()
+
+    def annotate_request_progress(self, rows) -> None:
+        """stamp approved request rows with where the acquisition stands:
+        ``progress`` = {wanted, failed, owned, total} from the wishlist and the
+        library, and ``state`` = available | partial | failed | on_the_way.
+        movies: their wishlist row's status; shows: episode counts."""
+        want = [r for r in rows if r.get("status") == "approved" and r.get("tmdb_id")]
+        if not want:
+            return
+        conn = self._get_connection()
+        try:
+            for r in want:
+                tid = int(r["tmdb_id"])
+                if r.get("kind") == "movie":
+                    w = conn.execute("SELECT status FROM video_wishlist WHERE kind='movie' AND tmdb_id=?",
+                                     (tid,)).fetchone()
+                    owned = conn.execute("SELECT COUNT(*) FROM movies WHERE tmdb_id=? AND has_file=1",
+                                         (tid,)).fetchone()[0]
+                    failed = 1 if (w and w["status"] == "failed") else 0
+                    wanted = 1 if (w and w["status"] not in ("downloaded", "failed")) else 0
+                    total = 1
+                else:
+                    wanted = conn.execute(
+                        "SELECT COUNT(*) FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
+                        "AND status NOT IN ('downloaded','failed')", (tid,)).fetchone()[0]
+                    failed = conn.execute(
+                        "SELECT COUNT(*) FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
+                        "AND status='failed'", (tid,)).fetchone()[0]
+                    owned = conn.execute(
+                        "SELECT COUNT(*) FROM episodes e JOIN shows s ON s.id=e.show_id "
+                        "WHERE s.tmdb_id=? AND e.has_file=1", (tid,)).fetchone()[0]
+                    total = owned + wanted + failed
+                r["progress"] = {"owned": owned, "wanted": wanted, "failed": failed, "total": total}
+                if owned and not wanted and not failed:
+                    r["state"] = "available"
+                elif failed and not wanted:
+                    r["state"] = "failed" if not owned else "partial"
+                elif owned:
+                    r["state"] = "partial"
+                else:
+                    r["state"] = "on_the_way"
+        except sqlite3.Error:
+            logger.exception("annotate_request_progress failed")
         finally:
             conn.close()
 

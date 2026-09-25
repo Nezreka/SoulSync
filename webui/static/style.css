@@ -50417,6 +50417,12 @@ body.downloads-disabled [data-download-action] {
     display: none !important;
 }
 
+/* ...except where the download is really a wishlist add: for these
+   profiles that's a request, so the control stays and says Request */
+body.downloads-disabled .discog-download-btn[data-request-action] {
+    display: flex !important;
+}
+
 /* Profile Indicator in Sidebar */
 .profile-indicator {
     display: flex;

@@ -141,4 +141,39 @@ def comment(side: IssueSide, *, actor: int, actor_name: str, is_admin: bool, iss
     return {"success": True, "id": cid}, 201
 
 
-__all__ = ["IssueSide", "report", "detail", "triage", "comment"]
+BULK_MAX = 200
+
+
+def bulk(side: IssueSide, *, actor: int, actor_name: str, is_admin: bool, ids,
+         body: Dict[str, Any], delete: Optional[Callable[[int], Any]] = None) -> Result:
+    """admin triage of many issues at once: {ids, status?, priority?} or
+    {ids, delete: true}. each one goes through the same rules, events and
+    notes as a single change; the answer says how many took."""
+    if not is_admin:
+        return {"success": False, "error": "Admin only"}, 403
+    try:
+        ids = [int(i) for i in (ids or [])][:BULK_MAX]
+    except (TypeError, ValueError):
+        return {"success": False, "error": "ids must be numbers"}, 400
+    if not ids:
+        return {"success": False, "error": "Pick some issues first"}, 400
+    changes = {k: body[k] for k in ("status", "priority") if k in (body or {})}
+    done, failed = 0, 0
+    for iid in ids:
+        if (body or {}).get("delete"):
+            if delete is None or not side.get(iid):
+                failed += 1
+                continue
+            ok = delete(iid)       # the db's delete_issue takes the thread with it
+            ok = ok.get("success") if isinstance(ok, dict) else bool(ok)
+        else:
+            if not changes:
+                return {"success": False, "error": "Nothing to change"}, 400
+            _payload, code = triage(side, actor=actor, actor_name=actor_name, is_admin=True,
+                                    issue_id=iid, body=dict(changes))
+            ok = code == 200
+        done, failed = (done + 1, failed) if ok else (done, failed + 1)
+    return {"success": True, "done": done, "failed": failed}, 200
+
+
+__all__ = ["IssueSide", "report", "detail", "triage", "comment", "bulk", "BULK_MAX"]

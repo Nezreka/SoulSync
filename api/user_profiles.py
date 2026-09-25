@@ -72,6 +72,16 @@ def create_blueprint():
     return bp
 
 
+def _end_device():
+    """a sign-out takes this browser off the profile's device list."""
+    device_id, owner = session.get('device_id'), session.get('profile_id')
+    if device_id and owner:
+        try:
+            get_database().revoke_profile_device(owner, device_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("device revoke on logout failed", exc_info=True)
+
+
 def _audit(action, target_id=None, target_name=None, detail=None):
     from api.profile_admin import audit
     audit(action, target_id, target_name, detail)
@@ -614,6 +624,12 @@ def update_profile(profile_id):
             if control_error:
                 return jsonify({'success': False, 'error': control_error}), 400
             kwargs.update(controls)
+            if 'disabled' in data:
+                # turn a profile off without deleting it. never the owner or
+                # yourself: that would lock the install or you out
+                if int(profile_id) == 1 or int(profile_id) == int(current_pid):
+                    return jsonify({'success': False, 'error': "You can't turn this profile off"}), 400
+                kwargs['disabled'] = 1 if data['disabled'] else 0
 
         # own library (#1199): admin only, never on the admin profile itself
         library_result = None
@@ -652,6 +668,15 @@ def update_profile(profile_id):
         success = database.update_profile(profile_id, **kwargs) if kwargs else True
         if library_result is False:
             return jsonify({'success': False, 'error': 'Failed to save the library setting'}), 500
+        if success and kwargs.get('disabled'):
+            # turning it off signs it out everywhere now, not at its next pick
+            database.bump_profile_session_epoch(profile_id)
+            from core.security.session_epoch import forget
+            forget(profile_id)
+        if success and 'disabled' in kwargs:
+            _audit('profile_disabled' if kwargs['disabled'] else 'profile_enabled', profile_id,
+                   (database.get_profile(profile_id) or {}).get('name'))
+            kwargs.pop('disabled')
         if success and (kwargs or library_result is not None):
             changed = sorted(set(kwargs) | ({'library'} if library_result is not None else set()))
             if 'is_admin' in kwargs:
@@ -709,6 +734,8 @@ def select_profile():
         profile = database.get_profile(profile_id)
         if not profile:
             return jsonify({'success': False, 'error': 'Profile not found'}), 404
+        if profile.get('disabled') and not profile.get('is_admin'):
+            return jsonify({'success': False, 'error': 'This profile is turned off', 'disabled': True}), 403
 
         _ip = request.remote_addr or 'unknown'
         _now = time.time()
@@ -748,6 +775,11 @@ def select_profile():
         session['profile_id'] = profile_id
         # the epoch this sign-in counts under ("sign out everywhere" moves it)
         session['profile_epoch'] = profile.get('session_epoch', 0)
+        if session.get('device_owner') != profile_id or not session.get('device_id'):
+            from core.security.devices import start_device
+            start_device(session, database.add_profile_device, profile_id, request.headers.get('User-Agent', ''),
+                         request.remote_addr or '')
+            session['device_owner'] = profile_id
         # If the admin PIN was just validated, also mark launch PIN as
         # verified so the subsequent page reload doesn't ask again. only a pin
         # that was actually checked counts: this used to fire for ANY pin on a
@@ -913,8 +945,10 @@ def logout_profile():
     """Clear session — back to profile picker. drops the login and launch-pin
     flags too: popping only the profile left an authenticated session with no
     profile, which resolved to the admin."""
+    _end_device()
     session.pop('profile_id', None)
     session.pop('profile_epoch', None)
+    session.pop('device_id', None)
     session.pop('login_authenticated', None)
     session.pop('launch_pin_verified', None)
     return jsonify({'success': True})

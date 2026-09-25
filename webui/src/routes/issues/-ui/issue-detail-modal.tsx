@@ -44,10 +44,12 @@ import {
   parseSnapshot,
 } from '../-issues.helpers';
 import { ISSUE_PRIORITY_VALUES } from '../-issues.types';
+import { requestArtistEdit } from '../../artist-detail/-artist-detail.edit-focus';
 import { ArtPicker } from '../../artist-detail/-ui/art-picker';
 import { BodyPortal } from '../../artist-detail/-ui/portal';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
+import { requestFindingsFocus } from '../../tools/-tools.findings-focus';
 import styles from './issue-detail-modal.module.css';
 
 /** a fix tool opened from the issue; the issue dialog steps aside while it's up */
@@ -89,6 +91,8 @@ export function IssueDetailModal({
   const [reply, setReply] = useState('');
   const [tool, setTool] = useState<OpenTool | null>(null);
   const [offerResolve, setOfferResolve] = useState(false);
+  // the reporter fixing their own words: title and details become fields
+  const [draft, setDraft] = useState<{ title: string; description: string } | null>(null);
   // a pending app confirm sits outside the dialog; don't let it read as a dismiss
   const confirmingRef = useRef(false);
   const isOpen = Boolean(issueId || queryLoading || queryError);
@@ -97,6 +101,7 @@ export function IssueDetailModal({
     setReply('');
     setTool(null);
     setOfferResolve(false);
+    setDraft(null);
   }, [issueId]);
 
   const snapshot = issue ? parseSnapshot(issue.snapshot_data) : {};
@@ -130,6 +135,10 @@ export function IssueDetailModal({
     mutationFn: (updates: IssueUpdatePayload) => updateIssue(issue!.id, updates),
     onSuccess: (_, updates) => {
       if (updates.status === 'resolved') notify('Marked resolved', 'success');
+      if (updates.title !== undefined) {
+        setDraft(null);
+        notify('Saved', 'success');
+      }
       setOfferResolve(false);
       refresh();
     },
@@ -254,11 +263,35 @@ export function IssueDetailModal({
         }
         openArtistPage('Wishlist the missing tracks from the album there');
         return;
-      case 'edit_metadata':
-        openArtistPage('Switch to the enhanced view there to edit the details');
+      case 'edit_metadata': {
+        // the details form lives in the artist's enhanced view: land there
+        // with this album open and its form up (or the track row in view)
+        if (!artistLink) {
+          openArtistPage();
+          return;
+        }
+        const albumId = entity === 'album' ? issue.entity_id : snapshot.album_id;
+        requestArtistEdit({
+          artistId: artistLink.artistId,
+          albumId: albumId != null ? String(albumId) : undefined,
+          trackId: entity === 'track' ? issue.entity_id : undefined,
+        });
+        openArtistPage(
+          entity === 'track'
+            ? 'Click a field in the track row to change it'
+            : entity === 'artist'
+              ? 'Use Edit metadata at the top to change the details'
+              : undefined,
+        );
         return;
+      }
       case 'find_duplicates':
-        notify('Run the Duplicate Detector in Library Maintenance, then resolve this', 'info');
+        // the duplicate detector's findings, searched for this item
+        requestFindingsFocus({
+          jobId: 'duplicate_detector',
+          query: getItemName(issue, snapshot).replace(/^(Track|Album|Artist) #.*/, ''),
+        });
+        notify('Showing the Duplicate Detector findings for this item', 'info');
         onClose();
         void navigate({ to: '/tools' });
         return;
@@ -422,7 +455,15 @@ export function IssueDetailModal({
         danger: true,
         onSelect: () => void removeIssue(),
       });
-    } else if (isReporter && issue.status === 'open') {
+    } else if (isReporter && isActive(issue.status)) {
+      items.push({
+        key: 'edit',
+        label: 'Edit',
+        onSelect: () =>
+          setDraft({ title: issue.title, description: String(issue.description || '') }),
+      });
+    }
+    if (!isAdmin && isReporter && issue.status === 'open') {
       items.push({
         key: 'withdraw',
         label: 'Withdraw report',
@@ -498,7 +539,9 @@ export function IssueDetailModal({
             <div className={styles.threadEyebrow} title={formatIssueDate(issue.created_at)}>
               {eyebrow}
             </div>
-            <div className={styles.threadTitle}>{issue.title}</div>
+            <Show when={!draft}>
+              <div className={styles.threadTitle}>{issue.title}</div>
+            </Show>
             <div className={styles.threadItem}>
               <span className={styles.threadItemType}>{getEntityLabel(issue.entity_type)}</span>
               <span className={styles.threadItemName}>{itemName}</span>
@@ -539,6 +582,55 @@ export function IssueDetailModal({
         <Show when={followers}>
           <div className={styles.threadFollowers}>{followers}</div>
         </Show>
+
+        {draft ? (
+          <form
+            className={styles.ownerEdit}
+            aria-label="Edit your report"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (draft.title.trim()) {
+                updateMutation.mutate({
+                  title: draft.title.trim(),
+                  description: draft.description.trim(),
+                });
+              }
+            }}
+          >
+            <label className={styles.ownerEditLabel}>
+              Title
+              <input
+                className={styles.ownerEditInput}
+                value={draft.title}
+                maxLength={200}
+                autoFocus
+                onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+              />
+            </label>
+            <label className={styles.ownerEditLabel}>
+              Details
+              <textarea
+                className={styles.threadReply}
+                value={draft.description}
+                maxLength={2000}
+                rows={4}
+                onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+              />
+            </label>
+            <div className={styles.ownerEditActions}>
+              <button type="button" className={styles.quietButton} onClick={() => setDraft(null)}>
+                Cancel
+              </button>
+              <Button
+                className={styles.modalButtonPrimary}
+                type="submit"
+                disabled={!draft.title.trim() || updateMutation.isPending}
+              >
+                {updateMutation.isPending ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </form>
+        ) : null}
 
         <Show when={offerResolve && isAdmin && isActive(issue.status)}>
           <div className={styles.threadOffer} role="status">
