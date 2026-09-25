@@ -16,14 +16,16 @@ import time
 
 from flask import Blueprint, jsonify, request, session
 
-from core.security.rate_limit import AttemptLimiter
+from core.security.rate_limit import TargetedLimiter
 from utils.logging_config import get_logger
 
 logger = get_logger("api.login")
 
 # Brute-force limiter for /api/auth/login and the recovery reset (lenient;
-# only a flood of wrong answers from one IP trips it - success clears it).
-login_limiter = AttemptLimiter(max_attempts=10, window_seconds=300)
+# only a flood of wrong answers trips it). keyed by (ip, username): a success
+# clears only the account that succeeded, so signing in as yourself no longer
+# resets your guesses at someone else's.
+login_limiter = TargetedLimiter(max_attempts=10, window_seconds=300)
 
 # injected by configure()
 get_database = None
@@ -44,14 +46,13 @@ def auth_login():
     try:
         _ip = request.remote_addr or 'unknown'
         _now = time.time()
-        _locked, _retry_after = login_limiter.is_locked(_ip, _now)
-        if _locked:
-            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
-                    429, {'Retry-After': str(_retry_after)})
-
         data = request.json or {}
         username = (data.get('username') or '').strip()
         password = data.get('password') or ''
+        _locked, _retry_after = login_limiter.is_locked(_ip, username, _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
         if not username or not password:
             return jsonify({'success': False, 'error': 'Username and password required'}), 400
 
@@ -60,10 +61,10 @@ def auth_login():
         # Same generic error + a recorded failure whether the name or password is
         # wrong — don't leak which names exist.
         if not profile or not database.verify_profile_password(profile['id'], password):
-            login_limiter.record_failure(_ip, _now)
+            login_limiter.record_failure(_ip, username, _now)
             return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
 
-        login_limiter.record_success(_ip)
+        login_limiter.record_success(_ip, username)
         session['login_authenticated'] = True
         session['profile_id'] = profile['id']
         # A fresh login also clears any stale launch-PIN flag.
@@ -110,13 +111,12 @@ def auth_recovery_reset():
     try:
         _ip = request.remote_addr or 'unknown'
         _now = time.time()
-        _locked, _retry_after = login_limiter.is_locked(_ip, _now)
+        data = request.json or {}
+        username = (data.get('username') or '').strip()
+        _locked, _retry_after = login_limiter.is_locked(_ip, username, _now)
         if _locked:
             return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
                     429, {'Retry-After': str(_retry_after)})
-
-        data = request.json or {}
-        username = (data.get('username') or '').strip()
         answer = data.get('answer') or ''
         new_password = data.get('new_password') or ''
         if not username or not answer or not new_password:
@@ -127,10 +127,10 @@ def auth_recovery_reset():
         database = get_database()
         profile = database.get_profile_by_name(username)
         if not profile or not database.verify_profile_recovery_answer(profile['id'], answer):
-            login_limiter.record_failure(_ip, _now)
+            login_limiter.record_failure(_ip, username, _now)
             return jsonify({'success': False, 'error': 'Incorrect answer'}), 401
 
-        login_limiter.record_success(_ip)
+        login_limiter.record_success(_ip, username)
         database.set_profile_password(profile['id'], new_password)
         session['login_authenticated'] = True
         session['profile_id'] = profile['id']

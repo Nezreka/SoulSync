@@ -8412,6 +8412,16 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                # open issues are problems with the library, not with the
+                # person: they stay in the admin's queue (closed ones go)
+                try:
+                    row = cursor.execute("SELECT name FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+                    kept = self.issue_threads.hand_open_issues_to_admin(
+                        conn, profile_id, row['name'] if row else '')
+                    if kept:
+                        logger.info("delete_profile: kept %d open issue(s) for the admin", kept)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("keeping open issues on profile delete failed: %s", e)
                 tables = [r[0] for r in cursor.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' "
                     "AND name NOT LIKE 'sqlite_%'").fetchall()]
@@ -14678,7 +14688,8 @@ class MusicDatabase:
             return None
 
     def get_wishlist_tracks(self, limit: Optional[int] = None, profile_id: int = 1,
-                            offset: int = 0, category: Optional[str] = None) -> List[Dict[str, Any]]:
+                            offset: int = 0, category: Optional[str] = None,
+                            approved_only: bool = False) -> List[Dict[str, Any]]:
         """Get tracks in the wishlist for the given profile, ordered by date added
         (oldest first for retry priority).
 
@@ -14698,6 +14709,11 @@ class MusicDatabase:
                 """
 
                 params: List[Any] = [profile_id]
+
+                # a profile without download rights: only what an admin approved
+                if approved_only:
+                    self._ensure_music_request_schema(cursor)
+                    query += " AND request_status = 'approved'"
 
                 if category == "albums":
                     query += " AND json_extract(spotify_data, '$.album.album_type') = 'album'"
@@ -14910,7 +14926,8 @@ class MusicDatabase:
             logger.error(f"Error resetting wishlist retry backoff: {e}")
             return 0
 
-    def get_wishlist_count(self, profile_id: int = 1, category: Optional[str] = None) -> int:
+    def get_wishlist_count(self, profile_id: int = 1, category: Optional[str] = None,
+                           approved_only: bool = False) -> int:
         """Get the total number of tracks in the wishlist for the given profile,
         optionally filtered by category ('singles' or 'albums')."""
         try:
@@ -14918,6 +14935,9 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 query = "SELECT COUNT(*) FROM wishlist_tracks WHERE profile_id = ?"
                 params: List[Any] = [profile_id]
+                if approved_only:
+                    self._ensure_music_request_schema(cursor)
+                    query += " AND request_status = 'approved'"
                 if category == "albums":
                     query += " AND json_extract(spotify_data, '$.album.album_type') = 'album'"
                 elif category == "singles":
@@ -23563,6 +23583,17 @@ class MusicDatabase:
 
     # ── Library Issues CRUD ──
 
+    @property
+    def issue_threads(self):
+        """comments, followers and the reporter's unread flag (core/issues)."""
+        store = getattr(self, '_issue_threads', None)
+        if store is None:
+            from core.issues.thread_store import IssueThreadStore
+            store = IssueThreadStore(self._get_connection, 'library_issues',
+                                     'library_issue_comments', 'library_issue_followers')
+            self._issue_threads = store
+        return store
+
     def create_issue(self, profile_id: int, entity_type: str, entity_id: str,
                      category: str, title: str, description: str = '',
                      snapshot_data: Dict = None, priority: str = 'normal') -> Dict[str, Any]:
@@ -23589,14 +23620,25 @@ class MusicDatabase:
                    is_admin: bool = False) -> Dict[str, Any]:
         """Get issues with optional filters. Non-admin only sees own issues."""
         try:
+            self.issue_threads._run(lambda _c: None)   # reporter_label exists
+        except Exception as e:  # noqa: BLE001
+            logger.debug("issue thread schema check failed: %s", e)
+        try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 conditions = []
                 params = []
 
                 if not is_admin and profile_id:
-                    conditions.append("i.profile_id = ?")
-                    params.append(profile_id)
+                    # their own reports, and the ones they said they hit too
+                    followed = self.issue_threads.followed_issue_ids(profile_id)
+                    if followed:
+                        conditions.append("(i.profile_id = ? OR i.id IN (%s))" % ','.join('?' * len(followed)))
+                        params.append(profile_id)
+                        params.extend(followed)
+                    else:
+                        conditions.append("i.profile_id = ?")
+                        params.append(profile_id)
                 if status:
                     conditions.append("i.status = ?")
                     params.append(status)
@@ -23615,7 +23657,8 @@ class MusicDatabase:
 
                 # Fetch issues with reporter profile info
                 cursor.execute(f"""
-                    SELECT i.*, p.name as reporter_name, p.avatar_color as reporter_color,
+                    SELECT i.*, COALESCE(i.reporter_label, p.name) as reporter_name,
+                           p.avatar_color as reporter_color,
                            p.avatar_url as reporter_avatar
                     FROM library_issues i
                     LEFT JOIN profiles p ON i.profile_id = p.id
@@ -23644,10 +23687,15 @@ class MusicDatabase:
     def get_issue(self, issue_id: int) -> Optional[Dict[str, Any]]:
         """Get a single issue by ID with reporter info."""
         try:
+            self.issue_threads._run(lambda _c: None)   # reporter_label exists
+        except Exception as e:  # noqa: BLE001
+            logger.debug("issue thread schema check failed: %s", e)
+        try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT i.*, p.name as reporter_name, p.avatar_color as reporter_color,
+                    SELECT i.*, COALESCE(i.reporter_label, p.name) as reporter_name,
+                           p.avatar_color as reporter_color,
                            p.avatar_url as reporter_avatar
                     FROM library_issues i
                     LEFT JOIN profiles p ON i.profile_id = p.id
@@ -23693,6 +23741,10 @@ class MusicDatabase:
     def delete_issue(self, issue_id: int) -> Dict[str, Any]:
         """Delete an issue (admin only)."""
         try:
+            self.issue_threads.delete_thread(issue_id)
+        except Exception as e:  # noqa: BLE001 - the issue row is the thing asked for
+            logger.debug("issue thread cleanup failed: %s", e)
+        try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM library_issues WHERE id = ?", (issue_id,))
@@ -23728,6 +23780,196 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting issue counts: {e}")
             return {'open': 0, 'in_progress': 0, 'resolved': 0, 'dismissed': 0, 'total': 0}
+
+    # ===================== Music requests =====================
+    # a profile without download rights keeps a wishlist the scheduled run
+    # won't download. each row is a request until an admin approves it
+    # (request_status = 'approved', downloaded like any other row) or declines
+    # it (row removed). music_requests is the history both leave behind, and
+    # how an approved request learns it arrived. see core/requests/music.py.
+
+    def _ensure_music_request_schema(self, cursor) -> None:
+        """idempotent, cheap: two columns and a table. run defensively before
+        use because the old wishlist rebuild migration recreates the table
+        from a fixed column list."""
+        cursor.execute("PRAGMA table_info(wishlist_tracks)")
+        cols = {c[1] for c in cursor.fetchall()}
+        if cols and 'request_status' not in cols:
+            cursor.execute("ALTER TABLE wishlist_tracks ADD COLUMN request_status TEXT DEFAULT NULL")
+        if cols and 'request_resolved_at' not in cols:
+            cursor.execute("ALTER TABLE wishlist_tracks ADD COLUMN request_resolved_at TIMESTAMP DEFAULT NULL")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS music_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                requester_name TEXT,
+                group_key TEXT NOT NULL,
+                kind TEXT NOT NULL,                 -- album | track
+                title TEXT NOT NULL,
+                artist TEXT,
+                image_url TEXT,
+                tracks TEXT NOT NULL DEFAULT '[]',  -- [{id, title, artist}]
+                status TEXT NOT NULL,               -- approved | available | declined | removed
+                admin_response TEXT,
+                resolved_by INTEGER,
+                resolved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                available_at TIMESTAMP,
+                seen_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_requests_profile ON music_requests (profile_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_requests_status ON music_requests (status)")
+
+    def get_pending_request_rows(self, profile_id: int) -> List[Dict[str, Any]]:
+        """the not-yet-approved wishlist rows of one profile."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(
+                    "SELECT spotify_track_id, spotify_data, source_type, date_added "
+                    "FROM wishlist_tracks WHERE profile_id = ? AND request_status IS NULL "
+                    "ORDER BY date_added DESC", (int(profile_id),))
+                out = []
+                for row in cursor.fetchall():
+                    try:
+                        data = json.loads(row['spotify_data'])
+                    except (ValueError, TypeError):
+                        data = {}
+                    out.append({'spotify_track_id': row['spotify_track_id'], 'spotify_data': data,
+                                'source_type': row['source_type'], 'date_added': row['date_added']})
+                return out
+        except Exception as e:
+            logger.error("Error reading pending music requests: %s", e)
+            return []
+
+    def approve_request_rows(self, profile_id: int, track_ids: List[str]) -> int:
+        """flip pending rows to approved; the scheduled run picks them up.
+        only rows still pending change, so a second approve is a no-op."""
+        ids = [str(t) for t in track_ids or [] if t]
+        if not ids:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                ph = ','.join('?' * len(ids))
+                cursor.execute(
+                    f"UPDATE wishlist_tracks SET request_status = 'approved', "
+                    f"request_resolved_at = CURRENT_TIMESTAMP "
+                    f"WHERE profile_id = ? AND request_status IS NULL AND spotify_track_id IN ({ph})",
+                    [int(profile_id)] + ids)
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error("Error approving music request rows: %s", e)
+            return 0
+
+    def wishlist_has_track(self, profile_id: int, track_id: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM wishlist_tracks WHERE profile_id = ? AND spotify_track_id = ? LIMIT 1",
+                               (int(profile_id), str(track_id)))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.debug("wishlist_has_track failed: %s", e)
+            return True   # unknown reads as still on its way, never a false "arrived"
+
+    def add_music_request(self, *, profile_id: int, requester_name: str, group_key: str, kind: str,
+                          title: str, artist: str, image_url: str, tracks: List[Dict[str, Any]],
+                          status: str, resolved_by: int, admin_response: Optional[str] = None) -> Optional[int]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(
+                    "INSERT INTO music_requests (profile_id, requester_name, group_key, kind, title, artist, "
+                    "image_url, tracks, status, admin_response, resolved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (int(profile_id), requester_name, group_key, kind, title, artist, image_url,
+                     json.dumps(tracks or []), status, admin_response, int(resolved_by)))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error("Error recording music request: %s", e)
+            return None
+
+    def list_music_requests(self, profile_id: Optional[int] = None, status: Optional[str] = None,
+                            limit: int = 200) -> List[Dict[str, Any]]:
+        """request history, newest first. profile_id None = everyone's."""
+        where, args = [], []
+        if profile_id is not None:
+            where.append("profile_id = ?")
+            args.append(int(profile_id))
+        if status:
+            where.append("status = ?")
+            args.append(status)
+        sql = ("SELECT * FROM music_requests" + (" WHERE " + " AND ".join(where) if where else "") +
+               " ORDER BY resolved_at DESC, id DESC LIMIT ?")
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(sql, args + [max(1, int(limit))])
+                rows = []
+                for row in cursor.fetchall():
+                    d = dict(row)
+                    try:
+                        d['tracks'] = json.loads(d.get('tracks') or '[]')
+                    except (ValueError, TypeError):
+                        d['tracks'] = []
+                    rows.append(d)
+                return rows
+        except Exception as e:
+            logger.error("Error listing music requests: %s", e)
+            return []
+
+    def set_music_request_status(self, request_id: int, status: str) -> bool:
+        """approved -> available | removed, stamping available_at and clearing
+        seen_at so the requester's badge lights up."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(
+                    "UPDATE music_requests SET status = ?, seen_at = NULL, "
+                    "available_at = CASE WHEN ? = 'available' THEN CURRENT_TIMESTAMP ELSE available_at END "
+                    "WHERE id = ? AND status = 'approved'", (status, status, int(request_id)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error updating music request %s: %s", request_id, e)
+            return False
+
+    def mark_music_requests_seen(self, profile_id: int) -> int:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute("UPDATE music_requests SET seen_at = CURRENT_TIMESTAMP "
+                               "WHERE profile_id = ? AND seen_at IS NULL", (int(profile_id),))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.debug("mark_music_requests_seen failed: %s", e)
+            return 0
+
+    def delete_music_request(self, request_id: int, profile_id: Optional[int] = None) -> bool:
+        where, args = "id = ?", [int(request_id)]
+        if profile_id is not None:
+            where += " AND profile_id = ?"
+            args.append(int(profile_id))
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(f"DELETE FROM music_requests WHERE {where}", args)
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error deleting music request %s: %s", request_id, e)
+            return False
 
     # ===================== HiFi Instances =====================
 

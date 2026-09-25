@@ -551,3 +551,30 @@ class TestFoundByReadingLineByLine:
         src = inspect.getsource(request_mod.register_routes)
         payload = src[src.index("Check the status of a music request"):]
         assert '"notify_url"' not in payload
+
+
+# ── sept 24 2026 review ──────────────────────────────────────────────────────
+
+def test_automation_skips_a_query_the_request_api_already_started():
+    """the endpoint downloads the query itself AND emits webhook_received; an
+    automation webhook_received -> search_and_download grabbed it again."""
+    from types import SimpleNamespace
+
+    from core.automation.handlers.search_and_download import auto_search_and_download
+
+    called = []
+    deps = SimpleNamespace(update_progress=lambda *a, **k: None,
+                           run_async=lambda coro: (called.append(coro), 'dl-1')[1],
+                           download_orchestrator=SimpleNamespace(
+                               search_and_download_best=lambda q: q))
+    out = auto_search_and_download(
+        {'_event_data': {'query': 'Radiohead - Reckoner', 'download_started_by': 'api_request'}}, deps)
+    assert out['status'] == 'skipped' and called == []
+    out = auto_search_and_download({'_event_data': {'query': 'Radiohead - Reckoner'}}, deps)
+    assert out['status'] == 'completed' and called == ['Radiohead - Reckoner']
+
+
+def test_request_api_marks_its_event_and_refuses_odd_callback_schemes():
+    src = open('api/request.py', encoding='utf-8').read()
+    assert "'download_started_by': 'api_request'" in src
+    assert 'notify_url must be an http(s) url' in src

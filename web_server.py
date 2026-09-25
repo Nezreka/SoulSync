@@ -541,10 +541,11 @@ def inject_webui_assets():
         'vite_assets': build_webui_vite_assets,
     }
 
-# Brute-force limiter for the launch-PIN unlock (lenient; only a flood of wrong
-# PINs from one IP trips it — correct entry clears it instantly).
-from core.security.rate_limit import AttemptLimiter as _AttemptLimiter
-_launch_pin_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
+# Brute-force limiter for every PIN check: the launch unlock and picking a
+# pinned profile. keyed by (ip, profile) so a correct pin on your own card
+# doesn't wipe the failures on someone else's.
+from core.security.rate_limit import TargetedLimiter as _TargetedLimiter
+_launch_pin_limiter = _TargetedLimiter(max_attempts=10, window_seconds=300)
 # the login/recovery limiter moved to api/login.py with its routes; imported
 # back because api/user_profiles gets it injected (admin clears lockouts)
 from api.login import login_limiter as _login_limiter
@@ -678,7 +679,29 @@ def _set_profile_context():
             return
 
     path = request.path
-    pid = session.get('profile_id', 1)
+    # no profile in the session is only the admin on a single-profile install;
+    # anywhere else it is no rights until a card is picked (logout, a deleted
+    # profile or a fresh browser used to land on profile 1 here)
+    from core.security.session_profile import resolve_session_profile, no_profile_request_is_blocked
+    _session_pid = session.get('profile_id')
+    _profile_count = 2
+    if _session_pid is None:
+        try:
+            _profile_count = len(get_database().get_all_profiles())
+        except Exception as e:
+            logger.debug("profile count for session resolve: %s", e)
+    pid = resolve_session_profile(session_pid=_session_pid,
+                                  login_mode=_require_login_enabled(),
+                                  profile_count=_profile_count)
+    if pid is None:
+        g.profile_id = None
+        g.is_admin = False
+        g.can_download = False
+        g.profile_name = "No profile"
+        g.allowed_sides = 'none'
+        if no_profile_request_is_blocked(path, request.method):
+            return jsonify({"error": "profile_required", "profile_required": True}), 401
+        return
 
     # Validate session profile still exists (handles deleted profiles), and stash
     # download permission on g so isolated blueprints (video) can gate without a
@@ -929,15 +952,10 @@ VALID_PAGE_IDS = {
 
 def check_download_permission():
     """Check if current profile has download permission. Returns error response or None if allowed."""
-    pid = get_current_profile_id()
-    if pid == 1:
-        return None  # Root admin always allowed
-    try:
-        profile = get_database().get_profile(pid)
-        if profile and not profile.get('can_download', True):
-            return jsonify({'success': False, 'error': 'Downloads are disabled for this profile.'}), 403
-    except Exception as e:
-        logger.debug("download permission check: %s", e)
+    from core.permissions import download_denied_reason
+    reason = download_denied_reason(get_current_profile_id(), lambda pid: get_database().get_profile(pid))
+    if reason:
+        return jsonify({'success': False, 'error': reason}), 403
     return None
 
 # --- Docker Helper Functions ---
@@ -1539,6 +1557,17 @@ def _register_automation_handlers():
         _reg_fw(_notify_handle)
     except Exception:
         logger.exception("Could not wire video events -> notifications")
+    # requests: a finished download may be the title somebody asked for
+    try:
+        from core.video.download_events import register_event_forwarder as _reg_fw_req
+
+        def _request_arrivals(etype, _data):
+            if etype in ('video_download_completed', 'video_batch_complete'):
+                from api.video.requests import sweep_arrivals
+                sweep_arrivals()
+        _reg_fw_req(_request_arrivals)
+    except Exception:
+        logger.exception("Could not wire video events -> request arrivals")
 
     logger.info("Automation action handlers registered")
 
@@ -3451,6 +3480,7 @@ from core.debug_info import (
 
 
 @app.route('/api/debug-info')
+@admin_only
 def get_debug_info():
     return _debug_info_get()
 
@@ -4034,6 +4064,7 @@ _LIVE_LOG_BUFFER_MAX = 500
 
 
 @app.route('/api/logs/tail', methods=['GET'])
+@admin_only
 def get_log_tail():
     """Return the last N lines from a log file, optionally filtered by level."""
     log_source = request.args.get('source', 'app')
@@ -5930,6 +5961,9 @@ def _music_video_deps():
 @app.route('/api/music-video/download', methods=['POST'])
 def download_music_video():
     """Download a YouTube video as a music video file to the configured music videos folder."""
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
@@ -11233,6 +11267,9 @@ from core.library.redownload import (
 
 @app.route('/api/library/track/<track_id>/redownload/start', methods=['POST'])
 def redownload_start(track_id):
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     return _redownload_start_impl(track_id)
 
 
@@ -21621,6 +21658,8 @@ def handle_profile_join(data):
     watches all); everyone else gets exactly their own."""
     requested = data.get('profile_id')
     pid, is_admin = _ws_session_profile()
+    if pid is None:
+        return
     target = requested if (is_admin and requested) else pid
     if target != requested and requested:
         logger.warning("profile:join — client asked for profile %s but session is %s; "
@@ -21635,11 +21674,21 @@ def handle_profile_join(data):
 def _ws_session_profile():
     """(profile_id, is_admin) for the CURRENT socket's session — server-side
     truth for room joins. Fail-closed to the session profile; profile 1 or an
-    is_admin-flagged profile counts as admin."""
-    try:
-        pid = int(session.get('profile_id', 1) or 1)
-    except (TypeError, ValueError):
-        pid = 1
+    is_admin-flagged profile counts as admin. no profile in the session is
+    (None, False) except on a single-profile install, same rule as http."""
+    from core.security.session_profile import resolve_session_profile
+    _session_pid = session.get('profile_id')
+    _count = 2
+    if _session_pid is None:
+        try:
+            _count = len(get_database().get_all_profiles())
+        except Exception:
+            _count = 2
+    pid = resolve_session_profile(session_pid=_session_pid,
+                                  login_mode=_require_login_enabled(),
+                                  profile_count=_count)
+    if pid is None:
+        return None, False
     if pid == 1:
         return pid, True
     try:
@@ -22198,6 +22247,19 @@ _cfg_is(
 )
 app.register_blueprint(_bp_is())
 
+# music requests: what a profile without download rights asked for
+from api.music_requests import configure as _cfg_mr, create_blueprint as _bp_mr
+_cfg_mr(get_database=get_database)
+app.register_blueprint(_bp_mr())
+
+# per-profile notes (request approved, issue answered): pushed to the
+# requester's profile room; core.profile_notify journals them too
+try:
+    from core.profile_notify import register_emitter as _reg_profile_notify
+    _reg_profile_notify(lambda event, payload, room: socketio.emit(event, payload, room=room))
+except Exception:
+    logger.exception("Could not wire profile notifications")
+
 # database updater/backup/maintenance
 from api.database_admin import configure as _cfg_dba, create_blueprint as _bp_dba
 _cfg_dba(
@@ -22658,7 +22720,12 @@ _emit_live_log_loop._source = 'app'
 
 @socketio.on('logs:subscribe')
 def handle_logs_subscribe(data):
-    """Client subscribes to live log stream with optional source."""
+    """Client subscribes to live log stream with optional source. admin only,
+    same as the Settings log viewer that sends it: logs carry paths, usernames
+    and server urls, and the source switch is global for every viewer."""
+    _pid, _is_admin = _ws_session_profile()
+    if not _is_admin:
+        return
     source = data.get('source', 'app')
     _emit_live_log_loop._source = source
     join_room('logs:live')

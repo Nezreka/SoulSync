@@ -19,16 +19,10 @@ from core.metadata.registry import get_itunes_client, get_spotify_client
 logger = logging.getLogger(__name__)
 
 
-def get_current_profile_id() -> int:
-    """Mirror of web_server.get_current_profile_id — uses Flask g.
-
-    Catches RuntimeError too because reading `g` outside a request
-    context raises that (not AttributeError) — happens when this is
-    called from background threads (sync, automation, scanners)."""
-    try:
-        return g.profile_id
-    except (AttributeError, RuntimeError):
-        return 1
+# the one resolver (session, then the background profile an automation runs
+# as, then admin). this module used to carry its own copy that only read g, so
+# a sync thread running for a member looked up profile 1's matches.
+from core.profile_context import get_current_profile_id  # noqa: E402,F401
 
 
 def _get_itunes_client():

@@ -343,6 +343,10 @@ def register_routes(bp):
 
         request_id = str(uuid.uuid4())
         notify_url = (body.get("notify_url") or "").strip() or None
+        # a callback is an http post from the server: http(s) only, no file:,
+        # gopher: or whatever else requests may learn to speak
+        if notify_url and not notify_url.lower().startswith(("http://", "https://")):
+            return api_error("BAD_REQUEST", "notify_url must be an http(s) url.", 400)
         metadata = body.get("metadata") or {}
 
         with _requests_lock:
@@ -368,6 +372,10 @@ def register_routes(bp):
                 'request_id': request_id,
                 'source': 'api',
                 'metadata': metadata,
+                # this endpoint starts the download itself (below). an
+                # automation "webhook received -> search and download" used to
+                # grab the same query a second time; the handler reads this
+                'download_started_by': 'api_request',
             })
 
         # Start background search-download (Feature A: works without automations)

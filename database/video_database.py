@@ -418,6 +418,9 @@ _COLUMN_MIGRATIONS = [
     # YouTube completed rows are the ownership ledger (scan dedup, retention,
     # Channels tab); a user clear must never delete the facts.
     ("video_download_history", "cleared_at", "TEXT"),
+    # requests: when the approved title showed up in the library (the
+    # requester gets told once, this is the once)
+    ("video_requests", "available_at", "TEXT"),
 ]
 
 
@@ -6041,6 +6044,17 @@ class VideoDatabase:
     _ISSUE_UPDATABLE = {"status", "priority", "admin_response", "resolved_by",
                         "resolved_at", "title", "description", "category"}
 
+    @property
+    def issue_threads(self):
+        """comments, followers and the reporter's unread flag (core/issues)."""
+        store = getattr(self, "_issue_threads", None)
+        if store is None:
+            from core.issues.thread_store import IssueThreadStore
+            store = IssueThreadStore(self._get_connection, "video_issues",
+                                     "video_issue_comments", "video_issue_followers")
+            self._issue_threads = store
+        return store
+
     def create_issue(self, profile_id: int, entity_type: str, entity_id, category: str,
                      title: str, description: str = "", snapshot_data=None,
                      priority: str = "normal", reporter_name=None) -> int:
@@ -6073,8 +6087,15 @@ class VideoDatabase:
         high priority first inside each; newest first. Non-admin sees own only."""
         where, params = ["1=1"], []
         if not is_admin:
-            where.append("profile_id=?")
-            params.append(int(profile_id))
+            # their own reports, and the ones they said they hit too
+            followed = self.issue_threads.followed_issue_ids(int(profile_id))
+            if followed:
+                where.append("(profile_id=? OR id IN (%s))" % ",".join("?" * len(followed)))
+                params.append(int(profile_id))
+                params.extend(followed)
+            else:
+                where.append("profile_id=?")
+                params.append(int(profile_id))
         for col, val in (("status", status), ("category", category),
                          ("entity_type", entity_type)):
             if val and val != "all":
@@ -6118,6 +6139,10 @@ class VideoDatabase:
             conn.close()
 
     def delete_issue(self, issue_id: int) -> bool:
+        try:
+            self.issue_threads.delete_thread(issue_id)
+        except Exception:  # noqa: BLE001 - the issue row is the thing asked for
+            logger.debug("video issue thread cleanup failed", exc_info=True)
         conn = self._get_connection()
         try:
             cur = conn.execute("DELETE FROM video_issues WHERE id=?", (int(issue_id),))
@@ -7426,6 +7451,13 @@ class VideoDatabase:
         removed = 0
         conn = self._get_connection()
         try:
+            # open issues are problems with the library, not with the person:
+            # they stay in the admin's queue (reporter_name is already kept)
+            try:
+                self.issue_threads.hand_open_issues_to_admin(conn, int(profile_id), "")
+                conn.commit()
+            except sqlite3.Error:
+                logger.debug("keeping open video issues on profile delete failed", exc_info=True)
             tables = [r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 "AND name NOT LIKE 'sqlite_%'").fetchall()]
@@ -7518,6 +7550,89 @@ class VideoDatabase:
         for r in rows:
             r["in_library"] = bool(r.get("tmdb_id")) and \
                 int(r["tmdb_id"]) in owned.get(r.get("kind"), set())
+
+    def claim_video_requests(self, kind, tmdb_id, *, resolved_by, admin_response=None,
+                             status="approved") -> list:
+        """take every PENDING request for one title (several people may have
+        asked) to ``status`` in one statement, and return the rows taken.
+        claiming before acquiring is what keeps a deny that lands mid-approve
+        from leaving a wishlisted title that reads "denied"."""
+        if status not in ("approved", "denied"):
+            return []
+        conn = self._get_connection()
+        try:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT * FROM video_requests WHERE kind=? AND tmdb_id=? AND status='pending'",
+                (kind, int(tmdb_id))).fetchall()]
+            if not rows:
+                return []
+            ids = [r["id"] for r in rows]
+            ph = ",".join("?" * len(ids))
+            cur = conn.execute(
+                f"UPDATE video_requests SET status=?, admin_response=?, resolved_by=?, "
+                f"resolved_at=datetime('now') WHERE status='pending' AND id IN ({ph})",
+                (status, admin_response, int(resolved_by), *ids))
+            conn.commit()
+            if cur.rowcount != len(ids):
+                # someone else resolved part of it between the read and the write
+                taken = {r[0] for r in conn.execute(
+                    f"SELECT id FROM video_requests WHERE id IN ({ph}) AND status=? "
+                    f"AND resolved_by=?", (*ids, status, int(resolved_by))).fetchall()}
+                rows = [r for r in rows if r["id"] in taken]
+            return rows
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.exception("claim_video_requests failed")
+            return []
+        finally:
+            conn.close()
+
+    def unclaim_video_requests(self, ids) -> int:
+        """put claimed requests back to pending (the acquisition step failed)."""
+        ids = [int(i) for i in ids or []]
+        if not ids:
+            return 0
+        ph = ",".join("?" * len(ids))
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                f"UPDATE video_requests SET status='pending', admin_response=NULL, resolved_by=NULL, "
+                f"resolved_at=NULL WHERE status='approved' AND id IN ({ph})", ids)
+            conn.commit()
+            return cur.rowcount
+        except sqlite3.Error:
+            logger.exception("unclaim_video_requests failed")
+            return 0
+        finally:
+            conn.close()
+
+    def approved_requests_awaiting_arrival(self) -> list:
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM video_requests WHERE status='approved' AND available_at IS NULL")]
+        except sqlite3.Error:
+            logger.exception("approved_requests_awaiting_arrival failed")
+            return []
+        finally:
+            conn.close()
+
+    def mark_video_requests_available(self, ids) -> int:
+        ids = [int(i) for i in ids or []]
+        if not ids:
+            return 0
+        ph = ",".join("?" * len(ids))
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                f"UPDATE video_requests SET available_at=datetime('now') "
+                f"WHERE available_at IS NULL AND id IN ({ph})", ids)
+            conn.commit()
+            return cur.rowcount
+        except sqlite3.Error:
+            logger.exception("mark_video_requests_available failed")
+            return 0
+        finally:
+            conn.close()
 
     def video_requests_pending_count(self, profile_id=None) -> int:
         conn = self._get_connection()

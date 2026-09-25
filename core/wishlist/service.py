@@ -235,13 +235,20 @@ class WishlistService:
         self,
         limit: Optional[int] = None,
         profile_id: int = 1,
+        approved_only: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get wishlist tracks formatted for the download modal.
         Returns tracks in a format similar to playlist tracks for compatibility.
+        ``approved_only``: just the rows an admin approved (a profile without
+        download rights, see core/requests/music.py).
         """
         try:
-            wishlist_tracks = self.database.get_wishlist_tracks(limit=limit, profile_id=profile_id)
+            if approved_only:
+                wishlist_tracks = self.database.get_wishlist_tracks(limit=limit, profile_id=profile_id,
+                                                                    approved_only=True)
+            else:
+                wishlist_tracks = self.database.get_wishlist_tracks(limit=limit, profile_id=profile_id)
             formatted_tracks = []
 
             for wishlist_track in wishlist_tracks:
@@ -353,8 +360,10 @@ class WishlistService:
         """Remove a track from the wishlist (typically after successful download)"""
         return self.database.remove_from_wishlist(spotify_track_id, profile_id=profile_id)
 
-    def get_wishlist_count(self, profile_id: int = 1) -> int:
+    def get_wishlist_count(self, profile_id: int = 1, approved_only: bool = False) -> int:
         """Get the total number of tracks in the wishlist"""
+        if approved_only:
+            return self.database.get_wishlist_count(profile_id=profile_id, approved_only=True)
         return self.database.get_wishlist_count(profile_id=profile_id)
 
     def clear_wishlist(self, profile_id: int = 1) -> bool:

@@ -29,26 +29,58 @@ def _is_admin():
     return bool(getattr(g, "is_admin", _me() == 1))
 
 
+def _notify(profile_id, message, kind="info"):
+    try:
+        from core.profile_notify import notify_profile
+        notify_profile(profile_id, message, kind, link="video-requests")
+    except Exception:  # noqa: BLE001 - a note never fails the action
+        logger.debug("request note failed", exc_info=True)
+
+
+def _tmdb_lookup(kind, tmdb_id):
+    from core.video.enrichment.engine import get_video_enrichment_engine
+    return get_video_enrichment_engine().tmdb_detail(kind, tmdb_id)
+
+
+def sweep_arrivals():
+    """approved titles that reached the library: stamp + tell the requester."""
+    from core.requests.video import sweep_arrivals as _sweep
+
+    from . import get_video_db
+    try:
+        return _sweep(get_video_db(), _notify)
+    except Exception:  # noqa: BLE001 - the page still loads without the sweep
+        logger.exception("video request arrival sweep failed")
+        return 0
+
+
 def register_routes(bp):
     @bp.route("/requests", methods=["POST"])
     def video_request_create():
         """File a request: {kind, tmdb_id, title, year?, poster_url?, note?,
         monitor?}. Idempotent per (profile, kind, tmdb) while pending."""
+        from core.requests.video import monitor_for_new_request, parse_tmdb_id, request_metadata
+
         from . import get_video_db
         body = request.get_json(silent=True) or {}
         kind = body.get("kind")
-        tmdb_id = body.get("tmdb_id")
-        title = (body.get("title") or "").strip()
-        if kind not in _KINDS or not tmdb_id or not title:
+        tmdb_id = parse_tmdb_id(body.get("tmdb_id"))
+        if kind not in _KINDS or tmdb_id is None:
             return jsonify({"success": False, "error": "kind, tmdb_id and title are required"}), 400
-        monitor = str(body.get("monitor") or "future").lower()
-        from core.video.monitor_policy import POLICIES
-        if monitor not in POLICIES:
-            monitor = "future"
+        # title/year/poster come from tmdb, not from what the member typed:
+        # the admin approves on them and the indexer searches with them
+        meta = request_metadata(kind, tmdb_id, body, _tmdb_lookup)
+        if not meta["title"]:
+            return jsonify({"success": False, "error": "kind, tmdb_id and title are required"}), 400
+        if meta["owned"] and kind == "movie":
+            return jsonify({"success": False, "error": "That's already in the library.",
+                            "in_library": True}), 409
+        monitor = monitor_for_new_request(kind, body.get("monitor"))
+        title = meta["title"]
         rid, created = get_video_db().add_video_request(
             profile_id=_me(), requester_name=getattr(g, "profile_name", None),
-            kind=kind, tmdb_id=int(tmdb_id), title=title, year=body.get("year"),
-            poster_url=body.get("poster_url"), note=(body.get("note") or "")[:500] or None,
+            kind=kind, tmdb_id=tmdb_id, title=title, year=meta["year"],
+            poster_url=meta["poster_url"], note=(body.get("note") or "")[:500] or None,
             monitor=monitor)
         if rid is None:
             return jsonify({"success": False, "error": "Could not file the request."}), 500
@@ -69,6 +101,7 @@ def register_routes(bp):
         so an approved request visibly progresses to 'In library' instead of
         sitting ambiguously forever; ``counts`` feeds the page tabs."""
         from . import get_video_db
+        sweep_arrivals()
         db = get_video_db()
         status = request.args.get("status") or None
         scope = None if _is_admin() else _me()
@@ -82,15 +115,20 @@ def register_routes(bp):
     def video_request_counts():
         """The nav badge: pending requests (all for admins, own for members)."""
         from . import get_video_db
+        sweep_arrivals()
         return jsonify({"success": True, "pending": get_video_db().video_requests_pending_count(
             None if _is_admin() else _me())})
 
     @bp.route("/requests/<int:request_id>/approve", methods=["POST"])
     def video_request_approve(request_id):
         """Admin approves → the title enters acquisition: movie → wishlist,
-        show → watchlist + the request's monitor policy expanded (P2).
-        Fulfillment is atomic-enough: the request only flips to approved after
-        the wishlist/watchlist write succeeded."""
+        show → watchlist + the monitor policy expanded (the admin may override
+        the requester's pick with ``{"monitor": ...}``). Every pending request
+        for the same title is approved together, and everyone who asked hears
+        about it. The rows are claimed FIRST (pending → approved in one
+        statement); if the wishlist/watchlist write fails they go back."""
+        from core.requests.video import monitor_for_new_request
+
         from . import get_video_db
         if not _is_admin():
             return jsonify({"success": False, "error": "Admin only."}), 403
@@ -102,6 +140,12 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "Already resolved."}), 409
 
         body = request.get_json(silent=True) or {}
+        claimed = db.claim_video_requests(
+            req["kind"], req["tmdb_id"], resolved_by=_me(),
+            admin_response=(body.get("response") or "")[:500] or None)
+        if not claimed:
+            return jsonify({"success": False, "error": "Already resolved."}), 409
+
         wished = 0
         if req["kind"] == "movie":
             ok = db.add_movie_to_wishlist(req["tmdb_id"], req["title"],
@@ -110,7 +154,8 @@ def register_routes(bp):
         else:
             ok = db.add_to_watchlist("show", req["tmdb_id"], req["title"],
                                      poster_url=req.get("poster_url"))
-            monitor = str(req.get("monitor") or "future").lower()
+            monitor = (monitor_for_new_request("show", body.get("monitor")) if body.get("monitor")
+                       else str(req.get("monitor") or "all").lower())
             if ok and monitor != "future":
                 try:
                     from datetime import date
@@ -127,36 +172,40 @@ def register_routes(bp):
                 except Exception:   # noqa: BLE001 - expansion is best-effort, approval still lands
                     logger.exception("request approve: policy expansion failed for %s", req["tmdb_id"])
         if not ok:
+            db.unclaim_video_requests([r["id"] for r in claimed])
             return jsonify({"success": False, "error": "Could not add the title — request left pending."}), 500
-        # The add is idempotent, so a resolve failure is safe to surface: the
-        # user retries and the wishlist/watchlist write is a no-op re-upsert.
-        # Swallowing it left the row pending with a success toast — the
-        # "approved but still says Approve" state.
-        if not db.resolve_video_request(request_id, status="approved", resolved_by=_me(),
-                                        admin_response=(body.get("response") or "")[:500] or None):
-            return jsonify({"success": False,
-                            "error": "Title added, but the request could not be marked approved — try again."}), 500
+        for r in claimed:
+            _notify(r["profile_id"], f"{req['title']} was approved, it's on the way", "success")
         try:      # 'Request Approved' automation trigger
             from core.video.download_events import publish
             publish("video_request_approved", {
                 "kind": req["kind"], "title": req["title"],
-                "requester": req.get("requester_name") or ""})
+                "requester": ", ".join(sorted({r.get("requester_name") or "" for r in claimed} - {""}))})
         except Exception:   # noqa: BLE001 - events never disturb the approval
             logger.exception("request-approved event publish failed")
-        return jsonify({"success": True, "wished": wished, "kind": req["kind"]})
+        return jsonify({"success": True, "wished": wished, "kind": req["kind"],
+                        "approved": len(claimed)})
 
     @bp.route("/requests/<int:request_id>/deny", methods=["POST"])
     def video_request_deny(request_id):
+        """Declines the title for everyone who asked for it, with the note."""
         from . import get_video_db
         if not _is_admin():
             return jsonify({"success": False, "error": "Admin only."}), 403
-        body = request.get_json(silent=True) or {}
-        ok = get_video_db().resolve_video_request(
-            request_id, status="denied", resolved_by=_me(),
-            admin_response=(body.get("response") or "")[:500] or None)
-        if not ok:
+        db = get_video_db()
+        req = db.get_video_request(request_id)
+        if not req or req["status"] != "pending":
             return jsonify({"success": False, "error": "Unknown or already-resolved request."}), 404
-        return jsonify({"success": True})
+        body = request.get_json(silent=True) or {}
+        note = (body.get("response") or "")[:500] or None
+        claimed = db.claim_video_requests(req["kind"], req["tmdb_id"], resolved_by=_me(),
+                                          admin_response=note, status="denied")
+        if not claimed:
+            return jsonify({"success": False, "error": "Unknown or already-resolved request."}), 404
+        for r in claimed:
+            _notify(r["profile_id"], f"{req['title']} was declined" + (f": {note}" if note else ""),
+                    "warning")
+        return jsonify({"success": True, "denied": len(claimed)})
 
     @bp.route("/requests/resolved", methods=["DELETE"])
     def video_request_clear_resolved():
