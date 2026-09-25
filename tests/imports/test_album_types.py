@@ -8,6 +8,8 @@ beets-organised library and drifting into a second convention beside it.
 
 from __future__ import annotations
 
+import os
+
 import core.imports.paths as paths
 from core.imports.album_types import (
     DEFAULT_TYPES,
@@ -438,3 +440,114 @@ def test_the_shipped_defaults_are_the_ones_the_code_falls_back_to():
     from_shipped = format_album_types({"album_type": "ep"},
                                       {"types": dict(DEFAULT_TYPES), "bracket": "[]"})
     assert from_fallback == from_shipped == "[EP]"
+
+
+def test_the_reorganize_planner_carries_secondary_types_to_the_path_builder():
+    """The one line that actually delivers the labels. The tag reader producing
+    them and $atypes consuming them are both covered, but between those two the
+    planner has to put them on the album context the path builder reads — and a
+    refactor that dropped that line would silently strip every label from the
+    library on the next reorganize, with the rest of the suite still green."""
+    from core.library_reorganize import _build_post_process_context
+
+    ctx = _build_post_process_context(
+        api_album={
+            'id': 'a1', 'name': 'Salival', 'release_date': '2007',
+            'total_tracks': 8, 'secondary_types': ['compilation', 'live'],
+        },
+        api_track={'id': 't1', 'name': 'Third Eye', 'track_number': 1, 'disc_number': 1},
+        artist_name='Tool', album_title='Salival', total_discs=1,
+    )
+    assert ctx['spotify_album']['secondary_types'] == ['compilation', 'live']
+
+
+def test_a_reorganize_context_renders_the_labels_end_to_end():
+    """Reader -> planner -> $atypes, in one go, against the tags a beets file
+    actually carries. Any break in that chain silently renames folders."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _secondary_album_types)
+    from core.library_reorganize import _build_post_process_context
+
+    tag = ["album", "compilation", "live"]            # as beets writes it
+    primary = _normalize_album_type(tag)
+    album_meta = {
+        'id': '', 'name': 'Salival', 'release_date': '2007', 'total_tracks': 8,
+        'album_type': primary,
+        'secondary_types': _secondary_album_types(tag, primary),
+    }
+    ctx = _build_post_process_context(
+        api_album=album_meta,
+        api_track={'id': '', 'name': 'Third Eye', 'track_number': 1, 'disc_number': 1},
+        artist_name='Tool', album_title='Salival', total_discs=1,
+        record_type=primary,
+    )
+    album_ctx = ctx['spotify_album']
+    assert format_album_types(album_ctx, BEETS_CONFIG) == "[Live][Anthology]"
+
+
+# --- the path builder actually emits the labels --------------------------
+
+def _atypes_path(tmp_path, monkeypatch, *, secondary, album="Salival", template=None):
+    """Drive the REAL path builder and hand back the album folder it chose."""
+    from core.library_reorganize import _build_album_info, _build_post_process_context
+
+    template = template or "$albumartist/[$year]$atypes $album/$track - $title"
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"album_path": template},
+        "file_organization.album_types": dict(BEETS_CONFIG),
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    ctx = _build_post_process_context(
+        {"id": "AL1", "name": album, "release_date": "2007-01-01", "total_tracks": 8,
+         "images": [{"url": ""}], "secondary_types": secondary},
+        {"name": "Third Eye", "track_number": 1, "disc_number": 1, "artists": [{"name": "Tool"}]},
+        "Tool", album, 1)
+    path, _ = paths.build_final_path_for_track(
+        ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac", create_dirs=False)
+    return os.path.basename(os.path.dirname(path))
+
+
+class _Cfg:
+    def __init__(self, vals):
+        self.vals = vals
+
+    def get(self, key, default=None):
+        return self.vals.get(key, default)
+
+
+def test_the_path_builder_puts_the_labels_in_the_folder(tmp_path, monkeypatch):
+    """End to end through build_final_path_for_track, not just the helpers.
+    The value has to be computed AND placed on the template context; a test of
+    each half separately would miss the wiring between them."""
+    assert _atypes_path(tmp_path, monkeypatch, secondary=["compilation", "live"]) == \
+        "[2007][Live][Anthology] Salival"
+
+
+def test_the_path_builder_leaves_a_plain_album_unlabelled(tmp_path, monkeypatch):
+    assert _atypes_path(tmp_path, monkeypatch, secondary=[], album="Lateralus") == \
+        "[2007] Lateralus"
+
+
+def test_the_single_path_gets_the_labels_too(tmp_path, monkeypatch):
+    """$atypes is offered for single_path in the settings UI, so the single
+    branch of the path builder has to populate it as well — it is a separate
+    context dict from the album branch and was previously uncovered."""
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"single_path": "$albumartist/[$year]$atypes $title/$title"},
+        "file_organization.album_types": dict(BEETS_CONFIG),
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    ctx = {
+        "source": "musicbrainz",
+        "artist": {"name": "Julien Baker", "id": "a1"},
+        "album": {"name": "Tokyo", "id": "al1", "album_type": "single",
+                  "release_date": "2019-01-01", "artists": [{"name": "Julien Baker"}]},
+        "track_info": {"name": "Tokyo", "id": "t1", "artists": [{"name": "Julien Baker"}]},
+        "original_search_result": {"title": "Tokyo"},
+    }
+    # album_info=None -> the builder takes its SINGLE branch
+    path, _ = paths.build_final_path_for_track(
+        ctx, ctx["artist"], None, ".flac", create_dirs=False)
+    assert "[Single]" in path, path
