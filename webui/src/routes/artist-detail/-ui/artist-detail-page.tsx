@@ -44,6 +44,7 @@ import { useCompletionStream } from '../-artist-detail.use-completion';
 import { useEnhancedData } from '../-artist-detail.use-enhanced';
 import { useGapFill } from '../-artist-detail.use-gap-fill';
 import { clearVanillaArtist, syncVanillaArtist } from '../-artist-detail.vanilla-state';
+import { AppearsOnSection } from './appears-on-section';
 import { ArtistDetailBackButton } from './artist-detail-back-button';
 import { ArtistHero } from './artist-hero';
 import { ArtistVideosSection } from './artist-videos-section';
@@ -511,6 +512,15 @@ export function ArtistDetailPage() {
           {/* Live dates and setlists. Renders nothing unless a concert
               provider is configured, so it costs an unconfigured install
               exactly one request that answers "not set up". */}
+          {/* features and collabs filed under other artists. a source-only
+              artist has no library tracks to be credited on. */}
+          {sourceOnly ? null : (
+            <AppearsOnSection
+              artistId={payload.artist?.id}
+              artistName={String(payload.artist?.name || '')}
+            />
+          )}
+
           <ConcertsSection
             artistName={String(payload?.artist?.name || '')}
             mbid={String(payload?.artist?.musicbrainz_id || '')}

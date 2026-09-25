@@ -20,6 +20,7 @@ from core.worker_utils import (
     set_album_api_track_count,
 )
 from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
+from core.library.artist_credits import CreditsBackfill, try_save_track_credits
 
 logger = get_logger("deezer_worker")
 
@@ -54,6 +55,9 @@ class DeezerWorker:
 
         # Retry configuration
         self.retry_days = 30
+        # tracks matched before the worker kept artist credits. one /track call
+        # each, so small batches, about the pace of a normal match
+        self._credits_backfill = CreditsBackfill('deezer', batch_size=3)
 
         # Name matching threshold
         self.name_similarity_threshold = 0.80
@@ -226,6 +230,13 @@ class DeezerWorker:
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_deezer_id': row[3]}
 
+            # Priority 3b: artist credits. rematched tracks, then the one-time
+            # sweep of tracks matched before we kept them
+            backfill = self._credits_backfill.next_batch(cursor)
+            if backfill:
+                return {'type': 'credits_backfill', 'id': backfill[0][0], 'tracks': backfill,
+                        'name': f"Artist credits for {len(backfill)} tracks"}
+
             # Priority 4: Retry 'not_found' artists after retry_days
             not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
             cursor.execute("""
@@ -395,6 +406,13 @@ class DeezerWorker:
 
     def _process_item(self, item: Dict[str, Any]):
         """Process a single item (artist, album, or track)"""
+        if item.get('type') == 'credits_backfill':
+            # not a match, so nothing to mark as error if it fails
+            try:
+                self._process_credits_backfill(item)
+            except Exception as e:
+                logger.error(f"Error backfilling Deezer artist credits: {e}")
+            return
         try:
             item_type = item['type']
             item_id = item['id']
@@ -766,6 +784,11 @@ class DeezerWorker:
                 track_id
             ))
 
+            # every artist on the track. only the full /track record has
+            # contributors, the search result just has the primary artist
+            if full_data:
+                try_save_track_credits(cursor, track_id, 'deezer', full_data.get('contributors'))
+
             # Update BPM if available and non-zero
             if bpm and bpm > 0:
                 cursor.execute("""
@@ -788,6 +811,27 @@ class DeezerWorker:
         finally:
             if conn:
                 conn.close()
+
+    def _process_credits_backfill(self, item: Dict[str, Any]):
+        """credits for tracks matched before we kept them, off the full /track
+        record (cached when the match fetched it recently)."""
+        saved = 0
+        for track_id, deezer_track_id, _album_id in item['tracks']:
+            if self.should_stop:
+                break
+            full = self.client.get_track_raw(deezer_track_id)
+            if not full:
+                continue
+            conn = None
+            try:
+                conn = self.db._get_connection()
+                if try_save_track_credits(conn.cursor(), track_id, 'deezer', full.get('contributors')):
+                    saved += 1
+                conn.commit()
+            finally:
+                if conn:
+                    conn.close()
+        logger.debug("Deezer credits backfill: %d/%d tracks", saved, len(item['tracks']))
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
         """Mark an entity (artist, album, or track) with a match status"""

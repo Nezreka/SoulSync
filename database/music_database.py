@@ -1688,6 +1688,13 @@ class MusicDatabase:
             self._ensure_art_lock_columns(cursor)
             self._ensure_genres_lock_columns(cursor)
             self._ensure_manual_metadata_schema(cursor)
+            # every artist credited on a track, from the enrichment workers.
+            # after the provider id columns above, the triggers watch them
+            try:
+                from core.library.artist_credits import ensure_schema as _ensure_artist_credits
+                _ensure_artist_credits(cursor)
+            except Exception as e:
+                logger.error(f"track_artist_credits schema init failed: {e}")
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
