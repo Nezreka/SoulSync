@@ -97,6 +97,12 @@ def _resolve_scope(scope):
         return ANY_OWNER
 
 
+def ambient_scope():
+    """The scope whoever is asking reads through: ANY_OWNER when nothing
+    separates libraries, else 'shared', a profile id, or None (all)."""
+    return _resolve_scope(_AMBIENT)
+
+
 def owner_clause(scope=_AMBIENT, column: str = "owned_f.owner_profile_id") -> str:
     """The owner half of the ownership predicate, ready to append.
 
@@ -160,7 +166,7 @@ def scope_visibility_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str
     # user is waiting for -- checking the artist level alone hid it and made
     # the album unreachable from the page.
     if entity == "artist":
-        owns_track = ("SELECT 1 FROM lib2_tracks it"
+        owns_track = ("SELECT it.id FROM lib2_tracks it"
                       "  JOIN lib2_albums ial ON ial.id = it.album_id"
                       f" WHERE ial.primary_artist_id = {alias}.id")
         intent_sql = (
@@ -228,6 +234,50 @@ def intent_profile_id(scope=_AMBIENT) -> int:
     return int(resolved)
 
 
+def monitored_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
+    """The monitored flag of ``alias`` as this scope sees it.
+
+    The ``monitored`` column on the catalogue row is the SHARED library's
+    intent (Guide §2.6: the admin's), and it is what the shared library reads.
+    An own library reads its profile's rule instead -- and nothing, when that
+    profile never set one: another library's monitoring is not its own.
+    """
+    if not _VALID_IDENTIFIER.match(alias):
+        raise ValueError(f"Invalid alias: {alias!r}")
+    entity = str(entity_type or "").strip().lower().rstrip("s")
+    if entity not in _OWNED:
+        raise ValueError(f"Unknown entity type: {entity_type!r}")
+    intent = intent_profile_id(scope)
+    if intent == 1:
+        return f"{alias}.monitored"
+    return (f"COALESCE((SELECT mr.monitored FROM lib2_monitor_rules mr"
+            f" WHERE mr.entity_type='{entity}' AND mr.entity_id={alias}.id"
+            f" AND mr.profile_id={int(intent)}), 0)")
+
+
+def scoped_monitored(conn: Any, entity_type: str, ids: Iterable[Any], *,
+                     scope=_AMBIENT):
+    """``{id: bool}`` for rows read with ``SELECT *``, where ``monitored_sql``
+    cannot be spliced in -- or None when the scope reads the global column
+    unchanged (the shared library, and every install without own libraries)."""
+    intent = intent_profile_id(scope)
+    if intent == 1:
+        return None
+    entity = str(entity_type or "").strip().lower().rstrip("s")
+    wanted = {int(i) for i in ids if i is not None}
+    out = {i: False for i in wanted}
+    unique = list(wanted)
+    for start in range(0, len(unique), _CHUNK):
+        part = unique[start:start + _CHUNK]
+        marks = ",".join("?" for _ in part)
+        for eid, mon in conn.execute(
+                f"SELECT entity_id, monitored FROM lib2_monitor_rules"
+                f" WHERE entity_type=? AND profile_id=? AND entity_id IN ({marks})",
+                (entity, int(intent), *part)):
+            out[int(eid)] = bool(mon)
+    return out
+
+
 def owned_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
     """SQL predicate: ``alias`` is a row the caller actually owns.
 
@@ -244,5 +294,5 @@ def owned_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
     return _OWNED[key].format(alias=alias, owner=owner_clause(scope))
 
 
-__all__ = ["ANY_OWNER", "intent_profile_id", "owned_sql", "owner_clause",
-           "scope_visibility_sql", "select_existing_ids"]
+__all__ = ["ANY_OWNER", "intent_profile_id", "monitored_sql", "owned_sql", "owner_clause",
+           "scope_visibility_sql", "scoped_monitored", "select_existing_ids"]

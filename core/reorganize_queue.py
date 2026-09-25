@@ -92,6 +92,10 @@ class QueueItem:
     # Rename-only mode (#875): move files to the current naming scheme WITHOUT the
     # copy + post-processing (re-tag / quality / AcoustID) the full flow runs.
     rename_only: bool = False
+    # The library the album is reorganized in (#1199): 'shared', a profile
+    # id, or None for "each library that holds files of it". Captured when the
+    # item is queued, while the request (and an admin's pick) still exists.
+    library: Any = None
     status: str = 'queued'              # queued | running | done | failed | cancelled
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
@@ -119,6 +123,7 @@ class QueueItem:
             'source': self.source,
             'metadata_source': self.metadata_source,
             'rename_only': self.rename_only,
+            'library': self.library,
             'enqueued_at': self.enqueued_at,
             'started_at': self.started_at,
             'finished_at': self.finished_at,
@@ -205,9 +210,11 @@ class ReorganizeQueue:
         adding a duplicate. ``cancelled`` / ``done`` / ``failed``
         items don't block re-enqueue (user retried after a failure).
         """
+        library = _library_for_new_item()
         with self._cond:
             for existing in self._items:
-                if existing.album_id == album_id and existing.status in ('queued', 'running'):
+                if (existing.album_id == album_id and existing.library == library
+                        and existing.status in ('queued', 'running')):
                     return {
                         'queued': False,
                         'reason': 'already_queued',
@@ -224,6 +231,7 @@ class ReorganizeQueue:
                 enqueued_at=time.time(),
                 metadata_source=metadata_source or 'api',
                 rename_only=bool(rename_only),
+                library=library,
             )
             self._items.append(item)
             self._persist(item)
@@ -263,11 +271,13 @@ class ReorganizeQueue:
         enqueued = 0
         already = 0
         seen_in_batch: set = set()
+        library = _library_for_new_item()
         with self._cond:
             # Snapshot album_ids that already block re-enqueue so we don't
             # rescan self._items per row.
             blocked = {
-                i.album_id for i in self._items if i.status in ('queued', 'running')
+                i.album_id for i in self._items
+                if i.status in ('queued', 'running') and i.library == library
             }
             for raw in items:
                 album_id = str(raw['album_id'])
@@ -284,6 +294,7 @@ class ReorganizeQueue:
                     source=raw.get('source'),
                     enqueued_at=time.time(),
                     metadata_source=raw.get('metadata_source') or 'api',
+                    library=library,
                 )
                 self._items.append(item)
                 enqueued += 1
@@ -424,6 +435,7 @@ class ReorganizeQueue:
                         enqueued_at=float(snap.get('enqueued_at') or time.time()),
                         metadata_source=snap.get('metadata_source') or 'api',
                         rename_only=bool(snap.get('rename_only')),
+                        library=snap.get('library'),
                     )
                 except (KeyError, TypeError, ValueError):
                     continue
@@ -572,6 +584,21 @@ class ReorganizeQueue:
 
 _singleton: Optional[ReorganizeQueue] = None
 _singleton_lock = threading.Lock()
+
+
+def _library_for_new_item():
+    """The library an album queued right now is reorganized in (#1199).
+
+    The caller's selected library when libraries are separated at all; None
+    otherwise, and for "all libraries" -- then the runner walks each library
+    that holds files of the album, each inside its own folder."""
+    try:
+        from core.library_scope import any_own_library_exists, current_library_scope
+        if not any_own_library_exists():
+            return None
+        return current_library_scope()
+    except Exception:  # noqa: BLE001 - unscoped is the pre-#1199 behaviour
+        return None
 
 
 class _DatabaseQueueStore:

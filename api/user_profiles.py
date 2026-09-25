@@ -569,8 +569,8 @@ def update_profile(profile_id):
                 if problem:
                     return jsonify({'success': False, 'error': problem}), 400
             library_result = database.set_profile_library(profile_id, mode, root or None)
-            from core.library_scope import invalidate_library_scope_cache
-            invalidate_library_scope_cache()
+            from core.library_scope import library_config_changed
+            library_config_changed()
             try:
                 from core.imports.paths import reset_own_library_fallback_notifications
                 reset_own_library_fallback_notifications()
@@ -605,6 +605,9 @@ def delete_profile(profile_id):
         if success:
             from api.profiles import _sweep_video_profile_data
             _sweep_video_profile_data(profile_id)
+            # its folder is no library any more (#1199)
+            from core.library_scope import library_config_changed
+            library_config_changed()
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

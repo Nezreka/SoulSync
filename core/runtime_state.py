@@ -14,7 +14,28 @@ matched_context_lock = threading.Lock()
 matched_downloads_context: Dict[str, Dict[str, Any]] = {}
 tasks_lock = threading.Lock()
 download_tasks: Dict[str, Dict[str, Any]] = {}
-download_batches: Dict[str, Dict[str, Any]] = {}
+class _BatchRegistry(dict):
+    """``download_batches``, which decides a new batch's library on arrival.
+
+    Where a download lands is decided while a request -- and an admin's pick --
+    still exists (#1199), and every creator is meant to stamp it. There are a
+    dozen creators, and upstream adds more every release; one that forgets
+    would send an admin's grab for someone else's library into the shared one.
+    So a batch registered without a decision gets one here, the same one
+    ``core.library_scope.owner_for_new_file`` would give for its profile.
+    """
+
+    def __setitem__(self, key, value):
+        if isinstance(value, dict):
+            try:
+                from core.library_scope import stamp_batch_owner
+                stamp_batch_owner(value)
+            except Exception:  # noqa: BLE001, S110 - undecided still resolves by profile
+                pass
+        super().__setitem__(key, value)
+
+
+download_batches: Dict[str, Dict[str, Any]] = _BatchRegistry()
 batch_locks: Dict[str, threading.Lock] = {}
 processed_download_ids = set()
 post_process_locks: Dict[str, threading.Lock] = {}

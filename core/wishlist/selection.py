@@ -13,9 +13,15 @@ def sanitize_and_dedupe_wishlist_tracks(
     *,
     sanitizer: Callable[[dict[str, Any]], dict[str, Any]] = sanitize_track_data_for_processing,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Sanitize wishlist tracks and drop duplicate track IDs."""
+    """Sanitize wishlist tracks and drop duplicate track IDs.
+
+    A duplicate is the same track for the same LIBRARY (``_wishlist_library``,
+    when the caller tagged it): two profiles on the shared library want one
+    download, but a profile with a library of its own wants its own copy even
+    when the shared library is getting one too (#1199, E-06).
+    """
     sanitized_tracks: list[dict[str, Any]] = []
-    seen_track_ids: set[str] = set()
+    seen_track_ids: set[Any] = set()
     duplicates_found = 0
 
     for track in raw_tracks:
@@ -26,13 +32,14 @@ def sanitize_and_dedupe_wishlist_tracks(
             or sanitized_track.get('id')
         )
 
-        if spotify_track_id and spotify_track_id in seen_track_ids:
+        key = (sanitized_track.get('_wishlist_library'), spotify_track_id)
+        if spotify_track_id and key in seen_track_ids:
             duplicates_found += 1
             continue
 
         sanitized_tracks.append(sanitized_track)
         if spotify_track_id:
-            seen_track_ids.add(spotify_track_id)
+            seen_track_ids.add(key)
 
     return sanitized_tracks, duplicates_found
 

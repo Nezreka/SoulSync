@@ -460,16 +460,15 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
     1. Runs the analysis.
     2. If missing tracks are found, it automatically queues them for download.
     """
-    # the analysis asks "do we already have this" through the batch owner's
-    # library (#1199); this runs on a pool thread with no request context
-    from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
+    # the analysis asks "do we already have this" through the library the
+    # batch fills (#1199) -- the one decided when it was created, which for an
+    # admin is the library they had selected, not their own. this runs on a
+    # pool thread with no request context.
+    from core.library_scope import batch_scope, library_scope
     with tasks_lock:
-        _batch_profile = (download_batches.get(batch_id) or {}).get('profile_id')
-    _scope_token = set_library_scope(library_scope_for_profile(_batch_profile))
-    try:
+        _scope = batch_scope(download_batches.get(batch_id) or {})
+    with library_scope(_scope):
         return _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps, serialize)
-    finally:
-        reset_library_scope(_scope_token)
 
 
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: MasterDeps,

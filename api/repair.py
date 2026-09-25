@@ -177,6 +177,12 @@ def repair_job_run(job_id):
             artist_name = scope['artist_name']
         elif artist_name:
             scope = {'artist_name': artist_name}
+        # E-14: a run started by hand covers the library the caller has
+        # selected. Only where there is more than one to choose between.
+        from core.library_scope import any_own_library_exists, current_library_scope
+        if any_own_library_exists():
+            scope = dict(scope or {})
+            scope['library'] = current_library_scope()
         _repair_worker().run_job_now(job_id, scope=scope)
         logger.info("Repair job %s triggered manually via UI%s", job_id,
                     f" (artist scope: {artist_name})" if artist_name else "")

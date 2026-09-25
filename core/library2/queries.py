@@ -14,7 +14,9 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .metadata_overrides import project_metadata, project_metadata_many
 from .paths import library_relative_path
-from .sql_util import intent_profile_id, owner_clause, scope_visibility_sql
+from .sql_util import (
+    intent_profile_id, monitored_sql, owner_clause, scoped_monitored, scope_visibility_sql,
+)
 from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier
 from .track_files import primary_order
 
@@ -441,6 +443,17 @@ def find_artists_by_name(conn, name: str, *, limit: int = 5) -> List[Dict[str, A
     return found
 
 
+def _scoped_flag(conn, entity: str, row) -> bool:
+    """A row's monitored flag as this library sees it (see ``monitored_sql``),
+    for rows read with ``SELECT *``."""
+    if not row:
+        return False
+    override = scoped_monitored(conn, entity, [row["id"]])
+    if override is None:
+        return bool(row["monitored"])
+    return override.get(int(row["id"]), False)
+
+
 def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str = "all",
                  page: int = 1, limit: int = 75,
                  include_size: bool = True) -> Tuple[List[Dict[str, Any]], int]:
@@ -460,6 +473,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     # every query here is byte for byte the one that ran before.
     tf_owner = owner_clause(column="tf.owner_profile_id")
     album_visible = scope_visibility_sql("album", "al") or "1=1"
+    album_monitored = monitored_sql("album", "al")
+    track_monitored = monitored_sql("track", "t")
     page_join, page_order, outer_order, rollup_column = _artist_page_order(sort)
     if rollup_column:
         # Rebuilt only when missing or stale; a few minutes of drift moves an
@@ -537,10 +552,13 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
             .replace("_", "\\_")
         )
         params["like"] = f"%{escaped}%"
+    # the monitored flag THIS library sees: the shared library's global
+    # column, or an own library's rules (#1199)
+    artist_monitored = monitored_sql("artist", "a")
     if monitored == "monitored":
-        clauses.append("a.monitored = 1")
+        clauses.append(f"{artist_monitored} = 1")
     elif monitored == "unmonitored":
-        clauses.append("a.monitored = 0")
+        clauses.append(f"{artist_monitored} = 0")
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
     total = conn.execute(
@@ -631,11 +649,11 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
             SELECT aa.artist_id,
                    COUNT(DISTINCT CASE
                        WHEN al.album_type <> 'single'
-                        AND (al.origin='library' OR al.monitored=1)
+                        AND (al.origin='library' OR {album_monitored}=1)
                        THEN al.id END) AS album_count,
                    COUNT(DISTINCT CASE
                        WHEN al.album_type = 'single'
-                        AND (al.origin='library' OR al.monitored=1)
+                        AND (al.origin='library' OR {album_monitored}=1)
                        THEN al.id END) AS single_count
               FROM artist_albums aa
               JOIN lib2_albums al ON al.id=aa.album_id
@@ -647,7 +665,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         track_stats AS (
             SELECT cm.canonical_id AS artist_id,
                    COUNT(DISTINCT CASE
-                       WHEN COALESCE(w.wanted, t.monitored)=1 OR tf.id IS NOT NULL
+                       WHEN COALESCE(w.wanted, {track_monitored})=1 OR tf.id IS NOT NULL
                        THEN t.id END) AS track_count,
                    COUNT(DISTINCT CASE
                        WHEN tf.id IS NOT NULL
@@ -663,7 +681,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
              GROUP BY cm.canonical_id
         ){size_cte}
         SELECT a.id, a.name, a.sort_name, a.image_url, a.genres,
-               a.monitored, a.monitor_new_items, a.quality_profile_id,
+               {artist_monitored} AS monitored, a.monitor_new_items, a.quality_profile_id,
                a.quality_profile_explicit, a.added_at,
                COALESCE(als.album_count, 0) AS album_count,
                COALESCE(als.single_count, 0) AS single_count,
@@ -988,7 +1006,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
              GROUP BY t.album_id
         )
         SELECT al.id, al.title, al.album_type, al.release_date, al.year,
-               al.image_url, al.monitored, al.quality_profile_id,
+               al.image_url, {monitored_sql("album", "al")} AS monitored, al.quality_profile_id,
                al.quality_profile_explicit, al.track_count,
                al.expected_track_count, al.origin, al.spotify_id,
                al.primary_artist_id,
@@ -1007,7 +1025,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                -- just as much as a monitored album does — without this count
                -- bookmarking a single top track wrote a wishlist row the user
                -- could then not find anywhere in their library.
-               COUNT(DISTINCT CASE WHEN t.monitored=1 THEN t.id END) AS monitored_tracks,
+               COUNT(DISTINCT CASE WHEN {monitored_sql("track", "t")}=1 THEN t.id END) AS monitored_tracks,
                -- What "missing" is allowed to mean: a track you still want and
                -- do not have. Unmonitoring the two interludes you never intend
                -- to own used to leave the album reading "2 missing" forever,
@@ -1017,7 +1035,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                -- what the album detail projects per row, and the two views
                -- disagreeing about the same number would be its own bug.
                COUNT(DISTINCT CASE
-                   WHEN COALESCE(w.wanted, t.monitored)=1 AND NOT EXISTS (
+                   WHEN COALESCE(w.wanted, {monitored_sql("track", "t")})=1 AND NOT EXISTS (
                        SELECT 1 FROM lib2_track_files f
                         WHERE f.track_id=t.id
                           AND COALESCE(f.file_state,'active')
@@ -1133,7 +1151,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         # (those workers still write legacy rows — Stufe 2). Say which, instead
         # of letting the chips imply parity.
         "enrichment_depth": "full" if a["legacy_artist_id"] is not None else "native",
-        "monitored": bool(a["monitored"]),
+        "monitored": _scoped_flag(conn, "artist", a),
         "monitor_new_items": a["monitor_new_items"],
         "quality_profile": _quality_profile_dict(qp),
         "quality_profile_source": artist_profile["source"],
@@ -1518,7 +1536,7 @@ def _serialize_track(
             f"WHERE profile_id={intent_profile_id()} AND track_id=?",
             (t["id"],),
         ).fetchone()
-        wanted = bool(wanted_row["wanted"]) if wanted_row else bool(t["monitored"])
+        wanted = bool(wanted_row["wanted"]) if wanted_row else _scoped_flag(conn, "track", t)
     gaps = compute_metadata_gaps(file_row)
     scan_status = metadata_scan_status(file_row)
     fstat = file_status(file_row, t["canonical_track_id"])
@@ -1784,7 +1802,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         "SELECT id, name FROM lib2_artists WHERE id = ?", (al["primary_artist_id"],)
     ).fetchone()
     track_rows = conn.execute(
-        f"""SELECT t.*, COALESCE(w.wanted, t.monitored) AS effective_wanted
+        f"""SELECT t.*, COALESCE(w.wanted, {monitored_sql("track", "t")}) AS effective_wanted
              FROM lib2_tracks t
              LEFT JOIN lib2_wanted_tracks w
                     ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
@@ -1910,7 +1928,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         "label": album_effective["label"],
         "style": album_effective["style"],
         "mood": album_effective["mood"],
-        "monitored": bool(al["monitored"]),
+        "monitored": _scoped_flag(conn, "album", al),
         "origin": origin,
         "quality_profile": _quality_profile_dict(qp),
         "quality_profile_source": album_profile["source"],
@@ -1956,7 +1974,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
 def get_track(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """Single-track detail incl. linked album + artists + file + status."""
     t = conn.execute(
-        f"""SELECT t.*, COALESCE(w.wanted, t.monitored) AS effective_wanted
+        f"""SELECT t.*, COALESCE(w.wanted, {monitored_sql("track", "t")}) AS effective_wanted
              FROM lib2_tracks t
              LEFT JOIN lib2_wanted_tracks w
                     ON w.track_id=t.id AND w.profile_id={intent_profile_id()}

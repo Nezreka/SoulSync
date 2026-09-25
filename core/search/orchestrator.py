@@ -141,14 +141,23 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
       canonical artist, spelled as ``library2.queries.list_artists`` spells it
       (iss29-D04) so the membership test stays index-servable.
     """
+    from core.library2.sql_util import scope_visibility_sql
     from core.text.normalize import normalize_for_comparison
 
+    # "Your" library is the one you are looking at (#1199): an artist that only
+    # another library holds is not in yours. Absent when nothing separates
+    # libraries; judged across the alias group, like the library's own list.
+    visible = scope_visibility_sql("artist", "va")
+    in_scope = (
+        "AND EXISTS (SELECT 1 FROM lib2_artists va"
+        "  WHERE COALESCE(va.canonical_artist_id, va.id) = a.id"
+        f"   AND {visible})" if visible else "")
     out: list[dict] = []
     conn = None
     try:
         conn = deps.database._get_connection()
         rows = conn.execute(
-            """SELECT a.id, a.name, a.image_url
+            f"""SELECT a.id, a.name, a.image_url
                  FROM lib2_artists a
                 WHERE a.canonical_artist_id IS NULL
                   AND EXISTS (
@@ -157,6 +166,7 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
                               OR (member.canonical_artist_id IS NULL
                                   AND member.id = a.id))
                          AND unidecode_lower(member.name) LIKE :needle)
+                  {in_scope}
                 ORDER BY a.name COLLATE NOCASE, a.id
                 LIMIT 10""",
             {"needle": f"%{normalize_for_comparison(query)}%"},

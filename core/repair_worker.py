@@ -179,6 +179,29 @@ JOB_CATEGORIES = {
 }
 
 
+def _findings_library_clause() -> str:
+    """The findings of the library the caller has selected (#1199, E-14).
+
+    A finding has no owner of its own, but it names a file, and a file belongs
+    to the library whose folder holds it (core.library2.library_roots). A
+    finding without a file, or under no known folder, is the shared library's.
+    Empty when nothing separates libraries, or the caller looks at all of them.
+    """
+    try:
+        from core.library2.sql_util import ANY_OWNER, ambient_scope
+        scope = ambient_scope()
+    except Exception:  # noqa: BLE001 - unreadable scope filters nothing
+        return ""
+    if scope is ANY_OWNER or scope is None:
+        return ""
+    owner_of = ("(SELECT r.profile_id FROM lib2_library_roots r"
+                " WHERE substr(file_path, 1, length(r.prefix)) = r.prefix"
+                " ORDER BY length(r.prefix) DESC LIMIT 1)")
+    if scope == "shared":
+        return f"COALESCE({owner_of}, 0) = 0"
+    return f"{owner_of} = {int(scope)}"
+
+
 def job_category(job_id: str) -> str:
     """The family a job belongs to. Unknown jobs are grouped, not hidden."""
     return JOB_CATEGORIES.get(job_id, JOB_CATEGORY_FALLBACK)
@@ -1241,7 +1264,13 @@ class RepairWorker:
 
         try:
             if run_status != 'failed':
-                result = job.scan(context)
+                # E-14: a run started by hand covers the library it was started
+                # in (the API puts it on the scope); a scheduled run covers
+                # every library -- explicitly, because the request-less default
+                # would be the shared one only.
+                from core.library_scope import library_scope
+                with library_scope((run_scope or {}).get('library')):
+                    result = job.scan(context)
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e, exc_info=True)
             result.errors += 1
@@ -1712,6 +1741,9 @@ class RepairWorker:
             # search box could not see them
             where_parts.append("(title LIKE ? OR file_path LIKE ? OR details_json LIKE ?)")
             params.extend([needle, needle, needle])
+        library = _findings_library_clause()
+        if library:
+            where_parts.append(library)
 
         where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
         return where, params
@@ -5300,6 +5332,10 @@ class RepairWorker:
             if severity:
                 where_parts.append("severity = ?")
                 params.append(severity)
+            # "Fix all" fixes the library on screen, never another one (E-14)
+            library = _findings_library_clause()
+            if library:
+                where_parts.append(library)
 
             where = f"WHERE {' AND '.join(where_parts)}"
             cursor.execute(f"SELECT id FROM repair_findings {where}", params)
@@ -5462,6 +5498,9 @@ class RepairWorker:
                 marks = ','.join('?' for _ in destructive)
                 where.append(f"finding_type NOT IN ({marks})")
                 params.extend(destructive)
+            library = _findings_library_clause()
+            if library:
+                where.append(library)
             rows = conn.execute(
                 f"SELECT DISTINCT finding_type FROM repair_findings "
                 f"WHERE {' AND '.join(where)}",
@@ -5688,18 +5727,21 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            # the badges count the library on screen, like the list (E-14)
+            library = _findings_library_clause() or "1"
 
             # Overall counts by status
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT status, COUNT(*) FROM repair_findings
+                WHERE {library}
                 GROUP BY status
             """)
             status_counts = {row[0]: row[1] for row in cursor.fetchall()}
 
             # Pending counts per job
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT job_id, finding_type, severity, COUNT(*) FROM repair_findings
-                WHERE status = 'pending'
+                WHERE status = 'pending' AND {library}
                 GROUP BY job_id, finding_type, severity
             """)
             by_job = {}

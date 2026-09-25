@@ -65,6 +65,11 @@ def active_file_subjects(
             if include_missing
             else "COALESCE(f.file_state,'active')='active'"
         )
+        # The library the run is for (#1199, E-14): a job started by hand in
+        # one library walks that library's files; a scheduled run sets no
+        # scope and walks all of them. Empty when nothing separates libraries.
+        from core.library2.sql_util import owner_clause
+        state_clause += owner_clause(column="f.owner_profile_id")
         rows = conn.execute(
             f"""SELECT f.id AS file_id, f.track_id, f.path, f.original_path,
                        f.is_primary, f.primary_manual, f.file_role,
@@ -75,7 +80,7 @@ def active_file_subjects(
                        f.verification_status, f.acoustid_status,
                        f.tags_json, f.missing_tags_json, f.metadata_gaps_json,
                        f.pipeline_result_json,
-                       f.content_hash, f.file_state,
+                       f.content_hash, f.file_state, f.owner_profile_id,
                        t.album_id, t.title, t.duration, t.track_number,
                        t.disc_number, t.isrc, t.spotify_id AS track_spotify_id,
                        t.musicbrainz_id AS track_musicbrainz_id,
@@ -161,12 +166,14 @@ def active_album_subjects(
     try:
         if not _table_exists(conn, "lib2_albums"):
             return []
-        file_predicate = "" if not require_active_files else """
+        from core.library2.sql_util import owner_clause
+        owner = owner_clause(column="fx.owner_profile_id")
+        file_predicate = "" if not require_active_files else f"""
                    AND EXISTS (
                        SELECT 1 FROM lib2_tracks tx
                        JOIN lib2_track_files fx ON fx.track_id=tx.id
                       WHERE tx.album_id=al.id
-                        AND COALESCE(fx.file_state,'active')='active')
+                        AND COALESCE(fx.file_state,'active')='active'{owner})
         """
         rows = conn.execute(
             f"""SELECT al.id AS album_id, al.primary_artist_id AS artist_id,
@@ -190,7 +197,7 @@ def active_album_subjects(
                        (SELECT fx.path FROM lib2_tracks tx
                          JOIN lib2_track_files fx ON fx.track_id=tx.id
                         WHERE tx.album_id=al.id
-                          AND COALESCE(fx.file_state,'active')='active'
+                          AND COALESCE(fx.file_state,'active')='active'{owner}
                         ORDER BY COALESCE(tx.disc_number,1),
                                  COALESCE(tx.track_number,2147483647), fx.id
                         LIMIT 1) AS rep_path

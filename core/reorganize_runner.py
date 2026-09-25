@@ -145,15 +145,23 @@ def build_runner(
                 "AND name='lib2_track_files'"
             ).fetchone())
             if has_v2_files:
+                # the library being reorganized (#1199): the file the move was
+                # planned for is the first of THIS library's rows, in the same
+                # order load_album_and_tracks chose it -- the global primary
+                # may be another library's copy
+                from core.library2.sql_util import owner_clause
+                owner = owner_clause(column="f.owner_profile_id")
                 rows = conn.execute(
-                    """SELECT f.id AS file_id, f.track_id, f.path, f.is_primary
+                    f"""SELECT f.id AS file_id, f.track_id, f.path, f.is_primary
                          FROM lib2_track_files f
                         WHERE f.track_id=?
-                          AND COALESCE(f.file_state,'active')<>'deleted'
+                          AND COALESCE(f.file_state,'active')<>'deleted'{owner}
                         ORDER BY f.is_primary DESC, f.id""",
                     (int(track_id),),
                 ).fetchall()
                 primary_rows = [row for row in rows if bool(row["is_primary"])] if rows else []
+                if rows and not primary_rows and owner:
+                    primary_rows = [rows[0]]
                 if primary_rows:
                     previous_path = primary_rows[0]["path"]
                 lib2_links = {
@@ -228,12 +236,27 @@ def build_runner(
             )
 
     def runner(item):
+        """Reorganize one album inside the library it was queued for (#1199).
+
+        Every library is its own folder, and a reorganize moves files WITHIN
+        one: building the destination under the shared folder would carry
+        another library's files into the shared one. An item queued with no
+        library (nothing separates libraries, or "all libraries") runs once
+        per library that holds files of the album."""
         # Read config per-run so the user changing their download path
         # in Settings takes effect on the next reorganize without a
         # server restart.
-        download_dir = get_download_path()
-        transfer_dir = get_transfer_path()
+        libraries = _libraries_for(get_database(), item)
+        if libraries is None:
+            return _run_in(item, get_transfer_path())
+        from core.library_scope import library_scope
+        results = []
+        for scope, root in libraries:
+            with library_scope(scope):
+                results.append(_run_in(item, root))
+        return _merge_results(results)
 
+    def _run_in(item, transfer_dir):
         def _cleanup_empty(src_dir):
             try:
                 cleanup_empty_directories_fn(transfer_dir, os.path.join(src_dir, '_'))
@@ -288,3 +311,51 @@ def build_runner(
         )
 
     return runner
+
+
+def _libraries_for(db, item):
+    """``[(scope, folder)]`` an album is reorganized in, or None when nothing
+    separates libraries (the one shared folder, as before #1199)."""
+    from core.library_scope import any_own_library_exists, own_library_ids, scope_for_owner
+    if not any_own_library_exists():
+        return None
+    if item.library is not None:
+        scopes = [item.library]
+    else:
+        live = own_library_ids()
+        with db._get_connection() as conn:
+            owners = {row[0] for row in conn.execute(
+                "SELECT DISTINCT f.owner_profile_id FROM lib2_track_files f"
+                "  JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE t.album_id = ? AND COALESCE(f.file_state,'active') = 'active'",
+                (str(item.album_id),))}
+        # a file of a library that is not active right now stays where it is
+        scopes = [scope_for_owner(o) for o in sorted(owners, key=lambda o: (o is not None, o or 0))
+                  if o is None or int(o) in live] or ['shared']
+    from core.imports.paths import library_root_for_profile, shared_transfer_root
+    out = []
+    for scope in scopes:
+        root = (shared_transfer_root() if scope == 'shared'
+                else library_root_for_profile(scope, announce=False))
+        if root:
+            out.append((scope, root))
+    return out
+
+
+def _merge_results(results):
+    """One summary for an album reorganized in several libraries."""
+    if not results:
+        return {'status': 'no_tracks', 'source': None, 'total': 0, 'moved': 0,
+                'skipped': 0, 'failed': 0, 'errors': []}
+    if len(results) == 1:
+        return results[0]
+    merged = {'status': 'completed', 'source': None, 'total': 0, 'moved': 0,
+              'skipped': 0, 'failed': 0, 'errors': []}
+    for result in results:
+        for key in ('total', 'moved', 'skipped', 'failed'):
+            merged[key] += int(result.get(key) or 0)
+        merged['errors'].extend(result.get('errors') or [])
+        merged['source'] = merged['source'] or result.get('source')
+        if merged['status'] == 'completed' and result.get('status') != 'completed':
+            merged['status'] = result.get('status')
+    return merged

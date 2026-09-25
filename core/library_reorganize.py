@@ -861,18 +861,22 @@ def load_album_and_tracks(db, album_id):
             return None, []
         album_data = dict(album_row)
 
+        # the files of the library being reorganized (#1199): the same album
+        # can have a copy in two of them, each in its own folder
+        from core.library2.sql_util import owner_clause
+        owner = owner_clause(column="f.owner_profile_id")
         cursor.execute(
-            """
+            f"""
             SELECT t.*, ar.name AS artist_name,
                    (SELECT f.path FROM lib2_track_files f
-                     WHERE f.track_id=t.id AND f.file_state='active'
+                     WHERE f.track_id=t.id AND f.file_state='active'{owner}
                      ORDER BY f.is_primary DESC, f.id LIMIT 1) AS file_path
             FROM lib2_tracks t
             JOIN lib2_albums al ON t.album_id = al.id
             JOIN lib2_artists ar ON al.primary_artist_id = ar.id
             WHERE t.album_id = ?
               AND EXISTS (SELECT 1 FROM lib2_track_files f
-                           WHERE f.track_id=t.id AND f.file_state='active')
+                           WHERE f.track_id=t.id AND f.file_state='active'{owner})
             ORDER BY COALESCE(t.disc_number, 1), t.track_number, t.id
             """,
             (str(album_id),),

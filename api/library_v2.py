@@ -27,6 +27,10 @@ from flask import jsonify, make_response, request, send_file
 from core.library2 import ADMIN_PROFILE_ID
 from core.library2 import bootstrap as lib2_bootstrap
 from core.library2.job_registry import JobAlreadyRunning, JobRegistry
+# Every background job this page starts runs under the library the request is
+# looking at (#1199): a ContextVar does not cross a thread start, so without
+# this a job for someone's own library would answer from the shared one.
+from core.library_scope import carrying_scope
 from utils.logging_config import get_logger
 
 logger = get_logger("api.library_v2")
@@ -63,6 +67,20 @@ _RETAG_CONFLICT_WAIT_SECONDS = 10.0
 _RETAG_CONFLICT_POLL_SECONDS = 0.2
 
 _MONITOR_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
+
+# E-13: the writes a profile with a library of its own may make in it -- wishing
+# (monitoring, Automatic Search, bookmarking from discovery), never changing
+# files or shared metadata. Flask endpoint names of the routes below.
+_OWN_LIBRARY_WISH_ENDPOINTS = frozenset({
+    "lib2_set_monitored",
+    "lib2_bulk_monitor",
+    "lib2_scoped_search",
+    "lib2_discovery_artist",
+    "lib2_discovery_album",
+    "lib2_discovery_track",
+    # a missing album slot becomes a track row so it can be monitored
+    "lib2_materialize_missing_track",
+})
 _PROFILE_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 
 # A track is "consolidated away" when it deliberately has no file while its
@@ -183,7 +201,7 @@ def _start_artwork_cache(get_database: Callable[[], Any], config_manager: Any) -
                 )
 
     try:
-        threading.Thread(target=_run, name="lib2-artwork-cache", daemon=True).start()
+        threading.Thread(target=carrying_scope(_run), name="lib2-artwork-cache", daemon=True).start()
     except Exception as exc:  # noqa: BLE001 - optional presentation worker
         logger.warning("Could not start Library v2 artwork cache worker: %s", exc)
         with _artwork_cache_lock:
@@ -287,11 +305,69 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # (audit P0-02). Other profiles keep read access.
         if request.method not in ("GET", "HEAD", "OPTIONS") \
                 and not _is_admin():
+            # E-13: a profile with a library of its own may WISH in it --
+            # monitor, Automatic Search, bookmark from discovery -- and those
+            # writes land on its own intent rows (`_intent_profile`), never on
+            # the admin's. Everything that changes files or shared metadata
+            # stays with the admin.
+            if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
+                return None
             return jsonify({
                 "success": False,
                 "error": "Library v2 changes require the admin profile",
             }), 403
         return None
+
+    def _hidden_from_caller(conn, entity: str, entity_id: int) -> bool:
+        """Is this row outside every library the caller may look at? (E-06)
+
+        An admin can switch to any library, so nothing is hidden from them. A
+        profile sees the library it reads and nothing else -- asking for
+        another library's artist by id answers exactly as if it did not
+        exist, which it does not, for them."""
+        if _is_admin():
+            return False
+        try:
+            from core.library2.sql_util import scope_visibility_sql
+            table = {"artist": "lib2_artists", "album": "lib2_albums",
+                     "track": "lib2_tracks"}[entity]
+            visible = scope_visibility_sql(entity, "e")
+            if not visible:
+                return False
+            # an artist is judged across its alias group, like the artist list
+            # is; a release or track also shows when its artist is in the
+            # library -- the rest of the discography is there to be wished for
+            artist_of = {"artist": "e.id", "album": "e.primary_artist_id",
+                         "track": "(SELECT al.primary_artist_id FROM lib2_albums al"
+                                  " WHERE al.id = e.album_id)"}[entity]
+            artist_visible = (f"EXISTS (SELECT 1 FROM lib2_artists pa, lib2_artists va"
+                              f" WHERE pa.id = {artist_of}"
+                              f"   AND COALESCE(va.canonical_artist_id, va.id)"
+                              f"       = COALESCE(pa.canonical_artist_id, pa.id)"
+                              f"   AND {scope_visibility_sql('artist', 'va')})")
+            visible = (artist_visible if entity == "artist"
+                       else f"({visible}) OR {artist_visible}")
+            return conn.execute(
+                f"SELECT 1 FROM {table} e WHERE e.id = ? AND ({visible})",
+                (int(entity_id),)).fetchone() is None
+        except Exception as exc:  # noqa: BLE001 - an unanswerable check hides nothing
+            logger.debug("scope visibility check failed for %s %s: %s", entity, entity_id, exc)
+            return False
+
+    def _can_wish() -> bool:
+        """May the caller monitor and search in the library it is looking at?
+        The admin anywhere; any other profile only in a library of its own."""
+        if _is_admin():
+            return True
+        try:
+            from core.library_scope import library_scope_for_profile
+            if library_scope_for_profile(_profile()) != _profile():
+                return False
+            # wishing ends in downloads; a profile barred from those is barred here
+            profile = get_database().get_profile(_profile()) or {}
+            return bool(profile.get("can_download", 1))
+        except Exception:  # noqa: BLE001 - unreadable mode: no writes
+            return False
 
     def _conn():
         return get_database()._get_connection()
@@ -363,6 +439,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception:  # noqa: BLE001 - fall back to the caller
             return _profile()
 
+    def _shared_intent() -> bool:
+        """Does a monitor write here speak for the SHARED library?
+
+        The ``monitored`` columns on lib2_artists/albums/tracks are one global
+        compatibility flag, and they are the shared library's (the admin's)
+        intent (Guide §2.6). A write for someone's own library -- an admin
+        working in it, or its owner (E-13) -- records that profile's rule and
+        wanted projection and leaves the global flag alone, or the shared
+        library would start showing another library's monitoring.
+        """
+        return _intent_profile() == ADMIN_PROFILE_ID
+
     def _is_admin() -> bool:
         """Is the CALLER an admin? Not "is the caller profile 1".
 
@@ -404,37 +492,83 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/scopes")
     def lib2_scopes():
-        """Which directories the caller may look at, and which one they are on.
+        """Which libraries the caller may look at, and which one they are on.
 
-        `switchable` is what the page keys the control off: it is false unless
-        the caller is an admin AND there is more than one directory, so a
-        single-library install renders exactly what it rendered before and a
-        plain profile never sees a control it cannot use (E-05).
+        `switchable` is what the shell keys the header switcher off: it is
+        false unless the caller is an admin AND at least one profile keeps a
+        library of its own, so a single-library install renders exactly what
+        it rendered before and a plain profile never sees a control it cannot
+        use (E-05, E-11). `target` is where a download started now would land,
+        which the pages show next to their download buttons.
         """
         guard = _guard()
         if guard:
             return guard
-        from core.library_scope import SCOPE_PARKED, current_library_scope
+        from core.library_scope import (
+            current_library_scope, own_library_ids, owner_for_new_file,
+        )
 
         owners = []
-        if not SCOPE_PARKED:
+        live = own_library_ids()
+        if live:
             try:
-                owners = get_database().get_own_library_profiles() or []
+                owners = [p for p in (get_database().get_own_library_profiles() or [])
+                          if int(p["id"]) in live]
             except Exception as exc:  # noqa: BLE001 - no list, no switcher
                 logger.debug("own-library profiles unavailable: %s", exc)
         admin = _is_admin()
-        options = [{"id": "shared", "name": "Shared library"}]
-        options += [{"id": str(p["id"]), "name": p["name"], "root": p.get("root")}
+        switchable = bool(admin and owners)
+        files: Dict[Any, int] = {}
+        if switchable:
+            conn = _conn()
+            try:
+                for owner, count in conn.execute(
+                        "SELECT owner_profile_id, COUNT(*) FROM lib2_track_files"
+                        " WHERE COALESCE(file_state,'active')='active'"
+                        "   AND path IS NOT NULL AND path<>''"
+                        " GROUP BY owner_profile_id"):
+                    files[owner] = int(count)
+            except Exception as exc:  # noqa: BLE001 - counts are decoration
+                logger.debug("library file counts unavailable: %s", exc)
+            finally:
+                conn.close()
+        from core.imports.paths import library_root_for_profile, shared_transfer_root
+        options = [{"id": "shared", "name": "Shared library",
+                    "root": shared_transfer_root(), "files": files.get(None, 0)}]
+        options += [{"id": str(p["id"]), "name": p["name"],
+                     "root": library_root_for_profile(p["id"], announce=False) or p.get("root"),
+                     "files": files.get(int(p["id"]), 0)}
                     for p in owners]
-        if admin and owners:
-            options.append({"id": "all", "name": "All libraries"})
+        if switchable:
+            options.append({"id": "all", "name": "All libraries",
+                            "files": sum(files.values())})
         current = current_library_scope()
+        target_owner = owner_for_new_file(_profile())
+
+        def _name(pid):
+            if pid is None:
+                return "Shared library"
+            for p in owners:
+                if int(p["id"]) == int(pid):
+                    return f"{p['name']}'s library"
+            try:
+                return f"{(get_database().get_profile(int(pid)) or {}).get('name') or 'Own'}'s library"
+            except Exception:  # noqa: BLE001 - a name is decoration
+                return "Own library"
+
         return jsonify({
             "success": True,
-            "switchable": bool(admin and owners),
+            "switchable": switchable,
             "current": ("all" if current is None
                         else "shared" if current == "shared" else str(current)),
-            "options": options if (admin and owners) else [],
+            "current_name": ("All libraries" if current is None
+                             else _name(None if current == "shared" else current)),
+            "target": "shared" if target_owner is None else str(target_owner),
+            "target_name": _name(target_owner),
+            # anything to tell apart at all: an own library exists, or the
+            # caller reads one (a profile of its own sees its name)
+            "separated": bool(live),
+            "options": options if switchable else [],
         })
 
     @app.route("/api/library/v2/scope", methods=["POST"])
@@ -459,11 +593,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                             "error": "Switching libraries requires an admin profile"}), 403
         body = request.get_json(silent=True) or {}
         wanted = str(body.get("scope") or "").strip()
-        allowed = {"shared", "all"}
-        try:
-            allowed |= {str(p["id"]) for p in (get_database().get_own_library_profiles() or [])}
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("own-library profiles unavailable: %s", exc)
+        from core.library_scope import own_library_ids
+        live = own_library_ids()
+        allowed = ({"shared", "all"} | {str(pid) for pid in live}) if live else set()
         if wanted not in allowed:
             return jsonify({"success": False, "error": "Unknown library"}), 400
         from flask import session
@@ -484,6 +616,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # THIS profile may see the page.
             "enabled": _page_allowed(),
             "can_write": _is_admin(),
+            # E-13: monitor/search in a library of one's own
+            "can_wish": _can_wish(),
         })
 
     # -- acquisition requests / decisions (Phase 4) -------------------------
@@ -1616,7 +1750,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     source=None if legacy else (source or None),
                     create=create)
             if monitor and artist_id is not None:
-                conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (artist_id,))
+                if _shared_intent():
+                    conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (artist_id,))
                 from core.library2.monitor_rules import PROVENANCE_USER, record_rule
                 record_rule(conn, "artist", artist_id, True, PROVENANCE_USER,
                             profile_id=_intent_profile())
@@ -1689,13 +1824,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 source=source or None, monitored=0)
             created = album_id not in known_album_ids
             conn.execute(
-                """UPDATE lib2_albums SET monitored=1,
+                """UPDATE lib2_albums SET monitored=CASE WHEN ? THEN 1 ELSE monitored END,
                        origin=CASE WHEN ? THEN 'discography' ELSE origin END,
                        release_date=COALESCE(release_date, ?),
                        year=COALESCE(year, ?), image_url=COALESCE(image_url, ?),
                        expected_track_count=MAX(COALESCE(expected_track_count, 0), ?),
                        updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                (1 if created else 0, release_date, year,
+                (1 if _shared_intent() else 0, 1 if created else 0, release_date, year,
                  str(body.get("image_url") or "").strip() or None,
                  track_count, album_id))
             from core.library2.monitor_rules import (
@@ -1705,7 +1840,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             track_ids = [r[0] for r in conn.execute(
                 "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,))]
             if track_ids:
-                conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?", (album_id,))
+                if _shared_intent():
+                    conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?", (album_id,))
                 record_rules(conn, "track", track_ids, True, PROVENANCE_CASCADE,
                              profile_id=_intent_profile())
             from core.library2.wanted import recompute_wanted_for_entity
@@ -1734,7 +1870,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             except Exception as exc:  # noqa: BLE001
                 logger.debug("discovery discography expansion failed (%s): %s", artist_id, exc)
 
-        threading.Thread(target=_expand_catalogue,
+        threading.Thread(target=carrying_scope(_expand_catalogue),
                          name=f"lib2-discovery-{artist_id}", daemon=True).start()
         return jsonify({"success": True, "artist_id": artist_id,
                         "album_id": album_id, "monitored": True})
@@ -1875,7 +2011,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 conn.execute("UPDATE lib2_albums SET origin='discography' WHERE id=?",
                              (album_id,))
             if monitor:
-                conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (track_id,))
+                if _shared_intent():
+                    conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (track_id,))
                 from core.library2.monitor_rules import PROVENANCE_USER, record_rule
                 record_rule(conn, "track", track_id, True, PROVENANCE_USER,
                             profile_id=_intent_profile())
@@ -1912,7 +2049,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2 import queries as Q
         conn = _conn()
         try:
-            data = Q.get_artist(conn, artist_id)
+            data = (None if _hidden_from_caller(conn, "artist", artist_id)
+                    else Q.get_artist(conn, artist_id))
         finally:
             conn.close()
         if data is None:
@@ -2073,7 +2211,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 with _tracklist_resolves_lock:
                     _tracklist_resolves.discard(album_id)
 
-        threading.Thread(target=_run, name=f"lib2-tracklist-{album_id}",
+        threading.Thread(target=carrying_scope(_run), name=f"lib2-tracklist-{album_id}",
                          daemon=True).start()
 
     @app.route("/api/library/v2/albums/<int:album_id>")
@@ -2084,10 +2222,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2 import queries as Q
         conn = _conn()
         try:
+            hidden = _hidden_from_caller(conn, "album", album_id)
             # ``?resolve=1``: materialize the provider tracklist first, so a
             # discography-only release (no track rows yet) shows its real
             # tracklist when the user expands it — Lidarr-style.
-            if request.args.get("resolve") == "1" and not _tracklist_resolve_pending(album_id):
+            if (not hidden and request.args.get("resolve") == "1"
+                    and not _tracklist_resolve_pending(album_id)):
                 from core.library2.provider_adapters import TRACKLIST_PARSER_VERSION
                 # Not "has ANY track": bookmarking one top track materializes
                 # exactly that recording, which left the release looking like a
@@ -2141,7 +2281,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         (album_id,))
                     conn.commit()
                     _schedule_tracklist_resolve(album_id)
-            data = Q.get_album(conn, album_id)
+            data = None if hidden else Q.get_album(conn, album_id)
         finally:
             conn.close()
         if data is None:
@@ -2157,7 +2297,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2 import queries as Q
         conn = _conn()
         try:
-            data = Q.get_track(conn, track_id)
+            data = (None if _hidden_from_caller(conn, "track", track_id)
+                    else Q.get_track(conn, track_id))
         finally:
             conn.close()
         if data is None:
@@ -2466,7 +2607,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             finally:
                 _job_registry.finish(job_id)
 
-        threading.Thread(target=_run, name="lib2-replaygain", daemon=True).start()
+        threading.Thread(target=carrying_scope(_run), name="lib2-replaygain", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
     @app.route("/api/library/v2/tracks/<int:track_id>/replaygain", methods=["POST"])
@@ -2983,7 +3124,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         finally:
                             _job_registry.finish(job_id)
 
-                    threading.Thread(target=_run, name="lib2-cover-embed", daemon=True).start()
+                    threading.Thread(target=carrying_scope(_run), name="lib2-cover-embed", daemon=True).start()
         except Exception as e:  # noqa: BLE001
             logger.error("Library v2 cover-embed scheduling failed: %s", e, exc_info=True)
             embed_error = str(e)
@@ -3208,12 +3349,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     # lands and the client's existing poll picks them up.
                     _schedule_tracklist_resolve(eid)
             marks = ",".join("?" for _ in entity_ids)
-            cur.execute(
-                f"UPDATE {table} SET monitored=? WHERE id IN ({marks})",
-                (1 if monitored else 0, *entity_ids),
-            )
-            if not cur.rowcount:
+            if not conn.execute(f"SELECT 1 FROM {table} WHERE id IN ({marks})",
+                                entity_ids).fetchone():
                 return jsonify({"success": False, "error": "Not found"}), 404
+            shared_intent = _shared_intent()
+            if shared_intent:
+                cur.execute(
+                    f"UPDATE {table} SET monitored=? WHERE id IN ({marks})",
+                    (1 if monitored else 0, *entity_ids),
+                )
             # Monitor provenance (audit P1-13/P1-14): this endpoint is a direct
             # user action on exactly this entity — record the intent so later
             # cascades know it was deliberate.
@@ -3227,7 +3371,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             for entity_scope_id in entity_ids:
                 record_rule(conn, {"artists": "artist", "albums": "album",
                                    "tracks": "track"}[entity], entity_scope_id,
-                            monitored, PROVENANCE_USER, profile_id=_profile())
+                            monitored, PROVENANCE_USER, profile_id=_intent_profile())
             track_ids: List[int] = []
             preserved_track_ids: List[int] = []
             if entity == "albums":
@@ -3242,13 +3386,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 preserved_track_ids = [t for t in all_ids
                                        if t in explicit and explicit[t] != monitored]
                 track_ids = [t for t in all_ids if t not in preserved_track_ids]
-                if preserved_track_ids:
+                if shared_intent and preserved_track_ids:
                     keep = ",".join("?" for _ in preserved_track_ids)
                     cur.execute(
                         f"UPDATE lib2_tracks SET monitored=? "
                         f"WHERE album_id=? AND id NOT IN ({keep})",
                         (1 if monitored else 0, eid, *preserved_track_ids))
-                else:
+                elif shared_intent:
                     cur.execute("UPDATE lib2_tracks SET monitored=? WHERE album_id=?",
                                 (1 if monitored else 0, eid))
                 # The re-projected tracks carry the cascade as their own rule
@@ -3270,7 +3414,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # Recompute before enqueue: the derived Wishlist consumes the
             # authoritative projection, never the compatibility flag/command.
             from core.library2.wanted import recompute_wanted_for_entity
-            recompute_wanted_for_entity(conn, entity, eid, profile_id=_profile())
+            recompute_wanted_for_entity(conn, entity, eid, profile_id=_intent_profile())
             from core.library2.mirror_outbox import (
                 drain as drain_mirror_outbox,
                 enqueue_artist_watchlist,
@@ -3280,7 +3424,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             if entity == "artists":
                 for artist_scope_id in entity_ids:
                     outbox_ids.extend(enqueue_artist_watchlist(
-                        conn, artist_scope_id, monitored, profile_id=_profile()
+                        conn, artist_scope_id, monitored, profile_id=_intent_profile()
                     ))
             elif track_ids:
                 # Only the track-level toggle is a direct user action on that
@@ -3289,7 +3433,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 outbox_ids = enqueue_projected_tracks(
                     conn,
                     track_ids,
-                    profile_id=_profile(),
+                    profile_id=_intent_profile(),
                     user_initiated=(entity == "tracks"),
                 )
             conn.commit()
@@ -3430,16 +3574,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 )
                 if entity != "tracks" and auto_monitor_track_ids:
                     vetoed = explicitly_unmonitored_track_ids(
-                        conn, auto_monitor_track_ids, profile_id=_profile())
+                        conn, auto_monitor_track_ids, profile_id=_intent_profile())
                     auto_monitor_track_ids = [
                         t for t in auto_monitor_track_ids if t not in vetoed]
                 if auto_monitor_track_ids:
                     marks = ",".join("?" for _ in auto_monitor_track_ids)
-                    cur.execute(
-                        f"UPDATE lib2_tracks SET monitored=1 WHERE id IN ({marks})",
-                        auto_monitor_track_ids,
-                    )
-                    auto_monitored = cur.rowcount
+                    if _shared_intent():
+                        cur.execute(
+                            f"UPDATE lib2_tracks SET monitored=1 WHERE id IN ({marks})",
+                            auto_monitor_track_ids,
+                        )
+                        auto_monitored = cur.rowcount
+                    else:
+                        auto_monitored = len(auto_monitor_track_ids)
                     record_rules(
                         conn, "track", auto_monitor_track_ids, True,
                         PROVENANCE_USER if entity == "tracks" else PROVENANCE_CASCADE,
@@ -3449,7 +3596,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # keeps its old profile forever.
             if affected_track_ids:
                 from core.library2.wanted import recompute_wanted
-                recompute_wanted(conn, profile_id=_profile(),
+                recompute_wanted(conn, profile_id=_intent_profile(),
                                  track_ids=affected_track_ids)
             conn.commit()
             mirrored = 0
@@ -3460,16 +3607,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     mirror_projected_tracks_wishlist,
                 )
                 states = track_wanted_states(
-                    conn, affected_track_ids, profile_id=_profile())
+                    conn, affected_track_ids, profile_id=_intent_profile())
                 wishlisted = set(_wishlisted_lib2_track_ids(
-                    conn, profile_id=_profile()))
+                    conn, profile_id=_intent_profile()))
                 mirror_ids = [tid for tid in affected_track_ids
                               if states.get(tid) or tid in wishlisted]
                 mirrored = mirror_projected_tracks_wishlist(
                     db,
                     conn,
                     mirror_ids,
-                    profile_id=_profile(),
+                    profile_id=_intent_profile(),
                 )
         finally:
             conn.close()
@@ -3520,7 +3667,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             }), 409
         job_id = job["job_id"]
         # Resolve the active profile in the request context, never in the thread.
-        active_profile = _profile()
+        active_profile = _intent_profile()
 
         def _run():
             db = get_database()
@@ -3570,7 +3717,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 logger.debug("MB release-group reconcile failed (artist %s): %s",
                              artist_id, reconcile_error)
 
-        threading.Thread(target=_run, name="lib2-discography-refresh",
+        threading.Thread(target=carrying_scope(_run), name="lib2-discography-refresh",
                          daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
@@ -3664,7 +3811,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             finally:
                 _job_registry.finish(job_id)
 
-        threading.Thread(target=_run, name="lib2-reconcile-artists", daemon=True).start()
+        threading.Thread(target=carrying_scope(_run), name="lib2-reconcile-artists", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
     @app.route("/api/library/v2/maintenance/reconcile-wishlist", methods=["POST"])
@@ -3708,7 +3855,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             finally:
                 _job_registry.finish(job_id)
 
-        threading.Thread(target=_run, name="lib2-reconcile-wishlist", daemon=True).start()
+        threading.Thread(target=carrying_scope(_run), name="lib2-reconcile-wishlist", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
     @app.route("/api/library/v2/maintenance/duplicate-findings", methods=["GET"])
@@ -3870,7 +4017,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # Resolve the active profile OUTSIDE the thread (request context) —
         # _profile() degrades to 1 without one, which would mirror into the
         # wrong user's wishlist on multi-profile installs.
-        active_profile = _profile()
+        active_profile = _intent_profile()
 
         def _run():
             db = get_database()
@@ -3912,8 +4059,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                 except Exception as e:  # noqa: BLE001
                                     logger.debug("bulk tracklist resolve failed (%s): %s",
                                                  album_id, e)
-                        conn.execute("UPDATE lib2_albums SET monitored=? WHERE id=?",
-                                     (1 if monitored else 0, album_id))
+                        if _shared_intent():
+                            conn.execute("UPDATE lib2_albums SET monitored=? WHERE id=?",
+                                         (1 if monitored else 0, album_id))
                         from core.library2.monitor_rules import (
                             PROVENANCE_CASCADE,
                             PROVENANCE_USER,
@@ -3950,9 +4098,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         ]
                         if track_ids:
                             marks = ",".join("?" for _ in track_ids)
-                            conn.execute(
-                                f"UPDATE lib2_tracks SET monitored=? WHERE id IN ({marks})",
-                                [1 if monitored else 0, *track_ids])
+                            if _shared_intent():
+                                conn.execute(
+                                    f"UPDATE lib2_tracks SET monitored=? WHERE id IN ({marks})",
+                                    [1 if monitored else 0, *track_ids])
                             record_rules(
                                 conn,
                                 "track",
@@ -3991,7 +4140,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             finally:
                 _job_registry.finish(job_id)
 
-        threading.Thread(target=_run, name="lib2-bulk-monitor", daemon=True).start()
+        threading.Thread(target=carrying_scope(_run), name="lib2-bulk-monitor", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
     @app.route("/api/library/v2/jobs/status")
@@ -4463,10 +4612,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.library2.wanted import recompute_wanted_for_entity
             for track_id in ids:
                 recompute_wanted_for_entity(
-                    conn, "tracks", track_id, profile_id=_profile()
+                    conn, "tracks", track_id, profile_id=_intent_profile()
                 )
             from core.library2.mirror_outbox import enqueue_projected_tracks
-            enqueue_projected_tracks(conn, ids, profile_id=_profile())
+            enqueue_projected_tracks(conn, ids, profile_id=_intent_profile())
             conn.commit()
         finally:
             conn.close()
@@ -4540,7 +4689,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 return jsonify({"success": False, "error": "Artist not found"}), 404
             from core.library2.mirror_outbox import drain as drain_mirror_outbox
             from core.library2.mirror_outbox import enqueue_artist_watchlist
-            enqueue_artist_watchlist(conn, artist_id, False, profile_id=_profile())
+            enqueue_artist_watchlist(conn, artist_id, False, profile_id=_intent_profile())
             stats = _unmonitor_tracks_and_delete(db, conn, artist_id=artist_id)
             # Detach the artist from releases owned by OTHER primary artists
             # (featured/various credits). Those albums, tracks, files and
@@ -4834,7 +4983,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = db._get_connection()
         try:
             result = move_track_file(db, conn, track_id, to_track_id,
-                                     wishlist_profile_id=_profile())
+                                     wishlist_profile_id=_intent_profile())
         except MoveError as e:
             return jsonify({"success": False, "error": str(e)}), e.status
         except Exception as e:  # noqa: BLE001
@@ -4967,7 +5116,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         job_id = job["job_id"]
 
         # Resolve the active profile OUTSIDE the thread (request context).
-        active_profile = _profile()
+        active_profile = _intent_profile()
 
         def _run():
             db = get_database()
@@ -5000,7 +5149,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             finally:
                 _job_registry.finish(job_id)
 
-        threading.Thread(target=_run, name="lib2-upgrade-scan", daemon=True).start()
+        threading.Thread(target=carrying_scope(_run), name="lib2-upgrade-scan", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
     # -- scoped Automatic Search (deep-dive C1) ---------------------------------
@@ -5031,7 +5180,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
-        active_profile = _profile()
+        active_profile = _intent_profile()
         try:
             job = _job_registry.start(f"search:{entity}:{eid}")
         except JobAlreadyRunning as exc:
@@ -5123,7 +5272,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 conn.close()
                 _job_registry.finish(job_id)
 
-        threading.Thread(target=_run, name="lib2-scoped-search", daemon=True).start()
+        threading.Thread(target=carrying_scope(_run), name="lib2-scoped-search", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
     # -- §73/I6: live queue status for track/album rows -------------------------
@@ -5296,7 +5445,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             finally:
                 _job_registry.finish(job_id)
 
-        threading.Thread(target=_run, name="lib2-retag", daemon=True).start()
+        threading.Thread(target=carrying_scope(_run), name="lib2-retag", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
     @app.route("/api/library/v2/tracks/<int:eid>/fill-tag-gaps", methods=["POST"])
@@ -5372,7 +5521,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             finally:
                 _job_registry.finish(job_id)
 
-        threading.Thread(target=_run, name="lib2-fill-tag-gaps", daemon=True).start()
+        threading.Thread(target=carrying_scope(_run), name="lib2-fill-tag-gaps", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
     # -- refresh & scan (re-read tags into DB + bust artwork cache) -----------
@@ -5418,6 +5567,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "job_id": exc.state["job_id"],
             }), 409
         job_id = job["job_id"]
+        intent_profile = _intent_profile()
 
         def _run():
             try:
@@ -5455,7 +5605,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         sync_scanned_tracks_wishlist,
                     )
                     sync_stats = sync_scanned_tracks_wishlist(
-                        db, presence_changed, profile_id=ADMIN_PROFILE_ID,
+                        db, presence_changed, profile_id=intent_profile,
                     )
                     scan_stats["acquisition_tracks"] = sync_stats["tracks"]
                     scan_stats["acquisition_mirrored"] = sync_stats["mirrored"]
@@ -5475,7 +5625,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 _job_registry.finish(job_id)
 
         threading.Thread(
-            target=_run,
+            target=carrying_scope(_run),
             name=f"lib2-refresh-{entity}-{eid}",
             daemon=True,
         ).start()
@@ -5683,7 +5833,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 keepalive.stop()
                 _import_state.update(running=False, finished_at=_t.time())
 
-        threading.Thread(target=_run, name="lib2-import", daemon=True).start()
+        threading.Thread(target=carrying_scope(_run), name="lib2-import", daemon=True).start()
         return jsonify({"success": True, "started": True})
 
     # Tables that survive a reset. Everything else named lib2_* is catalogue

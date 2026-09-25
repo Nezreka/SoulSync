@@ -61,6 +61,14 @@ _process_wishlist_automatically = None
 _run_full_missing_tracks_process = None
 
 
+def _wishlist_profile_id():
+    """The wishlist a request reads and writes: the caller's, or -- for an admin
+    who picked someone's own library in the header -- that library's (E-12).
+    A wishlist entry belongs to the library it fills."""
+    from core.library_scope import acting_profile_id
+    return acting_profile_id(get_current_profile_id())
+
+
 def configure(**deps):
     g = globals()
     for name, value in deps.items():
@@ -326,7 +334,7 @@ def _build_wishlist_route_runtime(
 
     return _WishlistRouteRuntime(
         get_music_database=MusicDatabase,
-        profile_id=get_current_profile_id(),
+        profile_id=_wishlist_profile_id(),
         download_batches=download_batches,
         download_tasks=download_tasks,
         tasks_lock=tasks_lock,
@@ -358,7 +366,7 @@ def start_wishlist_missing_downloads():
         from database.music_database import MusicDatabase
 
         db = MusicDatabase()
-        manual_profile_id = get_current_profile_id()
+        manual_profile_id = _wishlist_profile_id()
         manual_runtime = _WishlistManualDownloadRuntime(
             get_music_database=lambda: db,
             download_batches=download_batches,
@@ -416,7 +424,7 @@ def cleanup_wishlist():
         payload, status_code = _cleanup_wishlist_against_library(
             wishlist_service,
             db,
-            get_current_profile_id(),
+            _wishlist_profile_id(),
             active_server,
         )
         return jsonify(payload), status_code

@@ -108,6 +108,20 @@ def remove_completed_tracks_from_wishlist(
     return removed_count
 
 
+def _tag_wishlist_owner(tracks, profile_id) -> None:
+    """Mark each wishlist track with the profile it belongs to and the library
+    that profile fills. A run spanning several profiles dispatches each one's
+    tracks under its own profile -- which is also where its downloads land
+    (#1199): the batch's library follows its profile -- and deduplicates per
+    library, never across two of them."""
+    from core.library_scope import library_scope_for_profile, owner_for_scope
+    library = owner_for_scope(library_scope_for_profile(profile_id))
+    for track in tracks or []:
+        if isinstance(track, dict):
+            track['_wishlist_profile_id'] = profile_id
+            track['_wishlist_library'] = library
+
+
 def make_wishlist_batch_row(
     *,
     playlist_id: str,
@@ -1134,12 +1148,11 @@ def process_wishlist_automatically(
                         profile_tracks = wishlist_service.get_wishlist_tracks_for_download(
                             profile_id=profile['id']
                         )
-                        for track in profile_tracks:
-                            # A6: remembered so a multi-profile playlist scope
-                            # can dispatch each profile's tracks under its own
-                            # profile_id instead of collapsing everything onto
-                            # whatever runtime.profile_id happens to be set to.
-                            track['_wishlist_profile_id'] = profile['id']
+                        # A6: remembered so a multi-profile playlist scope
+                        # can dispatch each profile's tracks under its own
+                        # profile_id instead of collapsing everything onto
+                        # whatever runtime.profile_id happens to be set to.
+                        _tag_wishlist_owner(profile_tracks, profile['id'])
                         raw_wishlist_tracks.extend(
                             _tracks_in_scope(profile_tracks, requested_track_ids)
                         )
@@ -1200,7 +1213,9 @@ def process_wishlist_automatically(
                 if not scoped:
                     raw_wishlist_tracks = []
                     for profile in all_profiles:
-                        raw_wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=profile['id']))
+                        profile_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=profile['id'])
+                        _tag_wishlist_owner(profile_tracks, profile['id'])
+                        raw_wishlist_tracks.extend(profile_tracks)
                 if not raw_wishlist_tracks:
                     logger.warning("No tracks returned from wishlist service.")
                     return
@@ -1330,7 +1345,20 @@ def process_wishlist_automatically(
                 # once-per-run cycle toggle on it) and hand off to the SHARED
                 # wishlist engine — the same code path the manual trigger uses.
                 wishlist_run_id = str(uuid.uuid4())
-                if scoped and len(scoped_profile_ids) > 1:
+                _track_profiles = {
+                    int(t.get('_wishlist_profile_id') or runtime.profile_id) for t in wishlist_tracks
+                }
+                _cycle_extra = {
+                    'wishlist_scope': 'playlist',
+                    'toggle_wishlist_cycle': False,
+                } if scoped else None
+                _runtime_profile = runtime.profile_id
+                if len(_track_profiles) == 1:
+                    # one profile's tracks: dispatched under THAT profile, which
+                    # is also the library they land in (#1199) -- not under
+                    # whichever profile the runtime was built for
+                    runtime.profile_id = next(iter(_track_profiles))
+                if len(_track_profiles) > 1:
                     # A6: tracks in this playlist scope span more than one
                     # wishlist profile. _run_wishlist_cycle stamps every batch
                     # it creates with the single runtime.profile_id in effect
@@ -1353,10 +1381,7 @@ def process_wishlist_automatically(
                             tracks=group_tracks,
                             run_id=wishlist_run_id,
                             auto_initiated=True,
-                            batch_extra_fields={
-                                'wishlist_scope': 'playlist',
-                                'toggle_wishlist_cycle': False,
-                            },
+                            batch_extra_fields=_cycle_extra,
                         )
                         _cycle_result['submitted'].extend(group_result['submitted'])
                         _cycle_result['album_batches'] += group_result['album_batches']
@@ -1369,11 +1394,9 @@ def process_wishlist_automatically(
                         tracks=wishlist_tracks,
                         run_id=wishlist_run_id,
                         auto_initiated=True,
-                        batch_extra_fields={
-                            'wishlist_scope': 'playlist',
-                            'toggle_wishlist_cycle': False,
-                        } if scoped else None,
+                        batch_extra_fields=_cycle_extra,
                     )
+                runtime.profile_id = _runtime_profile
 
                 _summary_parts: list[str] = []
                 if _cycle_result['album_batches']:

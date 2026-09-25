@@ -65,6 +65,12 @@ def _file_rows_in_scope(
     if album_ids is not None:
         if not album_ids:
             return []
+        # An artist or album scan runs over the library the caller is looking
+        # at (#1199, E-14): the same album can have files in two of them, and
+        # a "Refresh & Scan" in one must not observe -- or mark missing -- the
+        # other's. Empty when nothing separates libraries.
+        from core.library2.sql_util import owner_clause
+        owner = owner_clause(column="tf.owner_profile_id")
         rows = []
         ids = list(dict.fromkeys(int(album_id) for album_id in album_ids))
         for start in range(0, len(ids), 500):
@@ -76,7 +82,7 @@ def _file_rows_in_scope(
                       FROM lib2_track_files tf
                    JOIN lib2_tracks t ON t.id = tf.track_id
                    WHERE t.album_id IN ({marks}) AND tf.path IS NOT NULL AND tf.path <> ''
-                     AND COALESCE(tf.file_state,'active')<>'deleted'""",
+                     AND COALESCE(tf.file_state,'active')<>'deleted'{owner}""",
                 chunk,
             ).fetchall())
         return rows

@@ -3914,6 +3914,15 @@ def handle_settings():
                 except Exception as _cc_err:
                     logger.debug("concert cache clear after settings save failed: %s", _cc_err)
 
+            if 'soulseek' in new_settings or 'active_media_server' in new_settings:
+                # the shared folder or the server's own-library support may have
+                # moved: every file's library follows its folder (#1199)
+                try:
+                    from core.library_scope import library_config_changed
+                    library_config_changed()
+                except Exception as _lib_err:
+                    logger.debug("library folder sync after settings save failed: %s", _lib_err)
+
             if any(s in new_settings for s in ('acoustid', 'lossy_copy', 'post_processing', 'import')):
                 try:
                     get_database().sync_default_quality_profile_from_config()
@@ -15553,7 +15562,10 @@ def cancel_download_task():
                 failure_reason="Download cancelled by user",
                 source_type="playlist",
                 source_context=source_context,
-                profile_id=get_current_profile_id(),
+                # the wishlist of the library the batch was filling (E-12),
+                # not whoever pressed cancel
+                profile_id=(download_batches.get(task.get('batch_id')) or {}).get('profile_id')
+                or get_current_profile_id(),
                 quality_profile_id=resolve_task_quality_profile_id(task),
             )
 
@@ -23044,6 +23056,15 @@ def start_runtime_services():
         except Exception as _sweep_err:
             # Sweep must not crash startup — log and continue.
             logger.warning("[Startup] Album-bundle staging sweep failed: %s", _sweep_err)
+
+        # Which library every file is in follows from its folder (#1199): bring
+        # the folder table in line with the configuration before anything
+        # imports or reads a scoped page.
+        try:
+            from core.library2.library_roots import sync_library_roots
+            sync_library_roots(get_database())
+        except Exception as _roots_err:
+            logger.warning("[Startup] Library folder sync failed: %s", _roots_err)
 
         # Atomic-album staging reconciliation (#1289). A batch interrupted
         # mid-album leaves finished, tagged audio under

@@ -59,6 +59,13 @@ _owned_mirrored_playlist = None
 _build_watchlist_count_payload = None
 
 
+def _acting(current_profile_id):
+    def _profile_id():
+        from core.library_scope import acting_profile_id
+        return acting_profile_id(current_profile_id())
+    return _profile_id
+
+
 def configure(*, config, database_getter, socketio_obj, timer_lock,
               deezer_client_getter, spotify_client_getter, automation_engine_getter,
               current_profile_id, discogs_client, metadata_fallback_client,
@@ -78,7 +85,10 @@ def configure(*, config, database_getter, socketio_obj, timer_lock,
     _get_deezer_client = deezer_client_getter
     _spotify_client = spotify_client_getter
     _automation_engine = automation_engine_getter
-    get_current_profile_id = current_profile_id
+    # E-12: a watchlist entry belongs to the library it fills. An admin who
+    # picked someone's own library in the header watches for THAT library, and
+    # sees its list -- so every handler here asks for the acting profile.
+    get_current_profile_id = _acting(current_profile_id)
     _get_discogs_client = discogs_client
     _get_metadata_fallback_client = metadata_fallback_client
     _get_metadata_fallback_source = metadata_fallback_source

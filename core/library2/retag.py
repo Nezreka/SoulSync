@@ -34,10 +34,15 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
     (ADR-03) — a bare-column GROUP BY would let SQLite pick an arbitrary
     file when a track has several.
     """
+    from core.library2.sql_util import owner_clause
     from core.library2.track_files import primary_order
 
     if not track_ids:
         return []
+    # the file IN THE LIBRARY BEING WORKED ON (#1199): the primary election is
+    # per track across every library, and a retag started in one must not
+    # write into another library's copy
+    owner = owner_clause(column="tf.owner_profile_id")
     batch = track_ids[:MAX_TRACKS]
     marks = ",".join("?" for _ in batch)
     return conn.execute(
@@ -51,12 +56,12 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
                    (SELECT tf.id FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
                        AND COALESCE(tf.file_state,'active')
-                           NOT IN ('missing_confirmed','deleted')
+                           NOT IN ('missing_confirmed','deleted'){owner}
                      ORDER BY {primary_order('tf')} LIMIT 1) AS file_id,
                    (SELECT tf.path FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
                        AND COALESCE(tf.file_state,'active')
-                           NOT IN ('missing_confirmed','deleted')
+                           NOT IN ('missing_confirmed','deleted'){owner}
                      ORDER BY {primary_order('tf')} LIMIT 1) AS file_path
             FROM lib2_tracks t
             JOIN lib2_albums al ON al.id = t.album_id

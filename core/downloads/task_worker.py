@@ -402,8 +402,14 @@ def _find_owning_sibling(task_id: str, track: SpotifyTrack):
             # untitled row.
             return None, None
         my_profile = _dedup_profile_id(mine)
+        # A copy in someone else's library is not this library's copy (E-06):
+        # the sibling has to be filling the same one.
+        from core.library_scope import batch_library_owner
+        my_library = batch_library_owner(download_batches.get(own_batch) or {})
         for other_id, other in download_tasks.items():
             if other_id == task_id or other.get('batch_id') == own_batch:
+                continue
+            if batch_library_owner(download_batches.get(other.get('batch_id')) or {}) != my_library:
                 continue
             if other.get('status') not in _SIBLING_OWNED_STATUSES:
                 continue
@@ -419,6 +425,22 @@ def _find_owning_sibling(task_id: str, track: SpotifyTrack):
 
 
 def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorkerDeps) -> None:
+    """Run one task under the library its batch fills (#1199).
+
+    Everything below asks the catalogue -- the cross-batch dedup, source reuse,
+    the staging match -- and all of it has to answer for the library this file
+    is going into, not for whoever happens to own the pool thread.
+    """
+    if not batch_id:
+        return _download_track_worker(task_id, batch_id, deps)
+    from core.library_scope import batch_scope, library_scope
+    with tasks_lock:
+        scope = batch_scope(download_batches.get(batch_id) or {})
+    with library_scope(scope):
+        return _download_track_worker(task_id, batch_id, deps)
+
+
+def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorkerDeps) -> None:
     """Enhanced download worker that matches the GUI's exact retry logic.
 
     Implements sequential query retry, fallback candidates, and download

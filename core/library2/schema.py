@@ -1026,6 +1026,14 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         )
     except Exception as e:  # noqa: BLE001
         logger.debug("idx_lib2_track_files_owner create skipped: %s", e)
+    # Owning by path (E-15): the folder table and the triggers that derive a
+    # file's owner from where it is. The folders themselves are configuration
+    # and are synced at start (core.library2.library_roots.sync_library_roots).
+    try:
+        from core.library2.library_roots import ensure_library_roots_schema
+        ensure_library_roots_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("library folder triggers could not be installed: %s", e)
     # §40 alias registry index — runs AFTER the additive column migration
     # above so it also works on installs that predate canonical_artist_id.
     try:

@@ -1146,6 +1146,23 @@ def _apply_profile_output_transforms(final_path: str, context: dict,
 
 
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
+    """Import one finished download, under the library it was decided for (#1199).
+
+    The organising, the "is this already in the library" guards and the wishlist
+    settle all ask the catalogue; they must answer for the library the file is
+    going into. This runs on a worker thread, where no request can say which.
+    """
+    from core.imports.paths import import_owner_id
+    from core.library_scope import library_scope, scope_for_owner
+    try:
+        _scope = scope_for_owner(import_owner_id(context))
+    except Exception:  # noqa: BLE001 - an unreadable stamp imports under the caller's scope
+        return _post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime)
+    with library_scope(_scope):
+        return _post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime)
+
+
+def _post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
     on_download_completed = getattr(runtime, "on_download_completed", None)
     automation_engine = getattr(runtime, "automation_engine", None)
     web_scan_manager = getattr(runtime, "web_scan_manager", None)

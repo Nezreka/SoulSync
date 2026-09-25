@@ -929,8 +929,11 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                         "path %s (was %s)",
                         file_id, file_path, existing["file_state"])
             else:
-                from core.imports.paths import import_profile_id
-                from core.library_scope import owner_for_new_file
+                # The library the download was decided for -- the same answer
+                # the path builder used, so the row and the file agree. The
+                # folder triggers (library_roots) re-derive it from the path
+                # anyway; this is what a path under no known folder keeps.
+                from core.imports.paths import import_owner_id
                 cur = conn.execute(
                     """INSERT INTO lib2_track_files(track_id, path, size, bitrate,
                            sample_rate, bit_depth, format, quality_tier, source,
@@ -942,7 +945,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                      fmt, tier, source,
                      verification_status, acoustid_status, pipeline_result_json,
                      main_file_role, acquired_quality_json, retention_json,
-                     owner_for_new_file(import_profile_id(context))),
+                     import_owner_id(context)),
                 )
                 file_id = cur.lastrowid
             # dd28-40: a retained lossless original next to a generated lossy
