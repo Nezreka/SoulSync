@@ -284,3 +284,71 @@ def test_first_m3u_entry_skips_the_directives():
     assert web_server._first_m3u_entry(body) == "/music/A/Album/01 - B.flac"
     assert web_server._first_m3u_entry("#EXTM3U\n# NOT AVAILABLE: x\n") is None
     assert web_server._first_m3u_entry("") is None
+
+
+# --- reorganize parity ---------------------------------------------------
+
+def test_reorganize_reads_a_multi_valued_releasetype_tag():
+    """beets and Picard write releasetype as a LIST. The reader used to run
+    str() over it, producing "['album', 'compilation', 'live']" — a string
+    matching no canonical token — so every such file read as having no type."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _secondary_album_types)
+
+    tag = ["album", "compilation", "live"]
+    primary = _normalize_album_type(tag)
+    assert primary == "compilation", "the qualifier wins over the bare primary"
+    assert _secondary_album_types(tag, primary) == ["album", "live"]
+
+
+def test_a_single_valued_tag_still_reads_as_before():
+    from core.library.reorganize_tag_source import _normalize_album_type
+
+    assert _normalize_album_type("compilation") == "compilation"
+    assert _normalize_album_type("album") == "album"
+    assert _normalize_album_type("nonsense") == ""
+    assert _normalize_album_type(None) == ""
+
+
+def test_slash_and_semicolon_separated_tags_split():
+    """Some taggers pack several values into one string."""
+    from core.library.reorganize_tag_source import _release_type_tokens
+
+    assert _release_type_tokens("album/compilation") == ["album", "compilation"]
+    assert _release_type_tokens("Album; Live") == ["album", "live"]
+
+
+def test_atypes_is_identical_at_import_and_at_reorganize():
+    """The whole point: reorganize is the convergence step, so if it renders
+    $atypes differently from import it RENAMES every labelled folder. Salival
+    through both routes must produce the same string."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _secondary_album_types)
+
+    at_import = {"album_type": "compilation", "secondary_types": ["Live", "Compilation"]}
+
+    tag = ["album", "compilation", "live"]
+    primary = _normalize_album_type(tag)
+    at_reorganize = {"album_type": primary, "record_type": primary,
+                     "secondary_types": _secondary_album_types(tag, primary)}
+
+    assert format_album_types(at_reorganize, BEETS_CONFIG) == "[Live][Anthology]"
+    assert format_album_types(at_import, BEETS_CONFIG) == \
+        format_album_types(at_reorganize, BEETS_CONFIG)
+
+
+def test_the_tag_reader_surfaces_secondary_types(tmp_path):
+    """End to end through read_album_track_from_file, so the dict the
+    reorganize planner consumes really carries the field."""
+    from core.library.reorganize_tag_source import read_album_track_from_file
+
+    album_meta, _track_meta, err = read_album_track_from_file(
+        str(tmp_path / "x.flac"),
+        read_embedded_tags_fn=lambda _p: {"available": True, "duration": 300, "tags": {
+            "album": "Salival", "albumartist": "Tool", "artist": "Tool",
+            "title": "Third Eye", "tracknumber": "1",
+            "releasetype": ["album", "compilation", "live"],
+        }})
+    assert err is None
+    assert album_meta["album_type"] == "compilation"
+    assert album_meta["secondary_types"] == ["album", "live"]
