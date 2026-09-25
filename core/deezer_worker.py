@@ -20,7 +20,12 @@ from core.worker_utils import (
     set_album_api_track_count,
 )
 from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
-from core.library.artist_credits import CreditsBackfill, try_save_track_credits
+from core.library.artist_credits import (
+    AlbumCreditsBackfill,
+    CreditsBackfill,
+    try_save_album_credits,
+    try_save_track_credits,
+)
 
 logger = get_logger("deezer_worker")
 
@@ -58,6 +63,7 @@ class DeezerWorker:
         # tracks matched before the worker kept artist credits. one /track call
         # each, so small batches, about the pace of a normal match
         self._credits_backfill = CreditsBackfill('deezer', batch_size=3)
+        self._album_credits_backfill = AlbumCreditsBackfill('deezer', batch_size=3)
 
         # Name matching threshold
         self.name_similarity_threshold = 0.80
@@ -230,8 +236,14 @@ class DeezerWorker:
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_deezer_id': row[3]}
 
-            # Priority 3b: artist credits. rematched tracks, then the one-time
-            # sweep of tracks matched before we kept them
+            # Priority 3b: artist credits. rematched albums and tracks, then
+            # the one-time sweeps of ones matched before we kept them. albums
+            # first, there are far fewer and they're what collab pages need
+            album_backfill = self._album_credits_backfill.next_batch(cursor)
+            if album_backfill:
+                return {'type': 'album_credits_backfill', 'id': album_backfill[0][0],
+                        'albums': album_backfill,
+                        'name': f"Artist credits for {len(album_backfill)} albums"}
             backfill = self._credits_backfill.next_batch(cursor)
             if backfill:
                 return {'type': 'credits_backfill', 'id': backfill[0][0], 'tracks': backfill,
@@ -406,10 +418,13 @@ class DeezerWorker:
 
     def _process_item(self, item: Dict[str, Any]):
         """Process a single item (artist, album, or track)"""
-        if item.get('type') == 'credits_backfill':
+        if item.get('type') in ('credits_backfill', 'album_credits_backfill'):
             # not a match, so nothing to mark as error if it fails
             try:
-                self._process_credits_backfill(item)
+                if item['type'] == 'album_credits_backfill':
+                    self._process_album_credits_backfill(item)
+                else:
+                    self._process_credits_backfill(item)
             except Exception as e:
                 logger.error(f"Error backfilling Deezer artist credits: {e}")
             return
@@ -697,6 +712,11 @@ class DeezerWorker:
                 album_id
             ))
 
+            # every album artist. the full /album record has contributors,
+            # the search hit only the primary
+            if full_data:
+                try_save_album_credits(cursor, album_id, 'deezer', full_data.get('contributors'))
+
             # Update label if available
             if label:
                 cursor.execute("""
@@ -811,6 +831,24 @@ class DeezerWorker:
         finally:
             if conn:
                 conn.close()
+
+    def _process_album_credits_backfill(self, item: Dict[str, Any]):
+        """album artists for albums matched before we kept them, off the full
+        /album record."""
+        for album_id, deezer_album_id, _ in item['albums']:
+            if self.should_stop:
+                break
+            full = self.client.get_album_raw(deezer_album_id)
+            if not full:
+                continue
+            conn = None
+            try:
+                conn = self.db._get_connection()
+                try_save_album_credits(conn.cursor(), album_id, 'deezer', full.get('contributors'))
+                conn.commit()
+            finally:
+                if conn:
+                    conn.close()
 
     def _process_credits_backfill(self, item: Dict[str, Any]):
         """credits for tracks matched before we kept them, off the full /track

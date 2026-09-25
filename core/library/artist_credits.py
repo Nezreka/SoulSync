@@ -1,9 +1,10 @@
-"""every artist credited on a track, as the metadata sources report it.
+"""every artist credited on a track or album, as the metadata sources report it.
 
-tracks.artist_id only holds the primary artist. spotify and deezer hand back
+tracks.artist_id and albums.artist_id only hold the primary artist. spotify and deezer hand back
 the full credit list with ids when the workers match a track, the workers just
 used to throw it away. now they save it here, one row per credited artist per
-source. (tidal's client drops the ids, qobuz and itunes only ever give the
+source. albums the same way, so watch the throne shows on kanye's page as well
+as jay-z's. (tidal's client drops the ids, qobuz and itunes only ever give the
 primary artist, so they have nothing to add yet.)
 
 rows point at the provider's artist id, not at our artists table. a featured
@@ -32,6 +33,12 @@ logger = get_logger("library.artist_credits")
 SOURCES: Dict[str, Tuple[str, str]] = {
     'spotify': ('spotify_track_id', 'spotify_artist_id'),
     'deezer': ('deezer_id', 'deezer_id'),
+}
+
+# source -> albums column holding the matched album id
+ALBUM_SOURCES: Dict[str, str] = {
+    'spotify': 'spotify_album_id',
+    'deezer': 'deezer_id',
 }
 
 
@@ -92,6 +99,54 @@ def ensure_schema(cursor) -> None:
             END
         """)
 
+    # albums, the same three pieces
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS album_artist_credits (
+            album_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            source_artist_id TEXT,
+            PRIMARY KEY (album_id, source, position)
+        ) WITHOUT ROWID
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_album_artist_credits_artist "
+                   "ON album_artist_credits (source, source_artist_id)")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS album_artist_credits_pending (
+            album_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            PRIMARY KEY (source, album_id)
+        ) WITHOUT ROWID
+    """)
+    cursor.execute("DROP TRIGGER IF EXISTS trg_album_artist_credits_gone")
+    cursor.execute("""
+        CREATE TRIGGER trg_album_artist_credits_gone
+        AFTER DELETE ON albums
+        BEGIN
+            DELETE FROM album_artist_credits WHERE album_id = OLD.id;
+            DELETE FROM album_artist_credits_pending WHERE album_id = OLD.id;
+        END
+    """)
+    cursor.execute("PRAGMA table_info(albums)")
+    album_columns = {row[1] for row in cursor.fetchall()}
+    for source, album_col in ALBUM_SOURCES.items():
+        if album_col not in album_columns:
+            continue
+        cursor.execute(f"DROP TRIGGER IF EXISTS trg_album_artist_credits_{source}_rematch")
+        cursor.execute(f"""
+            CREATE TRIGGER trg_album_artist_credits_{source}_rematch
+            AFTER UPDATE OF {album_col} ON albums
+            WHEN NEW.{album_col} IS NOT OLD.{album_col}
+            BEGIN
+                DELETE FROM album_artist_credits
+                WHERE album_id = NEW.id AND source = '{source}';
+                INSERT OR IGNORE INTO album_artist_credits_pending (album_id, source)
+                SELECT NEW.id, '{source}'
+                WHERE NEW.{album_col} IS NOT NULL AND NEW.{album_col} != '';
+            END
+        """)
+
 
 def normalize_credits(artists: Any) -> List[Tuple[str, Optional[str]]]:
     """turn whatever a client handed back into [(name, provider_id)].
@@ -123,26 +178,51 @@ def normalize_credits(artists: Any) -> List[Tuple[str, Optional[str]]]:
     return out
 
 
+def _save(cursor, kind: str, entity_id: Any, source: str, artists: Any) -> int:
+    """replace this source's credits for one track or album, and take it off
+    the queue. kind is 'track' or 'album'."""
+    if entity_id in (None, ''):
+        return 0
+    credits = normalize_credits(artists)
+    if not any(aid for _name, aid in credits):
+        return 0
+    eid = str(entity_id)
+    table, key = f"{kind}_artist_credits", f"{kind}_id"
+    cursor.execute(f"DELETE FROM {table}_pending WHERE {key} = ? AND source = ?", (eid, source))
+    cursor.execute(f"DELETE FROM {table} WHERE {key} = ? AND source = ?", (eid, source))
+    cursor.executemany(
+        f"INSERT INTO {table} ({key}, source, position, name, source_artist_id) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [(eid, source, i, name, aid) for i, (name, aid) in enumerate(credits)],
+    )
+    return len(credits)
+
+
 def save_track_credits(cursor, track_id: Any, source: str, artists: Any) -> int:
     """replace this source's credits for a track. returns rows written.
 
     writes nothing, and leaves what's there alone, when the list carries no
     artist ids at all. names alone can't link to anyone, and a names-only row
     would stop the backfill from ever going back for the real thing."""
-    if source not in SOURCES or track_id in (None, ''):
+    if source not in SOURCES:
         return 0
-    credits = normalize_credits(artists)
-    if not any(aid for _name, aid in credits):
+    return _save(cursor, 'track', track_id, source, artists)
+
+
+def save_album_credits(cursor, album_id: Any, source: str, artists: Any) -> int:
+    """save_track_credits for an album's artists."""
+    if source not in ALBUM_SOURCES:
         return 0
-    tid = str(track_id)
-    cursor.execute("DELETE FROM track_artist_credits_pending WHERE track_id = ? AND source = ?", (tid, source))
-    cursor.execute("DELETE FROM track_artist_credits WHERE track_id = ? AND source = ?", (tid, source))
-    cursor.executemany(
-        "INSERT INTO track_artist_credits (track_id, source, position, name, source_artist_id) "
-        "VALUES (?, ?, ?, ?, ?)",
-        [(tid, source, i, name, aid) for i, (name, aid) in enumerate(credits)],
-    )
-    return len(credits)
+    return _save(cursor, 'album', album_id, source, artists)
+
+
+def try_save_album_credits(cursor, album_id: Any, source: str, artists: Any) -> int:
+    """save_album_credits that never raises, same reason as the track one."""
+    try:
+        return save_album_credits(cursor, album_id, source, artists)
+    except Exception as e:
+        logger.debug("Could not save %s credits for album %s: %s", source, album_id, e)
+        return 0
 
 
 def try_save_track_credits(cursor, track_id: Any, source: str, artists: Any) -> int:
@@ -257,6 +337,13 @@ def requeue(cursor, source: str, tracks: Iterable[Tuple[Any, str, Any]]) -> None
         [(str(t[0]), source) for t in tracks])
 
 
+def requeue_albums(cursor, source: str, albums: Iterable[Tuple[Any, str, Any]]) -> None:
+    """requeue for albums."""
+    cursor.executemany(
+        "INSERT OR IGNORE INTO album_artist_credits_pending (album_id, source) VALUES (?, ?)",
+        [(str(a[0]), source) for a in albums])
+
+
 class CreditsBackfill:
     """what a worker should fetch credits for next.
 
@@ -269,12 +356,25 @@ class CreditsBackfill:
     by_album hands out one album's tracks at a time, for a source that answers
     a whole album in one call. otherwise batch_size tracks in id order."""
 
+    sweep_key = "artist_credits_sweep_{source}"
+
     def __init__(self, source: str, batch_size: int = 50, by_album: bool = False):
         self.source = source
         self.batch_size = batch_size
         self.by_album = by_album
-        self._key = f"artist_credits_sweep_{source}"
+        self._key = self.sweep_key.format(source=source)
         self._sweep_done: Optional[bool] = None
+
+    def _claim(self, cursor) -> List[Tuple[Any, str, Any]]:
+        return _pending_batch(cursor, self.source, self.batch_size, self.by_album)
+
+    def _sweep_batch(self, cursor, after: Any) -> List[Tuple[Any, str, Any]]:
+        if self.by_album:
+            return album_missing_credits(cursor, self.source, after)
+        return tracks_missing_credits(cursor, self.source, self.batch_size, after)
+
+    def _place(self, batch: List[Tuple[Any, str, Any]]) -> Any:
+        return batch[-1][2] if self.by_album else batch[-1][0]
 
     def _read_sweep(self, cursor) -> Tuple[bool, Any]:
         cursor.execute("SELECT value FROM metadata WHERE key = ?", (self._key,))
@@ -295,7 +395,7 @@ class CreditsBackfill:
     def next_batch(self, cursor) -> List[Tuple[Any, str, Any]]:
         """the next tracks to fetch credits for, [] when there's nothing.
         commits its own bookkeeping on the cursor's connection."""
-        batch = _pending_batch(cursor, self.source, self.batch_size, self.by_album)
+        batch = self._claim(cursor)
         if batch:
             cursor.connection.commit()
             return batch
@@ -306,17 +406,57 @@ class CreditsBackfill:
             cursor.connection.commit()
             return []
         _done, after = self._read_sweep(cursor)
-        if self.by_album:
-            batch = album_missing_credits(cursor, self.source, after)
-        else:
-            batch = tracks_missing_credits(cursor, self.source, self.batch_size, after)
+        batch = self._sweep_batch(cursor, after)
         if not batch:
             self._write_sweep(cursor, True, None)
             self._sweep_done = True
         else:
-            self._write_sweep(cursor, False, batch[-1][2] if self.by_album else batch[-1][0])
+            self._write_sweep(cursor, False, self._place(batch))
         cursor.connection.commit()
         return batch
+
+
+class AlbumCreditsBackfill(CreditsBackfill):
+    """the same queue-then-one-sweep, over matched albums. hands out
+    [(album_id, provider_album_id, None)]."""
+
+    sweep_key = "album_artist_credits_sweep_{source}"
+
+    def _claim(self, cursor) -> List[Tuple[Any, str, Any]]:
+        col = ALBUM_SOURCES[self.source]
+        cursor.execute(f"""
+            SELECT p.album_id, al.{col}
+            FROM album_artist_credits_pending p
+            LEFT JOIN albums al ON al.id = p.album_id
+            WHERE p.source = ?
+            LIMIT ?
+        """, (self.source, self.batch_size))
+        rows = cursor.fetchall()
+        cursor.executemany("DELETE FROM album_artist_credits_pending WHERE source = ? AND album_id = ?",
+                           [(self.source, r[0]) for r in rows])
+        return [(r[0], str(r[1]), None) for r in rows if r[1]]
+
+    def _sweep_batch(self, cursor, after: Any) -> List[Tuple[Any, str, Any]]:
+        col = ALBUM_SOURCES[self.source]
+        params: List[Any] = [self.source]
+        after_sql = ''
+        if after is not None:
+            after_sql = ' AND al.id > ?'
+            params.append(after)
+        cursor.execute(f"""
+            SELECT al.id, al.{col} FROM albums al
+            WHERE al.{col} IS NOT NULL AND al.{col} != ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM album_artist_credits c
+                  WHERE c.album_id = al.id AND c.source = ?
+              ){after_sql}
+            ORDER BY al.id
+            LIMIT ?
+        """, params + [self.batch_size])
+        return [(r[0], str(r[1]), None) for r in cursor.fetchall()]
+
+    def _place(self, batch: List[Tuple[Any, str, Any]]) -> Any:
+        return batch[-1][0]
 
 
 def artist_source_ids(cursor, artist_id: Any) -> List[Tuple[str, str]]:
@@ -394,3 +534,58 @@ def credited_names(cursor, track_ids: Sequence[str]) -> Dict[str, List[str]]:
     for tid, source, _pos, name in cursor.fetchall():
         by_track.setdefault(str(tid), {}).setdefault(source, []).append(name)
     return {tid: max(lists.values(), key=len) for tid, lists in by_track.items()}
+
+
+def appears_on_albums(cursor, artist_id: Any, limit: int = 100,
+                      scope_sql: str = '1=1', scope_params: Sequence[Any] = ()) -> List[Dict[str, Any]]:
+    """albums this artist is credited on that are filed under someone else,
+    with their tracks. a collab album sits under one artist row; this puts it
+    on the other artist's page too. scope_sql is over al.owner_profile_id."""
+    ids = artist_source_ids(cursor, artist_id)
+    if not ids:
+        return []
+    where = ' OR '.join('(c.source = ? AND c.source_artist_id = ?)' for _ in ids)
+    params: List[Any] = [v for pair in ids for v in pair]
+    cursor.execute(f"""
+        SELECT al.id, al.title, al.thumb_url, al.year, ar.id, ar.name
+        FROM albums al
+        JOIN artists ar ON ar.id = al.artist_id
+        WHERE al.id IN (SELECT c.album_id FROM album_artist_credits c WHERE {where})
+          AND al.artist_id != ?
+          AND {scope_sql}
+        ORDER BY al.year DESC, al.title
+        LIMIT ?
+    """, params + [artist_id] + list(scope_params) + [limit])
+    albums = cursor.fetchall()
+    if not albums:
+        return []
+    album_ids = [str(a[0]) for a in albums]
+    ph = ','.join('?' for _ in album_ids)
+    cursor.execute(f"""
+        SELECT album_id, source, position, name FROM album_artist_credits
+        WHERE album_id IN ({ph}) ORDER BY album_id, source, position
+    """, album_ids)
+    by_album: Dict[str, Dict[str, List[str]]] = {}
+    for aid, source, _pos, name in cursor.fetchall():
+        by_album.setdefault(str(aid), {}).setdefault(source, []).append(name)
+    cursor.execute(f"""
+        SELECT album_id, id, title, track_number, disc_number, duration, file_path
+        FROM tracks WHERE album_id IN ({ph})
+        ORDER BY album_id, COALESCE(disc_number, 1), track_number
+    """, album_ids)
+    tracks: Dict[str, List[Dict[str, Any]]] = {}
+    for r in cursor.fetchall():
+        tracks.setdefault(str(r[0]), []).append({
+            'id': r[1], 'title': r[2], 'track_number': r[3], 'disc_number': r[4],
+            'duration': r[5], 'file_path': r[6],
+        })
+    return [{
+        'id': a[0],
+        'title': a[1],
+        'thumb_url': a[2],
+        'year': a[3],
+        'artist_id': a[4],
+        'artist_name': a[5],
+        'credits': max(by_album[str(a[0])].values(), key=len) if str(a[0]) in by_album else [],
+        'tracks': tracks.get(str(a[0]), []),
+    } for a in albums]

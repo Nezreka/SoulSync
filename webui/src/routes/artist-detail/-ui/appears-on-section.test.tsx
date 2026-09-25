@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { formatDuration, queueRow, subLine, withLine } from '../-artist-detail.appears-on';
+import {
+  albumSubLine,
+  albumTracks,
+  formatDuration,
+  queueRow,
+  subLine,
+  withLine,
+} from '../-artist-detail.appears-on';
 import { AppearsOnSection } from './appears-on-section';
 
 /**
@@ -23,10 +30,25 @@ const WFL = {
   credits: ['Calvin Harris', 'Rihanna'],
 };
 
-function stub(tracks: unknown[]) {
+const WTT = {
+  id: '30',
+  title: 'Watch the Throne',
+  thumb_url: '/img/wtt.jpg',
+  year: 2011,
+  artist_id: '5',
+  artist_name: 'JAY-Z',
+  credits: ['JAY-Z', 'Kanye West'],
+  tracks: [
+    { id: '301', title: 'No Church in the Wild', track_number: 1, file_path: '/m/wtt/01.flac' },
+    { id: '302', title: 'Lift Off', track_number: 2, file_path: null },
+    { id: '303', title: 'Niggas in Paris', track_number: 3, file_path: '/m/wtt/03.flac' },
+  ],
+};
+
+function stub(tracks: unknown[], albums: unknown[] = []) {
   const fetchMock = vi.fn(
     async () =>
-      new Response(JSON.stringify({ success: true, tracks }), {
+      new Response(JSON.stringify({ success: true, tracks, albums }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -121,5 +143,52 @@ describe('AppearsOnSection', () => {
     expect(screen.queryByText('Song 8')).toBeNull();
     fireEvent.click(screen.getByText('Show all 12'));
     expect(screen.getByText('Song 11')).toBeTruthy();
+  });
+});
+
+describe('collab albums', () => {
+  it('describes the album from the other artists point of view', () => {
+    expect(albumSubLine(WTT, 'Kanye West')).toBe('with JAY-Z · 2011');
+  });
+
+  it('only queues album tracks with a file, carrying the album along', () => {
+    const tracks = albumTracks(WTT);
+    expect(tracks.map((t) => t.id)).toEqual(['301', '303']);
+    expect(tracks[0]).toMatchObject({
+      album_title: 'Watch the Throne',
+      album_thumb_url: '/img/wtt.jpg',
+    });
+  });
+
+  it('shows the album and plays it', async () => {
+    stub([], [WTT]);
+    const play = vi.fn();
+    window.playTrackList = play;
+    render(<AppearsOnSection artistId="6" artistName="Kanye West" />);
+    fireEvent.click(await screen.findByTitle('Play Watch the Throne'));
+    const [queue] = play.mock.calls[0] as [Array<{ id: string; artist: string }>];
+    expect(queue.map((t) => t.id)).toEqual(['301', '303']);
+    expect(queue[0]?.artist).toBe('JAY-Z, Kanye West');
+    expect(screen.getByText('with JAY-Z · 2011')).toBeTruthy();
+    expect(screen.getByText('1 album')).toBeTruthy();
+  });
+
+  it('play all takes the albums first, then the songs', async () => {
+    stub([{ ...WFL, id: '100' }], [WTT]);
+    const play = vi.fn();
+    window.playTrackList = play;
+    render(<AppearsOnSection artistId="6" artistName="Kanye West" />);
+    await screen.findByText('Watch the Throne');
+    expect(screen.getByText('1 album · 1 track')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Play all'));
+    const [queue] = play.mock.calls[0] as [Array<{ id: string }>];
+    expect(queue.map((t) => t.id)).toEqual(['301', '303', '100']);
+  });
+
+  it('hides an album with nothing to play', async () => {
+    stub([WFL], [{ ...WTT, tracks: [{ id: '302', title: 'Lift Off', file_path: null }] }]);
+    render(<AppearsOnSection artistId="6" artistName="Kanye West" />);
+    await screen.findByText('We Found Love');
+    expect(screen.queryByText('Watch the Throne')).toBeNull();
   });
 });

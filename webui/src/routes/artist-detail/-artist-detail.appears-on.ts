@@ -1,13 +1,14 @@
 /**
- * "appears on": tracks this artist is credited on that are filed under
- * someone else. features and collabs, from the credits the spotify and deezer
- * workers keep (/api/artist/<id>/appears-on).
+ * "appears on": albums and tracks this artist is credited on that are filed
+ * under someone else. collab albums and features, from the credits the
+ * spotify and deezer workers keep (/api/artist/<id>/appears-on).
  */
 
 export interface AppearsOnTrack {
   id: string | number;
   title?: string;
   track_number?: number | null;
+  disc_number?: number | null;
   duration?: number | null;
   file_path?: string | null;
   album_id?: string | number;
@@ -19,15 +20,65 @@ export interface AppearsOnTrack {
   credits?: string[];
 }
 
-export async function loadAppearsOn(artistId: string | number): Promise<AppearsOnTrack[]> {
+export interface AppearsOnAlbum {
+  id: string | number;
+  title?: string;
+  thumb_url?: string | null;
+  year?: number | null;
+  artist_id?: string | number;
+  artist_name?: string;
+  credits?: string[];
+  tracks?: AppearsOnTrack[];
+}
+
+export interface AppearsOnData {
+  albums: AppearsOnAlbum[];
+  tracks: AppearsOnTrack[];
+}
+
+export const EMPTY_APPEARS_ON: AppearsOnData = { albums: [], tracks: [] };
+
+export async function loadAppearsOn(artistId: string | number): Promise<AppearsOnData> {
   try {
     const resp = await fetch(`/api/artist/${encodeURIComponent(String(artistId))}/appears-on`);
-    if (!resp.ok) return [];
+    if (!resp.ok) return EMPTY_APPEARS_ON;
     const data = await resp.json();
-    return data?.success && Array.isArray(data.tracks) ? data.tracks : [];
+    if (!data?.success) return EMPTY_APPEARS_ON;
+    return {
+      albums: Array.isArray(data.albums) ? data.albums : [],
+      tracks: Array.isArray(data.tracks) ? data.tracks : [],
+    };
   } catch {
-    return [];
+    return EMPTY_APPEARS_ON;
   }
+}
+
+/** an album's tracks you can play, carrying the album's title, art and
+ *  credits so they queue like any other appears-on track. */
+export function albumTracks(album: AppearsOnAlbum): AppearsOnTrack[] {
+  return (album.tracks ?? [])
+    .filter((t) => t.file_path)
+    .map((t) => ({
+      ...t,
+      album_id: album.id,
+      album_title: album.title,
+      album_thumb_url: album.thumb_url,
+      year: album.year,
+      artist_id: album.artist_id,
+      artist_name: album.artist_name,
+      credits: t.credits?.length ? t.credits : album.credits,
+    }));
+}
+
+/** "with JAY-Z · 2011" for an album card. */
+export function albumSubLine(album: AppearsOnAlbum, pageArtist: string): string {
+  const who = withLine(
+    { id: album.id, credits: album.credits, artist_name: album.artist_name },
+    pageArtist,
+  );
+  return [who ? `with ${who}` : '', album.year ? String(album.year) : '']
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /**

@@ -59474,6 +59474,39 @@ tr.tag-diff-same {
 .artist-appears-on-play-all:hover {
     filter: brightness(1.12);
 }
+.artist-appears-on-albums {
+    list-style: none;
+    margin: 0 0 14px;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 14px;
+}
+.artist-appears-on-album {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+}
+.artist-appears-on-album-art {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 8px;
+    object-fit: cover;
+    margin-bottom: 5px;
+    transition: filter 0.15s ease;
+}
+.artist-appears-on-album:hover .artist-appears-on-album-art {
+    filter: brightness(1.1);
+}
 .artist-appears-on-list {
     list-style: none;
     margin: 0;

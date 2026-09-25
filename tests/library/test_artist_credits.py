@@ -494,7 +494,13 @@ def test_spotify_next_item_hands_out_backfill_after_real_work(db, monkeypatch):
     c.close()
     w = _spotify_worker(db, monkeypatch)
     monkeypatch.setattr('core.worker_utils.read_enrichment_priority', lambda _s: None)
+    # album credits come first (fewer, and what collab pages need)
     item = w._get_next_item()
+    assert item['type'] == 'album_credits_backfill'
+    for _ in range(10):
+        if item['type'] != 'album_credits_backfill':
+            break
+        item = w._get_next_item()
     assert item['type'] == 'credits_backfill'
     # one album per item
     assert [t[0] for t in item['tracks']] == ['100', '101']
@@ -574,3 +580,240 @@ def test_appears_on_endpoint(db):
     assert resp.status_code == 200, body
     assert [t['title'] for t in body['tracks']] == ['We Found Love']
     assert body['tracks'][0]['credits'] == ['Calvin Harris', 'Rihanna']
+
+
+# ---------------------------------------------------------------------------
+# albums: a collab album sits under one artist row. watch the throne filed
+# under jay-z never showed on kanye's page. same idea as tracks.
+# ---------------------------------------------------------------------------
+
+SP_18_MONTHS = [{'id': 'sp_calvin', 'name': 'Calvin Harris'},
+                {'id': 'sp_rihanna', 'name': 'Rihanna'}]
+
+
+def _album_credits(db, album_id, source=None):
+    c = _raw(db)
+    sql = "SELECT source, position, name, source_artist_id FROM album_artist_credits WHERE album_id = ?"
+    params = [str(album_id)]
+    if source:
+        sql += " AND source = ?"
+        params.append(source)
+    rows = c.execute(sql + " ORDER BY source, position", params).fetchall()
+    c.close()
+    return rows
+
+
+def _albums_for(db, artist_id, **kw):
+    with db._get_connection() as conn:
+        return ac.appears_on_albums(conn.cursor(), artist_id, **kw)
+
+
+def test_fresh_db_has_album_tables_and_triggers(db):
+    c = _raw(db)
+    names = {r[0] for r in c.execute("SELECT name FROM sqlite_master")}
+    c.close()
+    for n in ("album_artist_credits", "album_artist_credits_pending",
+              "idx_album_artist_credits_artist", "trg_album_artist_credits_gone",
+              "trg_album_artist_credits_spotify_rematch", "trg_album_artist_credits_deezer_rematch"):
+        assert n in names, n
+
+
+def test_collab_album_shows_on_the_other_artists_page_with_its_tracks(db):
+    _seed(db)
+    with db._get_connection() as conn:
+        assert ac.save_album_credits(conn.cursor(), 10, 'spotify', SP_18_MONTHS) == 2
+        conn.commit()
+    albums = _albums_for(db, 2)
+    assert [a['title'] for a in albums] == ['18 Months']
+    assert albums[0]['artist_name'] == 'Calvin Harris'
+    assert albums[0]['credits'] == ['Calvin Harris', 'Rihanna']
+    assert [t['title'] for t in albums[0]['tracks']] == ['We Found Love', 'Feel So Close']
+    # calvin's own album is already his
+    assert _albums_for(db, 1) == []
+
+
+def test_album_names_without_ids_write_nothing(db):
+    _seed(db)
+    with db._get_connection() as conn:
+        assert ac.save_album_credits(conn.cursor(), 10, 'spotify', ['Calvin Harris', 'Rihanna']) == 0
+        conn.commit()
+    assert _album_credits(db, 10) == []
+
+
+def test_album_rematch_drops_credits_and_queues_it(db):
+    _seed(db)
+    c = _raw(db)
+    with db._get_connection() as conn:
+        ac.save_album_credits(conn.cursor(), 10, 'spotify', SP_18_MONTHS)
+        conn.commit()
+    c.execute("UPDATE albums SET spotify_album_id = 'sp_album_18' WHERE id = 10")
+    c.commit()
+    assert len(_album_credits(db, 10)) == 2
+    c.execute("UPDATE albums SET spotify_album_id = 'other' WHERE id = 10")
+    c.commit()
+    assert _album_credits(db, 10) == []
+    assert c.execute("SELECT album_id FROM album_artist_credits_pending").fetchall() == [('10',)]
+    c.execute("DELETE FROM albums WHERE id = 10")
+    c.commit()
+    assert c.execute("SELECT COUNT(*) FROM album_artist_credits_pending").fetchone()[0] == 0
+    c.close()
+
+
+def test_album_sweep_runs_once_and_resumes(db):
+    _seed(db)
+    c = _raw(db)
+    c.execute("UPDATE albums SET spotify_album_id = 'x_' || id")
+    c.execute("DELETE FROM album_artist_credits_pending")
+    c.commit()
+    c.close()
+    assert _next(db, ac.AlbumCreditsBackfill('spotify', batch_size=1)) == ['10']
+    # a fresh worker picks up where the last one stopped
+    sweep = ac.AlbumCreditsBackfill('spotify', batch_size=1)
+    assert _next(db, sweep) == ['20']
+    assert _next(db, sweep) == []
+    assert _next(db, ac.AlbumCreditsBackfill('spotify', batch_size=1)) == []
+
+
+def test_album_sweep_does_not_touch_the_track_sweep(db):
+    _seed(db)
+    _match_all(db)
+    c = _raw(db)
+    c.execute("UPDATE albums SET spotify_album_id = 'x_' || id")
+    c.execute("DELETE FROM album_artist_credits_pending")
+    c.commit()
+    c.close()
+    albums = ac.AlbumCreditsBackfill('spotify', batch_size=10)
+    for _ in range(5):
+        if not _next(db, albums):
+            break
+    assert _next(db, _sweep(db, batch_size=10)) == ['100', '101', '200']
+
+
+def test_appears_on_albums_respects_library_scope(db):
+    _seed(db)
+    c = _raw(db)
+    c.execute("UPDATE albums SET owner_profile_id = 2 WHERE id = 10")
+    c.commit()
+    c.close()
+    with db._get_connection() as conn:
+        ac.save_album_credits(conn.cursor(), 10, 'spotify', SP_18_MONTHS)
+        conn.commit()
+    shared_sql, shared_params = db._owner_scope_sql('shared', 'al.owner_profile_id')
+    own_sql, own_params = db._owner_scope_sql(2, 'al.owner_profile_id')
+    assert _albums_for(db, 2, scope_sql=shared_sql, scope_params=shared_params) == []
+    assert len(_albums_for(db, 2, scope_sql=own_sql, scope_params=own_params)) == 1
+
+
+def test_spotify_album_match_saves_album_artists(db, monkeypatch):
+    """the Album dataclass keeps names and ids in two parallel lists."""
+    from core.spotify_client import Album
+    _seed(db)
+    w = _spotify_worker(db, monkeypatch)
+    w._update_album(10, Album(id='sp_album_18', name='18 Months', artists=['Calvin Harris', 'Rihanna'],
+                              release_date='2012-10-26', total_tracks=15, album_type='album',
+                              artist_ids=['sp_calvin', 'sp_rihanna']))
+    assert [r[3] for r in _album_credits(db, 10)] == ['sp_calvin', 'sp_rihanna']
+    c = _raw(db)
+    assert c.execute("SELECT COUNT(*) FROM album_artist_credits_pending").fetchone()[0] == 0
+    c.close()
+
+
+def test_spotify_stored_album_match_reads_the_raw_artists(db, monkeypatch):
+    _seed(db)
+    w = _spotify_worker(db, monkeypatch)
+    w._refresh_album_via_stored_id(10, 'sp_album_18', {
+        'id': 'sp_album_18', 'name': '18 Months', 'artists': SP_18_MONTHS})
+    assert [r[3] for r in _album_credits(db, 10)] == ['sp_calvin', 'sp_rihanna']
+
+
+def test_spotify_album_backfill_and_rate_limit(db, monkeypatch):
+    from core.spotify_client import SpotifyRateLimitError
+    _seed(db)
+    c = _raw(db)
+    c.execute("UPDATE albums SET spotify_album_id = 'sp_album_18' WHERE id = 10")
+    c.execute("DELETE FROM album_artist_credits_pending")
+    c.commit()
+    c.close()
+    state = {'banned': True}
+    asked = []
+
+    def get_album(album_id, allow_fallback=True):
+        asked.append((album_id, allow_fallback))
+        if state['banned']:
+            raise SpotifyRateLimitError("banned")
+        return {'id': album_id, 'artists': SP_18_MONTHS}
+    w = _spotify_worker(db, monkeypatch, client=types.SimpleNamespace(get_album=get_album))
+    monkeypatch.setattr('core.worker_utils.read_enrichment_priority', lambda _s: None)
+    c = _raw(db)
+    c.execute("UPDATE artists SET spotify_match_status = 'matched'")
+    c.execute("UPDATE albums SET spotify_match_status = 'matched'")
+    c.execute("UPDATE tracks SET spotify_match_status = 'matched'")
+    c.commit()
+    c.close()
+    item = w._get_next_item()
+    assert item['type'] == 'album_credits_backfill'
+    with pytest.raises(SpotifyRateLimitError):
+        w._process_album_credits_backfill(item)
+    # the ban says nothing about the album, it goes back on the queue
+    state['banned'] = False
+    item = w._get_next_item()
+    assert item['type'] == 'album_credits_backfill'
+    w._process_album_credits_backfill(item)
+    assert asked[-1] == ('sp_album_18', False)
+    assert [r[2] for r in _album_credits(db, 10)] == ['Calvin Harris', 'Rihanna']
+
+
+def test_deezer_album_match_saves_contributors(db, monkeypatch):
+    _seed(db)
+    w = _deezer_worker(db, monkeypatch)
+    w._update_album(10, {'id': 555, 'title': '18 Months'},
+                    {'id': 555, 'contributors': [{'id': 'dz_calvin', 'name': 'Calvin Harris', 'role': 'Main'},
+                                                 {'id': 'dz_rihanna', 'name': 'Rihanna', 'role': 'Main'}]})
+    assert [r[3] for r in _album_credits(db, 10)] == ['dz_calvin', 'dz_rihanna']
+    assert [a['title'] for a in _albums_for(db, 2)] == ['18 Months']
+
+
+def test_deezer_album_backfill_fetches_the_full_album(db, monkeypatch):
+    _seed(db)
+    c = _raw(db)
+    c.execute("UPDATE albums SET deezer_id = '555' WHERE id = 10")
+    c.execute("DELETE FROM album_artist_credits_pending")
+    c.commit()
+    c.close()
+    w = _deezer_worker(db, monkeypatch, types.SimpleNamespace(get_album_raw=lambda _id: {
+        'id': 555, 'contributors': [{'id': 'dz_calvin', 'name': 'Calvin Harris'},
+                                    {'id': 'dz_rihanna', 'name': 'Rihanna'}]}))
+    monkeypatch.setattr('core.worker_utils.read_enrichment_priority', lambda _s: None)
+    c = _raw(db)
+    c.execute("UPDATE artists SET deezer_match_status = 'matched'")
+    c.execute("UPDATE albums SET deezer_match_status = 'matched'")
+    c.execute("UPDATE tracks SET deezer_match_status = 'matched'")
+    c.commit()
+    c.close()
+    item = w._get_next_item()
+    assert item['type'] == 'album_credits_backfill'
+    w._process_item(item)
+    assert [r[2] for r in _album_credits(db, 10)] == ['Calvin Harris', 'Rihanna']
+
+
+def test_endpoint_returns_albums_and_leaves_their_tracks_out(db):
+    from api import artist_detail
+    _seed(db)
+    with db._get_connection() as conn:
+        cur = conn.cursor()
+        ac.save_album_credits(cur, 10, 'spotify', SP_18_MONTHS)
+        ac.save_track_credits(cur, 100, 'spotify', SP_WE_FOUND_LOVE)
+        conn.commit()
+    prev = artist_detail.get_database
+    artist_detail.configure(get_database=lambda: db)
+    token = set_library_scope(None)
+    try:
+        app = Flask(__name__)
+        app.register_blueprint(artist_detail.bp)
+        body = app.test_client().get('/api/artist/2/appears-on').get_json()
+    finally:
+        reset_library_scope(token)
+        artist_detail.configure(get_database=prev)
+    assert [a['title'] for a in body['albums']] == ['18 Months']
+    # we found love is on 18 months, the album card already has it
+    assert body['tracks'] == []

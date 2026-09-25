@@ -725,23 +725,34 @@ def get_artist_image(artist_id):
 
 @bp.route('/api/artist/<artist_id>/appears-on', methods=['GET'])
 def get_artist_appears_on(artist_id):
-    """tracks this library artist is credited on that are filed under someone
-    else (features, collabs), from the credits the enrichment workers keep."""
+    """albums and tracks this library artist is credited on that are filed
+    under someone else (collab albums, features), from the credits the
+    enrichment workers keep. a track on one of those albums is left out of
+    the tracks, the album already has it."""
     try:
-        from core.library.artist_credits import appears_on
+        from core.library.artist_credits import appears_on, appears_on_albums
         try:
             limit = max(1, min(int(request.args.get('limit', 200)), 500))
         except (TypeError, ValueError):
             limit = 200
         database = get_database()
-        scope_sql, scope_params = database._current_scope_sql('t.owner_profile_id')
+        track_scope, track_params = database._current_scope_sql('t.owner_profile_id')
+        album_scope, album_params = database._current_scope_sql('al.owner_profile_id')
         with database._get_connection() as conn:
-            tracks = appears_on(conn.cursor(), artist_id, limit=limit,
-                                scope_sql=scope_sql, scope_params=scope_params)
+            cursor = conn.cursor()
+            albums = appears_on_albums(cursor, artist_id, scope_sql=album_scope,
+                                       scope_params=album_params)
+            tracks = appears_on(cursor, artist_id, limit=limit,
+                                scope_sql=track_scope, scope_params=track_params)
+        on_albums = {str(a['id']) for a in albums}
+        tracks = [t for t in tracks if str(t.get('album_id')) not in on_albums]
+        for a in albums:
+            if a.get('thumb_url'):
+                a['thumb_url'] = fix_artist_image_url(a['thumb_url'])
         for t in tracks:
             if t.get('album_thumb_url'):
                 t['album_thumb_url'] = fix_artist_image_url(t['album_thumb_url'])
-        return jsonify({'success': True, 'tracks': tracks})
+        return jsonify({'success': True, 'albums': albums, 'tracks': tracks})
     except Exception as e:
         logger.error(f"Error getting appears-on tracks for artist {artist_id}: {e}")
         return jsonify({'success': False, 'error': str(e), 'tracks': []}), 500

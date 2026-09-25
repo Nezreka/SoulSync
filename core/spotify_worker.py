@@ -19,7 +19,14 @@ from core.worker_utils import (
     source_id_conflict,
 )
 from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
-from core.library.artist_credits import CreditsBackfill, requeue, try_save_track_credits
+from core.library.artist_credits import (
+    AlbumCreditsBackfill,
+    CreditsBackfill,
+    requeue,
+    requeue_albums,
+    try_save_album_credits,
+    try_save_track_credits,
+)
 from core.metadata.cache import get_metadata_cache
 
 logger = get_logger("spotify_worker")
@@ -68,6 +75,8 @@ class SpotifyWorker:
         # tracks matched before the worker kept artist credits
         # one album at a time, one get_album_tracks call each
         self._credits_backfill = CreditsBackfill('spotify', by_album=True)
+        # albums too, a few get_album calls per item
+        self._album_credits_backfill = AlbumCreditsBackfill('spotify', batch_size=3)
 
         # Name matching threshold
         self.name_similarity_threshold = 0.80
@@ -460,8 +469,14 @@ class SpotifyWorker:
             if row:
                 return {'type': 'track_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
 
-            # Priority 5b: artist credits. rematched tracks, then the one-time
-            # sweep of tracks matched before we kept them
+            # Priority 5b: artist credits. rematched albums and tracks, then
+            # the one-time sweeps of ones matched before we kept them. albums
+            # first, there are far fewer and they're what collab pages need
+            album_backfill = self._album_credits_backfill.next_batch(cursor)
+            if album_backfill:
+                return {'type': 'album_credits_backfill', 'id': album_backfill[0][0],
+                        'albums': album_backfill,
+                        'name': f"Artist credits for {len(album_backfill)} albums"}
             backfill = self._credits_backfill.next_batch(cursor)
             if backfill:
                 return {'type': 'credits_backfill', 'id': backfill[0][0], 'tracks': backfill,
@@ -533,6 +548,8 @@ class SpotifyWorker:
                 self._process_track_individual(item)
             elif item_type == 'credits_backfill':
                 self._process_credits_backfill(item)
+            elif item_type == 'album_credits_backfill':
+                self._process_album_credits_backfill(item)
 
         except SpotifyRateLimitError:
             raise  # Propagate to main loop so it activates the sleep/ban guard
@@ -793,6 +810,7 @@ class SpotifyWorker:
             album_type=api_album_dict.get('album_type', 'album'),
             release_date=api_album_dict.get('release_date', ''),
             total_tracks=api_album_dict.get('total_tracks', 0),
+            artists=api_album_dict.get('artists'),
         )
         self._update_album(album_id, adapter)
 
@@ -986,6 +1004,9 @@ class SpotifyWorker:
                 WHERE id = ?
             """, (str(album_obj.id), album_id))
 
+            # every album artist, not just the one it's filed under
+            try_save_album_credits(cursor, album_id, 'spotify', self._album_artists(album_obj))
+
             # Backfill thumb_url if empty
             if album_obj.image_url:
                 cursor.execute("""
@@ -1095,6 +1116,50 @@ class SpotifyWorker:
                 conn.close()
 
     # ── Artist credits ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _album_artists(album_obj):
+        """album artists with ids off an Album dataclass (names and ids in two
+        parallel lists) or a raw dict's artists."""
+        names = getattr(album_obj, 'artists', None)
+        ids = getattr(album_obj, 'artist_ids', None)
+        if names and ids and len(names) == len(ids) and all(isinstance(n, str) for n in names):
+            return [{'name': n, 'id': i} for n, i in zip(names, ids, strict=True)]
+        return names
+
+    def _process_album_credits_backfill(self, item: Dict[str, Any]):
+        """album artists for albums matched before we kept them, one
+        get_album each (cached when the match fetched it)."""
+        found = []
+        for album_id, sp_album_id, _ in item['albums']:
+            try:
+                data = self.client.get_album(sp_album_id, allow_fallback=False)
+            except SpotifyRateLimitError:
+                self._requeue_album_credits(item['albums'])
+                raise
+            found.append((album_id, (data or {}).get('artists')))
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            for album_id, artists in found:
+                try_save_album_credits(cursor, album_id, 'spotify', artists)
+            conn.commit()
+        finally:
+            if conn:
+                conn.close()
+
+    def _requeue_album_credits(self, albums):
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            requeue_albums(conn.cursor(), 'spotify', albums)
+            conn.commit()
+        except Exception as e:
+            logger.debug("Could not requeue Spotify credit albums: %s", e)
+        finally:
+            if conn:
+                conn.close()
 
     def _cached_track_artists(self, spotify_track_id: str):
         """the credited artists (with ids) off the cached raw track, or None."""
