@@ -7,7 +7,7 @@ from core.metadata.art_apply import file_has_embedded_art, folder_has_cover_side
 from core.library.path_resolver import resolve_library_file_path
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, hand_tagged_path_keys, is_hand_tagged_path
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.cover_art")
@@ -119,11 +119,15 @@ class MissingCoverArtJob(RepairJob):
             # Scan every titled album — we decide per-album whether art is
             # missing in the DB OR on disk (the file/cover.jpg). The on-disk
             # check is cheap-first (a sidecar stat before opening any audio).
+            # hand-tagged: the user typed this release, a name search would
+            # give a bootleg the studio cover
+            locked_filter = (" AND COALESCE(al.metadata_locked, 0) = 0"
+                             if 'metadata_locked' in album_columns else '')
             cursor.execute(f"""
                 SELECT {', '.join(select_cols)}
                 FROM albums al
                 LEFT JOIN artists ar ON ar.id = al.artist_id
-                WHERE al.title IS NOT NULL AND al.title != ''
+                WHERE al.title IS NOT NULL AND al.title != ''{locked_filter}
             """)
             albums = cursor.fetchall()
         except Exception as e:
@@ -150,6 +154,7 @@ class MissingCoverArtJob(RepairJob):
             'no_art_source': 0,        # needs fix, but no API art found and nothing embedded to extract
         }
         _diag_logged = 0
+        hand_tagged = hand_tagged_path_keys(context.db)
 
         if context.report_progress:
             context.report_progress(phase=f'Searching artwork for {total} albums...', total=total)
@@ -170,6 +175,11 @@ class MissingCoverArtJob(RepairJob):
                 'hydrabase': row[column_index['hydrabase_album_id']] if 'hydrabase_album_id' in column_index else None,
             }
             result.scanned += 1
+
+            # same reason, for a hand-tagged file whose album isn't locked yet
+            if is_hand_tagged_path(rep_path, hand_tagged):
+                result.skipped += 1
+                continue
 
             # Art can be missing in the DB (no thumb_url) and/or on disk (no
             # embedded art and no cover.jpg). Skip albums that already have both.

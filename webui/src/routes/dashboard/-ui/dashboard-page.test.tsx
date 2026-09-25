@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe('the page shell', () => {
-  it('keeps the id, drops the .page class, and orders the grid like the vanilla', async () => {
+  it('keeps the id, drops the .page class, hero then music and the system rail', async () => {
     let view!: ReturnType<typeof render>;
     await act(async () => {
       view = render(<DashboardPage />);
@@ -36,29 +36,32 @@ describe('the page shell', () => {
     expect(root.id).toBe('dashboard-page');
     expect(root.className).toBe('page-shell dashboard-container');
 
-    expect(root.firstElementChild!.className).toBe('dashboard-header');
+    // the hero: greeting + library on the left, the orb stage on the right
+    const hero = root.firstElementChild!;
+    expect(hero.className).toBe('dashboard-header dash-hero');
+    expect(hero.querySelector('.dash-hero-main [data-card="library"]')).not.toBeNull();
+    expect(hero.querySelector(':scope > .orb-stage > .header-actions')).not.toBeNull();
 
-    const grid = root.querySelector('.dash-grid')!;
-    expect(Array.from(grid.children).map((card) => card.getAttribute('data-card'))).toEqual([
-      // The calm grid: the AlertsBand renders NOTHING while healthy (and
-      // under the test's dead fetch mock — no payload, no false alarms);
-      // the ContentBand renders nothing until a feed has rows. The Library
-      // strip LEADS, the Listen band is the payoff row (Library Radio +
-      // Mixes doorway), then the Sync band — Auto Sync + Recent Syncs
-      // merged. Everything else is rehomed: Services card retired (status
-      // + Test on the sidebar rows), enrichment equalizer retired (orbs +
-      // Manage Workers modal), System Stats in the notification tray,
-      // Recent Activity in the tray, Quick Actions back in the sidebar.
-      'library',
-      'listen',
-      'sync',
-      'automations',
-      'active-downloads',
-    ]);
+    // The calm page: the AlertsBand renders NOTHING while healthy (and under
+    // the test's dead fetch mock — no payload, no false alarms); the content
+    // and history bands render nothing until a feed has rows.
+    const cards = (sel: string) =>
+      Array.from(root.querySelectorAll(`${sel} > [data-card]`)).map((card) =>
+        card.getAttribute('data-card'),
+      );
+    expect(cards('.dash-main')).toEqual(['active-downloads', 'listen']);
+    expect(cards('.dash-side')).toEqual(['sync', 'automations']);
+    // watchlist + wishlist are rail tiles, keeping the tour's ids
+    expect(root.querySelector('.dash-side #watchlist-button')).not.toBeNull();
+    expect(root.querySelector('.dash-side #wishlist-button')).not.toBeNull();
+    // Boulder's quick switches: their own footer, not inside a card
+    expect(root.querySelector('.dash-footer .dash-quick-settings')).not.toBeNull();
+    expect(root.querySelector('[data-card="automations"] .dash-quick-settings')).toBeNull();
 
     // worker-orbs' anchor selector must resolve against this tree.
-    expect(view.container.querySelector('#dashboard-page .dashboard-header')).not.toBeNull();
-    expect(view.container.querySelector('#dashboard-page .header-actions')).not.toBeNull();
+    expect(
+      view.container.querySelector('#dashboard-page .orb-stage .header-actions'),
+    ).not.toBeNull();
   });
 
   it('re-pings worker-orbs after mount so the lazy re-anchor finds the header', async () => {

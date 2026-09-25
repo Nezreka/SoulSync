@@ -6,14 +6,18 @@ Runs every 30 minutes (configurable). Detects the active server type
 (Plex/Jellyfin/Navidrome) and calls the appropriate client methods.
 """
 
+import json
 import threading
 import time
 from typing import Dict, Any
 
 from utils.logging_config import get_logger
+from core.listening_scope import SHARED_OWNER, owner_clause
 from core.worker_utils import interruptible_sleep
 
 logger = get_logger("listening_stats_worker")
+
+SHARED_SCOPE = owner_clause(SHARED_OWNER)
 
 
 class ListeningStatsWorker:
@@ -182,6 +186,9 @@ class ListeningStatsWorker:
                     'played_at': entry.get('played_at'),
                     'duration_ms': entry.get('duration_ms', 0),
                     'server_source': active_server,
+                    # the app's server account, so the shared pile. a navidrome
+                    # admin only ever sees its own plays here (#1293).
+                    'profile_id': SHARED_OWNER,
                     # db_track_id filled in below by a single batched lookup
                     'db_track_id': None,
                 })
@@ -254,75 +261,23 @@ class ListeningStatsWorker:
         self.current_item = "Building stats cache..."
         self._build_stats_cache()
 
-    def _build_stats_cache(self):
-        """Pre-compute stats for all time ranges, enrich with images/IDs, and store."""
-        import json
+    def _build_stats_cache(self, owners=None):
+        """Pre-compute stats for all time ranges, enrich with images/IDs, and store.
+
+        one cache per pile (#1293). owners narrows it, a profile's own import
+        only needs its own pile rebuilt."""
+        from core.listening_scope import listening_owners
         try:
-            for time_range in ('7d', '30d', '12m', 'all'):
-                granularity = 'month' if time_range in ('12m', 'all') else 'day'
-                cache = {
-                    'overview': self.db.get_listening_stats(time_range),
-                    # The same aggregate over the window immediately before this
-                    # one, so the page can say "vs last month" instead of
-                    # printing a total that stands alone. None for 'all' —
-                    # there is no period before everything, and the UI omits the
-                    # comparison rather than inventing a zero to beat.
-                    'previous': self.db.get_listening_stats_previous(time_range),
-                    'top_artists': self.db.get_top_artists(time_range, 25),
-                    'top_albums': self.db.get_top_albums(time_range, 25),
-                    'top_tracks': self.db.get_top_tracks(time_range, 25),
-                    'timeline': self.db.get_listening_timeline(time_range, granularity),
-                    'genres': self.db.get_genre_breakdown(time_range),
-                    # When you listen, and whether you keep listening — the
-                    # first stats that are about a person rather than a total.
-                    'clock': self.db.get_listening_clock(time_range),
-                    'rhythm': self.db.get_listening_rhythm(time_range),
-                    # The one thing only SoulSync can answer: what you own
-                    # against what you actually play.
-                    'own_vs_play': self.db.get_genre_own_vs_play(time_range),
-                    'neglected': self.db.get_neglected_albums(),
-                }
-
-                # Enrich with images/IDs so the endpoint doesn't have to
-                self._enrich_stats_items(cache)
-
-                conn = self.db._get_connection()
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
-                    (f'stats_cache_{time_range}', json.dumps(cache))
-                )
-                conn.commit()
-                conn.close()
-
-            # Cache recent plays and library health separately
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT title, artist, album, played_at, duration_ms
-                FROM listening_history ORDER BY played_at DESC LIMIT 20
-            """)
-            recent = [{'title': r[0], 'artist': r[1], 'album': r[2], 'played_at': r[3], 'duration_ms': r[4]}
-                      for r in cursor.fetchall()]
-            cursor.execute(
-                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
-                ('stats_cache_recent', json.dumps(recent))
-            )
-
-            # Year in Listening — cached ONCE, not per range. It is a fixed
-            # period rather than a filter, so it has no business inside the
-            # per-range loop: four identical copies under four keys would be
-            # four chances for them to disagree after a partial rebuild.
-            year = self.db.get_year_in_listening()
-            # Same enrichment the per-range caches get. Without it the story
-            # renders name-only — and this surface is carried by its artwork.
-            self._enrich_stats_items(year)
-            cursor.execute(
-                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
-                ('stats_cache_year', json.dumps(year))
-            )
+            for owner in (owners if owners is not None else listening_owners(self.db)):
+                # one pile failing mustn't leave everyone else's stale
+                try:
+                    self._build_owner_stats_cache(owner)
+                except Exception as e:
+                    logger.error(f"Failed to build stats cache for pile {owner}: {e}")
 
             health = self.db.get_library_health()
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
             cursor.execute(
                 "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
                 ('stats_cache_health', json.dumps(health))
@@ -334,6 +289,80 @@ class ListeningStatsWorker:
         except Exception as e:
             logger.error(f"Failed to build stats cache: {e}")
 
+    def _build_owner_stats_cache(self, owner):
+        """every cached stat for one pile. the shared pile keeps the old keys."""
+        from core.listening_scope import STATS_CACHE_RANGES, owner_clause, owner_key
+        for time_range in STATS_CACHE_RANGES:
+            granularity = 'month' if time_range in ('12m', 'all') else 'day'
+            cache = {
+                'overview': self.db.get_listening_stats(time_range, profile_id=owner),
+                # The same aggregate over the window immediately before this
+                # one, so the page can say "vs last month" instead of
+                # printing a total that stands alone. None for 'all' —
+                # there is no period before everything, and the UI omits the
+                # comparison rather than inventing a zero to beat.
+                'previous': self.db.get_listening_stats_previous(time_range, profile_id=owner),
+                'top_artists': self.db.get_top_artists(time_range, 25, profile_id=owner),
+                'top_albums': self.db.get_top_albums(time_range, 25, profile_id=owner),
+                'top_tracks': self.db.get_top_tracks(time_range, 25, profile_id=owner),
+                'timeline': self.db.get_listening_timeline(time_range, granularity, profile_id=owner),
+                'genres': self.db.get_genre_breakdown(time_range, profile_id=owner),
+                # When you listen, and whether you keep listening — the
+                # first stats that are about a person rather than a total.
+                'clock': self.db.get_listening_clock(time_range, profile_id=owner),
+                'rhythm': self.db.get_listening_rhythm(time_range, profile_id=owner),
+                # The one thing only SoulSync can answer: what you own
+                # against what you actually play.
+                'own_vs_play': self.db.get_genre_own_vs_play(time_range, profile_id=owner),
+                'neglected': self.db.get_neglected_albums(),
+            }
+
+            # Enrich with images/IDs so the endpoint doesn't have to
+            self._enrich_stats_items(cache)
+
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+                (owner_key(f'stats_cache_{time_range}', owner), json.dumps(cache))
+            )
+            conn.commit()
+            conn.close()
+
+        # Cache recent plays separately
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT title, artist, album, played_at, duration_ms
+            FROM listening_history WHERE {owner_clause(owner)}
+            ORDER BY played_at DESC LIMIT 20
+        """)
+        recent = [{'title': r[0], 'artist': r[1], 'album': r[2], 'played_at': r[3], 'duration_ms': r[4]}
+                  for r in cursor.fetchall()]
+        cursor.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+            (owner_key('stats_cache_recent', owner), json.dumps(recent))
+        )
+        conn.commit()
+        conn.close()
+
+        # Year in Listening — cached ONCE, not per range. It is a fixed
+        # period rather than a filter, so it has no business inside the
+        # per-range loop: four identical copies under four keys would be
+        # four chances for them to disagree after a partial rebuild.
+        year = self.db.get_year_in_listening(profile_id=owner)
+        # Same enrichment the per-range caches get. Without it the story
+        # renders name-only — and this surface is carried by its artwork.
+        self._enrich_stats_items(year)
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+            (owner_key('stats_cache_year', owner), json.dumps(year))
+        )
+        conn.commit()
+        conn.close()
+
     def _enrich_stats_items(self, cache):
         """Delegates to the shared enricher — see core/stats/enrich.py.
 
@@ -344,7 +373,12 @@ class ListeningStatsWorker:
         enrich_stats_items(self.db, cache)
 
     def _scrobble_new_events(self):
-        """Scrobble unscrobbled listening events to ListenBrainz and Last.fm."""
+        """Scrobble unscrobbled listening events to ListenBrainz and Last.fm.
+
+        shared pile only. these are the admin's accounts, and a profile's own
+        pile is someone else's listening (#1293). its listenbrainz rows are
+        already marked scrobbled for listenbrainz but not last.fm, so without
+        the filter they'd go straight onto the admin's last.fm."""
         conn = None
         try:
             # ListenBrainz scrobbling
@@ -353,10 +387,11 @@ class ListeningStatsWorker:
                 if lb_token:
                     conn = self.db._get_connection()
                     cursor = conn.cursor()
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT id, title, artist, album, played_at
                         FROM listening_history
                         WHERE scrobbled_listenbrainz = 0
+                          AND {SHARED_SCOPE}
                         ORDER BY played_at ASC
                         LIMIT 500
                     """)
@@ -398,10 +433,11 @@ class ListeningStatsWorker:
                 if api_key and api_secret and session_key:
                     conn = self.db._get_connection()
                     cursor = conn.cursor()
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT id, title, artist, album, played_at
                         FROM listening_history
                         WHERE scrobbled_lastfm = 0
+                          AND {SHARED_SCOPE}
                         ORDER BY played_at ASC
                         LIMIT 200
                     """)

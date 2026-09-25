@@ -99,13 +99,23 @@ export function phaseDisplay(batch: AdlBatch): PhaseDisplay {
   const isAudiobook =
     batch.playlist_id === 'audiobooks' ||
     batch.batch_id === 'audiobooks' ||
-    (batch as any).batch_type === 'audiobook';
-  const unit = isAudiobook ? (total === 1 ? 'book' : 'books') : 'tracks';
+    batch.batch_type === 'audiobook';
+  const isVideo = batch.batch_type === 'music_video';
+  const unit = isAudiobook
+    ? total === 1
+      ? 'book'
+      : 'books'
+    : isVideo
+      ? total === 1
+        ? 'video'
+        : 'videos'
+      : 'tracks';
   switch (batch.phase) {
     case 'queued':
       return { text: 'Queued', icon: 'hourglass' };
     case 'analysis':
-      return { text: 'Analyzing...', icon: 'spinner' };
+      // a video batch spends this phase working out who it is by, not analysing a list
+      return { text: isVideo ? 'Matching...' : 'Analyzing...', icon: 'spinner' };
     case 'album_downloading':
       return { text: bundleProgressText(batch.album_bundle), icon: 'spinner' };
     case 'downloading':

@@ -1368,6 +1368,22 @@ def set_album_art(album_id):
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route('/api/album/<album_id>/metadata-lock', methods=['DELETE'])
+def clear_album_metadata_lock(album_id):
+    """Unlock a hand-tagged album. it was tagged by hand from basic search
+    ("tag it yourself") and locked so nothing rematched it to a studio release.
+    unlocking hands it back to enrichment and the maintenance jobs. explicit,
+    never on a timer."""
+    try:
+        if not get_database().clear_manual_lock(album_id):
+            return jsonify({"error": "Album not found"}), 404
+        logger.info("[manual] album %s unlocked, enrichment may rematch it", album_id)
+        return jsonify({"success": True, "album_id": album_id, "metadata_locked": False})
+    except Exception as e:
+        logger.error("[manual] unlock failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @bp.route('/api/album/<album_id>/art', methods=['DELETE'])
 def clear_album_art_lock(album_id):
     """Hand this album's cover back to the media server.

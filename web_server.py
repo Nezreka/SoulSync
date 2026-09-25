@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.5"
+_SOULSYNC_BASE_VERSION = "3.4.6"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -190,6 +190,7 @@ from core.metadata.source import (
     normalize_album_cache_key,
 )
 from core import direct_download_state
+from core.downloads import music_video as _music_video
 from core import runtime_state as _rt_state
 from core.runtime_state import (
     activity_feed,
@@ -238,6 +239,7 @@ from core.tidal_worker import TidalWorker
 from core.qobuz_worker import QobuzWorker
 from core.hydrabase_worker import HydrabaseWorker
 from core.amazon_worker import AmazonWorker
+from core.amazon_outage import amazon_enrichment_should_run as _amazon_enrichment_should_run
 from core.hydrabase_client import HydrabaseClient
 from core.automation_engine import AutomationEngine
 
@@ -1510,7 +1512,9 @@ def _register_automation_handlers():
         record_progress_history=_auto_progress.record_history,
         build_personalized_manager=_build_personalized_manager,
         lastfm_import_worker=lastfm_import_worker,
+        lastfm_import_workers=lastfm_import_workers,
         listenbrainz_import_worker=listenbrainz_import_worker,
+        listenbrainz_import_workers=listenbrainz_import_workers,
     )
     _register_extracted_handlers(_automation_deps)
 
@@ -1979,21 +1983,28 @@ def validate_and_heal_batch_states():
                 # (no-op for normal batches and for atomic batches that already
                 # published — their staging was pruned at publish).
                 _cleanup_batch = download_batches[batch_id]
-                _preserve_failed_publish = (
-                    _cleanup_batch.get('phase') == 'error'
-                    and _cleanup_batch.get('_atomic_publish_attempts', 0) > 0
-                )
-                if _preserve_failed_publish:
-                    logger.warning("[Atomic Publish] Keeping failed publish staging for manual recovery: %s",
-                                   _cleanup_batch.get('_atomic_staging_root'))
-                if (_cleanup_batch.get('_atomic_active') and _cleanup_batch.get('_atomic_staging_root')
-                        and not _preserve_failed_publish):
-                    try:
-                        from core.downloads.atomic_album_publish import discard_staging_root
+                # #1289: this used to preserve staging ONLY after an exhausted
+                # publish, so the batch force-errored by the stuck healer below
+                # (which never attempts a publish, leaving _atomic_publish_attempts
+                # at 0) had its finished audio rmtree'd five minutes later — and
+                # before the deferred-removal fix, its wishlist rows had already
+                # been deleted, so the track was gone from everywhere at once.
+                # Staged audio is now kept for startup reconciliation unless the
+                # user explicitly cancelled. Same lesson as #1210.
+                try:
+                    from core.downloads.atomic_album_publish import (
+                        discard_staging_root, should_discard_staging)
+                    _discard, _why = should_discard_staging(_cleanup_batch)
+                    if _discard:
                         if discard_staging_root(_cleanup_batch.get('_atomic_staging_root')):
-                            logger.info(f"[Atomic Publish] Discarded staging for abandoned batch {batch_id}")
-                    except Exception as _atomic_e:
-                        logger.debug(f"[Atomic Publish] staging discard failed: {_atomic_e}")
+                            logger.info("[Atomic Publish] Discarded staging for batch %s (%s)",
+                                        batch_id, _why)
+                    elif _cleanup_batch.get('_atomic_staging_root') and _cleanup_batch.get('_atomic_active'):
+                        logger.warning(
+                            "[Atomic Publish] Keeping staged audio for batch %s (%s): %s",
+                            batch_id, _why, _cleanup_batch.get('_atomic_staging_root'))
+                except Exception as _atomic_e:
+                    logger.debug(f"[Atomic Publish] staging discard check failed: {_atomic_e}")
                 task_ids_to_remove = download_batches[batch_id].get('queue', [])
                 del download_batches[batch_id]
                 # Clean up associated tasks
@@ -5903,47 +5914,18 @@ def stream_enhanced_search_track():
 # MUSIC VIDEO DOWNLOADS
 # =============================================================================
 
-_music_video_downloads = {}  # {video_id: {status, progress, path, error}}
+def _music_video_deps():
+    """the music video job's reach into the app. core/downloads/music_video.py"""
+    return _music_video.MusicVideoDeps(
+        search_tracks=lambda query, limit: _get_metadata_fallback_client().search_tracks(query, limit=limit),
+        download=lambda url, stem, progress, should_cancel: download_orchestrator.client("youtube").download_music_video(
+            url, stem, progress_callback=progress, should_cancel=should_cancel),
+        video_template=lambda: (config_manager.get('file_organization.templates', {}) or {}).get('video_path', ''),
+        artist_letter=_shared_artist_letter,
+        add_activity=lambda icon, title, subtitle: add_activity_item(icon, title, subtitle, "Now"),
+        record_history=lambda **fields: get_database().add_library_history_entry(**fields),
+    )
 
-
-def _clean_music_video_title(raw_title):
-    """Strip YouTube noise from a video title for metadata search + filing.
-
-    Handles the suffix both parenthesized — "(Official Music Video)" — and
-    BARE at the end of the title ("... Fat Official Music Video", the shape
-    fan uploads use constantly; the old parenthesized-only strip left the
-    noise in the search query, which is half of how a video ends up filed
-    under the uploader's channel name). Bare stripping is deliberately
-    conservative: only unambiguous multi-word forms ('official …', 'music
-    video', 'lyric video', 'visualizer'), so a song genuinely titled
-    "Video" or "Video Games" is never eaten."""
-    import re as _re
-    s = _re.sub(
-        r'\s*[\(\[](official\s*(music\s*)?video|official\s*lyric\s*video|official\s*audio'
-        r'|official\s*hd|hd|4k|remastered|lyric\s*video|visualizer|audio)[\)\]]',
-        '', raw_title or '', flags=_re.IGNORECASE).strip()
-    s = _re.sub(
-        r'[\s\-–—|]*\b(official\s+(music\s+|lyric\s+)?(video|audio)'
-        r'|music\s+video|lyric\s+video|visualizer)\s*$',
-        '', s, flags=_re.IGNORECASE).strip()
-    return _re.sub(r'\s*-\s*$', '', s).strip()
-
-
-def _parse_music_video_artist_title(raw_title, raw_channel):
-    """Artist/title for filing a music video, from the video's own name.
-
-    'Artist - Title' (hyphen, en or em dash) parses to the real artist —
-    the UPLOADER's channel name is only the last resort for titles with no
-    separator at all, because fan-channel uploads ("Bad Boy Edd") are the
-    norm and filing under them scatters one artist's videos across folders."""
-    import re as _re
-    for sep in (' - ', ' – ', ' — '):
-        if sep in (raw_title or ''):
-            artist, title = raw_title.split(sep, 1)
-            title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
-            title = _clean_music_video_title(title) or title
-            return artist.strip(), title
-    return raw_channel, (_clean_music_video_title(raw_title) or raw_title)
 
 @app.route('/api/music-video/download', methods=['POST'])
 def download_music_video():
@@ -5951,17 +5933,9 @@ def download_music_video():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
-
-    video_id = data.get('video_id', '')
-    video_url = data.get('url', '')
-    raw_title = data.get('title', '')
-    raw_channel = data.get('channel', '')
-
-    if not video_id or not video_url:
+    if not data.get('video_id') or not data.get('url'):
         return jsonify({"error": "Missing video_id or url"}), 400
-
-    # Check if already downloading
-    if video_id in _music_video_downloads and _music_video_downloads[video_id].get('status') == 'downloading':
+    if _music_video.is_in_flight(str(data.get('video_id'))):
         return jsonify({"error": "Already downloading"}), 409
 
     # Get and validate music videos path
@@ -5979,141 +5953,16 @@ def download_music_video():
     except (OSError, PermissionError) as e:
         return jsonify({"error": f"Music Videos directory is not writable: {e}"}), 400
 
-    # Initialize download state
-    _music_video_downloads[video_id] = {'status': 'searching', 'progress': 0, 'path': None, 'error': None}
-
-    def _do_download():
-        try:
-            # Step 1: Try to match against primary metadata source for clean artist/title
-            _music_video_downloads[video_id]['status'] = 'matching'
-            artist_name = raw_channel
-            track_title = raw_title
-            year = ''
-            matched = False
-
-            import re as _re
-            clean_search = _clean_music_video_title(raw_title)
-
-            try:
-                fallback_client = _get_metadata_fallback_client()
-                results = fallback_client.search_tracks(clean_search, limit=5)
-                if results:
-                    from difflib import SequenceMatcher
-                    best = None
-                    best_score = 0
-                    for r in results:
-                        name_sim = SequenceMatcher(None, clean_search.lower(), r.name.lower()).ratio()
-                        if r.artists:
-                            artist_sim = SequenceMatcher(None, raw_channel.lower(), r.artists[0].lower()).ratio()
-                            name_sim = (name_sim * 0.6) + (artist_sim * 0.4)
-                        if name_sim > best_score:
-                            best_score = name_sim
-                            best = r
-                    if best and best_score >= 0.5 and best.artists:
-                        matched = True
-                        artist_name = best.artists[0]
-                        track_title = best.name
-                        if hasattr(best, 'release_date') and best.release_date:
-                            year = str(best.release_date)[:4]
-                        logger.info(f"[Music Video] Matched to: {artist_name} - {track_title} (confidence: {best_score:.2f})")
-            except Exception as e:
-                logger.error(f"[Music Video] Metadata lookup failed: {e}")
-
-            if not matched:
-                # No confident metadata match — parse 'Artist - Title' from the
-                # video's own name. This must cover EVERY unmatched path
-                # (weak match, lookup crash, and crucially an EMPTY result
-                # list — the old code skipped the parse entirely on zero
-                # results, so the video filed under the uploader's channel:
-                # the '"Weird Al" Yankovic - Fat' → 'bad boy edd/' bug).
-                artist_name, track_title = _parse_music_video_artist_title(raw_title, raw_channel)
-                logger.warning(f"[Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
-
-            # Sanitize for filesystem
-            def _sanitize(s):
-                return _re.sub(r'[<>:"/\\|?*]', '_', s).strip().rstrip('.')
-
-            # Apply video path template
-            video_template = config_manager.get('file_organization.templates', {}).get('video_path', '$artist/$title-video')
-            if not video_template or not video_template.strip():
-                video_template = '$artist/$title-video'
-            safe_artist = _sanitize(artist_name)
-            video_path = video_template
-            video_path = video_path.replace('$artistletter', _shared_artist_letter(safe_artist) if safe_artist else 'A')
-            video_path = video_path.replace('$artist', safe_artist)
-            video_path = video_path.replace('$title', _sanitize(track_title))
-            video_path = video_path.replace('$year', str(year) if year else '')
-            # Clean up empty segments from missing variables
-            video_path = _re.sub(r'//+', '/', video_path).strip('/')
-            # Split into folder and filename
-            path_parts = video_path.rsplit('/', 1)
-            if len(path_parts) == 2:
-                folder_part, file_part = path_parts
-            else:
-                folder_part, file_part = '', path_parts[0]
-            output_dir = os.path.join(music_videos_path, folder_part) if folder_part else music_videos_path
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, file_part)
-
-            # Step 2: Download
-            _music_video_downloads[video_id]['status'] = 'downloading'
-            _music_video_downloads[video_id]['artist'] = artist_name
-            _music_video_downloads[video_id]['title'] = track_title
-
-            # Also put it on the Downloads page. This path keeps its own private
-            # dict and its own status endpoint, so until now a music video was
-            # downloading with nothing to show for it on the page whose whole
-            # job is showing downloads. Registered as managed_externally: this
-            # thread runs and files it, the music engine must not adopt it.
-            _mv_card = direct_download_state.register(
-                direct_download_state.MUSIC_VIDEO_BATCH, video_id,
-                title=track_title, artist=artist_name, album='Music Videos',
-                artwork_url=data.get('thumbnail') or '',
-                source_label='Music Video (YouTube)',
-            )
-
-            def _progress(pct):
-                _music_video_downloads[video_id]['progress'] = round(pct, 1)
-                if _mv_card:
-                    direct_download_state.update_progress(video_id, percent=pct)
-
-            final_path = download_orchestrator.client("youtube").download_music_video(video_url, output_path, progress_callback=_progress)
-
-            if final_path and os.path.exists(final_path):
-                _music_video_downloads[video_id]['status'] = 'completed'
-                _music_video_downloads[video_id]['progress'] = 100
-                _music_video_downloads[video_id]['path'] = final_path
-                if _mv_card:
-                    direct_download_state.mark_status(video_id, 'completed', file_path=final_path)
-                logger.info(f"[Music Video] Downloaded: {artist_name} - {track_title} → {final_path}")
-                add_activity_item("", "Music Video Downloaded", f"{artist_name} - {track_title}", "Now")
-            else:
-                _music_video_downloads[video_id]['status'] = 'error'
-                _music_video_downloads[video_id]['error'] = 'Download failed — file not found'
-                if _mv_card:
-                    direct_download_state.mark_status(video_id, 'failed',
-                                                     error='Download failed — file not found')
-                logger.error(f"[Music Video] Download failed for: {artist_name} - {track_title}")
-
-        except Exception as e:
-            _music_video_downloads[video_id]['status'] = 'error'
-            _music_video_downloads[video_id]['error'] = str(e)
-            # A card left saying 'downloading' after the thread died is worse
-            # than no card: the page would show it running forever.
-            direct_download_state.mark_status(video_id, 'failed', error=str(e))
-            logger.error(f"[Music Video] {e}")
-
-    # Run in background thread
-    import threading
-    threading.Thread(target=_do_download, daemon=True, name=f'music-video-{video_id}').start()
-
-    return jsonify({"success": True, "video_id": video_id})
+    result = _music_video.start(data, music_videos_path, _music_video_deps())
+    if result.get('error'):
+        return jsonify({"error": result['error']}), result.get('code', 400)
+    return jsonify(result)
 
 
 @app.route('/api/music-video/status/<video_id>', methods=['GET'])
 def get_music_video_status(video_id):
     """Get download status for a music video."""
-    status = _music_video_downloads.get(video_id)
+    status = _music_video.state.get(video_id)
     if not status:
         return jsonify({"status": "unknown"})
     return jsonify(status)
@@ -6473,6 +6322,18 @@ def _track_quick_download(download_id, title, artist='', size_bytes=0, source_la
                       name=f'quick-dl-{download_id[:12]}').start()
 
 
+from core.downloads import pinned_batch as _pinned_batch
+
+
+def _pinned_batch_deps():
+    return _pinned_batch.PinnedBatchDeps(
+        start_monitoring=download_monitor.start_monitoring,
+        submit=missing_download_executor.submit,
+        attempt_download_with_candidates=_attempt_download_with_candidates,
+        on_download_completed=_on_download_completed,
+    )
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
@@ -6490,6 +6351,31 @@ def start_download():
             tracks = data.get('tracks', [])
             if not tracks:
                 return jsonify({"error": "No tracks found in album."}), 400
+
+            # the user picked these exact files: one batch, one pinned task per
+            # file, so they show on the Downloads page like any other batch.
+            # torrent/usenet/lidarr are a whole release per download, they
+            # stay on the direct route below
+            if all(_pinned_batch.is_pinnable(t.get('username')) for t in tracks):
+                album_name = data.get('album_title') or data.get('album_name') or 'Unknown Album'
+                files = [
+                    _pinned_batch.PinnedFile(
+                        candidate=_pinned_batch.candidate_from_result(t),
+                        track_info=_pinned_batch.simple_track_info(t),
+                    )
+                    for t in tracks if t.get('username') and t.get('filename')
+                ]
+                if not files:
+                    return jsonify({"error": "No downloadable tracks in album."}), 400
+                batch_id, _task_ids = _pinned_batch.create_pinned_batch(
+                    files, name=album_name, profile_id=get_current_profile_id())
+                _pinned_batch.dispatch_pinned_batch(batch_id, _task_ids, _pinned_batch_deps())
+                add_activity_item("", "Album Download Started", f"'{album_name}' - {len(files)} tracks", "Now")
+                return jsonify({
+                    "success": True,
+                    "batch_id": batch_id,
+                    "message": f"Started {len(files)} downloads from album",
+                })
 
             started_downloads = 0
             for track_data in tracks:
@@ -6534,7 +6420,8 @@ def start_download():
                     continue
 
             # Add activity for album download start
-            album_name = data.get('album_name', 'Unknown Album')
+            # basic search albums carry album_title, album_name was never sent
+            album_name = data.get('album_title') or data.get('album_name') or 'Unknown Album'
             logger.info(f"Starting simple album download: '{album_name}' with {started_downloads}/{len(tracks)} tracks")
             add_activity_item("", "Album Download Started", f"'{album_name}' - {started_downloads} tracks", "Now")
 
@@ -6572,6 +6459,23 @@ def start_download():
                             }), 409
                 except Exception as _bl_err:
                     logger.debug("manual download blocklist check skipped: %s", _bl_err)
+
+            # one pinned task in its own batch, so it shows on the Downloads
+            # page. release-level sources stay on the direct route below
+            if _pinned_batch.is_pinnable(username):
+                title = data.get('title') or ''
+                artist = data.get('artist') or ''
+                batch_id, _task_ids = _pinned_batch.create_pinned_batch(
+                    [_pinned_batch.PinnedFile(
+                        candidate=_pinned_batch.candidate_from_result(data),
+                        track_info=_pinned_batch.simple_track_info(data),
+                    )],
+                    name=f"{artist} - {title}" if artist and title else (title or os.path.basename(str(filename).replace('\\', '/'))),
+                    profile_id=get_current_profile_id(),
+                )
+                _pinned_batch.dispatch_pinned_batch(batch_id, _task_ids, _pinned_batch_deps())
+                add_activity_item("", "Track Download Started", f"'{title or filename}'", "Now")
+                return jsonify({"success": True, "batch_id": batch_id, "message": "Download started"})
 
             download_id = run_async(download_orchestrator.download(username, filename, file_size))
             logger.info(f"Download ID returned: {download_id}")
@@ -10426,7 +10330,12 @@ def library_log_play():
         event = build_play_event(track, played_at, duration_ms)
         if not event:
             return jsonify({"success": False, "skipped": True}), 200
-        get_database().record_web_player_play(event)
+        # the play goes in the listener's pile (#1293). no own listenbrainz
+        # means the shared one, same as before.
+        from core.listening_scope import listening_owner
+        db = get_database()
+        event['profile_id'] = listening_owner(db, get_current_profile_id())
+        db.record_web_player_play(event)
         return jsonify({"success": True})
     except Exception as e:
         logger.debug(f"log-play failed (non-fatal): {e}")
@@ -11522,6 +11431,88 @@ def sync_artist_library(artist_id):
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/library/artist/<artist_id>', methods=['DELETE'])
+@admin_only
+def library_delete_artist(artist_id):
+    """Remove an artist and everything the library knows about them.
+
+    DATABASE ONLY — no file on disk is touched, ever. There is deliberately no
+    `delete_files` switch like the album and track endpoints have: this can span
+    hundreds of albums, and "clear this artist out of my library" is a different
+    intent from "erase these recordings".
+
+    What goes: the artist row, their albums, and every track on those albums —
+    including tracks whose own `artist_id` points elsewhere (a compilation the
+    artist owns), because a track outliving its album is an orphan nothing can
+    reach. Plus the two tables keyed on the artist's library id, `similar_artists`
+    and `rematch_hints`, which would otherwise dangle.
+
+    What stays, on purpose: listening history and download history (keyed by NAME,
+    so stats and provenance survive a delete/rescan), the watchlist (wanting an
+    artist is separate from owning them), and the discovery caches.
+    """
+    try:
+        database = get_database()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT id, name, server_source FROM artists WHERE id = ?", (artist_id,))
+            artist_row = cursor.fetchone()
+            if not artist_row:
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+            artist_name = artist_row['name']
+            server_source = artist_row['server_source']
+
+            cursor.execute("SELECT id FROM albums WHERE artist_id = ?", (artist_id,))
+            album_ids = [row['id'] for row in cursor.fetchall()]
+
+            tracks_deleted = 0
+            if album_ids:
+                # Chunked: SQLite caps host parameters (999 by default) and a
+                # deep discography can exceed that.
+                for i in range(0, len(album_ids), 400):
+                    chunk = album_ids[i:i + 400]
+                    marks = ",".join("?" * len(chunk))
+                    cursor.execute(f"DELETE FROM tracks WHERE album_id IN ({marks})", chunk)
+                    tracks_deleted += cursor.rowcount
+            # Tracks credited to the artist that sat on someone else's album.
+            cursor.execute("DELETE FROM tracks WHERE artist_id = ?", (artist_id,))
+            tracks_deleted += cursor.rowcount
+
+            cursor.execute("DELETE FROM albums WHERE artist_id = ?", (artist_id,))
+            albums_deleted = cursor.rowcount
+
+            # Rows keyed on the library id — dangling once the artist is gone.
+            for table, column in (("similar_artists", "source_artist_id"),
+                                  ("rematch_hints", "artist_id")):
+                try:
+                    cursor.execute(f"DELETE FROM {table} WHERE {column} = ?", (artist_id,))
+                except Exception as e:
+                    # An older install may predate the table; losing the sweep
+                    # must not abort the delete the user asked for.
+                    logger.debug("artist delete: %s cleanup skipped: %s", table, e)
+
+            cursor.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
+            conn.commit()
+
+        logger.info(
+            f"[Library] Deleted artist '{artist_name}' ({artist_id}): "
+            f"{albums_deleted} albums, {tracks_deleted} tracks. No files touched."
+        )
+        return jsonify({
+            "success": True,
+            "artist_name": artist_name,
+            "albums_deleted": albums_deleted,
+            "tracks_deleted": tracks_deleted,
+            # A media-server artist is re-created by the next scan; the UI says so
+            # rather than letting them reappear and look like the delete failed.
+            "returns_on_rescan": bool(server_source and server_source != 'soulsync'),
+        })
+    except Exception as e:
+        logger.error(f"Error deleting artist {artist_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/album/<album_id>', methods=['DELETE'])
 @admin_only
 def library_delete_album(album_id):
@@ -12288,6 +12279,28 @@ def _is_explicit_blocked(track_data):
     return sp_data.get('explicit', False)
 
 
+def _preflight_mb_release(album_name, artist_name, track_count):
+    """Pre-populate the MusicBrainz release cache so every track of an album
+    download resolves to the same release."""
+    try:
+        mb_svc = mb_worker.mb_service if mb_worker else None
+        if mb_svc and album_name and artist_name:
+            from core.album_consistency import _find_best_release
+            _pf_release = _find_best_release(album_name, artist_name, track_count, mb_svc)
+            if _pf_release and _pf_release.get('id'):
+                _pf_mbid = _pf_release['id']
+                _pf_artist_key = artist_name.lower().strip()
+                with mb_release_cache_lock:
+                    mb_release_cache[(normalize_album_cache_key(album_name), _pf_artist_key)] = _pf_mbid
+                    mb_release_cache[(album_name.lower().strip(), _pf_artist_key)] = _pf_mbid
+                with mb_release_detail_cache_lock:
+                    mb_release_detail_cache[_pf_mbid] = _pf_release
+                logger.info(f"[Preflight] Pre-cached MB release for '{album_name}': "
+                      f"'{_pf_release.get('title', '')}' ({_pf_mbid[:8]}...)")
+    except Exception as pf_err:
+        logger.error(f"[Preflight] MB release preflight failed: {pf_err}")
+
+
 def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_artist, spotify_album):
     """
     Download album tracks that have been matched to Spotify with full track metadata.
@@ -12302,24 +12315,8 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
     started_count = 0
 
     # PREFLIGHT: Pre-populate MusicBrainz release cache so all tracks get the same release
-    try:
-        mb_svc = mb_worker.mb_service if mb_worker else None
-        if mb_svc and spotify_album.get('name') and spotify_artist.get('name'):
-            from core.album_consistency import _find_best_release
-            _pf_count = len(enhanced_tracks) + len(unmatched_tracks)
-            _pf_release = _find_best_release(spotify_album['name'], spotify_artist['name'], _pf_count, mb_svc)
-            if _pf_release and _pf_release.get('id'):
-                _pf_mbid = _pf_release['id']
-                _pf_artist_key = spotify_artist['name'].lower().strip()
-                with mb_release_cache_lock:
-                    mb_release_cache[(normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
-                    mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
-                with mb_release_detail_cache_lock:
-                    mb_release_detail_cache[_pf_mbid] = _pf_release
-                logger.info(f"[Preflight] Pre-cached MB release for '{spotify_album['name']}': "
-                      f"'{_pf_release.get('title', '')}' ({_pf_mbid[:8]}...)")
-    except Exception as pf_err:
-        logger.error(f"[Preflight] MB release preflight failed: {pf_err}")
+    _preflight_mb_release(spotify_album.get('name'), spotify_artist.get('name'),
+                          len(enhanced_tracks) + len(unmatched_tracks))
 
     # Process matched tracks with full Spotify metadata
     for matched_item in enhanced_tracks:
@@ -12649,6 +12646,283 @@ def start_matched_download():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+# ── enriched downloads from basic search ────────────────────────────────────
+# one metadata provider end to end: the release, its tracklist and the ids all
+# come from the provider the user picked. files are mapped to tracks on the
+# server with the import matcher. pinnable sources become a real batch, so the
+# download shows on the Downloads page; torrent/usenet keep the direct route.
+from core.search import enriched_download as _enriched
+
+
+def _enriched_blocklist_answer(data, artist, title):
+    """the same "blocked, download anyway?" 409 the as-is route gives"""
+    if data.get('ignore_blocklist') or not artist:
+        return None
+    try:
+        reason = get_database().blocklist_reason_for_track(
+            get_current_profile_id(), {'name': title, 'artists': [{'name': artist}]})
+    except Exception as bl_err:  # noqa: BLE001 - the guard is best-effort, like the as-is route
+        logger.debug("enriched download blocklist check skipped: %s", bl_err)
+        return None
+    if reason:
+        return jsonify({
+            "success": False, "blocked": True,
+            "blocked_entity_type": reason[0], "blocked_name": reason[1],
+        }), 409
+    return None
+
+
+def _enriched_files(data):
+    return [f for f in (data.get('files') or []) if isinstance(f, dict) and f.get('username') and f.get('filename')]
+
+
+@app.route('/api/search/enriched/match', methods=['POST'])
+def enriched_match():
+    """the chosen release's tracklist plus which picked file is which track"""
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
+    data = request.get_json(silent=True) or {}
+    source = str(data.get('source') or '').strip().lower()
+    album_id = str(data.get('album_id') or '').strip()
+    album_name = str(data.get('album_name') or '')
+    artist = str(data.get('artist') or '')
+    files = _enriched_files(data)
+    if not source or not album_id or not files:
+        return jsonify({"success": False, "error": "Pick a release and at least one file."}), 400
+    try:
+        release = _enriched.fetch_release(source, album_id, album_name, artist)
+    except _enriched.ProviderMismatch as mismatch:
+        return jsonify({"success": False, "error": f"{mismatch}. Try another source."}), 502
+    except LookupError as missing:
+        return jsonify({"success": False, "error": str(missing)}), 404
+    except Exception as err:  # noqa: BLE001 - surface it to the modal, don't 500 blind
+        logger.error("[Enriched] release lookup failed: %s", err, exc_info=True)
+        return jsonify({"success": False, "error": "Could not load that release."}), 500
+    album = _enriched.album_context(release['album'], source, artist)
+    assignments = _enriched.match_files(files, release['tracks'], album.get('name') or album_name)
+    tracks = [{
+        'index': i,
+        'name': t.get('name') or '',
+        'track_number': t.get('track_number') or 0,
+        'disc_number': t.get('disc_number') or 1,
+        'duration_ms': t.get('duration_ms') or 0,
+    } for i, t in enumerate(release['tracks'])]
+    return jsonify({"success": True, "album": album, "tracks": tracks, "assignments": assignments})
+
+
+@app.route('/api/search/enriched/start', methods=['POST'])
+def enriched_start():
+    """start an enriched download: an album (files + assignments) or a single
+    track (one file + track_id)"""
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
+    data = request.get_json(silent=True) or {}
+    source = str(data.get('source') or '').strip().lower()
+    files = _enriched_files(data)
+    if not source or not files:
+        return jsonify({"success": False, "error": "Pick a release and at least one file."}), 400
+    try:
+        if data.get('track_id'):
+            return _enriched_start_single(data, source, files[0])
+        return _enriched_start_album(data, source, files)
+    except _enriched.ProviderMismatch as mismatch:
+        return jsonify({"success": False, "error": f"{mismatch}. Try another source."}), 502
+    except LookupError as missing:
+        return jsonify({"success": False, "error": str(missing)}), 404
+    except Exception as err:  # noqa: BLE001
+        logger.error("[Enriched] start failed: %s", err, exc_info=True)
+        return jsonify({"success": False, "error": "Could not start the download."}), 500
+
+
+def _enriched_start_album(data, source, files):
+    album_id = str(data.get('album_id') or '').strip()
+    album_name = str(data.get('album_name') or '')
+    artist = str(data.get('artist') or '')
+    if not album_id:
+        return jsonify({"success": False, "error": "Pick a release first."}), 400
+    # re-fetched here, the browser never ships track objects we'd have to trust
+    release = _enriched.fetch_release(source, album_id, album_name, artist)
+    album = _enriched.album_context(release['album'], source, artist)
+    album_artist = (album.get('artists') or [{'name': artist}])[0].get('name') or artist
+
+    blocked = _enriched_blocklist_answer(data, album_artist, album.get('name'))
+    if blocked:
+        return blocked
+
+    by_key = {_enriched.file_key(f): f for f in files}
+    picked = []
+    for assignment in data.get('assignments') or []:
+        index = assignment.get('track_index')
+        file = by_key.get(assignment.get('file_key'))
+        if file is None or index is None or not (0 <= int(index) < len(release['tracks'])):
+            continue  # skipped by the user, or not a real track
+        track = release['tracks'][int(index)]
+        if _is_explicit_blocked(track):
+            logger.info("[Content Filter] Skipping explicit track: '%s'", track.get('name'))
+            continue
+        picked.append((file, track))
+    if not picked:
+        return jsonify({"success": False, "error": "No files are assigned to a track."}), 400
+
+    _preflight_mb_release(album.get('name'), album_artist, len(picked))
+    artist_ctx = {'name': album_artist, 'id': '', 'genres': [], 'source': source}
+
+    if all(_pinned_batch.is_pinnable(f.get('username')) for f, _t in picked):
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(
+                candidate=_pinned_batch.candidate_from_result(f),
+                track_info=_enriched.enriched_track_info(t, album, source, as_album=True),
+            ) for f, t in picked],
+            name=album.get('name') or album_name or 'Album',
+            profile_id=get_current_profile_id(),
+            is_album=True, album_context=album, artist_context=artist_ctx,
+        )
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        add_activity_item("", "Album Download Started", f"'{album.get('name')}' - {len(picked)} tracks", "Now")
+        return jsonify({"success": True, "batch_id": batch_id,
+                        "message": f"Downloading {len(picked)} tracks of {album.get('name')}"})
+
+    # torrent/usenet: one download is the whole release, keep the direct route
+    enhanced = [{'slskd_track': f, 'spotify_track': {**t, 'album': album}} for f, t in picked]
+    started = _start_enhanced_album_download(enhanced, [], artist_ctx, dict(album))
+    if not started:
+        return jsonify({"success": False, "error": "Failed to queue any tracks from the album."}), 500
+    return jsonify({"success": True, "message": f"Queued {started} tracks of {album.get('name')}"})
+
+
+def _enriched_start_single(data, source, file):
+    track_id = str(data.get('track_id'))
+    row = data.get('track') if isinstance(data.get('track'), dict) else {}
+    details = _enriched.single_track_details(source, track_id) or {}
+    artist = row.get('artist') or file.get('artist') or ''
+    track = {
+        'id': track_id,
+        'name': details.get('name') or row.get('name') or file.get('title') or '',
+        'artists': details.get('artists') or ([artist] if artist else []),
+        'duration_ms': details.get('duration_ms') or row.get('duration_ms') or 0,
+        'track_number': details.get('track_number') or 0,
+        'disc_number': details.get('disc_number') or 1,
+        'explicit': bool(details.get('explicit')),
+    }
+    raw_album = details.get('album') if isinstance(details.get('album'), dict) else {}
+    raw_album = dict(raw_album or {'name': row.get('album') or '', 'release_date': row.get('release_date') or ''})
+    if not raw_album.get('image_url') and row.get('image_url'):
+        raw_album['image_url'] = row['image_url']
+    album = _enriched.album_context(raw_album, source, artist)
+    # a track off a real album files under that album; a single stays a single
+    as_album = bool(album.get('id') and album.get('name') and album.get('album_type') != 'single')
+
+    names = [a.get('name') if isinstance(a, dict) else a for a in track['artists']]
+    first_artist = next((n for n in names if n), artist)
+    blocked = _enriched_blocklist_answer(data, first_artist, track['name'])
+    if blocked:
+        return blocked
+    if _is_explicit_blocked(track):
+        return jsonify({"success": False, "error": "Explicit content is disabled in settings",
+                        "explicit_blocked": True}), 403
+
+    track_info = _enriched.enriched_track_info(track, album, source, as_album=as_album)
+    title = f"{first_artist} - {track['name']}" if first_artist else track['name']
+
+    if _pinned_batch.is_pinnable(file.get('username')):
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(candidate=_pinned_batch.candidate_from_result(file), track_info=track_info)],
+            name=title, profile_id=get_current_profile_id(),
+            album_context=album if as_album else None,
+            artist_context={'name': first_artist, 'id': '', 'genres': [], 'source': source},
+        )
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        add_activity_item("", "Track Download Started", f"'{track['name']}'", "Now")
+        return jsonify({"success": True, "batch_id": batch_id, "message": f"Downloading {track['name']}"})
+
+    # release-level source: the direct route, as the old modal did
+    username, filename, size = file.get('username'), file.get('filename'), file.get('size', 0)
+    download_id = run_async(download_orchestrator.download(username, filename, size))
+    if not download_id:
+        return jsonify({"success": False, "error": "Failed to start the download"}), 500
+    _register_matched_download_context(_make_context_key(username, filename), {
+        "profile_id": get_current_profile_id(),
+        "spotify_artist": {'name': first_artist, 'id': '', 'genres': [], 'source': source},
+        "spotify_album": album,
+        "track_info": track_info,
+        "original_search_result": {
+            'username': username, 'filename': filename, 'size': size,
+            'title': track['name'], 'artist': first_artist, 'album': album.get('name') or '',
+            'track_number': track['track_number'] or 1,
+            'spotify_clean_title': track['name'],
+            'source': source,
+        },
+        "is_album_download": as_album,
+        "has_full_spotify_metadata": True,
+    })
+    return jsonify({"success": True, "message": f"Downloading {track['name']}"})
+
+
+# ── tag it yourself (basic search) ──────────────────────────────────────────
+# the user typed the release: bootlegs, live sets, mixtapes no service knows.
+# the tasks carry _manual_metadata, which stands tagging lookups, acoustid and
+# enrichment down (core/metadata/manual.py); the lock is recorded when each
+# file lands (pipeline _record_manual_lock).
+from core.search import manual_download as _manual
+
+
+@app.route('/api/search/manual/start', methods=['POST'])
+def manual_start():
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
+    data = request.get_json(silent=True) or {}
+    files = _enriched_files(data)
+    album = data.get('album') if isinstance(data.get('album'), dict) else {}
+    tracks = [t for t in (data.get('tracks') or []) if isinstance(t, dict)]
+    if not files:
+        return jsonify({"success": False, "error": "No files to download."}), 400
+    try:
+        album_ctx, tasks = _manual.build_manual_tasks(files, album, tracks, file_key=_enriched.file_key)
+    except _manual.ManualInputError as bad:
+        return jsonify({"success": False, "error": str(bad)}), 400
+
+    album_artist = album_ctx['artists'][0]['name']
+    blocked = _enriched_blocklist_answer(data, album_artist, album_ctx['name'])
+    if blocked:
+        return blocked
+
+    # the cover is saved only once everything else checked out
+    if album.get('image_data'):
+        try:
+            cover_path = _manual.save_cover(album['image_data'])
+        except _manual.ManualInputError as bad:
+            return jsonify({"success": False, "error": str(bad)}), 400
+        for _file, info in tasks:
+            info['_manual_cover_path'] = cover_path
+
+    name = album_ctx['name']
+    if all(_pinned_batch.is_pinnable(f.get('username')) for f, _i in tasks):
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(candidate=_pinned_batch.candidate_from_result(f), track_info=info)
+             for f, info in tasks],
+            name=name, profile_id=get_current_profile_id(),
+            is_album=True, album_context=album_ctx,
+            artist_context=tasks[0][1]['_explicit_artist_context'],
+        )
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        add_activity_item("", "Album Download Started", f"'{name}' - {len(tasks)} tracks (tagged by hand)", "Now")
+        return jsonify({"success": True, "batch_id": batch_id,
+                        "message": f"Downloading {len(tasks)} {'track' if len(tasks) == 1 else 'tracks'} of {name}"})
+
+    # torrent/usenet: one download is the whole release, the direct route.
+    # the track_info rides along as the context's track_info, so the manual
+    # flag reaches post-processing the same way
+    enhanced = [{'slskd_track': f, 'spotify_track': info} for f, info in tasks]
+    started = _start_enhanced_album_download(
+        enhanced, [], dict(tasks[0][1]['_explicit_artist_context']), dict(album_ctx))
+    if not started:
+        return jsonify({"success": False, "error": "Failed to queue any tracks."}), 500
+    return jsonify({"success": True, "message": f"Queued {started} tracks of {name}"})
+
 
 def _parse_filename_metadata(filename: str) -> dict:
     """
@@ -13788,10 +14062,12 @@ def _apply_path_template(template: str, context: dict) -> str:
         'discnum': str(clean_context.get('disc_number', 1)),
         'year': str(clean_context.get('year', '')),
         'quality': clean_context.get('quality', ''),
+        'disambiguation': clean_context.get('disambiguation', ''),
     }
     for var_name, val in _bracket_map.items():
         result = result.replace('${' + var_name + '}', val)
 
+    result = result.replace('$disambiguation', clean_context.get('disambiguation', ''))
     result = result.replace('$albumartist', album_artist_value)
     result = result.replace('$albumtype', clean_context.get('albumtype', 'Album'))
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
@@ -15238,6 +15514,10 @@ def _get_staging_file_cache(batch_id):
                 'full_path': full_path,
                 'title': meta['title'] or '',
                 'artist': meta['albumartist'] or meta['artist'] or '',
+                # the performer, when the file has one. 'artist' above reads the
+                # album artist first, so every compilation track looked like
+                # 'Various Artists' and never matched the track it was
+                'track_artist': meta['artist'] or '',
                 'album': meta['album'] or '',
                 'track_number': meta.get('track_number'),
                 'disc_number': meta.get('disc_number'),
@@ -16347,13 +16627,22 @@ def cleanup_batch():
 
                 # #999: discard unpublished atomic staging on cleanup/cancel of a
                 # staged album (no-op for normal batches and already-published ones).
-                if batch.get('_atomic_active') and batch.get('_atomic_staging_root'):
-                    try:
-                        from core.downloads.atomic_album_publish import discard_staging_root
+                # #1289: only an explicit cancel throws the audio away — a cleanup
+                # of an errored or stale batch leaves it for startup recovery.
+                try:
+                    from core.downloads.atomic_album_publish import (
+                        discard_staging_root, should_discard_staging)
+                    _discard, _why = should_discard_staging(batch)
+                    if _discard:
                         if discard_staging_root(batch.get('_atomic_staging_root')):
-                            logger.info(f"[Atomic Publish] Discarded staging for cleaned-up batch {batch_id}")
-                    except Exception as _atomic_e:
-                        logger.debug(f"[Atomic Publish] staging discard failed: {_atomic_e}")
+                            logger.info("[Atomic Publish] Discarded staging for cleaned-up batch %s (%s)",
+                                        batch_id, _why)
+                    elif batch.get('_atomic_active') and batch.get('_atomic_staging_root'):
+                        logger.warning(
+                            "[Atomic Publish] Keeping staged audio for cleaned-up batch %s (%s): %s",
+                            batch_id, _why, batch.get('_atomic_staging_root'))
+                except Exception as _atomic_e:
+                    logger.debug(f"[Atomic Publish] staging discard check failed: {_atomic_e}")
 
                 # Delete the batch record
                 del download_batches[batch_id]
@@ -20055,7 +20344,9 @@ try:
     # (T2Tunes) that can be down, so it stays paused unless the user has
     # explicitly enabled it (amazon_enrichment_paused=False). This stops an
     # instance outage from grinding/log-flooding installs that never opted in.
-    if config_manager.get('amazon_enrichment_paused', True):
+    # the public t2tunes.site is gone for good (#1300), so an opt-in pointed at
+    # it just hammers a dead host. only a self-hosted amazon.base_url can run.
+    if not _amazon_enrichment_should_run(config_manager):
         amazon_worker.pause()
         logger.info("Amazon enrichment worker initialized (paused — enable it in Settings)")
     else:
@@ -20677,48 +20968,62 @@ except Exception as e:
     listening_stats_worker = None
 
 lastfm_import_worker = None
+lastfm_import_workers = None
 try:
-    from core.listening_import.lastfm import LastFMListeningImportWorker
+    from core.listening_import.lastfm import LastFMImportWorkers
 
-    def _emit_lastfm_import_progress(state):
+    def _emit_lastfm_import_progress(state, owner=None):
+        # a profile's own import is its business, only its room hears it (#1293)
         try:
-            socketio.emit('lastfm:import-progress', state or {})
+            if owner is None:
+                socketio.emit('lastfm:import-progress', state or {})
+            else:
+                socketio.emit('lastfm:import-progress', state or {}, room=f'profile:{owner}')
         except Exception as e:
             logger.debug("lastfm import progress emit failed: %s", e)
 
     lastfm_import_db = MusicDatabase()
-    lastfm_import_worker = LastFMListeningImportWorker(
+    lastfm_import_workers = LastFMImportWorkers(
         database=lastfm_import_db,
         config_manager=config_manager,
         cache_builder=(listening_stats_worker._build_stats_cache if listening_stats_worker else None),
         progress_callback=_emit_lastfm_import_progress,
     )
+    lastfm_import_worker = lastfm_import_workers.shared
     logger.info("Last.fm listening import worker initialized")
 except Exception as e:
     logger.error(f"Last.fm listening import worker initialization failed: {e}")
     lastfm_import_worker = None
+    lastfm_import_workers = None
 
 listenbrainz_import_worker = None
+listenbrainz_import_workers = None
 try:
-    from core.listening_import.listenbrainz import ListenBrainzListeningImportWorker
+    from core.listening_import.listenbrainz import ListenBrainzImportWorkers
 
-    def _emit_listenbrainz_import_progress(state):
+    def _emit_listenbrainz_import_progress(state, owner=None):
+        # a profile's own import is its business, only its room hears it (#1293)
         try:
-            socketio.emit('listenbrainz:import-progress', state or {})
+            if owner is None:
+                socketio.emit('listenbrainz:import-progress', state or {})
+            else:
+                socketio.emit('listenbrainz:import-progress', state or {}, room=f'profile:{owner}')
         except Exception as e:
             logger.debug("listenbrainz import progress emit failed: %s", e)
 
     listenbrainz_import_db = MusicDatabase()
-    listenbrainz_import_worker = ListenBrainzListeningImportWorker(
+    listenbrainz_import_workers = ListenBrainzImportWorkers(
         database=listenbrainz_import_db,
         config_manager=config_manager,
         cache_builder=(listening_stats_worker._build_stats_cache if listening_stats_worker else None),
         progress_callback=_emit_listenbrainz_import_progress,
     )
+    listenbrainz_import_worker = listenbrainz_import_workers.shared
     logger.info("ListenBrainz listening import worker initialized")
 except Exception as e:
     logger.error(f"ListenBrainz listening import worker initialization failed: {e}")
     listenbrainz_import_worker = None
+    listenbrainz_import_workers = None
 
 # --- Stats API Endpoints ---
 # Lifted to api/stats.py (wired near the other internal blueprints below).
@@ -21644,7 +21949,9 @@ _configure_stats_api(get_database=get_database, config_manager=config_manager,
                      _automation_engine=lambda: automation_engine,
                      listening_stats_worker_getter=lambda: listening_stats_worker,
                      lastfm_import_worker_getter=lambda: lastfm_import_worker,
-                     listenbrainz_import_worker_getter=lambda: listenbrainz_import_worker)
+                     listenbrainz_import_worker_getter=lambda: listenbrainz_import_worker,
+                     listenbrainz_import_workers_getter=lambda: listenbrainz_import_workers,
+                     lastfm_import_workers_getter=lambda: lastfm_import_workers)
 app.register_blueprint(_create_stats_blueprint())
 
 # Quality profiles / auto-import watcher / metadata-cache browser - three
@@ -21760,7 +22067,9 @@ _cfg_up(get_database=get_database, config_manager=config_manager,
         download_orchestrator_getter=lambda: download_orchestrator,
         media_server_engine_getter=lambda: media_server_engine,
         spotify_client_getter=lambda: spotify_client,
-        tidal_client_clearer=clear_profile_tidal_client)
+        tidal_client_clearer=clear_profile_tidal_client,
+        listenbrainz_import_workers_getter=lambda: listenbrainz_import_workers,
+        lastfm_import_workers_getter=lambda: lastfm_import_workers)
 app.register_blueprint(_bp_up())
 
 from api.labels import configure as _configure_labels_api, create_blueprint as _create_labels_blueprint
@@ -22756,6 +23065,45 @@ def start_runtime_services():
         except Exception as _sweep_err:
             # Sweep must not crash startup — log and continue.
             logger.warning("[Startup] Album-bundle staging sweep failed: %s", _sweep_err)
+
+        # Atomic-album staging reconciliation (#1289). A batch interrupted
+        # mid-album leaves finished, tagged audio under
+        # <library>/.soulsync_atomic_staging/<batch id>/, and the only thing
+        # that knew what that directory was is download_batches — a dict that
+        # died with the process. Nothing looked at it afterwards: the dot prefix
+        # hides it from media servers and both SoulSync's scanner and the repair
+        # jobs prune it on purpose, so the tracks were invisible forever.
+        # download_batches is empty here (no batch survives a restart), so every
+        # tree on disk is an orphan by definition, and this runs before any new
+        # batch can claim a staging directory.
+        try:
+            from core.downloads.atomic_recovery import recover_orphan_staging
+            from core.imports.paths import library_root_for_profile, shared_transfer_root
+            _libraries = [shared_transfer_root()]
+            try:
+                for _profile in (get_database().get_all_profiles() or []):
+                    _own = library_root_for_profile(_profile.get('id'))
+                    if _own:
+                        _libraries.append(_own)
+            except Exception as _lib_err:
+                logger.debug("[Startup] Could not enumerate own libraries: %s", _lib_err)
+            _recovery = recover_orphan_staging(
+                _libraries,
+                live_batch_ids=set(download_batches.keys()),
+                enabled=bool(config_manager.get('album_downloads.atomic_recover_orphans', True)),
+            )
+            if _recovery.get('scanned'):
+                logger.warning(
+                    "[Startup] Atomic staging reconciliation: %d tree(s) scanned, "
+                    "%d album(s) recovered (%d file(s)), %d file(s) superseded by the "
+                    "library and moved to the recycle bin, %d failed, %d empty, "
+                    "%d reported, %d wishlist entries cleared",
+                    _recovery['scanned'], _recovery['published'], _recovery['files'],
+                    _recovery['superseded'], _recovery['failed'], _recovery['empty'],
+                    _recovery['reported'], _recovery['wishlist_cleared'])
+        except Exception as _recover_err:
+            # Recovery must not crash startup — the files are still on disk.
+            logger.warning("[Startup] Atomic staging reconciliation failed: %s", _recover_err)
 
         # Start simple background monitor when server starts
         logger.info("Starting simple background monitor...")

@@ -47,6 +47,10 @@ def release_tags(release):
     rg = release.get("release-group") or {}
     if release.get("id"):
         tags["MUSICBRAINZ_RELEASE_ID"] = release["id"]
+    # the release's disambiguation ("baby punk version"), picard's album comment.
+    # it's what keeps two same-named releases apart on disk (#1299).
+    if (release.get("disambiguation") or "").strip():
+        tags["MUSICBRAINZ_ALBUMCOMMENT"] = release["disambiguation"].strip()
     if rg.get("id"):
         tags["MUSICBRAINZ_RELEASEGROUPID"] = rg["id"]
     types = [rg.get("primary-type")] + (rg.get("secondary-types") or [])

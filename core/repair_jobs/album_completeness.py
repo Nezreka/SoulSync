@@ -160,6 +160,10 @@ class AlbumCompletenessJob(RepairJob):
                     "AND al.canonical_album_id IS NOT NULL AND al.canonical_album_id != '')"
                 )
             where_clause = ' OR '.join(where_parts)
+            # hand-tagged: the user typed this release, the service tracklist
+            # is the studio album and would call it incomplete
+            if 'metadata_locked' in columns:
+                where_clause = f"({where_clause}) AND COALESCE(al.metadata_locked, 0) = 0"
 
             select_sql = ', '.join(
                 f'{expr} AS {alias}'

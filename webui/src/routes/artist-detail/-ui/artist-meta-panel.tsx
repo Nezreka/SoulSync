@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { EnhancedAlbum, EnhancedData } from '../-artist-detail.enhanced';
 import type { ArtistInfo } from '../-artist-detail.types';
 
+import { enhancedStats, qualityBreakdown, statsSentenceParts } from '../-artist-detail.enhanced';
 import { getServiceUrl } from '../-artist-detail.enhanced-album';
 import { foldUpdatedData, runEnrichmentRequest } from '../-artist-detail.enrich-match';
 import {
@@ -15,9 +16,12 @@ import {
   collectArtistMetaUpdates,
   syncResultMessage,
 } from '../-artist-detail.meta';
+import { ActionMenu } from './action-menu';
+import { FolderIcon, PencilIcon, RefreshIcon, SparkleIcon } from './lib-icons';
 import { ManualMatchModal } from './manual-match-modal';
 import { ReorganizeAllModal } from './reorganize-modal';
 import { ReorganizeStatusPanel } from './reorganize-status-panel';
+import { monogram, SourceHealth } from './source-health';
 
 interface Props {
   artist: ArtistInfo;
@@ -31,15 +35,17 @@ interface Props {
 }
 
 /**
- * The Enhanced view's artist metadata card (renderArtistMetaPanel,
- * library.js:1174): image + name + id badges on the left; the reorganize
- * status panel and the action buttons on the right; the match-status chip row;
- * and the collapsible edit form.
+ * the artist card at the top of your library: who this is, what you own of
+ * them, how good the files are, and how well the metadata sources know them.
+ *
+ * one card instead of the old meta panel plus a separate stats bar. the
+ * numbers read as a sentence under the name, the format badges hang off a
+ * quality bar, and the twelve "Service: status" chips are a row of small
+ * monograms with the open/rematch actions behind a click.
  */
 export function ArtistMetaPanel({ artist, albums, isAdmin, onReload, onArtistPatched }: Props) {
   const [imageBroken, setImageBroken] = useState(false);
   const [formVisible, setFormVisible] = useState(false);
-  const [enrichOpen, setEnrichOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [reorganizingAll, setReorganizingAll] = useState(false);
   const [matchingService, setMatchingService] = useState<string | null>(null);
@@ -55,8 +61,25 @@ export function ArtistMetaPanel({ artist, albums, isAdmin, onReload, onArtistPat
     onArtistPatched();
   };
 
+  // the id badges and the match chips describe the same services from two
+  // angles (do we hold an id / did the matcher succeed); merged per service
+  // so one dot carries both the external link and the rematch action.
   const badges = buildIdBadges(artist);
   const chips = artistMatchChips(artist);
+  const sources = chips.map((chip) => {
+    const badge = badges.find((b) => b.svc === chip.service);
+    return {
+      service: chip.service,
+      label: chip.label,
+      status: chip.status,
+      title: chip.title,
+      url: badge ? getServiceUrl(badge.svc, 'artist', badge.value) : null,
+    };
+  });
+
+  const stats = enhancedStats({ albums });
+  const sentence = statsSentenceParts(stats);
+  const quality = qualityBreakdown(stats.badges);
 
   const sync = async () => {
     setSyncing(true);
@@ -105,8 +128,10 @@ export function ArtistMetaPanel({ artist, albums, isAdmin, onReload, onArtistPat
     }
   };
 
+  const name = artistDisplayName(artist);
+
   return (
-    <div className="enhanced-artist-meta" id="enhanced-artist-meta">
+    <div className="enhanced-artist-meta lib-artist" id="enhanced-artist-meta">
       {matchingService ? (
         <ManualMatchModal
           entityType="artist"
@@ -127,100 +152,40 @@ export function ArtistMetaPanel({ artist, albums, isAdmin, onReload, onArtistPat
         />
       ) : null}
 
-      <div className="enhanced-artist-meta-header">
-        <div className="enhanced-artist-meta-header-left">
+      <div className="enhanced-artist-meta-header lib-artist-head">
+        <div className="enhanced-artist-meta-header-left lib-artist-identity">
           {artist.thumb_url && !imageBroken ? (
             <img
               className="enhanced-artist-meta-image"
               src={String(artist.thumb_url)}
-              alt={String(artist.name || '')}
+              alt={name}
               onError={() => setImageBroken(true)}
             />
-          ) : null}
+          ) : (
+            <div className="enhanced-artist-meta-image lib-artist-initial" aria-hidden="true">
+              {name.trim().charAt(0).toUpperCase() || '♪'}
+            </div>
+          )}
           <div className="enhanced-artist-meta-info">
-            <div className="enhanced-artist-meta-name">{artistDisplayName(artist)}</div>
-            <div className="enhanced-artist-id-badges">
-              {badges.map((badge) => {
-                const cls = `enhanced-id-badge ${badge.svc === 'musicbrainz' ? 'mb' : badge.svc}`;
-                const url = getServiceUrl(badge.svc, 'artist', badge.value);
-                return url ? (
-                  <a
-                    className={cls}
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={`${badge.label}: ${badge.value} (click to open)`}
-                    onClick={(e) => e.stopPropagation()}
-                    key={badge.key}
-                  >
-                    {badge.label}
-                  </a>
-                ) : (
-                  <span className={cls} title={`${badge.label}: ${badge.value}`} key={badge.key}>
-                    {badge.label}
-                  </span>
-                );
-              })}
+            <div className="lib-eyebrow">In your library</div>
+            <div className="enhanced-artist-meta-name">{name}</div>
+            <div className="lib-artist-stats" data-testid="library-stats">
+              {sentence.map((part, i) => (
+                <span className="enhanced-stat-item" key={`${part.label}-${i}`}>
+                  {i > 0 ? <span className="lib-sep">·</span> : null}
+                  <span className="enhanced-stat-value">{part.value}</span>
+                  {part.label ? <span className="enhanced-stat-label"> {part.label}</span> : null}
+                </span>
+              ))}
             </div>
           </div>
         </div>
 
-        <div className="enhanced-artist-meta-actions">
+        <div className="enhanced-artist-meta-actions lib-artist-actions">
           <ReorganizeStatusPanel artistId={artist.id} onReload={onReload} />
 
-          {isAdmin ? (
-            <>
-              <button
-                className={`enhanced-meta-edit-toggle${formVisible ? ' active' : ''}`}
-                type="button"
-                onClick={() => {
-                  // Opening re-seeds from the record so a Revert-then-reopen
-                  // shows saved values, matching the vanilla's full re-render.
-                  if (!formVisible) setFormValues(readForm(artist));
-                  setFormVisible((open) => !open);
-                }}
-              >
-                {formVisible ? 'Hide Editor' : 'Edit Metadata'}
-              </button>
-              <div className="enhanced-enrich-wrap">
-                <button
-                  className="enhanced-enrich-btn"
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEnrichOpen((open) => !open);
-                  }}
-                >
-                  Enrich ▾
-                </button>
-                <div className={`enhanced-enrich-menu${enrichOpen ? ' visible' : ''}`}>
-                  {artistEnrichServices().map((svc) => (
-                    <div
-                      className="enhanced-enrich-menu-item"
-                      key={svc.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEnrichOpen(false);
-                        void runEnrichmentRequest({
-                          entityType: 'artist',
-                          entityId: artist.id,
-                          service: svc.id,
-                          name: String(artist.name || ''),
-                          artistName: '',
-                          artistId: artist.id,
-                        }).then(applyOutcome);
-                      }}
-                    >
-                      {svc.icon} {svc.label}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          ) : null}
-
           <button
-            className="enhanced-sync-btn"
+            className="enhanced-sync-btn lib-btn"
             type="button"
             title="Validate files — removes stale entries for tracks no longer on disk"
             disabled={syncing}
@@ -229,30 +194,99 @@ export function ArtistMetaPanel({ artist, albums, isAdmin, onReload, onArtistPat
               void sync();
             }}
           >
-            {syncing ? 'Syncing...' : '🔄 Sync'}
+            <RefreshIcon className={syncing ? 'lib-spin' : undefined} />
+            <span>{syncing ? 'Syncing…' : 'Sync'}</span>
           </button>
           <button
-            className="enhanced-sync-btn"
+            className="enhanced-sync-btn lib-btn"
             type="button"
             title="Reorganize all albums for this artist using your configured download template"
             onClick={() => setReorganizingAll(true)}
           >
-            📁 Reorganize All
+            <FolderIcon />
+            <span>Reorganize all</span>
           </button>
+
+          {isAdmin ? (
+            <>
+              <div className="enhanced-enrich-wrap">
+                <ActionMenu
+                  items={artistEnrichServices().map((svc) => ({
+                    key: svc.id,
+                    className: 'enhanced-enrich-menu-item',
+                    icon: <span className="lib-menu-mono">{monogram(svc.id, svc.label)}</span>,
+                    label: svc.label,
+                    onSelect: () =>
+                      void runEnrichmentRequest({
+                        entityType: 'artist',
+                        entityId: artist.id,
+                        service: svc.id,
+                        name: String(artist.name || ''),
+                        artistName: '',
+                        artistId: artist.id,
+                      }).then(applyOutcome),
+                  }))}
+                  heading="Pull metadata from"
+                  trigger={(t) => (
+                    <button
+                      className="enhanced-enrich-btn lib-btn"
+                      type="button"
+                      title="Pull fresh metadata for this artist from one source"
+                      {...t}
+                    >
+                      <SparkleIcon />
+                      <span>Enrich</span>
+                      <span className="lib-btn-caret" aria-hidden="true">
+                        ▾
+                      </span>
+                    </button>
+                  )}
+                />
+              </div>
+              <button
+                className={`enhanced-meta-edit-toggle lib-btn${formVisible ? ' active' : ''}`}
+                type="button"
+                onClick={() => {
+                  // Opening re-seeds from the record so a Revert-then-reopen
+                  // shows saved values, matching the vanilla's full re-render.
+                  if (!formVisible) setFormValues(readForm(artist));
+                  setFormVisible((open) => !open);
+                }}
+              >
+                <PencilIcon />
+                <span>{formVisible ? 'Done' : 'Edit metadata'}</span>
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
 
-      <div className="enhanced-match-status-row">
-        {chips.map((chip) => (
-          <span
-            className={chip.className}
-            title={chip.title}
-            key={chip.service}
-            onClick={() => setMatchingService(chip.service)}
-          >
-            {chip.label}: {chip.status}
-          </span>
-        ))}
+      <div className="lib-artist-foot">
+        <div
+          className="lib-quality"
+          title={`${quality.lossless} lossless · ${quality.lossy} lossy`}
+        >
+          <div className="lib-quality-bar" aria-hidden="true">
+            <span
+              className="lib-quality-seg lossless"
+              style={{ width: `${quality.losslessPercent}%` }}
+            />
+          </div>
+          <div className="lib-quality-legend enhanced-stats-formats">
+            <span className="lib-quality-headline">{quality.label}</span>
+            {stats.badges.map((badge) => (
+              <span className={`enhanced-format-badge ${badge.className}`} key={badge.format}>
+                {badge.format} <span className="lib-badge-count">{badge.count}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <SourceHealth
+          entries={sources}
+          onRematch={isAdmin ? setMatchingService : undefined}
+          className="enhanced-match-status-row"
+        />
       </div>
 
       <div
@@ -290,7 +324,7 @@ export function ArtistMetaPanel({ artist, albums, isAdmin, onReload, onArtistPat
         </div>
         <div className="enhanced-artist-form-actions">
           <button
-            className="enhanced-meta-cancel-btn"
+            className="enhanced-meta-cancel-btn lib-btn"
             type="button"
             onClick={() => {
               setFormValues(readForm(artist));
@@ -299,7 +333,11 @@ export function ArtistMetaPanel({ artist, albums, isAdmin, onReload, onArtistPat
           >
             Revert
           </button>
-          <button className="enhanced-meta-save-btn" type="button" onClick={() => void save()}>
+          <button
+            className="enhanced-meta-save-btn lib-btn primary"
+            type="button"
+            onClick={() => void save()}
+          >
             Save Changes
           </button>
         </div>

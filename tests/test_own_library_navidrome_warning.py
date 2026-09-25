@@ -158,3 +158,22 @@ def test_scan_skip_logs_under_navidrome(sam, monkeypatch, caplog):
     assert clients == []
     assert any("[Own Library]" in record.message and "skipping own-library scans" in record.message
                for record in caplog.records)
+
+
+def test_library_root_for_profile_announce_false_is_silent(sam, monkeypatch):
+    """the wishlist asks for library roots on every removal. that lookup isn't
+    routing a download, so it must not repeat the warning or notify."""
+    pid, root = sam
+    db = web_server.get_database()
+    monkeypatch.setattr(web_server.config_manager, 'get_active_media_server', lambda: 'navidrome')
+    reset_own_library_fallback_notifications()
+    with db._get_connection() as conn:
+        conn.cursor().execute("DELETE FROM notification_history WHERE profile_id = ?", (pid,))
+        conn.commit()
+
+    warnings = []
+    monkeypatch.setattr(paths.logger, 'warning', lambda msg, *a, **k: warnings.append(msg))
+
+    assert library_root_for_profile(pid, announce=False) is None
+    assert warnings == []
+    assert db.get_notification_history(profile_id=pid) == []

@@ -16,10 +16,18 @@ const JS = readFileSync(resolve(process.cwd(), 'static/chat.js'), 'utf8');
 
 const BLOCK = JS.slice(
   JS.indexOf('function _ovToast'),
-  JS.indexOf("// ── shared file card (filepost.dev links dressed by envelope 'f') ────"),
+  // the section title after it; matched on its stable start so rewording the
+  // rest can't send the slice to end of file (a -1 here tested all of chat.js)
+  JS.indexOf('// ── shared file card'),
 );
 
 describe('the helpers it leans on are defined in chat.js', () => {
+  it('slices the block it means to', () => {
+    const start = JS.indexOf('function _ovToast');
+    expect(start).toBeGreaterThan(-1);
+    expect(JS.indexOf('// ── shared file card')).toBeGreaterThan(start);
+  });
+
   it.each(['postJSON', '_tagRoomPayload', 'toggleAttachPanel', '_ovToast'])(
     '%s',
     (name) => {

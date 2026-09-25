@@ -89,7 +89,10 @@ def test_manual_download_blocked_by_artist_name(client, banned_artist):
 def test_manual_download_unrelated_artist_not_blocked(client, banned_artist):
     # Allowed artist -> guard passes. Keep the external download outside this
     # guard test so an unavailable client cannot stall the suite.
-    with patch.object(web_server, "run_async", side_effect=_skip_download):
+    # the pinned path dispatches through the executor, not run_async; stub
+    # both so no real download starts from a guard test
+    with patch.object(web_server, "run_async", side_effect=_skip_download), \
+            patch.object(web_server._pinned_batch, "dispatch_pinned_batch"):
         r = client.post("/api/download", json={
             "result_type": "track", "username": "peer", "filename": "y.flac",
             "artist": "Allowed Artist", "title": "Song"})
@@ -97,7 +100,10 @@ def test_manual_download_unrelated_artist_not_blocked(client, banned_artist):
 
 
 def test_manual_download_override_passes_guard(client, banned_artist):
-    with patch.object(web_server, "run_async", side_effect=_skip_download):
+    # the pinned path dispatches through the executor, not run_async; stub
+    # both so no real download starts from a guard test
+    with patch.object(web_server, "run_async", side_effect=_skip_download), \
+            patch.object(web_server._pinned_batch, "dispatch_pinned_batch"):
         r = client.post("/api/download", json={
             "result_type": "track", "username": "peer", "filename": "x.flac",
             "artist": "Banned Guy", "title": "Song", "ignore_blocklist": True})
@@ -119,3 +125,34 @@ def test_modal_blocked_album_returns_409_before_starting(client):
         assert body["blocked"] is True and body["blocked_entity_type"] == "album"
     finally:
         db.remove_blocklist_entry(1, eid)
+
+
+def test_manual_download_becomes_a_batch_on_the_downloads_page(client):
+    """a basic search pick is a real batch now, so the Downloads page shows it"""
+    from core.runtime_state import download_batches, download_tasks
+    with patch.object(web_server._pinned_batch, "dispatch_pinned_batch") as dispatch:
+        r = client.post("/api/download", json={
+            "result_type": "track", "username": "peer", "filename": "z.flac",
+            "artist": "Some Artist", "title": "Some Song"})
+    body = r.get_json()
+    assert body["success"] is True
+    batch_id = body["batch_id"]
+    try:
+        assert download_batches[batch_id]["playlist_name"] == "Some Artist - Some Song"
+        (task_id,) = download_batches[batch_id]["queue"]
+        assert download_tasks[task_id]["_pinned_candidate"]["filename"] == "z.flac"
+        dispatch.assert_called_once()
+    finally:
+        for tid in download_batches.get(batch_id, {}).get("queue", []):
+            download_tasks.pop(tid, None)
+        download_batches.pop(batch_id, None)
+
+
+def test_torrent_results_stay_on_the_direct_route(client):
+    """one torrent download is a whole release, it can't be pinned to a file"""
+    with patch.object(web_server, "run_async", side_effect=_skip_download), \
+            patch.object(web_server._pinned_batch, "dispatch_pinned_batch") as dispatch:
+        client.post("/api/download", json={
+            "result_type": "track", "username": "torrent", "filename": "tok",
+            "artist": "Some Artist", "title": "Some Song"})
+    dispatch.assert_not_called()

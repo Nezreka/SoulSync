@@ -45,7 +45,7 @@ class _FakeWishlistService:
     def get_wishlist_tracks_for_download(self, profile_id=1):
         return list(self._tracks)
 
-    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1):
+    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1, **kwargs):
         return True
 
 

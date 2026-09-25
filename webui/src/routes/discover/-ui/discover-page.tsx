@@ -1150,7 +1150,7 @@ export function DiscoverPage() {
             onSelectTab={lb.selectTab}
             onSelectGroup={lb.selectGroup}
             onRefresh={() => void lb.refresh()}
-            onConnect={() => void window.openPersonalSettings?.()}
+            onConnect={() => window.openMyAccountsModal?.()}
             onOpenMix={modal.open}
             onPlayMix={playMixFromCard}
             playingKey={playingMixKey}

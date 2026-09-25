@@ -15,6 +15,9 @@ import {
 export interface ShellProfileContext {
   profileId: number;
   isAdmin: boolean;
+  name?: string;
+  avatarColor?: string;
+  avatarUrl?: string;
 }
 
 export interface ShellContext {

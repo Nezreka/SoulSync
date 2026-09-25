@@ -2,7 +2,7 @@
 
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, not_locked_sql
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.metadata_gap")
@@ -83,13 +83,17 @@ class MetadataGapFillerJob(RepairJob):
                     column_index[alias] = len(select_cols)
                     select_cols.append(f"{column} AS {alias}")
 
+            # hand-tagged: the user typed this release, a limit=1 name search
+            # would hand it the studio recording's ids. filtered in sql so
+            # locked rows don't eat the 500 row budget
+            locked_filter = not_locked_sql(cursor, 'tracks', 't') + not_locked_sql(cursor, 'albums', 'al')
             cursor.execute(f"""
                 SELECT {', '.join(select_cols)}
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.title IS NOT NULL AND t.title != ''
-                  AND ({where})
+                  AND ({where}){locked_filter}
                 LIMIT 500
             """)
             tracks = cursor.fetchall()

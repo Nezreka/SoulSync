@@ -18,7 +18,14 @@ from core.metadata_service import (
     get_source_priority,
 )
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, skip_deleted_quarantine
+from core.repair_jobs.base import (
+    JobContext,
+    JobResult,
+    RepairJob,
+    hand_tagged_path_keys,
+    is_hand_tagged_path,
+    skip_deleted_quarantine,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.track_number")
@@ -107,11 +114,22 @@ class TrackNumberRepairJob(RepairJob):
                 total=total
             )
 
+        hand_tagged = hand_tagged_path_keys(context.db)
+
         for folder_path, filenames in album_folders.items():
             if context.check_stop():
                 return result
             if context.wait_if_paused():
                 return result
+
+            # hand-tagged: the user typed this release, a tracklist from a
+            # service (the studio album) would renumber it wrong
+            if any(is_hand_tagged_path(os.path.join(folder_path, f), hand_tagged) for f in filenames):
+                result.scanned += len(filenames)
+                result.skipped += len(filenames)
+                if context.update_progress:
+                    context.update_progress(result.scanned, total)
+                continue
 
             folder_name = os.path.basename(folder_path)
             if context.report_progress:

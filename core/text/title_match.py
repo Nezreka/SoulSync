@@ -543,6 +543,33 @@ def base_title_before_dash(title: str) -> str:
     return title[:idx].strip() if idx > 0 else title
 
 
+def _content_text(text: str) -> str:
+    return " ".join(t for t in _TOKEN_RE.findall(_fold(text)) if t not in _TITLE_STOPWORDS)
+
+
+def _fuzzy_pair_holds(
+    search_clean: str,
+    db_clean: str,
+    sim: float,
+    similarity_fn: Callable[[str, str], float],
+    threshold: float,
+) -> bool:
+    """Second look at a fuzzy pair that already cleared the char floor.
+
+    #1292: 'The Noose' matched 'The Doomed' at 0.74 and the import page called
+    it already in the library. the shared 'the ' is most of that score, so the
+    words that actually name the song have to clear the floor on their own
+    ('noose'/'doomed' = 0.55). 'Grey'/'Gray' and 'Tonite'/'Tonight' have no
+    stopword to lean on and score the same either way.
+    """
+    if not titles_plausibly_same(search_clean, db_clean, sim):
+        return False
+    a, b = _content_text(search_clean), _content_text(db_clean)
+    if not a or not b:
+        return True
+    return similarity_fn(a, b) >= threshold
+
+
 def choose_best_title_candidate(
     search_norm: str,
     search_clean: str,
@@ -570,6 +597,8 @@ def choose_best_title_candidate(
         else:
             sim = max(similarity_fn(search_norm, db_norm), similarity_fn(search_clean, db_clean))
             if sim < threshold:
+                continue
+            if not _fuzzy_pair_holds(search_clean, db_clean, sim, similarity_fn, threshold):
                 continue
             rank = (2, -sim, abs(len(search_norm) - len(db_norm)))
 

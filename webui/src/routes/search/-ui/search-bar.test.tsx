@@ -9,15 +9,16 @@ function Host({
   onQueryChange,
   onClear,
   onSubmit = () => {},
-  onIdSubmit = () => {},
+  picker,
+  searching,
 }: {
   onQueryChange?: (value: string) => void;
   onClear?: () => void;
   onSubmit?: () => void;
-  onIdSubmit?: () => void;
+  picker?: React.ReactNode;
+  searching?: boolean;
 }) {
   const [query, setQuery] = useState('');
-  const [idValue, setIdValue] = useState('');
   return (
     <SearchBar
       query={query}
@@ -30,9 +31,8 @@ function Host({
         setQuery('');
         onClear?.();
       }}
-      idValue={idValue}
-      onIdChange={setIdValue}
-      onIdSubmit={onIdSubmit}
+      picker={picker}
+      searching={searching}
     />
   );
 }
@@ -155,36 +155,28 @@ describe('SearchBar', () => {
     expect(document.getElementById('enhanced-cancel-btn')).toBeNull();
   });
 
-  it('runs an ID lookup from the button and from Enter', () => {
-    const onIdSubmit = vi.fn();
-    render(<Host onIdSubmit={onIdSubmit} />);
-    const idInput = document.getElementById('enh-id-input') as HTMLInputElement;
-
-    fireEvent.change(idInput, { target: { value: 'https://open.spotify.com/album/x' } });
-    expect(idInput.value).toBe('https://open.spotify.com/album/x');
-
-    fireEvent.keyDown(idInput, { key: 'Enter' });
-    fireEvent.click(screen.getByRole('button', { name: 'Look up' }));
-    expect(onIdSubmit).toHaveBeenCalledTimes(2);
+  it('has no second lookup box: a pasted link goes in the one field', () => {
+    // the page routes a link to the id resolver, so the field says it takes one
+    render(<Host />);
+    expect(document.getElementById('enh-id-input')).toBeNull();
+    expect(input().placeholder).toBe('Artists, albums, tracks, or paste a link');
+    expect(input().getAttribute('autocomplete')).toBe('off');
+    expect(input().getAttribute('spellcheck')).toBe('false');
   });
 
-  it('keeps the ID box’s own affordances', () => {
-    // The placeholder is the only place this feature explains itself (#775),
-    // and autocomplete/spellcheck are wrong for pasted URLs and UUIDs.
-    render(<Host />);
-    const idInput = document.getElementById('enh-id-input') as HTMLInputElement;
-    expect(idInput.placeholder).toBe(
-      '…or paste a Spotify / Apple Music / MusicBrainz / Deezer link, or a MusicBrainz ID',
-    );
-    expect(idInput.getAttribute('autocomplete')).toBe('off');
-    expect(idInput.getAttribute('spellcheck')).toBe('false');
+  it('puts the source picker inside the field, before the input', () => {
+    render(<Host picker={<button type="button">Spotify</button>} />);
+    const box = document.getElementById('enhanced-search-bar') as HTMLElement;
+    expect(box.firstElementChild?.textContent).toBe('Spotify');
+    expect(box.contains(input())).toBe(true);
   });
 
-  it('wears the vanilla’s search glyph', () => {
+  it('shows a spinner only while searching', () => {
     render(<Host />);
-    const glyph = document.querySelector('.enhanced-search-icon');
-    expect(glyph?.tagName).toBe('DIV');
-    expect(glyph?.textContent).toBe('✨');
+    expect(screen.queryByRole('status', { name: 'Searching' })).toBeNull();
+    cleanup();
+    render(<Host searching />);
+    expect(screen.getByRole('status', { name: 'Searching' })).toBeInTheDocument();
   });
 
   it('keeps the ids the rest of the app reaches for', () => {
@@ -192,7 +184,6 @@ describe('SearchBar', () => {
     // breaks the handoff.
     render(<Host />);
     expect(input()).not.toBeNull();
-    expect(document.getElementById('enh-id-input')).not.toBeNull();
-    expect(document.getElementById('enh-id-btn')).not.toBeNull();
+    expect(document.getElementById('enhanced-search-bar')).not.toBeNull();
   });
 });

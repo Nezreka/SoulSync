@@ -153,8 +153,28 @@ export function relativeAge(iso: string, now: number): string {
 }
 
 /** The card's file line: "FLAC · soulseek", degrading to whichever half exists. */
+// podcasts report a mime type as their quality ("AUDIO/MPEG"), which is noise
+// on a card. show the format name a person would say.
+const MIME_FORMATS: Record<string, string> = {
+  'AUDIO/MPEG': 'MP3',
+  'AUDIO/MP3': 'MP3',
+  'AUDIO/MP4': 'M4A',
+  'AUDIO/X-M4A': 'M4A',
+  'AUDIO/AAC': 'AAC',
+  'AUDIO/OGG': 'OGG',
+  'AUDIO/OPUS': 'OPUS',
+  'AUDIO/FLAC': 'FLAC',
+  'AUDIO/WAV': 'WAV',
+};
+
+export function readableQuality(quality: string): string {
+  const q = quality.trim().toUpperCase();
+  if (!q.includes('/')) return quality;
+  return MIME_FORMATS[q] ?? q.slice(q.indexOf('/') + 1).replace(/^X-/, '');
+}
+
 export function fileBadge(quality: string, source: string): string {
-  return [quality, source].filter(Boolean).join(' · ');
+  return [readableQuality(quality), source].filter(Boolean).join(' · ');
 }
 
 // ── Fresh from your artists ──────────────────────────────────────────────────

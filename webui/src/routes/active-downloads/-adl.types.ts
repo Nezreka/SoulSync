@@ -140,6 +140,8 @@ export interface AdlBatch {
   playlist_id: string;
   batch_name: string;
   source_page: string;
+  /** what the batch holds: 'audiobook', 'music_video', or '' for music */
+  batch_type?: string;
   phase: string;
   total: number;
   completed: number;

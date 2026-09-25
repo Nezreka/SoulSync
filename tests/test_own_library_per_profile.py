@@ -398,6 +398,18 @@ def test_search_download_endpoints_route_to_profile_own_library(db, monkeypatch,
     monkeypatch.setattr(web_server, "get_current_profile_id", lambda: kim)
     monkeypatch.setattr("core.profile_context.get_current_profile_id", lambda: kim)
 
+    # basic search downloads are pinned batches now: run each task inline so
+    # the real candidate handoff writes its context before we look, with the
+    # monitor off and the network stubbed by run_async below
+    _real_deps = web_server._pinned_batch_deps
+
+    def _inline_deps():
+        deps = _real_deps()
+        deps.start_monitoring = lambda _bid: None
+        deps.submit = lambda fn, *args: fn(*args)
+        return deps
+    monkeypatch.setattr(web_server, "_pinned_batch_deps", _inline_deps)
+
     # 1. Single track download via /api/download
     single_key = web_server._make_context_key("peer_kim", "music/song.mp3")
     try:
@@ -413,7 +425,8 @@ def test_search_download_endpoints_route_to_profile_own_library(db, monkeypatch,
             assert res.status_code == 200
             assert single_key in matched_downloads_context
             ctx = matched_downloads_context[single_key]
-            assert ctx.get("profile_id") == kim
+            # a pinned batch carries it on track_info, the resolver is the contract
+            assert paths.import_profile_id(ctx) == kim
             assert paths.transfer_root_for_context(ctx) == str(tmp_path / 'kim')
     finally:
         matched_downloads_context.pop(single_key, None)
@@ -436,7 +449,8 @@ def test_search_download_endpoints_route_to_profile_own_library(db, monkeypatch,
             assert res.status_code == 200
             assert album_key in matched_downloads_context
             ctx = matched_downloads_context[album_key]
-            assert ctx.get("profile_id") == kim
+            # a pinned batch carries it on track_info, the resolver is the contract
+            assert paths.import_profile_id(ctx) == kim
             assert paths.transfer_root_for_context(ctx) == str(tmp_path / 'kim')
     finally:
         matched_downloads_context.pop(album_key, None)
@@ -458,7 +472,8 @@ def test_search_download_endpoints_route_to_profile_own_library(db, monkeypatch,
             assert res.status_code == 200
             assert matched_key in matched_downloads_context
             ctx = matched_downloads_context[matched_key]
-            assert ctx.get("profile_id") == kim
+            # a pinned batch carries it on track_info, the resolver is the contract
+            assert paths.import_profile_id(ctx) == kim
             assert paths.transfer_root_for_context(ctx) == str(tmp_path / 'kim')
     finally:
         matched_downloads_context.pop(matched_key, None)

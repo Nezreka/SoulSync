@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SearchAlbum, SearchTrack } from '../-search.types';
 
 import { albumIdentity, trackIdentity } from '../-search.helpers';
-import { EMPTY_OWNERSHIP, SearchResults } from './search-results';
+import { EMPTY_OWNERSHIP, FilterPills, resultCounts, SearchResults } from './search-results';
 
 const album = (over: Partial<SearchAlbum> = {}): SearchAlbum => ({
   id: 'a1',
@@ -30,7 +30,7 @@ function renderResults(props: Partial<Parameters<typeof SearchResults>[0]> = {})
       videoProgress={{}}
       ownership={EMPTY_OWNERSHIP}
       artistImages={{}}
-      onArtistHref={(a) => `/artist-detail/spotify/${a.id}`}
+      onArtistHref={(a, inLibrary) => `/artist-detail/${inLibrary ? 'library' : 'spotify'}/${a.id}`}
       onLabelHref={(l) => `/label-detail/${l.id}`}
       onAlbumClick={vi.fn()}
       onTrackClick={vi.fn()}
@@ -41,32 +41,49 @@ function renderResults(props: Partial<Parameters<typeof SearchResults>[0]> = {})
   );
 }
 
+const section = (id: string) => document.getElementById(id) as HTMLElement;
+const top = () => document.getElementById('enh-top-result') as HTMLElement;
+
 afterEach(cleanup);
 
-describe('SearchResults', () => {
+describe('SearchResults sections', () => {
   it('renders nothing for a section with no results', () => {
     // An empty section with a "0" count is noise; the vanilla hid it.
     renderResults();
-    expect(document.getElementById('enh-albums-section')).toBeNull();
-    expect(document.getElementById('enh-tracks-section')).toBeNull();
+    expect(section('enh-albums-section')).toBeNull();
+    expect(section('enh-tracks-section')).toBeNull();
+    expect(top()).toBeNull();
   });
 
   it('splits albums from singles and EPs into their own sections', () => {
     renderResults({
       albums: [
-        album({ id: '1', name: 'LP', album_type: 'album' }),
+        album({ id: '1', name: 'Full Length', album_type: 'album' }),
         album({ id: '2', name: 'A Single', album_type: 'single' }),
         album({ id: '3', name: 'An EP', album_type: 'ep' }),
+        album({ id: '4', name: 'Another Single', album_type: 'single' }),
       ],
     });
+    expect(within(section('enh-albums-section')).getByText('Full Length')).toBeInTheDocument();
+    const singles = section('enh-singles-section');
+    expect(singles.textContent).toContain('A Single');
+    expect(singles.textContent).toContain('An EP');
+    expect(singles.textContent).not.toContain('Full Length');
+  });
 
-    const albumsList = document.getElementById('enh-albums-list');
-    const singlesList = document.getElementById('enh-singles-list');
-    expect(albumsList?.textContent).toContain('LP');
-    expect(singlesList?.textContent).toContain('A Single');
-    expect(singlesList?.textContent).toContain('An EP');
-    expect(document.getElementById('enh-albums-count')?.textContent).toBe('1');
-    expect(document.getElementById('enh-singles-count')?.textContent).toBe('2');
+  it('folds one or two singles into the albums row, marked with their kind', () => {
+    // a whole shelf for one card read as unfinished
+    renderResults({
+      albums: [
+        album({ id: '1', name: 'Full Length', release_date: '1991-11-18' }),
+        album({ id: '2', name: 'Street Of Dreams', album_type: 'single', release_date: '2004' }),
+      ],
+    });
+    expect(section('enh-singles-section')).toBeNull();
+    const albums = section('enh-albums-section');
+    expect(within(albums).getByText('Street Of Dreams')).toBeInTheDocument();
+    expect(within(albums).getByText('Aphex Twin • Single • 2004')).toBeInTheDocument();
+    expect(within(albums).getByText('Aphex Twin • 1991')).toBeInTheDocument();
   });
 
   it('badges the RIGHT album when albums and singles interleave', () => {
@@ -76,24 +93,28 @@ describe('SearchResults', () => {
       album({ id: 'A1', name: 'First LP', album_type: 'album' }),
       album({ id: 'S1', name: 'Owned Single', album_type: 'single' }),
       album({ id: 'A2', name: 'Second LP', album_type: 'album' }),
+      album({ id: 'S2', name: 'Other Single', album_type: 'single' }),
+      album({ id: 'S3', name: 'Third Single', album_type: 'single' }),
     ];
     renderResults({
       albums: rows,
       ownership: { ...EMPTY_OWNERSHIP, ownedAlbums: new Set([albumIdentity(rows[1])]) },
     });
-
-    const badges = document.querySelectorAll('.enh-item-lib-badge');
-    expect(badges).toHaveLength(1);
-    // The badge sits on the single, not on whichever card shares its index.
-    expect(badges[0].closest('.enh-compact-item')?.textContent).toContain('Owned Single');
+    expect(within(section('enh-albums-section')).queryByText('In library')).toBeNull();
+    expect(within(section('enh-singles-section')).getByText('In library')).toBeInTheDocument();
   });
 
-  it('keeps the compound card classes the stylesheet targets', () => {
-    // `.album-card` alone collides with the global one used by the
-    // artist-detail and library discographies; the compound is the guard.
-    renderResults({ albums: [album()], tracks: [{ id: 't1', name: 'Xtal' }] });
-    expect(document.querySelector('.enh-compact-item.album-card')).not.toBeNull();
-    expect(document.querySelector('.enh-compact-item.track-item')).not.toBeNull();
+  it('puts library artists first, with their own link and marker', () => {
+    // this is where things get acquired: the ones already yours lead
+    renderResults({
+      dbArtists: [{ id: 7, name: 'Owned Artist' }],
+      artists: [{ id: 'sp1', name: 'Found Artist', source: 'spotify' }],
+    });
+    const faces = section('enh-spotify-artists-section').querySelectorAll('a');
+    expect(faces[0].textContent).toContain('Owned Artist');
+    expect(faces[0].textContent).toContain('In your library');
+    expect(faces[0].getAttribute('href')).toBe('/artist-detail/library/7');
+    expect(faces[1].getAttribute('href')).toBe('/artist-detail/spotify/sp1');
   });
 
   it('renders artists and labels as real links', () => {
@@ -102,54 +123,15 @@ describe('SearchResults', () => {
       artists: [{ id: 'sp1', name: 'Aphex Twin', source: 'spotify' }],
       labels: [{ id: 'l1', name: 'Warp' }],
     });
-    // The name renders twice now — the Top result spotlight and the card —
-    // and BOTH must be real links to the same place.
-    const names = screen.getAllByText('Aphex Twin');
-    expect(names.length).toBe(2);
-    for (const el of names) {
-      expect(el.closest('a')?.getAttribute('href')).toBe('/artist-detail/spotify/sp1');
-    }
+    // the face and the top result's button both go to one place
+    expect(
+      within(section('enh-spotify-artists-section')).getByRole('link').getAttribute('href'),
+    ).toBe('/artist-detail/spotify/sp1');
+    expect(within(top()).getByRole('link', { name: 'Open artist' })).toHaveAttribute(
+      'href',
+      '/artist-detail/spotify/sp1',
+    );
     expect(screen.getByText('Warp').closest('a')?.getAttribute('href')).toBe('/label-detail/l1');
-  });
-
-  it('gives a label card the artist styling it piggybacks on', () => {
-    renderResults({ labels: [{ id: 'l1', name: 'Warp' }] });
-    const card = screen.getByText('Warp').closest('.enh-compact-item');
-    expect(card?.className).toContain('label-card');
-    expect(card?.className).toContain('artist-card');
-  });
-
-  it('names each artist section in its cards, without inventing a count', () => {
-    // db_artists carry only id/name/image_url, so any count would read 0.
-    renderResults({
-      dbArtists: [{ id: 1, name: 'Owned' }],
-      artists: [{ id: 'sp1', name: 'Found', source: 'deezer' }],
-    });
-    const metas = [...document.querySelectorAll('.enh-item-meta')].map((el) => el.textContent);
-    expect(metas).toEqual(['In Your Library', 'Artist']);
-  });
-
-  it('badges an artist with the source being VIEWED, not the row’s own', () => {
-    // A Deezer row read under the Spotify tab is still a Spotify result set; the
-    // vanilla derives the badge from the active tab (search.js:465-468).
-    renderResults({
-      activeSource: 'itunes',
-      artists: [{ id: 'sp1', name: 'Found', source: 'deezer' }],
-    });
-    const badge = document.querySelector('.enh-item-badge');
-    expect(badge?.textContent).toBe('Apple Music');
-    expect(badge?.className).toContain('enh-badge-itunes');
-  });
-
-  it('leaves albums, singles and tracks unbadged', () => {
-    // Only the Artists section gets a source badge — search.js passes
-    // `sourceBadge` to that one call. A badge on every card is noise the design
-    // dropped, and the lit picker icon already says where results came from.
-    renderResults({
-      albums: [album(), album({ id: 's1', album_type: 'single' })],
-      tracks: [{ id: 't1', name: 'Xtal', artist: 'Aphex Twin', album: 'SAW 85-92' }],
-    });
-    expect(document.querySelector('.enh-item-badge')).toBeNull();
   });
 
   it('reads a track’s album as the plain string the API sends', () => {
@@ -158,24 +140,56 @@ describe('SearchResults', () => {
     renderResults({
       tracks: [{ id: 't1', name: 'Xtal', artist: 'Aphex Twin', album: 'SAW 85-92' }],
     });
-    expect(document.querySelector('.enh-item-meta')?.textContent).toBe('Aphex Twin • SAW 85-92');
+    expect(within(section('enh-tracks-section')).getByText('Aphex Twin • SAW 85-92')).toBeTruthy();
   });
 
-  it('gives an album card its year, or N/A', () => {
+  it('gives an album card its year, never N/A', () => {
+    // deezer's album search has no dates; "N/A" sat on every card
     renderResults({
-      albums: [album({ release_date: '2001-10-22' }), album({ id: 'a2', release_date: undefined })],
+      albums: [
+        album({ release_date: '2001-10-22' }),
+        album({ id: 'a2', release_date: undefined, total_tracks: 12 }),
+        album({ id: 'a3', release_date: undefined }),
+      ],
     });
-    const metas = [...document.querySelectorAll('.enh-item-meta')].map((el) => el.textContent);
-    expect(metas).toEqual(['Aphex Twin • 2001', 'Aphex Twin • N/A']);
+    const grid = section('enh-albums-section');
+    expect(within(grid).getByText('Aphex Twin • 2001')).toBeTruthy();
+    expect(within(grid).getByText('Aphex Twin • 12 tracks')).toBeTruthy();
+    expect(within(grid).getByText('Aphex Twin')).toBeTruthy();
+    expect(grid.textContent).not.toContain('N/A');
   });
 
   it('hides labels under soulseek as well as youtube_videos', () => {
     // Labels are fetched additively, so both sources need the section hidden
     // explicitly (search.js:429-434).
     renderResults({ activeSource: 'soulseek', labels: [{ id: 'l1', name: 'Warp' }] });
-    expect(document.getElementById('enh-labels-section')).toBeNull();
+    expect(section('enh-labels-section')).toBeNull();
   });
 
+  it('renders a Playlists section and opens the preview on click', () => {
+    const onPlaylistClick = vi.fn();
+    renderResults({
+      albums: [album()],
+      playlists: [
+        {
+          id: 'pl-1',
+          name: 'Chill Vibes',
+          creator: 'DJ Chill',
+          track_count: 25,
+          image_url: 'cover.jpg',
+          source: 'deezer',
+        },
+      ],
+      onPlaylistClick,
+    });
+    const playlists = section('enh-playlists-section');
+    expect(playlists.textContent).toContain('by DJ Chill · 25 tracks');
+    fireEvent.click(within(playlists).getByRole('button', { name: 'Chill Vibes' }));
+    expect(onPlaylistClick).toHaveBeenCalledWith(expect.objectContaining({ id: 'pl-1' }));
+  });
+});
+
+describe('artist images', () => {
   it('marks a needs-image artist for the lazy loader, and a resolved one not', () => {
     renderResults({
       artists: [
@@ -183,12 +197,21 @@ describe('SearchResults', () => {
         { id: 'has-img', name: 'Has', source: 'spotify', image_url: 'https://cdn/a.jpg' },
       ],
     });
+    const faces = section('enh-spotify-artists-section');
     expect(
-      document.querySelector('[data-artist-id="no-img"]')?.getAttribute('data-needs-image'),
-    ).toBe('true');
+      faces.querySelector('[data-needs-image="true"][data-artist-id="no-img"]'),
+    ).not.toBeNull();
+    expect(faces.querySelector('[data-needs-image][data-artist-id="has-img"]')).toBeNull();
+  });
+
+  it('lets a library artist resolve an image too', () => {
+    // a library artist whose server has no thumb is exactly the case that needs it
+    renderResults({ dbArtists: [{ id: 7, name: 'Owned' }] });
     expect(
-      document.querySelector('[data-artist-id="has-img"]')?.getAttribute('data-needs-image'),
-    ).toBe('false');
+      section('enh-spotify-artists-section').querySelector(
+        '[data-needs-image="true"][data-artist-id="7"]',
+      ),
+    ).not.toBeNull();
   });
 
   it('prefers a lazily-resolved image over the source one', () => {
@@ -196,83 +219,88 @@ describe('SearchResults', () => {
       artists: [{ id: 'sp1', name: 'A', source: 'spotify', image_url: 'https://cdn/old.jpg' }],
       artistImages: { sp1: 'https://cdn/resolved.jpg' },
     });
-    expect(document.querySelector('img')?.getAttribute('src')).toBe('https://cdn/resolved.jpg');
+    for (const img of document.querySelectorAll('img')) {
+      expect(img.getAttribute('src')).toBe('https://cdn/resolved.jpg');
+    }
   });
 
-  it('falls back to the placeholder when an image 404s', () => {
+  it('falls back to initials when a cover 404s', () => {
     // MusicBrainz cover-art urls are built without probing, so misses are
     // routine; the browser's broken-image glyph is not acceptable.
-    renderResults({ albums: [album({ image_url: 'https://cdn/missing.jpg' })] });
-    // The CARD's image, not the spotlight's — the spotlight handles its own 404.
-    const img = document.querySelector('.enh-item-image.album-cover') as HTMLImageElement;
-    fireEvent.error(img);
-    expect(document.querySelector('.album-placeholder')?.textContent).toBe('💿');
-  });
-
-  it('opens an album, and a track, through their own handlers', () => {
-    const onAlbumClick = vi.fn();
-    const onTrackClick = vi.fn();
     renderResults({
-      albums: [album()],
-      tracks: [{ id: 't1', name: 'Xtal' }],
-      onAlbumClick,
-      onTrackClick,
+      albums: [album({ name: 'Drukqs Two', image_url: 'https://cdn/missing.jpg' })],
     });
-
-    fireEvent.click(document.querySelector('#enh-albums-list .enh-item-name')!);
-    fireEvent.click(screen.getByText('Xtal'));
-    expect(onAlbumClick).toHaveBeenCalledOnce();
-    expect(onTrackClick).toHaveBeenCalledOnce();
+    const grid = section('enh-albums-section');
+    fireEvent.error(grid.querySelector('img') as HTMLImageElement);
+    expect(grid.querySelector('img')).toBeNull();
+    expect(grid.textContent).toContain('DT');
   });
+});
 
-  it('spotlights the best match: artist over album over track', () => {
-    const onAlbumClick = vi.fn();
+describe('the top result', () => {
+  it('ranks a library artist over a found one, an album and a track', () => {
     renderResults({
       dbArtists: [{ id: 7, name: 'Owned Artist' }],
       artists: [{ id: 'sp1', name: 'Found Artist', source: 'spotify' }],
       albums: [album()],
-      onAlbumClick,
-      // inLibrary-aware, unlike the harness default — the spotlight must pass
-      // the flag for a db artist or this renders spotify/7.
-      onArtistHref: (a, inLibrary) => `/artist-detail/${inLibrary ? 'library' : 'spotify'}/${a.id}`,
+      tracks: [{ id: 't1', name: 'Xtal' }],
     });
-    // A library artist outranks everything, links where its card links, and
-    // wears the round treatment.
-    const spot = document.querySelector('#enh-top-result .enh-top-result-card')!;
-    expect(spot.querySelector('.enh-top-result-name')?.textContent).toBe('Owned Artist');
-    expect(spot.getAttribute('href')).toBe('/artist-detail/library/7');
-    expect(spot.querySelector('.enh-top-result-art')?.className).toContain('--round');
+    expect(top().textContent).toContain('Owned Artist');
+    expect(top().textContent).toContain('In your library');
+    expect(within(top()).getByRole('link', { name: 'Open artist' })).toHaveAttribute(
+      'href',
+      '/artist-detail/library/7',
+    );
   });
 
-  it('spotlights an album when no artist matched, opening via the album handler', () => {
+  it('is an album when no artist matched, and its button downloads it', () => {
     const onAlbumClick = vi.fn();
-    renderResults({ albums: [album()], onAlbumClick });
-    const spot = document.querySelector('#enh-top-result .enh-top-result-card')!;
-    expect(spot.querySelector('.enh-top-result-name')?.textContent).toBe('Drukqs');
-    fireEvent.click(spot);
-    expect(onAlbumClick).toHaveBeenCalledOnce();
+    renderResults({ albums: [album()], tracks: [{ id: 't1', name: 'Xtal' }], onAlbumClick });
+    expect(top().textContent).toContain('Drukqs');
+    fireEvent.click(within(top()).getByRole('button', { name: 'Download' }));
+    expect(onAlbumClick).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1' }));
   });
 
-  it('plays a track without also opening its download modal', () => {
+  it('is a track with play and download when only tracks came back', () => {
+    const onTrackPlay = vi.fn();
+    const onTrackClick = vi.fn();
+    const track: SearchTrack = { id: 't1', name: 'Xtal' };
+    renderResults({ tracks: [track], onTrackPlay, onTrackClick });
+    fireEvent.click(within(top()).getByRole('button', { name: 'Play' }));
+    expect(onTrackPlay).toHaveBeenCalledWith(track, undefined);
+    fireEvent.click(within(top()).getByRole('button', { name: 'Download' }));
+    expect(onTrackClick).toHaveBeenCalledWith(track);
+  });
+});
+
+describe('track rows', () => {
+  const track: SearchTrack = { id: 't1', name: 'Xtal', duration_ms: 60_000 };
+  const row = () =>
+    within(section('enh-tracks-section')).getByRole('button', { name: /^Xtal/ }) as HTMLElement;
+
+  it('opens the download from the row and from its arrow', () => {
+    const onTrackClick = vi.fn();
+    renderResults({ tracks: [track], onTrackClick });
+    fireEvent.click(row());
+    fireEvent.click(within(row()).getByRole('button', { name: 'Download Xtal' }));
+    expect(onTrackClick).toHaveBeenCalledTimes(2);
+  });
+
+  it('plays a track without also opening its download', () => {
     const onTrackClick = vi.fn();
     const onTrackPlay = vi.fn();
-    const track: SearchTrack = { id: 't1', name: 'Xtal', duration_ms: 60_000 };
     renderResults({ tracks: [track], onTrackClick, onTrackPlay });
-
-    fireEvent.click(document.querySelector('.enh-item-play-btn') as HTMLElement);
-    expect(onTrackPlay).toHaveBeenCalledOnce();
-    // The card's own click must not fire underneath the button.
+    fireEvent.click(within(row()).getByRole('button', { name: /Stream this track/ }));
+    expect(onTrackPlay).toHaveBeenCalledWith(track, undefined);
     expect(onTrackClick).not.toHaveBeenCalled();
   });
 
   it('hands the whole library row to the play handler for an owned track', () => {
     // playLibraryTrack needs the library id, title, thumb and album/artist
-    // names, none of which the search result carries — only the library check
-    // knows them. The vanilla swapped the button's listener by cloning it; a
-    // prop is the same decision made once.
+    // names, none of which the search result carries. only the library check
+    // knows them.
     const onTrackPlay = vi.fn();
-    const track: SearchTrack = { id: 't1', name: 'Xtal', duration_ms: 60_000 };
-    const row = {
+    const libraryRow = {
       in_library: true,
       track_id: 99,
       title: 'Xtal',
@@ -286,33 +314,14 @@ describe('SearchResults', () => {
       ownership: {
         ...EMPTY_OWNERSHIP,
         ownedTracks: new Set([trackIdentity(track)]),
-        libraryTracks: new Map([[trackIdentity(track), row]]),
+        libraryTracks: new Map([[trackIdentity(track), libraryRow]]),
       },
     });
-
-    expect(document.querySelector('.enh-item-play-btn')?.getAttribute('title')).toBe(
-      'Play from library',
-    );
-    fireEvent.click(document.querySelector('.enh-item-play-btn') as HTMLElement);
-    expect(onTrackPlay).toHaveBeenCalledWith(track, row);
-  });
-
-  it('streams a track it does not own, and says so', () => {
-    const onTrackPlay = vi.fn();
-    const track: SearchTrack = { id: 't1', name: 'Xtal', duration_ms: 60_000 };
-    renderResults({ tracks: [track], onTrackPlay });
-
-    expect(document.querySelector('.enh-item-play-btn')?.getAttribute('title')).toBe(
-      'Stream this track',
-    );
-    fireEvent.click(document.querySelector('.enh-item-play-btn') as HTMLElement);
-    expect(onTrackPlay).toHaveBeenCalledWith(track, undefined);
+    fireEvent.click(within(row()).getByRole('button', { name: /Play from library/ }));
+    expect(onTrackPlay).toHaveBeenCalledWith(track, libraryRow);
   });
 
   it('shows a track ONE badge, never both', () => {
-    // The vanilla's else-if. Both badges are absolutely positioned at the same
-    // corner (style.css:40405/40436), so two would sit on top of each other.
-    const track: SearchTrack = { id: 't1', name: 'Xtal' };
     renderResults({
       tracks: [track],
       ownership: {
@@ -321,112 +330,100 @@ describe('SearchResults', () => {
         wishlistTracks: new Set([trackIdentity(track)]),
       },
     });
-    expect(document.querySelector('.enh-item-lib-badge')).not.toBeNull();
-    expect(document.querySelector('.enh-item-wishlist-badge')).toBeNull();
+    expect(within(row()).getByText('In library')).toBeTruthy();
+    expect(within(row()).queryByText('In wishlist')).toBeNull();
   });
 
-  it('calls a wishlisted track "In Wishlist"', () => {
-    const track: SearchTrack = { id: 't1', name: 'Xtal' };
+  it('calls a wishlisted track "In wishlist"', () => {
     renderResults({
       tracks: [track],
       ownership: { ...EMPTY_OWNERSHIP, wishlistTracks: new Set([trackIdentity(track)]) },
     });
-    expect(document.querySelector('.enh-item-wishlist-badge')?.textContent).toBe('In Wishlist');
+    expect(within(row()).getByText('In wishlist')).toBeTruthy();
+  });
+});
+
+describe('the filter', () => {
+  const many = (n: number, over: Partial<SearchAlbum> = {}) =>
+    Array.from({ length: n }, (_, i) => album({ id: `a${i}`, name: `Album ${i}`, ...over }));
+  const tracks = (n: number): SearchTrack[] =>
+    Array.from({ length: n }, (_, i) => ({ id: `t${i}`, name: `Track ${i}` }));
+
+  it('previews each section under All and offers the rest', () => {
+    const onFilter = vi.fn();
+    renderResults({ albums: many(15), tracks: tracks(9), onFilter });
+    expect(section('enh-albums-section').querySelectorAll('[role="button"]').length).toBe(12);
+    expect(screen.getAllByText(/^Track \d$/).length).toBe(5);
+
+    fireEvent.click(within(section('enh-albums-section')).getByText('Show all 15'));
+    expect(onFilter).toHaveBeenCalledWith('albums');
+    fireEvent.click(screen.getByText('Show all 9'));
+    expect(onFilter).toHaveBeenCalledWith('tracks');
   });
 
-  it('staggers the badges with one counter across all three sections', () => {
-    // The badges animate on arrival (libBadgeFadeIn); the vanilla's 30ms
-    // setTimeout ladder made them cascade instead of popping together, and it
-    // used ONE counter for albums, singles and tracks alike.
-    const owned = [
-      album({ id: 'a1', album_type: 'album' }),
-      album({ id: 's1', album_type: 'single' }),
-    ];
-    const track: SearchTrack = { id: 't1', name: 'Xtal' };
-    renderResults({
-      albums: owned,
-      tracks: [track],
-      ownership: {
-        ...EMPTY_OWNERSHIP,
-        ownedAlbums: new Set(owned.map(albumIdentity)),
-        ownedTracks: new Set([trackIdentity(track)]),
-      },
-    });
+  it('shows one kind in full, and nothing else', () => {
+    renderResults({ albums: many(15), tracks: tracks(9), filter: 'tracks' });
+    expect(top()).toBeNull();
+    expect(section('enh-albums-section')).toBeNull();
+    expect(screen.getAllByText(/^Track \d$/).length).toBe(9);
+    expect(screen.queryByText(/^Show all/)).toBeNull();
+  });
 
-    const delays = [...document.querySelectorAll('.enh-item-lib-badge')].map(
-      (el) => (el as HTMLElement).style.animationDelay,
+  it('counts what came back, labels out under files', () => {
+    const counts = resultCounts({
+      dbArtists: [{ id: 1 }],
+      artists: [{ id: 2 }],
+      albums: [album(), album({ id: 's', album_type: 'single' })],
+      tracks: [],
+      playlists: [],
+      labels: [{ id: 'l' }],
+      activeSource: 'spotify',
+    });
+    // the lone single folds into albums, so the pills count it there
+    expect(counts).toEqual({
+      artists: 2,
+      albums: 2,
+      singles: 0,
+      tracks: 0,
+      playlists: 0,
+      labels: 1,
+    });
+    expect(
+      resultCounts({
+        dbArtists: [],
+        artists: [],
+        albums: [],
+        tracks: [],
+        playlists: [],
+        labels: [{ id: 'l' }],
+        activeSource: 'soulseek',
+      }).labels,
+    ).toBe(0);
+  });
+
+  it('pills only the kinds that came back, and presses the current one', () => {
+    const onFilter = vi.fn();
+    render(
+      <FilterPills
+        counts={{ artists: 2, albums: 1, singles: 0, tracks: 4, playlists: 0, labels: 0 }}
+        filter="tracks"
+        onFilter={onFilter}
+        servedBy="Deezer"
+      />,
     );
-    expect(delays).toEqual(['0ms', '30ms', '60ms']);
+    const pills = screen.getAllByRole('button').map((b) => b.textContent);
+    expect(pills).toEqual(['All', 'Artists2', 'Albums1', 'Tracks4']);
+    expect(screen.getByRole('button', { name: 'Tracks4' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('from Deezer')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    expect(onFilter).toHaveBeenCalledWith('all');
   });
+});
 
-  it('does not spend a stagger slot on an unbadged card', () => {
-    const rows = [album({ id: 'a1' }), album({ id: 'a2' })];
-    renderResults({
-      albums: rows,
-      ownership: { ...EMPTY_OWNERSHIP, ownedAlbums: new Set([albumIdentity(rows[1])]) },
-    });
-    // The owned album is second, but it is the FIRST badge, so it starts at 0.
-    const badge = document.querySelector('.enh-item-lib-badge') as HTMLElement;
-    expect(badge.style.animationDelay).toBe('0ms');
-  });
-
-  it('lets a library artist resolve an image too', () => {
-    // renderCompactSection stamped the lazy-load attributes on every artist card
-    // with an id, library ones included — a server with no thumb is exactly the
-    // case that needs resolving.
-    renderResults({ dbArtists: [{ id: 7, name: 'Owned' }] });
-    const card = document.querySelector('[data-artist-id="7"]');
-    expect(card).not.toBeNull();
-    expect(card?.getAttribute('data-needs-image')).toBe('true');
-    expect(card?.getAttribute('data-artist-name')).toBe('Owned');
-  });
-
-  it('shows a library artist a resolved image', () => {
-    renderResults({
-      dbArtists: [{ id: 7, name: 'Owned' }],
-      artistImages: { 7: 'https://cdn/a.jpg' },
-    });
-    expect(document.querySelector('img')?.getAttribute('src')).toBe('https://cdn/a.jpg');
-  });
-
-  it('pairs the two artist sections inside the wrapper that lays them out', () => {
-    // Without .enh-artists-wrapper the two sections stack, and without
-    // .enh-artist-section each grows the card chrome (border, background,
-    // shadow) that the design strips from exactly these two.
-    renderResults({
-      dbArtists: [{ id: 1, name: 'Owned' }],
-      artists: [{ id: 'sp1', name: 'Found', source: 'spotify' }],
-    });
-    const wrapper = document.querySelector('.enh-artists-wrapper');
-    expect(wrapper).not.toBeNull();
-    expect(wrapper?.querySelectorAll('.enh-dropdown-section')).toHaveLength(2);
-    expect(document.getElementById('enh-db-artists-section')?.className).toContain(
-      'enh-artist-section',
-    );
-    expect(document.getElementById('enh-spotify-artists-section')?.className).toContain(
-      'enh-artist-section',
-    );
-    // Albums are NOT in the wrapper and keep the normal card chrome.
-    expect(document.getElementById('enh-albums-section')).toBeNull();
-  });
-
-  it('leaves out the wrapper entirely when neither artist section has results', () => {
-    // The wrapper carries its own 24px margin-bottom, so an empty one is a gap
-    // above Albums with nothing in it.
-    renderResults({ albums: [album()] });
-    expect(document.querySelector('.enh-artists-wrapper')).toBeNull();
-  });
-
-  it('keeps the wrapper when only one of the two has results', () => {
-    renderResults({ artists: [{ id: 'sp1', name: 'Found', source: 'spotify' }] });
-    expect(document.querySelector('.enh-artists-wrapper')).not.toBeNull();
-    expect(document.getElementById('enh-db-artists-section')).toBeNull();
-  });
-
+describe('videos', () => {
   it('shows ONLY the video grid for the youtube_videos source', () => {
-    // search.js:178-186 hides all six sections for this source. Labels matter
-    // most: they are fetched additively, so without the rule a video search
-    // sprouts a Labels section the vanilla never showed.
+    // Labels matter most: they are fetched additively, so without the rule a
+    // video search sprouts a Labels section the vanilla never showed.
     renderResults({
       activeSource: 'youtube_videos',
       videos: [{ video_id: 'v1', title: 'Clip', channel: 'Ch', duration: 215 }],
@@ -434,95 +431,131 @@ describe('SearchResults', () => {
       albums: [album()],
       artists: [{ id: 'sp1', name: 'Found', source: 'spotify' }],
     });
-
-    expect(document.getElementById('enh-videos-section')).not.toBeNull();
+    expect(section('enh-videos-section')).not.toBeNull();
     // Seconds, not milliseconds — a different unit from track durations.
     expect(screen.getByText('3:35')).toBeInTheDocument();
-    expect(document.getElementById('enh-labels-section')).toBeNull();
-    expect(document.getElementById('enh-albums-section')).toBeNull();
-    expect(document.querySelector('.enh-artists-wrapper')).toBeNull();
+    expect(section('enh-labels-section')).toBeNull();
+    expect(section('enh-albums-section')).toBeNull();
+    expect(section('enh-spotify-artists-section')).toBeNull();
+    expect(top()).toBeNull();
   });
 
   it('says so when a video search found nothing, rather than going blank', () => {
     renderResults({ activeSource: 'youtube_videos', videos: [] });
-    expect(document.getElementById('enh-videos-section')).not.toBeNull();
-    expect(screen.getByText('No music videos found')).toBeInTheDocument();
+    expect(screen.getByText('No music videos found.')).toBeInTheDocument();
   });
 
   it('never renders a video grid under a metadata source', () => {
     renderResults({ albums: [album()] });
-    expect(document.getElementById('enh-videos-section')).toBeNull();
+    expect(section('enh-videos-section')).toBeNull();
   });
+});
 
-  it('renders a Playlists section when playlists are present and handles clicks', () => {
-    const onPlaylistClick = vi.fn();
-    renderResults({
-      playlists: [
-        {
-          id: 'pl-1',
-          name: 'Chill Vibes',
-          creator: 'DJ Chill',
-          track_count: 25,
-          image_url: 'cover.jpg',
-          source: 'deezer',
-        },
-      ],
-      onPlaylistClick,
-    });
-
-    const section = document.getElementById('enh-playlists-section');
-    expect(section).not.toBeNull();
-    expect(section?.textContent).toContain('Playlists');
-    expect(section?.textContent).toContain('Chill Vibes');
-    expect(section?.textContent).toContain('by DJ Chill');
-
-    const card = section?.querySelector('.enh-compact-item');
-    expect(card).not.toBeNull();
-    fireEvent.click(card!);
-    expect(onPlaylistClick).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'pl-1', name: 'Chill Vibes' }),
+describe('the layout', () => {
+  it('shows one measured row per shelf, with Show all when more exist', () => {
+    // 1000px fits 5 covers of 168 + 14 gap
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
     );
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+    try {
+      const onFilter = vi.fn();
+      renderResults({
+        albums: Array.from({ length: 9 }, (_, i) => album({ id: `a${i}`, name: `LP ${i}` })),
+        onFilter,
+      });
+      const albums = section('enh-albums-section');
+      expect(within(albums).getAllByRole('button', { name: /^LP \d$/ })).toHaveLength(5);
+      fireEvent.click(within(albums).getByRole('button', { name: 'Show all 9' }));
+      expect(onFilter).toHaveBeenCalledWith('albums');
+    } finally {
+      width.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
-  it('renders top result play affordance and card floating play button', () => {
+  it('offers no Show all when the row holds everything', () => {
     renderResults({ albums: [album()] });
-    const spot = document.querySelector('#enh-top-result .enh-top-result-card')!;
-    expect(spot.querySelector('.enh-top-result-play-affordance')).not.toBeNull();
-    expect(document.querySelector('.enh-card-floating-play')).not.toBeNull();
+    expect(within(section('enh-albums-section')).queryByText(/Show all/)).toBeNull();
+  });
+
+  it('shows one face for a library artist and its found twin', () => {
+    renderResults({
+      dbArtists: [{ id: 7, name: 'U2' }],
+      artists: [
+        { id: 'd1', name: 'U2', source: 'deezer', followers: 9_800_000 },
+        { id: 'd2', name: 'U2', source: 'deezer', followers: 1_200 },
+      ],
+    });
+    const faces = section('enh-spotify-artists-section').querySelectorAll('a');
+    expect(faces).toHaveLength(2);
+    expect(faces[0].textContent).toContain('In your library');
+    // the namesake that is left says who it is
+    expect(faces[1].textContent).toContain('1.2K fans');
+  });
+
+  it('renders labels as quiet tiles, not initials circles', () => {
+    renderResults({ labels: [{ id: 'l1', name: 'U2 Limited', type: 'Holding', area: 'Ireland' }] });
+    const link = within(section('enh-labels-section')).getByRole('link');
+    expect(within(link).getByText('U2 Limited')).toBeTruthy();
+    expect(within(link).getByText('Record label · Ireland')).toBeTruthy();
+    expect(link.getAttribute('href')).toBe('/label-detail/l1');
+    // the musicbrainz type means nothing to a user
+    expect(section('enh-labels-section').textContent).not.toContain('Holding');
+  });
+
+  it('dims a track title release note in its own span', () => {
+    renderResults({
+      tracks: [{ id: 't1', name: 'Vertigo (Remastered 2024)', artist: 'U2', album: 'Bomb' }],
+    });
+    const row = within(section('enh-tracks-section')).getByRole('button', { name: /^Vertigo/ });
+    expect(row.textContent).toContain('Vertigo');
+    expect(within(row).getByText('(Remastered 2024)').tagName).toBe('SPAN');
+  });
+
+  it('ranks playlists that name the query first', () => {
+    renderResults({
+      query: 'u2',
+      playlists: [
+        { id: 'p1', name: 'Joe Joe Vault II', creator: 'jaws2u4' },
+        { id: 'p2', name: '100% U2', creator: 'Deezer Artist Editor' },
+      ],
+    });
+    const names = within(section('enh-playlists-section'))
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label'));
+    expect(names).toEqual(['100% U2', 'Joe Joe Vault II']);
   });
 });
 
 /**
- * Asserted against style.css because jsdom has no layout: it cannot notice a
- * card clipped to its cover's height, so a result showing art and no title
- * looks identical to a correct one in every rendered test.
+ * found by measuring in chromium, invisible to jsdom. each one sounded fine
+ * the first way and did nothing.
  */
-describe('an album result shows its title', () => {
-  // Comments STRIPPED first. The comment above this very rule explains the fix
-  // by naming the declaration, so matching raw text made the guard pass on its
-  // own prose with the declaration deleted.
-  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8').replace(
-    /\/\*[\s\S]*?\*\//g,
-    '',
-  );
+describe('the layout css', () => {
+  const css = readFileSync(resolve(__dirname, 'search.module.css'), 'utf8');
+  const rule = (selector: string) => {
+    const at = css.indexOf(`\n${selector} {`);
+    return at < 0 ? '' : css.slice(at, css.indexOf('}', at));
+  };
 
-  it('the search card opts OUT of the square it inherits', () => {
-    // A bare `.album-card` rule belongs to the artist-detail release card,
-    // which is deliberately square with its text overlaid on the art. This
-    // card shares the class name and has the opposite design — title and meta
-    // BELOW the cover. Inheriting `aspect-ratio: 1` pinned it to the cover's
-    // height and `overflow: hidden` clipped every word, so search results were
-    // art with no title at all.
-    const block = /\.enh-compact-item\.album-card\s*\{([^}]*)\}/.exec(css);
-    expect(block, 'no .enh-compact-item.album-card rule').toBeTruthy();
-    expect(block![1]).toMatch(/aspect-ratio:\s*auto/);
+  it('puts the container query on the column, not the top card', () => {
+    // on .top itself the @container rule never matched and the card never stacked
+    expect(rule('.topCol')).toContain('container-type: inline-size');
+    expect(rule('.top')).not.toContain('container-type');
   });
 
-  it('the bare .album-card rule still IS square, so this stays necessary', () => {
-    // If that rule ever stops forcing a square, the opt-out becomes dead code
-    // rather than load-bearing — and this test should be the thing that says so.
-    const bare = /\n\.album-card\s*\{([^}]*)\}/.exec(css);
-    expect(bare, 'the colliding rule vanished — re-check the opt-out').toBeTruthy();
-    expect(bare![1]).toMatch(/aspect-ratio:\s*1/);
+  it('pulls the shelves back by the card padding so art meets the heading edge', () => {
+    expect(rule('.covers')).toContain('margin-inline: -10px');
+    expect(rule('.faces')).toContain('margin-inline: -10px');
+    expect(rule('.coverCard')).toContain('padding: 10px');
   });
 });

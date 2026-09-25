@@ -1,8 +1,7 @@
 import { cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { BasicAlbum, BasicResult, BasicTrack } from '../-basic.types';
-import type { BasicResultActions } from './basic-results';
+import type { BasicAlbum, BasicResult, BasicTrack, DownloadTarget } from '../-basic.types';
 
 import { BasicResults } from './basic-results';
 
@@ -14,7 +13,7 @@ function track(over: Partial<BasicTrack> = {}): BasicTrack {
     username: 'peer',
     filename: 'a.flac',
     size: 10 * 1024 * 1024,
-    bitrate: 320,
+    bitrate: 1411,
     duration: 200_000,
     quality: 'flac',
     free_upload_slots: 1,
@@ -51,278 +50,135 @@ function album(over: Partial<BasicAlbum> = {}): BasicAlbum {
   };
 }
 
-function noopActions(): BasicResultActions {
-  return {
-    onDownloadTrack: vi.fn(),
-    onStreamTrack: vi.fn(),
-    onMatchedTrack: vi.fn(),
-    onDownloadAlbum: vi.fn(),
-    onMatchedAlbum: vi.fn(),
-    onDownloadAlbumTrack: vi.fn(),
-    onStreamAlbumTrack: vi.fn(),
-    onMatchedAlbumTrack: vi.fn(),
-  };
-}
-
-function renderResults(results: BasicResult[] = [track()], actions = noopActions()) {
+function renderResults(results: BasicResult[] = [track()]) {
+  const onDownload = vi.fn<(target: DownloadTarget) => void>();
   const view = render(
-    <BasicResults results={results} actions={actions} placeholder="Nothing here." />,
+    <BasicResults results={results} placeholder="Nothing here." onDownload={onDownload} />,
   );
-  return { ...view, actions };
+  return { ...view, onDownload };
 }
 
-describe('empty state', () => {
-  it('renders the placeholder it is given, not a hardcoded one', () => {
-    // Two different sentences in the vanilla — "Enter a search term to get
-    // started." before any search, "No search results found." after a failed
-    // one. Accusing a fresh page of a failed search is the bug this prevents.
-    const { container } = render(
-      <BasicResults results={[]} actions={noopActions()} placeholder="Enter a search term." />,
-    );
-    expect(container.querySelector('.search-results-placeholder p')?.textContent).toBe(
-      'Enter a search term.',
-    );
-  });
+const rows = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll<HTMLElement>('[data-result-kind]'));
 
-  it('keeps the results container id even when empty', () => {
-    // helper.js's tour targets #search-results-area; losing it on the empty
-    // state would break the tour step for exactly the users being shown around.
-    const { container } = render(
-      <BasicResults results={[]} actions={noopActions()} placeholder="x" />,
-    );
+describe('empty', () => {
+  it('shows the placeholder as the status line', () => {
+    const { container } = renderResults([]);
+    expect(container.querySelector('#search-status-text')?.textContent).toBe('Nothing here.');
     expect(container.querySelector('#search-results-area')).not.toBeNull();
   });
 });
 
-describe('track cards', () => {
-  it('renders the title, artist, size, quality and bitrate', () => {
-    const { container } = renderResults([track()]);
-    const card = container.querySelector('.track-result-card') as HTMLElement;
-    expect(within(card).getByText('Xtal')).toBeTruthy();
-    expect(within(card).getByText('by Aphex Twin')).toBeTruthy();
-    expect(card.querySelector('.track-details')?.textContent).toContain('10.0 MB');
-    expect(card.querySelector('.track-details')?.textContent).toContain('flac');
-    expect(card.querySelector('.track-details')?.textContent).toContain('320kbps');
+describe('a track row', () => {
+  it('reads title, then artist and album', () => {
+    const { container } = renderResults();
+    const row = rows(container)[0];
+    expect(row.textContent).toContain('Xtal');
+    expect(row.textContent).toContain('Aphex Twin');
+    expect(row.textContent).toContain('SAW');
   });
 
-  it('falls back for a result with no title or artist', () => {
-    const { container } = renderResults([track({ title: null, artist: null })]);
-    expect(container.querySelector('.track-title')?.textContent).toBe('Unknown Title');
-    expect(container.querySelector('.track-artist')?.textContent).toBe('by Unknown Artist');
+  it('badges lossless by depth and rate, not kbps', () => {
+    const { container } = renderResults();
+    expect(rows(container)[0].textContent).toContain('FLAC 16/44.1');
+    expect(rows(container)[0].textContent).not.toContain('1411');
   });
 
-  it('omits the bitrate rather than printing a zero', () => {
-    const { container } = renderResults([track({ bitrate: null })]);
-    expect(container.querySelector('.track-details')?.textContent).not.toContain('kbps');
-  });
-
-  it('wires the three actions to the rendered index', () => {
-    const actions = noopActions();
-    const { container } = renderResults(
-      [track({ title: 'first' }), track({ title: 'second' })],
-      actions,
-    );
-    const second = container.querySelectorAll('.track-result-card')[1];
-
-    fireEvent.click(second.querySelector('.track-download-btn') as HTMLElement);
-    fireEvent.click(second.querySelector('.track-stream-btn') as HTMLElement);
-    fireEvent.click(second.querySelector('.track-matched-btn') as HTMLElement);
-
-    expect(actions.onDownloadTrack).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'second' }),
-      1,
-    );
-    expect(actions.onStreamTrack).toHaveBeenCalledWith(expect.anything(), 1);
-    expect(actions.onMatchedTrack).toHaveBeenCalledWith(expect.anything(), 1);
-  });
-
-  it('renders the uploader as chat.js"s delegated message button', () => {
-    // chat.js binds ONE capture-phase listener on document for
-    // [data-chat-msg-user]; the attribute is the whole contract.
-    const { container } = renderResults([track({ username: 'somepeer' })]);
-    const button = container.querySelector('.track-uploader .chat-user-link') as HTMLElement;
-    expect(button.getAttribute('data-chat-msg-user')).toBe('somepeer');
-    expect(button.textContent).toBe('somepeer');
-    expect(button.getAttribute('title')).toBe('Message this user on Soulseek');
-  });
-
-  it('shows Unknown for a missing uploader but sends no name to chat', () => {
-    const { container } = renderResults([track({ username: '' })]);
-    const button = container.querySelector('.chat-user-link') as HTMLElement;
-    expect(button.textContent).toBe('Unknown');
-    expect(button.getAttribute('data-chat-msg-user')).toBe('');
-  });
-});
-
-describe('album cards', () => {
-  it('renders the header with the track count, size and dominant quality', () => {
-    // The vanilla read `result.quality` here, which an album never carries, so
-    // every album — FLAC included — was labelled "Mixed".
-    const { container } = renderResults([album()]);
-    expect(container.querySelector('.album-title')?.textContent).toBe('Selected Ambient Works');
-    const details = container.querySelector('.album-details')?.textContent ?? '';
-    expect(details).toContain('2 tracks');
-    expect(details).toContain('80.0 MB');
-    expect(details).toContain('flac');
-    expect(details).not.toContain('Mixed');
-  });
-
-  it('starts collapsed and expands on a header click', () => {
-    const { container } = renderResults([album()]);
-    const list = container.querySelector('.album-track-list') as HTMLElement;
-    const indicator = container.querySelector('.album-expand-indicator') as HTMLElement;
-
-    expect(list.style.display).toBe('none');
-    expect(indicator.textContent).toBe('▶');
-
-    fireEvent.click(container.querySelector('.album-card-header') as HTMLElement);
-
-    expect(list.style.display).toBe('block');
-    expect(indicator.textContent).toBe('▼');
-    expect(container.querySelector('.album-result-card')?.className).toContain('expanded');
-  });
-
-  it('collapses again on a second click', () => {
-    const { container } = renderResults([album()]);
-    const header = container.querySelector('.album-card-header') as HTMLElement;
-    fireEvent.click(header);
-    fireEvent.click(header);
-    expect((container.querySelector('.album-track-list') as HTMLElement).style.display).toBe(
-      'none',
-    );
-  });
-
-  it('expands each album independently', () => {
-    const { container } = renderResults([album({ album_title: 'A' }), album({ album_title: 'B' })]);
-    fireEvent.click(container.querySelectorAll('.album-card-header')[1] as HTMLElement);
-    const lists = container.querySelectorAll('.album-track-list');
-    expect((lists[0] as HTMLElement).style.display).toBe('none');
-    expect((lists[1] as HTMLElement).style.display).toBe('block');
-  });
-
-  it('does not toggle when an action button inside the header is clicked', () => {
-    // The download buttons live INSIDE the clickable header; without
-    // stopPropagation every download would also expand the folder.
-    const actions = noopActions();
-    const { container } = renderResults([album()], actions);
-    fireEvent.click(container.querySelector('.album-download-btn') as HTMLElement);
-
-    expect(actions.onDownloadAlbum).toHaveBeenCalled();
-    expect((container.querySelector('.album-track-list') as HTMLElement).style.display).toBe(
-      'none',
-    );
-  });
-
-  it('collapses everything when the result list changes', () => {
-    // Index 2 in a new result set is a different album, so a retained
-    // expansion opens a folder the user never clicked.
-    const { container, rerender } = renderResults([album()]);
-    fireEvent.click(container.querySelector('.album-card-header') as HTMLElement);
-    expect((container.querySelector('.album-track-list') as HTMLElement).style.display).toBe(
-      'block',
-    );
-
-    rerender(
-      <BasicResults
-        results={[album({ album_title: 'Other' })]}
-        actions={noopActions()}
-        placeholder="x"
-      />,
-    );
-
-    expect((container.querySelector('.album-track-list') as HTMLElement).style.display).toBe(
-      'none',
-    );
-  });
-
-  it('wires the album actions', () => {
-    const actions = noopActions();
-    const { container } = renderResults([track(), album()], actions);
-    fireEvent.click(container.querySelector('.album-matched-btn') as HTMLElement);
-    // Index 1 — the album's position in the RENDERED list, which is what
-    // window.currentSearchResults publishes.
-    expect(actions.onMatchedAlbum).toHaveBeenCalledWith(expect.anything(), 1);
-  });
-});
-
-describe('album track rows', () => {
-  it('renders each track with its number, artist, size and quality', () => {
-    const { container } = renderResults([album()]);
-    fireEvent.click(container.querySelector('.album-card-header') as HTMLElement);
-
-    const rows = container.querySelectorAll('.track-item');
-    expect(rows).toHaveLength(2);
-    expect(rows[0].querySelector('.track-item-title')?.textContent).toBe('Xtal');
-    expect(rows[0].querySelector('.track-item-details')?.textContent).toContain('1. ');
-    expect(rows[0].querySelector('.track-item-details')?.textContent).toContain('Aphex Twin');
-  });
-
-  it('names an untitled track by its position', () => {
-    const { container } = renderResults([album({ tracks: [track({ title: null })] })]);
-    fireEvent.click(container.querySelector('.album-card-header') as HTMLElement);
-    expect(container.querySelector('.track-item-title')?.textContent).toBe('Track 1');
-  });
-
-  it("falls back to the album's artist for a track that has none", () => {
+  it('badges lossy by bitrate', () => {
     const { container } = renderResults([
-      album({ artist: 'Album Artist', tracks: [track({ artist: null })] }),
+      track({ quality: 'mp3', bitrate: 320, bit_depth: null, sample_rate: null }),
     ]);
-    fireEvent.click(container.querySelector('.album-card-header') as HTMLElement);
-    expect(container.querySelector('.track-item-details')?.textContent).toContain('Album Artist');
+    expect(rows(container)[0].textContent).toContain('MP3 320');
   });
 
-  it('passes both indices to the track actions', () => {
-    const actions = noopActions();
-    const { container } = renderResults([album()], actions);
-    fireEvent.click(container.querySelector('.album-card-header') as HTMLElement);
+  it('shows size and length', () => {
+    const { container } = renderResults();
+    expect(rows(container)[0].textContent).toContain('10.0 MB');
+    expect(rows(container)[0].textContent).toContain('3:20');
+  });
 
-    const second = container.querySelectorAll('.track-item')[1];
-    fireEvent.click(second.querySelector('.track-download-btn') as HTMLElement);
-    fireEvent.click(second.querySelector('.track-stream-btn') as HTMLElement);
-    fireEvent.click(second.querySelector('.track-matched-btn') as HTMLElement);
+  it('keeps the uploader hook chat.js listens for', () => {
+    const { container } = renderResults();
+    const link = container.querySelector<HTMLElement>('.chat-user-link');
+    expect(link?.dataset.chatMsgUser).toBe('peer');
+  });
 
-    expect(actions.onDownloadAlbumTrack).toHaveBeenCalledWith(expect.anything(), 0, 1);
-    expect(actions.onStreamAlbumTrack).toHaveBeenCalledWith(expect.anything(), 0, 1);
-    expect(actions.onMatchedAlbumTrack).toHaveBeenCalledWith(expect.anything(), 0, 1);
+  it('has exactly one action: Download, which asks for the track', () => {
+    const { container, onDownload } = renderResults();
+    const buttons = within(rows(container)[0]).getAllByRole('button');
+    // the uploader link and the download button, nothing else
+    expect(buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual([
+      'peer',
+      'Download Xtal',
+    ]);
+    fireEvent.click(within(rows(container)[0]).getByRole('button', { name: 'Download Xtal' }));
+    expect(onDownload).toHaveBeenCalledWith({
+      kind: 'track',
+      track: expect.objectContaining({ title: 'Xtal' }),
+    });
+  });
+
+  it('no stream and no matched buttons anywhere', () => {
+    const { container } = renderResults([track(), album()]);
+    expect(container.textContent).not.toMatch(/Stream|Matched/);
   });
 });
 
-describe('disc separators', () => {
-  it('renders none for a single-disc album', () => {
+describe('an album row', () => {
+  it('says how many tracks and the year', () => {
     const { container } = renderResults([album()]);
-    fireEvent.click(container.querySelector('.album-card-header') as HTMLElement);
-    expect(container.querySelectorAll('.disc-separator')).toHaveLength(0);
+    expect(rows(container)[0].textContent).toContain('2 tracks');
+    expect(rows(container)[0].textContent).toContain('1992');
   });
 
-  it('labels every disc when the track numbers reset', () => {
-    const tracks = [1, 2, 1, 2].map((n, i) =>
-      track({ track_number: n, filename: `t${i}.flac`, title: `T${i}` }),
+  it('downloads the whole album', () => {
+    const a = album();
+    const { container, onDownload } = renderResults([a]);
+    fireEvent.click(
+      within(rows(container)[0]).getByRole('button', { name: 'Download Selected Ambient Works' }),
     );
-    const { container } = renderResults([album({ tracks })]);
-    fireEvent.click(container.querySelector('.album-card-header') as HTMLElement);
-
-    const separators = [...container.querySelectorAll('.disc-separator')].map((n) => n.textContent);
-    expect(separators).toEqual(['Disc 1', 'Disc 2']);
+    expect(onDownload).toHaveBeenCalledWith({ kind: 'album', album: a });
   });
 
-  it('numbers a third disc correctly', () => {
-    const tracks = [1, 2, 1, 1].map((n, i) => track({ track_number: n, filename: `t${i}.flac` }));
-    const { container } = renderResults([album({ tracks })]);
-    fireEvent.click(container.querySelector('.album-card-header') as HTMLElement);
-
-    const separators = [...container.querySelectorAll('.disc-separator')].map((n) => n.textContent);
-    expect(separators).toEqual(['Disc 1', 'Disc 2', 'Disc 3']);
+  it('hides its tracks until expanded', () => {
+    const { container, getByRole } = renderResults([album()]);
+    expect(container.textContent).not.toContain('Tha');
+    const toggle = getByRole('button', { name: /Show tracks of/ });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Tha');
   });
 
-  it('carries the inline styling that is its only appearance', () => {
-    // `.disc-separator` has no stylesheet rule; drop the inline styles and the
-    // separators render as plain unstyled text.
-    const tracks = [1, 1].map((n, i) => track({ track_number: n, filename: `t${i}.flac` }));
-    const { container } = renderResults([album({ tracks })]);
-    fireEvent.click(container.querySelector('.album-card-header') as HTMLElement);
+  it('a track inside it downloads with the album kept', () => {
+    const a = album();
+    const { getByRole, onDownload } = renderResults([a]);
+    fireEvent.click(getByRole('button', { name: /Show tracks of/ }));
+    fireEvent.click(getByRole('button', { name: 'Download Tha' }));
+    expect(onDownload).toHaveBeenCalledWith({ kind: 'albumTrack', album: a, trackIndex: 1 });
+  });
 
-    const first = container.querySelector('.disc-separator') as HTMLElement;
-    expect(first.style.fontWeight).toBe('600');
-    expect(first.style.borderBottom).toBeTruthy();
+  it('marks discs when track numbers start over', () => {
+    const { container, getByRole } = renderResults([
+      album({
+        tracks: [
+          track({ track_number: 1 }),
+          track({ track_number: 2, filename: 'b' }),
+          track({ track_number: 1, filename: 'c', title: 'Second disc' }),
+        ],
+      }),
+    ]);
+    fireEvent.click(getByRole('button', { name: /Show tracks of/ }));
+    expect(container.textContent).toContain('Disc 1');
+    expect(container.textContent).toContain('Disc 2');
+  });
+
+  it('collapses when the results change underneath', () => {
+    const onDownload = vi.fn();
+    const first = [album()];
+    const view = render(<BasicResults results={first} placeholder="" onDownload={onDownload} />);
+    fireEvent.click(view.getByRole('button', { name: /Show tracks of/ }));
+    expect(view.container.textContent).toContain('Tha');
+    view.rerender(<BasicResults results={[album()]} placeholder="" onDownload={onDownload} />);
+    expect(view.container.textContent).not.toContain('Tha');
   });
 });

@@ -206,6 +206,8 @@ export interface AutoSyncCardRow {
   cadence: string;
   enabled: boolean;
   nextRun: string | null;
+  /** next_run as epoch ms for sorting; null when absent or unparseable. */
+  nextRunAt: number | null;
   coverage: AutoSyncRowCoverage | null;
   lastRun: AutoSyncRowLastRun | null;
   running: AutoSyncRowRunning | null;
@@ -288,6 +290,7 @@ export function autoSyncCardRows(state: AutoSyncSeamState, nowMs: number): AutoS
       cadence,
       enabled,
       nextRun: nextRunText(nextRun, nowMs),
+      nextRunAt: nextRun && Number.isFinite(parseDbUtc(nextRun)) ? parseDbUtc(nextRun) : null,
       coverage: coverageFor(playlist),
       lastRun: lastRunFor(key, state.runHistory, nowMs),
       running: runningFor(playlist),

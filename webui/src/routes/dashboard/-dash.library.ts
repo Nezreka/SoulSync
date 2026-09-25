@@ -89,7 +89,10 @@ function capitalize(s: string | null | undefined): string {
 
 /** The vanilla's DB-size format: sub-MB flips to KB. */
 export function formatDbSize(sizeMb: number): string {
-  return sizeMb < 1 ? `${Math.round(sizeMb * 1024)} KB` : `${sizeMb.toFixed(1)} MB`;
+  if (sizeMb < 1) return `${Math.round(sizeMb * 1024)} KB`;
+  // past a gig "10664.0 MB" is a number nobody reads, say 10.4 GB
+  if (sizeMb >= 1024) return `${(sizeMb / 1024).toFixed(1)} GB`;
+  return `${sizeMb.toFixed(1)} MB`;
 }
 
 export type LibraryMessageKind = 'no-server' | 'disconnected' | 'empty';

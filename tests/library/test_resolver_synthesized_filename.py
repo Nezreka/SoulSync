@@ -220,3 +220,79 @@ def test_web_server_delegates_to_the_shared_helper():
     assert ("from core.library.path_resolver import "
             "resolve_via_last_resort_fallbacks") in source
     assert "resolve_via_last_resort_fallbacks(clean_rel, abs_bases)" in source
+
+
+# ── #1298: "Artist - Album - NN - Title" filenames ───────────────────────────
+# the numbering sits in the middle of these, so stripping a leading number
+# never lines up. the reporter's library, verbatim.
+
+_BONES = "CHVRCHES - The Bones of What You Believe"
+
+
+@pytest.fixture()
+def chvrches(tmp_path):
+    root = str(tmp_path / "legacy")
+    bones = _make(root, "CHVRCHES", "The Bones of What You Believe (2013)",
+                  f"{_BONES} - 04 - Tether.flac",
+                  f"{_BONES} - 09 - Science+Visions.flac",
+                  f"{_BONES} - 05 - Lies.flac")
+    darkness = _make(root, "CHVRCHES", "In Search of Darkness (2021)",
+                     "CHVRCHES - In Search of Darkness - 01 - Science+Visions.flac",
+                     "CHVRCHES - In Search of Darkness - 02 - Tether.flac")
+    return root, bones, darkness
+
+
+def test_1298_the_reported_path_resolves(chvrches):
+    root, bones, _ = chvrches
+    got = resolve_library_file_path(
+        "CHVRCHES/The Bones of What You Believe/01-04 - Tether.flac",
+        config_manager=_Config(root))
+    assert got == os.path.join(bones, f"{_BONES} - 04 - Tether.flac")
+
+
+@pytest.mark.parametrize("synth,album,name", [
+    # navidrome writes "/" as "_", the reporter's tagger wrote "+"
+    ("CHVRCHES/In Search of Darkness/01-01 - Science_Visions.flac",
+     "darkness", "CHVRCHES - In Search of Darkness - 01 - Science+Visions.flac"),
+    ("CHVRCHES/The Bones of What You Believe/01-09 - Science_Visions.flac",
+     "bones", f"{_BONES} - 09 - Science+Visions.flac"),
+    # same title on two albums: the album in the filename picks the right one
+    ("CHVRCHES/In Search of Darkness/01-02 - Tether.flac",
+     "darkness", "CHVRCHES - In Search of Darkness - 02 - Tether.flac"),
+])
+def test_1298_the_other_reported_tracks_resolve(chvrches, synth, album, name):
+    root, bones, darkness = chvrches
+    folder = bones if album == "bones" else darkness
+    assert resolve_library_file_path(synth, config_manager=_Config(root)) == os.path.join(folder, name)
+
+
+@pytest.mark.parametrize("synth", [
+    "CHVRCHES/The Bones of What You Believe/01-05 - Tether.flac",     # wrong track number
+    "CHVRCHES/Every Open Eye/01-04 - Tether.flac",                    # album in no filename
+    "CHVRCHES/The Bones of What You Believe/01-04 - Tethered.flac",   # different title
+    "CHVRCHES/The Bones of What You Believe/01-04 - Tether.mp3",      # different extension
+])
+def test_1298_every_part_has_to_agree(chvrches, synth):
+    root, _, _ = chvrches
+    assert resolve_library_file_path(synth, config_manager=_Config(root)) is None
+
+
+def test_1298_two_copies_still_refuse(tmp_path):
+    """the same prefixed file in two album folders is a real second copy."""
+    root = str(tmp_path / "legacy")
+    _make(root, "CHVRCHES", "The Bones of What You Believe (2013)", f"{_BONES} - 04 - Tether.flac")
+    _make(root, "CHVRCHES", "The Bones of What You Believe (Deluxe)", f"{_BONES} - 04 - Tether.flac")
+    assert resolve_library_file_path(
+        "CHVRCHES/The Bones of What You Believe/01-04 - Tether.flac",
+        config_manager=_Config(root)) is None
+
+
+def test_1298_a_plain_match_still_wins_over_a_prefixed_one(tmp_path):
+    """anything that resolved before #1298 resolves the same way, rather than
+    turning ambiguous because a prefixed copy also exists."""
+    root = str(tmp_path / "legacy")
+    plain = _make(root, "CHVRCHES", "CHVRCHES - The Bones of What You Believe", "04 - Tether.flac")
+    _make(root, "CHVRCHES", "The Bones of What You Believe (2013)", f"{_BONES} - 04 - Tether.flac")
+    assert resolve_library_file_path(
+        "CHVRCHES/The Bones of What You Believe/01-04 - Tether.flac",
+        config_manager=_Config(root)) == os.path.join(plain, "04 - Tether.flac")

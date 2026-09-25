@@ -172,6 +172,15 @@ JOB_CATEGORIES = {
 }
 
 
+def _lock_genres(cursor, table: str, entity_id) -> None:
+    """mark genres a genre job just settled, so the next media server scan
+    keeps them instead of putting back what the files said (Cremonies).
+    an older db without the column just doesn't get the lock."""
+    cols = {c[1] for c in cursor.execute(f"PRAGMA table_info({table})").fetchall()}  # noqa: S608 - fixed table
+    if 'genres_locked' in cols:
+        cursor.execute(f"UPDATE {table} SET genres_locked = 1 WHERE id = ?", (entity_id,))  # noqa: S608
+
+
 def job_category(job_id: str) -> str:
     """The family a job belongs to. Unknown jobs are grouped, not hidden."""
     return JOB_CATEGORIES.get(job_id, JOB_CATEGORY_FALLBACK)
@@ -1972,6 +1981,7 @@ class RepairWorker:
             if cursor.rowcount == 0:
                 conn.commit()
                 return {'success': False, 'error': f'{entity_type} {entity_id} no longer exists'}
+            _lock_genres(cursor, table, entity_id)
             conn.commit()
             removed = details.get('removed_genres') or []
             logger.info("Genre cleanup: %s %s — removed %d off-whitelist genre(s)",
@@ -2006,6 +2016,7 @@ class RepairWorker:
                 if genre and _normalize_for_match(genre) not in seen:
                     current.append(genre); seen.add(_normalize_for_match(genre))
             cur.execute(f"UPDATE {table} SET genres = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (json.dumps(current), entity_id))
+            _lock_genres(cur, table, entity_id)
             conn.commit(); conn.close()
             return {'success': True, 'action': 'genres_applied'}
         except Exception as e:

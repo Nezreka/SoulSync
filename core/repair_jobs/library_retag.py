@@ -22,7 +22,7 @@ from core.library.retag_planner import (
 from core.metadata.album_tracks import get_album_for_source, get_album_tracks_for_source
 from core.metadata_service import get_primary_source, get_source_priority
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, not_locked_sql
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.library_retag")
@@ -303,11 +303,14 @@ class LibraryRetagJob(RepairJob):
         try:
             with context.db._get_connection() as conn:
                 cursor = conn.cursor()
+                # hand-tagged: the user typed this release, retagging from a
+                # service would overwrite it with the studio album
+                locked_filter = not_locked_sql(cursor, 'albums', 'al')
                 cursor.execute(f"""
                     SELECT al.id, al.title, ar.name, {cols}
                     FROM albums al
                     LEFT JOIN artists ar ON ar.id = al.artist_id
-                    WHERE al.title IS NOT NULL AND al.title != ''
+                    WHERE al.title IS NOT NULL AND al.title != ''{locked_filter}
                 """)
                 albums = cursor.fetchall()
         except Exception as e:

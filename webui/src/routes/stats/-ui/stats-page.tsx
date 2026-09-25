@@ -306,16 +306,20 @@ export function StatsPage() {
               ))}
             </div>
             <div className={styles.statsSyncControls}>
-              <LastfmImportControl
-                status={lastfmImportQuery.data}
-                onRun={() => lastfmMutation.mutate()}
-                running={lastfmMutation.isPending}
-              />
-              <ListenbrainzImportControl
-                status={listenbrainzImportQuery.data}
-                onRun={() => listenbrainzMutation.mutate()}
-                running={listenbrainzMutation.isPending}
-              />
+              {isImportCardYours(lastfmImportQuery.data) ? (
+                <LastfmImportControl
+                  status={lastfmImportQuery.data}
+                  onRun={() => lastfmMutation.mutate()}
+                  running={lastfmMutation.isPending}
+                />
+              ) : null}
+              {isImportCardYours(listenbrainzImportQuery.data) ? (
+                <ListenbrainzImportControl
+                  status={listenbrainzImportQuery.data}
+                  onRun={() => listenbrainzMutation.mutate()}
+                  running={listenbrainzMutation.isPending}
+                />
+              ) : null}
               {isStandalone ? (
                 <span
                   className={styles.statsStandaloneNotice}
@@ -469,6 +473,16 @@ const PREVIOUS_PERIOD_LABEL: Partial<Record<StatsRange, string>> = {
   '30d': 'vs previous 30 days',
   '12m': 'vs previous 12 months',
 };
+
+/**
+ * your own history comes from your own accounts (#1293). a card for a service
+ * you didn't connect would fill the shared history, which you don't read.
+ */
+function isImportCardYours(
+  status: { history_scope?: string; own_account?: boolean } | undefined,
+): boolean {
+  return !(status?.history_scope === 'profile' && !status.own_account);
+}
 
 type HistoryImportControlProps = {
   onRun: () => void;

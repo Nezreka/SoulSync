@@ -58,8 +58,8 @@ def build_stations(database, profile_id: int = 1,
     """
     from core.discovery.listening_recommendations import build_recency_weighted_seeds
 
-    top = database.get_top_artists('all', 120) or []
-    recent = database.get_top_artists('30d', 120) or []
+    top = database.get_top_artists('all', 120, profile_id=profile_id) or []
+    recent = database.get_top_artists('30d', 120, profile_id=profile_id) or []
     seeds = build_recency_weighted_seeds(
         top, {a['name']: a.get('play_count', 0) for a in recent})
     seeds = sorted(seeds, key=lambda s: -s['weight'])

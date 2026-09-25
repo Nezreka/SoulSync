@@ -46,11 +46,11 @@ def test_staging_root_is_hidden_and_inside_transfer(tmp_path):
     """
     transfer = tmp_path / "media" / "music"
     root = ap.staging_root_for_batch(str(transfer), "batch-123")
-    assert os.path.basename(os.path.dirname(root)) == ap._STAGING_DIRNAME
-    assert root.endswith(os.path.join(ap._STAGING_DIRNAME, "batch-123"))
+    assert os.path.basename(os.path.dirname(root)) == ap.STAGING_DIRNAME
+    assert root.endswith(os.path.join(ap.STAGING_DIRNAME, "batch-123"))
     assert os.path.normpath(root).startswith(os.path.normpath(str(transfer)) + os.sep)
     # Dot-prefixed so media servers (and SoulSync's own scan) skip it.
-    assert ap._STAGING_DIRNAME.startswith('.')
+    assert ap.STAGING_DIRNAME.startswith('.')
 
 
 def test_an_already_staged_path_is_not_staged_again(tmp_path):

@@ -283,18 +283,5 @@ export function useBasicSearchController(): BasicSearchController {
     [state.results, state.filters, state.query],
   );
 
-  /**
-   * Publish what is on screen for the vanilla matched-download modal.
-   *
-   * `skipMatching` and the three `matchedDownload*` handlers in
-   * wishlist-tools.js read `window.currentSearchResults` — by INDEX, and in one
-   * case by `indexOf` on the object — so it has to be the same array the page
-   * renders, in the same order, holding the same object references. This is the
-   * one piece of basic search that cannot move into React until that modal does.
-   */
-  useEffect(() => {
-    window.currentSearchResults = visible;
-  }, [visible]);
-
   return { state, visible, search, cancel, setFilters, toggleSortOrder, selectSource };
 }

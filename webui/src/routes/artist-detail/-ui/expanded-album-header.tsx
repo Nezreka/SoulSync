@@ -7,21 +7,40 @@ import {
   albumIdBadges,
   albumMatchChips,
   expandedHeaderDetails,
+  getAlbumTrackRows,
+  queueTrackPayload,
 } from '../-artist-detail.enhanced-album';
 import { foldUpdatedData, runEnrichmentRequest } from '../-artist-detail.enrich-match';
 import {
   deleteLibraryAlbumRequest,
   type DeleteAlbumChoice,
+  unlockHandTaggedAlbumRequest,
 } from '../-artist-detail.manage-actions';
 import { redownloadAlbumFlow } from '../-artist-detail.redownload';
 import { refreshReorganizeQueue, reorganizeStateForAlbum } from '../-artist-detail.reorganize';
 import { analyzeAlbumReplayGainRequest } from '../-artist-detail.tags-rg';
+import { ActionMenu } from './action-menu';
 import { ArtPicker } from './art-picker';
 import { BatchTagPreviewModal } from './batch-tag-preview-modal';
+import {
+  DownloadIcon,
+  FlagIcon,
+  FolderIcon,
+  ImageIcon,
+  MoreIcon,
+  PencilIcon,
+  PlayIcon,
+  SparkleIcon,
+  SwapIcon,
+  TagIcon,
+  TrashIcon,
+  WaveIcon,
+} from './lib-icons';
 import { ManualMatchModal } from './manual-match-modal';
 import { ReassignModal } from './reassign-modal';
 import { ReorganizeModal } from './reorganize-modal';
 import { SmartDeleteDialog, ALBUM_DELETE_COPY } from './smart-delete-dialog';
+import { monogram, SourceHealth } from './source-health';
 
 interface Props {
   album: EnhancedAlbum;
@@ -37,15 +56,29 @@ interface Props {
   onAlbumPatched: (album: Record<string, unknown>) => void;
   /** The album was deleted — the view drops it and its selections. */
   onAlbumDeleted: () => void;
+  /** whether the metadata form under the header is open; admin only. */
+  editing?: boolean;
+  onToggleEdit?: () => void;
+  /** the header's own play button; falls back to the shared player when absent. */
+  artist?: Record<string, unknown>;
+  /** tracks were moved to another artist; this artist's payload is stale. */
+  onReassigned?: () => void;
 }
 
 /**
- * The expanded album panel's header (renderExpandedAlbumHeader, library.js:3783).
+ * the expanded album's header: cover, title, one meta line, genres, the
+ * source health row, and one action row led by Play.
  *
- * Every action still lives in library.js and is invoked through window; the
- * modals slice ports them. Two of them are handed the button element itself,
- * because they render progress onto it.
+ * the seven mixed-colour buttons the row used to carry are now Play, Edit
+ * details, Enrich, Reorganize and a More menu; the destructive one sits last
+ * in that menu behind a separator. every action still stops propagation, the
+ * whole row above is a toggle and a bubbling click would fold the panel.
  */
+/** set when the user tagged this album by hand from basic search */
+function isHandTagged(album: { metadata_locked?: unknown }): boolean {
+  return Number(album.metadata_locked) === 1;
+}
+
 export function ExpandedAlbumHeader({
   album,
   rows,
@@ -55,6 +88,10 @@ export function ExpandedAlbumHeader({
   onArtApplied,
   onAlbumDeleted,
   onAlbumPatched,
+  editing = false,
+  onToggleEdit,
+  artist,
+  onReassigned,
 }: Props) {
   const [artBroken, setArtBroken] = useState(false);
   const [pickingArt, setPickingArt] = useState(false);
@@ -82,6 +119,16 @@ export function ExpandedAlbumHeader({
   const genres = Array.isArray(album.genres) ? album.genres : [];
   const badges = albumIdBadges(album);
   const chips = albumMatchChips(album);
+  // one entry per service: the match state from the chip, the outbound link
+  // from the id badge when we hold an id for it
+  const sources = chips.map((chip) => ({
+    service: chip.service,
+    label: chip.label,
+    status: chip.status,
+    title: chip.title,
+    url: badges.find((b) => b.service === chip.service)?.url ?? null,
+  }));
+  const albumTitle = String(album.title || 'Unknown');
 
   /** deleteLibraryAlbum (library.js:4020): request, toast, then drop the album. */
   const performDelete = async (choice: DeleteAlbumChoice) => {
@@ -93,6 +140,20 @@ export function ExpandedAlbumHeader({
     } catch (error) {
       window.showToast?.(`Delete failed: ${(error as Error).message}`, 'error');
     }
+  };
+
+  const playAlbum = () => {
+    const owned = getAlbumTrackRows(album).filter(
+      (t) => !(t as { _missingExpected?: boolean })._missingExpected,
+    );
+    if (!owned.length) {
+      window.showToast?.(`No tracks found for ${albumTitle}`, 'info');
+      return;
+    }
+    const tracks = owned.map((track) =>
+      queueTrackPayload(track, album, artist ?? { id: artistId, name: artistName }),
+    );
+    void window.playTrackList?.(tracks, albumTitle);
   };
 
   return (
@@ -134,38 +195,47 @@ export function ExpandedAlbumHeader({
       <div
         className="enhanced-expanded-art-wrap"
         title="Change cover art"
-        onClick={() => setPickingArt(true)}
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          e.stopPropagation();
+          setPickingArt(true);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setPickingArt(true);
+          }
+        }}
       >
         {/* The vanilla hid a broken cover rather than removing it, so the
             wrap keeps its size and the click target does not collapse. */}
         <img
           className="enhanced-expanded-art"
           src={album.thumb_url ? String(album.thumb_url) : undefined}
-          alt={String(album.title || '')}
+          // no alt text without a source, or the browser paints the title
+          // over the placeholder note
+          alt={album.thumb_url ? String(album.title || '') : ''}
           style={{ visibility: artBroken ? 'hidden' : undefined }}
           onError={() => setArtBroken(true)}
         />
+        {!album.thumb_url || artBroken ? (
+          <div className="lib-art-empty" aria-hidden="true">
+            ♪
+          </div>
+        ) : null}
         <div className="enhanced-art-edit-overlay">
-          <svg
-            viewBox="0 0 24 24"
-            width="26"
-            height="26"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.7"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <path d="m21 15-5-5L5 21" />
-          </svg>
+          <ImageIcon size={22} />
           <span>Change cover</span>
         </div>
       </div>
 
       <div className="enhanced-expanded-info">
-        <div className="enhanced-expanded-title">{String(album.title || 'Unknown')}</div>
+        <div className="lib-eyebrow">
+          {String(album.record_type || 'album')}
+          {isHandTagged(album) ? ' · hand-tagged' : ''}
+        </div>
+        <div className="enhanced-expanded-title">{albumTitle}</div>
         <div className="enhanced-expanded-meta">{expandedHeaderDetails(album, rows)}</div>
 
         {genres.length > 0 ? (
@@ -178,76 +248,64 @@ export function ExpandedAlbumHeader({
           </div>
         ) : null}
 
-        {badges.length > 0 ? (
-          <div className="enhanced-expanded-ids">
-            {badges.map((badge) =>
-              badge.url ? (
-                <a
-                  key={badge.service}
-                  className={badge.className}
-                  href={badge.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={badge.title}
-                  // Without this the row's own click handler collapses the
-                  // album out from under the link.
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {badge.label}
-                </a>
-              ) : (
-                <span key={badge.service} className={badge.className} title={badge.title}>
-                  {badge.label}
-                </span>
-              ),
-            )}
-          </div>
-        ) : null}
-
-        <div className="enhanced-match-status-row compact">
-          {chips.map((chip) => (
-            <span
-              key={chip.service}
-              className={chip.className}
-              title={chip.title}
-              onClick={(e) => {
-                e.stopPropagation();
-                setMatchingService(chip.service);
-              }}
-            >
-              {chip.label}: {chip.status}
-            </span>
-          ))}
-        </div>
+        <SourceHealth
+          entries={sources}
+          onRematch={isAdmin ? setMatchingService : undefined}
+          className="enhanced-match-status-row compact"
+        />
 
         <div className="enhanced-expanded-actions">
+          <button
+            type="button"
+            className="lib-btn primary lib-play-album"
+            onClick={(e) => {
+              e.stopPropagation();
+              playAlbum();
+            }}
+          >
+            <PlayIcon />
+            <span>Play</span>
+          </button>
+
           {isAdmin ? (
             <AdminAlbumActions
               album={album}
               artistId={artistId}
               artistName={artistName}
+              editing={editing}
+              onToggleEdit={onToggleEdit}
               onDelete={() => setConfirmingDelete(true)}
+              onReassigned={onReassigned ?? onAlbumDeleted}
               onEnrichOutcome={applyOutcome}
+              onReport={() =>
+                window.showReportIssueModal?.(
+                  'album',
+                  album.id,
+                  String(album.title || ''),
+                  artistName,
+                )
+              }
             />
-          ) : null}
-
-          {/* Reporting an issue is open to every user, not just admins. */}
-          <button
-            type="button"
-            className="enhanced-report-issue-btn"
-            title="Report a problem with this album"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.showReportIssueModal?.(
-                'album',
-                album.id,
-                String(album.title || ''),
-                artistName,
-              );
-            }}
-          >
-            ⚑ Report Issue
-          </button>
+          ) : (
+            // Reporting an issue is open to every user, not just admins.
+            <button
+              type="button"
+              className="enhanced-report-issue-btn lib-btn quiet"
+              title="Report a problem with this album"
+              onClick={(e) => {
+                e.stopPropagation();
+                window.showReportIssueModal?.(
+                  'album',
+                  album.id,
+                  String(album.title || ''),
+                  artistName,
+                );
+              }}
+            >
+              <FlagIcon />
+              <span>Report issue</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -258,106 +316,134 @@ function AdminAlbumActions({
   album,
   artistId,
   artistName,
+  editing,
+  onToggleEdit,
   onDelete,
+  onReassigned,
   onEnrichOutcome,
+  onReport,
 }: {
   album: EnhancedAlbum;
   artistId: unknown;
   artistName: string;
+  editing: boolean;
+  onToggleEdit?: () => void;
   onDelete: () => void;
+  onReassigned: () => void;
   onEnrichOutcome: (outcome: {
     updatedData: import('../-artist-detail.enhanced').EnhancedData | null;
   }) => void;
+  onReport: () => void;
 }) {
-  const [enrichOpen, setEnrichOpen] = useState(false);
   const [reassigning, setReassigning] = useState(false);
   const [taggingTracks, setTaggingTracks] = useState<unknown[] | null>(null);
   const [rgBusy, setRgBusy] = useState(false);
   const [reorganizing, setReorganizing] = useState(false);
   const [redownloadBusy, setRedownloadBusy] = useState(false);
 
+  const writeAllTags = () => {
+    // writeAlbumTags (5449): only tracks that actually have a file.
+    const withFiles = (album.tracks ?? [])
+      .filter((t) => (t as { file_path?: string }).file_path)
+      .map((t) => t.id);
+    if (withFiles.length === 0) {
+      window.showToast?.('No tracks with files in this album', 'error');
+      return;
+    }
+    setTaggingTracks(withFiles);
+  };
+
+  const analyzeReplayGain = () => {
+    if (rgBusy) return;
+    setRgBusy(true);
+    void analyzeAlbumReplayGainRequest(album.id, () => setRgBusy(false));
+  };
+
+  const unlockHandTagged = async () => {
+    const ok = await window.showConfirmDialog?.({
+      title: 'Unlock hand-tagged details?',
+      message:
+        'You tagged this album yourself. Unlocking lets enrichment and the maintenance jobs match it to a release and change it.',
+      confirmText: 'Unlock',
+      cancelText: 'Keep locked',
+    });
+    if (!ok) return;
+    if (await unlockHandTaggedAlbumRequest(album.id)) {
+      window.showToast?.('Unlocked. Enrichment can change this album again.', 'success');
+      onReassigned();
+    } else {
+      window.showToast?.('Could not unlock this album', 'error');
+    }
+  };
+
+  const redownload = () => {
+    if (redownloadBusy) return;
+    setRedownloadBusy(true);
+    // #911: pulls the album's CANONICAL edition, then hands off to the
+    // shared Download Missing modal (redownloadLibraryAlbum's port).
+    void redownloadAlbumFlow(album, artistName)
+      .catch((error: Error) => {
+        console.error('Redownload album error:', error);
+        window.showToast?.(`Error: ${error.message}`, 'error');
+      })
+      .finally(() => setRedownloadBusy(false));
+  };
+
   return (
     <>
-      <div className="enhanced-enrich-wrap">
+      {onToggleEdit ? (
         <button
           type="button"
-          className="enhanced-enrich-btn small"
+          className={`lib-btn lib-edit-details${editing ? ' active' : ''}`}
+          title="Edit the album's title, year, label, genres and more"
           onClick={(e) => {
             e.stopPropagation();
-            setEnrichOpen((open) => !open);
+            onToggleEdit();
           }}
         >
-          Enrich Album ▾
+          <PencilIcon />
+          <span>{editing ? 'Done' : 'Edit details'}</span>
         </button>
-        <div className={`enhanced-enrich-menu${enrichOpen ? ' visible' : ''}`}>
-          {albumEnrichServices().map((service) => (
-            <div
-              className="enhanced-enrich-menu-item"
-              key={service.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                setEnrichOpen(false);
-                void runEnrichmentRequest({
-                  entityType: 'album',
-                  entityId: album.id,
-                  service: service.id,
-                  name: String(album.title || ''),
-                  artistName,
-                  artistId,
-                }).then(onEnrichOutcome);
-              }}
+      ) : null}
+
+      <div className="enhanced-enrich-wrap">
+        <ActionMenu
+          heading="Pull metadata from"
+          items={albumEnrichServices().map((service) => ({
+            key: service.id,
+            className: 'enhanced-enrich-menu-item',
+            icon: <span className="lib-menu-mono">{monogram(service.id, service.label)}</span>,
+            label: service.label,
+            onSelect: () =>
+              void runEnrichmentRequest({
+                entityType: 'album',
+                entityId: album.id,
+                service: service.id,
+                name: String(album.title || ''),
+                artistName,
+                artistId,
+              }).then(onEnrichOutcome),
+          }))}
+          trigger={(t) => (
+            <button
+              type="button"
+              className="enhanced-enrich-btn lib-btn"
+              title="Pull fresh metadata for this album from one source"
+              {...t}
             >
-              {service.icon} {service.label}
-            </div>
-          ))}
-        </div>
+              <SparkleIcon />
+              <span>Enrich</span>
+              <span className="lib-btn-caret" aria-hidden="true">
+                ▾
+              </span>
+            </button>
+          )}
+        />
       </div>
 
       <button
         type="button"
-        className="enhanced-write-tags-album-btn"
-        title="Write DB metadata to file tags for all tracks in this album"
-        onClick={(e) => {
-          e.stopPropagation();
-          // writeAlbumTags (5449): only tracks that actually have a file.
-          const withFiles = (album.tracks ?? [])
-            .filter((t) => (t as { file_path?: string }).file_path)
-            .map((t) => t.id);
-          if (withFiles.length === 0) {
-            window.showToast?.('No tracks with files in this album', 'error');
-            return;
-          }
-          setTaggingTracks(withFiles);
-        }}
-      >
-        ✎ Write All Tags
-      </button>
-      {taggingTracks ? (
-        <BatchTagPreviewModal
-          trackIds={taggingTracks}
-          albumTitle={String(album.title || '')}
-          onClose={() => setTaggingTracks(null)}
-        />
-      ) : null}
-
-      <button
-        type="button"
-        className="enhanced-rg-album-btn"
-        title="Analyze ReplayGain for all tracks in this album (writes track + album gain)"
-        data-album-id={String(album.id)}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (rgBusy) return;
-          setRgBusy(true);
-          void analyzeAlbumReplayGainRequest(album.id, () => setRgBusy(false));
-        }}
-      >
-        {rgBusy ? '♫ Analyzing…' : '♫ ReplayGain'}
-      </button>
-
-      <button
-        type="button"
-        className="enhanced-reorganize-album-btn"
+        className="enhanced-reorganize-album-btn lib-btn"
         title="Reorganize album files using your configured download template"
         data-album-id={String(album.id)}
         onClick={(e) => {
@@ -378,58 +464,100 @@ function AdminAlbumActions({
           setReorganizing(true);
         }}
       >
-        📁 Reorganize
+        <FolderIcon />
+        <span>Reorganize</span>
       </button>
+
+      <ActionMenu
+        items={[
+          {
+            key: 'tags',
+            className: 'enhanced-write-tags-album-btn',
+            icon: <TagIcon />,
+            label: 'Write all tags to files',
+            title: 'Write DB metadata to file tags for all tracks in this album',
+            onSelect: writeAllTags,
+          },
+          {
+            key: 'rg',
+            className: 'enhanced-rg-album-btn',
+            icon: <WaveIcon />,
+            label: rgBusy ? 'Analyzing ReplayGain…' : 'Analyze ReplayGain',
+            title: 'Analyze ReplayGain for all tracks in this album (writes track + album gain)',
+            disabled: rgBusy,
+            data: { 'album-id': String(album.id) },
+            onSelect: analyzeReplayGain,
+          },
+          {
+            key: 'redownload',
+            className: 'enhanced-redownload-album-btn',
+            icon: <DownloadIcon />,
+            label: redownloadBusy ? 'Loading…' : 'Redownload album',
+            title: 'Redownload this album (opens Download Missing modal with force-download)',
+            disabled: redownloadBusy,
+            onSelect: redownload,
+          },
+          {
+            key: 'reassign',
+            className: 'enhanced-reassign-album-btn',
+            icon: <SwapIcon />,
+            label: 'Move to another artist…',
+            title: 'Move this album to a different artist',
+            data: { 'album-id': String(album.id) },
+            onSelect: () => setReassigning(true),
+          },
+          ...(isHandTagged(album)
+            ? [
+                {
+                  key: 'unlock-manual',
+                  className: 'enhanced-unlock-manual-btn',
+                  icon: <TagIcon />,
+                  label: 'Unlock hand-tagged details…',
+                  title: 'Let enrichment and maintenance jobs change this album again',
+                  onSelect: () => void unlockHandTagged(),
+                },
+              ]
+            : []),
+          {
+            key: 'report',
+            className: 'enhanced-report-issue-btn',
+            icon: <FlagIcon />,
+            label: 'Report issue',
+            title: 'Report a problem with this album',
+            onSelect: onReport,
+          },
+          {
+            key: 'delete',
+            className: 'enhanced-delete-album-btn',
+            icon: <TrashIcon />,
+            label: 'Delete album…',
+            danger: true,
+            onSelect: onDelete,
+          },
+        ]}
+        trigger={(t) => (
+          <button
+            type="button"
+            className="lib-btn icon lib-more"
+            title="More actions"
+            aria-label="More album actions"
+            {...t}
+          >
+            <MoreIcon />
+          </button>
+        )}
+      />
+
+      {taggingTracks ? (
+        <BatchTagPreviewModal
+          trackIds={taggingTracks}
+          albumTitle={String(album.title || '')}
+          onClose={() => setTaggingTracks(null)}
+        />
+      ) : null}
       {reorganizing ? (
         <ReorganizeModal album={album} onClose={() => setReorganizing(false)} />
       ) : null}
-
-      <button
-        type="button"
-        className="enhanced-reassign-album-btn"
-        title="Move this album to a different artist"
-        data-album-id={String(album.id)}
-        onClick={(e) => {
-          e.stopPropagation();
-          setReassigning(true);
-        }}
-      >
-        ⇄ Reassign
-      </button>
-
-      <button
-        type="button"
-        className="enhanced-redownload-album-btn"
-        title="Redownload this album (opens Download Missing modal with force-download)"
-        disabled={redownloadBusy}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (redownloadBusy) return;
-          setRedownloadBusy(true);
-          // #911: pulls the album's CANONICAL edition, then hands off to the
-          // shared Download Missing modal (redownloadLibraryAlbum's port).
-          void redownloadAlbumFlow(album, artistName)
-            .catch((error: Error) => {
-              console.error('Redownload album error:', error);
-              window.showToast?.(`Error: ${error.message}`, 'error');
-            })
-            .finally(() => setRedownloadBusy(false));
-        }}
-      >
-        {redownloadBusy ? 'Loading...' : '↻ Redownload'}
-      </button>
-
-      <button
-        type="button"
-        className="enhanced-delete-album-btn"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-      >
-        Delete Album
-      </button>
-
       {reassigning ? (
         <ReassignModal
           albumId={album.id}
@@ -437,9 +565,10 @@ function AdminAlbumActions({
           currentArtist={artistName}
           imageUrl={String(album.thumb_url || '')}
           onClose={() => setReassigning(false)}
-          // The album's files are on their way to a different artist, so this
-          // artist's view of it is now stale — let the page refetch.
-          onApplied={onDelete}
+          // the album's files are on their way to a different artist, so this
+          // artist's view of it is stale: refetch. this used to call onDelete,
+          // which opened the delete confirmation dialog over a finished reassign
+          onApplied={onReassigned}
         />
       ) : null}
     </>

@@ -91,8 +91,13 @@
     // ── Init ──
 
     function init() {
-        dashboardHeader = document.querySelector('#dashboard-page .dashboard-header');
-        headerActions = document.querySelector('#dashboard-page .header-actions');
+        // the orbs live on their own stage in the dashboard hero now: the
+        // canvas, the nucleus at its centre, the hover that opens the worker
+        // grid, all of it measured against the stage, so orbs never drift over
+        // the greeting. the whole header is the fallback (the old layout).
+        dashboardHeader = document.querySelector('#dashboard-page .orb-stage')
+            || document.querySelector('#dashboard-page .dashboard-header');
+        headerActions = dashboardHeader && dashboardHeader.querySelector('.header-actions');
         if (!dashboardHeader || !headerActions) return;
 
         if (!hubImage) {

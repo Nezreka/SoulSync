@@ -294,7 +294,7 @@ describe('expandedHeaderDetails', () => {
       tracks: [{ duration: 300_000 }, { duration: 60_000 }],
     };
     expect(expandedHeaderDetails(album, getAlbumTrackRows(album))).toBe(
-      '1992 · 2 tracks · 6:00 · Apollo · ALBUM',
+      '1992 · 2 tracks · 6:00 · Apollo',
     );
   });
 

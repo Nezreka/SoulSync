@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { getShellBridge } from '@/platform/shell/bridge';
 
@@ -25,13 +25,28 @@ import {
   type DeleteTrackChoice,
 } from '../-artist-detail.manage-actions';
 import { analyzeTrackReplayGainRequest } from '../-artist-detail.tags-rg';
+import { ActionMenu } from './action-menu';
 import { EditableCell } from './editable-cell';
+import {
+  DownloadIcon,
+  FlagIcon,
+  InfoIcon,
+  MoreIcon,
+  PlayIcon,
+  PlayNextIcon,
+  PlusIcon,
+  SwapIcon,
+  TagIcon,
+  TrashIcon,
+  WaveIcon,
+} from './lib-icons';
 import { ManualMatchModal } from './manual-match-modal';
 import { MissingTrackManageModal } from './missing-track-modals';
 import { MobileTrackActions } from './mobile-track-actions';
 import { RedownloadModal } from './redownload-modal';
 import { ReidentifyModal } from './reidentify-modal';
 import { SmartDeleteDialog, TRACK_DELETE_COPY } from './smart-delete-dialog';
+import { SourceMeter } from './source-health';
 import { SourceInfoPopover } from './source-info-popover';
 import { TagPreviewModal } from './tag-preview-modal';
 
@@ -92,6 +107,8 @@ export function EnhancedTrackTable({
   }
 
   const columns = trackColumns(isAdmin);
+  // the disc column only earns its width on a multi-disc release
+  const multiDisc = rows.some((row) => Number(row.disc_number || 1) > 1);
   // Only owned rows are selectable; a missing row has no file to act on.
   const selectableIds = rows
     .filter((row) => !(row as { _missingExpected?: boolean })._missingExpected)
@@ -145,7 +162,11 @@ export function EnhancedTrackTable({
 
   return (
     <>
-      <table className="enhanced-track-table" data-album-id={String(album.id)}>
+      <table
+        className="enhanced-track-table"
+        data-album-id={String(album.id)}
+        data-multidisc={multiDisc ? '' : undefined}
+      >
         <thead>
           <tr>
             {isAdmin ? (
@@ -153,6 +174,7 @@ export function EnhancedTrackTable({
                 <input
                   type="checkbox"
                   className="enhanced-track-checkbox"
+                  aria-label="Select all tracks"
                   checked={allSelected}
                   onChange={toggleAll}
                 />
@@ -161,7 +183,7 @@ export function EnhancedTrackTable({
             {columns.map((column) => (
               <th
                 key={column.cls}
-                className={column.cls}
+                className={`${column.cls}${sort && sort.field === column.sortField ? ' sorted' : ''}`}
                 style={column.sortField ? { cursor: 'pointer' } : undefined}
                 data-sort-field={column.sortField}
                 data-label={column.sortField ? column.label : undefined}
@@ -317,6 +339,8 @@ function TrackRow({
 }) {
   const [rgBusy, setRgBusy] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  /** the source-info popover anchors beside the row's menu button. */
+  const moreRef = useRef<HTMLElement | null>(null);
   const missing = Boolean((track as { _missingExpected?: boolean })._missingExpected);
   const editable = isAdmin && !missing ? ' editable' : '';
   const format = extractFormat(track.file_path);
@@ -341,6 +365,13 @@ function TrackRow({
     else window.addToQueue?.(payload);
   };
 
+  const trackTitle = String(track.title || 'Unknown');
+  const play = () => {
+    if (track.file_path) {
+      getShellBridge()?.playLibraryTrack(track as never, String(album.title || ''), artistName);
+    }
+  };
+
   return (
     <tr
       data-track-id={String(track.id)}
@@ -355,6 +386,7 @@ function TrackRow({
             <input
               type="checkbox"
               className="enhanced-track-checkbox"
+              aria-label={`Select ${trackTitle}`}
               checked={selected}
               onChange={onToggle}
             />
@@ -367,18 +399,11 @@ function TrackRow({
           type="button"
           className="enhanced-play-btn"
           title={track.file_path ? 'Play track' : 'No file available'}
+          aria-label={track.file_path ? `Play ${trackTitle}` : 'No file available'}
           disabled={!track.file_path}
-          onClick={act(() => {
-            if (track.file_path) {
-              getShellBridge()?.playLibraryTrack(
-                track as never,
-                String(album.title || ''),
-                artistName,
-              );
-            }
-          })}
+          onClick={act(play)}
         >
-          {missing ? '—' : '▶'}
+          {missing ? <span aria-hidden="true">—</span> : <PlayIcon size={12} />}
         </button>
       </td>
 
@@ -416,7 +441,7 @@ function TrackRow({
         value={track.title as string | null}
         onSaved={onEdited}
       >
-        {String(track.title || 'Unknown')}
+        <span className="lib-track-title">{trackTitle}</span>
         {missing ? <span className="enhanced-missing-track-badge">Missing</span> : null}
       </EditableCell>
 
@@ -462,130 +487,128 @@ function TrackRow({
       </td>
 
       <td className="col-match">
-        <div className="enhanced-track-match-cell">
-          {trackMatchChips(track).map((chip) => (
-            <span
-              key={chip.service}
-              className={chip.className}
-              title={chip.title}
-              data-service={chip.service}
-              onClick={
-                // Re-matching is admin-only; for everyone else the chip is
-                // just a status marker.
-                isAdmin ? act(() => onMatch(chip.service)) : undefined
-              }
-            >
-              {chip.label}
-            </span>
-          ))}
-        </div>
+        {/* Re-matching is admin-only; for everyone else the meter is just a
+            status marker. */}
+        <SourceMeter entries={trackMatchChips(track)} onMatch={isAdmin ? onMatch : undefined} />
       </td>
 
       <td className="col-queue">
         {track.file_path ||
         (missing && (track as { _hasActionableContext?: boolean })._hasActionableContext) ? (
-          <>
+          <span className="lib-row-queue">
             <button
               type="button"
-              className="enhanced-playnext-btn"
+              className="enhanced-playnext-btn lib-row-btn"
               title={missing ? 'Download automatically and play next' : 'Play next'}
+              aria-label={missing ? 'Download automatically and play next' : 'Play next'}
               onClick={act(() => enqueue(true))}
             >
-              ⇥
+              <PlayNextIcon size={15} />
             </button>
             <button
               type="button"
-              className="enhanced-queue-btn"
+              className="enhanced-queue-btn lib-row-btn"
               title={missing ? 'Add to queue and download automatically' : 'Add to queue'}
+              aria-label={missing ? 'Add to queue and download automatically' : 'Add to queue'}
               onClick={act(() => enqueue(false))}
             >
-              +
+              <PlusIcon size={15} />
             </button>
-          </>
+          </span>
         ) : null}
       </td>
 
       {isAdmin ? (
-        <>
-          <td className="col-writetag">
-            {track.file_path && !missing ? (
-              <>
+        <td className="col-track-actions">
+          {missing ? (
+            <button
+              type="button"
+              className="enhanced-missing-manage-btn"
+              data-action="manage-missing"
+              title="Manage this missing album track"
+              onClick={act(() => onMissingManage())}
+            >
+              Manage
+            </button>
+          ) : (
+            <ActionMenu
+              heading={<strong>{trackTitle}</strong>}
+              items={[
+                ...(track.file_path
+                  ? [
+                      {
+                        key: 'tags',
+                        className: 'enhanced-write-tag-btn',
+                        icon: <TagIcon />,
+                        label: 'Write tags to file',
+                        onSelect: onTagPreview,
+                      },
+                      {
+                        key: 'rg',
+                        className: 'enhanced-rg-btn',
+                        icon: <WaveIcon />,
+                        label: rgBusy ? 'Analyzing ReplayGain…' : 'Analyze ReplayGain',
+                        disabled: rgBusy,
+                        onSelect: () => {
+                          // Synchronous on the server (~1-3s); the row shows a
+                          // spinner meanwhile, as the vanilla's did (5710-5712).
+                          setRgBusy(true);
+                          void analyzeTrackReplayGainRequest(track.id).finally(() =>
+                            setRgBusy(false),
+                          );
+                        },
+                      },
+                    ]
+                  : []),
+                {
+                  key: 'source',
+                  className: 'enhanced-source-info-btn',
+                  icon: <InfoIcon />,
+                  label: 'Where this file came from',
+                  onSelect: () => onSourceInfo(moreRef.current),
+                },
+                {
+                  key: 'reidentify',
+                  className: 'enhanced-reidentify-btn',
+                  icon: <SwapIcon />,
+                  label: 'Re-identify…',
+                  title: 'File this track under a different release',
+                  onSelect: onReidentify,
+                },
+                {
+                  key: 'redownload',
+                  className: 'enhanced-redownload-btn',
+                  icon: <DownloadIcon />,
+                  label: 'Redownload…',
+                  onSelect: onRedownload,
+                },
+                {
+                  key: 'delete',
+                  className: 'enhanced-delete-btn',
+                  icon: <TrashIcon />,
+                  label: 'Delete from library…',
+                  danger: true,
+                  onSelect: onDelete,
+                },
+              ]}
+              trigger={(t) => (
                 <button
                   type="button"
-                  className="enhanced-write-tag-btn"
-                  title="Write tags to file"
-                  onClick={act(() => onTagPreview())}
+                  className={`lib-row-btn lib-row-more${rgBusy ? ' busy' : ''}`}
+                  title="More actions"
+                  aria-label={`More actions for ${trackTitle}`}
+                  {...t}
+                  ref={(el) => {
+                    t.ref(el);
+                    moreRef.current = el;
+                  }}
                 >
-                  ✎
+                  <MoreIcon size={16} />
                 </button>
-                <button
-                  type="button"
-                  className="enhanced-rg-btn"
-                  title="Analyze &amp; write ReplayGain (track gain)"
-                  disabled={rgBusy}
-                  onClick={act(() => {
-                    // Synchronous on the server (~1-3s); the button shows '…'
-                    // meanwhile, as the vanilla's did (5710-5712).
-                    setRgBusy(true);
-                    void analyzeTrackReplayGainRequest(track.id).finally(() => setRgBusy(false));
-                  })}
-                >
-                  {rgBusy ? '…' : 'RG'}
-                </button>
-              </>
-            ) : null}
-          </td>
-          <td className="col-track-actions">
-            {missing ? (
-              <div className="enhanced-track-actions-group visible">
-                <button
-                  type="button"
-                  className="enhanced-missing-manage-btn"
-                  data-action="manage-missing"
-                  title="Manage this missing album track"
-                  onClick={act(() => onMissingManage())}
-                >
-                  Manage
-                </button>
-              </div>
-            ) : (
-              <div className="enhanced-track-actions-group">
-                <button
-                  type="button"
-                  className="enhanced-source-info-btn"
-                  title="View download source info"
-                  onClick={act((e) => onSourceInfo(e.currentTarget))}
-                >
-                  ℹ
-                </button>
-                <button
-                  type="button"
-                  className="enhanced-reidentify-btn"
-                  title="Re-identify — file this track under a different release"
-                  onClick={act(() => onReidentify())}
-                >
-                  ⇄
-                </button>
-                <button
-                  type="button"
-                  className="enhanced-redownload-btn"
-                  title="Redownload this track"
-                  onClick={act(() => onRedownload())}
-                >
-                  ↻
-                </button>
-                <button
-                  type="button"
-                  className="enhanced-delete-btn"
-                  title="Delete track from library"
-                  onClick={act(() => onDelete())}
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-          </td>
-        </>
+              )}
+            />
+          )}
+        </td>
       ) : (
         <td className="col-report">
           {missing ? (
@@ -600,8 +623,9 @@ function TrackRow({
           ) : (
             <button
               type="button"
-              className="enhanced-track-report-btn"
+              className="enhanced-track-report-btn lib-row-btn"
               title="Report issue with this track"
+              aria-label={`Report an issue with ${trackTitle}`}
               onClick={act(() =>
                 window.showReportIssueModal?.(
                   'track',
@@ -612,7 +636,7 @@ function TrackRow({
                 ),
               )}
             >
-              ⚑
+              <FlagIcon size={14} />
             </button>
           )}
         </td>
@@ -624,28 +648,22 @@ function TrackRow({
           type="button"
           className="enhanced-mobile-actions-btn"
           title="Actions"
+          aria-label={`Actions for ${trackTitle}`}
           onClick={act(() => setMobileOpen(true))}
         >
-          ⋯
+          <MoreIcon size={16} />
         </button>
         {mobileOpen ? (
           <MobileTrackActions
             track={track}
             isAdmin={isAdmin}
-            onPlay={() => {
-              if (track.file_path) {
-                getShellBridge()?.playLibraryTrack(
-                  track as never,
-                  String(album.title || ''),
-                  artistName,
-                );
-              }
-            }}
+            onPlay={play}
             onQueue={() => enqueue(false)}
             onTagPreview={onTagPreview}
             onSourceInfo={() => onSourceInfo(null)}
             onRedownload={onRedownload}
             onDelete={onDelete}
+            onMissingManage={onMissingManage}
             onClose={() => setMobileOpen(false)}
           />
         ) : null}

@@ -328,7 +328,13 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
     from core.downloads.size_limit import filter_music_candidates
     expected_duration_ms = (track.get('duration_ms') if isinstance(track, dict)
                             else getattr(track, 'duration_ms', None))
-    candidates = filter_music_candidates(candidates, expected_duration_ms=expected_duration_ms)
+    # a pinned task (basic search: the user picked this exact file) skips the
+    # size/duration filter. it exists to drop bad SEARCH results, and dropping
+    # the one file the user chose would fail the download for no reason
+    with tasks_lock:
+        _pinned = bool((download_tasks.get(task_id) or {}).get('_pinned_candidate'))
+    if not _pinned:
+        candidates = filter_music_candidates(candidates, expected_duration_ms=expected_duration_ms)
 
     with tasks_lock:
         active_peer_occupancy = {}
@@ -636,6 +642,13 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         "track_info": track_info,  # Add track_info for playlist folder mode
                         "_download_username": username,  # Source username for AcoustID skip logic
                     }
+                    # an as-is download from basic search: the simple
+                    # post-processing branch keys on search_result, which
+                    # this handoff never wrote, so the file would have been
+                    # retagged and moved like an enriched one
+                    _simple = track_info.get('_simple_search_result') if track_info.get('_simple_download') else None
+                    if isinstance(_simple, dict):
+                        matched_downloads_context[context_key]['search_result'] = dict(_simple)
                     try:
                         from core.matching_engine import MusicMatchingEngine
                         _took, _adv_ms = preferred_version_stamp(

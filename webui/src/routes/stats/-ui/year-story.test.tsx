@@ -404,15 +404,17 @@ describe('YearStory', () => {
     renderStory();
     await advanceTo('That was your year');
 
-    // Turn off all four defaults; the last one must refuse.
-    for (const label of ['Plays', 'Listening time', 'Artists', 'Days with music']) {
-      fireEvent.click(screen.getByRole('button', { name: label }));
-    }
-
-    const pressed = ['Plays', 'Listening time', 'Artists', 'Days with music'].filter(
-      (label) =>
-        screen.getByRole('button', { name: label }).getAttribute('aria-pressed') === 'true',
+    // Turn off all four defaults; the last one must refuse. The buttons are
+    // looked up once: a role query walks the whole story, and doing it eight
+    // times pushed this test past its time budget.
+    const toggles = ['Plays', 'Listening time', 'Artists', 'Days with music'].map((label) =>
+      screen.getByRole('button', { name: label }),
     );
+    for (const toggle of toggles) fireEvent.click(toggle);
+
+    // still the live buttons, not nodes a re-render swapped out
+    expect(toggles.every((t) => t.isConnected)).toBe(true);
+    const pressed = toggles.filter((t) => t.getAttribute('aria-pressed') === 'true');
     expect(pressed).toHaveLength(1);
   });
 

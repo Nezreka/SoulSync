@@ -67,7 +67,7 @@ export function EnhancedBulkBar({ selected, isAdmin, onClear, onEdited }: Props)
             className="btn btn--sm btn--secondary enhanced-bulk-btn"
             onClick={() => setEditing(true)}
           >
-            Edit Selected
+            Edit selected
           </button>
           <button
             type="button"
@@ -76,7 +76,7 @@ export function EnhancedBulkBar({ selected, isAdmin, onClear, onEdited }: Props)
             // the boundary without reading the old selection state.
             onClick={() => setTagging(true)}
           >
-            Write Tags
+            Write tags
           </button>
           <button
             type="button"
@@ -90,7 +90,7 @@ export function EnhancedBulkBar({ selected, isAdmin, onClear, onEdited }: Props)
             className="btn btn--sm btn--danger enhanced-bulk-btn"
             onClick={onClear}
           >
-            Clear Selection
+            Clear
           </button>
         </div>
       </div>

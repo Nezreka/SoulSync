@@ -139,6 +139,10 @@ export interface ListeningStatsStatus {
 
 export interface LastfmListeningImportStatus {
   success: boolean;
+  /** 'profile' when this profile's stats come from its own account (#1293). */
+  history_scope?: 'profile' | 'shared';
+  /** true when this card runs the profile's own account on this service. */
+  own_account?: boolean;
   enabled?: boolean;
   api_key_configured?: boolean;
   authenticated_user_available?: boolean;
@@ -161,6 +165,10 @@ export interface LastfmListeningImportStatus {
 
 export interface ListenbrainzListeningImportStatus {
   success: boolean;
+  /** 'profile' when this profile's stats come from its own account (#1293). */
+  history_scope?: 'profile' | 'shared';
+  /** true when this card runs the profile's own account on this service. */
+  own_account?: boolean;
   enabled?: boolean;
   token_configured?: boolean;
   authenticated_user_available?: boolean;

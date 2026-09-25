@@ -5,7 +5,14 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import (
+    JobContext,
+    JobResult,
+    RepairJob,
+    hand_tagged_path_keys,
+    is_hand_tagged_path,
+    not_locked_sql,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.single_album_dedup")
@@ -50,6 +57,9 @@ class SingleAlbumDedupJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
+            # hand-tagged: a live single the user typed would pair with the
+            # studio album track and one of them gets offered for deletion
+            locked_filter = not_locked_sql(cursor, 'tracks', 't') + not_locked_sql(cursor, 'albums', 'al')
             cursor.execute("""
                 SELECT t.id, t.title, ar.name, al.title, al.record_type, al.track_count,
                        t.file_path, t.bitrate, t.duration, al.thumb_url, ar.thumb_url,
@@ -59,7 +69,7 @@ class SingleAlbumDedupJob(RepairJob):
                 LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.title IS NOT NULL AND t.title != ''
                   AND t.file_path IS NOT NULL AND t.file_path != ''
-            """)
+            """ + locked_filter)
             tracks = cursor.fetchall()
         except Exception as e:
             logger.error("Error fetching tracks from DB: %s", e, exc_info=True)
@@ -82,11 +92,16 @@ class SingleAlbumDedupJob(RepairJob):
         # Separate tracks into singles/EPs and album tracks
         singles = []
         album_tracks = []
+        hand_tagged = hand_tagged_path_keys(context.db)
 
         for row in tracks:
             (track_id, title, artist_name, album_title, album_type,
              total_track_count, file_path, bitrate, duration,
              album_thumb, artist_thumb, track_number, artist_id) = row
+
+            # same reason, for a hand-tagged file whose row isn't locked yet
+            if is_hand_tagged_path(file_path, hand_tagged):
+                continue
 
             entry = {
                 'id': track_id,

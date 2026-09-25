@@ -17,6 +17,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.listenbrainz_client import ListenBrainzClient
 from core.listening_import.dedup import insert_import_events
+from core.listening_import.profiles import ProfileImportWorkers
+from core.listening_scope import SHARED_OWNER, owner_key
 from utils.logging_config import get_logger
 
 logger = get_logger("listenbrainz_import")
@@ -40,6 +42,10 @@ class ListenBrainzListeningImportWorker:
     run buttons, and settings can all call ``start_import``; if
     a run is already active they get a skipped response instead of creating a
     second crawl.
+
+    profile_id is the pile it fills (#1293). the shared one uses the account in
+    Settings, any other profile uses the listenbrainz it connected itself, and
+    each keeps its own resume state.
     """
 
     def __init__(
@@ -49,11 +55,14 @@ class ListenBrainzListeningImportWorker:
         *,
         cache_builder: Optional[Callable[[], Any]] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        profile_id: int = SHARED_OWNER,
     ):
         self.db = database
         self.config_manager = config_manager
         self.cache_builder = cache_builder
         self.progress_callback = progress_callback
+        self.profile_id = int(profile_id)
+        self._state_key = owner_key(STATE_KEY, self.profile_id)
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._cancel = threading.Event()
@@ -91,7 +100,7 @@ class ListenBrainzListeningImportWorker:
                 return {"status": "skipped", "reason": "ListenBrainz import already running", **self.status()}
             self._cancel.clear()
             target = self._resolve_username(username)
-            token = self.config_manager.get("listenbrainz.token", "")
+            token = self._credentials()[0]
             if not target:
                 err = "ListenBrainz user token not configured" if not token else "ListenBrainz username not configured"
                 state = self._set_state(status="error", error=err)
@@ -101,7 +110,7 @@ class ListenBrainzListeningImportWorker:
                 target=self._run,
                 args=(target, full),
                 daemon=True,
-                name="listenbrainz-listening-import",
+                name=f"listenbrainz-listening-import-{self.profile_id}",
             )
             self._thread.start()
             return {"status": "started", "username": target}
@@ -136,10 +145,8 @@ class ListenBrainzListeningImportWorker:
         last_cursor = _int(previous.get("last_imported_ts")) if use_incremental else 0
         min_ts = max(0, last_cursor - RECENT_OVERLAP_SECONDS) if last_cursor else None
 
-        client = ListenBrainzClient(
-            token=self.config_manager.get("listenbrainz.token", ""),
-            base_url=self.config_manager.get("listenbrainz.base_url", "") or None,
-        )
+        token, base_url, _ = self._credentials()
+        client = ListenBrainzClient(token=token, base_url=base_url or None)
 
         total_scrobbles = client.get_user_listen_count(username) if not use_incremental else None
         total_pages = max(1, math.ceil(total_scrobbles / PAGE_LIMIT)) if total_scrobbles else None
@@ -344,20 +351,34 @@ class ListenBrainzListeningImportWorker:
             time.sleep(1)
         return not self._cancel.is_set()
 
+    def _credentials(self) -> tuple:
+        """(token, base_url, username) for this worker's pile."""
+        if self.profile_id == SHARED_OWNER:
+            return (
+                self.config_manager.get("listenbrainz.token", "") or "",
+                self.config_manager.get("listenbrainz.base_url", "") or "",
+                self.config_manager.get("listenbrainz.username", "") or "",
+            )
+        try:
+            s = self.db.get_profile_listenbrainz(self.profile_id) or {}
+        except Exception as e:
+            logger.debug("profile %s listenbrainz lookup failed: %s", self.profile_id, e)
+            s = {}
+        return (s.get("token") or "", s.get("base_url") or "", s.get("username") or "")
+
     def _resolve_username(self, username: Optional[str]) -> str:
-        configured = username or self.config_manager.get("listenbrainz.username", "")
+        token, base_url, stored = self._credentials()
+        # a profile imports its own account, never a name someone typed in.
+        # the shared pile keeps the username setting it always had.
+        configured = stored if self.profile_id != SHARED_OWNER else (username or stored)
         if configured:
             return str(configured).strip()
-        token = self.config_manager.get("listenbrainz.token", "")
         if not token:
             return ""
         try:
-            client = ListenBrainzClient(
-                token=token,
-                base_url=self.config_manager.get("listenbrainz.base_url", "") or None,
-            )
+            client = ListenBrainzClient(token=token, base_url=base_url or None)
             found = client.get_authenticated_username() or ""
-            if found:
+            if found and self.profile_id == SHARED_OWNER:
                 self.config_manager.set("listenbrainz.username", found)
             return found
         except Exception:
@@ -395,11 +416,11 @@ class ListenBrainzListeningImportWorker:
             conn.close()
 
     def _insert_events_deduped(self, events: Iterable[Dict[str, Any]]) -> int:
-        return insert_import_events(self.db, events, SOURCE)
+        return insert_import_events(self.db, events, SOURCE, profile_id=self.profile_id)
 
     def _load_state(self) -> Dict[str, Any]:
         try:
-            raw = self.db.get_metadata(STATE_KEY)
+            raw = self.db.get_metadata(self._state_key)
             return json.loads(raw) if raw else {"status": "idle", "source": SOURCE}
         except Exception:
             return {"status": "idle", "source": SOURCE}
@@ -408,7 +429,7 @@ class ListenBrainzListeningImportWorker:
         state = {**(self._state or {}), **updates, "source": SOURCE, "updated_at": _now_iso()}
         self._state = state
         try:
-            self.db.set_metadata(STATE_KEY, json.dumps(state))
+            self.db.set_metadata(self._state_key, json.dumps(state))
         except Exception as e:
             logger.debug("Could not persist ListenBrainz import state: %s", e)
         if self.progress_callback:
@@ -495,3 +516,11 @@ def _progress(page: int, total_pages: Optional[int]) -> int:
     if not total_pages:
         return 0
     return max(0, min(99, round((page / max(total_pages, 1)) * 100)))
+
+
+class ListenBrainzImportWorkers(ProfileImportWorkers):
+    """one listenbrainz importer per pile, see core/listening_import/profiles.py."""
+
+    worker_cls = ListenBrainzListeningImportWorker
+    source = SOURCE
+    redact = staticmethod(_safe_error_message)
