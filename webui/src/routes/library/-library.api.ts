@@ -2,8 +2,11 @@ import { queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
 
+import type { LibraryAlbumTrack } from './-library.helpers';
+
 import {
   LIBRARY_PAGE_SIZE,
+  type LibraryAlbumsResponse,
   type LibraryArtistsResponse,
   type LibrarySearch,
   type UnmatchedSummary,
@@ -60,6 +63,45 @@ export function libraryArtistsQueryOptions(profileId: number, search: LibrarySea
     queryFn: () =>
       readJson<LibraryArtistsResponse>(apiClient.get('library/artists', { searchParams: params })),
   });
+}
+
+/**
+ * The album grid, the library's other view.
+ *
+ * The watchlist filter is not sent: it belongs to an artist, and the page
+ * hides it in this view. The source filter IS — an album has provider ids of
+ * its own, on its own columns.
+ */
+export function libraryAlbumsQueryOptions(profileId: number, search: LibrarySearch) {
+  const params: Record<string, string | number> = {
+    search: search.q,
+    letter: search.letter,
+    page: search.page,
+    limit: LIBRARY_PAGE_SIZE,
+  };
+  if (search.source) params.source_filter = search.source;
+
+  return queryOptions({
+    queryKey: [...LIBRARY_QUERY_KEY, 'albums', profileId, params] as const,
+    queryFn: () =>
+      readJson<LibraryAlbumsResponse>(apiClient.get('library/albums', { searchParams: params })),
+  });
+}
+
+/**
+ * The owned tracks of one album, for the card's play button.
+ *
+ * Not a query: it is fetched on click, for one album, and caching a tracklist
+ * the page never displays would only hold memory.
+ */
+export async function loadAlbumTracks(albumId: string | number): Promise<LibraryAlbumTrack[]> {
+  const payload = await readJson<{
+    success?: boolean;
+    error?: string;
+    tracks?: LibraryAlbumTrack[];
+  }>(apiClient.get(`library/albums/${albumId}/tracks`));
+  if (!payload.success) throw new Error(payload.error || 'Could not load the album');
+  return payload.tracks ?? [];
 }
 
 /**

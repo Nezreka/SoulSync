@@ -67,6 +67,18 @@ export const librarySearchSchema = z.object({
     .preprocess((v) => searchString(v) ?? '', z.string())
     .default('')
     .catch(''),
+  /**
+   * Which grid the page shows. In the URL with the other filters rather than
+   * in localStorage, for the same reason they are: a library you are looking
+   * at should survive a reload and be linkable.
+   */
+  view: z
+    .preprocess(
+      (v) => (searchString(v) === 'albums' ? 'albums' : 'artists'),
+      z.enum(['artists', 'albums']),
+    )
+    .default('artists')
+    .catch('artists'),
 });
 
 export type LibrarySearch = z.infer<typeof librarySearchSchema>;
@@ -111,6 +123,36 @@ export interface LibraryArtistsResponse {
   success?: boolean;
   error?: string;
   artists?: LibraryArtist[];
+  pagination?: LibraryPagination;
+}
+
+export interface LibraryAlbum {
+  id: string | number;
+  title: string;
+  year?: number | null;
+  thumb_url?: string | null;
+  artist_id: string | number;
+  artist_name: string;
+  track_count?: number;
+  spotify_album_id?: string | null;
+  musicbrainz_release_id?: string | null;
+  deezer_id?: string | number | null;
+  audiodb_id?: string | number | null;
+  itunes_album_id?: string | number | null;
+  lastfm_url?: string | null;
+  tidal_id?: string | number | null;
+  qobuz_id?: string | number | null;
+  discogs_id?: string | number | null;
+  jiosaavn_id?: string | null;
+  bandcamp_url?: string | null;
+  amazon_id?: string | null;
+  soul_id?: string | null;
+}
+
+export interface LibraryAlbumsResponse {
+  success?: boolean;
+  error?: string;
+  albums?: LibraryAlbum[];
   pagination?: LibraryPagination;
 }
 

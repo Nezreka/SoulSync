@@ -398,3 +398,57 @@ describe('the canonical tracklist on expand', () => {
     expect(tracklist).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Arriving from the library's album view (?album=<id>).
+ *
+ * The card there is one of your owned albums, so the row it names is in this
+ * view — landing at the top of a 60-album page and leaving you to find it
+ * again would waste the click.
+ */
+describe('an album the URL points at', () => {
+  const scrolled: string[] = [];
+
+  beforeEach(() => {
+    scrolled.length = 0;
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      scrolled.push(this.id);
+    };
+  });
+
+  it('opens that album and leaves the rest closed', async () => {
+    render(<EnhancedView isAdmin onReload={vi.fn()} data={DATA} status={READY} focusAlbumId="2" />);
+
+    await waitFor(() =>
+      expect(document.getElementById('enhanced-album-row-2')?.getAttribute('aria-expanded')).toBe(
+        'true',
+      ),
+    );
+    expect(document.getElementById('enhanced-album-row-1')?.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+  });
+
+  it('scrolls it into view', async () => {
+    render(<EnhancedView isAdmin onReload={vi.fn()} data={DATA} status={READY} focusAlbumId="2" />);
+
+    await waitFor(() => expect(scrolled).toContain('enhanced-album-wrapper-2'));
+  });
+
+  it('opens nothing when the URL names no album', async () => {
+    render(<EnhancedView isAdmin onReload={vi.fn()} data={DATA} status={READY} />);
+
+    await waitFor(() => expect(document.getElementById('enhanced-album-row-1')).not.toBeNull());
+    expect(document.querySelector('.enhanced-album-wrapper.expanded')).toBeNull();
+    expect(scrolled).toEqual([]);
+  });
+
+  it('ignores an album id that is not in this library', async () => {
+    render(
+      <EnhancedView isAdmin onReload={vi.fn()} data={DATA} status={READY} focusAlbumId="nope" />,
+    );
+
+    await waitFor(() => expect(document.getElementById('enhanced-album-row-1')).not.toBeNull());
+    expect(document.querySelector('.enhanced-album-wrapper.expanded')).toBeNull();
+  });
+});

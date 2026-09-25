@@ -250,7 +250,11 @@ describe('LibraryPage filters', () => {
   it('marks the active filter and letter', async () => {
     renderPage('/library?watchlist=unwatched&letter=c');
     await waitFor(() =>
-      expect(document.querySelector('.watchlist-filter-btn.active')?.textContent).toBe('Unwatched'),
+      // Scoped to the watchlist group: the view toggle wears the same chip
+      // classes, and it comes first in the toolbar.
+      expect(
+        document.querySelector('#watchlist-filter .watchlist-filter-btn.active')?.textContent,
+      ).toBe('Unwatched'),
     );
     expect(document.querySelector('.alphabet-btn.active')?.textContent).toBe('C');
   });

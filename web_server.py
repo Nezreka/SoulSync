@@ -8219,6 +8219,71 @@ def get_library_artists():
             }
         }), 500
 
+@app.route('/api/library/albums')
+def get_library_albums():
+    """Get albums for the library page's album view, with search and pagination"""
+    try:
+        result = get_database().get_library_albums(
+            search_query=request.args.get('search', ''),
+            letter=request.args.get('letter', 'all'),
+            page=int(request.args.get('page', 1)),
+            limit=int(request.args.get('limit', 75)),
+            profile_id=get_current_profile_id(),
+            source_filter=request.args.get('source_filter', '')
+        )
+
+        # Media-server art is stored as a relative path; a browser cannot load it
+        for album in result['albums']:
+            if album.get('thumb_url'):
+                album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
+
+        return jsonify({
+            "success": True,
+            **result
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching library albums: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "albums": [],
+            "pagination": {
+                "page": 1,
+                "limit": 75,
+                "total_count": 0,
+                "total_pages": 0,
+                "has_prev": False,
+                "has_next": False
+            }
+        }), 500
+
+@app.route('/api/library/albums/<album_id>/tracks')
+def get_library_album_tracks(album_id):
+    """The tracks of one owned album, for the album card's play button.
+
+    Not /api/album/<id>/tracks, which resolves a metadata SOURCE's tracklist
+    for the download-missing modal. This returns the rows that have a file, so
+    the player queues them rather than treating each as a miss to acquire.
+    """
+    try:
+        tracks = get_database().get_tracks_by_album(album_id)
+        return jsonify({
+            "success": True,
+            "tracks": [{
+                'id': t.id,
+                'title': t.title,
+                'track_number': t.track_number,
+                'file_path': t.file_path,
+                'duration': t.duration,
+                'bitrate': t.bitrate,
+            } for t in tracks if t.file_path]
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching tracks for library album {album_id}: {e}")
+        return jsonify({"success": False, "error": str(e), "tracks": []}), 500
+
 @app.route('/api/library/unmatched-summary')
 def get_library_unmatched_summary():
     """How many tracks imported without a match, for the library banner (#1202).

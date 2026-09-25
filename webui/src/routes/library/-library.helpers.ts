@@ -1,4 +1,14 @@
-import type { ArtistBadge, LibraryArtist, LibraryArtistsResponse } from './-library.types';
+import type {
+  ArtistBadge,
+  LibraryAlbum,
+  LibraryAlbumsResponse,
+  LibraryArtist,
+  LibraryArtistsResponse,
+  LibraryPagination,
+} from './-library.types';
+
+import { getServiceUrl } from '../artist-detail/-artist-detail.enhanced-album';
+import { filterJiosaavnEntries } from '../artist-detail/-artist-detail.enrichment';
 
 /**
  * Provider logo paths, mirroring the constants in core.js.
@@ -18,6 +28,10 @@ export const BRAND_LOGOS = {
   tidal: '/static/img/brands/tidal.svg',
   qobuz: '/static/img/brands/qobuz.svg',
   discogs: '/static/img/brands/discogs.svg',
+  // Album-level only: no artist carries either id, so these two are used by
+  // buildAlbumBadges alone.
+  jiosaavn: '/static/img/brands/jiosaavn.webp',
+  bandcamp: '/static/img/brands/bandcamp.svg',
   amazon: '/static/amazon.svg',
   soulsync: '/static/trans2.png',
 } as const;
@@ -185,6 +199,148 @@ export function watchlistArtistId(
   return id ? String(id) : null;
 }
 
+/**
+ * The provider badges for one ALBUM.
+ *
+ * Same shape and rendering as the artist badges, but the ids are different
+ * columns and mean different things — musicbrainz is a RELEASE here, spotify
+ * and itunes are album ids, and JioSaavn and Bandcamp exist only at album
+ * level. Genius has no album id at all, so it never appears.
+ *
+ * The urls come from getServiceUrl, which the artist page's album header
+ * already uses: it knows that Last.fm and Bandcamp store a full url rather
+ * than an id, and that a Discogs id carries its own master/release tag.
+ */
+const ALBUM_BADGE_FIELDS = [
+  {
+    key: 'spotify',
+    field: 'spotify_album_id',
+    logo: BRAND_LOGOS.spotify,
+    fallback: 'SP',
+    title: 'Spotify',
+  },
+  {
+    key: 'musicbrainz',
+    field: 'musicbrainz_release_id',
+    logo: BRAND_LOGOS.musicbrainz,
+    fallback: 'MB',
+    title: 'MusicBrainz',
+  },
+  { key: 'deezer', field: 'deezer_id', logo: BRAND_LOGOS.deezer, fallback: 'Dz', title: 'Deezer' },
+  { key: 'audiodb', field: 'audiodb_id', logo: '', fallback: 'ADB', title: 'AudioDB' },
+  {
+    key: 'itunes',
+    field: 'itunes_album_id',
+    logo: BRAND_LOGOS.itunes,
+    fallback: 'IT',
+    title: 'Apple Music',
+  },
+  {
+    key: 'lastfm',
+    field: 'lastfm_url',
+    logo: BRAND_LOGOS.lastfm,
+    fallback: 'LFM',
+    title: 'Last.fm',
+  },
+  { key: 'tidal', field: 'tidal_id', logo: BRAND_LOGOS.tidal, fallback: 'TD', title: 'Tidal' },
+  { key: 'qobuz', field: 'qobuz_id', logo: BRAND_LOGOS.qobuz, fallback: 'Qz', title: 'Qobuz' },
+  {
+    key: 'discogs',
+    field: 'discogs_id',
+    logo: BRAND_LOGOS.discogs,
+    fallback: 'DC',
+    title: 'Discogs',
+  },
+  {
+    key: 'jiosaavn',
+    field: 'jiosaavn_id',
+    logo: BRAND_LOGOS.jiosaavn,
+    fallback: 'JS',
+    title: 'JioSaavn',
+  },
+  {
+    key: 'bandcamp',
+    field: 'bandcamp_url',
+    logo: BRAND_LOGOS.bandcamp,
+    fallback: 'BC',
+    title: 'Bandcamp',
+  },
+  {
+    key: 'amazon',
+    field: 'amazon_id',
+    logo: BRAND_LOGOS.amazon,
+    fallback: 'AMZ',
+    title: 'Amazon Music',
+  },
+] as const;
+
+export function buildAlbumBadges(album: LibraryAlbum): ArtistBadge[] {
+  // JioSaavn is off unless the shell says otherwise — the same gate the artist
+  // page's album header applies, so one album cannot show a badge there and
+  // hide it here.
+  const badges: ArtistBadge[] = filterJiosaavnEntries(ALBUM_BADGE_FIELDS, 'key')
+    .filter((entry) => album[entry.field])
+    .map((entry) => ({
+      key: entry.key,
+      // AudioDB's logo is only resolvable at call time (see audioDbLogo).
+      logo: entry.key === 'audiodb' ? audioDbLogo() : entry.logo,
+      fallback: entry.fallback,
+      title: entry.title,
+      url: getServiceUrl(entry.key, 'album', album[entry.field]),
+    }));
+
+  // A placeholder soul_id is not a real identity and must not earn a badge.
+  if (album.soul_id && !String(album.soul_id).startsWith('soul_unnamed_')) {
+    badges.push({
+      key: 'soulsync',
+      logo: BRAND_LOGOS.soulsync,
+      fallback: 'SS',
+      title: `SoulID: ${album.soul_id}`,
+      url: null,
+    });
+  }
+  return badges;
+}
+
+/** One owned track of an album, from /api/library/albums/<id>/tracks. */
+export interface LibraryAlbumTrack {
+  id: string | number;
+  title: string;
+  track_number?: number | null;
+  file_path: string;
+  duration?: number | null;
+  bitrate?: number | null;
+}
+
+/**
+ * Shape one owned track for the player queue.
+ *
+ * The same fields the artist page's album rows queue (queueTrackPayload):
+ * `is_library` and `playback_status` are what make the player read the file
+ * instead of treating the row as a miss to download.
+ */
+export function albumQueueTrack(track: LibraryAlbumTrack, album: LibraryAlbum) {
+  const title = track.title || 'Unknown Track';
+  return {
+    title,
+    name: title,
+    artist: album.artist_name || 'Unknown Artist',
+    artists: [{ name: album.artist_name || 'Unknown Artist' }],
+    album: album.title || 'Unknown Album',
+    file_path: track.file_path,
+    filename: track.file_path,
+    is_library: true,
+    playback_status: 'ready',
+    image_url: album.thumb_url ?? null,
+    id: track.id,
+    artist_id: album.artist_id,
+    album_id: album.id,
+    track_number: track.track_number,
+    duration: track.duration,
+    bitrate: track.bitrate,
+  };
+}
+
 /** "12 tracks" / "1 track"; empty when the artist has none. */
 export function trackCountLabel(count: number | undefined): string {
   if (!count || count <= 0) return '';
@@ -200,24 +356,35 @@ export function trackCountLabel(count: number | undefined): string {
  */
 export function readArtistsResponse(payload: LibraryArtistsResponse | undefined): {
   artists: LibraryArtist[];
-  pagination: {
-    page: number;
-    totalPages: number;
-    totalCount: number;
-    hasPrev: boolean;
-    hasNext: boolean;
-  };
+  pagination: LibraryPageState;
 } {
   if (payload?.success === false) throw new Error(payload.error || 'Failed to load artists');
-  const p = payload?.pagination;
+  return { artists: payload?.artists ?? [], pagination: readPagination(payload?.pagination) };
+}
+
+/** Unwrap /api/library/albums. Same contract as the artists response. */
+export function readAlbumsResponse(payload: LibraryAlbumsResponse | undefined): {
+  albums: LibraryAlbum[];
+  pagination: LibraryPageState;
+} {
+  if (payload?.success === false) throw new Error(payload.error || 'Failed to load albums');
+  return { albums: payload?.albums ?? [], pagination: readPagination(payload?.pagination) };
+}
+
+interface LibraryPageState {
+  page: number;
+  totalPages: number;
+  totalCount: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+}
+
+function readPagination(p: LibraryPagination | undefined): LibraryPageState {
   return {
-    artists: payload?.artists ?? [],
-    pagination: {
-      page: p?.page ?? 1,
-      totalPages: p?.total_pages ?? 0,
-      totalCount: p?.total_count ?? 0,
-      hasPrev: p?.has_prev ?? false,
-      hasNext: p?.has_next ?? false,
-    },
+    page: p?.page ?? 1,
+    totalPages: p?.total_pages ?? 0,
+    totalCount: p?.total_count ?? 0,
+    hasPrev: p?.has_prev ?? false,
+    hasNext: p?.has_next ?? false,
   };
 }
