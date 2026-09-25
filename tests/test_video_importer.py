@@ -313,6 +313,17 @@ def test_move_mode_moves_and_does_not_reclaim():
     assert not fs.copied and not fs.removed     # moved, so no copy + no source reclaim
 
 
+def test_move_mode_never_moves_a_seeding_torrent():
+    """move mode took a torrent's file out from under the client: missing
+    files, broken seeding, and a seed cleanup deleting nothing (sept 25 2026)."""
+    dl = dict(_movie_dl("The Matrix 1999 1080p BluRay"), source="torrent")
+    fs = FakeFS()
+    patch = importer.run_import(dl, "/dl/x/matrix.mkv", fs=fs, settings={"transfer_mode": "move"})
+    assert patch["status"] == "completed"
+    assert not fs.moved and fs.copied and fs.copied[0][0] == "/dl/x/matrix.mkv"
+    assert "/dl/x/matrix.mkv" not in fs.removed     # still seeding
+
+
 def test_carry_subtitles_toggle_off():
     dl = _movie_dl("The Matrix 1999 1080p BluRay")
     fs = FakeFS(dirs={"/dl/x": ["matrix.mkv", "matrix.en.srt"]})
