@@ -161,6 +161,19 @@ def test_missing_tags_do_not_turn_a_failed_comparison_into_an_overwrite(
     assert c.existing.read_bytes() == b"old audio"
 
 
+def test_an_unmeasurable_existing_file_keeps_the_download(import_case):
+    """A truncated leftover at the destination: no comparison is possible, so
+    nothing is replaced -- and the good download is not thrown away either."""
+    c = import_case
+    c.context["track_info"].pop("source_info")
+    c.profile["replace_lower_quality"] = True
+    c.old_quality = None
+    c.run()
+    assert c.existing.read_bytes() == b"old audio"
+    assert c.incoming.exists()
+    assert "cannot be measured" in c.context.get("_context_failure_msg", "")
+
+
 def test_unknown_existing_bitrate_is_not_evidence_of_improvement(import_case):
     c = import_case
     c.context["track_info"].pop("source_info")

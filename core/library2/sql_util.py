@@ -322,11 +322,27 @@ def owned_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
     return _OWNED[key].format(alias=alias, owner=owner_clause(scope))
 
 
+def separated(scope):
+    """``scope`` as given -- or ANY_OWNER when nobody keeps a library of their
+    own, which an explicit scope does not check by itself: an explicit
+    'shared' on a single-library install must add no clause at all."""
+    if scope is _AMBIENT:
+        return scope
+    try:
+        from core.library_scope import SCOPE_PARKED, any_own_library_exists
+        if SCOPE_PARKED or not any_own_library_exists():
+            return ANY_OWNER
+    except Exception:  # noqa: BLE001 - unreadable: do not filter
+        return ANY_OWNER
+    return scope
+
+
 def in_library_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
     """`` AND <alias has a live file in this library>`` for the "do we already
     have this" matchers, or "" when nothing separates libraries or the caller
     asks for all of them -- then the matcher reads exactly as before (#1199).
     The catalogue row is shared; having it means having a file of it here."""
+    scope = separated(scope)
     if not owner_clause(scope):
         return ""
     return f" AND {owned_sql(entity_type, alias, scope=scope)}"

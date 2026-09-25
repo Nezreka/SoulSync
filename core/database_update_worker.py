@@ -1479,7 +1479,9 @@ class DatabaseUpdateWorker:
 
         results = self.database.delete_removed_content(
             removed_artist_ids, removed_album_ids, self.server_type,
-            owner_profile_id=self.owner_profile_id)
+            owner_profile_id=self.owner_profile_id,
+            # an album the server still lists survives its old artist's removal
+            keep_album_ids=server_album_ids if check_albums else ())
 
         self._removal_results = results
         return results

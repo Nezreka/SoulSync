@@ -7476,9 +7476,10 @@ class MusicDatabase:
         # measured against that library's rows, like the id sets it diffs
         owner = ""
         if owner_profile_id is not MusicDatabase._ANY_OWNER:
-            from core.library2.sql_util import owner_clause
-            owner = owner_clause("shared" if owner_profile_id is None else int(owner_profile_id),
-                                 column="f.owner_profile_id")
+            from core.library2.sql_util import owner_clause, separated
+            owner = owner_clause(
+                separated("shared" if owner_profile_id is None else int(owner_profile_id)),
+                column="f.owner_profile_id")
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7530,19 +7531,38 @@ class MusicDatabase:
 
     @staticmethod
     def _detach_server_contribution(cursor, server_source: str, scope="all", ids=(),
-                                    owner_profile_id=_ANY_OWNER):
+                                    owner_profile_id=_ANY_OWNER, keep_album_ids=()):
         """Detach one server without deleting shared catalogue/provider state.
 
         ``owner_profile_id`` restricts it to one library: _ANY_OWNER keeps the
         historical whole-server behaviour (a full refresh of a shared install),
         None means the shared library, an int means that profile's. A scan of
         one directory must never detach another directory's rows.
+
+        With libraries separated (#1199) that holds for the MAPPINGS too: an
+        own-library scan keeps its ids under ``server_library_id = own:<pid>``,
+        so a library's detach touches only its own mapping rows, only its own
+        files, and never the compatibility columns (``lib2_*.server_id``),
+        which cannot say whose id they hold.
+
+        ``keep_album_ids``: server album ids the server still lists. An artist
+        the server dropped does not take along an album it now files under
+        another artist.
         """
         source = str(server_source)
         # Second line of defence for the same trap: a blank id in an explicit
         # detach list is not a selector for one row, it matches every row that
         # never got a server id.
         ids = [str(value) for value in ids if str(value).strip()]
+        keep_album_ids = {str(value) for value in keep_album_ids or () if str(value).strip()}
+        from core.library_scope import any_own_library_exists
+        per_library = (owner_profile_id is not MusicDatabase._ANY_OWNER
+                       and any_own_library_exists())
+        library_id = ("" if owner_profile_id is None or owner_profile_id is MusicDatabase._ANY_OWNER
+                      else f"own:{int(owner_profile_id)}")
+        # the mapping rows of the library being detached, when there is one
+        lib_sql, lib_params = ((" AND server_library_id=?", [library_id]) if per_library
+                               else ("", []))
         # Restrict every TRACK lookup below to the library being detached: a
         # track belongs to it when a file of that library hangs off it. Artist
         # and album rows are shared metadata and are detached by their mapping.
@@ -7563,7 +7583,7 @@ class MusicDatabase:
 
         def mapped(entity_type, server_ids=None):
             sql = ("SELECT entity_id FROM lib2_media_server_mappings "
-                   "WHERE entity_type=? AND server_source=?")
+                   "WHERE entity_type=? AND server_source=?" + lib_sql)
             table = {'artist': 'lib2_artists', 'album': 'lib2_albums',
                      'track': 'lib2_tracks'}[entity_type]
             legacy_sql = f"SELECT id FROM {table} WHERE server_source=?"
@@ -7572,21 +7592,23 @@ class MusicDatabase:
                 sql += owned_only("lib2_media_server_mappings.entity_id")
             if server_ids is None:
                 found = {int(row[0]) for row in cursor.execute(
-                    sql, [entity_type, source]).fetchall()}
-                found.update(int(row[0]) for row in cursor.execute(
-                    legacy_sql, [source]).fetchall())
+                    sql, [entity_type, source, *lib_params]).fetchall()}
+                if not per_library:
+                    found.update(int(row[0]) for row in cursor.execute(
+                        legacy_sql, [source]).fetchall())
                 return found
             found = set()
             for chunk in chunks(server_ids):
                 marks = ",".join("?" for _ in chunk)
                 found.update(int(row[0]) for row in cursor.execute(
                     sql + f" AND server_id IN ({marks})",
-                    [entity_type, source, *chunk],
+                    [entity_type, source, *lib_params, *chunk],
                 ).fetchall())
-                found.update(int(row[0]) for row in cursor.execute(
-                    legacy_sql + f" AND server_id IN ({marks})",
-                    [source, *chunk],
-                ).fetchall())
+                if not per_library:
+                    found.update(int(row[0]) for row in cursor.execute(
+                        legacy_sql + f" AND server_id IN ({marks})",
+                        [source, *chunk],
+                    ).fetchall())
             return found
 
         artist_ids = mapped("artist", ids if scope == "artist" else None) \
@@ -7598,13 +7620,18 @@ class MusicDatabase:
                 album_ids = set()
                 for chunk in chunks(artist_ids):
                     marks = ",".join("?" for _ in chunk)
+                    compat = "" if per_library else "al.server_source=? OR "
                     album_ids.update(int(row[0]) for row in cursor.execute(
                         f"SELECT al.id FROM lib2_albums al WHERE "
-                        f"(al.server_source=? OR EXISTS (SELECT 1 FROM "
+                        f"({compat}EXISTS (SELECT 1 FROM "
                         f"lib2_media_server_mappings m WHERE m.entity_type='album' "
-                        f"AND m.entity_id=al.id AND m.server_source=?)) "
+                        f"AND m.entity_id=al.id AND m.server_source=?"
+                        f"{lib_sql.replace('server_library_id', 'm.server_library_id')})) "
                         f"AND al.primary_artist_id IN ({marks})",
-                        [source, source, *chunk]))
+                        [*([] if per_library else [source]), source, *lib_params, *chunk]))
+                if keep_album_ids:
+                    # still on the server, now under another artist
+                    album_ids -= mapped("album", keep_album_ids)
             else:
                 album_ids = set()
         else:
@@ -7616,12 +7643,15 @@ class MusicDatabase:
                 track_ids = set()
                 for chunk in chunks(album_ids):
                     marks = ",".join("?" for _ in chunk)
+                    compat = "" if per_library else "t.server_source=? OR "
                     track_ids.update(int(row[0]) for row in cursor.execute(
                         f"SELECT t.id FROM lib2_tracks t WHERE "
-                        f"(t.server_source=? OR EXISTS (SELECT 1 FROM "
+                        f"({compat}EXISTS (SELECT 1 FROM "
                         f"lib2_media_server_mappings m WHERE m.entity_type='track' "
-                        f"AND m.entity_id=t.id AND m.server_source=?)) "
-                        f"AND t.album_id IN ({marks})", [source, source, *chunk]))
+                        f"AND m.entity_id=t.id AND m.server_source=?"
+                        f"{lib_sql.replace('server_library_id', 'm.server_library_id')})) "
+                        f"AND t.album_id IN ({marks})" + owned_only("t.id"),
+                        [*([] if per_library else [source]), source, *lib_params, *chunk]))
             else:
                 track_ids = set()
         else:
@@ -7632,22 +7662,34 @@ class MusicDatabase:
                 return 0
             for chunk in chunks(entity_ids):
                 marks = ",".join("?" for _ in chunk)
-                params = [source, *chunk]
                 cursor.execute(
-                    f"DELETE FROM lib2_media_server_mappings WHERE server_source=? "
-                    f"AND entity_type='{entity_type}' AND entity_id IN ({marks})", params)
+                    f"DELETE FROM lib2_media_server_mappings WHERE server_source=?{lib_sql} "
+                    f"AND entity_type='{entity_type}' AND entity_id IN ({marks})",
+                    [source, *lib_params, *chunk])
+                # the compatibility columns go with the last mapping of this
+                # server, never while another library still maps the row
                 cursor.execute(
                     f"UPDATE {table} SET server_source=NULL,server_id=NULL,"
                     f"updated_at=CURRENT_TIMESTAMP WHERE server_source=? "
-                    f"AND id IN ({marks})", params)
+                    f"AND id IN ({marks}) AND NOT EXISTS (SELECT 1 FROM "
+                    f"lib2_media_server_mappings m WHERE m.entity_type='{entity_type}' "
+                    f"AND m.entity_id={table}.id AND m.server_source={table}.server_source)",
+                    [source, *chunk])
             return len(entity_ids)
 
         if track_ids:
+            files_owned = ""
+            if per_library:
+                from core.library2.sql_util import owner_clause
+                files_owned = owner_clause(
+                    "shared" if owner_profile_id is None else int(owner_profile_id),
+                    column="owner_profile_id")
             for chunk in chunks(track_ids):
                 marks = ",".join("?" for _ in chunk)
                 cursor.execute(
                     f"UPDATE lib2_track_files SET server_source=NULL,updated_at=CURRENT_TIMESTAMP "
-                    f"WHERE server_source=? AND track_id IN ({marks})", [source, *chunk])
+                    f"WHERE server_source=? AND track_id IN ({marks}){files_owned}",
+                    [source, *chunk])
         tracks = detach("track", "lib2_tracks", track_ids)
         albums = detach("album", "lib2_albums", album_ids)
         artists = detach("artist", "lib2_artists", artist_ids)
@@ -8036,8 +8078,9 @@ class MusicDatabase:
         clause) -- an own-library scan keeps its ids under ``own:<pid>``."""
         if not separated:
             return "", []
-        from core.library2.media_server_sync import scan_library_id
-        return " AND m.server_library_id = ?", [scan_library_id(owner_profile_id)]
+        # None is the shared library here -- never "whatever scope is set"
+        library = "" if owner_profile_id is None else f"own:{int(owner_profile_id)}"
+        return " AND m.server_library_id = ?", [library]
 
     def get_all_artist_ids_for_server(self, server_source: str, owner_profile_id=None) -> set:
         """Get all artist IDs stored in the database for a specific server (and
@@ -8051,13 +8094,17 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                # the compatibility columns cannot say whose id they hold:
+                # with libraries separated only the mapping rows count
+                compat = ("" if owned else
+                          " UNION SELECT a.server_id FROM lib2_artists a "
+                          "WHERE a.server_source=? AND a.server_id IS NOT NULL")
                 cursor.execute("SELECT m.server_id FROM lib2_media_server_mappings m "
                                "JOIN lib2_artists a ON a.id = m.entity_id "
                                "WHERE m.entity_type='artist' AND m.server_source=?" + library
-                               + owned +
-                               " UNION SELECT a.server_id FROM lib2_artists a "
-                               "WHERE a.server_source=? AND a.server_id IS NOT NULL" + owned,
-                               (server_source, *library_params, server_source))
+                               + owned + compat,
+                               (server_source, *library_params,
+                                *([] if owned else [server_source])))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting artist IDs for {server_source}: {e}")
@@ -8126,13 +8173,15 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                compat = ("" if owned else
+                          " UNION SELECT al.server_id FROM lib2_albums al "
+                          "WHERE al.server_source=? AND al.server_id IS NOT NULL")
                 cursor.execute("SELECT m.server_id FROM lib2_media_server_mappings m "
                                "JOIN lib2_albums al ON al.id = m.entity_id "
                                "WHERE m.entity_type='album' AND m.server_source=?" + library
-                               + owned +
-                               " UNION SELECT al.server_id FROM lib2_albums al "
-                               "WHERE al.server_source=? AND al.server_id IS NOT NULL" + owned,
-                               (server_source, *library_params, server_source))
+                               + owned + compat,
+                               (server_source, *library_params,
+                                *([] if owned else [server_source])))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting album IDs for {server_source}: {e}")
@@ -8157,20 +8206,21 @@ class MusicDatabase:
                  "              WHERE f.track_id = t.id"
                  "                AND COALESCE(f.file_state,'active') <> 'deleted'"
                  + owner_clause(scope, column="f.owner_profile_id") + ")")
-        from core.library2.sql_util import owner_clause as _separated
+        from core.library2.sql_util import owner_clause, separated
         library, library_params = self._scan_library_filter(
-            owner_profile_id, _separated(scope))
+            owner_profile_id, owner_clause(separated(scope)))
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                compat = ("" if library else
+                          " UNION SELECT t.server_id FROM lib2_tracks t WHERE t.server_source=? "
+                          "  AND t.server_id IS NOT NULL AND TRIM(t.server_id) <> ''" + owned)
                 cursor.execute(
                     "SELECT m.server_id FROM lib2_media_server_mappings m "
                     "  JOIN lib2_tracks t ON t.id = m.entity_id "
                     " WHERE m.entity_type='track' AND m.server_source=? "
-                    "   AND TRIM(m.server_id) <> ''" + library + owned + " UNION "
-                    "SELECT t.server_id FROM lib2_tracks t WHERE t.server_source=? "
-                    "  AND t.server_id IS NOT NULL AND TRIM(t.server_id) <> ''" + owned,
-                    (server_source, *library_params, server_source))
+                    "   AND TRIM(m.server_id) <> ''" + library + owned + compat,
+                    (server_source, *library_params, *([] if library else [server_source])))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting track IDs for {server_source}: {e}")
@@ -8306,7 +8356,8 @@ class MusicDatabase:
     })
 
     def delete_removed_content(self, removed_artist_ids: set, removed_album_ids: set,
-                               server_source: str, owner_profile_id=_ANY_OWNER):
+                               server_source: str, owner_profile_id=_ANY_OWNER,
+                               keep_album_ids=()):
         """Detach artists/albums removed from a server, preserving shared state.
 
         ``owner_profile_id``: the library the scan read (None = shared). With
@@ -8331,7 +8382,8 @@ class MusicDatabase:
                         batch = artist_list[i:i + batch_size]
                         detached = self._detach_server_contribution(
                             cursor, server_source, "artist", batch,
-                            owner_profile_id=owner_profile_id)
+                            owner_profile_id=owner_profile_id,
+                            keep_album_ids=keep_album_ids)
                         tracks_removed += detached['tracks_removed']
                         albums_removed += detached['albums_removed']
                         artists_removed += detached['artists_removed']

@@ -330,10 +330,10 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
     from core.library2.wanted import PROJECTION_VERSION
     from core.library2.track_files import primary_order
-    from core.library2.sql_util import owner_clause
+    from core.library2.sql_util import owner_clause, separated
     from core.library_scope import library_scope_for_profile
     # the files of the library this profile's wishes fill (#1199)
-    library = library_scope_for_profile(profile_id)
+    library = separated(library_scope_for_profile(profile_id))
     rows = conn.execute(
         f"""SELECT t.id,
                   (SELECT tf.path FROM lib2_track_files tf

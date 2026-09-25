@@ -382,6 +382,18 @@ def carrying_scope(fn):
     return _run
 
 
+def scoped_stream(generator):
+    """A streamed response's body runs after the request is gone, so it would
+    read the shared library whatever the caller had selected (#1199). Capture
+    the caller's library now and read through it while the stream runs."""
+    scope = current_library_scope()
+
+    def run():
+        with library_scope(scope):
+            yield from generator
+    return run()
+
+
 def acting_profile_id(profile_id: Optional[int]) -> Optional[int]:
     """Whose per-profile library intent a request acts on (E-12).
 

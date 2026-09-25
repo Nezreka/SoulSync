@@ -8637,8 +8637,10 @@ def library_completion_stream():
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
+    # the stream outlives the request: keep the caller's library (#1199)
+    from core.library_scope import scoped_stream
     return Response(
-        generate(),
+        scoped_stream(generate()),
         content_type='text/event-stream',
         headers={
             'Cache-Control': 'no-cache',

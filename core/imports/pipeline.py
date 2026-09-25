@@ -2213,6 +2213,20 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             if (_replace_lower and not _same_path_upgrade and not is_enhance_download
                     and not force_replace
                     and not is_profile_upgrade(final_path, file_path, _quality_profile)):
+                from core.imports import quality_replace as _qr
+                try:
+                    _existing_known = _qr.probe_audio_quality(final_path) is not None
+                except Exception:  # noqa: BLE001 - unreadable is unknown
+                    _existing_known = False
+                if not _existing_known:
+                    # nothing to compare against (a truncated leftover, an
+                    # unreadable file): refuse, but keep the download -- as
+                    # upstream does -- instead of discarding a good file
+                    logger.info("[Protection] Existing file cannot be measured - not replacing: %s",
+                                os.path.basename(final_path))
+                    context['_context_failure_msg'] = (
+                        'Existing library file cannot be measured against the quality profile')
+                    return
                 logger.info(
                     "[Protection] Incoming file is not a verified improvement under the quality profile - skipping: %s",
                     os.path.basename(final_path),

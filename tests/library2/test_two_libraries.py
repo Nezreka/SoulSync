@@ -233,6 +233,15 @@ class TestDoWeHaveIt:
             assert find_library_artist_for_source(two.db, "spotify", "sp-house") is None
             assert find_library_artist_for_source(two.db, "spotify", "sp-kim") is not None
 
+    def test_a_streamed_answer_keeps_the_library_it_was_asked_in(self, two):
+        """SSE/NDJSON bodies run after the request is gone; the completion
+        badges of Kim's artist page must still be Kim's."""
+        def body():
+            yield library_scope.current_library_scope()
+        with library_scope.library_scope(two.kim):
+            stream = library_scope.scoped_stream(body())
+        assert list(stream) == [two.kim]
+
     def test_an_album_and_its_tracks(self, two):
         with library_scope.library_scope(two.kim):
             album, _conf = two.db.check_album_exists("House", "House Band")
@@ -279,6 +288,71 @@ class TestRemovalDetection:
         assert lib.db.get_all_artist_ids_for_server("plex") == {"ar-h"}
         assert lib.db.get_all_album_ids_for_server("plex") == {"al-h"}
         assert lib.db.get_all_artist_ids_for_server("plex", owner_profile_id=lib.kim) == {"ar-k"}
+
+    def _both(self, lib):
+        """One release both libraries hold, mapped by both scans; the
+        compatibility columns hold whichever scan wrote last (Kim's)."""
+        kim_lib = f"own:{lib.kim}"
+        with lib.db._get_connection() as conn:
+            a = seed_artist(conn, server_id="ar-x", name="Both Band", server_source="soulsync")
+            al = seed_album(conn, server_id="al-x", title="Same", artist_id=a,
+                            server_source="soulsync")
+            t = seed_track(conn, server_id="t-x", title="S", album_id=al, artist_id=a,
+                           server_source="soulsync",
+                           file_path=os.path.join(lib.shared, "Both", "Same", "01.flac"))
+            conn.execute("INSERT INTO lib2_track_files(track_id, path, is_primary, file_state)"
+                         " VALUES(?,?,0,'active')",
+                         (t, os.path.join(lib.kim_root, "Both", "Same", "01.flac")))
+            conn.executemany(
+                "INSERT INTO lib2_media_server_mappings(entity_type, entity_id, server_source,"
+                " server_library_id, server_id) VALUES(?,?, 'plex', ?, ?)",
+                [("artist", a, "", "ar-s"), ("album", al, "", "al-s"), ("track", t, "", "tr-s"),
+                 ("artist", a, kim_lib, "ar-k"), ("album", al, kim_lib, "al-k"),
+                 ("track", t, kim_lib, "tr-k")])
+            conn.execute("UPDATE lib2_artists SET server_source='plex', server_id='ar-k' WHERE id=?", (a,))
+            conn.execute("UPDATE lib2_albums SET server_source='plex', server_id='al-k' WHERE id=?", (al,))
+            conn.execute("UPDATE lib2_tracks SET server_source='plex', server_id='tr-k' WHERE id=?", (t,))
+            conn.execute("UPDATE lib2_track_files SET server_source='plex'")
+            conn.commit()
+
+    def _left(self, lib):
+        with lib.db._get_connection() as conn:
+            maps = {tuple(r) for r in conn.execute(
+                "SELECT entity_type, server_library_id, server_id FROM lib2_media_server_mappings")}
+            files = {r[0].startswith(lib.kim_root): r[1] for r in conn.execute(
+                "SELECT path, server_source FROM lib2_track_files")}
+        return maps, files
+
+    def test_the_shared_id_sets_ignore_the_compatibility_columns(self, lib):
+        self._both(lib)
+        assert lib.db.get_all_artist_ids_for_server("plex") == {"ar-s"}
+        assert lib.db.get_all_album_ids_for_server("plex") == {"al-s"}
+        assert lib.db.get_all_track_ids_for_server("plex") == {"tr-s"}
+        assert lib.db.get_all_track_ids_for_server("plex", owner_profile_id=lib.kim) == {"tr-k"}
+
+    def test_the_house_losing_a_release_leaves_kims_copy_mapped(self, lib):
+        self._both(lib)
+        lib.db.delete_removed_content(set(), {"al-s"}, "plex", owner_profile_id=None)
+        maps, files = self._left(lib)
+        assert ("album", f"own:{lib.kim}", "al-k") in maps
+        assert ("track", f"own:{lib.kim}", "tr-k") in maps
+        assert ("album", "", "al-s") not in maps
+        assert files == {False: None, True: "plex"}  # only the house's file let go
+
+    def test_a_stale_track_in_kims_scan_leaves_the_houses_mapping(self, lib):
+        self._both(lib)
+        lib.db.delete_stale_tracks({"tr-k"}, "plex", owner_profile_id=lib.kim)
+        maps, _files = self._left(lib)
+        assert ("track", "", "tr-s") in maps
+        assert ("track", f"own:{lib.kim}", "tr-k") not in maps
+
+    def test_an_album_still_on_the_server_survives_its_old_artist(self, lib):
+        self._mapped(lib, "Old Name", "Kept", "o", lib.shared)
+        lib.db.delete_removed_content({"ar-o"}, set(), "plex", owner_profile_id=None,
+                                      keep_album_ids={"al-o"})
+        maps, _files = self._left(lib)
+        assert ("album", "", "al-o") in maps
+        assert ("artist", "", "ar-o") not in maps
 
     def test_removed_content_is_detached_on_a_real_database(self, lib):
         self._mapped(lib, "House Band", "House", "h", lib.shared)

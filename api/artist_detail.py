@@ -2032,7 +2032,9 @@ def download_discography(artist_id):
             }) + '\n'
 
         # Response instead of app.response_class: identical class, no app import
-        return Response(generate_ndjson(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
+        from core.library_scope import scoped_stream  # the caller's library (#1199)
+        return Response(scoped_stream(generate_ndjson()), mimetype='application/x-ndjson',
+                        headers={'X-Accel-Buffering': 'no'})
 
     except Exception as e:
         logger.error(f"Error in download discography: {e}")
@@ -2093,8 +2095,10 @@ def check_artist_discography_completion_stream(artist_id):
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
+    # the stream outlives the request: keep the caller's library (#1199)
+    from core.library_scope import scoped_stream
     return Response(
-        generate_completion_stream(),
+        scoped_stream(generate_completion_stream()),
         content_type='text/event-stream',
         headers={
             'Cache-Control': 'no-cache',

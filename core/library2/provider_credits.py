@@ -22,12 +22,19 @@ from utils.logging_config import get_logger
 
 logger = get_logger("library2.provider_credits")
 
-# how a source's artist id is found on a lib2 artist row
-_ARTIST_ID_SQL = {
-    "spotify": "SELECT id FROM lib2_artists WHERE spotify_id = ? LIMIT 1",
-    "deezer": ("SELECT id FROM lib2_artists"
-               " WHERE json_extract(external_ids, '$.deezer') = ? LIMIT 1"),
-}
+
+def _artist_id_sql(service: str) -> Optional[str]:
+    """How a source's artist id is found on a lib2 artist row -- through the
+    same expression the index is built on (a hand-written json_extract scans
+    the table and misses ids stored as JSON numbers). LIMIT 2: an id on two
+    artists is a corrupt mapping, and a credit must not guess."""
+    if service == "spotify":
+        return "SELECT id FROM lib2_artists WHERE spotify_id = ? LIMIT 2"
+    if service == "deezer":
+        from core.library2.provider_ids import external_id_sql
+        return (f"SELECT id FROM lib2_artists"
+                f" WHERE {external_id_sql('external_ids', 'deezer')} = ? LIMIT 2")
+    return None
 
 
 def _credited_ids(artists: Optional[Iterable[Any]]) -> list:
@@ -46,16 +53,17 @@ def link_credited_artists(conn: Any, entity_type: str, entity_id: int,
     track/album who is a library artist. Returns how many rows were added.
     Never removes a credit and never raises: a credit is decoration on a
     match that already succeeded."""
-    sql = _ARTIST_ID_SQL.get(str(service or "").lower())
+    sql = _artist_id_sql(str(service or "").lower())
     ids = _credited_ids(artists)
     if not sql or len(ids) < 2 or entity_type not in ("track", "album"):
         return 0  # a sole artist is the one it is filed under
     added = 0
     try:
         for position, provider_id in enumerate(ids):
-            row = conn.execute(sql, (provider_id,)).fetchone()
-            if not row:
-                continue
+            rows = conn.execute(sql, (provider_id,)).fetchall()
+            if len(rows) != 1:
+                continue  # not in the library, or ambiguous
+            row = rows[0]
             if entity_type == "track":
                 cur = conn.execute(
                     "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position)"

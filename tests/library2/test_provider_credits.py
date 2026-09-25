@@ -52,3 +52,18 @@ def test_a_sole_artist_or_an_unknown_source_adds_nothing(tmp_path):
     assert link_credited_artists(conn, "track", track, "spotify", [{"id": "sp-ye"}]) == 0
     assert link_credited_artists(conn, "track", track, "tidal",
                                  [{"id": "a"}, {"id": "b"}]) == 0
+
+
+def test_a_deezer_id_stored_as_a_number_still_links(tmp_path):
+    db, conn, _jay, kanye, _album, track = _world(tmp_path)
+    conn.execute("UPDATE lib2_artists SET external_ids='{\"deezer\": 27}' WHERE id=?", (kanye,))
+    assert link_credited_artists(conn, "track", track, "deezer",
+                                 [{"id": 1}, {"id": 27}]) == 1
+
+
+def test_an_id_on_two_artists_is_not_guessed(tmp_path):
+    db, conn, jay, kanye, _album, track = _world(tmp_path)
+    other = seed_artist(conn, server_id="dup", name="Kanye (dup)", server_source="soulsync")
+    conn.execute("UPDATE lib2_artists SET spotify_id='sp-ye' WHERE id=?", (other,))
+    assert link_credited_artists(conn, "track", track, "spotify",
+                                 [{"id": "sp-jay"}, {"id": "sp-ye"}]) == 0
