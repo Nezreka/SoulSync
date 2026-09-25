@@ -691,3 +691,92 @@
     justify-content: space-between;
   }
 }
+
+.issuesRefine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.issuesRefine > :first-child {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.issuesScope {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.issuesScopeButton {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+}
+
+.issuesScopeButton[aria-pressed='true'] {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.issueCardUnread {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: rgb(var(--accent-rgb, 29, 185, 84));
+  background: rgba(var(--accent-rgb, 29, 185, 84), 0.14);
+}
+
+.issuesMore {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.issuesMoreCount {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.issuesMoreButton {
+  padding: 8px 18px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.issuesMoreButton:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.issuesMoreButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 640px) {
+  .issuesRefine > * {
+    flex: 1 1 100%;
+  }
+}

@@ -83,6 +83,7 @@ describe('shellRouteManifest', () => {
       'label-detail',
       'stats',
       'issues',
+      'requests',
       'podcasts',
       'audiobooks',
     ]);

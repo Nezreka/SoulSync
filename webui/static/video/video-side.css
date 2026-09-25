@@ -2767,58 +2767,98 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vd-hist-rel { font-size: 13px; color: rgba(255, 255, 255, 0.85); word-break: break-all; }
 .vd-hist-sub { font-size: 11.5px; color: rgba(255, 255, 255, 0.45); }
 
-/* Requests page (P4) — the in-app Overseerr */
-.vreq-page { padding: 26px 30px 60px; max-width: 900px; margin: 0 auto; }
-.vreq-head { margin-bottom: 20px; }
-.vreq-title-h { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
-.vreq-sub-h { margin: 6px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.55); }
-.vreq-row { display: flex; gap: 14px; align-items: flex-start; padding: 14px; border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.025); margin-bottom: 12px; }
-.vreq-poster { width: 52px; height: 78px; border-radius: 8px; object-fit: cover; flex: 0 0 auto; }
-.vreq-poster--ph { display: flex; align-items: center; justify-content: center; font-size: 22px;
+/* Requests page (P4) — the in-app Overseerr. calm rows: one primary action,
+   the rest in a ⋯ menu, status as quiet text on the right. */
+.vreq-page { padding: 32px 24px 64px; max-width: 920px; margin: 0 auto; }
+.vreq-head { margin-bottom: 22px; }
+.vreq-title-h { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
+.vreq-sub-h { margin: 6px 0 0; font-size: 14px; color: rgba(255, 255, 255, 0.55); }
+.vreq-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin: 0 0 20px; flex-wrap: wrap; }
+.vreq-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.vreq-tab { padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.62); transition: background 0.15s, color 0.15s, border-color 0.15s; }
+.vreq-tab:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
+.vreq-tab.active { background: rgba(255, 255, 255, 0.12); color: #fff; border-color: rgba(255, 255, 255, 0.2); }
+.vreq-clear { border: 0; background: none; padding: 6px 4px; font-size: 12.5px; cursor: pointer;
+    color: rgba(255, 255, 255, 0.42); }
+.vreq-clear:hover { color: #fff; }
+.vreq-list { display: flex; flex-direction: column; gap: 10px; }
+.vreq-row { display: flex; gap: 16px; align-items: flex-start; padding: 14px 16px; border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.06); background: rgba(255, 255, 255, 0.025);
+    transition: border-color 0.15s; }
+.vreq-row:hover { border-color: rgba(255, 255, 255, 0.11); }
+.vreq-poster { width: 48px; height: 72px; border-radius: 7px; object-fit: cover; flex: 0 0 auto;
     background: rgba(255, 255, 255, 0.06); }
-.vreq-main { flex: 1; min-width: 0; }
-.vreq-title { font-size: 15px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.vreq-sub { font-size: 12px; color: rgba(255, 255, 255, 0.5); margin-top: 3px; }
-.vreq-note { font-size: 12.5px; color: rgba(255, 255, 255, 0.68); margin-top: 6px; font-style: italic; }
-.vreq-note--admin { font-style: normal; color: #93c5fd; }
-.vreq-st { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
-    padding: 3px 8px; border-radius: 999px; }
-.vreq-st--pending { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
-.vreq-st--approved { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
-.vreq-st--denied { background: rgba(248, 113, 113, 0.14); color: #f87171; }
-.vreq-actions { display: flex; gap: 8px; flex: 0 0 auto; }
-.vreq-btn { padding: 8px 14px; border-radius: 10px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+.vreq-poster--ph { display: flex; align-items: center; justify-content: center; font-size: 20px; opacity: 0.7; }
+.vreq-main { flex: 1; min-width: 0; padding-top: 2px; }
+.vreq-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.vreq-title-t { font-size: 15px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vreq-kind { flex: 0 0 auto; font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.55); }
+.vreq-sub { font-size: 13px; color: rgba(255, 255, 255, 0.6); margin-top: 3px; }
+.vreq-who { font-size: 12.5px; color: rgba(255, 255, 255, 0.42); margin-top: 6px; }
+.vreq-note { font-size: 12.5px; color: rgba(255, 255, 255, 0.62); margin-top: 6px; font-style: italic; }
+.vreq-note-by { font-style: normal; color: rgba(255, 255, 255, 0.38); margin-left: 4px; }
+.vreq-note--admin { color: rgba(252, 165, 165, 0.8); }
+.vreq-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; align-self: center; }
+.vreq-status { font-size: 12.5px; color: rgba(255, 255, 255, 0.45); white-space: nowrap; }
+.vreq-status--onway { color: rgba(147, 197, 253, 0.85); }
+.vreq-status--available { color: rgb(var(--accent-light-rgb, 30, 215, 96)); }
+.vreq-status--denied { color: rgba(252, 165, 165, 0.8); }
+.vreq-btn { padding: 7px 14px; border-radius: 9px; font-size: 12.5px; font-weight: 700; cursor: pointer;
     border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.05); color: #fff; }
 .vreq-btn:hover { background: rgba(255, 255, 255, 0.1); }
-.vreq-btn:disabled { opacity: 0.5; cursor: default; }
-.vreq-btn--ok { border-color: rgba(34, 197, 94, 0.4); background: rgba(34, 197, 94, 0.14); }
-.vreq-btn--ok:hover { background: rgba(34, 197, 94, 0.3); }
-.vreq-btn--no { border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1); color: #fca5a5; }
-.vreq-btn--no:hover { background: rgba(239, 68, 68, 0.25); }
-.vreq-denybox { display: flex; gap: 8px; margin-top: 10px; }
-.vreq-denybox.hidden { display: none; }
-.vreq-denyin { flex: 1; padding: 8px 10px; border-radius: 9px; font-size: 12.5px;
-    border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.3); color: #fff; }
-.vreq-empty { padding: 40px 0; text-align: center; color: rgba(255, 255, 255, 0.45); font-size: 13.5px; }
-.vreq-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    margin: 0 0 16px; flex-wrap: wrap; }
-.vreq-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.vreq-tab { padding: 7px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 700; cursor: pointer;
-    border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04);
-    color: rgba(255, 255, 255, 0.65); }
-.vreq-tab:hover { background: rgba(255, 255, 255, 0.09); color: #fff; }
-.vreq-tab.active { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.25); }
-.vreq-tab-n { opacity: 0.65; font-weight: 600; margin-left: 2px; }
-.vreq-btn--clear { border-color: rgba(255, 255, 255, 0.1); background: transparent;
-    color: rgba(255, 255, 255, 0.55); font-size: 12px; padding: 7px 12px; }
-.vreq-btn--clear:hover { color: #fff; }
-.vreq-btn--x { padding: 4px 10px; font-size: 15px; line-height: 1; color: rgba(255, 255, 255, 0.5); }
-.vreq-btn--x:hover { color: #fff; background: rgba(239, 68, 68, 0.35); border-color: transparent; }
-/* Approved keeps telling the story: acquiring until the library has it. */
-.vreq-st--lib { background: rgba(34, 197, 94, 0.85); color: #04150a; }
-.vreq-st--acq { background: rgba(59, 130, 246, 0.16); color: #93c5fd; }
-@media (max-width: 640px) { .vreq-row { flex-wrap: wrap; } .vreq-actions { width: 100%; justify-content: flex-end; } }
+.vreq-btn:disabled { opacity: 0.55; cursor: default; }
+.vreq-btn--primary { border-color: transparent; background: rgb(var(--accent-rgb, 29, 185, 84)); color: #000; }
+.vreq-btn--primary:hover:not(:disabled) { background: rgb(var(--accent-light-rgb, 30, 215, 96)); }
+.vreq-btn--ghost { border-color: transparent; background: transparent; color: rgba(255, 255, 255, 0.7); }
+.vreq-btn--ghost:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
+.vreq-btn--danger { border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.16); color: #fecaca; }
+.vreq-btn--danger:hover { background: rgba(239, 68, 68, 0.28); }
+.vreq-more { width: 32px; height: 32px; border-radius: 8px; border: 0; background: transparent; cursor: pointer;
+    color: rgba(255, 255, 255, 0.55); font-size: 18px; line-height: 1; }
+.vreq-more:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+.vreq-empty { padding: 56px 0; text-align: center; color: rgba(255, 255, 255, 0.42); font-size: 14px; }
+/* the ⋯ menu floats on body so rows never clip it */
+.vreq-menu { position: fixed; z-index: 11050; min-width: 190px; padding: 6px; border-radius: 12px;
+    background: rgba(24, 24, 28, 0.98); border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45); display: flex; flex-direction: column; }
+.vreq-menu-item { display: block; text-align: left; padding: 8px 12px; border-radius: 8px; border: 0;
+    background: transparent; font-size: 13px; color: rgba(255, 255, 255, 0.85); cursor: pointer;
+    text-decoration: none; font-family: inherit; }
+.vreq-menu-item:hover, .vreq-menu-item:focus-visible { background: rgba(255, 255, 255, 0.08); color: #fff; outline: none; }
+.vreq-menu-item--danger { color: rgba(252, 165, 165, 0.9); }
+/* seasons + reason sheets (the detail page's Request button uses them too) */
+.vreq-sheet-overlay { position: fixed; inset: 0; z-index: 11000; display: flex; align-items: center;
+    justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.55); opacity: 0; transition: opacity 0.15s; }
+.vreq-sheet-overlay--in { opacity: 1; }
+.vreq-sheet { width: 100%; max-width: 420px; padding: 20px; border-radius: 16px; color: #fff;
+    background: rgba(24, 24, 28, 0.98); border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); transform: translateY(6px); transition: transform 0.15s; }
+.vreq-sheet-overlay--in .vreq-sheet { transform: none; }
+.vreq-sheet-head { margin-bottom: 14px; }
+.vreq-sheet-title { font-size: 17px; font-weight: 700; }
+.vreq-sheet-sub { font-size: 13px; color: rgba(255, 255, 255, 0.5); margin-top: 3px; }
+.vreq-choices { display: flex; flex-direction: column; gap: 6px; }
+.vreq-choice { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px;
+    border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.03);
+    color: #fff; cursor: pointer; font-family: inherit; }
+.vreq-choice:hover { background: rgba(255, 255, 255, 0.07); }
+.vreq-choice.is-on { border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.7);
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.12); }
+.vreq-choice-label { font-size: 13.5px; font-weight: 600; }
+.vreq-choice-hint { font-size: 12px; color: rgba(255, 255, 255, 0.5); }
+.vreq-sheet-label { display: block; font-size: 12.5px; color: rgba(255, 255, 255, 0.6); margin-bottom: 6px; }
+.vreq-sheet-input { width: 100%; box-sizing: border-box; padding: 9px 11px; border-radius: 10px; resize: vertical;
+    font: inherit; font-size: 13px; border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.3); color: #fff; }
+.vreq-sheet-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+@media (max-width: 640px) {
+    .vreq-page { padding: 22px 16px 48px; }
+    .vreq-row { flex-wrap: wrap; }
+    .vreq-actions { width: 100%; justify-content: flex-end; }
+}
 
 /* Custom Formats editor rows (P3) */
 .vq-fmt-row { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr 74px 74px 30px; gap: 8px;
@@ -6140,6 +6180,147 @@ body[data-side="video"] #gsearch-aura {
     border-color: rgba(var(--accent-rgb, 88 101 242), 0.55); color: #fff;
 }
 .vmg-report { margin-top: 4px; align-self: flex-start; }
+.vi-st--dismissed { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.5); }
+
+/* refine row: search, item type, mine/everyone */
+.vi-toolbar { flex-wrap: wrap; align-items: center; }
+.vi-search {
+    flex: 1 1 240px; min-width: 0; padding: 9px 12px; border-radius: 10px; font: inherit; font-size: 13px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #eef1f7; outline: none;
+}
+.vi-search:focus { border-color: rgba(var(--accent-rgb, 88 101 242), 0.6); }
+.vi-scope {
+    display: inline-flex; padding: 3px; border-radius: 10px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+}
+.vi-scope[hidden] { display: none; }
+.vi-scope button {
+    padding: 6px 12px; border: 0; border-radius: 7px; background: none; cursor: pointer;
+    font: inherit; font-size: 12.5px; font-weight: 700; color: rgba(255,255,255,0.55);
+}
+.vi-scope button[aria-pressed="true"] { background: rgba(255,255,255,0.1); color: #fff; }
+.vi-card:focus-visible { outline: none; border-color: rgba(var(--accent-rgb, 88 101 242), 0.6); }
+.vi-new {
+    display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; vertical-align: 1px;
+    font-size: 10px; font-weight: 800; letter-spacing: 0.03em;
+    background: rgba(var(--accent-rgb, 88 101 242), 0.16); color: rgb(var(--accent-rgb, 88 101 242));
+}
+.vi-more { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 18px; }
+.vi-more[hidden] { display: none; }
+.vi-more-count { font-size: 12.5px; color: rgba(255,255,255,0.45); }
+.vi-more-btn {
+    padding: 8px 18px; border-radius: 10px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #fff;
+}
+.vi-more-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* the thread modal: item header, conversation, reply, one primary action */
+.vi-modal--thread { width: min(680px, 96vw); }
+.vi-modal--thread .vi-modal-body { display: flex; flex-direction: column; gap: 16px; }
+.vi-th-hero { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: start; }
+.vi-th-art {
+    width: 56px; aspect-ratio: 2/3; border-radius: 9px; object-fit: cover;
+    background: #1b1b22; box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+}
+.vi-th-info { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.vi-th-eyebrow { font-size: 12px; color: rgba(255,255,255,0.5); }
+.vi-th-title { font-size: 16.5px; font-weight: 800; color: #fff; line-height: 1.3; overflow-wrap: anywhere; }
+.vi-th-item {
+    font-size: 13px; color: rgba(255,255,255,0.75);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vi-th-type {
+    margin-right: 6px; font-size: 10px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.06em; color: rgba(255,255,255,0.4);
+}
+.vi-th-links { min-height: 18px; display: flex; gap: 12px; align-items: center; }
+.vi-link {
+    padding: 0; border: 0; background: none; cursor: pointer; font: inherit;
+    font-size: 12.5px; font-weight: 700; color: rgb(var(--accent-rgb, 88 101 242));
+}
+.vi-link:hover { text-decoration: underline; }
+.vi-removed { font-size: 12px; font-style: italic; color: rgba(255,255,255,0.45); }
+.vi-th-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.vi-th-prio {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: rgba(255,255,255,0.5); text-transform: capitalize;
+}
+.vi-th-followers {
+    padding: 8px 12px; border-radius: 10px; font-size: 12.5px;
+    background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.55);
+}
+.vi-offer {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 11px 14px; border-radius: 12px; font-size: 13.5px; color: #fff;
+    background: rgba(var(--accent-rgb, 88 101 242), 0.08);
+    border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.22);
+}
+.vi-offer-actions { display: flex; align-items: center; gap: 8px; }
+.vi-quiet {
+    padding: 8px 10px; border: 0; border-radius: 8px; background: none; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.6);
+}
+.vi-quiet:hover { color: #fff; background: rgba(255,255,255,0.06); }
+.vi-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.vi-c { display: flex; gap: 12px; align-items: flex-start; }
+.vi-c-avatar {
+    flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 12.5px; font-weight: 800; color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.08);
+}
+.vi-c-main { min-width: 0; flex: 1; }
+.vi-c-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+.vi-c-author { font-size: 13px; font-weight: 700; color: #fff; }
+.vi-c-when { font-size: 11.5px; color: rgba(255,255,255,0.38); white-space: nowrap; }
+.vi-c-body {
+    font-size: 13.5px; line-height: 1.55; color: rgba(255,255,255,0.78);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.vi-c-body--empty { font-size: 13px; font-style: italic; color: rgba(255,255,255,0.35); }
+.vi-ev { display: flex; align-items: center; gap: 10px; padding-left: 11px; font-size: 12.5px; color: rgba(255,255,255,0.5); }
+.vi-ev strong { font-weight: 700; color: rgba(255,255,255,0.7); }
+.vi-ev-dot {
+    flex: 0 0 auto; width: 8px; height: 8px; margin-right: 11px; border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+}
+.vi-reply { min-height: 76px; }
+.vi-snap { border-top: 1px solid rgba(255,255,255,0.06); padding-top: 12px; }
+.vi-snap summary {
+    cursor: pointer; font-size: 11px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.06em; color: rgba(255,255,255,0.42); margin-bottom: 6px;
+}
+.vi-menu { position: relative; }
+.vi-menu-trigger {
+    width: 36px; height: 36px; border-radius: 10px; cursor: pointer; font-size: 18px; line-height: 1;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.8);
+}
+.vi-menu-trigger:hover, .vi-menu-trigger[aria-expanded="true"] { background: rgba(255,255,255,0.09); color: #fff; }
+.vi-menu-pop {
+    position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 2; min-width: 200px; padding: 6px;
+    border-radius: 12px; background: rgba(24,24,26,0.98); border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+}
+.vi-menu-pop[hidden] { display: none; }
+.vi-menu-head {
+    padding: 8px 10px 4px; font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.06em; color: rgba(255,255,255,0.35);
+}
+.vi-menu-item {
+    width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 8px 10px; border: 0; border-radius: 8px; background: none; cursor: pointer;
+    font: inherit; font-size: 13px; text-align: left; color: rgba(255,255,255,0.85);
+}
+.vi-menu-item:hover, .vi-menu-item:focus-visible { background: rgba(255,255,255,0.07); outline: none; }
+.vi-menu-item--danger { margin-top: 4px; color: #ff7b70; }
+/* report entry on an expanded episode row (video-detail.js) */
+.vi-ep-report {
+    margin-top: 10px; padding: 0; border: 0; background: none; cursor: pointer;
+    font: inherit; font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.45);
+}
+.vi-ep-report:hover { color: #fff; }
+@media (max-width: 640px) {
+    .vi-th-hero { grid-template-columns: auto minmax(0, 1fr); }
+    .vi-th-side { grid-column: 1 / -1; flex-direction: row; align-items: center; }
+}
 
 /* ── Settings → Server Connection (video): tame the picker ─────────────────
    The shared .server-logo is width:100% with flex:1 buttons and no size cap —

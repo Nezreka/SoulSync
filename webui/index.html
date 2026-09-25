@@ -104,31 +104,12 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='discover-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='watchlist-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='chat-overhaul.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='profiles.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
         :root {
-            --accent-rgb: {
-                    {
-                    initial_accent_rgb
-                }
-            }
-
-            ;
-
-            --accent-light-rgb: {
-                    {
-                    initial_accent_light_rgb
-                }
-            }
-
-            ;
-
-            --accent-neon-rgb: {
-                    {
-                    initial_accent_neon_rgb
-                }
-            }
-
-            ;
+            --accent-rgb: {{ initial_accent_rgb }};
+            --accent-light-rgb: {{ initial_accent_light_rgb }};
+            --accent-neon-rgb: {{ initial_accent_neon_rgb }};
         }
     </style>
     <script>
@@ -236,144 +217,17 @@
         </div>
     </div>
 
-    <!-- Profile Picker Overlay -->
-    <div id="profile-picker-overlay" class="profile-picker-overlay" style="display: none;">
-        <div class="profile-picker-container">
-            <h2 class="profile-picker-title">Who's listening?</h2>
-            <div id="profile-picker-grid" class="profile-picker-grid"></div>
-            <div id="profile-picker-actions" class="profile-picker-actions" style="display: none;">
-                <button id="manage-profiles-btn" class="profile-manage-btn">Manage Profiles</button>
-            </div>
-        </div>
-        <!-- PIN Dialog -->
-        <div id="profile-pin-dialog" class="profile-pin-dialog" style="display: none;">
-            <div class="profile-pin-content">
-                <div id="profile-pin-avatar" class="profile-pin-avatar"></div>
-                <p id="profile-pin-name" class="profile-pin-name"></p>
-                <input type="password" id="profile-pin-input" class="profile-pin-input" maxlength="6"
-                    placeholder="Enter PIN" autocomplete="off">
-                <div class="profile-pin-buttons">
-                    <button id="profile-pin-cancel" class="profile-pin-cancel">Cancel</button>
-                    <button id="profile-pin-submit" class="profile-pin-submit">Submit</button>
-                </div>
-                <p id="profile-pin-error" class="profile-pin-error" style="display: none;"></p>
-                <a href="#" id="profile-pin-forgot" class="profile-pin-forgot"
-                    onclick="event.preventDefault(); showProfileForgotPin()">Forgot PIN?</a>
-            </div>
-        </div>
-        <!-- Profile Management Panel -->
-        <div id="profile-manage-panel" class="profile-manage-panel" style="display: none;">
-            <div class="profile-manage-content">
-                <div class="profile-manage-header">
-                    <h3>Manage Profiles<small>Create, edit & control access for everyone on this instance</small></h3>
-                    <button id="profile-manage-close" class="profile-manage-close-btn">&times;</button>
-                </div>
-                <div id="profile-manage-list" class="profile-manage-list"></div>
-                <div class="profile-manage-add">
-                    <h4>Add Profile</h4>
-                    <input type="text" id="new-profile-name" class="profile-input" placeholder="Profile name"
-                        maxlength="20">
-                    <input type="url" id="new-profile-avatar-url" class="profile-input"
-                        placeholder="Avatar image URL (optional)">
-                    <div class="profile-color-picker">
-                        <span class="profile-color-swatch" data-color="#6366f1" style="background:#6366f1"
-                            title="Indigo"></span>
-                        <span class="profile-color-swatch" data-color="#ec4899" style="background:#ec4899"
-                            title="Pink"></span>
-                        <span class="profile-color-swatch" data-color="#10b981" style="background:#10b981"
-                            title="Green"></span>
-                        <span class="profile-color-swatch" data-color="#f59e0b" style="background:#f59e0b"
-                            title="Amber"></span>
-                        <span class="profile-color-swatch" data-color="#3b82f6" style="background:#3b82f6"
-                            title="Blue"></span>
-                        <span class="profile-color-swatch" data-color="#ef4444" style="background:#ef4444"
-                            title="Red"></span>
-                        <span class="profile-color-swatch" data-color="#8b5cf6" style="background:#8b5cf6"
-                            title="Purple"></span>
-                        <span class="profile-color-swatch" data-color="#14b8a6" style="background:#14b8a6"
-                            title="Teal"></span>
-                    </div>
-                    <input type="password" id="new-profile-pin" class="profile-input" placeholder="PIN (optional)"
-                        maxlength="6">
-                    <input type="password" id="new-profile-password" class="profile-input"
-                        placeholder="Login password (required when login mode is on)" autocomplete="new-password">
-                    <div class="profile-settings-section">
-                        <label class="profile-settings-label">Home Page</label>
-                        <select id="new-profile-home-page" class="profile-input">
-                            <option value="">Default (Discover)</option>
-                            <option value="dashboard">Dashboard</option>
-                            <option value="sync">Sync</option>
-                            <option value="search">Search</option>
-                            <option value="discover">Discover</option>
-                            <option value="watchlist">Watchlist</option>
-                            <option value="wishlist">Wishlist</option>
-                            <option value="automations">Automations</option>
-                            <option value="active-downloads">Downloads</option>
-                            <option value="library">Library</option>
-                            <option value="stats">Listening Stats</option>
-                            <option value="playlist-explorer">Playlist Explorer</option>
-                            <option value="import">Import</option>
-                            <option value="help">Help & Docs</option>
-                        </select>
-                        <label class="profile-settings-label">Side Access</label>
-                        <div id="new-profile-sides" class="profile-sides-picker" role="radiogroup"
-                            aria-label="Side access">
-                            <label><input type="radio" name="new-profile-sides" value="music" checked> Music
-                                only</label>
-                            <label><input type="radio" name="new-profile-sides" value="video"> Video only</label>
-                            <label><input type="radio" name="new-profile-sides" value="both"> Music + Video</label>
-                        </div>
-                        <label class="profile-settings-label">Page Access</label>
-                        <div id="new-profile-allowed-pages" class="profile-page-checkboxes">
-                            <div class="profile-page-group-label profile-page-group-label--first">Music</div>
-                            <label><input type="checkbox" value="dashboard" checked> Dashboard</label>
-                            <label><input type="checkbox" value="sync" checked> Sync</label>
-                            <label><input type="checkbox" value="podcasts" checked> Podcasts</label>
-                            <label><input type="checkbox" value="audiobooks" checked> Audiobooks</label>
-                            <label><input type="checkbox" value="search" checked> Search</label>
-                            <label><input type="checkbox" value="discover" checked> Discover</label>
-                            <label><input type="checkbox" value="watchlist" checked> Watchlist</label>
-                            <label><input type="checkbox" value="wishlist" checked> Wishlist</label>
-                            <label><input type="checkbox" value="automations" checked> Automations</label>
-                            <label><input type="checkbox" value="active-downloads" checked> Downloads</label>
-                            <label><input type="checkbox" value="library" checked> Library</label>
-                            <label><input type="checkbox" value="stats" checked> Listening Stats</label>
-                            <label><input type="checkbox" value="playlist-explorer" checked> Playlist Explorer</label>
-                            <label><input type="checkbox" value="import" checked> Import</label>
-                            <label><input type="checkbox" value="help" checked disabled data-always-on="1"> Help &
-                                Docs</label>
-                            <label><input type="checkbox" value="issues" checked disabled data-always-on="1">
-                                Issues</label>
-                            <div class="profile-page-group-label">Video<span class="profile-page-group-note">Import,
-                                    Settings &amp; Automations stay admin-only</span></div>
-                            <label><input type="checkbox" value="video-dashboard" checked> Dashboard</label>
-                            <label><input type="checkbox" value="video-search" checked> Search</label>
-                            <label><input type="checkbox" value="video-discover" checked> Discover</label>
-                            <label><input type="checkbox" value="video-library" checked> Library</label>
-                            <label><input type="checkbox" value="video-watchlist" checked> Watchlist</label>
-                            <label><input type="checkbox" value="video-wishlist" checked> Wishlist</label>
-                            <label><input type="checkbox" value="video-downloads" checked> Downloads</label>
-                            <label><input type="checkbox" value="video-calendar" checked> Calendar</label>
-                            <label><input type="checkbox" value="video-tools" checked> Tools</label>
-                        </div>
-                        <label class="profile-checkbox-label">
-                            <input type="checkbox" id="new-profile-can-download" checked> Can download (music, podcasts, audiobooks &amp; video)
-                        </label>
-                    </div>
-                    <button id="create-profile-btn" class="btn btn--block btn--primary profile-create-btn">Create
-                        Profile</button>
-                </div>
-                <div id="admin-pin-section" class="admin-pin-section" style="display: none;">
-                    <h4>Admin PIN</h4>
-                    <p class="admin-pin-note">Required when multiple profiles exist</p>
-                    <input type="password" id="admin-pin-input" class="profile-input" placeholder="Set admin PIN"
-                        maxlength="6">
-                    <button id="set-admin-pin-btn" class="btn btn--block btn--primary profile-create-btn">Set Admin
-                        PIN</button>
-                </div>
-            </div>
+    <!-- profiles: the picker, the pin entry and the manage sheet. init.js
+         builds what goes in them, profiles.css is the look. -->
+    <div id="profile-picker-overlay" class="pf-picker" style="display: none;">
+        <div class="pf-picker-inner" role="dialog" aria-modal="true" aria-labelledby="profile-picker-title">
+            <h1 id="profile-picker-title" class="pf-picker-title">Who's here?</h1>
+            <div id="profile-picker-grid" class="pf-picker-grid"></div>
+            <div id="profile-picker-actions" class="pf-picker-actions" style="display: none;"></div>
         </div>
     </div>
+    <div id="profile-pin-dialog" class="pf-layer pf-layer--pin" style="display: none;"></div>
+    <div id="profile-manage-panel" class="pf-layer" style="display: none;"></div>
 
     <div class="main-container">
         <!-- Mobile Navigation -->
@@ -435,9 +289,13 @@
                         <span>Video</span>
                     </button>
                 </div>
-                <div id="profile-indicator" class="profile-indicator" style="display: none;" title="Switch profile">
-                    <div id="profile-indicator-avatar" class="profile-indicator-avatar"></div>
-                    <span id="profile-indicator-name" class="profile-indicator-name"></span>
+                <div id="profile-indicator" class="profile-indicator" style="display: none;">
+                    <!-- opens the quick switch menu (init.js toggleProfileQuickSwitch) -->
+                    <button type="button" id="profile-indicator-button" class="profile-indicator-main"
+                        aria-haspopup="menu" aria-expanded="false" title="Switch profile">
+                        <span id="profile-indicator-avatar" class="profile-indicator-avatar"></span>
+                        <span id="profile-indicator-name" class="profile-indicator-name"></span>
+                    </button>
                     <!-- My Account: your media server login + your own music services, one modal (#1293) -->
                     <button id="my-accounts-btn" class="personal-settings-trigger"
                         onclick="event.stopPropagation(); openMyAccountsModal()" title="My Account"
@@ -586,6 +444,15 @@
                             </svg></span>
                         <span class="nav-text">Wishlist</span>
                         <span class="dl-nav-badge hidden" id="wishlist-nav-badge">0</span>
+                    </a>
+                    <a class="nav-button" data-page="requests" href="/requests" style="display: none;">
+                        <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.8-.9L3 20.5l1.5-4.6A8.4 8.4 0 1 1 21 11.5z" />
+                                <path d="M9 11.5l2 2 4-4" />
+                            </svg></span>
+                        <span class="nav-text">Requests</span>
+                        <span class="dl-nav-badge hidden" id="requests-nav-badge">0</span>
                     </a>
                     <a class="nav-button" data-page="active-downloads" href="/active-downloads">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
@@ -2227,8 +2094,8 @@
                     <div class="vreq-page">
                         <div class="vreq-head">
                             <h1 class="vreq-title-h">Requests</h1>
-                            <p class="vreq-sub-h">Titles members asked for — approving one sends it straight into
-                                acquisition.</p>
+                            <p class="vreq-sub-h">What your household asked for. Approve once, everyone who asked
+                                hears about it.</p>
                         </div>
                         <div class="vreq-toolbar" data-vreq-toolbar></div>
                         <div class="vreq-list" data-vreq-list></div>
@@ -8939,9 +8806,9 @@
                                                     <div class="setting-help-text" style="margin-bottom: 8px;">
                                                         Set a PIN before you can turn on the lock screen.
                                                     </div>
-                                                    <input type="password" id="security-new-pin" placeholder="Enter PIN"
+                                                    <input type="password" id="security-new-pin" placeholder="4 to 20 digits" inputmode="numeric"
                                                         maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
-                                                    <input type="password" id="security-confirm-pin"
+                                                    <input type="password" id="security-confirm-pin" inputmode="numeric"
                                                         placeholder="Confirm PIN" maxlength="20" autocomplete="off"
                                                         style="margin-bottom: 6px;">
                                                     <button class="auth-button" id="security-save-pin-btn"

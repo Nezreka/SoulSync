@@ -844,6 +844,7 @@ async function openAddToWishlistModal(album, artist, tracks, albumType, trackOwn
         const addToWishlistBtn = document.getElementById('confirm-add-to-wishlist-btn');
         if (addToWishlistBtn) {
             addToWishlistBtn.onclick = () => handleAddToWishlist();
+            addToWishlistBtn.textContent = wishlistAddLabel();
         }
 
         // Quality Profile for this acquisition (P1-01). Preselects the mirror's
@@ -953,6 +954,11 @@ function generateWishlistTrackList(tracks, trackOwnership) {
             </div>
         `;
     }).join('');
+}
+
+// a profile without download rights sends a request, so the button says so
+function wishlistAddLabel() {
+    return (typeof canDownload === 'function' && !canDownload()) ? 'Request' : 'Add to Wishlist';
 }
 
 /**
@@ -1084,7 +1090,10 @@ async function handleAddToWishlist() {
             let message = `Added ${successCount} track${successCount !== 1 ? 's' : ''} to wishlist`;
             if (skippedCount > 0) message += ` (${skippedCount} already owned)`;
             if (errorCount > 0) message += ` — ${errorCount} failed`;
-            showToast(message, errorCount > 0 ? 'warning' : 'success');
+            // a profile that asks first hears who it went to instead
+            if (errorCount > 0 || typeof announceWishlistRequest !== 'function' || !announceWishlistRequest()) {
+                showToast(message, errorCount > 0 ? 'warning' : 'success');
+            }
         } else {
             showToast('Failed to add any tracks to wishlist', 'error');
         }
@@ -1101,7 +1110,7 @@ async function handleAddToWishlist() {
         // Reset button state
         if (addToWishlistBtn) {
             addToWishlistBtn.classList.remove('loading');
-            addToWishlistBtn.textContent = 'Add to Wishlist';
+            addToWishlistBtn.textContent = wishlistAddLabel();
             addToWishlistBtn.disabled = false;
         }
     }
@@ -1544,7 +1553,9 @@ async function addModalTracksToWishlist(playlistId) {
             if (skippedCount > 0) message += ` (${skippedCount} already owned)`;
             if (errorCount > 0) message += ` — ${errorCount} failed`;
             if (wingItSkipped > 0) message += ` (${wingItSkipped} wing-it skipped)`;
-            showToast(message, 'success');
+            if (errorCount > 0 || typeof announceWishlistRequest !== 'function' || !announceWishlistRequest()) {
+                showToast(message, 'success');
+            }
 
             // Close the modal on success
             await closeDownloadMissingModal(playlistId);

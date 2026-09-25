@@ -514,6 +514,35 @@ function setCurrentProfile(profile) {
     notifyProfileContextChanged();
 }
 
+// the path the browser opened, read before react's "/" redirect rewrites it
+const PF_BOOT_PATH = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname);
+
+// with 2+ profiles every data api answers 401 profile_required to a browser
+// that hasn't picked one. a page that's already open gets that when its
+// profile is deleted: reload once so the picker shows. once a minute at
+// most, so a server that keeps saying no can't spin us.
+(function reloadWhenProfileIsGone() {
+    const inner = window.fetch;
+    if (typeof inner !== 'function') return;
+    let reloading = false;
+    window.fetch = function (...args) {
+        return inner.apply(this, args).then((res) => {
+            if (res && res.status === 401 && currentProfile && !reloading) {
+                res.clone().json().then((body) => {
+                    if (!body || !body.profile_required || reloading) return;
+                    let last = 0;
+                    try { last = Number(sessionStorage.getItem('ss_profile_required_reload')) || 0; } catch (e) { /* ignore */ }
+                    if (Date.now() - last < 60000) return;
+                    try { sessionStorage.setItem('ss_profile_required_reload', String(Date.now())); } catch (e) { /* ignore */ }
+                    reloading = true;
+                    window.location.reload();
+                }).catch(() => { /* not json, not ours */ });
+            }
+            return res;
+        });
+    };
+})();
+
 // Temporary compatibility shim until existing profile rows are migrated to
 // the current page ids.
 const LEGACY_PROFILE_PAGE_ALIASES = {
@@ -530,10 +559,28 @@ function normalizeProfilePageList(pageIds) {
     return pageIds.map(normalizeProfilePageId);
 }
 
+// always a music page the profile can open: the react router and the denied
+// page bounce both land here, so a home they can't see would loop or render
+// the page they were refused. video homes are handled at boot
+// (profileVideoHomePage).
 function getProfileHomePage() {
     if (!currentProfile) return 'dashboard';
-    if (currentProfile.home_page) return normalizeProfilePageId(currentProfile.home_page);
-    return currentProfile.is_admin ? 'dashboard' : 'discover';
+    const home = currentProfile.home_page ? normalizeProfilePageId(currentProfile.home_page) : '';
+    if (home && !home.startsWith('video-') && isPageAllowed(home)) return home;
+    if (currentProfile.is_admin) return 'dashboard';
+    if (isPageAllowed('discover')) return 'discover';
+    // discover is switched off for them: the first page they do have
+    const firstAllowed = PROFILE_PAGE_GROUPS[0].pages.find(pageId => isPageAllowed(pageId));
+    return firstAllowed || 'help';
+}
+
+// a video page picked as home, when the profile can still reach it
+function profileVideoHomePage() {
+    if (!currentProfile || !currentProfile.home_page) return '';
+    const home = String(currentProfile.home_page);
+    if (!home.startsWith('video-')) return '';
+    if (profileAllowedSides() === 'music') return '';
+    return isPageAllowed(home) ? home : '';
 }
 
 function isPageAllowed(pageId) {
@@ -541,6 +588,8 @@ function isPageAllowed(pageId) {
     if (currentProfile.id === 1) return true;
     const normalizedPageId = normalizeProfilePageId(pageId);
     if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
+    // requests: admins answer them, profiles without download rights make them
+    if (normalizedPageId === 'requests') return !!currentProfile.is_admin || !canDownload();
     if (normalizedPageId === 'settings') return currentProfile.is_admin;
     if (normalizedPageId === 'artist-detail') {
         const ap = normalizeProfilePageList(currentProfile.allowed_pages);
@@ -591,23 +640,24 @@ function activatePage(pageId, options = {}) {
 function renderProfileAvatar(el, profile) {
     // Renders avatar as image (if avatar_url set) or colored initial fallback
     // Preserves existing classes, ensures 'profile-avatar' is present
-    if (!el.classList.contains('profile-avatar') && !el.classList.contains('profile-indicator-avatar') && !el.classList.contains('profile-pin-avatar')) {
+    if (!el.classList.contains('profile-avatar') && !el.classList.contains('profile-indicator-avatar') && !el.classList.contains('pf-avatar')) {
         el.className = 'profile-avatar';
     }
+    const initial = String(profile.name || '?').charAt(0).toUpperCase();
     el.style.background = profile.avatar_color || '#6366f1';
     el.textContent = '';
     if (profile.avatar_url) {
         const img = document.createElement('img');
         img.src = profile.avatar_url;
-        img.alt = profile.name;
+        img.alt = '';
         img.className = 'profile-avatar-img';
         img.onerror = () => {
             img.remove();
-            el.textContent = profile.name.charAt(0).toUpperCase();
+            el.textContent = initial;
         };
         el.appendChild(img);
     } else {
-        el.textContent = profile.name.charAt(0).toUpperCase();
+        el.textContent = initial;
     }
 }
 
@@ -981,8 +1031,9 @@ async function saveSecurityPin() {
     const confirm = document.getElementById('security-confirm-pin').value;
     const msg = document.getElementById('security-pin-msg');
 
-    if (!pin || pin.length < 4) {
-        msg.textContent = 'PIN must be at least 4 characters';
+    const pinProblem = profilePinError(pin || '');
+    if (pinProblem) {
+        msg.textContent = pinProblem;
         msg.style.display = 'block';
         msg.style.color = '#ff5252';
         return;
@@ -1084,7 +1135,6 @@ async function submitRecoveryCredential() {
         const data = await res.json();
 
         if (data.success) {
-            sessionStorage.setItem('soulsync_pin_ok', '1');
             document.getElementById('launch-pin-overlay').style.display = 'none';
             initApp();
             setTimeout(() => showToast('PIN cleared. You can set a new one in Settings → Advanced.', 'success'), 1000);
@@ -1105,256 +1155,647 @@ async function submitRecoveryCredential() {
     btn.textContent = 'Verify & Reset PIN';
 }
 
-// ── Profile PIN Forgot Recovery ────────────────────────────────────────
-function showProfileForgotPin() {
-    const dialog = document.getElementById('profile-pin-dialog');
-    const content = dialog.querySelector('.profile-pin-content');
+// ── Profiles: shared bits ──────────────────────────────────────────────
+// the picker, pin entry, quick switch and manage sheet all build their
+// markup here; profiles.css is the look.
 
-    // Store the profile ID we're recovering for
-    const profileName = document.getElementById('profile-pin-name').textContent;
+// one rule for every pin a person sets: 4 to 20 digits
+const PROFILE_PIN_MIN = 4;
+const PROFILE_PIN_MAX = 20;
+const PROFILE_COLORS = [
+    ['#6366f1', 'Indigo'], ['#ec4899', 'Pink'], ['#10b981', 'Green'], ['#f59e0b', 'Amber'],
+    ['#3b82f6', 'Blue'], ['#ef4444', 'Red'], ['#8b5cf6', 'Purple'], ['#14b8a6', 'Teal'],
+];
+const PF_ICONS = {
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+    more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
+    back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><path d="m18 9-6 6M12 9l6 6"/></svg>',
+    go: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+    user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
+    edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+    people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 20a6.5 6.5 0 0 0-3-5.5"/></svg>',
+    signout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>',
+};
 
-    // Replace dialog content with recovery form
-    content.dataset.prevHtml = content.innerHTML;
-    content.innerHTML = `
-        <p style="color:#fff;font-size:14px;font-weight:600;margin-bottom:4px">Reset PIN for ${profileName}</p>
-        <p style="color:rgba(255,255,255,0.5);font-size:12px;margin-bottom:12px">Enter any configured API credential<br>(Spotify secret, Plex token, etc.)</p>
-        <input type="password" id="profile-recovery-input" class="profile-pin-input" maxlength="200" placeholder="Paste API credential" autocomplete="off">
-        <div class="profile-pin-buttons">
-            <button id="profile-recovery-cancel" class="profile-pin-cancel">Back</button>
-            <button id="profile-recovery-submit" class="profile-pin-submit">Verify & Reset</button>
-        </div>
-        <p id="profile-recovery-error" class="profile-pin-error" style="display:none"></p>
-    `;
-    setTimeout(() => document.getElementById('profile-recovery-input').focus(), 100);
+let _pfUid = 0;
+let _pfProfilesCache = [];
 
-    document.getElementById('profile-recovery-cancel').onclick = () => {
-        content.innerHTML = content.dataset.prevHtml;
-    };
+function profilePinError(pin) {
+    if (!/^\d*$/.test(pin)) return 'Use digits only';
+    if (pin.length < PROFILE_PIN_MIN) return `Use at least ${PROFILE_PIN_MIN} digits`;
+    if (pin.length > PROFILE_PIN_MAX) return `Use ${PROFILE_PIN_MAX} digits at most`;
+    return '';
+}
 
-    document.getElementById('profile-recovery-submit').onclick = async () => {
-        const input = document.getElementById('profile-recovery-input');
-        const error = document.getElementById('profile-recovery-error');
-        const credential = input.value.trim();
-        if (!credential) return;
+function pfEl(tag, attrs = {}, children = []) {
+    const el = document.createElement(tag);
+    Object.entries(attrs).forEach(([key, value]) => {
+        if (value === null || value === undefined || value === false) return;
+        if (key === 'class') el.className = value;
+        else if (key === 'text') el.textContent = value;
+        else if (key === 'html') el.innerHTML = value;
+        else if (key.startsWith('on') && typeof value === 'function') el.addEventListener(key.slice(2), value);
+        else el.setAttribute(key, value === true ? '' : value);
+    });
+    (Array.isArray(children) ? children : [children]).forEach(child => {
+        if (child !== null && child !== undefined && child !== false) el.append(child);
+    });
+    return el;
+}
 
-        const btn = document.getElementById('profile-recovery-submit');
-        btn.disabled = true;
-        btn.textContent = 'Verifying...';
-        error.style.display = 'none';
+function pfAvatar(profile, sizeClass = '') {
+    const el = pfEl('span', { class: ('pf-avatar ' + sizeClass).trim(), 'aria-hidden': 'true' });
+    renderProfileAvatar(el, profile);
+    return el;
+}
 
-        try {
-            const res = await fetch('/api/profiles/reset-pin-via-credential', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ credential, profile_id: dialog._profileId || 1 })
-            });
-            const data = await res.json();
-            if (data.success) {
-                dialog.style.display = 'none';
-                content.innerHTML = content.dataset.prevHtml;
-                showToast('PIN cleared. You can set a new one in Settings.', 'success');
-                // Re-try selecting the profile (now PIN-free)
-                if (dialog._profileId) selectProfile(dialog._profileId);
-            } else {
-                error.textContent = data.error || 'Credential not recognized';
-                error.style.display = 'block';
-                input.value = '';
-                input.focus();
-            }
-        } catch (e) {
-            error.textContent = 'Connection error';
-            error.style.display = 'block';
+function pfIsOwner(p) { return !!p && Number(p.id) === 1; }
+function pfNoDownloads(p) { return !!p && !p.is_admin && (p.can_download === false || p.can_download === 0); }
+
+// the one quiet line under a name on the picker. other people's rows only
+// carry id/name/avatar/is_admin/has_pin/has_password, so everything past
+// that is optional.
+function profileMetaLine(p) {
+    const bits = [];
+    if (pfIsOwner(p)) bits.push('Owner');
+    else if (p.is_admin) bits.push('Admin');
+    if (p.library_mode === 'own') bits.push('Own library');
+    if (pfNoDownloads(p)) bits.push('Asks for downloads');
+    if (p.has_pin) bits.push('PIN');
+    return bits.slice(0, 2).join(' · ');
+}
+
+function pfOwnerName(profiles) {
+    const owner = (profiles || []).find(pfIsOwner) || (profiles || []).find(p => p.is_admin);
+    return owner ? owner.name : 'an admin';
+}
+
+async function pfFetchProfiles() {
+    const res = await fetch('/api/profiles');
+    const data = await res.json();
+    _pfProfilesCache = data.profiles || [];
+    return data;
+}
+
+async function pfReadJson(res) {
+    try { return await res.json(); } catch (e) { return {}; }
+}
+
+// ── layers: every profile modal goes through here, so escape, the focus
+// trap and giving focus back all work the same way ───────────────────────
+
+const _pfLayers = [];
+
+function pfFocusables(root) {
+    return Array.from(root.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+    )).filter(el => el.getClientRects().length > 0);
+}
+
+function pfOpenLayer(el, { onClose = null, escape = true, focus = null } = {}) {
+    const existing = _pfLayers.find(entry => entry.el === el);
+    if (existing) {
+        existing.onClose = onClose;
+        existing.escape = escape;
+    } else {
+        _pfLayers.push({ el, onClose, escape, returnTo: document.activeElement });
+    }
+    el.style.display = 'flex';
+    document.body.classList.add('pf-modal-open');
+    setTimeout(() => {
+        const target = (typeof focus === 'function' ? focus() : focus) || pfFocusables(el)[0];
+        if (target && el.contains(target)) target.focus();
+    }, 40);
+}
+
+function pfCloseLayer(el) {
+    const index = _pfLayers.findIndex(entry => entry.el === el);
+    el.style.display = 'none';
+    if (index < 0) return;
+    const [entry] = _pfLayers.splice(index, 1);
+    if (!_pfLayers.length) document.body.classList.remove('pf-modal-open');
+    if (entry.returnTo && document.contains(entry.returnTo) && typeof entry.returnTo.focus === 'function') {
+        try { entry.returnTo.focus(); } catch (e) { /* ignore */ }
+    }
+    if (entry.onClose) entry.onClose();
+}
+
+document.addEventListener('keydown', (e) => {
+    const top = _pfLayers[_pfLayers.length - 1];
+    if (!top) return;
+    // the confirm dialog sits above every profile layer; it keeps its own keys
+    const confirmOverlay = document.getElementById('confirm-modal-overlay');
+    if (confirmOverlay && !confirmOverlay.classList.contains('hidden')) return;
+    if (e.key === 'Escape') {
+        if (document.querySelector('.pf-menu, .pf-popover')) return;   // an open menu closes first
+        if (top.escape) {
+            e.preventDefault();
+            pfCloseLayer(top.el);
         }
-        btn.disabled = false;
-        btn.textContent = 'Verify & Reset';
-    };
+        return;
+    }
+    if (e.key !== 'Tab') return;
+    const items = pfFocusables(top.el);
+    if (!items.length) { e.preventDefault(); return; }
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (!top.el.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}, true);
 
-    document.getElementById('profile-recovery-input').onkeydown = (e) => {
-        if (e.key === 'Enter') document.getElementById('profile-recovery-submit').click();
+// a dialog card inside a fresh layer, removed from the page when it closes
+function pfModal({ title, subtitle = '', size = '', layerClass = 'pf-layer--editor', onClose = null, dismissable = true }) {
+    const titleId = 'pf-modal-title-' + (++_pfUid);
+    const layer = pfEl('div', { class: 'pf-layer ' + layerClass });
+    const card = pfEl('div', {
+        class: ('pf-modal ' + (size ? 'pf-modal--' + size : '')).trim(),
+        role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId,
+    });
+    const titleEl = pfEl('h2', { class: 'pf-modal-title', id: titleId, text: title });
+    const subEl = pfEl('p', { class: 'pf-modal-sub', text: subtitle });
+    if (!subtitle) subEl.style.display = 'none';
+    const closeBtn = pfEl('button', { type: 'button', class: 'pf-icon-btn', 'aria-label': 'Close', html: PF_ICONS.close });
+    const head = pfEl('div', { class: 'pf-modal-head' }, [pfEl('div', { class: 'pf-modal-titles' }, [titleEl, subEl]), closeBtn]);
+    const body = pfEl('div', { class: 'pf-modal-body' });
+    const foot = pfEl('div', { class: 'pf-modal-foot' });
+    card.append(head, body, foot);
+    layer.append(card);
+    document.body.append(layer);
+
+    const close = () => pfCloseLayer(layer);
+    closeBtn.addEventListener('click', close);
+    if (dismissable) {
+        layer.addEventListener('mousedown', (e) => { if (e.target === layer) close(); });
+    }
+    const open = (focus) => pfOpenLayer(layer, {
+        focus,
+        onClose: () => { layer.remove(); if (onClose) onClose(); },
+    });
+    return { layer, card, head, titleEl, subEl, body, foot, close, open };
+}
+
+// a switch: a title, one line saying what it does, and the toggle
+function pfSwitch({ title, desc = '', checked = false, disabled = false, onChange = null }) {
+    const id = 'pf-switch-' + (++_pfUid);
+    const descId = id + '-desc';
+    const input = pfEl('input', {
+        type: 'checkbox', role: 'switch', id, class: 'pf-switch-input',
+        'aria-describedby': desc ? descId : null,
+    });
+    input.checked = !!checked;
+    input.disabled = !!disabled;
+    const descEl = pfEl('span', { class: 'pf-switch-desc', id: descId, text: desc });
+    const row = pfEl('label', { class: 'pf-switch-row' + (disabled ? ' is-disabled' : ''), for: id }, [
+        pfEl('span', { class: 'pf-switch-text' }, [pfEl('span', { class: 'pf-switch-title', text: title }), descEl]),
+        input,
+        pfEl('span', { class: 'pf-switch-track', 'aria-hidden': 'true' }, pfEl('span', { class: 'pf-switch-thumb' })),
+    ]);
+    if (onChange) input.addEventListener('change', () => onChange(input.checked));
+    return {
+        row, input,
+        get checked() { return input.checked; },
+        set(value) { input.checked = !!value; },
+        setDesc(text) { descEl.textContent = text; },
+        setDisabled(value) { input.disabled = !!value; row.classList.toggle('is-disabled', !!value); },
     };
 }
 
+// a small menu of actions anchored to a button (the ⋯ on a card)
+function pfOpenMenu(anchor, items) {
+    pfCloseMenus();
+    const menu = pfEl('div', { class: 'pf-menu', role: 'menu' });
+    items.forEach(item => {
+        if (item === 'sep') { menu.append(pfEl('div', { class: 'pf-menu-sep', role: 'separator' })); return; }
+        const btn = pfEl('button', {
+            type: 'button', role: 'menuitem', tabindex: '-1',
+            class: 'pf-menu-item' + (item.danger ? ' pf-menu-item--danger' : ''),
+        }, [item.icon ? pfEl('span', { html: item.icon, style: 'display:contents' }) : null,
+            pfEl('span', { class: 'pf-menu-item-text', text: item.label })]);
+        btn.addEventListener('click', () => { pfCloseMenus(false); item.run(); });
+        menu.append(btn);
+    });
+    document.body.append(menu);
+    const rect = anchor.getBoundingClientRect();
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+    let left = Math.min(rect.right - width, window.innerWidth - width - 16);
+    left = Math.max(16, left);
+    let top = rect.bottom + 6;
+    if (top + height > window.innerHeight - 16) top = Math.max(16, rect.top - height - 6);
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+    anchor.setAttribute('aria-expanded', 'true');
+    _pfWireMenu(menu, anchor, () => pfCloseMenus());
+    return menu;
+}
+
+let _pfMenuCleanup = null;
+
+function pfCloseMenus(restoreFocus = true) {
+    if (_pfMenuCleanup) {
+        const cleanup = _pfMenuCleanup;
+        _pfMenuCleanup = null;
+        cleanup(restoreFocus);
+    }
+}
+
+// arrow keys between items, escape and tab and outside clicks close
+function _pfWireMenu(menu, anchor, close) {
+    const items = () => Array.from(menu.querySelectorAll('[role="menuitem"]'));
+    const onKey = (e) => {
+        const list = items();
+        const index = list.indexOf(document.activeElement);
+        if (e.key === 'ArrowDown') { e.preventDefault(); list[(index + 1) % list.length]?.focus(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); list[(index - 1 + list.length) % list.length]?.focus(); }
+        else if (e.key === 'Home') { e.preventDefault(); list[0]?.focus(); }
+        else if (e.key === 'End') { e.preventDefault(); list[list.length - 1]?.focus(); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+        else if (e.key === 'Tab') { close(); }
+    };
+    const onDown = (e) => {
+        if (!menu.contains(e.target) && !anchor.contains(e.target)) close();
+    };
+    const onScroll = (e) => { if (!menu.contains(e.target)) close(); };
+    menu.addEventListener('keydown', onKey);
+    setTimeout(() => {
+        document.addEventListener('mousedown', onDown, true);
+        document.addEventListener('touchstart', onDown, true);
+    }, 0);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', onScroll, true);
+    _pfMenuCleanup = (restoreFocus) => {
+        document.removeEventListener('mousedown', onDown, true);
+        document.removeEventListener('touchstart', onDown, true);
+        window.removeEventListener('resize', close);
+        window.removeEventListener('scroll', onScroll, true);
+        menu.remove();
+        anchor.setAttribute('aria-expanded', 'false');
+        if (restoreFocus && document.contains(anchor)) anchor.focus();
+    };
+    setTimeout(() => items()[0]?.focus(), 0);
+}
+
+// ── Picker ─────────────────────────────────────────────────────────────
+
 function showProfilePicker(profiles, canCancel = false) {
+    _pfProfilesCache = profiles || [];
     const overlay = document.getElementById('profile-picker-overlay');
     const grid = document.getElementById('profile-picker-grid');
     const actions = document.getElementById('profile-picker-actions');
+    const isAdmin = !!(currentProfile && currentProfile.is_admin);
 
     grid.innerHTML = '';
-    profiles.forEach(p => {
-        const card = document.createElement('div');
-        card.className = 'profile-picker-card';
-        const avatarEl = document.createElement('div');
-        renderProfileAvatar(avatarEl, p);
-        card.appendChild(avatarEl);
-        const nameEl = document.createElement('span');
-        nameEl.className = 'profile-name';
-        nameEl.textContent = p.name;
-        card.appendChild(nameEl);
-        if (p.is_admin) {
-            const badge = document.createElement('span');
-            badge.className = 'profile-badge';
-            badge.textContent = 'Admin';
-            card.appendChild(badge);
-        }
-        card.onclick = () => handleProfileClick(p);
-        grid.appendChild(card);
+    _pfProfilesCache.forEach(p => {
+        const meta = profileMetaLine(p);
+        const isCurrent = !!(currentProfile && currentProfile.id === p.id);
+        const tile = pfEl('button', {
+            type: 'button',
+            class: 'pf-tile' + (isCurrent ? ' is-current' : ''),
+            'aria-label': p.name + (meta ? ', ' + meta : '') + (isCurrent ? ', current profile' : ''),
+        }, [
+            pfAvatar(p, 'pf-avatar--tile'),
+            pfEl('span', { class: 'pf-tile-name', text: p.name }),
+            pfEl('span', { class: 'pf-tile-meta', text: meta }),
+        ]);
+        tile.addEventListener('click', () => handleProfileClick(p, _pfProfilesCache.length));
+        grid.append(tile);
     });
 
-    // Show actions: admin sees "Manage Profiles", non-admin sees "My Profile" (when they have a profile selected)
-    const isAdmin = currentProfile ? currentProfile.is_admin : false;
-    const manageBtn = document.getElementById('manage-profiles-btn');
     if (isAdmin) {
-        actions.style.display = '';
-        if (manageBtn) {
-            manageBtn.textContent = 'Manage Profiles';
-            // Reset onclick to admin handler (initProfileManagement sets this, but re-affirm here)
-            manageBtn.onclick = () => {
-                document.getElementById('profile-manage-panel').style.display = 'flex';
-                loadProfileManageList();
-            };
-        }
+        const add = pfEl('button', { type: 'button', class: 'pf-tile pf-tile--add' }, [
+            pfEl('span', { class: 'pf-add-square', html: PF_ICONS.plus, 'aria-hidden': 'true' }),
+            pfEl('span', { class: 'pf-tile-name', text: 'Add profile' }),
+            pfEl('span', { class: 'pf-tile-meta', text: '' }),
+        ]);
+        add.addEventListener('click', () => openProfileEditor({ mode: 'create' }));
+        grid.append(add);
+    }
+
+    actions.innerHTML = '';
+    if (isAdmin) {
+        actions.append(pfEl('button', { type: 'button', class: 'pf-pill', id: 'manage-profiles-btn', text: 'Manage profiles', onclick: () => openProfileManager() }));
     } else if (currentProfile && canCancel) {
-        // Non-admin with an active profile: show "My Profile" to edit own settings
-        actions.style.display = '';
-        if (manageBtn) {
-            manageBtn.textContent = 'My Profile';
-            manageBtn.onclick = () => showSelfEditForm();
-        }
-    } else {
-        actions.style.display = 'none';
+        actions.append(pfEl('button', { type: 'button', class: 'pf-pill', text: 'Edit my profile', onclick: () => openProfileEditor({ mode: 'self' }) }));
     }
-
-    // Show/remove cancel button when opened from sidebar indicator
-    let cancelBtn = overlay.querySelector('.profile-picker-cancel');
-    if (cancelBtn) cancelBtn.remove();
     if (canCancel) {
-        cancelBtn = document.createElement('button');
-        cancelBtn.className = 'profile-picker-cancel';
-        cancelBtn.textContent = 'Cancel';
-        cancelBtn.onclick = () => hideProfilePicker();
-        actions.parentElement.appendChild(cancelBtn);
+        actions.append(pfEl('button', { type: 'button', class: 'pf-pill', text: 'Cancel', onclick: () => hideProfilePicker() }));
     }
+    actions.style.display = actions.childElementCount ? '' : 'none';
 
-    overlay.style.display = 'flex';
-    document.querySelector('.main-container').style.display = 'none';
+    const main = document.querySelector('.main-container');
+    if (main) main.style.display = 'none';
+    pfOpenLayer(overlay, {
+        escape: !!canCancel,
+        focus: () => grid.querySelector('.pf-tile.is-current') || grid.querySelector('.pf-tile'),
+        onClose: () => {
+            const container = document.querySelector('.main-container');
+            if (container) container.style.display = 'flex';
+        },
+    });
 }
 
-async function handleProfileClick(profile) {
-    // Fetch profile count — PIN only matters with multiple profiles
-    let profileCount = 1;
-    try {
-        const r = await fetch('/api/profiles');
-        const d = await r.json();
-        profileCount = (d.profiles || []).length;
-    } catch (e) { }
+function hideProfilePicker() {
+    const overlay = document.getElementById('profile-picker-overlay');
+    pfCloseLayer(overlay);
+    overlay.style.display = 'none';
+    const main = document.querySelector('.main-container');
+    if (main) main.style.display = 'flex';
+}
 
-    if (profileLoginMode && currentProfile && profile.id !== currentProfile.id) {
+async function handleProfileClick(profile, profileCount = 0) {
+    pfCloseMenus(false);
+    // the pin only matters when there is someone to switch between
+    if (!profileCount) {
+        try { profileCount = ((await pfFetchProfiles()).profiles || []).length; } catch (e) { profileCount = 1; }
+    }
+    if (currentProfile && profile.id === currentProfile.id) {
+        hideProfilePicker();
+        return;
+    }
+    if (profileLoginMode && currentProfile) {
         showPinDialog(profile, 'password');
     } else if (profile.has_pin && profileCount > 1) {
         showPinDialog(profile, 'pin');
     } else {
-        const wasSwitching = !!currentProfile;
-        await selectProfile(profile.id);
-        if (wasSwitching) {
-            window.location.reload();
+        const ok = await selectProfile(profile.id);
+        if (!ok) {
+            if (typeof showToast === 'function') showToast(`Couldn't open ${profile.name}`, 'error');
             return;
         }
-        hideProfilePicker();
-        initApp();
+        // always a fresh load: with 2+ profiles everything the page fetched
+        // before a card was picked got 401 profile_required (theme, settings,
+        // react queries), and it has to load again as this profile
+        window.location.reload();
     }
 }
 
+// ── PIN entry ──────────────────────────────────────────────────────────
+
+// the pin's length is remembered after a right pin on this browser, so the
+// next time it can go through the moment the last digit lands. until then
+// it waits for enter: guessing 4 would burn a try on every longer pin.
+function _pfPinLengthKey(profileId) { return 'ss_pin_len_' + profileId; }
+
+function _pfKnownPinLength(profileId) {
+    try { return parseInt(localStorage.getItem(_pfPinLengthKey(profileId)) || '0', 10) || 0; } catch (e) { return 0; }
+}
+
 function showPinDialog(profile, mode = 'pin') {
-    const dialog = document.getElementById('profile-pin-dialog');
-    const avatar = document.getElementById('profile-pin-avatar');
-    const nameEl = document.getElementById('profile-pin-name');
-    const errorEl = document.getElementById('profile-pin-error');
-    const oldInput = document.getElementById('profile-pin-input');
-    const oldSubmit = document.getElementById('profile-pin-submit');
-    const oldCancel = document.getElementById('profile-pin-cancel');
+    const layer = document.getElementById('profile-pin-dialog');
+    const isPassword = mode === 'password';
+    const knownLength = isPassword ? 0 : _pfKnownPinLength(profile.id);
+    let busy = false;
+    let lockTimer = null;
 
-    // Replace controls on every open so stale listeners from a previous
-    // profile cannot submit the new PIN against the old profile id.
-    const input = oldInput.cloneNode(true);
-    const submit = oldSubmit.cloneNode(true);
-    const cancel = oldCancel.cloneNode(true);
-    oldInput.parentNode.replaceChild(input, oldInput);
-    oldSubmit.parentNode.replaceChild(submit, oldSubmit);
-    oldCancel.parentNode.replaceChild(cancel, oldCancel);
+    layer.innerHTML = '';
+    layer.setAttribute('role', 'dialog');
+    layer.setAttribute('aria-modal', 'true');
+    layer.setAttribute('aria-labelledby', 'profile-pin-title');
 
-    renderProfileAvatar(avatar, profile);
-    nameEl.textContent = profile.name;
-    input.value = '';
-    errorEl.style.display = 'none';
-    dialog._profileId = profile.id;
-    dialog.style.display = 'flex';
-    setTimeout(() => input.focus(), 100);
+    const card = pfEl('div', { class: 'pf-pin-card' });
+    card.append(pfAvatar(profile, 'pf-avatar--lg'));
+    card.append(pfEl('h2', {
+        class: 'pf-pin-title', id: 'profile-pin-title',
+        text: isPassword ? `Enter ${profile.name}'s password` : `Enter ${profile.name}'s PIN`,
+    }));
 
-    const isPasswordMode = mode === 'password';
-    input.placeholder = isPasswordMode ? 'Password' : 'Enter PIN';
-    input.maxLength = isPasswordMode ? 200 : 6;
-    const forgot = document.getElementById('profile-pin-forgot');
-    if (forgot) forgot.style.display = isPasswordMode ? 'none' : '';
+    const error = pfEl('p', { class: 'pf-pin-error', id: 'profile-pin-error', role: 'alert', 'aria-live': 'assertive' });
+    let input;
+    let entry = null;
+    let dots = null;
+    const keys = [];
 
-    const wasSwitching = !!currentProfile;
-    const handleSubmit = async () => {
+    if (isPassword) {
+        input = pfEl('input', {
+            type: 'password', id: 'profile-pin-input', class: 'pf-input pf-pin-password',
+            autocomplete: 'current-password', maxlength: '200', 'aria-label': `${profile.name}'s password`,
+            'aria-describedby': 'profile-pin-error',
+        });
+        card.append(input, error);
+        const go = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Continue', style: 'margin-top:8px;width:100%' });
+        go.addEventListener('click', () => submit());
+        keys.push(go);
+        card.append(go);
+    } else {
+        input = pfEl('input', {
+            type: 'password', id: 'profile-pin-input', class: 'pf-pin-input',
+            inputmode: 'numeric', autocomplete: 'off', maxlength: '64',
+            'aria-label': `${profile.name}'s PIN`, 'aria-describedby': 'profile-pin-error',
+        });
+        dots = pfEl('div', { class: 'pf-pin-dots', 'aria-hidden': 'true' });
+        entry = pfEl('div', { class: 'pf-pin-entry' }, [dots, input]);
+        card.append(entry, error);
+
+        const keypad = pfEl('div', { class: 'pf-keypad' });
+        ['1', '2', '3', '4', '5', '6', '7', '8', '9'].forEach(d => keypad.append(_key(d)));
+        const del = pfEl('button', { type: 'button', class: 'pf-key pf-key--quiet', 'aria-label': 'Delete', html: PF_ICONS.back });
+        del.addEventListener('click', () => { input.value = input.value.slice(0, -1); onInput(); });
+        keys.push(del);
+        keypad.append(del, _key('0'));
+        const go = pfEl('button', { type: 'button', class: 'pf-key pf-key--go', 'aria-label': 'Unlock', html: PF_ICONS.go });
+        go.addEventListener('click', () => submit());
+        keys.push(go);
+        keypad.append(go);
+        card.append(keypad);
+    }
+
+    function _key(digit) {
+        const key = pfEl('button', { type: 'button', class: 'pf-key', text: digit, 'aria-label': digit });
+        key.addEventListener('click', () => {
+            if (input.value.length >= 64) return;
+            input.value += digit;
+            onInput();
+            if (finePointer) input.focus();
+        });
+        keys.push(key);
+        return key;
+    }
+
+    // how to get back in when the pin is gone: the owner proves it with a
+    // service credential, everyone else asks the owner
+    const foot = pfEl('div', { class: 'pf-pin-foot' });
+    if (!isPassword) {
+        if (pfIsOwner(profile)) {
+            foot.append(pfEl('button', { type: 'button', class: 'pf-link', text: 'Forgot PIN?', onclick: () => showProfileForgotPin(profile) }));
+        } else {
+            foot.append(pfEl('span', { text: `Forgot? Ask ${pfOwnerName(_pfProfilesCache)} to reset it` }));
+        }
+    }
+    foot.append(pfEl('button', { type: 'button', class: 'pf-link', text: 'Cancel', onclick: () => pfCloseLayer(layer) }));
+    card.append(foot);
+    layer.append(card);
+
+    function renderDots() {
+        if (!dots) return;
+        const count = Math.max(knownLength || PROFILE_PIN_MIN, input.value.length);
+        dots.innerHTML = '';
+        for (let i = 0; i < count; i++) {
+            dots.append(pfEl('span', { class: 'pf-pin-dot' + (i < input.value.length ? ' is-filled' : '') }));
+        }
+    }
+
+    function setError(text) {
+        error.textContent = text;
+        if (entry) entry.classList.toggle('is-error', !!text);
+    }
+
+    function onInput() {
+        if (error.textContent && !lockTimer) setError('');
+        renderDots();
+        if (knownLength && input.value.length === knownLength) submit();
+    }
+
+    function setLocked(locked) {
+        input.disabled = locked;
+        keys.forEach(k => { k.disabled = locked; });
+    }
+
+    function lockFor(seconds) {
+        let left = Math.max(1, seconds);
+        setLocked(true);
+        const tick = () => {
+            setError(`Too many tries, wait ${left}s`);
+            if (left <= 0) {
+                clearInterval(lockTimer);
+                lockTimer = null;
+                setLocked(false);
+                setError('');
+                input.focus();
+            }
+            left -= 1;
+        };
+        clearInterval(lockTimer);
+        tick();
+        lockTimer = setInterval(tick, 1000);
+    }
+
+    function shake() {
+        if (!entry) return;
+        entry.classList.remove('is-shaking');
+        void entry.offsetWidth;
+        entry.classList.add('is-shaking');
+    }
+
+    async function submit() {
         const secret = input.value;
-        if (!secret) return;
-        submit.disabled = true;
-        submit.textContent = 'Verifying...';
+        if (!secret || busy || lockTimer) return;
+        busy = true;
         try {
             const res = await fetch('/api/profiles/select', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(isPasswordMode
+                body: JSON.stringify(isPassword
                     ? { profile_id: profile.id, password: secret }
-                    : { profile_id: profile.id, pin: secret })
+                    : { profile_id: profile.id, pin: secret }),
             });
-            const data = await res.json();
-            if (data.success) {
-                cleanup();
-                if (wasSwitching) {
-                    window.location.reload();
-                    return;
+            const data = await pfReadJson(res);
+            if (res.ok && data.success) {
+                if (!isPassword) {
+                    try { localStorage.setItem(_pfPinLengthKey(profile.id), String(secret.length)); } catch (e) { /* ignore */ }
                 }
-                dialog.style.display = 'none';
-                hideProfilePicker();
-                setCurrentProfile(data.profile);
-                initApp();
+                // a fresh load, same reason as the no-pin pick above
+                window.location.reload();
                 return;
+            }
+            input.value = '';
+            renderDots();
+            if (res.status === 429) {
+                lockFor(parseInt(res.headers.get('Retry-After') || '60', 10) || 60);
             } else {
-                errorEl.textContent = data.error || (isPasswordMode ? 'Invalid password' : 'Invalid PIN');
-                errorEl.style.display = '';
-                input.value = '';
+                shake();
+                const wrong = isPassword ? 'Wrong password, try again' : 'Wrong PIN, try again';
+                setError(/invalid/i.test(data.error || '') ? wrong : (data.error || wrong));
                 input.focus();
             }
         } catch (e) {
-            errorEl.textContent = 'Connection error';
-            errorEl.style.display = '';
+            setError('Connection error, try again');
+        } finally {
+            busy = false;
         }
-        submit.disabled = false;
-        submit.textContent = 'Submit';
-    };
+    }
 
-    const handleCancel = () => {
-        dialog.style.display = 'none';
-        cleanup();
+    input.addEventListener('input', onInput);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    });
+    // digits typed while a key has focus still count
+    layer.onkeydown = (e) => {
+        if (isPassword || e.target === input || input.disabled || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (/^[0-9]$/.test(e.key)) { e.preventDefault(); input.value += e.key; onInput(); }
+        else if (e.key === 'Backspace') { e.preventDefault(); input.value = input.value.slice(0, -1); onInput(); }
     };
+    renderDots();
 
-    const handleKeydown = (e) => {
-        if (e.key === 'Enter') handleSubmit();
-        if (e.key === 'Escape') handleCancel();
+    // on a phone the keypad is the keyboard; only a real pointer gets the
+    // input focused (and so the system keyboard stays down)
+    const finePointer = !window.matchMedia || window.matchMedia('(pointer: fine)').matches;
+    pfOpenLayer(layer, {
+        focus: () => (isPassword || finePointer) ? input : keys[0],
+        onClose: () => { clearInterval(lockTimer); lockTimer = null; },
+    });
+}
+
+// the owner's way back in: a service credential clears the owner's pin.
+// members are told to ask instead, the server refuses them here.
+function showProfileForgotPin(profile) {
+    const layer = document.getElementById('profile-pin-dialog');
+    const target = profile || { id: 1, name: pfOwnerName(_pfProfilesCache) };
+    layer.innerHTML = '';
+    const card = pfEl('div', { class: 'pf-pin-card' });
+    card.append(pfAvatar(target, 'pf-avatar--lg'));
+    card.append(pfEl('h2', { class: 'pf-pin-title', id: 'profile-pin-title', text: `Reset ${target.name}'s PIN` }));
+    card.append(pfEl('p', {
+        class: 'pf-modal-sub',
+        text: 'Paste any API key or token SoulSync already has (Plex token, Spotify secret, and so on). The PIN is cleared and the lock screen turns off.',
+    }));
+    const input = pfEl('input', {
+        type: 'password', id: 'profile-recovery-input', class: 'pf-input', maxlength: '200',
+        autocomplete: 'off', placeholder: 'API key or token', 'aria-label': 'API key or token',
+        style: 'margin-top:20px', 'aria-describedby': 'profile-recovery-error',
+    });
+    const error = pfEl('p', { class: 'pf-pin-error', id: 'profile-recovery-error', role: 'alert', 'aria-live': 'assertive' });
+    const go = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Clear the PIN', style: 'margin-top:8px;width:100%' });
+    const back = pfEl('button', { type: 'button', class: 'pf-link', text: 'Back', onclick: () => showPinDialog(target, 'pin') });
+    card.append(input, error, go, pfEl('div', { class: 'pf-pin-foot' }, back));
+    layer.append(card);
+
+    const submit = async () => {
+        const credential = input.value.trim();
+        if (!credential) { error.textContent = 'Paste a key or token first'; return; }
+        go.disabled = true;
+        error.textContent = '';
+        try {
+            const res = await fetch('/api/profiles/reset-pin-via-credential', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credential, profile_id: target.id }),
+            });
+            const data = await pfReadJson(res);
+            if (res.ok && data.success) {
+                try { localStorage.removeItem(_pfPinLengthKey(target.id)); } catch (e) { /* ignore */ }
+                pfCloseLayer(layer);
+                if (typeof showToast === 'function') showToast('PIN cleared. Set a new one from your profile.', 'success');
+                handleProfileClick({ ...target, has_pin: false }, _pfProfilesCache.length);
+                return;
+            }
+            if (res.status === 429) {
+                const wait = parseInt(res.headers.get('Retry-After') || '60', 10) || 60;
+                error.textContent = `Too many tries, wait ${wait}s`;
+            } else {
+                error.textContent = data.error || "That doesn't match anything SoulSync has";
+            }
+            input.value = '';
+            input.focus();
+        } catch (e) {
+            error.textContent = 'Connection error, try again';
+        }
+        go.disabled = false;
     };
-
-    const cleanup = () => {
-        submit.removeEventListener('click', handleSubmit);
-        cancel.removeEventListener('click', handleCancel);
-        input.removeEventListener('keydown', handleKeydown);
-    };
-
-    submit.addEventListener('click', handleSubmit);
-    cancel.addEventListener('click', handleCancel);
-    input.addEventListener('keydown', handleKeydown);
+    go.addEventListener('click', submit);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    pfOpenLayer(layer, { focus: input });
 }
 
 async function selectProfile(profileId) {
@@ -1382,9 +1823,70 @@ async function selectProfile(profileId) {
     }
 }
 
-function hideProfilePicker() {
-    document.getElementById('profile-picker-overlay').style.display = 'none';
-    document.querySelector('.main-container').style.display = 'flex';
+// ── Quick switch: the small menu above the sidebar profile ─────────────
+
+async function toggleProfileQuickSwitch() {
+    const button = document.getElementById('profile-indicator-button');
+    if (!button) return;
+    if (button.getAttribute('aria-expanded') === 'true') { pfCloseMenus(); return; }
+    let profiles = _pfProfilesCache;
+    try { profiles = (await pfFetchProfiles()).profiles || []; } catch (e) { /* use what we had */ }
+    openProfileQuickSwitch(button, profiles);
+}
+
+function openProfileQuickSwitch(button, profiles) {
+    pfCloseMenus(false);
+    const me = currentProfile;
+    if (!me) return;
+    const others = profiles.filter(p => p.id !== me.id);
+    const menu = pfEl('div', { class: 'pf-popover', id: 'profile-quick-switch', role: 'menu', 'aria-label': 'Profiles' });
+
+    const item = (children, run, extra = '') => {
+        const btn = pfEl('button', { type: 'button', role: 'menuitem', tabindex: '-1', class: 'pf-menu-item ' + extra }, children);
+        btn.addEventListener('click', () => { pfCloseMenus(false); run(); });
+        return btn;
+    };
+    const label = (text, icon) => [pfEl('span', { html: icon, style: 'display:contents' }), pfEl('span', { class: 'pf-menu-item-text', text })];
+
+    if (others.length) {
+        menu.append(pfEl('div', { class: 'pf-menu-label', text: 'SWITCH TO', 'aria-hidden': 'true' }));
+        others.forEach(p => {
+            const meta = profileLoginMode ? 'Password' : (p.has_pin ? 'PIN' : '');
+            menu.append(item([
+                pfAvatar(p, 'pf-avatar--sm'),
+                pfEl('span', { class: 'pf-menu-item-text' }, [
+                    pfEl('span', { class: 'pf-menu-item-name', text: p.name }),
+                    meta ? pfEl('span', { class: 'pf-menu-item-meta', text: meta }) : null,
+                ]),
+            ], () => handleProfileClick(p, profiles.length)));
+        });
+        menu.append(pfEl('div', { class: 'pf-menu-sep', role: 'separator' }));
+    }
+    menu.append(item(label('Edit my profile', PF_ICONS.edit), () => openProfileEditor({ mode: 'self' })));
+    // my account is the member's own media server login + music services;
+    // the admin runs on the app's accounts, so it's theirs only
+    if (!me.is_admin && typeof window.openMyAccountsModal === 'function') {
+        menu.append(item(label('Profile & account', PF_ICONS.user), () => window.openMyAccountsModal()));
+    }
+    if (me.is_admin) {
+        menu.append(item(label('Manage profiles', PF_ICONS.people), () => openProfileManager()));
+    }
+    if (profileLoginMode) {
+        menu.append(pfEl('div', { class: 'pf-menu-sep', role: 'separator' }));
+        menu.append(item(label('Sign out', PF_ICONS.signout), () => soulsyncLogout()));
+    }
+
+    document.body.append(menu);
+    const rect = button.getBoundingClientRect();
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+    const left = Math.max(16, Math.min(rect.left, window.innerWidth - width - 16));
+    let top = rect.top - height - 8;
+    if (top < 16) top = Math.min(rect.bottom + 8, window.innerHeight - height - 16);
+    menu.style.left = left + 'px';
+    menu.style.top = Math.max(16, top) + 'px';
+    button.setAttribute('aria-expanded', 'true');
+    _pfWireMenu(menu, button, () => pfCloseMenus());
 }
 
 function updateProfileIndicator() {
@@ -1409,13 +1911,12 @@ function updateProfileIndicator() {
     const myAccountsBtn = document.getElementById('my-accounts-btn');
     if (myAccountsBtn) myAccountsBtn.style.display = currentProfile.is_admin ? 'none' : '';
 
-    indicator.onclick = async () => {
-        const res = await fetch('/api/profiles');
-        const data = await res.json();
-        if (data.profiles && data.profiles.length > 0) {
-            showProfilePicker(data.profiles, true);
-        }
-    };
+    // the avatar + name is a real button that opens the quick switch menu
+    const indicatorButton = document.getElementById('profile-indicator-button');
+    if (indicatorButton) {
+        indicatorButton.onclick = (e) => { e.stopPropagation(); toggleProfileQuickSwitch(); };
+        indicatorButton.setAttribute('aria-label', `${currentProfile.name}, switch profile`);
+    }
 
     // Filter sidebar pages based on profile permissions
     document.querySelectorAll('.nav-button[data-page]').forEach(btn => {
@@ -1424,12 +1925,15 @@ function updateProfileIndicator() {
         if (page === 'settings') {
             // Settings always gated by is_admin
             btn.style.display = currentProfile.is_admin ? '' : 'none';
+        } else if (page === 'requests') {
+            btn.style.display = (currentProfile.is_admin || !canDownload()) ? '' : 'none';
         } else if (page === 'help' || page === 'issues') {
             btn.style.display = ''; // Always visible
         } else if (currentProfile.id === 1) {
             btn.style.display = ''; // Root admin sees all
         } else {
-            const ap = currentProfile.allowed_pages;
+            // old rows still carry retired page ids (downloads, artists)
+            const ap = normalizeProfilePageList(currentProfile.allowed_pages);
             btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
         }
     });
@@ -1535,918 +2039,851 @@ function getProfilePageLabel(pageId) {
     return PROFILE_PAGE_LABELS[pageId] || pageId.split('-').map(part => part ? part[0].toUpperCase() + part.slice(1) : part).join(' ');
 }
 
-function getProfilePageSelectOptions(profileSettings = {}) {
-    const options = [];
-    const seen = new Set();
-    const homeSelect = document.getElementById('new-profile-home-page');
-    const normalizedHomePage = normalizeProfilePageId(profileSettings.home_page);
+// every page a profile can be given, by side. help and issues are always on
+// and never listed. podcasts and audiobooks live with music.
+const PROFILE_PAGE_GROUPS = [
+    {
+        side: 'music', label: 'Music',
+        pages: ['dashboard', 'sync', 'podcasts', 'audiobooks', 'search', 'discover', 'watchlist', 'wishlist',
+            'automations', 'active-downloads', 'library', 'stats', 'playlist-explorer', 'import'],
+    },
+    {
+        side: 'video', label: 'Movies & TV',
+        pages: ['video-dashboard', 'video-search', 'video-discover', 'video-library', 'video-watchlist',
+            'video-wishlist', 'video-downloads', 'video-calendar', 'video-tools'],
+    },
+];
 
-    if (homeSelect) {
-        homeSelect.querySelectorAll('option').forEach(option => {
-            if (!option.value || seen.has(option.value)) return;
-            options.push({
-                value: option.value,
-                label: option.textContent?.trim() || getProfilePageLabel(option.value),
-            });
-            seen.add(option.value);
-        });
-    }
-
-    if (normalizedHomePage && !seen.has(normalizedHomePage)) {
-        options.push({
-            value: normalizedHomePage,
-            label: getProfilePageLabel(normalizedHomePage),
-        });
-        seen.add(normalizedHomePage);
-    }
-
-    return options;
-}
-
-function getProfilePageAccessOptions(profileSettings = {}) {
-    const options = [];
-    const seen = new Set();
-    const allowedSet = Array.isArray(profileSettings.allowed_pages)
-        ? new Set(normalizeProfilePageList(profileSettings.allowed_pages))
-        : null;
-    const accessContainer = document.getElementById('new-profile-allowed-pages');
-
-    if (accessContainer) {
-        accessContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-            if (seen.has(cb.value)) return;
-            // Permanent always-on pages (Help/Issues) are marked data-always-on
-            // in the template — checked+locked here too. Plain .disabled can't
-            // be the signal anymore: the create modal also disables a whole
-            // SIDE's boxes when its side-access radio excludes them, and that
-            // transient state must not leak into the edit form as "locked on".
-            const alwaysOn = cb.dataset.alwaysOn === '1';
-            options.push({
-                value: cb.value,
-                // Use the canonical label (keeps the 'Video · …' prefix) so the edit
-                // form's FLAT list stays unambiguous; the create modal groups them
-                // under Music/Video dividers with plain labels instead.
-                label: getProfilePageLabel(cb.value),
-                checked: alwaysOn ? true : (allowedSet ? allowedSet.has(cb.value) : true),
-                disabled: alwaysOn,
-            });
-            seen.add(cb.value);
-        });
-    }
-
-    if (allowedSet) {
-        allowedSet.forEach(pageId => {
-            if (seen.has(pageId)) return;
-            options.push({
-                value: pageId,
-                label: getProfilePageLabel(pageId),
-                checked: true,
-                disabled: false,
-            });
-            seen.add(pageId);
-        });
-    }
-
-    return options;
-}
-
-// Which side a profile page id belongs to — 'shared' pages (Help/Issues) are
-// exempt from side gating.
 function profilePageSide(pageId) {
     if (pageId === 'help' || pageId === 'issues') return 'shared';
     return String(pageId).startsWith('video-') ? 'video' : 'music';
 }
 
-// Grey out (and lock) the page checkboxes of a side the profile can't access.
-// Always-on boxes (Help/Issues) keep their permanent state.
-function applySidesToPageCheckboxes(checkboxes, sides) {
-    checkboxes.forEach(cb => {
-        if (cb.dataset.alwaysOn === '1') return;
-        const side = profilePageSide(cb.value);
-        const blocked = side !== 'shared' && sides !== 'both' && side !== sides;
-        cb.disabled = blocked;
-        const lbl = cb.closest('label');
-        if (lbl) lbl.style.opacity = blocked ? '0.35' : '';
-    });
+function _pfSidesAllow(sides, side) {
+    return side === 'shared' || sides === 'both' || sides === side;
 }
 
-function initProfileManagement() {
-    const manageBtn = document.getElementById('manage-profiles-btn');
-    const closeBtn = document.getElementById('profile-manage-close');
-    const createBtn = document.getElementById('create-profile-btn');
-    const adminPinBtn = document.getElementById('set-admin-pin-btn');
+function _pfPlainPageLabel(pageId) {
+    return getProfilePageLabel(pageId).replace(/^Video · /, '');
+}
 
-    if (manageBtn) {
-        manageBtn.onclick = () => {
-            document.getElementById('profile-manage-panel').style.display = 'flex';
-            loadProfileManageList();
-        };
-    }
-
-    if (closeBtn) {
-        closeBtn.onclick = () => {
-            document.getElementById('profile-manage-panel').style.display = 'none';
-            // Refresh picker — keep cancel button if user already has a profile selected
-            const hasCancel = !!currentProfile;
-            fetch('/api/profiles').then(r => r.json()).then(d => {
-                showProfilePicker(d.profiles || [], hasCancel);
-            });
-        };
-    }
-
-    // Color picker
-    let selectedColor = '#6366f1';
-    document.querySelectorAll('.profile-color-swatch').forEach(swatch => {
-        swatch.onclick = () => {
-            document.querySelectorAll('.profile-color-swatch').forEach(s => s.classList.remove('selected'));
-            swatch.classList.add('selected');
-            selectedColor = swatch.dataset.color;
-        };
+// the pages a home page can be: what the sides allow, narrowed by the
+// page list when there is one. video pages keep their side in the label.
+function profileHomeOptions(sides, allowedPages) {
+    const allowed = Array.isArray(allowedPages) ? new Set(normalizeProfilePageList(allowedPages)) : null;
+    const options = [];
+    PROFILE_PAGE_GROUPS.forEach(group => {
+        if (!_pfSidesAllow(sides, group.side)) return;
+        group.pages.forEach(pageId => {
+            if (allowed && !allowed.has(pageId)) return;
+            options.push({ value: pageId, label: getProfilePageLabel(pageId) });
+        });
     });
-    // Select first by default
-    const firstSwatch = document.querySelector('.profile-color-swatch');
-    if (firstSwatch) firstSwatch.classList.add('selected');
+    options.push({ value: 'help', label: getProfilePageLabel('help') });
+    return options;
+}
 
-    // Side access radios: greying out the excluded side's page checkboxes live.
-    // Default (from the template) is Music only — the shipped default.
-    const sideRadios = document.querySelectorAll('input[name="new-profile-sides"]');
-    const _createPageBoxes = () => Array.from(document.querySelectorAll('#new-profile-allowed-pages input[type="checkbox"]'));
-    const _selectedSides = () => {
-        const r = document.querySelector('input[name="new-profile-sides"]:checked');
-        return r ? r.value : 'music';
-    };
-    sideRadios.forEach(r => r.addEventListener('change', () => {
-        applySidesToPageCheckboxes(_createPageBoxes(), _selectedSides());
-    }));
-    applySidesToPageCheckboxes(_createPageBoxes(), _selectedSides());
+// ── Manage profiles ────────────────────────────────────────────────────
 
-    if (createBtn) {
-        createBtn.onclick = async () => {
-            const name = document.getElementById('new-profile-name').value.trim();
-            const avatarUrl = document.getElementById('new-profile-avatar-url').value.trim();
-            const pin = document.getElementById('new-profile-pin').value;
-            const loginPassword = (document.getElementById('new-profile-password') || {}).value || '';
-            if (!name) return;
+let _pfManageState = null;
 
-            // Collect profile settings
-            const homePage = document.getElementById('new-profile-home-page').value || null;
-            const pageCheckboxes = document.querySelectorAll('#new-profile-allowed-pages input[type="checkbox"]:not(:disabled)');
-            const allChecked = Array.from(pageCheckboxes).every(cb => cb.checked);
-            const allowedPages = allChecked ? null : Array.from(pageCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
-            const canDl = document.getElementById('new-profile-can-download').checked;
+function _pfSidesOf(p) {
+    if (p.is_admin) return 'both';
+    return (p.allowed_sides === 'video' || p.allowed_sides === 'both') ? p.allowed_sides : 'music';
+}
 
-            const res = await fetch('/api/profiles', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name, avatar_color: selectedColor,
-                    avatar_url: avatarUrl || undefined,
-                    pin: pin || undefined,
-                    password: loginPassword || undefined,
-                    home_page: homePage,
-                    allowed_pages: allowedPages,
-                    can_download: canDl,
-                    allowed_sides: _selectedSides()
-                })
-            });
-            const data = await res.json();
-            if (data.success) {
-                document.getElementById('new-profile-name').value = '';
-                document.getElementById('new-profile-avatar-url').value = '';
-                document.getElementById('new-profile-pin').value = '';
-                if (document.getElementById('new-profile-password')) document.getElementById('new-profile-password').value = '';
-                document.getElementById('new-profile-home-page').value = '';
-                pageCheckboxes.forEach(cb => cb.checked = true);
-                document.getElementById('new-profile-can-download').checked = true;
-                // Reset side access to the Music-only default.
-                const musicRadio = document.querySelector('input[name="new-profile-sides"][value="music"]');
-                if (musicRadio) { musicRadio.checked = true; }
-                applySidesToPageCheckboxes(_createPageBoxes(), 'music');
-                loadProfileManageList();
-                // Show admin PIN section if >1 profiles and admin has no PIN
-                checkAdminPinRequired();
-            } else {
-                alert(data.error || 'Failed to create profile');
+function _pfRoleLine(p) {
+    if (pfIsOwner(p)) return 'Owner';
+    return p.is_admin ? 'Admin' : 'Member';
+}
+
+function _pfSummary(p, loginMode) {
+    if (p.is_admin) return { text: 'Everything, including settings' + (p.has_pin ? ' · PIN' : ''), warn: '' };
+    const sides = _pfSidesOf(p);
+    const bits = [sides === 'both' ? 'Music & movies' : sides === 'video' ? 'Movies & TV only' : 'Music only'];
+    bits.push(pfNoDownloads(p) ? 'asks for downloads' : 'downloads');
+    if (Array.isArray(p.allowed_pages)) bits.push(`${p.allowed_pages.length} pages`);
+    if (p.library_mode === 'own') bits.push('own library');
+    if (p.has_pin) bits.push('PIN');
+    const warn = loginMode && !p.has_password ? "can't sign in yet, needs a login password" : '';
+    return { text: bits.join(' · '), warn };
+}
+
+async function openProfileManager() {
+    pfCloseMenus(false);
+    const layer = document.getElementById('profile-manage-panel');
+    layer.innerHTML = '';
+    const modal = pfEl('div', { class: 'pf-modal pf-modal--wide', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'profile-manage-title' });
+    const addBtn = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', id: 'create-profile-btn', html: PF_ICONS.plus + '<span>Add profile</span>' });
+    addBtn.addEventListener('click', () => openProfileEditor({ mode: 'create' }));
+    const closeBtn = pfEl('button', { type: 'button', class: 'pf-icon-btn', id: 'profile-manage-close', 'aria-label': 'Close', html: PF_ICONS.close });
+    closeBtn.addEventListener('click', () => pfCloseLayer(layer));
+    modal.append(pfEl('div', { class: 'pf-modal-head' }, [
+        pfEl('div', { class: 'pf-modal-titles' }, [
+            pfEl('h2', { class: 'pf-modal-title', id: 'profile-manage-title', text: 'Profiles' }),
+            pfEl('p', { class: 'pf-modal-sub', text: 'Who uses SoulSync here, and what each of them can do.' }),
+        ]),
+        addBtn, closeBtn,
+    ]));
+    const body = pfEl('div', { class: 'pf-modal-body', id: 'pf-manage-list' });
+    modal.append(body);
+    layer.append(modal);
+    layer.onmousedown = (e) => { if (e.target === layer) pfCloseLayer(layer); };
+    pfOpenLayer(layer, {
+        focus: addBtn,
+        onClose: () => {
+            _pfManageState = null;
+            // the picker, when it's up, shows the new names too
+            const picker = document.getElementById('profile-picker-overlay');
+            if (picker && picker.style.display !== 'none') {
+                pfFetchProfiles().then(d => showProfilePicker(d.profiles || [], !!currentProfile)).catch(() => {});
             }
-        };
-    }
-
-    if (adminPinBtn) {
-        adminPinBtn.onclick = async () => {
-            const pin = document.getElementById('admin-pin-input').value;
-            if (!pin || pin.length < 1) return;
-            // Find admin profile
-            const res = await fetch('/api/profiles');
-            const data = await res.json();
-            const admin = (data.profiles || []).find(p => p.is_admin);
-            if (!admin) return;
-
-            try {
-                const pinRes = await fetch(`/api/profiles/${admin.id}/set-pin`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pin })
-                });
-                const pinData = await pinRes.json();
-                if (!pinData.success) {
-                    alert(pinData.error || 'Failed to set PIN');
-                    return;
-                }
-            } catch (e) {
-                alert('Connection error');
-                return;
-            }
-            document.getElementById('admin-pin-input').value = '';
-            document.getElementById('admin-pin-section').style.display = 'none';
-            loadProfileManageList();
-        };
-    }
+        },
+    });
+    await loadProfileManageList();
 }
 
 async function loadProfileManageList() {
-    const list = document.getElementById('profile-manage-list');
-    const res = await fetch('/api/profiles');
-    const data = await res.json();
-    const profiles = data.profiles || [];
-
-    // Login-mode aware: when it's on, surface which members can't sign in yet
-    // (no login password) so the lock button's purpose is obvious.
-    let loginMode = false;
-    try { loginMode = !!(await (await fetch('/api/profiles/current')).json()).login_mode; } catch (e) { /* ignore */ }
-
-    // Banner when login mode is on (explains the password requirement up front).
-    const banner = document.getElementById('profile-manage-login-banner');
-    if (banner) banner.remove();
-    if (loginMode) {
-        const b = document.createElement('div');
-        b.id = 'profile-manage-login-banner';
-        b.className = 'profile-manage-login-banner';
-        b.textContent = '🔐 Login mode is on — every member needs a login password to sign in. Use the lock button to set one.';
-        list.parentNode.insertBefore(b, list);
+    const list = document.getElementById('pf-manage-list');
+    if (!list) return;
+    let data;
+    try {
+        data = await pfFetchProfiles();
+    } catch (e) {
+        list.innerHTML = '';
+        list.append(pfEl('p', { class: 'pf-form-error', text: "Couldn't load profiles. Check the connection and try again." }));
+        return;
     }
+    const profiles = data.profiles || [];
+    let loginMode = profileLoginMode;
+    try { loginMode = !!(await (await fetch('/api/profiles/current')).json()).login_mode; } catch (e) { /* keep what we had */ }
+    _pfManageState = {
+        profiles, loginMode,
+        librarySupported: data.own_library_supported !== false,
+        libraryHint: data.own_library_root_hint || '',
+    };
 
     list.innerHTML = '';
-    profiles.forEach(p => {
-        const item = document.createElement('div');
-        item.className = 'profile-manage-item';
-        const isCurrent = currentProfile && currentProfile.id === p.id;
-        if (isCurrent) item.classList.add('is-current');
-
-        const av = document.createElement('div');
-        renderProfileAvatar(av, p);
-        item.appendChild(av);
-
-        const info = document.createElement('div');
-        info.className = 'profile-info';
-        const nameDiv = document.createElement('div');
-        nameDiv.className = 'name';
-        nameDiv.textContent = p.name + (p.has_pin ? ' 🔒' : '');
-        info.appendChild(nameDiv);
-        // Role/status as pills
-        const pills = [];
-        if (isCurrent) pills.push({ text: 'You', cls: 'profile-role-pill--current' });
-        if (p.is_admin) pills.push({ text: 'Admin', cls: 'profile-role-pill--admin' });
-        if (p.can_download === false) pills.push({ text: 'No Downloads', cls: '' });
-        if (p.allowed_pages) pills.push({ text: `${p.allowed_pages.length} pages`, cls: '' });
-        // Login-password status (only meaningful while login mode is on).
-        if (loginMode && !p.is_admin) {
-            pills.push(p.has_password
-                ? { text: '🔒 Login ready', cls: 'profile-role-pill--ok' }
-                : { text: '⚠ No login password', cls: 'profile-role-pill--warn' });
+    if (loginMode) {
+        list.append(pfEl('div', { class: 'pf-note pf-note--warn', style: 'margin-bottom:18px', text: 'Login mode is on. Everyone needs a login password to sign in; set one from the ⋯ menu on their card.' }));
+    }
+    // with other people around, an open owner profile is an open door
+    const me = currentProfile;
+    if (me && pfIsOwner(me) && profiles.length > 1) {
+        const mine = profiles.find(p => p.id === me.id);
+        if (mine && !mine.has_pin) {
+            const add = pfEl('button', { type: 'button', class: 'pf-btn', id: 'set-admin-pin-btn', text: 'Add a PIN' });
+            add.addEventListener('click', () => openProfilePinModal(mine));
+            list.append(pfEl('div', { class: 'pf-nudge', id: 'admin-pin-section' }, [
+                pfEl('div', {}, [pfEl('strong', { text: 'Lock your profile' }), pfEl('span', { text: 'Anyone here can open yours and change everything. A PIN stops that.' })]),
+                add,
+            ]));
         }
-        if (pills.length) {
-            const roleDiv = document.createElement('div');
-            roleDiv.className = 'role';
-            pills.forEach(pill => {
-                const span = document.createElement('span');
-                span.className = ('profile-role-pill ' + pill.cls).trim();
-                span.textContent = pill.text;
-                roleDiv.appendChild(span);
+    }
+
+    const grid = pfEl('div', { class: 'pf-cards' });
+    profiles.forEach(p => grid.append(_pfManageCard(p, loginMode)));
+    list.append(grid);
+}
+
+function _pfManageCard(p, loginMode) {
+    const me = currentProfile || {};
+    const isSelf = me.id === p.id;
+    // profile 1 is only ever changed by itself
+    const canEdit = !pfIsOwner(p) || pfIsOwner(me);
+    const summary = _pfSummary(p, loginMode && !p.is_admin);
+    const role = pfEl('span', { class: 'pf-card-role' }, [
+        _pfRoleLine(p),
+        isSelf ? pfEl('span', { class: 'pf-you', text: ' · You' }) : null,
+    ]);
+    const main = pfEl('button', {
+        type: 'button', class: 'pf-card-main', disabled: !canEdit,
+        title: canEdit ? `Edit ${p.name}` : null,
+    }, [
+        pfAvatar(p, 'pf-avatar--md'),
+        pfEl('span', { class: 'pf-card-name', text: p.name }),
+        role,
+        pfEl('span', { class: 'pf-card-summary' }, [
+            summary.text,
+            summary.warn ? pfEl('span', { class: 'pf-warn', text: ' · ' + summary.warn }) : null,
+        ]),
+    ]);
+    main.addEventListener('click', () => openProfileEditor({ mode: isSelf ? 'self' : 'edit', profile: p }));
+    const card = pfEl('div', { class: 'pf-card' + (isSelf ? ' is-current' : '') }, main);
+
+    const items = [];
+    if (canEdit) items.push({ label: 'Edit', icon: PF_ICONS.edit, run: () => openProfileEditor({ mode: isSelf ? 'self' : 'edit', profile: p }) });
+    if (!isSelf && !pfIsOwner(p) && p.has_pin) items.push({ label: 'Reset PIN', run: () => resetProfilePin(p) });
+    if (!isSelf && !p.is_admin) items.push({ label: p.has_password ? 'Change login password' : 'Set login password', run: () => openProfilePasswordModal(p) });
+    if (!isSelf && !pfIsOwner(p)) {
+        if (items.length) items.push('sep');
+        items.push({ label: 'Delete', danger: true, run: () => deleteProfile(p) });
+    }
+    if (items.length) {
+        const more = pfEl('button', {
+            type: 'button', class: 'pf-icon-btn pf-card-more', html: PF_ICONS.more,
+            'aria-label': `More for ${p.name}`, 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+        });
+        more.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (more.getAttribute('aria-expanded') === 'true') pfCloseMenus();
+            else pfOpenMenu(more, items);
+        });
+        card.append(more);
+    }
+    return card;
+}
+
+async function resetProfilePin(p) {
+    const ok = await showConfirmDialog({
+        title: `Reset ${p.name}'s PIN?`,
+        message: `${p.name} can open their profile without a PIN until they set a new one.`,
+        confirmText: 'Reset PIN',
+    });
+    if (!ok) return;
+    try {
+        const res = await fetch(`/api/profiles/${p.id}/set-pin`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: '' }),
+        });
+        const data = await pfReadJson(res);
+        if (!res.ok || !data.success) throw new Error(data.error || "Couldn't reset the PIN");
+        try { localStorage.removeItem(_pfPinLengthKey(p.id)); } catch (e) { /* ignore */ }
+        showToast(`${p.name}'s PIN is reset`, 'success');
+        loadProfileManageList();
+    } catch (e) {
+        showToast(e.message || 'Connection error', 'error');
+    }
+}
+
+async function deleteProfile(p) {
+    const ok = await showConfirmDialog({
+        title: `Delete ${p.name}?`,
+        message: 'Their wishlist, watchlist, history and connected accounts go with them. Open issues they reported stay with you.',
+        confirmText: 'Delete',
+        destructive: true,
+    });
+    if (!ok) return;
+    try {
+        const res = await fetch(`/api/profiles/${p.id}`, { method: 'DELETE' });
+        const data = await pfReadJson(res);
+        if (!res.ok || !data.success) throw new Error(data.error || `Couldn't delete ${p.name}`);
+        showToast(`${p.name} is deleted`, 'success');
+    } catch (e) {
+        showToast(e.message || 'Connection error', 'error');
+    }
+    loadProfileManageList();
+}
+
+// a login password for someone else (login mode's sign-in, not the pin)
+function openProfilePasswordModal(p) {
+    const modal = pfModal({
+        title: `${p.name}'s login password`,
+        subtitle: 'Used to sign in when login mode is on. The PIN is separate.',
+        size: 'small', layerClass: 'pf-layer--small',
+    });
+    const pw = pfEl('input', { type: 'password', class: 'pf-input', autocomplete: 'new-password', maxlength: '200', 'aria-label': 'New password', placeholder: 'New password' });
+    const confirm = pfEl('input', { type: 'password', class: 'pf-input', autocomplete: 'new-password', maxlength: '200', 'aria-label': 'Confirm password', placeholder: 'Confirm password', style: 'margin-top:10px' });
+    const error = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
+    modal.body.append(pfEl('div', { class: 'pf-field' }, [pw, confirm]), error);
+
+    const post = async (password) => {
+        const res = await fetch(`/api/profiles/${encodeURIComponent(p.id)}/set-password`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }),
+        });
+        const data = await pfReadJson(res);
+        if (!res.ok || !data.success) throw new Error(data.error || "Couldn't save the password");
+    };
+    if (p.has_password) {
+        const remove = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Remove password', style: 'margin-right:auto' });
+        remove.addEventListener('click', async () => {
+            remove.disabled = true;
+            try { await post(''); modal.close(); showToast('Login password removed', 'info'); loadProfileManageList(); }
+            catch (e) { error.textContent = e.message; remove.disabled = false; }
+        });
+        modal.foot.append(remove);
+    }
+    const cancel = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Cancel', onclick: () => modal.close() });
+    const save = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Save password' });
+    save.addEventListener('click', async () => {
+        error.textContent = '';
+        if (pw.value.length < 4) { error.textContent = 'Use at least 4 characters'; pw.focus(); return; }
+        if (pw.value !== confirm.value) { error.textContent = "The passwords don't match"; confirm.focus(); return; }
+        save.disabled = true;
+        try { await post(pw.value); modal.close(); showToast(`Login password set for ${p.name}`, 'success'); loadProfileManageList(); }
+        catch (e) { error.textContent = e.message; save.disabled = false; }
+    });
+    confirm.addEventListener('keydown', (e) => { if (e.key === 'Enter') save.click(); });
+    modal.foot.append(cancel, save);
+    modal.open(pw);
+}
+
+// set a pin on your own profile (the manage sheet's nudge)
+function openProfilePinModal(p) {
+    const modal = pfModal({ title: 'Add a PIN', subtitle: `${PROFILE_PIN_MIN} to ${PROFILE_PIN_MAX} digits. You'll type it when you open your profile.`, size: 'small', layerClass: 'pf-layer--small' });
+    const pin = pfEl('input', { type: 'password', class: 'pf-input', inputmode: 'numeric', autocomplete: 'new-password', maxlength: String(PROFILE_PIN_MAX), 'aria-label': 'New PIN', placeholder: 'New PIN' });
+    const confirm = pfEl('input', { type: 'password', class: 'pf-input', inputmode: 'numeric', autocomplete: 'new-password', maxlength: String(PROFILE_PIN_MAX), 'aria-label': 'Confirm PIN', placeholder: 'Confirm PIN', style: 'margin-top:10px' });
+    const error = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
+    modal.body.append(pfEl('div', { class: 'pf-field' }, [pin, confirm]), error);
+    const save = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Save PIN' });
+    save.addEventListener('click', async () => {
+        const problem = profilePinError(pin.value);
+        if (problem) { error.textContent = problem; pin.focus(); return; }
+        if (pin.value !== confirm.value) { error.textContent = "The PINs don't match"; confirm.focus(); return; }
+        save.disabled = true;
+        try {
+            const res = await fetch(`/api/profiles/${p.id}/set-pin`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: pin.value }),
             });
-            info.appendChild(roleDiv);
+            const data = await pfReadJson(res);
+            if (!res.ok || !data.success) throw new Error(data.error || "Couldn't save the PIN");
+            if (currentProfile && currentProfile.id === p.id) currentProfile.has_pin = true;
+            modal.close();
+            showToast('PIN saved', 'success');
+            loadProfileManageList();
+        } catch (e) {
+            error.textContent = e.message || 'Connection error';
+            save.disabled = false;
         }
-        item.appendChild(info);
+    });
+    confirm.addEventListener('keydown', (e) => { if (e.key === 'Enter') save.click(); });
+    modal.foot.append(pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Cancel', onclick: () => modal.close() }), save);
+    modal.open(pin);
+}
 
-        const actions = document.createElement('div');
-        actions.className = 'profile-manage-actions';
+// ── The profile editor: add, edit someone, or edit yourself ───────────
+// add is two steps (who, then what they can do); edit shows the same two
+// as tabs. content rating filters don't exist yet, so no preset claims one.
 
-        const editBtn = document.createElement('button');
-        editBtn.className = 'profile-edit-btn';
-        editBtn.dataset.id = p.id;
-        editBtn.dataset.name = p.name;
-        editBtn.dataset.color = p.avatar_color || '#6366f1';
-        editBtn.dataset.avatarUrl = p.avatar_url || '';
-        editBtn.dataset.homePage = p.home_page || '';
-        editBtn.dataset.allowedPages = p.allowed_pages ? JSON.stringify(p.allowed_pages) : '';
-        editBtn.dataset.canDownload = p.can_download !== false ? '1' : '0';
-        editBtn.dataset.isAdmin = p.is_admin ? '1' : '0';
-        editBtn.dataset.librarySupported = data.own_library_supported === false ? '0' : '1';
-        editBtn.dataset.libraryMode = p.library_mode || 'shared';
-        editBtn.dataset.libraryRoot = p.library_root || '';
-        editBtn.dataset.libraryHint = (data.own_library_root_hint || '').replace('<name>', (p.name || 'profile').toLowerCase().replace(/[^a-z0-9]+/g, '-'));
-        editBtn.title = 'Edit profile';
-        editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-        actions.appendChild(editBtn);
+const PROFILE_PRESETS = [
+    { id: 'adult', name: 'Adult', desc: 'Music and movies, downloads anything', sides: 'both', can_download: true },
+    { id: 'teen', name: 'Teen', desc: 'Music and movies, asks before downloading', sides: 'both', can_download: false },
+    { id: 'kids', name: 'Kids', desc: 'Asks before downloading. Pick their pages below', sides: 'both', can_download: false },
+    { id: 'guest', name: 'Guest', desc: 'Listens to music, nothing else', sides: 'music', can_download: false },
+];
 
-        if (!p.is_admin) {
-            // Set/change the LOGIN password (separate from the quick-switch PIN;
-            // used when "Require login" is on). A member with no password can't
-            // sign in and can't self-bootstrap one, so the admin sets it here.
-            const pwBtn = document.createElement('button');
-            // Pulse the button when login's on and this member can't sign in yet.
-            const needsPw = loginMode && !p.has_password;
-            pwBtn.className = 'profile-password-btn' + (p.has_password ? ' has-password' : '') + (needsPw ? ' needs-password' : '');
-            pwBtn.dataset.id = p.id;
-            pwBtn.dataset.name = p.name;
-            pwBtn.dataset.hasPassword = p.has_password ? '1' : '0';
-            pwBtn.title = p.has_password ? 'Change login password' : 'Set login password (for Require Login mode)';
-            pwBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="16" r="1"/><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
-            actions.appendChild(pwBtn);
+async function openProfileEditor({ mode = 'create', profile = null } = {}) {
+    pfCloseMenus(false);
+    const me = currentProfile;
+    if (!me) return;
+    if (mode === 'self') profile = { ...me, ...(_pfProfilesCache.find(p => p.id === me.id) || {}) };
+    const isCreate = mode === 'create';
+    const isSelf = mode === 'self';
+    const adminEditsOther = !isCreate && !isSelf && !!me.is_admin;
+    const p = profile || {};
+    const loginMode = _pfManageState ? _pfManageState.loginMode : profileLoginMode;
+    const librarySupported = _pfManageState ? _pfManageState.librarySupported : true;
+    const libraryHint = _pfManageState
+        ? _pfManageState.libraryHint.replace('<name>', (p.name || 'profile').toLowerCase().replace(/[^a-z0-9]+/g, '-'))
+        : '';
 
-            const delBtn = document.createElement('button');
-            delBtn.className = 'profile-delete-btn';
-            delBtn.dataset.id = p.id;
-            delBtn.title = 'Delete profile';
-            delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
-            actions.appendChild(delBtn);
-        }
+    // everything the form edits, in one place
+    const st = {
+        name: p.name || '',
+        avatar_color: p.avatar_color || PROFILE_COLORS[0][0],
+        avatar_url: p.avatar_url || '',
+        avatarKind: p.avatar_url ? 'image' : 'initials',
+        is_admin: !!p.is_admin,
+        sides: isCreate ? 'both' : _pfSidesOf({ ...p, is_admin: false }),
+        can_download: isCreate ? true : !pfNoDownloads({ ...p, is_admin: false }),
+        allowed_pages: Array.isArray(p.allowed_pages) ? normalizeProfilePageList(p.allowed_pages).slice() : null,
+        home_page: p.home_page ? normalizeProfilePageId(p.home_page) : '',
+        pinOn: !!p.has_pin,
+        pin: '',
+        password: '',
+        library_mode: p.library_mode === 'own' ? 'own' : 'shared',
+        library_root: p.library_root || libraryHint || '',
+        preset: isCreate ? 'adult' : null,
+    };
+    const original = { ...st };
 
-        item.appendChild(actions);
-        list.appendChild(item);
+    const title = isCreate ? 'Add a profile' : isSelf ? 'Your profile' : `Edit ${p.name}`;
+    const modal = pfModal({ title, size: '', layerClass: 'pf-layer--editor', dismissable: false });
+    const stepIds = ['identity', 'access'];
+    const stepNames = isSelf ? ['Profile', 'Sign-in'] : ['Who', 'Access'];
+    let step = 0;
+    let furthest = isCreate ? 0 : 1;
+
+    // step tabs
+    const tabs = pfEl('div', { class: 'pf-steps', role: 'tablist' });
+    const tabButtons = stepNames.map((name, i) => {
+        const tab = pfEl('button', { type: 'button', class: 'pf-step', role: 'tab', text: (isCreate ? `${i + 1}. ` : '') + name });
+        tab.addEventListener('click', () => { if (i <= furthest) goTo(i); });
+        tabs.append(tab);
+        return tab;
+    });
+    const panes = stepIds.map(() => pfEl('div', { role: 'tabpanel' }));
+    const formError = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
+    modal.body.append(tabs, ...panes, formError);
+
+    // ── step 1: who ──
+    const preview = pfEl('div', { class: 'pf-identity-preview' });
+    const renderPreview = () => {
+        preview.innerHTML = '';
+        preview.append(pfAvatar({
+            name: st.name.trim() || '?', avatar_color: st.avatar_color,
+            avatar_url: st.avatarKind === 'image' ? st.avatar_url.trim() : '',
+        }, 'pf-avatar--lg'));
+    };
+    const nameId = 'pf-name-' + (++_pfUid);
+    const nameInput = pfEl('input', { type: 'text', id: nameId, class: 'pf-input', maxlength: '20', autocomplete: 'off', value: st.name, 'aria-describedby': nameId + '-err' });
+    const nameError = pfEl('p', { class: 'pf-field-error', id: nameId + '-err', role: 'alert' });
+    nameInput.addEventListener('input', () => {
+        st.name = nameInput.value;
+        nameError.textContent = '';
+        nameInput.classList.remove('is-invalid');
+        renderPreview();
     });
 
-    // Bind edit buttons
-    list.querySelectorAll('.profile-edit-btn').forEach(btn => {
-        btn.onclick = () => {
-            showProfileEditForm(btn.dataset.id, btn.dataset.name, btn.dataset.color, btn.dataset.avatarUrl, {
-                home_page: btn.dataset.homePage || '',
-                allowed_pages: btn.dataset.allowedPages ? JSON.parse(btn.dataset.allowedPages) : null,
-                can_download: btn.dataset.canDownload !== '0',
-                is_admin: btn.dataset.isAdmin === '1',
-                library_supported: btn.dataset.librarySupported !== '0',
-                library_mode: btn.dataset.libraryMode || 'shared',
-                library_root: btn.dataset.libraryRoot || '',
-                library_hint: btn.dataset.libraryHint || ''
+    const seg = pfEl('div', { class: 'pf-seg', role: 'group', 'aria-label': 'Avatar' });
+    const segInitials = pfEl('button', { type: 'button', text: 'Initial' });
+    const segImage = pfEl('button', { type: 'button', text: 'Image' });
+    seg.append(segInitials, segImage);
+    const swatches = pfEl('div', { class: 'pf-swatches', role: 'group', 'aria-label': 'Colour' });
+    PROFILE_COLORS.forEach(([color, colorName]) => {
+        const sw = pfEl('button', { type: 'button', class: 'pf-swatch', style: `background:${color}`, 'aria-label': colorName, 'data-color': color });
+        sw.addEventListener('click', () => { st.avatar_color = color; syncAvatarControls(); renderPreview(); });
+        swatches.append(sw);
+    });
+    const urlInput = pfEl('input', { type: 'url', class: 'pf-input', placeholder: 'https://…/photo.jpg', 'aria-label': 'Image URL', value: st.avatar_url });
+    urlInput.addEventListener('input', () => { st.avatar_url = urlInput.value; renderPreview(); });
+    const imageHelp = pfEl('p', { class: 'pf-help', text: "A link to a square picture. If it won't load, the initial shows instead." });
+    const imageBox = pfEl('div', {}, [urlInput, imageHelp]);
+    const syncAvatarControls = () => {
+        segInitials.setAttribute('aria-pressed', String(st.avatarKind === 'initials'));
+        segImage.setAttribute('aria-pressed', String(st.avatarKind === 'image'));
+        swatches.style.display = st.avatarKind === 'initials' ? '' : 'none';
+        imageBox.style.display = st.avatarKind === 'image' ? '' : 'none';
+        swatches.querySelectorAll('.pf-swatch').forEach(sw => sw.setAttribute('aria-pressed', String(sw.dataset.color === st.avatar_color)));
+    };
+    segInitials.addEventListener('click', () => { st.avatarKind = 'initials'; syncAvatarControls(); renderPreview(); });
+    segImage.addEventListener('click', () => { st.avatarKind = 'image'; syncAvatarControls(); renderPreview(); setTimeout(() => urlInput.focus(), 0); });
+
+    panes[0].append(
+        preview,
+        pfEl('div', { class: 'pf-field' }, [pfEl('label', { class: 'pf-label', for: nameId, text: 'Name' }), nameInput, nameError]),
+        pfEl('div', { class: 'pf-field' }, [pfEl('span', { class: 'pf-label', text: 'Avatar' }), seg, swatches, imageBox]),
+    );
+    renderPreview();
+    syncAvatarControls();
+
+    // ── step 2: access (or sign-in, for yourself) ──
+    const pane2 = panes[1];
+    let pageBoxes = [];
+    const homeSelect = pfEl('select', { class: 'pf-input', 'aria-label': 'Opens on' });
+    const renderHomeOptions = () => {
+        const sides = (isSelf || st.is_admin) ? (me.is_admin || st.is_admin ? 'both' : _pfSidesOf(me)) : st.sides;
+        const pages = (isSelf || st.is_admin) ? (st.is_admin || me.is_admin ? null : me.allowed_pages) : st.allowed_pages;
+        const options = profileHomeOptions(sides, pages);
+        homeSelect.innerHTML = '';
+        homeSelect.append(pfEl('option', { value: '', text: 'Automatic' }));
+        options.forEach(o => homeSelect.append(pfEl('option', { value: o.value, text: o.label })));
+        if (st.home_page && !options.some(o => o.value === st.home_page)) st.home_page = '';
+        homeSelect.value = st.home_page;
+    };
+    homeSelect.addEventListener('change', () => { st.home_page = homeSelect.value; });
+    const homeField = pfEl('div', { class: 'pf-field' }, [
+        pfEl('span', { class: 'pf-label', text: 'Opens on' }), homeSelect,
+        pfEl('p', { class: 'pf-help', text: 'Automatic is the first page they can use.' }),
+    ]);
+
+    // pin: on/off plus the digits
+    const pinInput = pfEl('input', {
+        type: 'password', class: 'pf-input', inputmode: 'numeric', autocomplete: 'new-password',
+        maxlength: String(PROFILE_PIN_MAX), 'aria-label': 'PIN',
+        placeholder: p.has_pin ? 'New PIN, or leave empty to keep it' : `${PROFILE_PIN_MIN} to ${PROFILE_PIN_MAX} digits`,
+    });
+    const pinError = pfEl('p', { class: 'pf-field-error', role: 'alert' });
+    pinInput.addEventListener('input', () => { st.pin = pinInput.value; pinError.textContent = ''; });
+    const pinExtra = pfEl('div', { class: 'pf-group-extra' }, [pinInput, pinError]);
+    const pinDesc = isSelf
+        ? (pfIsOwner(me) ? 'Asked when anyone opens your profile. Turning it off also turns off the lock screen.' : 'Asked when anyone opens your profile.')
+        : 'Asked when someone picks this profile.';
+    const pinSwitch = pfSwitch({
+        title: 'PIN to open this profile', desc: pinDesc, checked: st.pinOn,
+        onChange: (on) => { st.pinOn = on; pinExtra.style.display = on ? '' : 'none'; if (on) setTimeout(() => pinInput.focus(), 0); },
+    });
+    pinExtra.style.display = st.pinOn ? '' : 'none';
+
+    // login password: needed to create someone while login mode is on; your own lives in sign-in
+    const passwordInput = pfEl('input', {
+        type: 'password', class: 'pf-input', autocomplete: 'new-password', maxlength: '200', 'aria-label': 'Login password',
+        placeholder: isSelf && p.has_password ? 'New password, or leave empty to keep it' : 'Login password',
+    });
+    const passwordError = pfEl('p', { class: 'pf-field-error', role: 'alert' });
+    passwordInput.addEventListener('input', () => { st.password = passwordInput.value; passwordError.textContent = ''; });
+
+    if (isSelf) {
+        pane2.append(
+            pfEl('div', { class: 'pf-section-title', text: 'Privacy' }),
+            pfEl('div', { class: 'pf-group' }, [pinSwitch.row, pinExtra]),
+            pfEl('div', { class: 'pf-section-title', text: 'Login password' }),
+            pfEl('div', { class: 'pf-field' }, [passwordInput, passwordError,
+                pfEl('p', { class: 'pf-help', text: 'For signing in when login mode is on. Separate from the PIN.' })]),
+            pfEl('div', { class: 'pf-section-title', text: 'Home' }),
+            homeField,
+        );
+    } else {
+        // admin switch (editing someone else only)
+        const accessBox = pfEl('div');
+        const adminNote = pfEl('p', { class: 'pf-note', text: 'Admins can use everything, including settings and managing profiles.' });
+        if (adminEditsOther) {
+            const adminSwitch = pfSwitch({
+                title: 'Admin', desc: 'Can manage profiles, settings and every page.', checked: st.is_admin,
+                onChange: (on) => { st.is_admin = on; syncAccess(); },
             });
+            pane2.append(pfEl('div', { class: 'pf-group', style: 'margin-bottom:6px' }, adminSwitch.row));
+        }
+
+        // presets fill the switches below
+        const presets = pfEl('div', { class: 'pf-presets', role: 'radiogroup', 'aria-label': 'Start from' });
+        const presetButtons = PROFILE_PRESETS.map(preset => {
+            const btn = pfEl('button', { type: 'button', class: 'pf-preset', role: 'radio' }, [
+                pfEl('span', { class: 'pf-preset-name', text: preset.name }),
+                pfEl('span', { class: 'pf-preset-desc', text: preset.desc }),
+            ]);
+            btn.addEventListener('click', () => {
+                st.preset = preset.id;
+                st.sides = preset.sides;
+                st.can_download = preset.can_download;
+                syncAccess();
+            });
+            presets.append(btn);
+            return { btn, preset };
+        });
+
+        const musicSwitch = pfSwitch({
+            title: 'Music', desc: 'Library, discover, playlists, podcasts and audiobooks.',
+            onChange: (on) => setSide('music', on),
+        });
+        const videoSwitch = pfSwitch({
+            title: 'Movies & TV', desc: 'The video side: movies, shows and the calendar.',
+            onChange: (on) => setSide('video', on),
+        });
+        const sideError = pfEl('p', { class: 'pf-field-error', role: 'alert', style: 'padding:0 16px 12px;margin:0' });
+        const dlSwitch = pfSwitch({
+            title: 'Download without asking',
+            desc: 'Covers music, podcasts, audiobooks and video. Off: what they add becomes a request you approve.',
+            onChange: (on) => { st.can_download = on; st.preset = _pfMatchPreset(); syncAccess(); },
+        });
+
+        function setSide(side, on) {
+            const hasMusic = st.sides !== 'video';
+            const hasVideo = st.sides !== 'music';
+            const nextMusic = side === 'music' ? on : hasMusic;
+            const nextVideo = side === 'video' ? on : hasVideo;
+            if (!nextMusic && !nextVideo) {
+                sideError.textContent = 'Keep at least one side on.';
+                syncAccess();
+                return;
+            }
+            sideError.textContent = '';
+            st.sides = nextMusic && nextVideo ? 'both' : nextMusic ? 'music' : 'video';
+            st.preset = _pfMatchPreset();
+            syncAccess();
+        }
+
+        // advanced: the page list, the home page, own library
+        const pagesBox = pfEl('div');
+        const renderPages = () => {
+            pagesBox.innerHTML = '';
+            pageBoxes = [];
+            const allowed = st.allowed_pages ? new Set(st.allowed_pages) : null;
+            PROFILE_PAGE_GROUPS.forEach(group => {
+                if (!_pfSidesAllow(st.sides, group.side)) return;
+                pagesBox.append(pfEl('div', { class: 'pf-pages-group', text: group.label }));
+                const grid = pfEl('div', { class: 'pf-pages' });
+                group.pages.forEach(pageId => {
+                    const cb = pfEl('input', { type: 'checkbox', value: pageId });
+                    cb.checked = allowed ? allowed.has(pageId) : true;
+                    cb.addEventListener('change', () => { readPages(); renderHomeOptions(); });
+                    pageBoxes.push(cb);
+                    grid.append(pfEl('label', {}, [cb, _pfPlainPageLabel(pageId)]));
+                });
+                pagesBox.append(grid);
+            });
+            pagesBox.append(pfEl('p', { class: 'pf-help', text: 'Help and Issues are always there.' }));
         };
+        // every box ticked means "all pages", which also covers pages added later
+        const readPages = () => {
+            const shown = pageBoxes.filter(cb => cb.checked).map(cb => cb.value);
+            if (shown.length === pageBoxes.length) { st.allowed_pages = null; return; }
+            // pages of a side that's off keep whatever they were
+            const hiddenKept = (st.allowed_pages || []).filter(id => !_pfSidesAllow(st.sides, profilePageSide(id)));
+            st.allowed_pages = shown.concat(hiddenKept);
+        };
+
+        const details = pfEl('details', { class: 'pf-details' }, [pfEl('summary', { text: 'Choose pages' })]);
+        details.append(pagesBox, homeField);
+        if (!isCreate) {
+            const folderInput = pfEl('input', { type: 'text', class: 'pf-input', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Output folder', placeholder: libraryHint || '/app/libraries/name', value: st.library_root });
+            folderInput.addEventListener('input', () => { st.library_root = folderInput.value; });
+            const folderBox = pfEl('div', { class: 'pf-group-extra' }, [
+                folderInput,
+                pfEl('p', { class: 'pf-help', text: 'Docker: mount this folder in docker-compose.yml. Then add it as a second music library on Plex or Jellyfin and pick that library under their account.' }),
+            ]);
+            const inactive = !librarySupported;
+            const ownSwitch = pfSwitch({
+                title: 'Own library',
+                desc: inactive ? 'Needs Plex or Jellyfin. With Navidrome or standalone their downloads go to the shared folder.'
+                    : 'Their downloads go to their own folder and their own server library.',
+                checked: st.library_mode === 'own',
+                disabled: inactive && st.library_mode !== 'own',
+                onChange: (on) => { st.library_mode = on ? 'own' : 'shared'; folderBox.style.display = on ? '' : 'none'; },
+            });
+            folderBox.style.display = st.library_mode === 'own' ? '' : 'none';
+            details.append(pfEl('div', { class: 'pf-group', style: 'margin-top:4px' }, [ownSwitch.row, folderBox]));
+        }
+
+        const accessParts = [
+            pfEl('div', { class: 'pf-section-title', text: 'Start from' }), presets,
+            pfEl('div', { class: 'pf-section-title', text: 'What they can use' }),
+            pfEl('div', { class: 'pf-group' }, [musicSwitch.row, videoSwitch.row, sideError]),
+            pfEl('div', { class: 'pf-section-title', text: 'Downloads' }),
+            pfEl('div', { class: 'pf-group' }, dlSwitch.row),
+        ];
+        accessBox.append(...accessParts);
+        pane2.append(adminNote, accessBox);
+        pane2.append(pfEl('div', { class: 'pf-section-title', text: 'Privacy' }), pfEl('div', { class: 'pf-group' }, [pinSwitch.row, pinExtra]));
+        if (isCreate && loginMode) {
+            pane2.append(pfEl('div', { class: 'pf-section-title', text: 'Login password' }),
+                pfEl('div', { class: 'pf-field' }, [passwordInput, passwordError,
+                    pfEl('p', { class: 'pf-help', text: 'Login mode is on, so they need one to sign in.' })]));
+        }
+        pane2.append(details);
+
+        function _pfMatchPreset() {
+            if (st.preset) {
+                const current = PROFILE_PRESETS.find(x => x.id === st.preset);
+                if (current && current.sides === st.sides && current.can_download === st.can_download) return st.preset;
+            }
+            const match = PROFILE_PRESETS.find(x => x.sides === st.sides && x.can_download === st.can_download);
+            return match ? match.id : null;
+        }
+
+        function syncAccess() {
+            adminNote.style.display = st.is_admin ? '' : 'none';
+            accessBox.style.display = st.is_admin ? 'none' : '';
+            details.style.display = st.is_admin ? 'none' : '';
+            presetButtons.forEach(({ btn, preset }) => btn.setAttribute('aria-checked', String(st.preset === preset.id)));
+            musicSwitch.set(st.sides !== 'video');
+            videoSwitch.set(st.sides !== 'music');
+            dlSwitch.set(st.can_download);
+            renderPages();
+            renderHomeOptions();
+        }
+        if (!isCreate) st.preset = _pfMatchPreset();
+        syncAccess();
+    }
+    renderHomeOptions();
+
+    // ── footer ──
+    const back = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Back' });
+    const cancel = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Cancel', onclick: () => modal.close() });
+    const next = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Next' });
+    const save = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: isCreate ? 'Add profile' : 'Save' });
+    modal.foot.append(pfEl('span', { class: 'pf-foot-note' }), back, cancel, next, save);
+    back.addEventListener('click', () => goTo(0));
+    next.addEventListener('click', () => { if (checkIdentity()) goTo(1); });
+    save.addEventListener('click', () => submit());
+    nameInput.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        if (isCreate && step === 0) next.click(); else save.click();
     });
 
-    // Bind set-login-password buttons
-    list.querySelectorAll('.profile-password-btn').forEach(btn => {
-        btn.onclick = () => showProfilePasswordForm(btn.dataset.id, btn.dataset.name, btn.dataset.hasPassword === '1');
-    });
+    function goTo(i) {
+        step = i;
+        furthest = Math.max(furthest, i);
+        panes.forEach((pane, idx) => { pane.style.display = idx === i ? '' : 'none'; });
+        tabButtons.forEach((tab, idx) => {
+            tab.setAttribute('aria-selected', String(idx === i));
+            tab.disabled = idx > furthest;
+        });
+        back.style.display = isCreate && i === 1 ? '' : 'none';
+        cancel.style.display = isCreate && i === 1 ? 'none' : '';
+        next.style.display = isCreate && i === 0 ? '' : 'none';
+        save.style.display = isCreate && i === 0 ? 'none' : '';
+        modal.body.scrollTop = 0;
+    }
 
-    // Bind delete buttons
-    list.querySelectorAll('.profile-delete-btn').forEach(btn => {
-        btn.onclick = async () => {
-            if (!await showConfirmDialog({ title: 'Delete Profile', message: 'Delete this profile and all its data?', confirmText: 'Delete', destructive: true })) return;
+    function checkIdentity() {
+        if (!st.name.trim()) {
+            nameError.textContent = 'Give the profile a name';
+            nameInput.classList.add('is-invalid');
+            goTo(0);
+            nameInput.focus();
+            return false;
+        }
+        return true;
+    }
+
+    // everything is checked before anything is sent
+    function validate() {
+        formError.textContent = '';
+        if (!checkIdentity()) return false;
+        if (st.pinOn && (st.pin || !p.has_pin || isCreate)) {
+            const problem = profilePinError(st.pin);
+            if (problem) {
+                pinError.textContent = st.pin ? problem : 'Type a PIN, or turn the PIN off';
+                goTo(1);
+                pinInput.focus();
+                return false;
+            }
+        }
+        if (st.password && st.password.length < 4) {
+            passwordError.textContent = 'Use at least 4 characters';
+            goTo(1);
+            passwordInput.focus();
+            return false;
+        }
+        if (isCreate && loginMode && !st.password) {
+            passwordError.textContent = 'Login mode is on, so they need a password';
+            goTo(1);
+            passwordInput.focus();
+            return false;
+        }
+        if (!isSelf && !st.is_admin && st.library_mode === 'own' && !st.library_root.trim()) {
+            formError.textContent = 'An own library needs an output folder.';
+            goTo(1);
+            return false;
+        }
+        return true;
+    }
+
+    function identityPayload() {
+        return {
+            name: st.name.trim(),
+            avatar_color: st.avatar_color,
+            avatar_url: st.avatarKind === 'image' ? (st.avatar_url.trim() || null) : null,
+            home_page: st.home_page || null,
+        };
+    }
+
+    function accessPayload() {
+        if (st.is_admin) return {};
+        return {
+            allowed_sides: st.sides,
+            can_download: st.can_download,
+            allowed_pages: st.allowed_pages,
+        };
+    }
+
+    async function send(url, method, body) {
+        const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await pfReadJson(res);
+        if (!res.ok || !data.success) {
+            const err = new Error(data.error || 'Something went wrong');
+            err.status = res.status;
+            throw err;
+        }
+        return data;
+    }
+
+    async function submit() {
+        if (!validate()) return;
+        save.disabled = true;
+        try {
+            if (isCreate) await submitCreate();
+            else await submitEdit();
+        } finally {
+            save.disabled = false;
+        }
+    }
+
+    async function submitCreate() {
+        const body = {
+            ...identityPayload(), ...accessPayload(),
+            pin: st.pinOn ? st.pin : undefined,
+            password: st.password || undefined,
+        };
+        try {
+            await send('/api/profiles', 'POST', body);
+        } catch (e) {
+            if (e.status === 409) {
+                nameError.textContent = 'Someone already has that name';
+                nameInput.classList.add('is-invalid');
+                goTo(0);
+                nameInput.focus();
+            } else {
+                formError.textContent = e.message || 'Connection error';
+            }
+            return;
+        }
+        modal.close();
+        showToast(`${body.name} is ready`, 'success');
+        _pfAfterSave();
+    }
+
+    // one PUT for the profile, then the pin and the password on their own.
+    // if a later one fails the earlier ones stay saved, and the message says
+    // exactly which is which.
+    async function submitEdit() {
+        const targetId = isSelf ? me.id : p.id;
+        const saved = [];
+        const failed = [];
+        const body = identityPayload();
+        if (adminEditsOther) {
+            Object.assign(body, accessPayload());
+            if (st.is_admin !== original.is_admin) body.is_admin = st.is_admin;
+            if (!st.is_admin) {
+                body.library_mode = st.library_mode;
+                body.library_root = st.library_mode === 'own' ? st.library_root.trim() : '';
+            }
+        }
+        try {
+            const result = await send(`/api/profiles/${targetId}`, 'PUT', body);
+            saved.push('profile');
+            if (isSelf) {
+                setCurrentProfile({ ...currentProfile, ...body, ...(result.profile || {}) });
+            }
+        } catch (e) {
+            formError.textContent = e.message || 'Connection error';
+            return;
+        }
+
+        const pinChanged = st.pinOn ? !!st.pin : !!p.has_pin;
+        if (pinChanged) {
             try {
-                const res = await fetch(`/api/profiles/${btn.dataset.id}`, { method: 'DELETE' });
-                const data = await res.json();
-                if (!data.success) {
-                    alert(data.error || 'Failed to delete profile');
-                }
+                await send(`/api/profiles/${targetId}/set-pin`, 'POST', { pin: st.pinOn ? st.pin : '' });
+                saved.push(st.pinOn ? 'PIN' : 'PIN removal');
+                try {
+                    if (isSelf && st.pinOn) localStorage.setItem(_pfPinLengthKey(targetId), String(st.pin.length));
+                    else localStorage.removeItem(_pfPinLengthKey(targetId));
+                } catch (e) { /* ignore */ }
+                if (isSelf) currentProfile.has_pin = st.pinOn;
             } catch (e) {
-                alert('Connection error');
+                failed.push(['PIN', e.message]);
             }
-            loadProfileManageList();
-        };
-    });
-
-    checkAdminPinRequired();
-}
-
-function showProfilePasswordForm(profileId, name, hasPassword) {
-    const list = document.getElementById('profile-manage-list');
-    // One inline form at a time — drop any edit/password form already open.
-    ['profile-password-form', 'profile-edit-form'].forEach(id => {
-        const el = document.getElementById(id); if (el) el.remove();
-    });
-
-    const form = document.createElement('div');
-    form.id = 'profile-password-form';
-    form.className = 'profile-edit-form';
-
-    const title = document.createElement('div');
-    title.style.cssText = 'font-weight:600;margin-bottom:4px;';
-    title.textContent = 'Login password — ' + name;     // textContent = XSS-safe
-    form.appendChild(title);
-
-    const hint = document.createElement('div');
-    hint.style.cssText = 'font-size:0.8em;color:rgba(255,255,255,0.5);margin-bottom:8px;line-height:1.4;';
-    hint.textContent = 'Used when "Require login" is on (separate from the quick-switch PIN). ' +
-        (hasPassword ? 'This profile has a password set.'
-                     : "This profile has no password yet — it can't sign in until you set one.");
-    form.appendChild(hint);
-
-    const pw = document.createElement('input');
-    pw.type = 'password'; pw.className = 'profile-input';
-    pw.placeholder = 'New password'; pw.autocomplete = 'new-password';
-    const confirm = document.createElement('input');
-    confirm.type = 'password'; confirm.className = 'profile-input';
-    confirm.placeholder = 'Confirm password'; confirm.autocomplete = 'new-password';
-    form.appendChild(pw); form.appendChild(confirm);
-
-    const msg = document.createElement('div');
-    msg.style.cssText = 'font-size:0.8em;margin:6px 0;display:none;';
-    form.appendChild(msg);
-    const showMsg = (t, ok) => {
-        msg.textContent = t; msg.style.color = ok ? '#10b981' : '#ef4444'; msg.style.display = 'block';
-    };
-
-    const post = async (password, okMsg, okType) => {
-        const res = await fetch('/api/profiles/' + encodeURIComponent(profileId) + '/set-password', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password }),
-        });
-        const data = await res.json();
-        if (data.success) {
-            form.remove();
-            loadProfileManageList();
-            if (typeof showToast === 'function') showToast(okMsg, okType);
-            return true;
         }
-        showMsg(data.error || 'Failed to update password', false);
-        return false;
-    };
+        if (isSelf && st.password) {
+            try {
+                const data = await send(`/api/profiles/${targetId}/set-password`, 'POST', { password: st.password });
+                saved.push('login password');
+                currentProfile.has_password = !!data.has_password;
+            } catch (e) {
+                failed.push(['login password', e.message]);
+            }
+        }
 
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;';
-
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'btn btn--primary';
-    saveBtn.textContent = 'Save password';
-    saveBtn.onclick = async () => {
-        const p1 = pw.value, p2 = confirm.value;
-        if (!p1 || !p1.trim()) { showMsg('Enter a password', false); return; }
-        if (p1.length < 4) { showMsg('Use at least 4 characters', false); return; }
-        if (p1 !== p2) { showMsg("Passwords don't match", false); return; }
-        saveBtn.disabled = true;
-        try { if (!await post(p1, 'Login password set for ' + name, 'success')) saveBtn.disabled = false; }
-        catch (e) { showMsg('Connection error', false); saveBtn.disabled = false; }
-    };
-    btnRow.appendChild(saveBtn);
-
-    if (hasPassword) {
-        const clearBtn = document.createElement('button');
-        clearBtn.className = 'btn';
-        clearBtn.textContent = 'Remove password';
-        clearBtn.onclick = async () => {
-            clearBtn.disabled = true;
-            try { if (!await post('', 'Login password removed', 'info')) clearBtn.disabled = false; }
-            catch (e) { showMsg('Connection error', false); clearBtn.disabled = false; }
-        };
-        btnRow.appendChild(clearBtn);
+        if (failed.length) {
+            formError.textContent = `Saved: ${saved.join(', ')}. ` + failed.map(([what, why]) => `${what} didn't save: ${why}`).join(' ');
+            _pfAfterSave();
+            return;
+        }
+        modal.close();
+        showToast('Saved', 'success');
+        _pfAfterSave();
     }
 
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'btn';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.onclick = () => form.remove();
-    btnRow.appendChild(cancelBtn);
-
-    form.appendChild(btnRow);
-    list.appendChild(form);
-    pw.focus();
+    goTo(0);
+    modal.open(nameInput);
 }
 
-function showProfileEditForm(profileId, currentName, currentColor, currentAvatarUrl, profileSettings = {}) {
-    const list = document.getElementById('profile-manage-list');
-    // Remove any existing edit form
-    const existing = document.getElementById('profile-edit-form');
-    if (existing) existing.remove();
-
-    const isAdmin = currentProfile && currentProfile.is_admin;
-    const isEditingAdmin = profileSettings.is_admin;
-    const editColors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6'];
-    const pageSelectOptions = getProfilePageSelectOptions(profileSettings);
-    const pageAccessOptions = getProfilePageAccessOptions(profileSettings);
-
-    const form = document.createElement('div');
-    form.id = 'profile-edit-form';
-    form.className = 'profile-edit-form';
-
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.className = 'profile-input';
-    nameInput.value = currentName;
-    nameInput.maxLength = 20;
-    nameInput.placeholder = 'Profile name';
-    form.appendChild(nameInput);
-
-    const urlInput = document.createElement('input');
-    urlInput.type = 'url';
-    urlInput.className = 'profile-input';
-    urlInput.value = currentAvatarUrl || '';
-    urlInput.placeholder = 'Avatar image URL (optional)';
-    form.appendChild(urlInput);
-
-    const colorRow = document.createElement('div');
-    colorRow.className = 'profile-color-picker';
-    let editColor = currentColor;
-    editColors.forEach(c => {
-        const swatch = document.createElement('span');
-        swatch.className = 'profile-color-swatch' + (c === currentColor ? ' selected' : '');
-        swatch.style.background = c;
-        swatch.dataset.color = c;
-        swatch.onclick = () => {
-            colorRow.querySelectorAll('.profile-color-swatch').forEach(s => s.classList.remove('selected'));
-            swatch.classList.add('selected');
-            editColor = c;
-        };
-        colorRow.appendChild(swatch);
-    });
-    form.appendChild(colorRow);
-
-    // Home page selector — visible to everyone (self-edit or admin editing others)
-    const homeLabel = document.createElement('label');
-    homeLabel.className = 'profile-settings-label';
-    homeLabel.textContent = 'Home Page';
-    form.appendChild(homeLabel);
-
-    const homeSelect = document.createElement('select');
-    homeSelect.className = 'profile-input';
-    const defaultOpt = document.createElement('option');
-    defaultOpt.value = '';
-    defaultOpt.textContent = isEditingAdmin ? 'Default (Dashboard)' : 'Default (Discover)';
-    homeSelect.appendChild(defaultOpt);
-    const normalizedHome = profileSettings.home_page;
-    pageSelectOptions.forEach(({ value, label }) => {
-        const opt = document.createElement('option');
-        opt.value = value;
-        opt.textContent = label;
-        if (value === normalizedHome) opt.selected = true;
-        homeSelect.appendChild(opt);
-    });
-    form.appendChild(homeSelect);
-
-    // Admin-only settings: side access, allowed pages & can_download
-    let pageCheckboxes = [];
-    let canDlCheckbox = null;
-    let ownLibCheckbox = null;
-    let ownLibRootInput = null;
-    let selectedSides = null;
-    if (isAdmin && !isEditingAdmin) {
-        // Side access — music | video | both, never nothing.
-        selectedSides = (profileSettings.allowed_sides === 'video' || profileSettings.allowed_sides === 'both')
-            ? profileSettings.allowed_sides : 'music';
-        const sidesLabel = document.createElement('label');
-        sidesLabel.className = 'profile-settings-label';
-        sidesLabel.textContent = 'Side Access';
-        form.appendChild(sidesLabel);
-
-        const sidesRow = document.createElement('div');
-        sidesRow.className = 'profile-sides-picker';
-        [['music', 'Music only'], ['video', 'Video only'], ['both', 'Music + Video']].forEach(([value, label]) => {
-            const lbl = document.createElement('label');
-            const r = document.createElement('input');
-            r.type = 'radio';
-            r.name = 'edit-profile-sides';
-            r.value = value;
-            r.checked = value === selectedSides;
-            r.addEventListener('change', () => {
-                selectedSides = value;
-                applySidesToPageCheckboxes(pageCheckboxes, selectedSides);
-            });
-            lbl.appendChild(r);
-            lbl.appendChild(document.createTextNode(' ' + label));
-            sidesRow.appendChild(lbl);
-        });
-        form.appendChild(sidesRow);
-
-        const apLabel = document.createElement('label');
-        apLabel.className = 'profile-settings-label';
-        apLabel.textContent = 'Page Access';
-        form.appendChild(apLabel);
-
-        const apContainer = document.createElement('div');
-        apContainer.className = 'profile-page-checkboxes';
-        pageAccessOptions.forEach(({ value, label, checked, disabled }) => {
-            const lbl = document.createElement('label');
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.value = value;
-            cb.checked = checked;
-            cb.disabled = disabled;
-            if (disabled) cb.dataset.alwaysOn = '1';   // Help/Issues stay locked-on
-            lbl.appendChild(cb);
-            lbl.appendChild(document.createTextNode(' ' + label));
-            apContainer.appendChild(lbl);
-            pageCheckboxes.push(cb);
-        });
-        form.appendChild(apContainer);
-        applySidesToPageCheckboxes(pageCheckboxes, selectedSides);
-
-        const dlLabel = document.createElement('label');
-        dlLabel.className = 'profile-checkbox-label';
-        canDlCheckbox = document.createElement('input');
-        canDlCheckbox.type = 'checkbox';
-        canDlCheckbox.checked = profileSettings.can_download !== false;
-        dlLabel.appendChild(canDlCheckbox);
-        dlLabel.appendChild(document.createTextNode(' Can download (music, podcasts, audiobooks & video)'));
-        form.appendChild(dlLabel);
-
-        // own library (#1199): this profile's downloads go to its own folder
-        // and the library it picked on the server, not the shared one
-        const olLabel = document.createElement('label');
-        olLabel.className = 'profile-checkbox-label';
-        ownLibCheckbox = document.createElement('input');
-        ownLibCheckbox.type = 'checkbox';
-        ownLibCheckbox.checked = profileSettings.library_mode === 'own';
-        ownLibCheckbox.disabled = profileSettings.library_supported === false && !ownLibCheckbox.checked;
-        olLabel.appendChild(ownLibCheckbox);
-        olLabel.appendChild(document.createTextNode(profileSettings.library_supported === false
-            ? ' Own library (requires Plex or Jellyfin)'
-            : ' Own library (separate output folder + their own server library)'));
-        form.appendChild(olLabel);
-
-        let olWarn = null;
-        if (profileSettings.library_supported === false && ownLibCheckbox.checked) {
-            olWarn = document.createElement('div');
-            olWarn.className = 'profile-own-library-inactive-warning';
-            olWarn.style.cssText = 'margin: 6px 0 10px 0; padding: 8px 12px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; font-size: 12px; color: #f59e0b; line-height: 1.4;';
-            olWarn.innerHTML = '⚠️ <strong>Inactive on current media server:</strong> Own libraries require Plex or Jellyfin. While Navidrome or Standalone is active, downloads for this profile will route to the shared library folder.';
-            form.appendChild(olWarn);
-        }
-
-        // the folder: prefilled with the install's expected path (a mount
-        // under /app/libraries/<name>, see docker-compose.yml); outside docker
-        // the admin corrects it, and a folder that is not there is refused on save
-        const olField = document.createElement('div');
-        olField.className = 'profile-folder-field';
-        olField.style.display = ownLibCheckbox.checked ? '' : 'none';
-        const olFieldLabel = document.createElement('label');
-        olFieldLabel.className = 'profile-settings-label';
-        olFieldLabel.textContent = 'Output folder';
-        olField.appendChild(olFieldLabel);
-        const olWrap = document.createElement('div');
-        olWrap.className = 'profile-folder-input';
-        olWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
-        ownLibRootInput = document.createElement('input');
-        ownLibRootInput.type = 'text';
-        ownLibRootInput.spellcheck = false;
-        ownLibRootInput.autocomplete = 'off';
-        ownLibRootInput.placeholder = profileSettings.library_hint || '/app/libraries/name';
-        ownLibRootInput.value = profileSettings.library_root || profileSettings.library_hint || '';
-        olWrap.appendChild(ownLibRootInput);
-        olField.appendChild(olWrap);
-        const olHelp = document.createElement('div');
-        olHelp.className = 'profile-settings-help';
-        olHelp.textContent = 'Docker: mount this folder in docker-compose.yml (see the Per-profile libraries example). Not Docker: change it to a real folder. Then point a second music library on your Plex or Jellyfin server at it and have the profile pick that library under My Account.';
-        olField.appendChild(olHelp);
-        form.appendChild(olField);
-        ownLibCheckbox.addEventListener('change', () => {
-            olField.style.display = ownLibCheckbox.checked ? '' : 'none';
-            if (olWarn) olWarn.style.display = ownLibCheckbox.checked ? '' : 'none';
-            if (profileSettings.library_supported === false && !ownLibCheckbox.checked) {
-                ownLibCheckbox.disabled = true;
-            }
-        });
-    }
-
-    const btnRow = document.createElement('div');
-    btnRow.className = 'profile-edit-buttons';
-
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'btn btn--block btn--primary profile-create-btn';
-    saveBtn.textContent = 'Save';
-    saveBtn.onclick = async () => {
-        const newName = nameInput.value.trim();
-        if (!newName) { alert('Name cannot be empty'); return; }
-        const newAvatarUrl = urlInput.value.trim() || null;
-        const payload = { name: newName, avatar_color: editColor, avatar_url: newAvatarUrl };
-
-        // Home page
-        payload.home_page = homeSelect.value || null;
-
-        // Admin-only fields
-        if (isAdmin && !isEditingAdmin && pageCheckboxes.length) {
-            const editablePageCheckboxes = pageCheckboxes.filter(cb => !cb.disabled);
-            const allChecked = editablePageCheckboxes.every(cb => cb.checked);
-            payload.allowed_pages = allChecked ? null : editablePageCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
-            payload.can_download = canDlCheckbox ? canDlCheckbox.checked : true;
-            if (selectedSides) payload.allowed_sides = selectedSides;
-            if (ownLibCheckbox) {
-                payload.library_mode = ownLibCheckbox.checked ? 'own' : 'shared';
-                payload.library_root = ownLibCheckbox.checked ? (ownLibRootInput.value || '').trim() : '';
-                if (ownLibCheckbox.checked && !payload.library_root) { alert('An own library needs an output folder'); return; }
-            }
-        }
-
-        try {
-            const res = await fetch(`/api/profiles/${profileId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            if (data.success) {
-                // Update sidebar indicator if editing current profile
-                if (currentProfile && currentProfile.id == profileId) {
-                    currentProfile.name = newName;
-                    currentProfile.avatar_color = editColor;
-                    currentProfile.avatar_url = newAvatarUrl;
-                    if (payload.home_page !== undefined) currentProfile.home_page = payload.home_page;
-                    if (payload.allowed_pages !== undefined) currentProfile.allowed_pages = payload.allowed_pages;
-                    if (payload.can_download !== undefined) currentProfile.can_download = payload.can_download;
-                    if (payload.allowed_sides !== undefined) currentProfile.allowed_sides = payload.allowed_sides;
-                    updateProfileIndicator();
-                    notifyProfileContextChanged();
-                }
-                loadProfileManageList();
-            } else {
-                alert(data.error || 'Failed to update profile');
-            }
-        } catch (e) {
-            alert('Connection error');
-        }
-    };
-    btnRow.appendChild(saveBtn);
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'profile-picker-cancel';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.onclick = () => form.remove();
-    btnRow.appendChild(cancelBtn);
-
-    form.appendChild(btnRow);
-    list.appendChild(form);
-    nameInput.focus();
-    nameInput.select();
-}
-
-function showSelfEditForm() {
-    if (!currentProfile) return;
-    const overlay = document.getElementById('profile-picker-overlay');
-    const container = overlay.querySelector('.profile-picker-container');
-
-    // Hide the picker grid and show self-edit form
-    const grid = document.getElementById('profile-picker-grid');
-    const actions = document.getElementById('profile-picker-actions');
-    grid.style.display = 'none';
-    actions.style.display = 'none';
-
-    // Remove any existing self-edit form
-    const existing = document.getElementById('self-edit-form');
-    if (existing) existing.remove();
-
-    const pageLabels = {
-        dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
-        automations: 'Automations', library: 'Library', stats: 'Listening Stats',
-        'playlist-explorer': 'Playlist Explorer', import: 'Import', podcasts: 'Podcasts', help: 'Help & Docs'
-    };
-
-    const form = document.createElement('div');
-    form.id = 'self-edit-form';
-    form.className = 'profile-edit-form';
-    form.style.marginTop = '16px';
-
-    const title = document.createElement('h3');
-    title.textContent = 'My Profile';
-    title.style.cssText = 'color: #fff; margin: 0 0 12px; font-size: 18px;';
-    form.appendChild(title);
-
-    // Name
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.className = 'profile-input';
-    nameInput.value = currentProfile.name;
-    nameInput.maxLength = 20;
-    nameInput.placeholder = 'Profile name';
-    form.appendChild(nameInput);
-
-    // PIN
-    const pinLabel = document.createElement('label');
-    pinLabel.className = 'profile-settings-label';
-    pinLabel.textContent = currentProfile.has_pin ? 'Change PIN' : 'Add PIN';
-    form.appendChild(pinLabel);
-
-    const pinInput = document.createElement('input');
-    pinInput.type = 'password';
-    pinInput.className = 'profile-input';
-    pinInput.maxLength = 6;
-    pinInput.placeholder = currentProfile.has_pin ? 'New PIN (leave blank to keep)' : 'New PIN (optional)';
-    form.appendChild(pinInput);
-
-    // Login password
-    const passwordLabel = document.createElement('label');
-    passwordLabel.className = 'profile-settings-label';
-    passwordLabel.textContent = currentProfile.has_password ? 'Change Login Password' : 'Add Login Password';
-    form.appendChild(passwordLabel);
-
-    const passwordInput = document.createElement('input');
-    passwordInput.type = 'password';
-    passwordInput.className = 'profile-input';
-    passwordInput.maxLength = 200;
-    passwordInput.autocomplete = 'new-password';
-    passwordInput.placeholder = currentProfile.has_password ? 'New password (leave blank to keep)' : 'New password (optional)';
-    form.appendChild(passwordInput);
-
-    // Home page
-    const homeLabel = document.createElement('label');
-    homeLabel.className = 'profile-settings-label';
-    homeLabel.textContent = 'Home Page';
-    form.appendChild(homeLabel);
-
-    const homeSelect = document.createElement('select');
-    homeSelect.className = 'profile-input';
-    const defaultOpt = document.createElement('option');
-    defaultOpt.value = '';
-    defaultOpt.textContent = 'Default (Discover)';
-    homeSelect.appendChild(defaultOpt);
-    const normalizedHome = currentProfile.home_page;
-    getProfilePageSelectOptions({ home_page: normalizedHome }).forEach(({ value, label }) => {
-        const opt = document.createElement('option');
-        opt.value = value;
-        opt.textContent = label;
-        if (value === normalizedHome) opt.selected = true;
-        homeSelect.appendChild(opt);
-    });
-    form.appendChild(homeSelect);
-
-    // Buttons
-    const btnRow = document.createElement('div');
-    btnRow.className = 'profile-edit-buttons';
-    btnRow.style.marginTop = '12px';
-
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'btn btn--block btn--primary profile-create-btn';
-    saveBtn.textContent = 'Save';
-    saveBtn.onclick = async () => {
-        const newName = nameInput.value.trim();
-        if (!newName) { alert('Name cannot be empty'); return; }
-        try {
-            const res = await fetch(`/api/profiles/${currentProfile.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newName, home_page: homeSelect.value || null })
-            });
-            const data = await res.json();
-            if (data.success) {
-                const pin = pinInput.value.trim();
-                if (pin) {
-                    const pinRes = await fetch(`/api/profiles/${currentProfile.id}/set-pin`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ pin })
-                    });
-                    const pinData = await pinRes.json();
-                    if (!pinData.success) { alert(pinData.error || 'Failed to update PIN'); return; }
-                    currentProfile.has_pin = true;
-                }
-
-                const password = passwordInput.value;
-                if (password) {
-                    const passwordRes = await fetch(`/api/profiles/${currentProfile.id}/set-password`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ password })
-                    });
-                    const passwordData = await passwordRes.json();
-                    if (!passwordData.success) { alert(passwordData.error || 'Failed to update password'); return; }
-                    currentProfile.has_password = !!passwordData.has_password;
-                }
-
-                currentProfile.name = newName;
-                currentProfile.home_page = homeSelect.value || null;
-                updateProfileIndicator();
-                closeSelfEdit();
-                hideProfilePicker();
-            } else {
-                alert(data.error || 'Failed to update');
-            }
-        } catch (e) {
-            alert('Connection error');
-        }
-    };
-    btnRow.appendChild(saveBtn);
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'profile-picker-cancel';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.onclick = () => closeSelfEdit();
-    btnRow.appendChild(cancelBtn);
-
-    form.appendChild(btnRow);
-    container.appendChild(form);
-
-    function closeSelfEdit() {
-        form.remove();
-        grid.style.display = '';
-        actions.style.display = '';
-    }
-}
-
-async function checkAdminPinRequired() {
-    const res = await fetch('/api/profiles');
-    const data = await res.json();
-    const profiles = data.profiles || [];
-    const admin = profiles.find(p => p.is_admin);
-    const section = document.getElementById('admin-pin-section');
-
-    if (profiles.length > 1 && admin && !admin.has_pin && section) {
-        section.style.display = '';
-    } else if (section) {
-        section.style.display = 'none';
+function _pfAfterSave() {
+    if (document.getElementById('pf-manage-list')) loadProfileManageList();
+    const picker = document.getElementById('profile-picker-overlay');
+    if (picker && picker.style.display !== 'none') {
+        pfFetchProfiles().then(d => showProfilePicker(d.profiles || [], !!currentProfile)).catch(() => {});
     }
 }
 
@@ -2502,9 +2939,6 @@ document.addEventListener('DOMContentLoaded', async function () {
 });
 
 async function _continueAppInit() {
-    // Initialize profile management UI handlers
-    initProfileManagement();
-
     // Check profiles first — may show picker instead of app
     const profileReady = await initProfileSystem();
     if (!profileReady) {
@@ -2595,7 +3029,7 @@ const _DEEPLINK_VALID_PAGES = new Set([
     'dashboard', 'sync', 'search', 'discover', 'automations',
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
-    'hydrabase', 'tools', 'chat', 'podcasts', 'audiobooks'
+    'hydrabase', 'tools', 'chat', 'podcasts', 'audiobooks', 'requests'
 ]);
 
 function _getPageFromPath() {
@@ -3443,6 +3877,18 @@ async function loadInitialData() {
             const redirectedPage = _getPageFromPath();
             if (redirectedPage && isPageAllowed(redirectedPage)) {
                 targetPage = redirectedPage;
+            }
+        }
+
+        // a video page as home: opening the bare address lands there. the
+        // music boot below still runs underneath, like any side switch.
+        const videoHome = profileVideoHomePage();
+        if (videoHome && PF_BOOT_PATH === '/' && typeof window._switchAppSide === 'function') {
+            const videoNav = document.querySelector(`.video-nav .nav-button[data-video-page="${videoHome}"]`);
+            if (videoNav) {
+                document.querySelectorAll('.video-nav .nav-button.active').forEach(b => b.classList.remove('active'));
+                videoNav.classList.add('active');
+                window._switchAppSide('video');
             }
         }
 

@@ -700,11 +700,27 @@
         // acquisition path at all — give it the ask-an-admin button instead of
         // the Get/Watchlist controls (those APIs are gated for this profile).
         var _canDl = (typeof canDownload !== 'function') || canDownload();
-        if (!_canDl && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id) {
+        // an owned movie has nothing left to ask for; a show can still be
+        // missing seasons. "Requested" once this profile has one waiting.
+        var _ownedMovie = d.kind === 'movie' && ((d.source !== 'tmdb') || !!d.owned);
+        if (!_canDl && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id && !_ownedMovie) {
+            if (!d._req_checked) {
+                d._req_checked = true;
+                fetch('/api/video/requests?status=pending', { headers: { 'Accept': 'application/json' } })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (res) {
+                        var mine = !!(res && res.requests && res.requests.some(function (x) {
+                            return x.kind === d.kind && String(x.tmdb_id) === String(d.tmdb_id);
+                        }));
+                        if (mine !== !!d._req_pending) { d._req_pending = mine; if (data === d) renderActions(d); }
+                    }).catch(function () { /* keep the plain button */ });
+            }
+            var asked = !!d._req_pending;
             html +=
-                '<button class="library-artist-watchlist-btn vd-action-main" type="button" data-vd-act="request">' +
-                '<span class="watchlist-icon">🙋</span>' +
-                '<span class="watchlist-text">Request</span></button>';
+                '<button class="library-artist-watchlist-btn vd-action-main' + (asked ? ' watching' : '') +
+                '" type="button" data-vd-act="request"' + (asked ? ' disabled' : '') + '>' +
+                '<span class="watchlist-icon">' + (asked ? '✓' : '🙋') + '</span>' +
+                '<span class="watchlist-text">' + (asked ? 'Requested' : 'Request') + '</span></button>';
         }
         if (isAiringShow && _canDl) {
             var showPoster = d.source !== 'tmdb' ? ('/api/video/poster/show/' + d.id) : proxied(d.poster_url);
@@ -1807,7 +1823,24 @@
                         '" title="' + (ep.owned ? 'Wishlist for an upgrade' : 'Add this episode to the wishlist') + '" aria-label="Wishlist episode">＋</button>' +
                   '</div>')) +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
-            '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
+            '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '"' + episodeReportAttrs(ep) + ' hidden></div>';
+    }
+
+    // library episodes can be reported (video-issues.js owns the modal); the
+    // panel carries the id so the expanded view can offer it
+    function episodeReportAttrs(ep) {
+        if (!window.VideoIssues || !data || data.source === 'tmdb' || ep.id == null) return '';
+        var name = (data.title || '') + ' S' + String(selectedSeason).padStart(2, '0') +
+            'E' + String(ep.episode_number).padStart(2, '0');
+        return ' data-vi-ep-id="' + esc(ep.id) + '" data-vi-ep-name="' + esc(name) + '"' +
+            ' data-vi-ep-meta="' + esc(ep.title || '') + '"';
+    }
+    function episodeReportButton(panel) {
+        var id = panel && panel.getAttribute('data-vi-ep-id');
+        if (!id) return '';
+        return '<button type="button" class="vi-ep-report" data-vi-report-episode="' + esc(id) + '"' +
+            ' data-vi-name="' + esc(panel.getAttribute('data-vi-ep-name') || '') + '"' +
+            ' data-vi-meta="' + esc(panel.getAttribute('data-vi-ep-meta') || '') + '">⚑ Report a problem</button>';
     }
 
     function toggleEpisode(row) {
@@ -1848,7 +1881,7 @@
         }
         var tmdb = data && data.tmdb_id;
         var parts = key.split('_');
-        if (!tmdb) { panel.innerHTML = '<div class="vd-ep-extra-empty">No extra info.</div>'; return; }
+        if (!tmdb) { panel.innerHTML = '<div class="vd-ep-extra-empty">No extra info.</div>' + episodeReportButton(panel); return; }
         panel.innerHTML = '<div class="vd-ep-extra-empty">Loading…</div>';
         fetch('/api/video/episode/' + tmdb + '/' + parts[0] + '/' + parts[1],
             { headers: { 'Accept': 'application/json' } })
@@ -1918,6 +1951,7 @@
                 : '') +
             '<div class="vd-ep-extra-body">' +
                 (body || '<div class="vd-ep-extra-empty">No extra info.</div>') +
+                episodeReportButton(panel) +
             '</div>';
     }
 
@@ -3065,29 +3099,46 @@
     }
 
     // Requests (P4): the no-download-rights acquisition path — ask an admin.
+    // a show asks which seasons first (VideoRequestSheet lives in video-requests.js).
     function sendRequest(btn) {
         if (!data || !data.tmdb_id || btn.disabled) return;
-        btn.disabled = true;
-        fetch('/api/video/requests', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: data.kind, tmdb_id: data.tmdb_id,
-                title: data.title, year: data.year,
-                poster_url: data.poster_url || data.poster || null }) })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (res) {
-                if (!res || !res.success) throw new Error();
-                if (typeof showToast === 'function') {
-                    showToast(res.already ? 'Already requested — an admin will review it'
-                                          : 'Request sent — an admin will review it', 'success');
-                }
-                var txt = btn.querySelector('.watchlist-text');
-                if (txt) txt.textContent = 'Requested';
-                btn.classList.add('watching');
-            })
-            .catch(function () {
-                btn.disabled = false;
-                if (typeof showToast === 'function') showToast('Couldn’t send the request', 'error');
-            });
+        var d = data;
+        var sheet = window.VideoRequestSheet;
+        var pick = (d.kind === 'show' && sheet && sheet.pickSeasons)
+            ? sheet.pickSeasons({ title: d.title || '', current: 'all' })
+            : Promise.resolve(null);
+        pick.then(function (monitor) {
+            if (d.kind === 'show' && sheet && sheet.pickSeasons && !monitor) return;   // cancelled
+            btn.disabled = true;
+            var body = { kind: d.kind, tmdb_id: d.tmdb_id, title: d.title, year: d.year,
+                poster_url: d.poster_url || d.poster || null };
+            if (monitor) body.monitor = monitor;
+            fetch('/api/video/requests', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body) })
+                .then(function (r) { return r.json().catch(function () { return null; }); })
+                .then(function (res) {
+                    if (res && res.in_library) {
+                        if (typeof showToast === 'function') showToast('That’s already in your library', 'info');
+                        d.owned = true;
+                        if (data === d) renderActions(d);
+                        return;
+                    }
+                    if (!res || !res.success) throw new Error((res && res.error) || '');
+                    if (typeof showToast === 'function') {
+                        showToast(res.already ? 'Already requested. You’ll hear when it’s decided'
+                                              : 'Requested. You’ll hear when it’s decided', 'success');
+                    }
+                    d._req_pending = true;
+                    if (data === d) renderActions(d);
+                })
+                .catch(function (err) {
+                    btn.disabled = false;
+                    if (typeof showToast === 'function') {
+                        showToast((err && err.message) || 'Couldn’t send the request', 'error');
+                    }
+                });
+        });
     }
 
     function toggleMissing() {

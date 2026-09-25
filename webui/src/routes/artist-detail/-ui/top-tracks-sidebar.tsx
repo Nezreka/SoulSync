@@ -67,7 +67,10 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
       });
       const data = await response.json();
       if (data?.success) {
-        window.showToast?.(`Added "${track.name}" to wishlist`, 'success');
+        // a profile that asks first hears who it went to instead
+        if (!window.announceWishlistRequest?.()) {
+          window.showToast?.(`Added "${track.name}" to wishlist`, 'success');
+        }
       } else {
         window.showToast?.(
           `Failed to wishlist "${track.name}": ${data?.error || 'unknown'}`,

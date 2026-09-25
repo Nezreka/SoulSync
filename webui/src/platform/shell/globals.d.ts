@@ -9,6 +9,11 @@ import type { ShellProfileContext, ShellRouteDefinition, ShellPageId } from './b
 declare global {
   interface Window {
     showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
+    /** core.js: repaints the music Requests nav badge (admin: waiting, member: news). */
+    refreshMusicRequestsBadge?: () => void;
+    /** core.js: after a wishlist add, tells a profile that asks first it went out as a
+     *  request. true when it spoke, so the caller skips its own "added" toast. */
+    announceWishlistRequest?: () => boolean;
     showConfirmDialog?: (options?: {
       title?: string;
       message?: string;

@@ -26,6 +26,7 @@ import {
 } from '../-artist-detail.hero-stats';
 import { bucketCounts } from '../-artist-detail.use-completion';
 import { checkWatchlistRequest, toggleWatchlistRequest } from '../-artist-detail.watchlist-button';
+import { ReportIssueButton } from '../../issues/-ui/report-issue-button';
 import { ArtPicker } from './art-picker';
 import { ArtistDbRecord } from './artist-db-record';
 import { ArtistFixMatch } from './artist-matches-modal';
@@ -456,6 +457,15 @@ export function ArtistHero({
                 <span className="delete-text">{deleting ? 'Removing…' : 'Delete Artist'}</span>
               </button>
             ) : null}
+            {/* library artists only: a source artist has no row to report on */}
+            {isSourceArtist ? null : (
+              <ReportIssueButton
+                id="library-artist-report-btn"
+                entityType="artist"
+                entityId={artist.id}
+                entityName={String(artist.name || '')}
+              />
+            )}
           </div>
 
           <div className="artist-genres-container" id="artist-genres">
