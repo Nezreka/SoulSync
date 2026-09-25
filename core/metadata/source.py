@@ -924,12 +924,14 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
                     break
             if merged:
                 genre_string = ", ".join(merged)
+                from core.metadata.multi_value import genre_values
+                genres_out = genre_values(merged, bool(cfg.get("metadata_enhancement.tags.write_multi_artist", False)))
                 if isinstance(audio_file.tags, symbols.ID3):
-                    audio_file.tags.add(symbols.TCON(encoding=3, text=[genre_string]))
+                    audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
                 elif is_vorbis_like(audio_file, symbols):
-                    audio_file["GENRE"] = [genre_string]
+                    audio_file["GENRE"] = genres_out
                 elif isinstance(audio_file, symbols.MP4):
-                    audio_file["\xa9gen"] = [genre_string]
+                    audio_file["\xa9gen"] = genres_out
                 logger.info("Genres merged: %s", genre_string)
 
     isrc_candidates = []
@@ -973,12 +975,15 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         label_candidates.append(("Bandcamp", pp["bandcamp_label"]))
     if label_candidates and "LABEL" not in filtered_tags:
         label_source, final_label = label_candidates[0]
+        # "a;b;c" from a provider is three labels, written as three values (#1305)
+        from core.metadata.multi_value import split_values
+        label_values = split_values(final_label) or [final_label]
         if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TPUB(encoding=3, text=[final_label]))
+            audio_file.tags.add(symbols.TPUB(encoding=3, text=label_values))
         elif is_vorbis_like(audio_file, symbols):
-            audio_file["LABEL"] = [final_label]
+            audio_file["LABEL"] = label_values
         elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(final_label.encode("utf-8"))]
+            audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(v.encode("utf-8")) for v in label_values]
         logger.info("Label (%s): %s", label_source, final_label)
 
     if _tag_enabled(cfg, "lastfm.tags.url") and pp["lastfm_url"]:
