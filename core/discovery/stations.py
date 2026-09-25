@@ -74,13 +74,19 @@ def build_stations(database, profile_id: int = 1,
         placeholders = ",".join("?" * len(seed_names))
         cur.execute(
             f"""
-            SELECT ar.id, ar.name, ar.thumb_url,
-                   ar.spotify_artist_id, ar.itunes_artist_id, ar.deezer_id,
+            SELECT ar.id, ar.name, ar.image_url AS thumb_url,
+                   ar.spotify_id AS spotify_artist_id,
+                   json_extract(ar.external_ids, '$.itunes') AS itunes_artist_id,
+                   json_extract(ar.external_ids, '$.deezer') AS deezer_id,
                    ar.musicbrainz_id,
-                   (SELECT COUNT(*) FROM tracks t
-                    WHERE t.artist_id = ar.id
-                      AND t.file_path IS NOT NULL AND t.file_path != '') AS playable
-            FROM artists ar
+                   (SELECT COUNT(*)
+                      FROM lib2_tracks t
+                      JOIN lib2_albums al ON al.id = t.album_id
+                      JOIN lib2_track_files f ON f.track_id = t.id
+                     WHERE al.primary_artist_id = ar.id
+                       AND f.path IS NOT NULL AND TRIM(f.path) != ''
+                       AND COALESCE(f.file_state, 'active') = 'active') AS playable
+            FROM lib2_artists ar
             WHERE LOWER(ar.name) IN ({placeholders})
             """,
             seed_names)
@@ -129,11 +135,15 @@ def build_stations(database, profile_id: int = 1,
             cur.execute(
                 f"""
                 SELECT LOWER(ar.name)
-                FROM artists ar
+                FROM lib2_artists ar
                 WHERE LOWER(ar.name) IN ({placeholders})
-                  AND EXISTS (SELECT 1 FROM tracks t
-                              WHERE t.artist_id = ar.id
-                                AND t.file_path IS NOT NULL AND t.file_path != '')
+                  AND EXISTS (SELECT 1
+                                FROM lib2_tracks t
+                                JOIN lib2_albums al ON al.id = t.album_id
+                                JOIN lib2_track_files f ON f.track_id = t.id
+                               WHERE al.primary_artist_id = ar.id
+                                 AND f.path IS NOT NULL AND TRIM(f.path) != ''
+                                 AND COALESCE(f.file_state, 'active') = 'active')
                 """,
                 [_norm(n) for n in every_companion])
             playable_companions = {row[0] for row in cur.fetchall()}
@@ -169,7 +179,7 @@ def build_stations(database, profile_id: int = 1,
 
 
 def _track_columns(cur) -> set:
-    cur.execute("PRAGMA table_info(tracks)")
+    cur.execute("PRAGMA table_info(lib2_tracks)")
     return {row[1] for row in cur.fetchall()}
 
 
@@ -245,7 +255,8 @@ def build_station_snapshot(database, artist_id: Any, profile_id: int = 1,
 
     with database._get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id, name, thumb_url FROM artists WHERE id = ?", (artist_id,))
+        cur.execute("SELECT id, name, image_url AS thumb_url FROM lib2_artists WHERE id = ?",
+                    (artist_id,))
         artist = cur.fetchone()
         if not artist:
             return _unavailable(artist_id, revision, profile_id,
@@ -254,16 +265,22 @@ def build_station_snapshot(database, artist_id: Any, profile_id: int = 1,
 
         cols = _track_columns(cur)
         order = "COALESCE(t.play_count, 0) DESC, t.id ASC" if "play_count" in cols else "t.id ASC"
+        # The artist a track belongs to is the release's primary artist, which is
+        # how every other lib2 read resolves it; the playable file is the primary
+        # ACTIVE one (ADR-03), not any row that happens to carry a path.
         cur.execute(f"""
-            SELECT t.id, t.title, t.duration, t.file_path, t.bitrate,
+            SELECT t.id, t.title, t.duration, f.path AS file_path, f.bitrate,
                    al.title AS album,
-                   COALESCE(al.thumb_url, ar.thumb_url) AS image_url,
+                   COALESCE(al.image_url, ar.image_url) AS image_url,
                    ar.name AS artist
-            FROM tracks t
-            JOIN artists ar ON ar.id = t.artist_id
-            LEFT JOIN albums al ON al.id = t.album_id
-            WHERE t.artist_id = ?
-              AND t.file_path IS NOT NULL AND t.file_path != ''
+            FROM lib2_tracks t
+            JOIN lib2_albums al ON al.id = t.album_id
+            JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            JOIN lib2_track_files f ON f.track_id = t.id
+                 AND f.is_primary = 1
+                 AND COALESCE(f.file_state, 'active') = 'active'
+            WHERE al.primary_artist_id = ?
+              AND f.path IS NOT NULL AND TRIM(f.path) != ''
             ORDER BY {order}
             LIMIT 1
         """, (artist_id,))

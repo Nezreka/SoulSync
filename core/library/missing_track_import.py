@@ -192,8 +192,8 @@ def _load_album_and_source_track(database, album_id: str, source_track_id: str) 
         cursor.execute(
             """
             SELECT al.*, ar.name AS artist_name, ar.id AS target_artist_id
-            FROM albums al
-            JOIN artists ar ON ar.id = al.artist_id
+            FROM lib2_albums al
+            JOIN lib2_artists ar ON ar.id = al.primary_artist_id
             WHERE al.id = ?
             """,
             (album_id,),
@@ -202,7 +202,15 @@ def _load_album_and_source_track(database, album_id: str, source_track_id: str) 
         if not album_row:
             raise MissingTrackImportError("Album not found", 404)
 
-        cursor.execute("SELECT * FROM tracks WHERE id = ?", (source_track_id,))
+        cursor.execute(
+            """
+            SELECT t.*, f.path AS file_path, f.bitrate AS bitrate, f.size AS file_size
+              FROM lib2_tracks t
+              LEFT JOIN lib2_track_files f
+                     ON f.track_id = t.id AND f.is_primary = 1
+                    AND COALESCE(f.file_state, 'active') <> 'deleted'
+             WHERE t.id = ?
+            """, (source_track_id,))
         source_row = cursor.fetchone()
         if not source_row:
             raise MissingTrackImportError("Selected library track not found", 404)
@@ -303,13 +311,18 @@ def _upsert_target_track(
 
     with database._get_connection() as conn:
         cursor = conn.cursor()
-        _ensure_disc_number_column(cursor, conn)
 
-        cursor.execute("SELECT id FROM tracks WHERE file_path = ? LIMIT 1", (final_path,))
+        # The catalogue keeps the path on the FILE row (ADR-03), so "do we
+        # already know this file" is a question to lib2_track_files, and the
+        # track we fill in is either that file's track or the empty slot at
+        # this disc/track number.
+        cursor.execute(
+            "SELECT track_id FROM lib2_track_files WHERE path = ? LIMIT 1",
+            (final_path,))
         existing_by_path = cursor.fetchone()
         cursor.execute(
             """
-            SELECT id FROM tracks
+            SELECT id FROM lib2_tracks
             WHERE album_id = ? AND COALESCE(disc_number, 1) = ? AND track_number = ?
             LIMIT 1
             """,
@@ -317,92 +330,71 @@ def _upsert_target_track(
         )
         existing_target = cursor.fetchone()
 
-        if existing_by_path:
-            target_track_id = existing_by_path["id"]
+        if existing_by_path and existing_by_path["track_id"]:
+            target_track_id = existing_by_path["track_id"]
             cursor.execute(
                 """
-                UPDATE tracks
-                SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
-                    duration = ?, file_path = ?, bitrate = ?, file_size = ?,
-                    server_source = COALESCE(server_source, ?),
+                UPDATE lib2_tracks
+                SET album_id = ?, title = ?, track_number = ?, disc_number = ?,
+                    duration = ?, server_source = COALESCE(server_source, ?),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
-                (
-                    album_id,
-                    album_data.get("target_artist_id"),
-                    expected_title,
-                    api_track["track_number"],
-                    api_track["disc_number"],
-                    api_track["duration_ms"],
-                    final_path,
-                    bitrate,
-                    file_size,
-                    server_source,
-                    target_track_id,
-                ),
+                (album_id, expected_title, api_track["track_number"],
+                 api_track["disc_number"], api_track["duration_ms"],
+                 server_source, target_track_id),
             )
         elif existing_target:
             target_track_id = existing_target["id"]
             cursor.execute(
                 """
-                UPDATE tracks
-                SET title = ?, duration = ?, file_path = ?, bitrate = ?, file_size = ?,
-                    updated_at = CURRENT_TIMESTAMP
+                UPDATE lib2_tracks
+                SET title = ?, duration = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
-                (expected_title, api_track["duration_ms"], final_path, bitrate, file_size, target_track_id),
+                (expected_title, api_track["duration_ms"], target_track_id),
             )
         else:
-            cursor.execute("SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 AS next_id FROM tracks")
-            target_track_id = cursor.fetchone()["next_id"]
-            cursor.execute(
+            target_track_id = cursor.execute(
                 """
-                INSERT INTO tracks (
-                    id, album_id, artist_id, title, track_number, disc_number, duration,
-                    file_path, bitrate, file_size, server_source, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                INSERT INTO lib2_tracks (
+                    album_id, title, track_number, disc_number, duration,
+                    server_source
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    target_track_id,
-                    album_id,
-                    album_data.get("target_artist_id"),
-                    expected_title,
-                    api_track["track_number"],
-                    api_track["disc_number"],
-                    api_track["duration_ms"],
-                    final_path,
-                    bitrate,
-                    file_size,
-                    server_source,
-                ),
-            )
+                (album_id, expected_title, api_track["track_number"],
+                 api_track["disc_number"], api_track["duration_ms"], server_source),
+            ).lastrowid
 
-        track_source_col = (deps.service_id_columns or {}).get(metadata_source, {}).get("track")
-        if track_source_col and expected_track_id:
-            try:
-                cursor.execute(f"UPDATE tracks SET {track_source_col} = ? WHERE id = ?", (expected_track_id, target_track_id))
-            except Exception as source_err:
-                logger.debug("Imported track source-id update failed: %s", source_err)
+        artist_id = album_data.get("target_artist_id")
+        if artist_id:
+            cursor.execute(
+                "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position)"
+                " VALUES(?,?,'primary',0)", (target_track_id, artist_id))
+        from core.library2.media_server_sync import _upsert_file
+        _upsert_file(cursor, target_track_id, final_path, file_size, bitrate,
+                     source='missing_track_import')
+
+        if expected_track_id and metadata_source:
+            # The provider id this track was matched against — a promoted
+            # column for Spotify/MusicBrainz, `external_ids` for the rest.
+            from core.imports.side_effects import _fill_external_id
+            _fill_external_id(cursor, "lib2_tracks", target_track_id,
+                              metadata_source, expected_track_id)
 
         conn.commit()
 
     return target_track_id
 
 
-def _ensure_disc_number_column(cursor, conn) -> None:
-    cursor.execute("PRAGMA table_info(tracks)")
-    track_columns = {row[1] for row in cursor.fetchall()}
-    if "disc_number" not in track_columns:
-        cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
-        conn.commit()
-
-
 def ensure_tracks_disc_number_column(database) -> None:
-    with database._get_connection() as conn:
-        cursor = conn.cursor()
-        _ensure_disc_number_column(cursor, conn)
+    """No-op: the catalogue has a disc number on every track by construction.
+
+    The legacy tracks table gained the column late, so the import had to
+    migrate it on the way in (#927). Kept as a named seam because callers
+    outside this module still announce the intent.
+    """
+    return None
 
 
 def _read_file_stats(final_path: str, source_track: dict) -> tuple[Optional[int], int]:
@@ -460,12 +452,16 @@ def _existing_album_year_from_sibling(
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT file_path, year FROM tracks
-                WHERE album_id = ?
-                  AND file_path IS NOT NULL AND file_path != ''
-                  AND NOT (COALESCE(disc_number, 1) = ? AND track_number = ?)
-                ORDER BY COALESCE(disc_number, 1), track_number
-                LIMIT 12
+                SELECT f.path AS file_path, al.year AS year
+                  FROM lib2_tracks t
+                  JOIN lib2_albums al ON al.id = t.album_id
+                  JOIN lib2_track_files f ON f.track_id = t.id
+                 WHERE t.album_id = ?
+                   AND COALESCE(f.file_state, 'active') <> 'deleted'
+                   AND f.path IS NOT NULL AND f.path != ''
+                   AND NOT (COALESCE(t.disc_number, 1) = ? AND t.track_number = ?)
+                 ORDER BY COALESCE(t.disc_number, 1), t.track_number
+                 LIMIT 12
                 """,
                 (album_id, target_disc, target_track),
             )
@@ -498,13 +494,15 @@ def copy_album_identity_from_target_sibling(
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT file_path FROM tracks
-                WHERE album_id = ?
-                  AND file_path IS NOT NULL
-                  AND file_path != ''
-                  AND NOT (COALESCE(disc_number, 1) = ? AND track_number = ?)
-                ORDER BY COALESCE(disc_number, 1), track_number
-                LIMIT 12
+                SELECT f.path AS file_path
+                  FROM lib2_tracks t
+                  JOIN lib2_track_files f ON f.track_id = t.id
+                 WHERE t.album_id = ?
+                   AND COALESCE(f.file_state, 'active') <> 'deleted'
+                   AND f.path IS NOT NULL AND f.path != ''
+                   AND NOT (COALESCE(t.disc_number, 1) = ? AND t.track_number = ?)
+                 ORDER BY COALESCE(t.disc_number, 1), t.track_number
+                 LIMIT 12
                 """,
                 (album_id, target_disc, target_track),
             )

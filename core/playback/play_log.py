@@ -40,11 +40,27 @@ def build_play_event(track: Dict[str, Any], played_at: str,
     # db_track_id is the local tracks.id when it's a real library track (a
     # plain integer id). Streamed/search results may carry a composite id —
     # keep it only when it's a clean int so the FK-ish join stays valid.
-    raw_id = track.get("id")
-    db_track_id = int(raw_id) if _is_int_like(raw_id) else None
+    lib2_id = track.get("lib2_track_id")
+    legacy_id = track.get("legacy_track_id")
+    server_id = track.get("server_track_id")
+    raw_id = server_id if server_id is not None else (
+        legacy_id if legacy_id is not None else (
+            track.get("id") if lib2_id is None else None
+        )
+    )
+    # A generic numeric id remains backward-compatible for legacy callers,
+    # but once a typed lib2 id is present it can never become tracks.id.
+    db_candidate = legacy_id if legacy_id is not None else (
+        raw_id if lib2_id is None else None
+    )
+    db_track_id = int(db_candidate) if _is_int_like(db_candidate) else None
+    typed_lib2_id = int(lib2_id) if _is_int_like(lib2_id) else None
 
-    return {
-        "track_id": str(raw_id) if raw_id is not None else None,
+    event = {
+        "track_id": (
+            str(raw_id) if raw_id is not None
+            else (f"lib2:{typed_lib2_id}" if typed_lib2_id is not None else None)
+        ),
         "title": title,
         "artist": (track.get("artist") or "").strip(),
         "album": (track.get("album") or "").strip(),
@@ -53,6 +69,9 @@ def build_play_event(track: Dict[str, Any], played_at: str,
         "server_source": WEB_PLAYER_SOURCE,
         "db_track_id": db_track_id,
     }
+    if typed_lib2_id is not None:
+        event["lib2_track_id"] = typed_lib2_id
+    return event
 
 
 def _is_int_like(v: Any) -> bool:

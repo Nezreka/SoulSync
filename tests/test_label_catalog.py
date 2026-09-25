@@ -50,12 +50,13 @@ class TestWatchlistTable:
         assert db.get_watchlist_labels() == []
 
     def test_table_is_additive_only(self, db):
-        # the labels table must not have touched artists/albums/tracks/watchlist_artists
+        # the labels table must not have touched the catalogue or watchlist_artists
         with db._get_connection() as c:
             names = {r[0] for r in c.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")}
         assert "watchlist_labels" in names
-        assert {"artists", "albums", "tracks", "watchlist_artists"} <= names
+        assert {"lib2_artists", "lib2_albums", "lib2_tracks",
+                "watchlist_artists"} <= names
 
 
 class _FakeMB:

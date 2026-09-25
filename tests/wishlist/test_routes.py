@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 import core.wishlist.routes as routes_module
 from core.wishlist.routes import (
     WishlistRouteRuntime,
@@ -15,6 +17,16 @@ from core.wishlist.routes import (
     remove_track_from_wishlist,
     set_wishlist_cycle,
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_get_wishlist_service():
+    """``_build_runtime`` below reassigns ``routes_module.get_wishlist_service``
+    directly (not via monkeypatch) so it survives across tests and leaks the
+    fake service into any later test/module that imports the real one."""
+    original = routes_module.get_wishlist_service
+    yield
+    routes_module.get_wishlist_service = original
 
 
 class _FakeLogger:
@@ -266,7 +278,7 @@ def test_get_wishlist_stats_uses_cycle_and_next_run():
     }
 
 
-def test_get_wishlist_tracks_filters_category_and_cleans_duplicates():
+def test_get_wishlist_tracks_filters_category():
     tracks = [
         {
             "id": "track-1",
@@ -299,9 +311,56 @@ def test_get_wishlist_tracks_filters_category_and_cleans_duplicates():
     assert payload["total"] == 2
     assert len(payload["tracks"]) == 1
     assert payload["tracks"][0]["id"] == "track-1"
-    assert db.duplicate_cleanup_profiles == [1]
-    assert any("duplicate tracks from wishlist" in msg for msg in logger.warning_messages)
     assert service.get_wishlist_tracks_for_download(profile_id=1)[0]["id"] == "track-1"
+
+
+def test_get_wishlist_tracks_never_mutates_the_wishlist():
+    """A GET that deleted rows was both wrong on its own terms and the only
+    difference between this endpoint and /api/wishlist/stats — which is why the
+    two counts could disagree (614 vs 611 in the 2026-08-22 report) with no way
+    to attribute the gap. Cleanup lives in the maintenance automation and the
+    processing cycle."""
+    runtime, _service, db, _logger, _activity = _build_runtime(
+        tracks=[{"id": "t1", "name": "A", "artists": [], "spotify_data": {}}],
+        duplicate_removals=2,
+    )
+
+    get_wishlist_tracks(runtime)
+
+    assert db.duplicate_cleanup_profiles == []
+
+
+def test_get_wishlist_tracks_reports_rows_it_hides():
+    """Whatever the endpoint drops has to be visible in the response, so a
+    count/list disagreement explains itself instead of needing a DB dump."""
+    duplicated = {"id": "same", "track_id": "same", "name": "A",
+                  "artists": [], "spotify_data": {}}
+    runtime, _service, _db, logger, _activity = _build_runtime(
+        tracks=[duplicated, dict(duplicated), {"id": "other", "track_id": "other",
+                                               "name": "B", "artists": [],
+                                               "spotify_data": {}}],
+    )
+
+    payload, status = get_wishlist_tracks(runtime)
+
+    assert status == 200
+    assert payload["stored_rows"] == 3
+    assert len(payload["tracks"]) == 2
+    assert payload["hidden_rows"] == 1
+    assert payload["duplicates_found"] == 1
+    assert any("duplicate track id" in msg for msg in logger.warning_messages)
+
+
+def test_get_wishlist_tracks_reports_no_hidden_rows_when_nothing_is_dropped():
+    runtime, _service, _db, _logger, _activity = _build_runtime(
+        tracks=[{"id": f"t{i}", "track_id": f"t{i}", "name": "A", "artists": [],
+                 "spotify_data": {}} for i in range(3)],
+    )
+
+    payload, _status = get_wishlist_tracks(runtime)
+
+    assert payload["stored_rows"] == 3
+    assert payload["hidden_rows"] == 0
 
 
 def test_clear_wishlist_cancels_active_batches_and_resets_state():
@@ -369,6 +428,70 @@ def test_remove_track_from_wishlist_removes_single_track():
     assert status == 200
     assert payload == {"success": True, "message": "Track removed from wishlist"}
     assert service.removed == [("track-1", 1)]
+
+
+def test_remove_track_reverse_syncs_captured_descriptor(monkeypatch):
+    tracks = [{
+        "spotify_track_id": "track-1::album-1",
+        "source_info": {"source": "library_v2", "lib2_track_id": 41},
+        "spotify_data": {"id": "track-1", "name": "Track One"},
+    }]
+    runtime, service, db, _logger, _activity_calls = _build_runtime(tracks=tracks)
+    service.database = db
+    calls = []
+    monkeypatch.setattr(
+        "core.library2.monitor_sync.sync_wishlist_removal",
+        lambda sync_db, _cfg, descriptors, profile_id=1: calls.append(
+            (sync_db, descriptors, profile_id)
+        ),
+    )
+
+    payload, status = remove_track_from_wishlist(runtime, "track-1")
+
+    assert status == 200
+    assert payload["success"] is True
+    assert calls == [(db, tracks, 1)]
+
+
+def test_remove_composite_reverse_syncs_only_requested_album(monkeypatch):
+    tracks = [
+        {"spotify_track_id": "same::album-a", "source_info": {"lib2_track_id": 41}},
+        {"spotify_track_id": "same::album-b", "source_info": {"lib2_track_id": 42}},
+    ]
+    runtime, service, db, _logger, _activity_calls = _build_runtime(tracks=tracks)
+    service.database = db
+    captured = []
+    monkeypatch.setattr(
+        "core.library2.monitor_sync.sync_wishlist_removal",
+        lambda _db, _cfg, descriptors, profile_id=1: captured.extend(descriptors),
+    )
+
+    payload, status = remove_track_from_wishlist(runtime, "same::album-a")
+
+    assert status == 200 and payload["success"] is True
+    assert [row["spotify_track_id"] for row in captured] == ["same::album-a"]
+
+
+def test_clear_wishlist_reverse_syncs_every_captured_descriptor(monkeypatch):
+    tracks = [
+        {"spotify_track_id": "track-1", "source_info": {"lib2_track_id": 1}},
+        {"spotify_track_id": "track-2", "source_info": {"lib2_track_id": 2}},
+    ]
+    runtime, service, db, _logger, _activity_calls = _build_runtime(tracks=tracks)
+    service.database = db
+    calls = []
+    monkeypatch.setattr(
+        "core.library2.monitor_sync.sync_wishlist_removal",
+        lambda sync_db, _cfg, descriptors, profile_id=1: calls.append(
+            (sync_db, descriptors, profile_id)
+        ),
+    )
+
+    payload, status = clear_wishlist(runtime)
+
+    assert status == 200
+    assert payload["success"] is True
+    assert calls == [(db, tracks, 1)]
 
 
 def test_remove_album_from_wishlist_matches_album_name():
@@ -494,6 +617,58 @@ def test_add_album_track_to_wishlist_builds_spotify_payload_and_merges_context()
     ]
     assert add_call["track_data"]["duration_ms"] == 1234
     assert add_call["track_data"]["explicit"] is True
+
+
+def test_add_album_track_to_wishlist_materializes_lib2_entity_on_success(monkeypatch):
+    """§52.8: a confirmed 'Add to Wishlist' click must materialize the lib2
+    Artist/Release/Track — best-effort, never affecting the response."""
+    import core.library2.materialize as materialize_module
+
+    calls = []
+    monkeypatch.setattr(
+        materialize_module, "materialize_wishlist_intent",
+        lambda payload, **kwargs: calls.append((payload, kwargs)))
+
+    runtime, service, _db, _logger, _activity_calls = _build_runtime()
+    track = {"id": "track-1", "name": "Song One", "track_number": 2, "disc_number": 1}
+    artist = {"id": "artist-1", "name": "Artist One"}
+    album = {"id": "album-1", "name": "Album One"}
+
+    payload, status = add_album_track_to_wishlist(
+        runtime, track=track, artist=artist, album=album,
+    )
+
+    assert status == 200
+    assert len(calls) == 1
+    materialize_payload, _kwargs = calls[0]
+    assert materialize_payload["id"] == "track-1"
+    assert materialize_payload["name"] == "Song One"
+    assert materialize_payload["artists"] == [artist]
+    assert materialize_payload["album"] == album
+    assert materialize_payload["track_number"] == 2
+    assert materialize_payload["disc_number"] == 1
+
+
+def test_add_album_track_to_wishlist_skips_materialize_when_add_fails(monkeypatch):
+    import core.library2.materialize as materialize_module
+
+    calls = []
+    monkeypatch.setattr(
+        materialize_module, "materialize_wishlist_intent",
+        lambda payload, **kwargs: calls.append((payload, kwargs)))
+
+    runtime, service, _db, _logger, _activity_calls = _build_runtime()
+    service.add_track_to_wishlist = lambda **kwargs: False
+
+    payload, status = add_album_track_to_wishlist(
+        runtime,
+        track={"id": "track-1", "name": "Song One"},
+        artist={"id": "artist-1", "name": "Artist One"},
+        album={"id": "album-1", "name": "Album One"},
+    )
+
+    assert payload["success"] is False
+    assert calls == []
 
 
 def test_set_wishlist_cycle_rejects_invalid_cycle():

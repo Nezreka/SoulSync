@@ -114,7 +114,10 @@ async function _loadOriginEntries(): Promise<void> {
   try {
     const resp = await fetch(`/api/download-origins?origin=${_originActiveTab}&limit=500`);
     const data = (await resp.json()) as {
-      success?: boolean; error?: string; entries?: OriginEntry[]; total?: number;
+      success?: boolean;
+      error?: string;
+      entries?: OriginEntry[];
+      total?: number;
     };
     if (!data.success) throw new Error(data.error || 'Failed to load');
     _originEntries = data.entries || [];
@@ -129,9 +132,10 @@ async function _loadOriginEntries(): Promise<void> {
 function _renderOriginEntries(): void {
   const body = document.getElementById('origin-modal-body')!;
   if (!_originEntries.length) {
-    const what = _originActiveTab === 'watchlist'
-      ? 'No watchlist-triggered downloads recorded yet. New watchlist downloads will appear here.'
-      : 'No playlist-triggered downloads recorded yet. New playlist sync downloads will appear here.';
+    const what =
+      _originActiveTab === 'watchlist'
+        ? 'No watchlist-triggered downloads recorded yet. New watchlist downloads will appear here.'
+        : 'No playlist-triggered downloads recorded yet. New playlist sync downloads will appear here.';
     body.innerHTML = `<div class="origin-modal-empty">${what}</div>`;
     return;
   }
@@ -174,7 +178,9 @@ function _renderOriginEntries(): void {
     groups.get(key)!.push(e);
   }
 
-  body.innerHTML = Array.from(groups.entries()).map(([ctx, entries]) => `
+  body.innerHTML = Array.from(groups.entries())
+    .map(
+      ([ctx, entries]) => `
         <div class="origin-group">
             <button type="button" class="origin-group-header" onclick="toggleOriginGroup(this)" title="${ctxLabel}">
                 <span class="origin-group-caret">▾</span>
@@ -182,7 +188,9 @@ function _renderOriginEntries(): void {
                 <span class="origin-group-count">${entries.length} track${entries.length !== 1 ? 's' : ''}</span>
             </button>
             <div class="origin-group-body">${entries.map(entryRow).join('')}</div>
-        </div>`).join('');
+        </div>`,
+    )
+    .join('');
   _updateOriginDeleteButton();
 }
 
@@ -213,14 +221,17 @@ function _updateOriginDeleteButton(): void {
   const btn = document.getElementById('origin-delete-selected') as HTMLButtonElement | null;
   if (!btn) return;
   btn.disabled = _originSelected.size === 0;
-  btn.textContent = _originSelected.size ? `Delete Selected (${_originSelected.size})` : 'Delete Selected';
+  btn.textContent = _originSelected.size
+    ? `Delete Selected (${_originSelected.size})`
+    : 'Delete Selected';
 }
 
 export async function deleteSelectedOriginEntries(singleId?: number): Promise<void> {
   const ids = singleId !== undefined ? [singleId] : [..._originSelected];
   if (!ids.length) return;
   const what = ids.length === 1 ? 'this track' : `these ${ids.length} tracks`;
-  if (!confirm(`Delete ${what}? This removes the audio file(s) from disk and the library entry.`)) return;
+  if (!confirm(`Delete ${what}? This removes the audio file(s) from disk and the library entry.`))
+    return;
   try {
     const resp = await fetch('/api/download-origins/delete', {
       method: 'POST',
@@ -228,8 +239,12 @@ export async function deleteSelectedOriginEntries(singleId?: number): Promise<vo
       body: JSON.stringify({ ids, delete_files: true }),
     });
     const data = (await resp.json()) as {
-      success?: boolean; error?: string; removed?: number;
-      files_deleted?: number; files_missing?: number; errors?: unknown[];
+      success?: boolean;
+      error?: string;
+      removed?: number;
+      files_deleted?: number;
+      files_missing?: number;
+      errors?: unknown[];
     };
     if (!data.success) throw new Error(data.error || 'Delete failed');
     let msg = `Removed ${data.removed} entr${data.removed === 1 ? 'y' : 'ies'}`;
@@ -251,7 +266,10 @@ function _originFormatTime(ts: string | undefined): string {
     const d = new Date(String(ts).includes('T') ? ts : ts.replace(' ', 'T') + 'Z');
     if (isNaN(d.getTime())) return ts;
     return d.toLocaleString(undefined, {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
     });
   } catch {
     return ts;

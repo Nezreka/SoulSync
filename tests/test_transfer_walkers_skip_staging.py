@@ -142,12 +142,15 @@ def test_bottom_up_walks_need_the_path_check_not_the_prune(tmp_path):
 
 # ── every transfer-walking job actually uses one of them ──────────────────
 
+# Library v2 moved the file-tool jobs off their own walks: fake_lossless,
+# track_number_repair and the retired quality_upgrade_scanner now take their
+# subjects from the catalogue (``active_file_subjects``) or from the one shared
+# walk in ``filesystem_subjects`` — which is why that module is on this list and
+# they are not. Anything staged is by definition not in the catalogue yet.
 @pytest.mark.parametrize('path', [
     'core/repair_jobs/orphan_file_detector.py',
     'core/repair_jobs/empty_folder_cleaner.py',
-    'core/repair_jobs/quality_upgrade_scanner.py',
-    'core/repair_jobs/fake_lossless_detector.py',
-    'core/repair_jobs/track_number_repair.py',
+    'core/repair_jobs/filesystem_subjects.py',
     'core/library/duplicate_cleaner.py',
     'core/soulsync_client.py',
 ])

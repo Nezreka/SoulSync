@@ -1,4 +1,4 @@
-"""Backfilling ``artists.soul_id_path`` (L2-014).
+"""Backfilling ``lib2_artists.soul_id_path`` (L2-014).
 
 The column is additive, so every artist that already had a soul_id when it
 landed starts NULL — and nothing ever fills it: the worker only looks at
@@ -36,9 +36,10 @@ def db(tmp_path):
     path = str(tmp_path / "soulid.db")
     conn = sqlite3.connect(path)
     conn.executescript("""
-        CREATE TABLE artists(id TEXT PRIMARY KEY, name TEXT, soul_id TEXT,
-                             soul_id_path TEXT, updated_at TIMESTAMP);
-        CREATE TABLE albums(id TEXT PRIMARY KEY, artist_id TEXT, title TEXT);
+        CREATE TABLE lib2_artists(id TEXT PRIMARY KEY, name TEXT, soul_id TEXT,
+                                  soul_id_path TEXT, updated_at TIMESTAMP);
+        CREATE TABLE lib2_albums(id TEXT PRIMARY KEY, primary_artist_id TEXT,
+                                 title TEXT);
         CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT);
     """)
     conn.commit()
@@ -54,11 +55,12 @@ def _worker(db):
 
 def _artist(db, artist_id, name, soul_id, albums=()):
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists(id, name, soul_id) VALUES(?,?,?)",
+    conn.execute("INSERT INTO lib2_artists(id, name, soul_id) VALUES(?,?,?)",
                  (artist_id, name, soul_id))
     for i, title in enumerate(albums):
-        conn.execute("INSERT INTO albums(id, artist_id, title) VALUES(?,?,?)",
-                     (f"{artist_id}-al{i}", artist_id, title))
+        conn.execute(
+            "INSERT INTO lib2_albums(id, primary_artist_id, title) VALUES(?,?,?)",
+            (f"{artist_id}-al{i}", artist_id, title))
     conn.commit()
     conn.close()
 
@@ -66,7 +68,7 @@ def _artist(db, artist_id, name, soul_id, albums=()):
 def _paths(db):
     conn = db._get_connection()
     try:
-        return dict(conn.execute("SELECT id, soul_id_path FROM artists").fetchall())
+        return dict(conn.execute("SELECT id, soul_id_path FROM lib2_artists").fetchall())
     finally:
         conn.close()
 
@@ -115,7 +117,7 @@ def test_an_id_that_reproduces_neither_is_recorded_as_unproven(db):
 def test_an_existing_path_is_never_overwritten(db):
     _artist(db, "a1", "Rone", generate_soul_id("Rone"))
     conn = db._get_connection()
-    conn.execute("UPDATE artists SET soul_id_path='canonical'")
+    conn.execute("UPDATE lib2_artists SET soul_id_path='canonical'")
     conn.commit()
     conn.close()
 
@@ -145,7 +147,7 @@ def test_it_runs_once_and_stamps_its_own_version(db):
             (SoulIDWorker.PATH_MIGRATION_KEY,)).fetchone()[0] == \
             SoulIDWorker.PATH_MIGRATION_VERSION
         # A row that turns up NULL afterwards is not re-scanned.
-        conn.execute("UPDATE artists SET soul_id_path=NULL")
+        conn.execute("UPDATE lib2_artists SET soul_id_path=NULL")
         conn.commit()
     finally:
         conn.close()
@@ -158,8 +160,8 @@ def test_it_runs_once_and_stamps_its_own_version(db):
 def test_a_database_without_the_column_is_a_no_op(db):
     conn = db._get_connection()
     conn.executescript("""
-        DROP TABLE artists;
-        CREATE TABLE artists(id TEXT PRIMARY KEY, name TEXT, soul_id TEXT);
+        DROP TABLE lib2_artists;
+        CREATE TABLE lib2_artists(id TEXT PRIMARY KEY, name TEXT, soul_id TEXT);
     """)
     conn.commit()
     conn.close()

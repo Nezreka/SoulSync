@@ -8,9 +8,12 @@ from core.watchlist_sources import (
     ARTIST_ID_COLUMNS, SOURCE_COLUMNS, artist_id_match_sql, normalize_source,
 )
 from database.music_database import get_database
+from utils.logging_config import get_logger
 from .auth import require_api_key
 from .helpers import api_success, api_error, parse_fields, parse_profile_id
 from .serializers import serialize_watchlist_artist
+
+logger = get_logger("api.watchlist")
 
 
 def _parse_quality_profile_id(db, body):
@@ -108,8 +111,18 @@ def register_routes(bp):
         profile_id = parse_profile_id(request)
         try:
             db = get_database()
+            # §69.1 reverse edge: capture identity before delete, demonitor the
+            # matching lib2 artist afterwards (both-way sync).
+            descriptor = db.get_watchlist_artist_descriptor(artist_id, profile_id=profile_id)
             ok = db.remove_artist_from_watchlist(artist_id, profile_id=profile_id)
             if ok:
+                try:
+                    from core.settings import config_manager
+                    from core.library2.monitor_sync import sync_watchlist_removal
+                    sync_watchlist_removal(db, config_manager, descriptor,
+                                           profile_id=profile_id)
+                except Exception as sync_e:
+                    logger.debug("watchlist reverse-sync skipped: %s", sync_e)
                 return api_success({"message": "Artist removed from watchlist."})
             return api_error("NOT_FOUND", "Artist not found in watchlist.", 404)
         except Exception as e:

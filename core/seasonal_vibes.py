@@ -27,17 +27,28 @@ import hashlib
 import json
 from typing import Any, Dict, List, Optional
 
+from core.library2.provider_ids import provider_id_sql
+from core.library2.sql_util import owned_sql
 from utils.logging_config import get_logger
 
 logger = get_logger("seasonal_vibes")
+
+# Where a Last.fm tag list lives on a Library-v2 row. Legacy kept one column
+# per provider field; v2 folds the whole provider payload into ``enrichment``
+# (core/library2/enrich._ENRICHMENT_PAYLOAD), so the vibe LIKE has to look
+# inside the JSON. The extracted value is the array's text, which is exactly
+# what a substring match wants.
+LASTFM_TAGS_SQL = "json_extract({alias}.enrichment, '$.lastfm.tags')"
+LASTFM_PLAYCOUNT_SQL = (
+    "CAST(json_extract({alias}.enrichment, '$.lastfm.playcount') AS INTEGER)")
 
 # seasons that get taste-aware sourcing. christmas and halloween keep the
 # keyword flow: titles genuinely signal there.
 VIBE_SEASONS = {"summer", "spring", "autumn", "valentines"}
 
-# vibe words matched against albums.lastfm_tags / genres / mood / style and
-# artists.lastfm_tags. lowercase substrings, same LIKE semantics the genre
-# playlists use.
+# vibe words matched against a lib2 album's lastfm tags / genres / mood /
+# style and an artist's tags. lowercase substrings, same LIKE semantics the
+# genre playlists use.
 SEASON_VIBE_TAGS: Dict[str, List[str]] = {
     "summer": ["summer", "beach", "surf", "tropical", "reggae", "dancehall",
                "feel good", "party", "dance", "sunny", "upbeat"],
@@ -58,6 +69,12 @@ SEASON_LASTFM_TAGS: Dict[str, List[str]] = {
     "autumn": ["indie folk", "melancholic"],
     "valentines": ["love songs", "slow jams"],
 }
+
+
+# The four album columns a vibe word is matched against, v2 spelling.
+_ALBUM_VIBE_COLUMNS = [
+    LASTFM_TAGS_SQL.format(alias="al"), "al.genres", "al.mood", "al.style",
+]
 
 
 def _synth_id(prefix: str, artist: str, title: str) -> str:
@@ -136,11 +153,12 @@ def rewind_tracks(database, months: List[int], limit: int = 60) -> List[Dict[str
                 marks = ",".join("?" for _ in artists)
                 cursor.execute(f"""
                     SELECT LOWER(t.title) AS tt, LOWER(ar.name) AS an,
-                           al.thumb_url, t.duration
-                    FROM tracks t
-                    JOIN artists ar ON t.artist_id = ar.id
-                    LEFT JOIN albums al ON t.album_id = al.id
+                           al.image_url AS thumb_url, t.duration
+                    FROM lib2_tracks t
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
                     WHERE LOWER(ar.name) IN ({marks})
+                      AND {owned_sql('track', 't')}
                 """, artists)
                 artist_art: Dict[str, Any] = {}
                 for row in cursor.fetchall():
@@ -161,7 +179,8 @@ def rewind_tracks(database, months: List[int], limit: int = 60) -> List[Dict[str
                     (owned["thumb_url"] if owned and owned["thumb_url"] else None)
                     or artist_art.get(artist.lower())
                     or artist_art.get(_primary(artist)))
-                duration = (owned["duration"] or 0) * 1000 if owned else 0
+                # lib2 stores duration in MILLIseconds already (legacy was seconds).
+                duration = (owned["duration"] or 0) if owned else 0
                 out.append({
                     "spotify_track_id": _synth_id("seasonal_rewind", artist, title),
                     "track_name": title,
@@ -197,6 +216,12 @@ def vibe_library_albums(database, season_key: str, months: List[int], source: st
     album from that source by id."""
     id_col = {"spotify": "spotify_album_id", "itunes": "itunes_album_id",
               "deezer": "deezer_id"}.get(source, "spotify_album_id")
+    # v2 promotes Spotify to a column and keeps the rest in `external_ids`, so
+    # the provider column legacy interpolated becomes an expression — aliased
+    # back to the legacy name the reader below still speaks.
+    id_sql = provider_id_sql(
+        {"spotify_album_id": "spotify", "itunes_album_id": "itunes",
+         "deezer_id": "deezer"}[id_col], alias="al")
     tags = SEASON_VIBE_TAGS.get(season_key, [])
     if not tags:
         return []
@@ -241,11 +266,12 @@ def vibe_library_albums(database, season_key: str, months: List[int], source: st
             if artist_names:
                 marks = ",".join("?" for _ in artist_names)
                 cursor.execute(f"""
-                    SELECT al.title, ar.name, al.thumb_url, al.release_date,
-                           al.{id_col} AS {id_col}
-                    FROM albums al
-                    JOIN artists ar ON al.artist_id = ar.id
+                    SELECT al.title, ar.name, al.image_url AS thumb_url,
+                           al.release_date, {id_sql} AS {id_col}
+                    FROM lib2_albums al
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
                     WHERE LOWER(ar.name) IN ({marks})
+                      AND {owned_sql('album', 'al')}
                 """, artist_names)
                 for row in cursor.fetchall():
                     owned.setdefault(
@@ -262,15 +288,15 @@ def vibe_library_albums(database, season_key: str, months: List[int], source: st
                     break
 
             # leg b: vibe-tagged albums, most-listened first
-            like, params = _vibe_like_clause(
-                ["al.lastfm_tags", "al.genres", "al.mood", "al.style"], tags)
+            like, params = _vibe_like_clause(_ALBUM_VIBE_COLUMNS, tags)
             cursor.execute(f"""
-                SELECT al.title, ar.name, al.thumb_url, al.release_date,
-                       al.{id_col} AS {id_col}
-                FROM albums al
-                JOIN artists ar ON al.artist_id = ar.id
-                WHERE ({like}) AND al.{id_col} IS NOT NULL
-                ORDER BY al.lastfm_playcount DESC NULLS LAST
+                SELECT al.title, ar.name, al.image_url AS thumb_url,
+                       al.release_date, {id_sql} AS {id_col}
+                FROM lib2_albums al
+                JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE ({like}) AND {id_sql} IS NOT NULL
+                  AND {owned_sql('album', 'al')}
+                ORDER BY {LASTFM_PLAYCOUNT_SQL.format(alias='al')} DESC NULLS LAST
                 LIMIT ?
             """, [*params, limit])
             for row in cursor.fetchall():
@@ -292,14 +318,16 @@ def _vibe_artist_names(database, season_key: str) -> set:
         return set()
     with database._get_connection() as conn:
         cursor = conn.cursor()
-        like, params = _vibe_like_clause(["lastfm_tags", "genres", "mood", "style"], tags)
-        cursor.execute(f"SELECT name FROM artists WHERE {like}", params)
-        names = {str(r["name"]).lower() for r in cursor.fetchall()}
         like, params = _vibe_like_clause(
-            ["al.lastfm_tags", "al.genres", "al.mood", "al.style"], tags)
+            [LASTFM_TAGS_SQL.format(alias="ar"), "ar.genres", "ar.mood", "ar.style"],
+            tags)
+        cursor.execute(
+            f"SELECT ar.name FROM lib2_artists ar WHERE {like}", params)
+        names = {str(r["name"]).lower() for r in cursor.fetchall()}
+        like, params = _vibe_like_clause(_ALBUM_VIBE_COLUMNS, tags)
         cursor.execute(f"""
-            SELECT DISTINCT ar.name FROM albums al
-            JOIN artists ar ON al.artist_id = ar.id
+            SELECT DISTINCT ar.name FROM lib2_albums al
+            JOIN lib2_artists ar ON ar.id = al.primary_artist_id
             WHERE {like}
         """, params)
         names.update(str(r["name"]).lower() for r in cursor.fetchall())
@@ -317,25 +345,24 @@ def vibe_owned_tracks(database, season_key: str, limit: int = 40,
     try:
         with database._get_connection() as conn:
             cursor = conn.cursor()
-            like, params = _vibe_like_clause(
-                ["al.lastfm_tags", "al.genres", "al.mood", "al.style"], tags)
+            like, params = _vibe_like_clause(_ALBUM_VIBE_COLUMNS, tags)
             cursor.execute(f"""
                 SELECT al.id, al.title AS album_title, ar.name AS artist_name,
-                       al.thumb_url
-                FROM albums al
-                JOIN artists ar ON al.artist_id = ar.id
-                WHERE {like}
-                ORDER BY al.lastfm_playcount DESC NULLS LAST
+                       al.image_url AS thumb_url
+                FROM lib2_albums al
+                JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE ({like}) AND {owned_sql('album', 'al')}
+                ORDER BY {LASTFM_PLAYCOUNT_SQL.format(alias='al')} DESC NULLS LAST
                 LIMIT ?
             """, [*params, limit])
             albums = cursor.fetchall()
 
             out = []
             for album in albums:
-                cursor.execute("""
-                    SELECT title, duration FROM tracks
-                    WHERE album_id = ?
-                    ORDER BY track_number
+                cursor.execute(f"""
+                    SELECT t.title, t.duration FROM lib2_tracks t
+                    WHERE t.album_id = ? AND {owned_sql('track', 't')}
+                    ORDER BY t.track_number
                     LIMIT ?
                 """, (album["id"], per_album))
                 art = _normalize_art(album["thumb_url"])
@@ -347,7 +374,7 @@ def vibe_owned_tracks(database, season_key: str, limit: int = 40,
                         "artist_name": album["artist_name"],
                         "album_name": album["album_title"],
                         "album_cover_url": art,
-                        "duration_ms": (track["duration"] or 0) * 1000,
+                        "duration_ms": track["duration"] or 0,
                         "popularity": 50,
                         "track_data_json": {},
                     })
@@ -432,7 +459,7 @@ def lastfm_tag_tracks(database, lastfm_client, season_key: str,
     try:
         with database._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT LOWER(name) AS n FROM artists")
+            cursor.execute("SELECT LOWER(name) AS n FROM lib2_artists")
             known = {r["n"] for r in cursor.fetchall()}
 
         out = []

@@ -351,11 +351,14 @@ def evaluate(expected_title: str, expected_artist: str,
         ):
             return out(Decision.FAIL,
                        f"Version mismatch: expected ({expected_version}) "
-                       f"but file is ({matched_version})")
+                       f"but file is ({matched_version}) — matched "
+                       f"'{matched_title}' by '{matched_artist}'")
 
     # Clean match.
     if title_sim >= TITLE_MATCH_THRESHOLD and artist_sim >= ARTIST_MATCH_THRESHOLD:
-        return out(Decision.PASS, "Audio verified")
+        return out(Decision.PASS,
+                   f"Audio verified: matches '{matched_title}' by '{matched_artist}' "
+                   f"(title {title_sim:.0%}, artist {artist_sim:.0%})")
 
     # Title matches, artist doesn't — cover/collab vs genuinely wrong.
     if title_sim >= TITLE_MATCH_THRESHOLD and artist_sim < ARTIST_MATCH_THRESHOLD:
@@ -363,7 +366,10 @@ def evaluate(expected_title: str, expected_artist: str,
             if _alias_aware_artist_sim(
                 expected_artist, rec.get('artist', ''), aliases_provider,
             ) >= ARTIST_MATCH_THRESHOLD:
-                return out(Decision.PASS, "Expected artist found in AcoustID results")
+                return out(Decision.PASS,
+                           f"Expected artist found in AcoustID results: "
+                           f"'{rec.get('title', '?') or '?'}' by "
+                           f"'{rec.get('artist', '?') or '?'}'")
         if not artist_comparable:
             # The title already agrees and the artist score is unreadable, so
             # there is nothing here that says the file is wrong.
@@ -373,7 +379,7 @@ def evaluate(expected_title: str, expected_artist: str,
             # branch. Nothing cheap distinguishes it — MusicBrainz alias lists
             # are incomplete often enough that "the aliases did not match" is
             # not evidence either, and a fingerprint bar here would re-quarantine
-            # the correct files this change exists for. A matching title after a
+            # the correct files this branch exists for. A matching title after a
             # matching fingerprint is corroboration; we take it.
             return out(Decision.SKIP,
                        f"Title matches and the artist is written in a different "
@@ -384,7 +390,10 @@ def evaluate(expected_title: str, expected_artist: str,
             return out(Decision.FAIL,
                        f"Audio mismatch: '{matched_title}' by '{matched_artist}' "
                        f"— expected artist not found")
-        return out(Decision.SKIP, "Title matches but artist ambiguous (cover/collab?)")
+        return out(Decision.SKIP,
+                   f"Title matches but artist ambiguous (cover/collab?): closest "
+                   f"match '{matched_title}' by '{matched_artist}' "
+                   f"(artist {artist_sim:.0%})")
 
     # Title doesn't match — scan all recordings for a version-matched hit.
     def _title_sim(a, b):
@@ -404,7 +413,10 @@ def evaluate(expected_title: str, expected_artist: str,
             candidate = rec
             break
     if candidate is not None:
-        return out(Decision.PASS, "Scan match found in AcoustID results")
+        return out(Decision.PASS,
+                   f"Scan match found in AcoustID results: "
+                   f"'{candidate.get('title', '?') or '?'}' by "
+                   f"'{candidate.get('artist', '?') or '?'}'")
 
     # High-confidence / cross-script skips (don't quarantine a correct file).
     has_non_ascii = (any(ord(c) > 127 for c in (expected_title or ''))
@@ -430,17 +442,20 @@ def evaluate(expected_title: str, expected_artist: str,
     # unreportable here. Re-adding a fingerprint bar for that case was tried and
     # reverted — it does not separate the two, because the score says nothing
     # about the NAMES. What it does instead is quarantine the correct file this
-    # change exists for: "Zankoku na Tenshi no These" by "Yoko Takahashi"
-    # against 残酷な天使のテーゼ by 高橋洋子 at a perfectly ordinary 0.90 is the
-    # same shape as a wrong one, and that is the direction that costs a user
-    # their file. Silence is the safe half of an unanswerable question.
+    # branch exists for: "Zankoku na Tenshi no These" by "Yoko Takahashi" against
+    # 残酷な天使のテーゼ by 高橋洋子 at a perfectly ordinary 0.90 is the same
+    # shape as a wrong one, and that is the direction that costs a user their
+    # file. Silence is the safe half of an unanswerable question.
     incomparable_title_skip = (
         not title_comparable
         and (not artist_comparable or artist_sim >= ARTIST_MATCH_THRESHOLD)
     )
     if (language_script_skip or high_confidence_strong_match_skip
             or cross_script_artist_skip or incomparable_title_skip):
-        return out(Decision.SKIP, "Likely same song in different language/script")
+        return out(Decision.SKIP,
+                   f"Likely same song in different language/script: "
+                   f"matched '{matched_title}' by '{matched_artist}' "
+                   f"(fingerprint {fingerprint_score:.0%})")
 
     return out(Decision.FAIL,
                f"Audio mismatch: file identified as '{matched_title}' by "

@@ -240,10 +240,57 @@ def _pipeline_source() -> str:
     return Path(pipeline.__file__).read_text(encoding="utf-8", errors="replace")
 
 
+def test_an_unreachable_recorded_path_is_resolved_onto_this_process_mounts(tmp_path, monkeypatch):
+    """The resolution itself, on the helper that performs it."""
+    from core.imports import pipeline
+
+    reachable = tmp_path / "Billie Eilish" / "HIT ME HARD AND SOFT" / "10 BLUE.mp3"
+    reachable.parent.mkdir(parents=True)
+    reachable.write_bytes(b"x")
+
+    monkeypatch.setattr(
+        "core.library.path_resolver.resolve_library_file_path",
+        lambda recorded, config_manager=None: str(reachable))
+
+    assert pipeline._resolve_enhance_original_path(
+        "/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.mp3") == str(reachable)
+
+
+def test_a_reachable_recorded_path_is_left_alone(tmp_path, monkeypatch):
+    original = tmp_path / "10 BLUE.mp3"
+    original.write_bytes(b"x")
+
+    def _must_not_run(*_a, **_kw):
+        raise AssertionError("a path this process can already see needs no resolving")
+
+    monkeypatch.setattr(
+        "core.library.path_resolver.resolve_library_file_path", _must_not_run)
+
+    from core.imports import pipeline
+
+    assert pipeline._resolve_enhance_original_path(str(original)) == str(original)
+
+
+def test_a_failing_resolver_falls_back_to_the_recorded_path(monkeypatch):
+    """Resolution is best-effort: the caller's `exists()` stays the decision point."""
+    from core.imports import pipeline
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("no library roots configured")
+
+    monkeypatch.setattr(
+        "core.library.path_resolver.resolve_library_file_path", _boom)
+
+    recorded = "/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.mp3"
+    assert pipeline._resolve_enhance_original_path(recorded) == recorded
+
+
 def test_the_old_file_is_resolved_before_the_exists_check():
     src = _pipeline_source()
-    resolve_at = src.index("resolve_library_file_path(\n                        original_enhance_path")
-    decide_at = src.index("if os.path.normpath(_old_path) != os.path.normpath(final_path)")
+    resolve_at = src.index(
+        "original_enhance_path = _resolve_enhance_original_path(")
+    decide_at = src.index(
+        "if os.path.normpath(original_enhance_path) != os.path.normpath(final_path)")
     assert resolve_at < decide_at, (
         "the recorded path must be resolved BEFORE deciding whether the old "
         "file exists, or an unreachable original is silently left on disk")
@@ -251,11 +298,11 @@ def test_the_old_file_is_resolved_before_the_exists_check():
 
 def test_the_decision_and_the_delete_both_use_the_resolved_path():
     src = _pipeline_source()
-    # The guard compares the resolved path...
-    assert "if os.path.normpath(_old_path) != os.path.normpath(final_path)" in src
+    # `original_enhance_path` holds the RESOLVED path — the guard compares it...
+    assert "if os.path.normpath(original_enhance_path) != os.path.normpath(final_path)" in src
     # ...and the removal acts on the same value, never the raw recorded one.
-    assert "os.remove(_old_path)" in src
-    assert "os.remove(original_enhance_path)" not in src, (
+    assert "os.remove(original_enhance_path)" in src
+    assert "os.remove(_recorded_enhance_path)" not in src, (
         "deleting the RECORDED path would delete whatever happens to sit at "
         "that location rather than the file we actually resolved")
 

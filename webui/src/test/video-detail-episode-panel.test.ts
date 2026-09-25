@@ -16,7 +16,11 @@ import { extractFunction } from './vanilla-extract';
 const SRC = readFileSync(resolve(process.cwd(), 'static/video/video-detail.js'), 'utf8');
 
 /** A row + its panel, wired the way renderEpisodes emits them (panel is the row's sibling). */
-function expand(ex: Record<string, unknown>, rowDesc = '', showTmdb: number | null = 1396): HTMLElement {
+function expand(
+  ex: Record<string, unknown>,
+  rowDesc = '',
+  showTmdb: number | null = 1396,
+): HTMLElement {
   const host = document.createElement('div');
   host.innerHTML =
     `<div class="vd-ep">${rowDesc ? `<p class="vd-ep-desc">${rowDesc}</p>` : ''}</div>` +
@@ -28,12 +32,21 @@ function expand(ex: Record<string, unknown>, rowDesc = '', showTmdb: number | nu
     var data = { source: 'library' };
     var TMDB_LOGO = '';
   `;
-  const bodies = ['episodeLinks', 'renderEpisodeExtra'].map((n) => extractFunction(n, SRC)).join('\n');
-  const cap = SRC.slice(SRC.indexOf('var GUEST_VISIBLE'), SRC.indexOf('function renderEpisodeExtra'));
+  const bodies = ['episodeLinks', 'renderEpisodeExtra']
+    .map((n) => extractFunction(n, SRC))
+    .join('\n');
+  const cap = SRC.slice(
+    SRC.indexOf('var GUEST_VISIBLE'),
+    SRC.indexOf('function renderEpisodeExtra'),
+  );
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const render = new Function(
-    `${preamble}\n${cap}\n${bodies}\nreturn renderEpisodeExtra;`,
-  )() as (p: HTMLElement, ex: unknown, t: unknown, s: unknown, e: unknown) => void;
+  const render = new Function(`${preamble}\n${cap}\n${bodies}\nreturn renderEpisodeExtra;`)() as (
+    p: HTMLElement,
+    ex: unknown,
+    t: unknown,
+    s: unknown,
+    e: unknown,
+  ) => void;
   render(panel, ex, showTmdb, 1, 1);
   return panel;
 }
@@ -44,7 +57,10 @@ function guests(n: number) {
 
 describe('the expanded episode panel', () => {
   it('does not repeat the description the row already shows', () => {
-    const panel = expand({ overview: 'The Dessens receive a visitor.' }, 'The Dessens receive a visitor.');
+    const panel = expand(
+      { overview: 'The Dessens receive a visitor.' },
+      'The Dessens receive a visitor.',
+    );
     expect(panel.querySelector('.vd-ep-extra-ov')).toBeNull();
   });
 
@@ -55,10 +71,12 @@ describe('the expanded episode panel', () => {
 
   it('still shows a description the row does not have', () => {
     // A row with no description of its own, or a genuinely longer TMDB synopsis.
-    expect(expand({ overview: 'A longer synopsis.' }, '').querySelector('.vd-ep-extra-ov')
-      ?.textContent).toBe('A longer synopsis.');
-    expect(expand({ overview: 'A longer synopsis.' }, 'Short one.')
-      .querySelector('.vd-ep-extra-ov')).not.toBeNull();
+    expect(
+      expand({ overview: 'A longer synopsis.' }, '').querySelector('.vd-ep-extra-ov')?.textContent,
+    ).toBe('A longer synopsis.');
+    expect(
+      expand({ overview: 'A longer synopsis.' }, 'Short one.').querySelector('.vd-ep-extra-ov'),
+    ).not.toBeNull();
   });
 
   it('renders every guest but folds the overflow behind one button', () => {

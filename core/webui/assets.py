@@ -74,10 +74,36 @@ def load_webui_vite_manifest(manifest_path: str | Path | None = None) -> dict[st
             logger.warning("Failed to load webui manifest: %s", exc)
             manifest = {}
     else:
+        # Not a warning per call site -- build_webui_vite_assets reports it
+        # once, with the actionable message. Silence here would be the bug.
         manifest = {}
 
     _MANIFEST_CACHE[cache_key] = (manifest_mtime, manifest)
     return manifest
+
+
+_warned_manifest_keys: set = set()
+
+
+def _warn_missing_entry(entry: str, manifest: dict, manifest_path: Any) -> None:
+    """Say loudly, once, that the frontend bundle cannot be served."""
+    path = Path(manifest_path) if manifest_path else get_webui_vite_manifest_path()
+    key = f"{path}:{entry}"
+    if key in _warned_manifest_keys:
+        return
+    _warned_manifest_keys.add(key)
+    if not manifest:
+        logger.error(
+            "WebUI bundle manifest missing or empty at %s -- the React UI "
+            "(Library v2 and everything on it) will NOT load. In a container "
+            "this means the webui-builder stage output did not reach the image; "
+            "locally, run `cd webui && npm run build`.", path)
+    else:
+        logger.error(
+            "WebUI bundle manifest at %s has no entry %r (it has: %s) -- the "
+            "React UI will NOT load. The Vite entry point and "
+            "DEFAULT_WEBUI_VITE_ENTRY have diverged.",
+            path, entry, ", ".join(sorted(manifest)) or "nothing")
 
 
 def build_webui_vite_assets(
@@ -111,6 +137,14 @@ def build_webui_vite_assets(
     manifest = loader()
     entry_meta = manifest.get(entry)
     if not entry_meta:
+        # This used to `return ""`, silently. The page then rendered with NO
+        # module script: every vanilla `webui/static/*.js` feature kept working,
+        # so the app looked healthy while the entire React half -- the Library
+        # v2 page and everything on it -- was simply absent, with nothing in the
+        # log. "Works with the dev server, not in the Docker image" is the exact
+        # shape that produces, because dev mode emits the Vite client tags
+        # unconditionally and never consults a manifest.
+        _warn_missing_entry(entry, manifest, manifest_path)
         return ""
 
     if placement == "head":
@@ -121,6 +155,9 @@ def build_webui_vite_assets(
 
     entry_file = entry_meta.get("file")
     if not entry_file:
+        logger.error(
+            "WebUI manifest entry %r has no 'file' -- the React bundle will not "
+            "load. Rebuild the frontend (cd webui && npm run build).", entry)
         return ""
 
     return f'<script type="module" src="{static_url(f"dist/{entry_file}")}"></script>'

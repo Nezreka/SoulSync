@@ -81,16 +81,28 @@ def test_missing_result_name_skips_correction():
 
 
 # ── _correct_artist_deezer_id must not smear an id another artist owns (#988) ──
+#
+# Against Library v2 now (docs §32.3.1 stage 2): the id lives in
+# `lib2_artists.external_ids` rather than a `deezer_id` column, and the track's
+# parent artist is reached through its album because lib2 has no `tracks.artist_id`.
 def _seed_db(tmp_path):
+    from core.library2.schema import ensure_library_v2_schema
+
     path = str(tmp_path / "m.db")
     conn = sqlite3.connect(path)
-    conn.executescript(
-        "CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT, deezer_id TEXT, updated_at TEXT);"
-        "CREATE TABLE tracks (id INTEGER PRIMARY KEY, artist_id INTEGER);"
-        "INSERT INTO artists (id, name, deezer_id) VALUES (1, 'The Beatles', '1');"
-        "INSERT INTO artists (id, name, deezer_id) VALUES (2, 'The Outfield', NULL);"
-        "INSERT INTO tracks (id, artist_id) VALUES (10, 2);"
-    )
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
+    conn.execute(
+        "INSERT INTO lib2_artists (id, name, sort_name, external_ids) "
+        "VALUES (1, 'The Beatles', 'Beatles, The', '{\"deezer\": \"1\"}')")
+    conn.execute(
+        "INSERT INTO lib2_artists (id, name, sort_name) "
+        "VALUES (2, 'The Outfield', 'Outfield, The')")
+    conn.execute(
+        "INSERT INTO lib2_albums (id, primary_artist_id, title, album_type) "
+        "VALUES (5, 2, 'Play Deep', 'album')")
+    conn.execute("INSERT INTO lib2_tracks (id, album_id, title) "
+                 "VALUES (10, 5, 'Your Love')")
     conn.commit()
     conn.close()
     return path
@@ -101,7 +113,9 @@ class _DB:
         self.path = path
 
     def _get_connection(self):
-        return sqlite3.connect(self.path)   # fresh conn each call (matches real db)
+        conn = sqlite3.connect(self.path)   # fresh conn each call (matches real db)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def _worker_with_db(path):
@@ -111,11 +125,16 @@ def _worker_with_db(path):
 
 
 def _deezer_id_of(path, artist_id):
+    import json
+
     conn = sqlite3.connect(path)
     try:
-        return conn.execute("SELECT deezer_id FROM artists WHERE id = ?", (artist_id,)).fetchone()[0]
+        raw = conn.execute(
+            "SELECT external_ids FROM lib2_artists WHERE id = ?", (artist_id,)
+        ).fetchone()[0]
     finally:
         conn.close()
+    return json.loads(raw or "{}").get("deezer")
 
 
 def test_correct_refuses_id_owned_by_a_differently_named_artist(tmp_path):

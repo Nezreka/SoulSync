@@ -78,7 +78,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   delete window.showToast;
-  delete window.showConfirmDialog;
+  delete (window as Partial<Window>).showConfirmDialog;
 });
 
 describe('loading (602-650)', () => {

@@ -75,17 +75,14 @@ class _FakeDatabase:
                 entity_type TEXT,
                 name TEXT
             );
-            -- Minimal `tracks` table: exists so the `exclude_owned`
-            -- subquery in `_select_discovery_tracks` can join. Real
-            -- schema has many more columns; we only need the source-id
-            -- columns it actually inspects.
-            CREATE TABLE tracks (
-                id INTEGER PRIMARY KEY,
-                spotify_track_id TEXT,
-                itunes_track_id TEXT,
-                deezer_id TEXT
-            );
         """)
+        # The owned-track half of `exclude_owned` is a Library-v2 question now
+        # (docs §50.4.4.17), and lib2's real schema is what makes it a question
+        # at all: only Spotify has a column, the rest live in `external_ids`.
+        # So this uses the actual schema rather than a hand-written stand-in —
+        # a JSON path that does not match is exactly the defect worth catching.
+        from core.library2.schema import ensure_library_v2_schema
+        ensure_library_v2_schema(self._conn)
         self._conn.commit()
 
     @contextmanager
@@ -112,16 +109,33 @@ class _FakeDatabase:
         )
         self._conn.commit()
 
-    def insert_library_track(self, **kwargs):
-        """Insert a row into the local `tracks` table (the user's library).
-        Used to prove `exclude_owned=True` filters discovery rows whose IDs
-        match a library row."""
-        cols = ", ".join(kwargs.keys())
-        placeholders = ", ".join(["?"] * len(kwargs))
-        self._conn.execute(
-            f"INSERT INTO tracks ({cols}) VALUES ({placeholders})",
-            tuple(kwargs.values()),
-        )
+    def insert_library_track(self, spotify_track_id=None, itunes_track_id=None,
+                             deezer_id=None, origin='library'):
+        """Put one owned track in the Library-v2 catalogue.
+
+        Keeps the legacy keyword names, because they are what the discovery
+        columns are called on the other side of the comparison; where they land
+        is lib2's business — Spotify in its column, the rest in `external_ids`.
+        """
+        import json as _json
+
+        external = {k: v for k, v in
+                    (("itunes", itunes_track_id), ("deezer", deezer_id)) if v}
+        artist_id = self._conn.execute(
+            "INSERT INTO lib2_artists(name, name_key, sort_name) VALUES('A','a','A')"
+        ).lastrowid
+        album_id = self._conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, origin) VALUES(?,'Al',?)",
+            (artist_id, origin),
+        ).lastrowid
+        track_id = self._conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, spotify_id, external_ids) "
+            "VALUES(?, 'T', ?, ?)",
+            (album_id, spotify_track_id, _json.dumps(external)),
+        ).lastrowid
+        if origin == 'library':
+            self._conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                               (track_id, f'/music/{track_id}.flac'))
         self._conn.commit()
 
 
@@ -603,8 +617,10 @@ def test_discovery_helper_can_disable_owned_filter(service):
 
 
 def test_discovery_helper_owned_filter_handles_deezer_id_asymmetry(service):
-    """Column-name asymmetry: discovery_pool.deezer_track_id vs
-    tracks.deezer_id. Pin this — easy to break in a future refactor."""
+    """Column-name asymmetry: `discovery_pool.deezer_track_id` on one side, and
+    on the other a key inside lib2's `external_ids` JSON — Deezer has no column
+    of its own. Pin this: it is one string literal away from silently matching
+    nothing, which reads as "you own none of this" and floods the page."""
     svc, db = service
     db.insert_discovery_track(
         source='deezer', deezer_track_id='dz1',
@@ -622,3 +638,35 @@ def test_discovery_helper_owned_filter_handles_deezer_id_asymmetry(service):
         )
     assert tracks == []
 
+
+def test_discovery_helper_owned_filter_matches_itunes_through_the_json(service):
+    """iTunes is the third id and, like Deezer, has no column of its own."""
+    svc, db = service
+    db.insert_discovery_track(
+        source='itunes', itunes_track_id='it1',
+        spotify_track_id=None, deezer_track_id=None,
+        track_name='OwnedITunes', artist_name='A', album_name='X', popularity=50,
+    )
+    db.insert_library_track(itunes_track_id='it1')
+
+    with patch.object(svc, '_get_active_source', return_value='itunes'):
+        tracks = svc._select_discovery_tracks(
+            source='itunes', order_by='track_name', fetch_limit=100,
+        )
+    assert tracks == []
+
+
+def test_a_provider_only_release_does_not_count_as_owned(service):
+    """A discography row is a release we know of, not one we have. Treating it
+    as owned would hide from discovery exactly what discovery is for."""
+    svc, db = service
+    db.insert_discovery_track(
+        source='spotify', spotify_track_id='sp1', track_name='NotActuallyOwned',
+        artist_name='A', album_name='X', popularity=50,
+    )
+    db.insert_library_track(spotify_track_id='sp1', origin='discography')
+
+    tracks = svc._select_discovery_tracks(
+        source='spotify', order_by='track_name', fetch_limit=100,
+    )
+    assert [t['track_name'] for t in tracks] == ['NotActuallyOwned']

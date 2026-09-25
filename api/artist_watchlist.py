@@ -27,6 +27,7 @@ from core.artist_source_lookup import (
     sources_resolvable_in_library as _core_sources_resolvable_in_library,
 )
 from core.artists.map import _artmap_cache_invalidate
+from core.library2.provider_ids import ARTIST_IDS_SQL as _ARTIST_IDS_SQL
 from core.metadata.registry import get_spotify_client
 from utils.logging_config import get_logger
 
@@ -58,6 +59,13 @@ _owned_mirrored_playlist = None
 _build_watchlist_count_payload = None
 
 
+def _acting(current_profile_id):
+    def _profile_id():
+        from core.library_scope import acting_profile_id
+        return acting_profile_id(current_profile_id())
+    return _profile_id
+
+
 def configure(*, config, database_getter, socketio_obj, timer_lock,
               deezer_client_getter, spotify_client_getter, automation_engine_getter,
               current_profile_id, discogs_client, metadata_fallback_client,
@@ -77,7 +85,10 @@ def configure(*, config, database_getter, socketio_obj, timer_lock,
     _get_deezer_client = deezer_client_getter
     _spotify_client = spotify_client_getter
     _automation_engine = automation_engine_getter
-    get_current_profile_id = current_profile_id
+    # E-12: a watchlist entry belongs to the library it fills. An admin who
+    # picked someone's own library in the header watches for THAT library, and
+    # sees its list -- so every handler here asks for the acting profile.
+    get_current_profile_id = _acting(current_profile_id)
     _get_discogs_client = discogs_client
     _get_metadata_fallback_client = metadata_fallback_client
     _get_metadata_fallback_source = metadata_fallback_source
@@ -477,24 +488,44 @@ def export_library_artists():
         conn = database._get_connection()
         try:
             cur = conn.cursor()
-            cur.execute("""
-                SELECT id, name, spotify_artist_id, musicbrainz_id, deezer_id,
-                       discogs_id, itunes_artist_id, tidal_id, qobuz_id, amazon_id,
-                       lastfm_url, genius_url, soul_id
-                FROM artists ORDER BY name COLLATE NOCASE
+            cur.execute(f"""
+                SELECT id, name, soul_id, {_ARTIST_IDS_SQL}
+                FROM lib2_artists ORDER BY name COLLATE NOCASE
             """)
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]
 
             counts = {}
             if include_contents:
-                for table, key in (('albums', 'album_count'), ('tracks', 'track_count')):
+                # Counts roll up the OWNED v2 catalogue. Two things this must not
+                # do, both of which it used to: read legacy `albums`/`tracks` (the
+                # cutover ported the roster query above but not this roll-up, and
+                # because the empty legacy tables still exist the query "worked"
+                # and returned nothing), and count every catalogue row (v2 keeps
+                # discography and wishlist releases beside the owned ones, where
+                # legacy was the owned library by construction).
+                from core.library2.sql_util import owned_sql
+                roll_ups = (
+                    ('album_count', f"""
+                        SELECT al.primary_artist_id, COUNT(*)
+                          FROM lib2_albums al
+                         WHERE {owned_sql('album', 'al')}
+                      GROUP BY al.primary_artist_id"""),
+                    ('track_count', f"""
+                        SELECT al.primary_artist_id, COUNT(*)
+                          FROM lib2_tracks t
+                          JOIN lib2_albums al ON al.id = t.album_id
+                         WHERE {owned_sql('track', 't')}
+                      GROUP BY al.primary_artist_id"""),
+                )
+                for key, sql in roll_ups:
                     try:
-                        for aid, n in cur.execute(
-                                f"SELECT artist_id, COUNT(*) FROM {table} GROUP BY artist_id"):
+                        for aid, n in cur.execute(sql):
                             counts.setdefault(str(aid), {})[key] = n
-                    except Exception:  # noqa: S110 — counts are best-effort
-                        pass
+                    except Exception as e:
+                        # Still best-effort, but never silently again: a null
+                        # count column is exactly how the legacy read survived.
+                        logger.warning("Library export %s roll-up failed: %s", key, e)
         finally:
             conn.close()
 
@@ -571,9 +602,9 @@ def add_to_watchlist():
             try:
                 conn = database._get_connection()
                 cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT spotify_artist_id, itunes_artist_id, deezer_id, discogs_id, musicbrainz_id
-                    FROM artists WHERE id = ? LIMIT 1
+                cursor.execute(f"""
+                    SELECT {_ARTIST_IDS_SQL}
+                    FROM lib2_artists WHERE id = ? LIMIT 1
                 """, (artist_id,))
                 row = cursor.fetchone()
                 conn.close()
@@ -731,9 +762,20 @@ def remove_from_watchlist():
             return jsonify({"success": False, "error": "Missing artist_id"}), 400
 
         database = get_database()
+        # §69.1 reverse edge: capture the row's identity BEFORE deleting so the
+        # matching monitored lib2 artist can be demonitored (states must stay in
+        # sync both ways). Fires only for a user-facing removal — the forward
+        # mirror removes rows via the DB layer directly, never through here.
+        _wl_descriptor = database.get_watchlist_artist_descriptor(artist_id, profile_id=get_current_profile_id())
         success = database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id())
 
         if success:
+            try:
+                from core.library2.monitor_sync import sync_watchlist_removal
+                sync_watchlist_removal(database, config_manager, _wl_descriptor,
+                                       profile_id=get_current_profile_id())
+            except Exception as _sync_e:
+                logger.debug("watchlist reverse-sync (single) failed: %s", _sync_e)
             # Push updated count to this profile's WebSocket room immediately
             try:
                 pid = get_current_profile_id()
@@ -957,9 +999,23 @@ def remove_batch_from_watchlist():
 
         database = get_database()
         removed = 0
+        # §69.1 reverse edge (covers "Clear Watchlist" = batch remove): demonitor
+        # the matching lib2 artist for every row we actually removed.
+        removed_descriptors = []
         for artist_id in artist_ids:
+            descriptor = database.get_watchlist_artist_descriptor(artist_id, profile_id=get_current_profile_id())
             if database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id()):
                 removed += 1
+                if descriptor:
+                    removed_descriptors.append(descriptor)
+
+        try:
+            from core.library2.monitor_sync import sync_watchlist_removal
+            for descriptor in removed_descriptors:
+                sync_watchlist_removal(database, config_manager, descriptor,
+                                       profile_id=get_current_profile_id())
+        except Exception as _sync_e:
+            logger.debug("watchlist reverse-sync (batch) failed: %s", _sync_e)
 
         return jsonify({
             "success": True,
@@ -1554,9 +1610,12 @@ def watchlist_artist_config(artist_id):
                 # 'no such column' on every watchlist-config GET.
                 cur2.execute("""
                     SELECT banner_url, summary, style, mood, label, genres
-                    FROM artists
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_id = ?
-                          OR discogs_id = ? OR musicbrainz_id = ?
+                    FROM lib2_artists
+                    WHERE spotify_id = ?
+                       OR json_extract(external_ids, '$.itunes') = ?
+                       OR json_extract(external_ids, '$.deezer') = ?
+                       OR json_extract(external_ids, '$.discogs') = ?
+                       OR musicbrainz_id = ?
                     LIMIT 1
                 """, (
                     spotify_id or artist_id,

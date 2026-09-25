@@ -64,15 +64,25 @@ def dbpath(tmp_path, monkeypatch):
 
 
 def _seed(dbpath, n_tracks=10, server="navidrome"):
+    """What an earlier scan of this server left in the catalogue."""
     db = MusicDatabase(dbpath)
     with db._get_connection() as conn:
-        conn.execute("INSERT OR REPLACE INTO artists (id, name, server_source) VALUES ('a1', 'Old Artist', ?)", (server,))
-        conn.execute("INSERT OR REPLACE INTO albums (id, title, artist_id) VALUES (900, 'Old Album', 'a1')")
+        artist = conn.execute(
+            "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
+            " VALUES ('Old Artist', 'old artist', ?, 'a1')", (server,)).lastrowid
+        album = conn.execute(
+            "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source,"
+            "                         server_id)"
+            " VALUES (?, 'Old Album', 'library', ?, '900')", (artist, server)).lastrowid
         for i in range(n_tracks):
+            track = conn.execute(
+                "INSERT INTO lib2_tracks (album_id, title, track_number, duration,"
+                "                         server_source, server_id)"
+                " VALUES (?, ?, 1, 100, ?, ?)",
+                (album, f"T{i}", server, f"t{i}")).lastrowid
             conn.execute(
-                "INSERT OR REPLACE INTO tracks (id, album_id, artist_id, title, track_number, duration, "
-                "file_path, server_source) VALUES (?, 900, 'a1', ?, 1, 100, ?, ?)",
-                (f"t{i}", f"T{i}", f"/m/t{i}.flac", server))
+                "INSERT INTO lib2_track_files (track_id, path, is_primary)"
+                " VALUES (?, ?, 1)", (track, f"/m/t{i}.flac"))
         conn.commit()
     return db
 
@@ -89,8 +99,10 @@ def _worker(dbpath, client):
 def _counts(dbpath, server="navidrome"):
     db = MusicDatabase(dbpath)
     with db._get_connection() as conn:
-        artists = conn.execute("SELECT COUNT(*) FROM artists WHERE server_source = ?", (server,)).fetchone()[0]
-        tracks = conn.execute("SELECT COUNT(*) FROM tracks WHERE server_source = ?", (server,)).fetchone()[0]
+        artists = conn.execute("SELECT COUNT(*) FROM lib2_artists WHERE server_source = ?",
+                               (server,)).fetchone()[0]
+        tracks = conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE server_source = ?",
+                              (server,)).fetchone()[0]
     return artists, tracks
 
 
@@ -105,6 +117,11 @@ def test_verified_empty_library_removes_stale_artists(dbpath):
     artists, tracks = _counts(dbpath)
     assert tracks == 0
     assert artists == 0, "stale artists must be cleaned up"
+    with MusicDatabase(dbpath)._get_connection() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 10
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_track_files WHERE file_state='active'"
+        ).fetchone()[0] == 10
 
 
 def test_failed_connection_still_errors_and_removes_nothing(dbpath):

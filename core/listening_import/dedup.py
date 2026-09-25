@@ -78,6 +78,8 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
         # Serialize lookup + matching + writes across both importer workers.
         conn.execute("BEGIN IMMEDIATE")
         ensure_import_events_table(conn)
+        has_lib2_link = "lib2_track_id" in {
+            r[1] for r in conn.execute("PRAGMA table_info(listening_history)").fetchall()}
         low = min(key[2] for key in incoming) - CROSS_SOURCE_TOLERANCE_SECONDS
         high = max(key[2] for key in incoming) + CROSS_SOURCE_TOLERANCE_SECONDS
         # Clean only this window on connections without foreign-key enforcement.
@@ -136,7 +138,8 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
             if history_id is None:
                 cursor = conn.execute("""
                     INSERT OR IGNORE INTO listening_history
-                        (track_id, title, artist, album, played_at, duration_ms, server_source, db_track_id, profile_id)
+                        (track_id, title, artist, album, played_at, duration_ms, server_source,
+                         db_track_id, profile_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (event.get("track_id"), event["title"], event.get("artist", ""),
                       event.get("album", ""), event["played_at"], event.get("duration_ms", 0),
@@ -156,6 +159,11 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
             if event.get("db_track_id") is not None:
                 conn.execute("UPDATE listening_history SET db_track_id = COALESCE(db_track_id, ?) WHERE id = ?",
                              (event["db_track_id"], history_id))
+            # Library v2: the catalogue link is its own column (db_track_id is
+            # the media server's id), and it fills the same way.
+            if has_lib2_link and event.get("lib2_track_id") is not None:
+                conn.execute("UPDATE listening_history SET lib2_track_id = COALESCE(lib2_track_id, ?) WHERE id = ?",
+                             (event["lib2_track_id"], history_id))
             conn.execute("""
                 INSERT OR IGNORE INTO listening_import_events
                     (source, title, artist, listened_at, history_id, profile_id) VALUES (?, ?, ?, ?, ?, ?)

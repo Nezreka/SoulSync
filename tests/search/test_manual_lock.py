@@ -1,47 +1,33 @@
-"""the hand-tagged lock: a file the user tagged themselves marks its track and
-album so enrichment never rematches it to the studio release, including after
-a media server rescans it into a brand new row."""
+"""the hand-tagged lock on Library v2: a file the user tagged themselves is
+remembered by its path, and that remembered file IS the lock -- the maintenance
+jobs that would retag, renumber, rematch or delete it consult it, and a rescan
+cannot lose it because nothing is stored on the catalogue row.
+
+Upstream also stamps ``metadata_locked`` on its legacy track/album rows; this
+branch has no such rows (see ``MusicDatabase._ensure_manual_metadata_schema``).
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_library_track
 
-
-class _ScannedTrack:
-    """what the media-server scanner hands insert_or_update_media_track"""
-
-    def __init__(self, track_id, title, file_path):
-        self.ratingKey = track_id
-        self.title = title
-        self.trackNumber = 1
-        self.duration = 250_000
-        self.path = file_path
-        self.bitRate = 1411
-        self._data = {'ArtistItems': [{'Name': 'Radiohead'}], 'AlbumArtists': [{'Name': 'Radiohead'}]}
+LIVE = '/m/Radiohead/Live at Glastonbury 2003/04 - Lucky.flac'
 
 
 def _db(tmp_path: Path) -> MusicDatabase:
-    db = MusicDatabase(database_path=str(tmp_path / 'lib.db'))
-    conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('ar', 'Radiohead', 'jellyfin')")
-    conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES ('al', 'ar', 'Live at Glastonbury 2003', 'jellyfin')")
-    conn.commit()
-    conn.close()
-    return db
+    return MusicDatabase(database_path=str(tmp_path / 'lib.db'))
 
 
-def _row(db, table, row_id):
-    conn = db._get_connection()
-    conn.row_factory = None
-    cur = conn.cursor()
-    cur.execute(f"PRAGMA table_info({table})")
-    cols = [c[1] for c in cur.fetchall()]
-    cur.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,))
-    values = cur.fetchone()
-    conn.close()
-    return dict(zip(cols, values)) if values else None
+def _album_with_file(db, path):
+    with db._get_connection() as conn:
+        track_id = seed_library_track(conn, artist='Radiohead', album='Live at Glastonbury 2003',
+                                      title='Lucky', file_path=path)
+        album_id = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()[0]
+        conn.commit()
+    return album_id
 
 
 def test_the_path_key_is_the_part_every_mount_agrees_on():
@@ -51,90 +37,45 @@ def test_the_path_key_is_the_part_every_mount_agrees_on():
     assert key('') == ''
 
 
-def test_a_rescanned_file_is_locked_even_on_a_fresh_row(tmp_path):
+def test_a_file_is_remembered_under_every_mount(tmp_path):
     db = _db(tmp_path)
     # SoulSync wrote it under its own mount...
     db.record_manual_metadata_file('/app/Transfer/Radiohead/Live at Glastonbury 2003/04 - Lucky.flac',
                                    album_title='Live at Glastonbury 2003', album_artist='Radiohead')
-    # ...and the media server finds it under its own
-    db.insert_or_update_media_track(
-        _ScannedTrack('tr-new', 'Lucky', '/media/music/Radiohead/Live at Glastonbury 2003/04 - Lucky.flac'),
-        album_id='al', artist_id='ar', server_source='jellyfin')
-
-    track = _row(db, 'tracks', 'tr-new')
-    album = _row(db, 'albums', 'al')
-    assert track['metadata_locked'] == 1 and album['metadata_locked'] == 1
-    # every enrichment worker only picks NULL / not_found / error rows
-    statuses = [v for k, v in track.items() if k.endswith('_match_status')]
-    assert statuses and all(v == 'manual' for v in statuses)
-    assert all(v == 'manual' for k, v in album.items() if k.endswith('_match_status'))
+    # ...and the media server knows it under its own
+    assert MusicDatabase.manual_path_key(LIVE) in db.manual_path_keys()
 
 
-def test_a_file_already_in_the_library_is_locked_right_away(tmp_path):
+def test_a_file_already_in_the_library_is_counted(tmp_path):
     db = _db(tmp_path)
-    db.insert_or_update_media_track(
-        _ScannedTrack('tr-1', 'Lucky', '/m/Radiohead/Live at Glastonbury 2003/04 - Lucky.flac'),
-        album_id='al', artist_id='ar', server_source='jellyfin')
-    assert _row(db, 'tracks', 'tr-1')['metadata_locked'] in (0, None)
-
-    locked = db.record_manual_metadata_file('/other/Radiohead/Live at Glastonbury 2003/04 - Lucky.flac')
-    assert locked == 1
-    assert _row(db, 'tracks', 'tr-1')['metadata_locked'] == 1
-
-
-def test_an_ordinary_file_is_left_alone(tmp_path):
-    db = _db(tmp_path)
-    db.record_manual_metadata_file('/app/Radiohead/Live at Glastonbury 2003/04 - Lucky.flac')
-    db.insert_or_update_media_track(
-        _ScannedTrack('tr-2', 'Airbag', '/m/Radiohead/OK Computer/01 - Airbag.flac'),
-        album_id='al', artist_id='ar', server_source='jellyfin')
-    track = _row(db, 'tracks', 'tr-2')
-    assert track['metadata_locked'] in (0, None)
-    assert not any(v == 'manual' for k, v in track.items() if k.endswith('_match_status'))
+    _album_with_file(db, LIVE)
+    assert db.record_manual_metadata_file(LIVE) == 1
 
 
 def test_a_same_named_file_in_another_album_is_left_alone(tmp_path):
     db = _db(tmp_path)
-    db.record_manual_metadata_file('/app/Radiohead/Live at Glastonbury 2003/04 - Lucky.flac')
-    db.insert_or_update_media_track(
-        _ScannedTrack('tr-3', 'Lucky', '/m/Radiohead/OK Computer/04 - Lucky.flac'),
-        album_id='al', artist_id='ar', server_source='jellyfin')
-    assert _row(db, 'tracks', 'tr-3')['metadata_locked'] in (0, None)
+    _album_with_file(db, '/m/Radiohead/OK Computer/04 - Lucky.flac')
+    assert db.record_manual_metadata_file(LIVE) == 0
 
 
-def test_an_old_schema_without_the_table_still_scans(tmp_path):
+def test_an_old_schema_without_the_table_reads_as_nothing_locked(tmp_path):
     db = _db(tmp_path)
-    conn = db._get_connection()
-    conn.execute("DROP TABLE manual_metadata_files")
-    conn.commit()
-    conn.close()
-    assert db.insert_or_update_media_track(
-        _ScannedTrack('tr-4', 'Lucky', '/m/a/b/c.flac'), album_id='al', artist_id='ar', server_source='jellyfin')
-    assert _row(db, 'tracks', 'tr-4') is not None
+    with db._get_connection() as conn:
+        conn.execute("DROP TABLE manual_metadata_files")
+        conn.commit()
+    assert db.manual_path_keys() == set()
 
 
-def test_unlocking_hands_the_album_back_and_stops_the_relock(tmp_path):
+def test_unlocking_forgets_the_albums_files(tmp_path):
     db = _db(tmp_path)
-    path = '/m/Radiohead/Live at Glastonbury 2003/04 - Lucky.flac'
-    db.record_manual_metadata_file(path)
-    db.insert_or_update_media_track(_ScannedTrack('tr-u', 'Lucky', path),
-                                    album_id='al', artist_id='ar', server_source='jellyfin')
-    assert _row(db, 'albums', 'al')['metadata_locked'] == 1
-
-    assert db.clear_manual_lock('al') is True
-    track, album = _row(db, 'tracks', 'tr-u'), _row(db, 'albums', 'al')
-    assert track['metadata_locked'] == 0 and album['metadata_locked'] == 0
-    # 'manual' goes back to NULL, so every enrichment worker picks it up again
-    assert all(v is None for k, v in track.items() if k.endswith('_match_status'))
-
-    # a rescan doesn't lock it again
-    db.insert_or_update_media_track(_ScannedTrack('tr-u', 'Lucky', path),
-                                    album_id='al', artist_id='ar', server_source='jellyfin')
-    assert _row(db, 'tracks', 'tr-u')['metadata_locked'] == 0
+    album_id = _album_with_file(db, LIVE)
+    db.record_manual_metadata_file(LIVE)
+    assert db.clear_manual_lock(album_id) is True
+    assert db.manual_path_keys() == set()
 
 
 def test_unlocking_a_missing_album_says_so(tmp_path):
-    assert _db(tmp_path).clear_manual_lock('nope') is False
+    assert _db(tmp_path).clear_manual_lock(424242) is False
 
 
 def test_the_unlock_route(tmp_path, monkeypatch):
@@ -143,10 +84,11 @@ def test_the_unlock_route(tmp_path, monkeypatch):
     import api.artist_detail as artist_detail
 
     db = _db(tmp_path)
-    db.record_manual_metadata_file('/m/Radiohead/Live at Glastonbury 2003/04 - Lucky.flac')
+    album_id = _album_with_file(db, LIVE)
+    db.record_manual_metadata_file(LIVE)
     monkeypatch.setattr(artist_detail, 'get_database', lambda: db)
     web_server.app.config['TESTING'] = True
     client = web_server.app.test_client()
 
-    assert client.delete('/api/album/al/metadata-lock').get_json()['metadata_locked'] is False
-    assert client.delete('/api/album/missing/metadata-lock').status_code == 404
+    assert client.delete(f'/api/album/{album_id}/metadata-lock').get_json()['metadata_locked'] is False
+    assert client.delete('/api/album/424242/metadata-lock').status_code == 404

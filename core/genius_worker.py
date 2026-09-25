@@ -170,78 +170,26 @@ class GeniusWorker:
         logger.info("Genius worker thread finished")
 
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
-        """Get next item to process from priority queue.
-        Genius is artist+track focused — we skip album-level processing
-        since Genius doesn't have direct album endpoints."""
+        """Get next item to process from the Library-v2 catalogue.
+
+        Genius is artist+track focused — there are no album endpoints, so albums
+        are excluded rather than attempted and marked. Priority, retry window and
+        the pinned-group override come from ``core.library2.worker_queue``
+        (docs §32.3.1 stage 2).
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_pending
+            from core.worker_utils import read_enrichment_priority
+
+            pinned = read_enrichment_priority('genius')
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Pinned-group override (Manage Enrichment Workers): process one
-            # entity type first, then fall through to the normal chain. Genius
-            # is artist/track only, so albums are not honored.
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
-            _prio = read_enrichment_priority('genius')
-            if _prio in ('artist', 'track'):
-                _pi = priority_pending_item(cursor, 'genius', _prio)
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted artists
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE genius_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 2: Unattempted tracks (skip albums — Genius is song-centric)
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.genius_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 3: Retry 'not_found' artists
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE genius_match_status IN ('not_found', 'error') AND genius_last_attempted < ?
-                ORDER BY genius_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 4: Retry 'not_found' tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.genius_match_status IN ('not_found', 'error') AND t.genius_last_attempted < ?
-                ORDER BY t.genius_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            return None
-
+            return next_pending(
+                conn, 'genius',
+                entity_types=('artist', 'track'),
+                retry_after_days=self.retry_days,
+                pinned=pinned if pinned in ('artist', 'track') else None,
+            )
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
             return None
@@ -250,29 +198,30 @@ class GeniusWorker:
                 conn.close()
 
     def _normalize_name(self, name: str) -> str:
-        """Normalize name for comparison"""
-        name = name.lower().strip()
+        """Normalize provider titles before fuzzy comparison."""
+        name = (name or '').lower().strip()
         name = re.sub(r'\s+[-–—]\s+.*$', '', name)
         name = re.sub(r'\s*\(.*?\)\s*', ' ', name)
-        name = re.sub(r'\s*\[.*?\]\s*', ' ', name)  # Also strip brackets (Genius uses these)
-        name = re.sub(r'\s*feat\.?\s+.*$', '', name)  # Strip featuring
+        name = re.sub(r'\s*\[.*?\]\s*', ' ', name)
+        name = re.sub(r'\s*feat\.?\s+.*$', '', name)
         name = re.sub(r'[^\w\s]', '', name)
-        name = re.sub(r'\s+', ' ', name).strip()
-        return name
+        return re.sub(r'\s+', ' ', name).strip()
 
     def _name_matches(self, query_name: str, result_name: str) -> bool:
-        """Check if result name matches our query with fuzzy matching"""
+        """Match names without treating two normalized-empty titles as equal."""
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
         if not norm_query or not norm_result:
-            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
-            # "...") would compare at SequenceMatcher ratio 1.0 against any
-            # other such title — fall back to exact raw comparison instead.
-            raw_q = (query_name or '').strip().lower()
-            raw_r = (result_name or '').strip().lower()
-            return bool(raw_q) and raw_q == raw_r
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return bool(raw_query) and raw_query == raw_result
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
-        logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
+        logger.debug(
+            "Name similarity: '%s' vs '%s' = %.2f",
+            query_name,
+            result_name,
+            similarity,
+        )
         return similarity >= self.name_similarity_threshold
 
     def _process_item(self, item: Dict[str, Any]):
@@ -298,18 +247,22 @@ class GeniusWorker:
                 logger.error(f"Error updating item status: {e2}")
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an entity already has a genius_id (e.g. from manual match)."""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            return None
+        """The Genius id already stored for this entity, if any."""
         conn = None
         try:
+            from core.library2.provider_ids import parse_external_ids
+
+            table = {'artist': 'lib2_artists', 'album': 'lib2_albums',
+                     'track': 'lib2_tracks'}.get(entity_type)
+            if not table:
+                return None
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT genius_id FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            row = conn.execute(
+                f"SELECT external_ids FROM {table} WHERE id = ?", (entity_id,)
+            ).fetchone()
+            if not row:
+                return None
+            return parse_external_ids(row[0]).get('genius') or None
         except Exception:
             return None
         finally:
@@ -440,7 +393,6 @@ class GeniusWorker:
         conn = None
         try:
             conn = self.db._get_connection()
-            cursor = conn.cursor()
 
             genius_id = str(full_data.get('id', search_data.get('id', '')))
             description = self.client.extract_description(full_data.get('description'))
@@ -451,25 +403,22 @@ class GeniusWorker:
             alt_names = full_data.get('alternate_names', [])
             alt_names_json = json.dumps(alt_names) if alt_names else None
 
-            cursor.execute("""
-                UPDATE artists SET
-                    genius_id = ?,
-                    genius_match_status = 'matched',
-                    genius_last_attempted = CURRENT_TIMESTAMP,
-                    genius_description = ?,
-                    genius_alt_names = ?,
-                    genius_url = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (genius_id, description, alt_names_json, genius_url, artist_id))
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
 
-            # Backfill thumb_url
-            if image_url:
-                cursor.execute("""
-                    UPDATE artists SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (image_url, artist_id))
-
+            write_provider_enrichment(
+                conn, entity_type='artist', entity_id=artist_id, service='genius',
+                payload={
+                    'description': description,
+                    'alt_names': alt_names or None,
+                    'url': genius_url,
+                },
+                provider_id=genius_id or None,
+                # Genius artwork is a fallback, exactly as before.
+                backfill={'image_url': image_url} if image_url else None,
+            )
+            record_attempt(conn, entity_type='artist', entity_id=artist_id,
+                           service='genius', status='matched')
             conn.commit()
 
         except Exception as e:
@@ -484,24 +433,24 @@ class GeniusWorker:
         conn = None
         try:
             conn = self.db._get_connection()
-            cursor = conn.cursor()
 
             genius_id = str(full_data.get('id', search_data.get('id', '')))
             description = self.client.extract_description(full_data.get('description'))
             genius_url = full_data.get('url') or search_data.get('url')
 
-            cursor.execute("""
-                UPDATE tracks SET
-                    genius_id = ?,
-                    genius_match_status = 'matched',
-                    genius_last_attempted = CURRENT_TIMESTAMP,
-                    genius_lyrics = ?,
-                    genius_description = ?,
-                    genius_url = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (genius_id, lyrics, description, genius_url, track_id))
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
 
+            write_provider_enrichment(
+                conn, entity_type='track', entity_id=track_id, service='genius',
+                payload={'description': description, 'url': genius_url},
+                provider_id=genius_id or None,
+                # Lyrics are not a fallback: a fresh fetch is the newer truth.
+                # A failed fetch passes None and leaves what is stored alone.
+                columns={'genius_lyrics': lyrics},
+            )
+            record_attempt(conn, entity_type='track', entity_id=track_id,
+                           service='genius', status='matched')
             conn.commit()
 
         except Exception as e:
@@ -512,24 +461,14 @@ class GeniusWorker:
                 conn.close()
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
-        """Mark an entity with a match status"""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            logger.error(f"Unknown entity type: {entity_type}")
-            return
-
+        """Record the outcome of an attempt in the provider ledger."""
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    genius_match_status = ?,
-                    genius_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='genius', status=status)
             conn.commit()
         except Exception as e:
             logger.error(f"Error marking {entity_type} #{entity_id} status: {e}")
@@ -541,16 +480,11 @@ class GeniusWorker:
         """Count how many items still need processing (artists + tracks only)"""
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM artists WHERE genius_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE genius_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            return pending_count(conn, 'genius', entity_types=('artist', 'track'),
+                                 retry_after_days=self.retry_days)
         except Exception as e:
             logger.error(f"Error counting pending items: {e}")
             return 0
@@ -562,28 +496,11 @@ class GeniusWorker:
         """Get progress breakdown by entity type"""
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            progress = {}
-
-            for entity, table in [('artists', 'artists'), ('tracks', 'tracks')]:
-                cursor.execute(f"""
-                    SELECT
-                        COUNT(*) AS total,
-                        SUM(CASE WHEN genius_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                    FROM {table}
-                """)
-                row = cursor.fetchone()
-                if row:
-                    total, processed = row[0], row[1] or 0
-                    progress[entity] = {
-                        'matched': processed,
-                        'total': total,
-                        'percent': int((processed / total * 100) if total > 0 else 0)
-                    }
-
-            return progress
-
+            return progress_breakdown(conn, 'genius',
+                                      entity_types=('artist', 'track'))
         except Exception as e:
             logger.error(f"Error getting progress breakdown: {e}")
             return {}

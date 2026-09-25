@@ -8,11 +8,32 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.qobuz_client import _qobuz_is_rate_limited
-from core.worker_utils import (accept_artist_match, _names_equivalent,
-                               idle_backoff_seconds, interruptible_sleep)
-from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
+from core.worker_utils import idle_backoff_seconds, interruptible_sleep
+from core.library2.worker_support import (
+    MATCHED,
+    accept_artist_match,
+    honor_stored_match,
+    provider_id_conflict,
+)
 
 logger = get_logger("qobuz_worker")
+
+def _parent_artist_id(conn, entity_type: str, entity_id) -> Optional[int]:
+    """The lib2 artist that owns an album or track.
+
+    A track's artist is two joins away in lib2 — track → album → primary artist —
+    where legacy carried ``tracks.artist_id`` on the row itself.
+    """
+    sql = {
+        'album': "SELECT primary_artist_id FROM lib2_albums WHERE id=?",
+        'track': ("SELECT al.primary_artist_id FROM lib2_tracks t "
+                  "JOIN lib2_albums al ON al.id=t.album_id WHERE t.id=?"),
+    }.get(entity_type)
+    if not sql:
+        return None
+    row = conn.execute(sql, (entity_id,)).fetchone()
+    return row[0] if row else None
+
 
 
 class QobuzWorker:
@@ -186,101 +207,26 @@ class QobuzWorker:
         logger.info("Qobuz worker thread finished")
 
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
-        """Get next item to process from priority queue (artists -> albums -> tracks)"""
+        """Get next item to process from the Library-v2 catalogue.
+
+        Priority, retry window and the pinned-group override all live in
+        ``core.library2.worker_queue`` — the same rules every enrichment worker uses
+        (docs §32.3.1 stage 2). ``include_parent_id`` puts the parent artist's
+        Qobuz id on an album or track item, which ``_verify_artist_id`` compares
+        the result against.
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_pending
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Pinned-group override (Manage Enrichment Workers): process one
-            # entity type first, then fall through to the normal chain. Unset or
-            # exhausted ⇒ default artist→album→track order, unchanged.
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
-            _prio = read_enrichment_priority('qobuz')
-            if _prio:
-                _pi = priority_pending_item(cursor, 'qobuz', _prio)
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted artists
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE qobuz_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 2: Unattempted albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.qobuz_id AS artist_qobuz_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.qobuz_match_status IS NULL AND a.id IS NOT NULL
-                ORDER BY a.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_qobuz_id': row[3]}
-
-            # Priority 3: Unattempted tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.qobuz_id AS artist_qobuz_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.qobuz_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_qobuz_id': row[3]}
-
-            # Priority 4: Retry 'not_found' artists
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE qobuz_match_status IN ('not_found', 'error') AND qobuz_last_attempted < ?
-                ORDER BY qobuz_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 5: Retry 'not_found' albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.qobuz_id AS artist_qobuz_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.qobuz_match_status IN ('not_found', 'error') AND a.qobuz_last_attempted < ?
-                ORDER BY a.qobuz_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_qobuz_id': row[3]}
-
-            # Priority 6: Retry 'not_found' tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.qobuz_id AS artist_qobuz_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.qobuz_match_status IN ('not_found', 'error') AND t.qobuz_last_attempted < ?
-                ORDER BY t.qobuz_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_qobuz_id': row[3]}
-
-            return None
+            return next_pending(
+                conn, 'qobuz',
+                retry_after_days=self.retry_days,
+                pinned=read_enrichment_priority('qobuz') or None,
+                include_parent_id=True,
+            )
 
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
@@ -303,12 +249,9 @@ class QobuzWorker:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
         if not norm_query or not norm_result:
-            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
-            # "...") would compare at SequenceMatcher ratio 1.0 against any
-            # other such title — fall back to exact raw comparison instead.
-            raw_q = (query_name or '').strip().lower()
-            raw_r = (result_name or '').strip().lower()
-            return bool(raw_q) and raw_q == raw_r
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return bool(raw_query) and raw_query == raw_result
 
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
@@ -326,12 +269,6 @@ class QobuzWorker:
             return True
 
         if str(result_artist_id) != str(parent_qobuz_id):
-            # Guard: only correct on a POSITIVE name match. The old check
-            # skipped only on a CONFIRMED mismatch — Qobuz payloads without a
-            # performer/artist name (compilations, collabs) left
-            # result_artist_name as None, the guard never fired, and the
-            # parent artist's qobuz_id was rewritten unconditionally. Same
-            # failure the Deezer #988 fix closed.
             parent_name = item.get('artist') or ''
             if not (result_artist_name and parent_name
                     and self._name_matches(parent_name, result_artist_name)):
@@ -352,42 +289,34 @@ class QobuzWorker:
         return True
 
     def _correct_artist_qobuz_id(self, item: Dict[str, Any], correct_qobuz_id: str):
-        """Correct the parent artist's qobuz_id based on a more specific album/track match"""
+        """Correct the parent artist's Qobuz id from a more specific album/track
+        match. The name guard in ``_verify_artist_id`` has already run."""
         conn = None
         try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
+            from core.library2.provider_writes import write_provider_enrichment
 
-            table = 'albums' if item['type'] == 'album' else 'tracks'
-            cursor.execute(f"SELECT artist_id FROM {table} WHERE id = ?", (item['id'],))
-            row = cursor.fetchone()
-            if not row:
+            conn = self.db._get_connection()
+            artist_id = _parent_artist_id(conn, item['type'], item['id'])
+            if artist_id is None:
                 return
 
-            artist_id = row[0]
-            # #988-class guard (ported from the Deezer fix): never overwrite
-            # with a Qobuz id already owned by a DIFFERENTLY-named artist.
-            # Same-named holders legitimately share an id.
-            cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,))
-            _self_row = cursor.fetchone()
-            this_name = (_self_row[0] if _self_row else '') or (item.get('artist') or '')
-            cursor.execute(
-                "SELECT name FROM artists WHERE qobuz_id = ? AND id != ?",
-                (str(correct_qobuz_id), artist_id))
-            for (other_name,) in cursor.fetchall():
-                if not _names_equivalent(this_name, other_name):
-                    logger.warning(
-                        f"Refusing Qobuz-ID correction: id {correct_qobuz_id} is "
-                        f"already held by '{other_name}' (≠ '{this_name}') — avoiding a "
-                        f"shared/duplicate id (artist #{artist_id})")
-                    return
+            row = conn.execute(
+                "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)
+            ).fetchone()
+            this_name = (row[0] if row else '') or (item.get('artist') or '')
+            conflict = provider_id_conflict(
+                conn, 'qobuz', correct_qobuz_id, artist_id, this_name)
+            if conflict:
+                logger.warning(
+                    "Refusing Qobuz-ID correction: id %s is already held by "
+                    "'%s' (≠ '%s') — avoiding a shared/duplicate id (artist #%s)",
+                    correct_qobuz_id, conflict, this_name, artist_id,
+                )
+                return
 
-            cursor.execute("""
-                UPDATE artists SET
-                    qobuz_id = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (correct_qobuz_id, artist_id))
+            write_provider_enrichment(
+                conn, entity_type='artist', entity_id=artist_id,
+                service='qobuz', provider_id=correct_qobuz_id)
             conn.commit()
 
             logger.info(f"Corrected artist #{artist_id} Qobuz ID to {correct_qobuz_id}")
@@ -428,18 +357,13 @@ class QobuzWorker:
                 logger.error(f"Error updating item status: {e2}")
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an entity already has a qobuz_id (e.g. from manual match)."""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            return None
+        """The Qobuz id already stored for this entity, if any."""
         conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT qobuz_id FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'qobuz')
         except Exception:
             return None
         finally:
@@ -460,9 +384,13 @@ class QobuzWorker:
         if result:
             result_name = result.get('name', '')
             qobuz_artist_id = result.get('id')
-            ok, reason = accept_artist_match(
-                self.db, 'qobuz_id', qobuz_artist_id, artist_id, artist_name, result_name,
-            )
+            conn = self.db._get_connection()
+            try:
+                ok, reason = accept_artist_match(
+                    conn, 'qobuz', qobuz_artist_id, artist_id, artist_name, result_name,
+                )
+            finally:
+                conn.close()
             if not ok:
                 self._mark_status('artist', artist_id, 'not_found')
                 self.stats['not_found'] += 1
@@ -503,19 +431,17 @@ class QobuzWorker:
         # Issue #501: honor manual matches. Pre-fix this just marked
         # status='matched' without refreshing metadata.
         _stored = honor_stored_match(
-            db=self.db, entity_table='albums', entity_id=album_id,
-            id_column='qobuz_id',
-            client_fetch_fn=self.client.get_album,
-            on_match_fn=self._refresh_album_via_stored_id,
-            mark_status_fn=self._mark_status,
-            status_column='qobuz_match_status',
+            self.db, entity_type='album', entity_id=album_id,
+            service='qobuz',
+            fetch=self.client.get_album,
+            on_match=self._refresh_album_via_stored_id,
             log_prefix='Qobuz',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -573,19 +499,17 @@ class QobuzWorker:
         """Process a track: search Qobuz, verify, fetch full details, store metadata"""
         # Issue #501: honor manual matches.
         _stored = honor_stored_match(
-            db=self.db, entity_table='tracks', entity_id=track_id,
-            id_column='qobuz_id',
-            client_fetch_fn=self.client.get_track,
-            on_match_fn=self._refresh_track_via_stored_id,
-            mark_status_fn=self._mark_status,
-            status_column='qobuz_match_status',
+            self.db, entity_type='track', entity_id=track_id,
+            service='qobuz',
+            fetch=self.client.get_track,
+            on_match=self._refresh_track_via_stored_id,
             log_prefix='Qobuz',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -639,248 +563,134 @@ class QobuzWorker:
             self.stats['not_found'] += 1
             logger.debug(f"No match for track '{track_name}'")
 
-    def _update_artist(self, artist_id: int, data: Dict[str, Any], full_data: Optional[Dict[str, Any]] = None):
+    @staticmethod
+    def _image(src: Dict[str, Any]) -> Optional[str]:
+        """Qobuz returns artwork as a size-keyed dict, a bare string, or under
+        ``picture``. Largest first."""
+        image = src.get('image', {})
+        if isinstance(image, dict):
+            return image.get('large') or image.get('medium') or image.get('small') \
+                or image.get('thumbnail') or src.get('picture') or None
+        if isinstance(image, str) and image:
+            return image
+        return src.get('picture') or None
+
+    @staticmethod
+    def _text(value) -> Optional[str]:
+        """Label and copyright arrive either as a string or as a named object."""
+        if isinstance(value, dict):
+            value = value.get('name') or value.get('text')
+        return value if isinstance(value, str) and value else None
+
+    def _update_artist(self, artist_id: int, data: Dict[str, Any],
+                       full_data: Optional[Dict[str, Any]] = None):
         """Store Qobuz metadata for an artist"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
+        src = full_data or data
+        self._write('artist', artist_id, data.get('id'),
+                    backfill={'image_url': self._image(src)})
 
-            cursor.execute("""
-                UPDATE artists SET
-                    qobuz_id = ?,
-                    qobuz_match_status = 'matched',
-                    qobuz_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                str(data.get('id')),
-                artist_id
-            ))
-            conn.commit()
-
-            # Backfill optional metadata (failures here won't lose the match)
-            try:
-                src = full_data or data
-                thumb_url = None
-                image = src.get('image', {})
-                if isinstance(image, dict):
-                    thumb_url = image.get('large', image.get('medium', image.get('small', image.get('thumbnail', ''))))
-                elif isinstance(image, str):
-                    thumb_url = image
-                # Also check picture field
-                if not thumb_url:
-                    thumb_url = src.get('picture', '')
-
-                if thumb_url:
-                    cursor.execute("""
-                        UPDATE artists SET thumb_url = ?
-                        WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                    """, (thumb_url, artist_id))
-
-                conn.commit()
-            except Exception as e:
-                logger.warning(f"Backfill failed for artist #{artist_id} (match preserved): {e}")
-
-        except Exception as e:
-            logger.error(f"Error updating artist #{artist_id} with Qobuz data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
-
-    def _update_album(self, album_id: int, search_data: Dict[str, Any], full_data: Optional[Dict[str, Any]]):
+    def _update_album(self, album_id: int, search_data: Dict[str, Any],
+                      full_data: Optional[Dict[str, Any]]):
         """Store Qobuz metadata for an album"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
+        data = full_data or search_data
+        backfill = {'image_url': self._image(data),
+                    'label': self._text(data.get('label')),
+                    'upc': str(data['upc']) if data.get('upc') else None}
+        parental = data.get('parental_warning')
+        if parental is not None:
+            backfill['explicit'] = 1 if parental else 0
+        tracks_count = data.get('tracks_count')
+        if isinstance(tracks_count, int) and tracks_count > 0:
+            backfill['track_count'] = tracks_count
+        genre = data.get('genre', {})
+        genre_name = genre.get('name') if isinstance(genre, dict) else (
+            genre if isinstance(genre, str) else None)
+        if genre_name:
+            from core.genre_filter import filter_genres
+            from core.settings import config_manager as _cfg
+            _filtered = filter_genres([genre_name], _cfg)
+            if _filtered:
+                backfill['genres'] = json.dumps(_filtered)
+        # `duration` and `copyright` have no album-level column in lib2 (tracks
+        # carry both; albums never did). Keeping them in the payload loses nothing
+        # and invents no column.
+        duration = data.get('duration')
+        payload = {
+            'duration_ms': int(duration * 1000)
+            if isinstance(duration, (int, float)) and duration > 0 else None,
+            'copyright': self._text(data.get('copyright')),
+        }
+        self._write('album', album_id, search_data.get('id'),
+                    backfill=backfill, payload=payload)
 
-            data = full_data or search_data
-
-            cursor.execute("""
-                UPDATE albums SET
-                    qobuz_id = ?,
-                    qobuz_match_status = 'matched',
-                    qobuz_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                str(search_data.get('id')),
-                album_id
-            ))
-            conn.commit()
-
-            # Backfill optional metadata (failures here won't lose the match)
-            try:
-                label = data.get('label', {})
-                label_name = label.get('name', '') if isinstance(label, dict) else str(label) if label else ''
-                if label_name:
-                    cursor.execute("""
-                        UPDATE albums SET label = ?
-                        WHERE id = ? AND (label IS NULL OR label = '')
-                    """, (label_name, album_id))
-
-                parental = data.get('parental_warning')
-                if parental is not None:
-                    cursor.execute("""
-                        UPDATE albums SET explicit = ?
-                        WHERE id = ? AND explicit IS NULL
-                    """, (1 if parental else 0, album_id))
-
-                genre = data.get('genre', {})
-                genre_name = genre.get('name', '') if isinstance(genre, dict) else str(genre) if genre else ''
-                if genre_name:
-                    from core.genre_filter import filter_genres
-                    from core.settings import config_manager as _cfg
-                    _filtered = filter_genres([genre_name], _cfg)
-                    if _filtered:
-                        cursor.execute("""
-                            UPDATE albums SET genres = ?
-                            WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                        """, (json.dumps(_filtered), album_id))
-
-                upc = data.get('upc')
-                if upc:
-                    cursor.execute("""
-                        UPDATE albums SET upc = ?
-                        WHERE id = ? AND (upc IS NULL OR upc = '')
-                    """, (str(upc), album_id))
-
-                tracks_count = data.get('tracks_count')
-                if tracks_count and isinstance(tracks_count, int) and tracks_count > 0:
-                    cursor.execute("""
-                        UPDATE albums SET track_count = ?
-                        WHERE id = ? AND track_count IS NULL
-                    """, (tracks_count, album_id))
-
-                duration = data.get('duration')
-                if duration and isinstance(duration, (int, float)) and duration > 0:
-                    duration_ms = int(duration * 1000)
-                    cursor.execute("""
-                        UPDATE albums SET duration = ?
-                        WHERE id = ? AND duration IS NULL
-                    """, (duration_ms, album_id))
-
-                copyright_text = data.get('copyright')
-                if isinstance(copyright_text, dict):
-                    copyright_text = copyright_text.get('text', copyright_text.get('name', ''))
-                if copyright_text and isinstance(copyright_text, str):
-                    cursor.execute("""
-                        UPDATE albums SET copyright = ?
-                        WHERE id = ? AND (copyright IS NULL OR copyright = '')
-                    """, (copyright_text, album_id))
-
-                thumb_url = None
-                image = data.get('image', {})
-                if isinstance(image, dict):
-                    thumb_url = image.get('large', image.get('medium', image.get('small', image.get('thumbnail', ''))))
-                elif isinstance(image, str):
-                    thumb_url = image
-                if thumb_url:
-                    cursor.execute("""
-                        UPDATE albums SET thumb_url = ?
-                        WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                    """, (thumb_url, album_id))
-
-                conn.commit()
-            except Exception as e:
-                logger.warning(f"Backfill failed for album #{album_id} (match preserved): {e}")
-
-        except Exception as e:
-            logger.error(f"Error updating album #{album_id} with Qobuz data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
-
-    def _update_track(self, track_id: int, search_data: Dict[str, Any], full_data: Optional[Dict[str, Any]]):
+    def _update_track(self, track_id: int, search_data: Dict[str, Any],
+                      full_data: Optional[Dict[str, Any]]):
         """Store Qobuz metadata for a track"""
+        data = full_data or search_data
+        backfill = {'copyright': self._text(data.get('copyright'))}
+        parental = data.get('parental_warning')
+        if parental is not None:
+            backfill['explicit'] = 1 if parental else 0
+        isrc = data.get('isrc')
+        if isinstance(isrc, dict):
+            isrc = isrc.get('value') or isrc.get('id')
+        if isinstance(isrc, str) and isrc:
+            backfill['isrc'] = isrc
+        duration = data.get('duration')
+        if isinstance(duration, (int, float)) and duration > 0:
+            backfill['duration'] = int(duration * 1000)
+        self._write('track', track_id, search_data.get('id'), backfill=backfill)
+
+    def _write(self, entity_type: str, entity_id: int, provider_id,
+               backfill: Optional[Dict[str, Any]] = None,
+               payload: Optional[Dict[str, Any]] = None):
+        """One write path for all three entity types (docs §32.3.1 stage 2).
+
+        Everything outside Qobuz's own id is backfill — artwork, label, genres and
+        the rest are shared with better sources and with the user's own choice. The
+        match itself is committed even if a backfill value is unusable, which is what
+        the old "failures here won't lose the match" second transaction was for;
+        write_provider_enrichment simply skips an empty value instead.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            data = full_data or search_data
-
-            cursor.execute("""
-                UPDATE tracks SET
-                    qobuz_id = ?,
-                    qobuz_match_status = 'matched',
-                    qobuz_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                str(search_data.get('id')),
-                track_id
-            ))
+            write_provider_enrichment(
+                conn, entity_type=entity_type, entity_id=entity_id,
+                service='qobuz',
+                payload=payload,
+                provider_id=str(provider_id) if provider_id else None,
+                backfill={k: v for k, v in (backfill or {}).items() if v is not None}
+                or None,
+            )
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='qobuz', status='matched')
             conn.commit()
-
-            # Backfill optional metadata (failures here won't lose the match)
-            try:
-                parental = data.get('parental_warning')
-                if parental is not None:
-                    cursor.execute("""
-                        UPDATE tracks SET explicit = ?
-                        WHERE id = ? AND explicit IS NULL
-                    """, (1 if parental else 0, track_id))
-
-                isrc = data.get('isrc')
-                if isinstance(isrc, dict):
-                    isrc = isrc.get('value', isrc.get('id', ''))
-                if isrc and isinstance(isrc, str):
-                    cursor.execute("""
-                        UPDATE tracks SET isrc = ?
-                        WHERE id = ? AND (isrc IS NULL OR isrc = '')
-                    """, (isrc, track_id))
-
-                duration = data.get('duration')
-                if duration and isinstance(duration, (int, float)) and duration > 0:
-                    duration_ms = int(duration * 1000)
-                    cursor.execute("""
-                        UPDATE tracks SET duration = ?
-                        WHERE id = ? AND duration IS NULL
-                    """, (duration_ms, track_id))
-
-                copyright_text = data.get('copyright')
-                if isinstance(copyright_text, dict):
-                    copyright_text = copyright_text.get('text', copyright_text.get('name', ''))
-                if copyright_text and isinstance(copyright_text, str):
-                    cursor.execute("""
-                        UPDATE tracks SET copyright = ?
-                        WHERE id = ? AND (copyright IS NULL OR copyright = '')
-                    """, (copyright_text, track_id))
-
-                conn.commit()
-            except Exception as e:
-                logger.warning(f"Backfill failed for track #{track_id} (match preserved): {e}")
-
         except Exception as e:
-            logger.error(f"Error updating track #{track_id} with Qobuz data: {e}")
+            logger.error(f"Error updating {entity_type} #{entity_id} with Qobuz data: {e}")
             raise
         finally:
             if conn:
                 conn.close()
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
-        """Mark an entity with a match status"""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            logger.error(f"Unknown entity type: {entity_type}")
-            return
+        """Record the outcome of an attempt in the provider ledger.
 
+        Replaces the legacy `qobuz_match_status`/`_last_attempted` column pair.
+        Both `not_found` and `error` become due again after the retry
+        window; a source-wide outage is handled by the worker's own backoff
+        before an attempt is ever recorded, so it cannot become a tight loop.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    qobuz_match_status = ?,
-                    qobuz_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='qobuz', status=status)
             conn.commit()
         except Exception as e:
             logger.error(f"Error marking {entity_type} #{entity_id} status: {e}")
@@ -889,23 +699,12 @@ class QobuzWorker:
                 conn.close()
 
     def _count_pending_items(self) -> int:
-        """Count how many items still need processing"""
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM artists WHERE qobuz_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE qobuz_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE qobuz_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-
-            row = cursor.fetchone()
-            return row[0] if row else 0
-
+            return pending_count(conn, 'qobuz', retry_after_days=self.retry_days)
         except Exception as e:
             logger.error(f"Error counting pending items: {e}")
             return 0
@@ -914,61 +713,12 @@ class QobuzWorker:
                 conn.close()
 
     def _get_progress_breakdown(self) -> Dict[str, Dict[str, int]]:
-        """Get progress breakdown by entity type"""
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            progress = {}
-
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN qobuz_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM artists
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['artists'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN qobuz_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM albums
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['albums'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN qobuz_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM tracks
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['tracks'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            return progress
-
+            return progress_breakdown(conn, 'qobuz')
         except Exception as e:
             logger.error(f"Error getting progress breakdown: {e}")
             return {}

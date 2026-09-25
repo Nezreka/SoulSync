@@ -44,6 +44,21 @@ def _extract_lookup_value(value: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
+def _fetchable_album_image_url(images: Any) -> str:
+    """The first album image THIS process can download.
+
+    Not simply ``images[0]``: a Library-v2 wishlist payload leads with
+    SoulSync's own relative artwork URL (``/api/library/v2/artwork/album/<id>``)
+    so the browser prefers the locally cached copy. A browser resolves that
+    against the page; ``urllib`` here cannot resolve it at all, so cover.jpg and
+    embedded tag art would silently get nothing. Skip to the first absolute
+    http(s) entry instead.
+    """
+    from core.library2.wishlist_art import first_fetchable_image_url
+
+    return first_fetchable_image_url(images) or ''
+
+
 def _normalize_context_artists(artists: Any) -> List[Dict[str, Any]]:
     if not artists:
         return []
@@ -214,7 +229,7 @@ def _build_single_import_context_payload(
             if not album_image_url:
                 album_image_url = typed_album.image_url or ''
                 if not album_image_url and album_images:
-                    album_image_url = str(_extract_lookup_value(album_images[0], 'url', default='') or '')
+                    album_image_url = _fetchable_album_image_url(album_images)
             album_artists = _normalize_context_artists(
                 [{'name': name} for name in typed_album.artists]
             )
@@ -228,7 +243,7 @@ def _build_single_import_context_payload(
             if not album_image_url:
                 album_image_url = str(_extract_lookup_value(album_data, 'image_url', 'thumb_url', default='') or '')
                 if not album_image_url and album_images:
-                    album_image_url = str(_extract_lookup_value(album_images[0], 'url', default='') or '')
+                    album_image_url = _fetchable_album_image_url(album_images)
             album_artists = _normalize_context_artists(_extract_lookup_value(album_data, 'artists', default=[]))
     elif album_data:
         album_name = album_name or str(album_data)
@@ -237,7 +252,7 @@ def _build_single_import_context_payload(
         album_artists = [{'name': primary_artist_name}]
 
     if not album_image_url and album_images:
-        album_image_url = str(_extract_lookup_value(album_images[0], 'url', default='') or '')
+        album_image_url = _fetchable_album_image_url(album_images)
 
     track_info = {
         'id': track_id,

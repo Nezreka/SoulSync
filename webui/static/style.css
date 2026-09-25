@@ -26179,6 +26179,35 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     gap: 12px;
 }
 
+.search-quality-profile-picker {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 190px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.search-quality-profile-picker select {
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: 8px;
+    padding: 6px 9px;
+    background: rgba(20, 20, 20, 0.9);
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.search-quality-profile-picker small {
+    max-width: 220px;
+    color: rgba(255, 255, 255, 0.52);
+    font-size: 10px;
+    font-weight: 400;
+    line-height: 1.25;
+}
+
 .download-control-btn {
     padding: 10px 20px;
     border-radius: 10px;
@@ -50457,6 +50486,134 @@ body.downloads-disabled [data-download-action] {
     white-space: nowrap;
 }
 
+/* Library switcher (#1199): which library an admin is working in. Drawn by
+   webui/src/shell/library-switch.ts only when there is more than one. */
+.library-switch {
+    position: relative;
+    margin-top: 6px;
+}
+.library-switch-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.28);
+    background: rgba(var(--accent-rgb), 0.08);
+    color: rgba(255, 255, 255, 0.88);
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.library-switch-trigger:hover,
+.library-switch-trigger[aria-expanded="true"] {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+.library-switch-trigger:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.8);
+    outline-offset: 1px;
+}
+html[data-library-scope="own"] .library-switch-trigger {
+    border-color: rgba(250, 204, 21, 0.45);
+    background: rgba(250, 204, 21, 0.1);
+}
+.library-switch-icon {
+    display: flex;
+    color: rgb(var(--accent-light-rgb));
+    flex-shrink: 0;
+}
+html[data-library-scope="own"] .library-switch-icon { color: rgb(250, 204, 21); }
+.library-switch-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.15;
+}
+.library-switch-caption {
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+}
+.library-switch-name {
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.library-switch-chevron {
+    margin-left: auto;
+    display: flex;
+    color: rgba(255, 255, 255, 0.5);
+}
+.library-switch-menu {
+    /* on <body>, placed under the trigger by library-switch.ts */
+    position: fixed;
+    max-height: min(70vh, 480px);
+    overflow-y: auto;
+    min-width: 260px;
+    max-width: 340px;
+    z-index: 1200;
+    padding: 6px;
+    border-radius: 10px;
+    background: #16181d;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+.library-switch-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    text-align: left;
+    cursor: pointer;
+}
+.library-switch-option:hover { background: rgba(255, 255, 255, 0.06); }
+.library-switch-option.is-current { background: rgba(var(--accent-rgb), 0.12); }
+.library-switch-option-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+}
+.library-switch-option-name { font-size: 13px; font-weight: 600; }
+.library-switch-option-meta {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.library-switch-option-meta code {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 10.5px;
+}
+.library-switch-option-check {
+    margin-left: auto;
+    display: flex;
+    color: rgb(var(--accent-light-rgb));
+    width: 14px;
+}
+.library-switch-foot {
+    margin-top: 4px;
+    padding: 8px 10px 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
+.library-switch-foot strong { color: rgba(255, 255, 255, 0.85); font-weight: 600; }
+html[data-sidebar="collapsed"] .library-switch-text,
+html[data-sidebar="collapsed"] .library-switch-chevron { display: none; }
+html[data-sidebar="collapsed"] .library-switch-trigger { justify-content: center; }
+
 /* Personal Settings Trigger (gear icon) */
 .personal-settings-trigger {
     background: none;
@@ -58861,6 +59018,13 @@ tr.tag-diff-same {
     font-weight: 700;
     color: #fff;
     letter-spacing: -0.2px;
+}
+
+.repair-job-name-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-wrap: wrap;
 }
 
 .repair-job-desc {
@@ -70952,6 +71116,12 @@ body.max-performance #page-particles-canvas {
     overflow: hidden; text-overflow: ellipsis; }
 .wl-list-track-album { color: rgba(255,255,255,0.42); font-size: 11.5px; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
+/* A wishlist row that is a QUALITY UPGRADE of a file already on disk, not a
+   missing track. Without it, a profile change that queues hundreds of owned
+   tracks reads as the wishlist duplicating the library. */
+.wl-list-upgrade { display: inline-block; margin-right: 6px; padding: 0 5px;
+    border-radius: 4px; background: rgba(96,165,250,0.14); color: #93c5fd;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.02em; vertical-align: 1px; }
 .wl-list-tries { font-size: 11.5px; color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .wl-list-tries--failing { color: #fbbf24; font-weight: 600; }
 .wl-list-last { font-size: 11.5px; color: rgba(255,255,255,0.35); white-space: nowrap;

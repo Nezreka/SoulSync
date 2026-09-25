@@ -1,4 +1,11 @@
-"""Track Number Repair canonical lookup (#765 Stage 4, read side)."""
+"""Track Number Repair canonical lookup (#765 Stage 4, read side).
+
+lib2 records the pin as the album's DEFAULT release edition, not a
+``canonical_source``/``canonical_album_id`` column pair on ``albums`` — the same
+idea one level down, release group as the album and edition as the concrete
+release the files were matched to. These tests used to seed the legacy pair via
+``set_album_canonical``, so they described a shape the lookup no longer reads.
+"""
 
 from __future__ import annotations
 
@@ -13,19 +20,24 @@ def _ctx(db):
 
 
 def _seed(db, *, with_canonical: bool, file_path: str = "/music/Evolve/01 - Believer.flac"):
+    from core.library2.schema import ensure_library_v2_schema
+
     conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES ('art1', 'Imagine Dragons')")
-    cur.execute("INSERT INTO albums (id, title, artist_id) VALUES ('alb1', 'Evolve', 'art1')")
-    cur.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path) "
-        "VALUES ('t1', 'alb1', 'art1', 'Believer', 1, 204000, ?)",
-        (file_path,),
-    )
+    ensure_library_v2_schema(conn)
+    conn.execute("INSERT INTO lib2_artists (id, name, sort_name) VALUES (1, 'Imagine Dragons', 'Imagine Dragons')")
+    conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'Evolve')")
+    conn.execute(
+        "INSERT INTO lib2_tracks (id, album_id, title, track_number, duration) "
+        "VALUES (1, 1, 'Believer', 1, 204000)")
+    conn.execute(
+        "INSERT INTO lib2_track_files (track_id, path, format, is_primary) "
+        "VALUES (1, ?, 'flac', 1)", (file_path,))
+    if with_canonical:
+        conn.execute(
+            "INSERT INTO lib2_release_editions (release_group_id, title, spotify_id, is_default) "
+            "VALUES (1, 'Evolve', 'sp_evolve', 1)")
     conn.commit()
     conn.close()
-    if with_canonical:
-        db.set_album_canonical("alb1", "spotify", "sp_evolve", 0.96)
 
 
 def test_returns_canonical_when_pinned(tmp_path):
@@ -36,6 +48,7 @@ def test_returns_canonical_when_pinned(tmp_path):
 
 
 def test_none_when_unresolved(tmp_path):
+    """The album is known but nothing is pinned — no edition to prefer."""
     db = MusicDatabase(str(tmp_path / "m.db"))
     fp = "/music/Evolve/01 - Believer.flac"
     _seed(db, with_canonical=False, file_path=fp)

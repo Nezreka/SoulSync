@@ -448,7 +448,7 @@ def get_artist_map_genres():
                  deezer_id=r['deezer_artist_id'], discogs_id=r['discogs_artist_id'], source='watchlist')
 
         # 4. Library artists
-        cursor.execute("SELECT name, thumb_url, genres FROM artists")
+        cursor.execute("SELECT name, image_url AS thumb_url, genres FROM lib2_artists")
         for r in cursor.fetchall():
             genres = []
             if r['genres']:
@@ -676,7 +676,12 @@ def get_artist_map_explore():
                     if wr[col]:
                         center_ids[k] = str(wr[col])
             else:
-                cursor.execute("SELECT name, thumb_url FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1", (artist_name,))
+                from core.library2.importer import normalize_name
+                # `name_key` is the stored fold. COLLATE NOCASE is ASCII-only,
+                # so "BJÖRK" never found the library's "Björk".
+                cursor.execute(
+                    "SELECT name, image_url AS thumb_url FROM lib2_artists"
+                    " WHERE name_key = ? LIMIT 1", (normalize_name(artist_name),))
                 lr = cursor.fetchone()
                 if lr:
                     artist_found = True

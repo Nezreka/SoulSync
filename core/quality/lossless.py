@@ -97,6 +97,7 @@ def lossy_output_would_overwrite_source(source_path: Any, output_path: Any) -> b
 
 __all__ = [
     'LOSSLESS_FORMATS',
+    'LOSSLESS_CANDIDATE_EXTENSIONS',
     'is_lossless_format',
     'is_lossless_audio_path',
     'lossy_output_would_overwrite_source',

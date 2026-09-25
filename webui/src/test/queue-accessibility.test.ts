@@ -1,16 +1,28 @@
+import { fireEvent, screen } from '@testing-library/dom';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fireEvent, screen } from '@testing-library/dom';
 import { beforeEach, expect, it, vi } from 'vitest';
+
 import { extractFunction } from './vanilla-extract';
 const source = readFileSync(resolve(process.cwd(), 'static/media-player.js'), 'utf8');
-const functions = ['renderNpQueue', 'npFocusQueueAction', 'npAnnounceQueue', 'npReorderQueue', 'removeFromQueue'].map(name => extractFunction(name, source)).join('\n');
+const functions = [
+  'renderNpQueue',
+  'npFocusQueueAction',
+  'npAnnounceQueue',
+  'npReorderQueue',
+  'removeFromQueue',
+]
+  .map((name) => extractFunction(name, source))
+  .join('\n');
 let queue: any;
 let play: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   document.body.innerHTML = '<div id="np-queue-list"></div>';
   play = vi.fn();
-  queue = new Function('document', 'playQueueItem', `
+  queue = new Function(
+    'document',
+    'playQueueItem',
+    `
     let npQueue = [
       { title: 'A', artist: 'Artist', file_path: '/a' },
       { title: 'B', artist: 'Artist', file_path: '/b' },
@@ -21,7 +33,8 @@ beforeEach(() => {
       updateNpPrevNextButtons = () => {}, npScheduleQueuePrefetch = () => {}, npStopQueuePrefetchPolling = () => {};
     ${functions}
     return { render: renderNpQueue, state: () => ({ titles: npQueue.map(t => t.title), index: npQueueIndex }) };
-  `)(document, play);
+  `,
+  )(document, play);
   queue.render();
 });
 it('exposes named native Play controls without clickable row ambiguity', () => {
@@ -32,7 +45,8 @@ it('exposes named native Play controls without clickable row ambiguity', () => {
 });
 it('moves a track while keeping playback identity and focus', () => {
   const move = screen.getByRole('button', { name: 'Move C earlier' });
-  move.focus(); fireEvent.click(move);
+  move.focus();
+  fireEvent.click(move);
   expect(queue.state()).toEqual({ titles: ['A', 'C', 'B'], index: 2 });
   expect(play).not.toHaveBeenCalled();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Move C earlier' }));

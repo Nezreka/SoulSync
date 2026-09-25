@@ -197,6 +197,30 @@ def resolve_override_server_id(
     )
 
 
+def _playlist_server_id(db: Any, track_id: Any, valid_server_ids: set) -> Optional[str]:
+    """The id THIS playlist knows for a matched library track, or None.
+
+    ``library_track_id`` is a catalogue id. It used to be the media server's
+    own id, because the two were one row — so a stored value that is already
+    in the playlist is taken at face value, which keeps matches saved before
+    the catalogue existed working.
+    """
+    if track_id is None:
+        return None
+    if str(track_id) in valid_server_ids:
+        return str(track_id)
+    reader = getattr(db, "server_track_id", None)
+    if reader is None:
+        return None
+    try:
+        server_id = reader(track_id)
+    except Exception:
+        return None
+    if server_id and str(server_id) in valid_server_ids:
+        return str(server_id)
+    return None
+
+
 def build_bulk_override_lookup(
     db: Any,
     profile_id: int,
@@ -263,8 +287,9 @@ def build_bulk_override_lookup(
         if not match:
             return None
         lib_id = match.get("library_track_id")
-        if lib_id is not None and str(lib_id) in valid_server_ids:
-            return str(lib_id)
+        resolved = _playlist_server_id(db, lib_id, valid_server_ids)
+        if resolved is not None:
+            return resolved
         # Stale pointer — re-resolve via the stored file path and self-heal.
         file_path = match.get("library_file_path")
         resolver = getattr(db, "find_track_id_by_file_path", None)
@@ -273,9 +298,10 @@ def build_bulk_override_lookup(
                 new_id = resolver(file_path)
             except Exception:
                 new_id = None
-            if new_id and str(new_id) in valid_server_ids:
+            resolved = _playlist_server_id(db, new_id, valid_server_ids)
+            if resolved is not None:
                 _self_heal_match_id(db, match, str(new_id))
-                return str(new_id)
+                return resolved
         # Every path exhausted — the user's confirmed match CANNOT apply. Say
         # exactly why, or this renders as a bare "missing" row and looks like
         # the match was never saved (the wolf39us report shape).
@@ -333,8 +359,9 @@ def resolve_durable_match_server_id(
         return None
 
     lib_id = match.get("library_track_id")
-    if lib_id is not None and str(lib_id) in valid_server_ids:
-        return str(lib_id)
+    resolved = _playlist_server_id(db, lib_id, valid_server_ids)
+    if resolved is not None:
+        return resolved
 
     # Stale pointer — re-resolve via the stored file path and self-heal.
     file_path = match.get("library_file_path")
@@ -344,9 +371,10 @@ def resolve_durable_match_server_id(
             new_id = resolver(file_path)
         except Exception:
             new_id = None
-        if new_id and str(new_id) in valid_server_ids:
+        resolved = _playlist_server_id(db, new_id, valid_server_ids)
+        if resolved is not None:
             _self_heal_match_id(db, match, str(new_id))
-            return str(new_id)
+            return resolved
     logger.warning(
         "Manual match for source %s (%s) cannot apply: library track %s is not "
         "in this playlist and the file-path fallback %s. The track likely needs "

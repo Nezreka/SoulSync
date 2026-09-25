@@ -197,6 +197,46 @@ def import_profile_id(context) -> Optional[int]:
     return None
 
 
+def import_owner_id(context) -> Optional[int]:
+    """Which library this download belongs to, as decided ONCE at the start.
+
+    The selected directory lives in the Flask session, and by the time a
+    download is organised, post-processed and linked there is no request left
+    to read it from -- those stages run on worker threads. So the answer is
+    stamped on the batch when the download is created and every later stage
+    reads it back here, which is also what keeps the five transfer-root call
+    sites from disagreeing about where the file went.
+
+    The KEY is the decision: ``library_owner_id: None`` is "the shared library,
+    on purpose" and must not fall through to the download's profile. Falls
+    back to resolving it live, for a caller that predates the stamp.
+    """
+    from core.library_scope import BATCH_OWNER_KEY, batch_library_owner, owner_for_new_file
+
+    def _owner(value):
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    if isinstance(context, dict):
+        if BATCH_OWNER_KEY in context:
+            return _owner(context[BATCH_OWNER_KEY])
+        track_info = context.get("track_info")
+        if isinstance(track_info, dict) and BATCH_OWNER_KEY in track_info:
+            return _owner(track_info[BATCH_OWNER_KEY])
+        batch_id = context.get("batch_id")
+        if batch_id:
+            try:
+                from core.runtime_state import download_batches
+                batch = download_batches.get(batch_id)
+                if isinstance(batch, dict) and BATCH_OWNER_KEY in batch:
+                    return batch_library_owner(batch)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("batch %s has no library owner stamp: %s", batch_id, exc)
+    return owner_for_new_file(import_profile_id(context))
+
+
 _notified_own_lib_fallback: set[int] = set()
 
 
@@ -262,9 +302,23 @@ def shared_transfer_root() -> str:
 
 
 def transfer_root_for_context(context) -> str:
-    """where this download/import's files go: the profile's own folder when
-    it has one, the configured transfer folder otherwise."""
-    return library_root_for_profile(import_profile_id(context)) or shared_transfer_root()
+    """Where this download's files go.
+
+    The SELECTED directory wins over the profile that started the download: an
+    admin who switched the library page to someone else's directory and grabbed
+    a track there meant that directory, and the file has to land where it was
+    put (E-04). Only with nothing selected does the download's own profile
+    decide, and with neither it is the configured transfer folder -- which is
+    every download on an install without own directories.
+    """
+    owner = import_owner_id(context)
+    if owner is None:
+        # a profile whose own library the media server cannot isolate lands in
+        # the shared folder -- and is told so, once (#1276)
+        from core.library_scope import own_library_supported
+        if not own_library_supported():
+            library_root_for_profile(import_profile_id(context))
+    return library_root_for_profile(owner) or shared_transfer_root()
 
 
 def build_simple_download_destination(context, file_path: str):

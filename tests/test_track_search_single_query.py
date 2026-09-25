@@ -16,20 +16,14 @@ def db(tmp_path):
 
 
 def _insert_track(db, track_id, title, artist_id, artist_name, album_id, album_title):
+    from tests.support.catalogue_seed import seed_library_track
+
     with db._get_connection() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)",
-            (artist_id, artist_name),
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO albums (id, title, artist_id) VALUES (?, ?, ?)",
-            (album_id, album_title, artist_id),
-        )
-        conn.execute(
-            """INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path)
-               VALUES (?, ?, ?, ?, 1, 180, ?)""",
-            (track_id, album_id, artist_id, title, f"/music/{title}.mp3"),
-        )
+        seed_library_track(
+            conn, artist=artist_name, album=album_title, title=title,
+            artist_server_id=str(artist_id), album_server_id=str(album_id),
+            track_server_id=str(track_id), track_number=1, duration=180,
+            file_path=f"/music/{title}.mp3")
         conn.commit()
 
 
@@ -41,7 +35,8 @@ def test_api_search_tracks_returns_dict_rows_with_full_columns(db):
     assert len(results) == 1
     row = results[0]
     assert isinstance(row, dict)
-    assert str(row["id"]) == "100"
+    # The catalogue mints its own id; the server's is kept beside it.
+    assert str(row["server_id"]) == "100"
     assert row["title"] == "Great Song"
     assert row["artist_name"] == "Band One"
     assert row["album_title"] == "Album X"

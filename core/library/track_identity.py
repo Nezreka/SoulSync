@@ -28,20 +28,18 @@ from utils.logging_config import get_logger
 logger = get_logger("library.track_identity")
 
 
-# Maps the conceptual ID name (used in the source-track dict we extract
-# below) to the column name on the library ``tracks`` table where that
-# ID is persisted. Keep the column names in sync with the schema in
-# ``database/music_database.py``.
+# Maps the source vocabulary to its native Library-v2 SQL expression.
 EXTERNAL_ID_COLUMNS: Dict[str, str] = {
-    'spotify_id': 'spotify_track_id',
-    'itunes_id': 'itunes_track_id',
-    'deezer_id': 'deezer_id',
-    'tidal_id': 'tidal_id',
-    'qobuz_id': 'qobuz_id',
-    'mbid': 'musicbrainz_recording_id',
-    'audiodb_id': 'audiodb_id',
-    'soul_id': 'soul_id',
-    'isrc': 'isrc',
+    'spotify_id': 't.spotify_id',
+    'itunes_id': "json_extract(t.external_ids,'$.itunes')",
+    'deezer_id': "json_extract(t.external_ids,'$.deezer')",
+    'tidal_id': "json_extract(t.external_ids,'$.tidal')",
+    'qobuz_id': "json_extract(t.external_ids,'$.qobuz')",
+    'mbid': 't.musicbrainz_id',
+    'audiodb_id': "json_extract(t.external_ids,'$.audiodb')",
+    'jiosaavn_id': "json_extract(t.external_ids,'$.jiosaavn')",
+    'soul_id': 't.soul_id',
+    'isrc': 't.isrc',
 }
 
 
@@ -147,14 +145,13 @@ def find_library_track_by_external_id(
     external_ids: Dict[str, str],
     server_source: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Return a row from the ``tracks`` table whose any external ID
-    column matches one of the provided IDs, or None if no match.
+    """Return an owned lib2 track whose any external ID matches, or ``None``.
 
     Returns a sqlite3.Row-like dict so callers can read whatever fields
     they want (id, title, file_path, etc.). When ``server_source`` is
-    set, restrict matches to tracks scanned from that media server —
-    avoids false positives when a user binds the same DB into multiple
-    profiles/servers.
+    set, its recognition mapping is preferred. Ownership itself remains local
+    and server-independent, so an offline or not-yet-scanned server cannot make
+    an existing file look absent and trigger a duplicate download.
 
     Performance: every external_id column is indexed in the schema, so
     each OR clause hits an index. Limit 1 because we only need to know
@@ -169,7 +166,7 @@ def find_library_track_by_external_id(
         column = EXTERNAL_ID_COLUMNS.get(id_name)
         if not column or not id_value:
             continue
-        clauses.append(f"({column} = ? AND {column} IS NOT NULL AND {column} != '')")
+        clauses.append(f"({column} = ? AND COALESCE({column}, '') != '')")
         params.append(id_value)
 
     if not clauses:
@@ -177,15 +174,23 @@ def find_library_track_by_external_id(
 
     where_external = " OR ".join(clauses)
 
-    # Optional server_source filter
+    owned = ("EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id "
+             "AND COALESCE(f.file_state,'active')='active')")
+    select = ("SELECT t.*, t.spotify_id AS spotify_track_id, "
+              "json_extract(t.external_ids,'$.itunes') AS itunes_track_id, "
+              "al.title AS album_title, "
+              "(SELECT f.path FROM lib2_track_files f WHERE f.track_id=t.id "
+              "AND COALESCE(f.file_state,'active')='active' "
+              "ORDER BY f.is_primary DESC, f.id LIMIT 1) AS file_path "
+              "FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id ")
     if server_source:
-        sql = (
-            f"SELECT * FROM tracks WHERE ({where_external}) "
-            f"AND (server_source = ? OR server_source IS NULL) LIMIT 1"
-        )
-        params.append(server_source)
+        sql = (f"{select} WHERE {owned} AND ({where_external}) "
+               "ORDER BY (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
+               "WHERE m.entity_type='track' AND m.entity_id=t.id "
+               "AND m.server_source=?) OR t.server_source=?) DESC, t.id LIMIT 1")
+        params.extend((server_source, server_source))
     else:
-        sql = f"SELECT * FROM tracks WHERE ({where_external}) LIMIT 1"
+        sql = f"{select} WHERE {owned} AND ({where_external}) LIMIT 1"
 
     conn = None
     try:

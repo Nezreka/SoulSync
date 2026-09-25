@@ -11,18 +11,25 @@ def db(tmp_path):
     d = MusicDatabase(str(tmp_path / 'm.db'))
     conn = d._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name, thumb_url, spotify_artist_id) "
-                "VALUES (1, 'Daft Punk', 'http://dp.jpg', 'sp1')")
-    cur.execute("INSERT INTO artists (id, name, spotify_artist_id) VALUES (2, 'Justice', 'sp2')")
-    cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (10, 'A', 1)")
-    cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (20, 'B', 2)")
+    cur.execute("INSERT INTO lib2_artists (id, name, name_key, image_url, spotify_id) "
+                "VALUES (1, 'Daft Punk', 'daft punk', 'http://dp.jpg', 'sp1')")
+    cur.execute("INSERT INTO lib2_artists (id, name, name_key, spotify_id) "
+                "VALUES (2, 'Justice', 'justice', 'sp2')")
+    cur.execute("INSERT INTO lib2_albums (id, title, primary_artist_id) VALUES (10, 'A', 1)")
+    cur.execute("INSERT INTO lib2_albums (id, title, primary_artist_id) VALUES (20, 'B', 2)")
+
+    def _owned(title, album_id, path):
+        cur.execute("INSERT INTO lib2_tracks (title, album_id) VALUES (?, ?)",
+                    (title, album_id))
+        cur.execute(
+            "INSERT INTO lib2_track_files (track_id, path, is_primary, file_state) "
+            "VALUES (?, ?, 1, 'active')", (cur.lastrowid, path))
+
     for i in range(5):
-        cur.execute("INSERT INTO tracks (title, artist_id, album_id, file_path) "
-                    "VALUES (?, 1, 10, ?)", (f'DP {i}', f'/m/dp{i}.flac'))
+        _owned(f'DP {i}', 10, f'/m/dp{i}.flac')
     # justice owns only TWO playable tracks - below the station floor
     for i in range(2):
-        cur.execute("INSERT INTO tracks (title, artist_id, album_id, file_path) "
-                    "VALUES (?, 2, 20, ?)", (f'J {i}', f'/m/j{i}.flac'))
+        _owned(f'J {i}', 20, f'/m/j{i}.flac')
     for artist, n in (('Daft Punk', 30), ('Justice', 20), ('Unowned Star', 50)):
         for i in range(n):
             cur.execute("INSERT INTO listening_history (title, artist, played_at) "

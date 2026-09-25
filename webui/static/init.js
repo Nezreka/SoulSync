@@ -519,6 +519,9 @@ function setCurrentProfile(profile) {
 const LEGACY_PROFILE_PAGE_ALIASES = {
     downloads: 'search',
     artists: 'search',
+    // Library v2 became the Library; anything still naming the old route id
+    // resolves to the same permission rather than to an unknown page.
+    'library-v2': 'library',
 };
 
 function normalizeProfilePageId(pageId) {
@@ -1429,8 +1432,7 @@ function updateProfileIndicator() {
         } else if (currentProfile.id === 1) {
             btn.style.display = ''; // Root admin sees all
         } else {
-            const ap = currentProfile.allowed_pages;
-            btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
+            btn.style.display = isPageAllowed(page) ? '' : 'none';
         }
     });
 
@@ -1840,6 +1842,7 @@ async function loadProfileManageList() {
         editBtn.dataset.canDownload = p.can_download !== false ? '1' : '0';
         editBtn.dataset.isAdmin = p.is_admin ? '1' : '0';
         editBtn.dataset.librarySupported = data.own_library_supported === false ? '0' : '1';
+        editBtn.dataset.libraryAvailable = data.own_library_available === false ? '0' : '1';
         editBtn.dataset.libraryMode = p.library_mode || 'shared';
         editBtn.dataset.libraryRoot = p.library_root || '';
         editBtn.dataset.libraryHint = (data.own_library_root_hint || '').replace('<name>', (p.name || 'profile').toLowerCase().replace(/[^a-z0-9]+/g, '-'));
@@ -1883,6 +1886,7 @@ async function loadProfileManageList() {
                 can_download: btn.dataset.canDownload !== '0',
                 is_admin: btn.dataset.isAdmin === '1',
                 library_supported: btn.dataset.librarySupported !== '0',
+                library_available: btn.dataset.libraryAvailable !== '0',
                 library_mode: btn.dataset.libraryMode || 'shared',
                 library_root: btn.dataset.libraryRoot || '',
                 library_hint: btn.dataset.libraryHint || ''
@@ -2152,9 +2156,16 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
         ownLibCheckbox = document.createElement('input');
         ownLibCheckbox.type = 'checkbox';
         ownLibCheckbox.checked = profileSettings.library_mode === 'own';
-        ownLibCheckbox.disabled = profileSettings.library_supported === false && !ownLibCheckbox.checked;
+        // parked beats unsupported in the message: the server can be the right
+        // one and the feature still be off, and a control that cannot succeed
+        // has to say so rather than fail on save
+        const libParked = profileSettings.library_available === false;
+        ownLibCheckbox.disabled = libParked
+            || (profileSettings.library_supported === false && !ownLibCheckbox.checked);
         olLabel.appendChild(ownLibCheckbox);
-        olLabel.appendChild(document.createTextNode(profileSettings.library_supported === false
+        olLabel.appendChild(document.createTextNode(
+            libParked ? ' Own library (not available in this build yet)'
+            : profileSettings.library_supported === false
             ? ' Own library (requires Plex or Jellyfin)'
             : ' Own library (separate output folder + their own server library)'));
         form.appendChild(olLabel);
@@ -2593,7 +2604,12 @@ function initializeNavigation() {
 
 const _DEEPLINK_VALID_PAGES = new Set([
     'dashboard', 'sync', 'search', 'discover', 'automations',
-    'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
+    // iss29-B07: '/library-v2' is a live alias that redirects to '/library'
+    // (query string preserved). It was missing here, so this fallback resolved
+    // a bookmark to it as 'dashboard'. React usually wins the race and the
+    // right page appears anyway — which is exactly what makes the gap easy to
+    // miss and unreliable to depend on.
+    'library', 'library-v2', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
     'hydrabase', 'tools', 'chat', 'podcasts', 'audiobooks'
 ]);
@@ -2610,6 +2626,9 @@ function _getPageFromPath() {
     if (!_DEEPLINK_VALID_PAGES.has(basePage)) return 'dashboard';
     // Context-dependent pages fall back to a sensible parent
     if (basePage === 'playlist-explorer') return 'library';
+    // The alias and its target are the same page as far as the shell chrome
+    // is concerned (iss29-B07).
+    if (basePage === 'library-v2') return 'library';
     return basePage;
 }
 

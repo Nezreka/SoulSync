@@ -25,6 +25,9 @@ function track(over: Partial<ParsedWishlistTrack>): ParsedWishlistTrack {
     failing: false,
     lastTried: '',
     failReason: '',
+    upgrade: false,
+    currentQuality: '',
+    imageFallback: '',
     ...over,
   };
 }
@@ -43,6 +46,7 @@ const GROUPS: WishlistArtistGroup[] = [
       {
         name: 'Lost Album',
         image: '',
+        imageFallback: '',
         tracks: [
           track({ id: 'f1', track: 'Ghost', retry: 7, failing: true, failReason: 'no sources' }),
         ],

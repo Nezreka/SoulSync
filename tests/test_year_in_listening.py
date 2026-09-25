@@ -349,9 +349,14 @@ def test_a_corrupt_cache_falls_back_instead_of_raising(db):
 # ── artwork ──────────────────────────────────────────────────────────────────
 
 def _artist_row(db, artist_id, name, thumb='http://img/a.jpg', soul_id=None):
+    from core.library2.importer import normalize_name
+
     conn = db._get_connection()
-    conn.execute("INSERT OR REPLACE INTO artists (id, name, thumb_url, soul_id) VALUES (?, ?, ?, ?)",
-                 (artist_id, name, thumb, soul_id))
+    conn.execute(
+        "INSERT OR REPLACE INTO lib2_artists "
+        "(id, name, name_key, image_url, soul_id) VALUES (?, ?, ?, ?, ?)",
+        (artist_id, name, normalize_name(name), thumb, soul_id),
+    )
     conn.commit()
     conn.close()
 
@@ -369,7 +374,6 @@ def test_discoveries_get_images_and_ids_like_top_artists(db):
     enrich_stats_items(db, year)
 
     discovery = year['discoveries'][0]
-    # artists.id is a TEXT column — compared as a string on purpose.
     assert str(discovery['id']) == '7'
     assert discovery['image_url']
 
@@ -406,15 +410,30 @@ def test_enrichment_leaves_an_unknown_artist_alone(db):
 # ── play an album from the story ─────────────────────────────────────────────
 
 def _album_with_tracks(db, album_id, title, artist_id=1, artist='A', files=(1, 2, 3)):
+    from core.library2.importer import normalize_name
+
     conn = db._get_connection()
-    conn.execute("INSERT OR REPLACE INTO artists (id, name) VALUES (?, ?)", (artist_id, artist))
-    conn.execute("INSERT OR REPLACE INTO albums (id, artist_id, title, thumb_url) VALUES (?, ?, ?, ?)",
-                 (album_id, artist_id, title, 'http://img/cover.jpg'))
+    conn.execute(
+        "INSERT OR REPLACE INTO lib2_artists (id, name, name_key) VALUES (?, ?, ?)",
+        (artist_id, artist, normalize_name(artist)),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO lib2_albums "
+        "(id, primary_artist_id, title, image_url) VALUES (?, ?, ?, ?)",
+        (album_id, artist_id, title, 'http://img/cover.jpg'),
+    )
     for n in files:
+        track_id = album_id * 100 + n
         conn.execute(
-            "INSERT OR REPLACE INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate) "
-            "VALUES (?, ?, ?, ?, ?, ?, 320)",
-            (album_id * 100 + n, album_id, artist_id, f'Track {n}', n, f'/music/{album_id}/{n}.flac'))
+            "INSERT OR REPLACE INTO lib2_tracks "
+            "(id, album_id, title, track_number) VALUES (?, ?, ?, ?)",
+            (track_id, album_id, f'Track {n}', n),
+        )
+        conn.execute(
+            "INSERT INTO lib2_track_files (track_id, path, bitrate, is_primary) "
+            "VALUES (?, ?, 320, 1)",
+            (track_id, f'/music/{album_id}/{n}.flac'),
+        )
     conn.commit()
     conn.close()
 
@@ -442,7 +461,6 @@ def test_the_rows_carry_what_the_player_needs(db):
     assert row['file_path'] == '/music/5/1.flac'
     assert row['album'] == 'Cold'
     assert row['artist'] == 'A'
-    # albums.id is a TEXT column, so the id comes back as a string.
     assert str(row['album_id']) == '5'
     assert row['image_url'] == 'http://img/cover.jpg'
 
@@ -455,8 +473,9 @@ def test_a_track_with_no_file_is_not_offered(db):
     _album_with_tracks(db, 5, 'Cold', files=(1,))
     conn = db._get_connection()
     conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path) "
-        "VALUES (999, 5, 1, 'Wishlisted', 2, NULL)")
+        "INSERT INTO lib2_tracks (id, album_id, title, track_number) "
+        "VALUES (999, 5, 'Wishlisted', 2)"
+    )
     conn.commit()
     conn.close()
 

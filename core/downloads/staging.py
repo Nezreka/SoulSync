@@ -396,8 +396,8 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
         transfer_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.transfer_path', './Transfer'))
         # an own-library profile's batch lands in its folder (#1199)
         try:
-            from core.imports.paths import import_profile_id, library_root_for_profile
-            transfer_dir = library_root_for_profile(import_profile_id({'batch_id': batch_id})) or transfer_dir
+            from core.imports.paths import import_owner_id, library_root_for_profile
+            transfer_dir = library_root_for_profile(import_owner_id({'batch_id': batch_id})) or transfer_dir
         except Exception as _root_err:  # noqa: BLE001
             logger.debug(f"[Staging] per-profile root lookup failed: {_root_err}")
         dest_filename = os.path.basename(best_match['full_path'])
@@ -453,7 +453,10 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
         # Run post-processing (tagging, AcoustID verification, path building)
         context_key = f"staging_{task_id}"
         with tasks_lock:
-            track_info = download_tasks.get(task_id, {}).get('track_info', {})
+            _task = download_tasks.get(task_id, {})
+            track_info = _task.get('track_info', {})
+            from core.imports.upgrade_intent import CONTEXT_KEY as _UPGRADE_INTENT_KEY
+            server_upgrade_intent = _task.get(_UPGRADE_INTENT_KEY)
         if not isinstance(track_info, dict):
             track_info = {}
         else:
@@ -582,6 +585,8 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             'has_clean_spotify_data': has_clean_data,
             'staging_source': True,
         }
+        from core.imports.upgrade_intent import attach_upgrade_intent
+        attach_upgrade_intent(context, server_upgrade_intent)
 
         # Store context in the matched downloads context store (used by post-processing)
         with matched_context_lock:

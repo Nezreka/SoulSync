@@ -131,7 +131,8 @@ class _DB:
     def get_all_album_ids_for_server(self, server_type, owner_profile_id=None):
         return {'b1'}
 
-    def delete_removed_content(self, artist_ids, album_ids, server_type):
+    def delete_removed_content(self, artist_ids, album_ids, server_type, owner_profile_id=None,
+                               keep_album_ids=()):
         self.removed = (set(artist_ids), set(album_ids))
         return {'artists_removed': len(artist_ids),
                 'albums_removed': len(album_ids),

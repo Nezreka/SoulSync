@@ -60,11 +60,13 @@ def imported(db, tmp_path, monkeypatch):
 
         with db._get_connection() as conn:
             cur = conn.cursor()
+            # the catalogue is Library v2 on this branch
             cur.execute("""
                 SELECT ar.name, al.title, t.title, t.track_artist
-                FROM tracks t
-                JOIN albums al ON t.album_id = al.id
-                JOIN artists ar ON al.artist_id = ar.id
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON t.album_id = al.id
+                JOIN lib2_artists ar ON al.primary_artist_id = ar.id
+                ORDER BY t.id
             """)
             return cur.fetchall()
 

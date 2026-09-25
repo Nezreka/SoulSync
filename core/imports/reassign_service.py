@@ -128,33 +128,89 @@ def target_tracks(source: str, album_id: str) -> List[Dict[str, Any]]:
     return rows
 
 
+LEGACY_SUBJECT_ERROR = (
+    "That album is not a Library v2 album — reassign needs a lib2:<id> subject"
+)
+
+
+def lib2_album_id(album_id: Any) -> Optional[int]:
+    """The Library-v2 row id behind a ``lib2:<id>`` subject, else None.
+
+    The prefix is not decoration. This flow ends in a rematch hint whose
+    ``replace_track_id`` is resolved against ``lib2_track_files.track_id``, so a
+    legacy ``tracks.id`` would not fail loudly — it would silently name a
+    DIFFERENT track and delete that track's file. An id space you cannot tell
+    apart by looking at it has to be labelled.
+    """
+    text = str(album_id or "").strip()
+    if not text.startswith("lib2:"):
+        return None
+    try:
+        value = int(text.split(":", 1)[1])
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def local_album_tracks(database, album_id: Any) -> List[Dict[str, Any]]:
     """The album's own files, shaped for the mapper.
 
-    Tracks with no ``file_path`` are excluded: there is nothing to stage, so
-    including them would only produce pairings that can never be applied.
+    Tracks with no live file are excluded: there is nothing to stage, so
+    including them would only produce pairings that can never be applied. One
+    row per TRACK — a track with an MP3 next to its FLAC is still one thing to
+    move, and its primary file is the one that goes.
+
+    ``file_path`` is resolved to a real on-disk path, because staging opens it:
+    what Library v2 stores is the path as the media server sees it, which this
+    process may not be able to read literally.
     """
+    native_id = lib2_album_id(album_id)
+    if native_id is None:
+        logger.warning("reassign refused non-Library-v2 album subject %r", album_id)
+        return []
     conn = None
     try:
         conn = database._get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT t.id, t.title, t.track_number, t.file_path
-            FROM tracks t
-            WHERE t.album_id = ? AND t.file_path IS NOT NULL AND t.file_path != ''
-            ORDER BY COALESCE(t.track_number, 999999), t.title
+            SELECT t.id, t.title, t.track_number, f.path
+            FROM lib2_tracks t
+            JOIN lib2_track_files f ON f.track_id = t.id
+            WHERE t.album_id = ?
+              AND f.path IS NOT NULL AND f.path != ''
+              AND COALESCE(f.file_state, 'active') = 'active'
+            ORDER BY COALESCE(t.track_number, 999999), t.title,
+                     f.is_primary DESC, f.id
             """,
-            (str(album_id),),
+            (native_id,),
         )
-        return [{"id": r[0], "title": r[1], "track_number": r[2], "file_path": r[3]}
-                for r in cursor.fetchall()]
+        rows: List[Dict[str, Any]] = []
+        seen = set()
+        for row in cursor.fetchall():
+            track_id = row[0]
+            if track_id in seen:
+                continue          # a second file of a track already listed
+            seen.add(track_id)
+            rows.append({"id": track_id, "title": row[1], "track_number": row[2],
+                         "file_path": _readable_path(row[3])})
+        return rows
     except Exception as exc:
         logger.error("reassign could not read local album %s: %s", album_id, exc)
         return []
     finally:
         if conn:
             conn.close()
+
+
+def _readable_path(stored: Any) -> str:
+    """The stored path mapped to the file this process can actually open."""
+    text = str(stored or "")
+    try:
+        from core.library.path_resolver import resolve_library_file_path
+        return resolve_library_file_path(text) or text
+    except Exception:                                   # pragma: no cover - defensive
+        return text
 
 
 def is_same_release(database, local_album_id: Any, source: str, album_id: str) -> bool:
@@ -165,23 +221,44 @@ def is_same_release(database, local_album_id: Any, source: str, album_id: str) -
     not a data-loss risk. It is a pointless-work and confusing-outcome risk:
     every file would be restaged and re-imported to produce no change. Caught
     here rather than trusted to the UI, because the API is callable directly.
+
+    Every source is comparable in Library v2, not just Spotify: the album row
+    carries its own ``spotify_id`` and ``musicbrainz_id``, and the long-tail
+    providers live in ``external_ids``.
     """
-    if not album_id or str(source).lower() != "spotify":
-        # Only Spotify ids are stored on the album row, so that is the only
-        # comparison we can make honestly. Others fall through.
+    native_id = lib2_album_id(local_album_id)
+    if not album_id or native_id is None:
         return False
     conn = None
     try:
         conn = database._get_connection()
         row = conn.cursor().execute(
-            "SELECT spotify_album_id FROM albums WHERE id = ?", (str(local_album_id),)
+            "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_albums WHERE id = ?",
+            (native_id,),
         ).fetchone()
     except Exception:
         return False
     finally:
         if conn:
             conn.close()
-    existing = (row[0] if row else None) or ""
+    if row is None:
+        return False
+    spotify_id, musicbrainz_id, external_ids = row[0], row[1], row[2]
+
+    key = str(source or "").lower()
+    if key == "spotify":
+        existing = spotify_id
+    elif key in ("musicbrainz", "mb"):
+        existing = musicbrainz_id
+    else:
+        existing = None
+        try:
+            import json
+            extra = json.loads(external_ids or "{}")
+            if isinstance(extra, dict):
+                existing = extra.get(key)
+        except (TypeError, ValueError):
+            existing = None
     return bool(existing) and str(existing) == str(album_id)
 
 
@@ -193,6 +270,11 @@ def preview_reassign(database, source: str, local_album_id: Any, album_id: str) 
     between a reassign the user trusts and one that silently misfiles a third
     of the tracks.
     """
+    if lib2_album_id(local_album_id) is None:
+        # "That album has no files" would be a lie about a full album; the
+        # request named the wrong id space and the message has to say so.
+        return {"success": False, "error": LEGACY_SUBJECT_ERROR}
+
     locals_ = local_album_tracks(database, local_album_id)
     if not locals_:
         return {"success": False, "error": "That album has no files on disk to reassign"}
@@ -248,6 +330,9 @@ def apply_reassign(
     that has shown the user the preview and had them accept it passes True;
     a caller that has not cannot cause it by accident.
     """
+    if lib2_album_id(local_album_id) is None:
+        return {"success": False, "error": LEGACY_SUBJECT_ERROR}
+
     if is_same_release(database, local_album_id, source, album_id):
         return {"success": False,
                 "error": "This album is already assigned to that release"}

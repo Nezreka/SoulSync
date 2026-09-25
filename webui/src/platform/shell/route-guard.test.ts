@@ -24,12 +24,9 @@ describe('guardPageAccess', () => {
   });
 
   it('NEVER redirects a denied page to itself — the infinite-loop pin', () => {
-    // The test bridge's home page is 'discover'. A deny-everything bridge once
-    // sent every gated route home to /discover, whose own gate denied it and
-    // redirected home to /discover, forever — the router allocated ~1MB/s and
-    // the worker died. Two route files ground for 28 minutes each in CI
-    // because of this; the guard must render the denied home page instead.
+    // A deny-everything bridge falls back to Help. The guard must render that
+    // denied fallback instead of redirecting it to itself forever.
     const bridge = createShellBridge({ isPageAllowed: vi.fn(() => false) });
-    expect(() => guardPageAccess(bridge, 'discover')).not.toThrow();
+    expect(() => guardPageAccess(bridge, 'help')).not.toThrow();
   });
 });

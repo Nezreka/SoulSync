@@ -17,6 +17,7 @@ a group row renders with a label and no meaning.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import threading
@@ -75,11 +76,13 @@ def worker():
 
 
 def _insert(worker, finding_type, *, status='pending', severity='info',
-            job_id='orphan_file_detector', created_at='2026-08-01 10:00:00'):
+            job_id='orphan_file_detector', created_at='2026-08-01 10:00:00',
+            details_json='{}'):
     worker.db._conn.execute(
-        "INSERT INTO repair_findings (job_id, finding_type, severity, status, title, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (job_id, finding_type, severity, status, f'{finding_type} row', created_at))
+        "INSERT INTO repair_findings (job_id, finding_type, severity, status, title, "
+        "created_at, details_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (job_id, finding_type, severity, status, f'{finding_type} row', created_at,
+         details_json))
     worker.db._conn.commit()
 
 
@@ -244,11 +247,14 @@ def _registered_job_ids() -> set:
     Importing the package would drag in the whole scanning stack for what is a
     question about a string constant.
     """
+    from core.repair_jobs import RETIRED_JOB_IDS
+
     ids = set()
     for path in _JOBS_DIR.glob('*.py'):
-        for match in re.finditer(r"^    job_id = '([^']+)'", path.read_text(encoding='utf-8'), re.M):
-            ids.add(match.group(1))
-    return ids
+        pattern = r'''^    job_id = (["'])([^"']+)\1'''
+        for match in re.finditer(pattern, path.read_text(encoding='utf-8'), re.M):
+            ids.add(match.group(2))
+    return ids - set(RETIRED_JOB_IDS)
 
 
 def test_every_job_is_filed_under_a_family():
@@ -275,3 +281,42 @@ def test_every_family_is_in_the_display_order():
 
     unordered = sorted(set(JOB_CATEGORIES.values()) - set(JOB_CATEGORY_ORDER))
     assert not unordered, f"family missing from JOB_CATEGORY_ORDER: {unordered}"
+
+
+# ── the hand-set count a bulk choice needs ───────────────────────────────────
+#
+# "Apply everything" and "apply everything except the fields I set myself" are
+# two different requests, and the user has to be able to tell which one they
+# want BEFORE clicking. That means the group row has to say how many of its
+# pending findings would overwrite a hand-set value — counted here, not by the
+# client walking every finding's diff.
+
+def test_a_group_counts_its_hand_set_conflicts(worker):
+    _insert(worker, 'library_retag', job_id='library_retag',
+            details_json=json.dumps({'has_manual_conflict': True}))
+    _insert(worker, 'library_retag', job_id='library_retag',
+            details_json=json.dumps({'has_manual_conflict': False}))
+    _insert(worker, 'library_retag', job_id='library_retag',
+            details_json=json.dumps({}))
+
+    group = _by_type(worker.get_finding_groups())['library_retag']
+
+    assert group['pending'] == 3
+    assert group['manual_conflicts'] == 1
+
+
+def test_a_resolved_conflict_is_not_still_counted(worker):
+    """The number sits next to "apply all N", and that action only touches
+    pending rows."""
+    _insert(worker, 'library_retag', job_id='library_retag', status='resolved',
+            details_json=json.dumps({'has_manual_conflict': True}))
+
+    group = _by_type(worker.get_finding_groups())['library_retag']
+
+    assert group['manual_conflicts'] == 0
+
+
+def test_a_type_that_cannot_have_conflicts_reports_zero(worker):
+    _insert(worker, 'orphan_file')
+
+    assert _by_type(worker.get_finding_groups())['orphan_file']['manual_conflicts'] == 0

@@ -56,32 +56,34 @@ from utils.logging_config import get_logger
 logger = get_logger("downloads.atomic_recovery")
 
 
-def make_db_path_updater(db):
-    """``fn(old_path, new_path) -> rows | None`` repointing a library row.
+def make_db_path_updater(db, *, count_is_evidence: bool = True):
+    """``fn(old_path, new_path) -> rows | None`` repointing a library file row.
 
-    Returns None — meaning "this count carries no information" — on anything but
-    a ``soulsync`` media server, because rows holding a staged path are only
-    ever written by ``record_soulsync_library_entry``, which is gated on that.
-    Reading a legitimate 0 as failure is what stranded albums in staging for
-    Navidrome/Plex/Jellyfin users in the first place.
+    Library v2: the file row lives in ``lib2_track_files`` and is written by
+    ``require_library_v2_registration``, which the import pipeline runs on
+    EVERY install whatever the media server -- so, unlike upstream's legacy
+    ``tracks`` row (only written on a 'soulsync' server), a zero here is real
+    evidence that the catalogue does not know where the file went, and the
+    live publish rolls the album back on it (L2-002).
+
+    ``count_is_evidence=False`` returns None ("unknown") instead. That is the
+    startup recovery's setting: a tree abandoned by an older build may never
+    have been registered, and a recovery that refuses to publish on a zero
+    would strand exactly the albums it exists to rescue. The scan registers
+    them once they are live.
     """
     def _update(old_path: str, new_path: str):
+        from core.library2.track_files import repoint_file_path
+
         conn = db._get_connection()
         try:
-            cur = conn.cursor()
-            cur.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                        (new_path, old_path))
+            repointed = repoint_file_path(conn, old_path, new_path)
             conn.commit()
-            rowcount = getattr(cur, 'rowcount', None)
         finally:
             conn.close()
-        try:
-            from core.settings import config_manager as _cm
-            if _cm.get_active_media_server() != 'soulsync':
-                return None
-        except Exception:  # noqa: BLE001 - can't tell whose rows these are → unknown
+        if not count_is_evidence:
             return None
-        return int(rowcount) if isinstance(rowcount, int) else None
+        return int(repointed) if isinstance(repointed, int) else None
     return _update
 
 
@@ -309,7 +311,7 @@ def recover_orphan_staging(transfer_dirs: Iterable[str], *,
             from database.music_database import MusicDatabase
             result = _publish.publish_album_batch(
                 root, transfer_dir, safe_move_file,
-                make_db_path_updater(MusicDatabase()))
+                make_db_path_updater(MusicDatabase(), count_is_evidence=False))
         except Exception as exc:  # noqa: BLE001
             logger.error("[Atomic Recovery] Publish of %s failed, files kept in staging: %s",
                          root, exc, exc_info=True)

@@ -22,7 +22,9 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from core.imports.paths import config_root_path, library_root_for_profile
+from core.imports.paths import (
+    config_root_path, import_owner_id, library_root_for_profile,
+)
 from core.playlists.materialize import (
     RebuildSummary,
     normalize_mode,
@@ -41,7 +43,7 @@ def collect_batch_real_paths(batch: dict, download_tasks: dict, *, config_manage
 
     out: List[str] = []
     seen = set()
-    library_root = library_root_for_profile(batch.get("profile_id"))
+    library_root = library_root_for_profile(import_owner_id(batch))
 
     def _add(stored_path: Any) -> None:
         if not stored_path:
@@ -175,7 +177,7 @@ def _rebuild_one_from_db(db, config_manager, playlist: dict):
     # completion threads and automations as well as requests, so the scope
     # comes from the row, not from whoever happens to be calling
     from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
-    library_root = library_root_for_profile(playlist.get("profile_id"))
+    library_root = library_root_for_profile(import_owner_id(playlist))
     resolved: List[dict] = []
     seen = set()
     _scope_token = set_library_scope(library_scope_for_profile(playlist.get("profile_id")))

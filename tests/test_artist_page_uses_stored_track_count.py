@@ -22,29 +22,47 @@ import core.metadata.completion as completion
 from database.music_database import MusicDatabase
 
 
+# Upstream stores the provider's total in ``albums.api_track_count``. The
+# catalogue's own name for that number -- the true total from metadata, as
+# opposed to ``track_count``, which is what the server reported -- is
+# ``lib2_albums.expected_track_count``, and that is the column the ported
+# get/set pair reads. Seeded through the shared catalogue helper, so the album
+# ids the assertions use are the ones the fixture actually created.
+ALBUMS = {}
+
+
 @pytest.fixture()
 def db(tmp_path):
+    from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
     d = MusicDatabase(database_path=str(tmp_path / "music.db"))
-    c = sqlite3.connect(str(d.database_path))
-    c.execute("INSERT INTO artists (id, name, server_source) VALUES (1, 'Oasis', 'plex')")
-    # 10: proven deezer release with a stored count; 11: proven, no count yet;
-    # 12: same title, different deezer id (another edition), stored count
-    c.execute("INSERT INTO albums (id, artist_id, title, server_source, deezer_id, api_track_count) VALUES (10, 1, 'Definitely Maybe', 'plex', 'dz-10', 11)")
-    c.execute("INSERT INTO albums (id, artist_id, title, server_source, deezer_id, api_track_count) VALUES (11, 1, 'Be Here Now', 'plex', 'dz-11', NULL)")
-    c.execute("INSERT INTO albums (id, artist_id, title, server_source, deezer_id, api_track_count) VALUES (12, 1, 'Morning Glory', 'plex', 'dz-12-deluxe', 20)")
-    n = 0
-    for alb, count in ((10, 11), (11, 12), (12, 12)):
-        for i in range(1, count + 1):
-            n += 1
-            c.execute("INSERT INTO tracks (id, album_id, artist_id, title, server_source, file_path, track_number) VALUES (?, ?, 1, ?, 'plex', ?, ?)",
-                      (n, alb, f"Track {alb}-{i}", f"/m/{alb}/{i}.flac", i))
-    c.commit()
-    c.close()
+    ALBUMS.clear()
+    conn = d._get_connection()
+    try:
+        artist = seed_artist(conn, server_id='ar-1', name='Oasis')
+        # 10: proven deezer release with a stored count; 11: proven, no count yet;
+        # 12: same title, different deezer id (another edition), stored count
+        spec = ((10, 'Definitely Maybe', 'dz-10', 11, 11),
+                (11, 'Be Here Now', 'dz-11', None, 12),
+                (12, 'Morning Glory', 'dz-12-deluxe', 20, 12))
+        for key, title, deezer_id, expected, files in spec:
+            album = seed_album(conn, server_id=f'al-{key}', title=title, artist_id=artist)
+            ALBUMS[key] = album
+            conn.execute(
+                "UPDATE lib2_albums SET expected_track_count=?,"
+                " external_ids=json_set(COALESCE(external_ids,'{}'), '$.deezer', ?)"
+                " WHERE id=?", (expected, deezer_id, album))
+            for i in range(1, files + 1):
+                seed_track(conn, server_id=f'tr-{key}-{i}', title=f'Track {key}-{i}',
+                           album_id=album, artist_id=artist, track_number=i,
+                           file_path=f'/m/{key}/{i}.flac')
+        conn.commit()
+    finally:
+        conn.close()
     return d
 
 
 def _counts(db, ids):
-    # albums.id is TEXT in the schema (plex rating keys), so keys come back as strings
     return {int(k): v for k, v in db.get_album_api_track_counts(ids).items()}
 
 
@@ -84,7 +102,7 @@ def test_album_without_a_count_is_fetched_once_and_remembered(db):
     assert calls == [("deezer", "dz-11")]
     assert first["expected_tracks"] == 14
     assert first["status"] == "partial"           # 12 of 14
-    assert _counts(db, [11]) == {11: 14}
+    assert _counts(db, [ALBUMS[11]]) == {ALBUMS[11]: 14}
     calls = []
     second = _check(db, {"id": "dz-11", "name": "Be Here Now", "total_tracks": 0}, calls)
     assert calls == []
@@ -101,7 +119,7 @@ def test_a_different_edition_still_fetches(db):
     assert calls == [("deezer", "dz-12-standard")]
     assert result["expected_tracks"] == 12
     # and the deluxe row's own count is untouched
-    assert _counts(db, [12]) == {12: 20}
+    assert _counts(db, [ALBUMS[12]]) == {ALBUMS[12]: 20}
 
 
 def test_a_card_that_carries_its_count_needs_neither(db):
@@ -112,9 +130,9 @@ def test_a_card_that_carries_its_count_needs_neither(db):
 
 
 def test_remember_never_overwrites_an_existing_count(db):
-    assert db.set_album_api_track_count(10, 99) is False
-    assert _counts(db, [10]) == {10: 11}
-    assert db.set_album_api_track_count(11, 0) is False
-    assert db.set_album_api_track_count(11, "x") is False
-    assert db.set_album_api_track_count(11, 12) is True
-    assert _counts(db, [10, 11, 12]) == {10: 11, 11: 12, 12: 20}
+    assert db.set_album_api_track_count(ALBUMS[10], 99) is False
+    assert _counts(db, [ALBUMS[10]]) == {ALBUMS[10]: 11}
+    assert db.set_album_api_track_count(ALBUMS[11], 0) is False
+    assert db.set_album_api_track_count(ALBUMS[11], "x") is False
+    assert db.set_album_api_track_count(ALBUMS[11], 12) is True
+    assert _counts(db, [ALBUMS[10], ALBUMS[11], ALBUMS[12]]) == {ALBUMS[10]: 11, ALBUMS[11]: 12, ALBUMS[12]: 20}

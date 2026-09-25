@@ -1,6 +1,5 @@
 // MUSICBRAINZ ENRICHMENT UI - PHASE 5 WEB UI
 // ============================================================================
-
 /**
  * Bundled status hydrate: every per-service status reader below goes through
  * this instead of its own /api/enrichment/<id>/status request — one
@@ -853,4 +852,3 @@ async function _selectMBMatch(entryId, mbid, mbName) {
 }
 
 // ===================================================================
-

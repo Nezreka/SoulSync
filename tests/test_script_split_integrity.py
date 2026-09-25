@@ -78,7 +78,6 @@ def _shell_window_exports() -> set[str]:
 KNOWN_CROSS_FILE_DUPES = {
     "escapeHtml",        # downloads.js, shared-helpers.js
     "formatDuration",    # sync-spotify.js, wishlist-tools.js, sync-services.js
-    "_escAttr",          # downloads.js, stats-automations.js
     "_formatDuration",   # stats-automations.js, wishlist-tools.js
                          # (pages-extra.js declared a THIRD, millisecond-based
                          #  copy that loaded last and shadowed both; it went
@@ -91,6 +90,15 @@ KNOWN_CROSS_FILE_DUPES = {
 #     — downloads.js declared all three AND so did wishlist-tools.js, which
 #       loads second, so the downloads.js copies had never run. Deleted.
 #   loadDashboardData — search.js's copy went with the file.
+# Resolved by the frontend audit (FE-07):
+#   _escAttr — downloads.js declared a JS-STRING escaper and stats-automations.js
+#     an HTML-ENTITY one under the same global name; stats-automations.js loads
+#     second, so its version won for both files and the onclick builders got
+#     `&#39;` where they needed `\'`. The attribute parser decoded it back into
+#     a bare apostrophe, which closed the JS string literal and threw — killing
+#     the whole handler ("Road trip-The Rolfe's" delete button). The downloads.js
+#     copy is gone; `_escAttr` and `_escJs` both live in stats-automations.js and
+#     each call site picks the one its context needs.
 
 # Pre-existing same-file duplicates (two filter UIs reuse the same names).
 # (the wishlist-tools double-pasted filter block was removed — c5a8bf241 —

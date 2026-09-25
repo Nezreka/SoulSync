@@ -23,6 +23,10 @@ os.environ['SOULSYNC_TEST_DB_READY'] = '1'
 
 web_server = pytest.importorskip('web_server')
 
+from tests.support.catalogue_seed import (  # noqa: E402
+    seed_album, seed_artist, seed_track,
+)
+
 
 @pytest.fixture
 def client():
@@ -42,61 +46,57 @@ def _set_default_profile_ranked_targets(db, ranked_targets_json):
 
 
 def _seed_artist_with_tracks():
+    """A SoulSync-imported artist with one lossless and one lossy track.
+    Returns (db, artist_id, {name: track_id}) — the catalogue mints the ids."""
     db = web_server.get_database()
     conn = db._get_connection()
     try:
-        conn.execute(
-            "INSERT OR REPLACE INTO artists (id, name, genres, server_source) "
-            "VALUES (?, ?, ?, ?)",
-            ('99101', 'Quality Test Artist', '[]', 'soulsync'),
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO albums (id, artist_id, title, server_source) "
-            "VALUES (?, ?, ?, ?)",
-            ('alb-qa-1', '99101', 'Test Album', 'soulsync'),
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO tracks (id, album_id, artist_id, title, file_path, server_source) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            ('trk-qa-flac', 'alb-qa-1', '99101', 'Lossless Track', '/music/a/track.flac', 'soulsync'),
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO tracks (id, album_id, artist_id, title, file_path, server_source) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            ('trk-qa-mp3', 'alb-qa-1', '99101', 'Lossy Track', '/music/a/track.mp3', 'soulsync'),
-        )
+        artist_id = seed_artist(conn, server_id='99101', name='Quality Test Artist',
+                                server_source='soulsync')
+        album_id = seed_album(conn, server_id='alb-qa-1', title='Test Album',
+                              artist_id=artist_id, server_source='soulsync')
+        tracks = {
+            'flac': seed_track(conn, server_id='trk-qa-flac', title='Lossless Track',
+                               album_id=album_id, artist_id=artist_id,
+                               server_source='soulsync',
+                               file_path='/music/a/track.flac'),
+            'mp3': seed_track(conn, server_id='trk-qa-mp3', title='Lossy Track',
+                              album_id=album_id, artist_id=artist_id,
+                              server_source='soulsync',
+                              file_path='/music/a/track.mp3'),
+        }
         conn.commit()
     finally:
         conn.close()
-    return db
+    return db, artist_id, tracks
 
 
 def test_min_acceptable_tier_reflects_v3_ranked_targets(client):
     """A profile whose only ranked target is FLAC must resolve to the
     'lossless' tier (1), not the broken always-999 fallback."""
-    db = _seed_artist_with_tracks()
+    db, artist_id, tracks = _seed_artist_with_tracks()
     _set_default_profile_ranked_targets(db, '[{"label": "FLAC", "format": "flac"}]')
 
-    r = client.get('/api/library/artist/99101/quality-analysis')
+    r = client.get(f'/api/library/artist/{artist_id}/quality-analysis')
     assert r.status_code == 200
     body = r.get_json()
     assert body['success'] is True
     assert body['min_acceptable_tier'] == 1
 
     tiers_by_id = {t['track_id']: t['tier_num'] for t in body['tracks']}
-    assert tiers_by_id['trk-qa-flac'] == 1
-    assert tiers_by_id['trk-qa-mp3'] == 4
+    assert tiers_by_id[tracks['flac']] == 1
+    assert tiers_by_id[tracks['mp3']] == 4
 
 
 def test_min_acceptable_tier_with_multiple_ranked_targets_takes_the_best(client):
     """Mirrors the pre-existing v2 semantics (`min(...)` across enabled
     qualities): if both FLAC and MP3 are ranked targets, the best (lowest
     tier number) still wins so the Enhance button targets the top quality."""
-    db = _seed_artist_with_tracks()
+    db, artist_id, _ = _seed_artist_with_tracks()
     _set_default_profile_ranked_targets(
         db, '[{"label": "FLAC", "format": "flac"}, {"label": "MP3 320", "format": "mp3", "min_bitrate": 320}]')
 
-    r = client.get('/api/library/artist/99101/quality-analysis')
+    r = client.get(f'/api/library/artist/{artist_id}/quality-analysis')
     body = r.get_json()
     assert body['success'] is True
     assert body['min_acceptable_tier'] == 1
@@ -105,10 +105,10 @@ def test_min_acceptable_tier_with_multiple_ranked_targets_takes_the_best(client)
 def test_no_ranked_targets_falls_back_to_no_constraint(client):
     """An "accept anything" profile (empty ranked_targets) must not crash and
     should leave min_acceptable_tier at the no-constraint sentinel."""
-    db = _seed_artist_with_tracks()
+    db, artist_id, _ = _seed_artist_with_tracks()
     _set_default_profile_ranked_targets(db, '[]')
 
-    r = client.get('/api/library/artist/99101/quality-analysis')
+    r = client.get(f'/api/library/artist/{artist_id}/quality-analysis')
     assert r.status_code == 200
     body = r.get_json()
     assert body['success'] is True

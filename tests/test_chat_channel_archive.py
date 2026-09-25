@@ -84,15 +84,32 @@ def test_resolve_library_tracks_batches_in_one_pass(tmp_path):
     db = _db(tmp_path)
     conn = db._get_connection()
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (?,?)", ('ar1', 'Ado'))
-        conn.execute("INSERT INTO albums (id, artist_id, title, thumb_url) VALUES (?,?,?,?)",
-                     ('al1', 'ar1', 'Kyougen', 'k.jpg'))
         conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (?,?,?,?,?)",
-            ('t1', 'al1', 'ar1', 'Show', '/m/show.flac'))
+            "INSERT INTO lib2_artists (id, name, name_key) VALUES (?,?,?)",
+            (1, 'Ado', 'ado'),
+        )
         conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (?,?,?,?,?)",
-            ('t2', 'al1', 'ar1', 'Gone File', ''))
+            "INSERT INTO lib2_albums (id, primary_artist_id, title, image_url)"
+            " VALUES (?,?,?,?)", (1, 1, 'Kyougen', 'k.jpg'),
+        )
+        conn.execute(
+            "INSERT INTO lib2_tracks (id, album_id, title) VALUES (?,?,?)",
+            (1, 1, 'Show'),
+        )
+        conn.execute(
+            "INSERT INTO lib2_tracks (id, album_id, title) VALUES (?,?,?)",
+            (2, 1, 'Gone File'),
+        )
+        conn.executemany(
+            "INSERT INTO lib2_track_artists (track_id, artist_id, role, position)"
+            " VALUES (?,?,?,?)", [(1, 1, 'primary', 0), (2, 1, 'primary', 0)],
+        )
+        conn.executemany(
+            "INSERT INTO lib2_track_files"
+            " (track_id, path, is_primary, file_state, source) VALUES (?,?,?,?,?)",
+            [(1, '/m/show.flac', 1, 'active', 'import'),
+             (2, '', 1, 'active', 'import')],
+        )
         conn.commit()
     finally:
         conn.close()

@@ -31,11 +31,17 @@ def _cache(db, src_id, server_id, server_source="navidrome"):
 
 
 def _seed_track(db, tid, path):
+    """A catalogue track that owns ``path``. The server ids in this test stand
+    for the media server's own track ids, which is exactly what `server_id` is
+    for — the catalogue's own row id is minted and returned."""
+    from tests.support.catalogue_seed import seed_library_track
     with db._get_connection() as conn:
-        conn.execute("PRAGMA foreign_keys=OFF")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (?, 1, 1, 'T', ?)",
-            (tid, path))
+        track_id = seed_library_track(conn, artist='A', album='Al', title='T',
+                                      artist_server_id=f'ar-{tid}',
+                                      album_server_id=f'al-{tid}',
+                                      track_server_id=tid, file_path=path)
+        conn.commit()
+        return track_id
 
 
 def test_bulk_read_matches_per_row_and_bumps_use_count(db):
@@ -80,7 +86,7 @@ def test_bulk_lookup_agrees_with_per_row_resolver(db):
     db.save_manual_library_match(1, "spotify", "heal", "v3-old",
                                  server_source="navidrome",
                                  library_file_path="/music/A/B/03.flac")
-    _seed_track(db, "v3-new", "/music/A/B/03.flac")            # rescan re-keyed it
+    healed = _seed_track(db, "v3-new", "/music/A/B/03.flac")   # rescan re-keyed it
 
     sources = [{"source_track_id": s} for s in ("hit", "stale-cache", "heal", "nope")]
     bulk = build_bulk_override_lookup(db, 1, "navidrome", valid, sources)
@@ -92,9 +98,11 @@ def test_bulk_lookup_agrees_with_per_row_resolver(db):
     assert bulk("stale-cache") == "v2"
     assert bulk("heal") == "v3-new"
     assert bulk("nope") is None
-    # the self-heal persisted — next lookup is a direct hit
+    # the self-heal persisted — next lookup is a direct hit. What it stores is
+    # the CATALOGUE id; "v3-new" is the server's id for the same track, which
+    # is what the playlist speaks and therefore what the lookup returns.
     row = db.get_manual_library_match(1, "spotify", "heal", server_source="navidrome")
-    assert row["library_track_id"] == "v3-new"
+    assert str(row["library_track_id"]) == str(healed)
 
 
 def test_stub_db_without_bulk_methods_falls_back_per_row():

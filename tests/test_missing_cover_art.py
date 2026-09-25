@@ -1,3 +1,20 @@
+"""Cover Art Filler — the scan's own decisions, against the Library-v2 catalogue.
+
+These tests used to build a hand-rolled ``artists``/``albums``/``tracks`` schema
+and monkeypatch ``get_client_for_source``/``get_primary_source`` on the job
+module. Both are gone: the scan walks ``active_album_subjects`` and asks
+``core.library2.provider_adapters.fetch_artwork_url`` for a URL, and the
+per-source client walk it replaced has been deleted from the job along with the
+search-result matching helpers it used.
+
+That split is why this file is now shorter. *Which* provider answers, in what
+order, and whether a fuzzy search result may be trusted are properties of
+``fetch_artwork_url`` and ``core.metadata.art_lookup``, tested in
+``tests/library2/test_provider_adapters.py``. What is still this job's own is
+the decision to raise a finding at all: DB image, embedded art, and cover.jpg
+sidecar, each checked against the path the file actually lives at.
+"""
+
 import sqlite3
 import sys
 import types
@@ -37,99 +54,45 @@ if 'core.settings' not in sys.modules:
     sys.modules['config'] = config_mod
     sys.modules['core.settings'] = settings_mod
 
+from core.library2.provider_adapters import ArtworkProviderResult
 from core.repair_jobs import missing_cover_art as mca
 
 
-class _FakeClient:
-    def __init__(self, album_image=None, search_image=None):
-        self.album_image = album_image
-        self.search_image = search_image
-        self.get_album_calls = []
-        self.search_calls = []
-
-    def get_album(self, album_id, include_tracks=False):
-        self.get_album_calls.append((album_id, include_tracks))
-        if self.album_image is None:
-            return None
-        if isinstance(self.album_image, str):
-            return {'images': [{'url': self.album_image}]}
-        return self.album_image
-
-    def search_albums(self, query, limit=1):
-        self.search_calls.append((query, limit))
-        if self.search_image is None:
-            return []
-        # Real source clients return album results carrying title + artist;
-        # the filler now validates those before trusting the artwork.
-        return [SimpleNamespace(id='search-album', image_url=self.search_image,
-                                title='Album', artist='Artist')]
+def _found(url='https://img/found', source='spotify'):
+    return ArtworkProviderResult(
+        kind='album', source=source, provider_entity_id='sp-album', url=url)
 
 
-def _make_db(album_row):
+def _make_db(*, album_image='', file_path=None, album_external_ids='{}'):
+    from core.library2.schema import ensure_library_v2_schema
+
     conn = sqlite3.connect(':memory:')
     conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        CREATE TABLE artists (
-            id INTEGER PRIMARY KEY,
-            name TEXT,
-            thumb_url TEXT
-        )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TABLE albums (
-            id INTEGER PRIMARY KEY,
-            title TEXT,
-            artist_id INTEGER,
-            thumb_url TEXT,
-            spotify_album_id TEXT,
-            itunes_album_id TEXT,
-            deezer_id TEXT,
-            discogs_id TEXT,
-            soul_id TEXT
-        )
-        """
-    )
-    # The scan now joins a representative track path to check art on disk.
-    cursor.execute(
-        """
-        CREATE TABLE tracks (
-            id INTEGER PRIMARY KEY,
-            album_id INTEGER,
-            file_path TEXT,
-            disc_number INTEGER,
-            track_number INTEGER
-        )
-        """
-    )
-    cursor.execute(
-        "INSERT INTO artists (id, name, thumb_url) VALUES (?, ?, ?)",
-        (1, 'Artist', 'https://artist/thumb'),
-    )
-    cursor.execute(
-        """
-        INSERT INTO albums
-            (id, title, artist_id, thumb_url, spotify_album_id, itunes_album_id, deezer_id, discogs_id, soul_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        album_row,
-    )
+    ensure_library_v2_schema(conn)
+    conn.execute(
+        "INSERT INTO lib2_artists (id, name, sort_name, image_url) "
+        "VALUES (1, 'Artist', 'Artist', 'https://artist/thumb')")
+    conn.execute(
+        "INSERT INTO lib2_albums (id, primary_artist_id, title, image_url, external_ids) "
+        "VALUES (1, 1, 'Album', ?, ?)", (album_image, album_external_ids))
+    conn.execute(
+        "INSERT INTO lib2_tracks (id, album_id, title, track_number) "
+        "VALUES (1, 1, 'Track', 1)")
+    if file_path:
+        conn.execute(
+            "INSERT INTO lib2_track_files (track_id, path, format, is_primary) "
+            "VALUES (1, ?, 'flac', 1)", (file_path,))
     conn.commit()
     return conn
 
 
-def _make_context(conn, prefer_source=None):
-    job_settings = {}
-    if prefer_source is not None:
-        job_settings['prefer_source'] = prefer_source
-    settings = {'repair.jobs.missing_cover_art.settings': job_settings}
+def _make_context(conn, **settings):
+    values = {'features.library_v2': True, **settings}
     findings = []
     return SimpleNamespace(
         db=SimpleNamespace(_get_connection=lambda: conn),
-        config_manager=SimpleNamespace(get=lambda key, default=None: settings.get(key, default)),
+        config_manager=SimpleNamespace(
+            get=lambda key, default=None: values.get(key, default)),
         check_stop=lambda: False,
         wait_if_paused=lambda: False,
         update_progress=lambda *args, **kwargs: None,
@@ -140,189 +103,108 @@ def _make_context(conn, prefer_source=None):
     )
 
 
-def test_missing_cover_art_prefers_explicit_source_over_primary(monkeypatch):
-    conn = _make_db((1, 'Album', 1, '', 'sp-album', 'it-album', 'dz-album', 'dg-album', 'hy-album'))
-    context = _make_context(conn, prefer_source='spotify')
-
-    deezer_client = _FakeClient(album_image='https://img/deezer-direct')
-    spotify_client = _FakeClient(album_image='https://img/spotify-direct')
-
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'deezer')
-    monkeypatch.setattr(
-        mca,
-        'get_client_for_source',
-        lambda source: {'deezer': deezer_client, 'spotify': spotify_client}.get(source),
-    )
-
-    result = mca.MissingCoverArtJob().scan(context)
-
-    assert result.findings_created == 1
-    assert spotify_client.get_album_calls == [('sp-album', False)]
-    assert deezer_client.get_album_calls == []
-    assert context.findings[0]['details']['found_artwork_url'] == 'https://img/spotify-direct'
+def _patch_disk(monkeypatch, *, resolved, embedded, sidecar, record=None):
+    monkeypatch.setattr('core.library2.paths.resolve_lib2_path',
+                        lambda raw, **k: resolved(raw) if callable(resolved) else resolved)
+    monkeypatch.setattr('core.metadata.art_apply.file_has_embedded_art',
+                        lambda p: (record.append(p) if record is not None else None) or embedded)
+    monkeypatch.setattr('core.metadata.art_apply.folder_has_cover_sidecar',
+                        lambda d: (record.append(d) if record is not None else None) or sidecar)
 
 
-def test_missing_cover_art_uses_configured_art_sources(monkeypatch):
-    """When cover-art sources are configured (album_art_order), the Filler pulls
-    art from them and skips the metadata source-priority loop — same 'cover art
-    sources' notion the Re-tag job and post-process embed honor."""
-    conn = _make_db((1, 'Album', 1, '', 'sp-album', 'it-album', 'dz-album', 'dg-album', 'hy-album'))
-    settings = {
-        'repair.jobs.missing_cover_art.settings': {},
-        'metadata_enhancement.album_art_order': ['itunes', 'deezer'],
-    }
-    findings = []
-    context = SimpleNamespace(
-        db=SimpleNamespace(_get_connection=lambda: conn),
-        config_manager=SimpleNamespace(get=lambda key, default=None: settings.get(key, default)),
-        check_stop=lambda: False, wait_if_paused=lambda: False,
-        update_progress=lambda *a, **k: None, report_progress=lambda *a, **k: None,
-        create_finding=lambda **kw: (findings.append(kw) or True),
-        findings=findings,
-    )
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
-    consulted = []
-    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: consulted.append(s) or _FakeClient())
-    monkeypatch.setattr('core.metadata.art_lookup.select_preferred_art_url',
-                        lambda artist, album, meta, order, **k: 'https://configured/art.jpg')
+def _patch_artwork(monkeypatch, album=None, artist=None, calls=None):
+    def fake(kind, **kwargs):
+        if calls is not None:
+            calls.append((kind, kwargs))
+        return album if kind == 'album' else artist
+
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_artwork_url', fake)
+
+
+# ── which sources the job asks for, and in what order ────────────────────────
+
+def test_prefer_source_leads_the_configured_order(monkeypatch):
+    """The job's own ``prefer_source`` setting goes to the FRONT of the order it
+    hands the adapter, and does not appear twice."""
+    conn = _make_db(file_path='/music/Album/01.flac')
+    context = _make_context(
+        conn,
+        **{'repair.jobs.missing_cover_art.settings': {'prefer_source': 'spotify'},
+           'metadata_enhancement.album_art_order': ['itunes', 'spotify', 'deezer']})
+    _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=False, sidecar=False)
+    calls = []
+    _patch_artwork(monkeypatch, album=_found(), calls=calls)
 
     result = mca.MissingCoverArtJob().scan(context)
 
     assert result.findings_created == 1
-    # ALBUM art came from the configured order — the album source-priority loop
-    # was skipped (if it had run, the URL would be the fake client's art).
-    assert findings[0]['details']['found_artwork_url'] == 'https://configured/art.jpg'
-    # Artist-art search (Pache711) is a SEPARATE lookup that does consult the
-    # sources; the fake client has no search_artists, so it finds nothing and
-    # no artist target is offered.
-    assert findings[0]['details']['found_artist_url'] is None
+    album_call = next(kwargs for kind, kwargs in calls if kind == 'album')
+    assert album_call['source_order'] == ('spotify', 'itunes', 'deezer')
 
 
-def test_missing_cover_art_uses_primary_when_prefer_unset(monkeypatch):
-    conn = _make_db((1, 'Album', 1, '', None, None, None, None, None))
+def test_configured_art_order_is_passed_through_unchanged(monkeypatch):
+    """`album_art_order` is the same 'cover art sources' notion the Re-tag job
+    and the post-process embed honour."""
+    conn = _make_db(file_path='/music/Album/01.flac')
+    context = _make_context(
+        conn, **{'metadata_enhancement.album_art_order': ['itunes', 'deezer']})
+    _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=False, sidecar=False)
+    calls = []
+    _patch_artwork(monkeypatch, album=_found(url='https://configured/art.jpg'), calls=calls)
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 1
+    album_call = next(kwargs for kind, kwargs in calls if kind == 'album')
+    assert album_call['source_order'] == ('itunes', 'deezer')
+    assert context.findings[0]['details']['found_artwork_url'] == 'https://configured/art.jpg'
+
+
+def test_artist_art_is_only_offered_when_it_differs(monkeypatch):
+    """Pache711: artist art is a separate, independently applyable target — but
+    offering the image the artist already has would be a no-op finding."""
+    conn = _make_db(file_path='/music/Album/01.flac')
     context = _make_context(conn)
+    _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=False, sidecar=False)
+    _patch_artwork(
+        monkeypatch, album=_found(),
+        artist=ArtworkProviderResult(kind='artist', source='spotify',
+                                     provider_entity_id='sp-artist',
+                                     url='https://artist/thumb'))
 
-    discogs_client = _FakeClient(search_image='https://img/discogs-search')
-    spotify_client = _FakeClient(search_image='https://img/spotify-search')
-    itunes_client = _FakeClient(search_image='https://img/itunes-search')
+    mca.MissingCoverArtJob().scan(context)
 
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'discogs')
-    monkeypatch.setattr(
-        mca,
-        'get_client_for_source',
-        lambda source: {'discogs': discogs_client, 'spotify': spotify_client, 'itunes': itunes_client}.get(source),
-    )
-
-    result = mca.MissingCoverArtJob().scan(context)
-
-    assert result.findings_created == 1
-    assert discogs_client.search_calls == [('Artist Album', 5)]
-    assert spotify_client.search_calls == []
-    assert itunes_client.search_calls == []
-    assert context.findings[0]['details']['found_artwork_url'] == 'https://img/discogs-search'
+    assert context.findings[0]['details']['found_artist_url'] is None
 
 
-# ── Stricter matching (issue: new sources returning WRONG cover art) ──
-
-class _SearchClient:
-    """search_albums returns whatever results it's given (title/artist/image)."""
-    def __init__(self, results):
-        self._results = results
-        self.search_calls = []
-
-    def get_album(self, album_id, include_tracks=False):
-        return None
-
-    def search_albums(self, query, limit=1):
-        self.search_calls.append((query, limit))
-        return list(self._results)
-
-
-def test_search_rejects_wrong_artist_result(monkeypatch):
-    """A result with the right-ish title but a DIFFERENT artist must be rejected
-    (this is what produced wrong covers from the new sources)."""
-    conn = _make_db((1, 'Album', 1, '', None, None, None, None, None))
-    context = _make_context(conn)
-    client = _SearchClient([SimpleNamespace(id='x', image_url='https://img/wrong',
-                                            title='Album', artist='Different Artist')])
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'discogs')
-    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: client if s == 'discogs' else None)
-
-    result = mca.MissingCoverArtJob().scan(context)
-    assert result.findings_created == 0          # wrong-artist art not accepted
-    assert context.findings == []
-
-
-def test_search_skips_wrong_result_and_takes_matching_one(monkeypatch):
-    """Given several results, take the first that actually matches title+artist."""
-    conn = _make_db((1, 'Album', 1, '', None, None, None, None, None))
-    context = _make_context(conn)
-    client = _SearchClient([
-        SimpleNamespace(id='a', image_url='https://img/wrong', title='Other Record', artist='Someone'),
-        SimpleNamespace(id='b', image_url='https://img/right', title='Album', artist='Artist'),
-    ])
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'discogs')
-    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: client if s == 'discogs' else None)
-
-    result = mca.MissingCoverArtJob().scan(context)
-    assert result.findings_created == 1
-    assert context.findings[0]['details']['found_artwork_url'] == 'https://img/right'
-
-
-def test_result_matches_unit():
-    m = mca.MissingCoverArtJob._result_matches
-    # exact + deluxe variant + featuring all accepted when artist matches
-    assert m({'title': 'Album', 'artist': 'Artist'}, 'Album', 'Artist')
-    assert m({'title': 'Album (Deluxe Edition)', 'artist': 'Artist'}, 'Album', 'Artist')
-    assert m({'title': 'Album', 'artist': 'The Artist'}, 'Album', 'Artist')   # stopword 'the'
-    # wrong artist / wrong title rejected
-    assert not m({'title': 'Album', 'artist': 'Nope'}, 'Album', 'Artist')
-    assert not m({'title': 'Totally Other', 'artist': 'Artist'}, 'Album', 'Artist')
-    # no artist on result → require exact title
-    assert m({'title': 'Album'}, 'Album', 'Artist')
-    assert not m({'title': 'Album Deluxe'}, 'Album', 'Artist')
-
-
-# ── disk-art check must run on the RESOLVED path (flags-every-album bug) ──
-
-def _add_track(conn, path):
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, file_path, disc_number, track_number) "
-        "VALUES (1, 1, ?, 1, 1)", (path,))
-    conn.commit()
-
+# ── disk-art check must run on the RESOLVED path (flags-every-album bug) ─────
 
 def test_scan_checks_disk_art_on_resolved_path(monkeypatch):
-    # Album already has a DB thumb (db not missing) and a track whose DB path
-    # only resolves via mapping. The disk-art check must run on the RESOLVED
-    # path — checking the raw path would fail on path-mapped setups and flag
-    # the whole library while the apply (which resolves) finds art present.
-    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
-    _add_track(conn, '/plex/raw/song.flac')
+    """The stored path may only resolve via mapping. Checking the raw path
+    failed on every path-mapped setup and flagged the whole library, while the
+    apply — which resolves — found the art sitting right there."""
+    conn = _make_db(album_image='https://has/thumb', file_path='/plex/raw/song.flac')
     context = _make_context(conn)
-    checked = {}
-    monkeypatch.setattr(mca, 'resolve_library_file_path',
-                        lambda raw, **k: '/resolved/song.flac' if raw == '/plex/raw/song.flac' else None)
-    monkeypatch.setattr(mca, 'file_has_embedded_art',
-                        lambda p: checked.update(path=p) or True)
-    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: True)  # has cover.jpg too
+    checked = []
+    _patch_disk(
+        monkeypatch,
+        resolved=lambda raw: '/resolved/song.flac' if raw == '/plex/raw/song.flac' else None,
+        embedded=True, sidecar=True, record=checked)
+    _patch_artwork(monkeypatch, album=_found())
 
     result = mca.MissingCoverArtJob().scan(context)
 
-    assert checked.get('path') == '/resolved/song.flac'   # resolved, not raw
-    assert result.findings_created == 0                    # embedded + cover.jpg → not flagged
+    assert checked[0] == '/resolved/song.flac'   # resolved, not raw
+    assert result.findings_created == 0          # embedded + cover.jpg → not flagged
 
 
-def test_scan_unresolvable_path_not_flagged_disk_missing(monkeypatch):
-    # An unreachable file (resolve → None) must NOT be claimed as "missing disk
-    # art" — we can't know, so don't false-flag. (Album has a thumb already.)
-    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
-    _add_track(conn, '/gone/song.flac')
+def test_unresolvable_path_is_not_claimed_as_missing_art(monkeypatch):
+    """An unreachable file cannot be said to lack art — don't false-flag it."""
+    conn = _make_db(album_image='https://has/thumb', file_path='/gone/song.flac')
     context = _make_context(conn)
-    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: None)
     called = []
-    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: called.append(p) or False)
-    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: called.append(d) or False)
+    _patch_disk(monkeypatch, resolved=None, embedded=False, sidecar=False, record=called)
+    _patch_artwork(monkeypatch, album=_found())
 
     result = mca.MissingCoverArtJob().scan(context)
 
@@ -330,102 +212,108 @@ def test_scan_unresolvable_path_not_flagged_disk_missing(monkeypatch):
     assert called == []                   # never checked art on a None path
 
 
-def test_local_album_with_embedded_and_sidecar_not_flagged(monkeypatch):
-    # Has BOTH embedded art AND a cover.jpg — nothing missing, even with an
-    # empty DB thumb cache. (Boulder: don't flag albums that already have art.)
-    conn = _make_db((1, 'Album', 1, '', None, None, None, None, None))  # empty thumb
-    _add_track(conn, '/music/Album/01.flac')
+def test_album_with_art_everywhere_is_not_flagged(monkeypatch):
+    """Boulder: don't flag albums that already have art."""
+    conn = _make_db(album_image='https://has/thumb', file_path='/music/Album/01.flac')
     context = _make_context(conn)
-    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
-    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: True)
-    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: True)
+    _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=True, sidecar=True)
+    _patch_artwork(monkeypatch, album=_found())
 
     result = mca.MissingCoverArtJob().scan(context)
 
-    assert result.findings_created == 0   # has both → not "missing"
+    assert result.findings_created == 0
     assert result.skipped == 1
 
 
+def test_a_blank_catalogue_image_is_a_gap_of_its_own(monkeypatch):
+    """Art on disk does not cover an empty ``lib2_albums.image_url``: that is
+    what the library grid draws, so the album renders blank there. The legacy
+    scan treated the DB thumb as a cache and stayed quiet; the native one names
+    the gap, and ``details`` says which of the three it is."""
+    conn = _make_db(album_image='', file_path='/music/Album/01.flac')
+    context = _make_context(conn)
+    _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=True, sidecar=True)
+    _patch_artwork(monkeypatch, album=_found())
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 1
+    details = context.findings[0]['details']
+    assert (details['db_missing'], details['embed_missing'],
+            details['sidecar_from_embedded']) == (True, False, False)
+
+
 def test_embedded_art_but_no_cover_jpg_is_flagged(monkeypatch):
-    # Sokhi: files HAVE embedded art but no cover.jpg sidecar. With cover.jpg
-    # enabled (default), it's flagged so the filler writes the sidecar — even
-    # when the API finds NO art (the apply extracts the embedded art).
-    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
-    _add_track(conn, '/music/Album/01.flac')
+    """Sokhi: files have embedded art but no cover.jpg. Flagged so the filler
+    writes the sidecar — even when no provider offers a URL, because the apply
+    extracts the embedded art instead."""
+    conn = _make_db(album_image='https://has/thumb', file_path='/music/Album/01.flac')
     context = _make_context(conn)
-    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
-    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: True)      # embedded present
-    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: False)  # but no cover.jpg
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
-    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient())  # API finds nothing
+    _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=True, sidecar=False)
+    _patch_artwork(monkeypatch, album=None)   # provider finds nothing
 
     result = mca.MissingCoverArtJob().scan(context)
-    assert result.findings_created == 1   # flagged for the missing sidecar
+
+    assert result.findings_created == 1
     assert context.findings[0]['details']['sidecar_from_embedded'] is True
+    assert context.findings[0]['details']['artwork_source'] == 'embedded'
 
 
-def test_local_album_without_file_art_still_flagged(monkeypatch):
-    # Local album whose files genuinely lack art → still flagged (real case).
-    # Give it a source id + findable art so a finding is created when flagged.
-    conn = _make_db((1, 'Album', 1, '', 'sp-album', None, None, None, None))
-    _add_track(conn, '/music/Album/01.flac')
+def test_files_genuinely_without_art_are_flagged(monkeypatch):
+    conn = _make_db(album_image='', file_path='/music/Album/01.flac')
     context = _make_context(conn)
-    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
-    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: False)     # no embedded art
-    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: False)
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
-    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient(album_image='https://img/x'))
+    _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=False, sidecar=False)
+    _patch_artwork(monkeypatch, album=_found(url='https://img/x'))
 
     result = mca.MissingCoverArtJob().scan(context)
-    assert result.findings_created == 1   # files lack art → flagged
+
+    assert result.findings_created == 1
+    assert context.findings[0]['entity_id'] == 'lib2:1'
 
 
-def test_media_server_only_album_empty_thumb_still_flagged(monkeypatch):
-    # No local files (media-server-only) + empty thumb → DB thumb is the only
-    # art, so still flag it.
-    conn = _make_db((1, 'Album', 1, '', 'sp-album', None, None, None, None))  # no track added
+def test_an_album_with_no_files_is_not_this_job(monkeypatch):
+    """``active_album_subjects`` requires an active file. A fileless release is
+    a wanted one, and its image is the enrichment workers' job — this scan is
+    about art on disk and the catalogue entry beside it."""
+    conn = _make_db(album_image='', file_path=None)
     context = _make_context(conn)
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
-    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient(album_image='https://img/x'))
+    _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=False, sidecar=False)
+    _patch_artwork(monkeypatch, album=_found())
 
     result = mca.MissingCoverArtJob().scan(context)
-    assert result.findings_created == 1   # media-server-only + empty thumb → flagged
+
+    assert result.scanned == 0
+    assert result.findings_created == 0
 
 
-def test_unresolved_path_falls_back_to_raw_when_file_exists(tmp_path, monkeypatch):
-    # Docker case (Sokhi): the path-mapping layer returns None, but the raw DB
-    # path is already a real file in the container. The scan must use it as-is —
-    # like the apply does (`_resolve_file_path(...) or p`) — so the album's
-    # folder is actually checked instead of the album being skipped.
+def test_unresolved_path_falls_back_to_raw_when_the_file_is_really_there(
+        tmp_path, monkeypatch):
+    """Docker case (Sokhi): the mapping layer returns nothing, but the stored
+    path is already a real file inside the container. Use it as-is, or the
+    album's folder never gets looked at."""
     track = tmp_path / 'Album' / '01.flac'
     track.parent.mkdir()
     track.write_bytes(b'')
-    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
-    _add_track(conn, str(track))
+    conn = _make_db(album_image='https://has/thumb', file_path=str(track))
     context = _make_context(conn)
-    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: None)  # mapping fails
-    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: True)             # files have art
-    # real folder has no cover.jpg → should flag for the sidecar
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
-    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient())    # API finds nothing
+    monkeypatch.setattr('core.library2.paths.resolve_lib2_path', lambda raw, **k: None)
+    monkeypatch.setattr('core.metadata.art_apply.file_has_embedded_art', lambda p: True)
+    _patch_artwork(monkeypatch, album=None)   # real folder has no cover.jpg
 
     result = mca.MissingCoverArtJob().scan(context)
 
-    assert result.findings_created == 1   # raw path used → folder checked → flagged
+    assert result.findings_created == 1
     assert context.findings[0]['details']['sidecar_from_embedded'] is True
 
 
-def test_unresolved_path_with_no_real_file_still_skips(tmp_path, monkeypatch):
-    # Guard: the raw-path fallback must NOT fire for a path that isn't a real
-    # file (no false "local" on a genuinely media-server-only album).
-    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
-    _add_track(conn, '/does/not/exist/01.flac')
-    context = _make_context(conn)
-    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: None)
-    called = []
-    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: called.append(p) or True)
+def test_cover_art_download_off_stops_the_sidecar_flag(monkeypatch):
+    """With sidecar writing disabled, a missing cover.jpg is not a gap."""
+    conn = _make_db(album_image='https://has/thumb', file_path='/music/Album/01.flac')
+    context = _make_context(conn, **{'metadata_enhancement.cover_art_download': False})
+    _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=True, sidecar=False)
+    _patch_artwork(monkeypatch, album=_found())
 
     result = mca.MissingCoverArtJob().scan(context)
 
-    assert result.findings_created == 0   # no real file, db has thumb → skipped
-    assert called == []                   # never treated as local
+    assert result.findings_created == 0
+    assert result.skipped == 1

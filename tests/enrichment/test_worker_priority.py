@@ -1,72 +1,19 @@
-"""Priority 'process this group first' helper for enrichment workers.
+"""The 'process this group first' setting for enrichment workers.
 
-The shared helper returns one pending item of a chosen entity type in the
-shape the worker's dispatch already expects (with Spotify/iTunes mapped to
-their album_individual / track_individual types). Default path (no override)
-is exercised by the workers themselves and unchanged.
+The setting itself lives here: reading it, its entity vocabulary, and the
+routes that get and set it. Serving a pinned group is now
+``worker_queue.next_pending(..., pinned=...)`` against lib2, pinned by
+``tests/library2/test_worker_queue.py``; the legacy
+``worker_utils.priority_pending_item`` it replaced has been deleted, and its
+six tests with it — they described a walk over ``artists``/``albums``/``tracks``
+that no worker performs any more.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from core.worker_utils import (
-    PRIORITY_ENTITIES,
-    priority_pending_item,
-    read_enrichment_priority,
-)
-from database.music_database import MusicDatabase
-
-
-@pytest.fixture
-def db(tmp_path):
-    d = MusicDatabase(str(tmp_path / 'prio.db'))
-    conn = d._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES ('a1', 'Pending Artist')")               # NULL status
-    cur.execute("INSERT INTO artists (id, name, spotify_match_status) VALUES ('a2','Done','matched')")
-    cur.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al1','a2','Pending Album')")  # NULL status
-    cur.execute("INSERT INTO tracks (id, album_id, artist_id, title) VALUES ('t1','al1','a2','Pending Track')")
-    conn.commit()
-    conn.close()
-    return d
-
-
-def _cur(db):
-    return db._get_connection().cursor()
-
-
-def test_priority_artist_shape(db):
-    item = priority_pending_item(_cur(db), 'spotify', 'artist')
-    assert item == {'type': 'artist', 'id': 'a1', 'name': 'Pending Artist'}
-
-
-def test_priority_album_default_type(db):
-    item = priority_pending_item(_cur(db), 'spotify', 'album')
-    assert item['id'] == 'al1' and item['name'] == 'Pending Album' and item['artist'] == 'Done'
-    assert item['type'] == 'album'  # default type string
-
-
-def test_priority_album_type_override_for_spotify_itunes(db):
-    item = priority_pending_item(_cur(db), 'spotify', 'album',
-                                 {'album': 'album_individual', 'track': 'track_individual'})
-    assert item['type'] == 'album_individual'  # matches Spotify/iTunes dispatch
-
-
-def test_priority_track_shape(db):
-    item = priority_pending_item(_cur(db), 'spotify', 'track')
-    assert item['id'] == 't1' and item['type'] == 'track' and item['artist'] == 'Done'
-
-
-def test_priority_returns_none_when_group_exhausted(db):
-    # No pending artists once a1 is matched -> None, so worker resumes its chain.
-    conn = db._get_connection(); conn.execute("UPDATE artists SET spotify_match_status='matched' WHERE id='a1'"); conn.commit(); conn.close()
-    assert priority_pending_item(_cur(db), 'spotify', 'artist') is None
-
-
-def test_priority_rejects_bad_entity_and_service(db):
-    assert priority_pending_item(_cur(db), 'spotify', 'bogus') is None
-    assert priority_pending_item(_cur(db), 'spot;drop', 'artist') is None  # non-alpha service blocked
+from core.worker_utils import PRIORITY_ENTITIES, read_enrichment_priority
 
 
 def test_read_priority_unset_is_empty():

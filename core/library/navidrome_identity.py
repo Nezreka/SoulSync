@@ -79,6 +79,28 @@ def _same_recording(old, song):
     return True
 
 
+# The catalogue is Library v2, so a Navidrome song id is not a row id: it lives
+# in lib2_media_server_mappings, with lib2_tracks.server_source/server_id kept as
+# a compatibility projection of the last observed one. Both are read, mapping
+# first, exactly as get_all_track_ids_for_server resolves a server id.
+_TRACK_BY_SERVER_ID = """
+    SELECT t.id AS track_id, t.title AS title, t.duration AS duration,
+           (SELECT f.path FROM lib2_track_files f
+             WHERE f.track_id = t.id
+               AND COALESCE(f.file_state, 'active') = 'active'
+               AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+             ORDER BY f.is_primary DESC, f.id LIMIT 1) AS file_path
+      FROM lib2_tracks t
+     WHERE t.id = (
+             SELECT m.entity_id FROM lib2_media_server_mappings m
+              WHERE m.entity_type='track' AND m.server_source='navidrome'
+                AND m.server_id = ?
+           )
+        OR (t.server_source='navidrome' AND t.server_id = ?)
+     LIMIT 1
+"""
+
+
 def resolve_tracks(tracks, songs, db):
     from core.navidrome_client import NavidromeTrack
     paths = _by_path(songs)
@@ -88,7 +110,7 @@ def resolve_tracks(tracks, songs, db):
                   or (track.get('id', '') if isinstance(track, dict) else ''))
         if sid not in songs:
             with db._get_connection() as conn:
-                row = conn.execute("SELECT file_path,title,duration FROM tracks WHERE id=? AND server_source='navidrome'", (sid,)).fetchone()
+                row = conn.execute(_TRACK_BY_SERVER_ID, (sid, sid)).fetchone()
             old = dict(row) if row else {}
             path = _path(old.get('file_path'))
             candidates = paths.get(path, [])
@@ -100,47 +122,83 @@ def resolve_tracks(tracks, songs, db):
 
 
 def repair_rekeyed_tracks(db, songs):
-    """Merge only obsolete IDs with one live same-path row already imported.
+    """Re-point Navidrome song ids that the server has reissued.
 
-    Never delete an unmatched file, an ID still on the server, or an ambiguous
-    path. Keep live server fields and fill missing enrichment from the old row.
+    Upstream merges two rows of the legacy ``tracks`` table here, because there
+    the song id IS the row id: a rekey mints a second row and the repair has to
+    move every enrichment column and foreign key onto it before deleting the
+    old one. The catalogue does not work that way. A lib2 track keeps its
+    identity for life and the server's id is held beside it in
+    ``lib2_media_server_mappings``, so a rekey is a stale *mapping* and nothing
+    else -- no row is merged, no column is copied, and no catalogue row is ever
+    deleted here. Only the mapping table and the two projection columns on
+    lib2_tracks are written.
+
+    The safety rules are upstream's, unchanged: never touch an id the server
+    still lists, never an unmatched file, never an ambiguous path, and only
+    when the file at that path is recognisably the same recording.
     """
     paths = _by_path(songs)
     repaired = 0
     with db._get_connection() as conn:
         conn.execute('BEGIN IMMEDIATE')
-        rows = conn.execute("SELECT * FROM tracks WHERE server_source='navidrome'").fetchall()
-        by_id = {str(r['id']): r for r in rows}
-        owned = {'id', 'album_id', 'artist_id', 'title', 'track_number', 'disc_number',
-                 'duration', 'file_path', 'bitrate', 'file_size', 'server_source', 'track_artist',
-                 'created_at', 'updated_at'}
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        references = []
-        for table in tables:
-            for fk in conn.execute(f'PRAGMA foreign_key_list("{table}")').fetchall():
-                if fk[2] == 'tracks' and fk[4] == 'id':
-                    references.append((table, fk[3]))
-        for old_id, old in by_id.items():
+        rows = conn.execute("""
+            SELECT m.id AS mapping_id, m.server_id AS server_id,
+                   t.id AS track_id, t.title AS title, t.duration AS duration,
+                   (SELECT f.path FROM lib2_track_files f
+                     WHERE f.track_id = t.id
+                       AND COALESCE(f.file_state, 'active') = 'active'
+                       AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+                     ORDER BY f.is_primary DESC, f.id LIMIT 1) AS file_path
+              FROM lib2_media_server_mappings m
+              JOIN lib2_tracks t ON t.id = m.entity_id
+             WHERE m.entity_type='track' AND m.server_source='navidrome'
+        """).fetchall()
+        live_ids = {str(r['server_id']) for r in rows if str(r['server_id']) in songs}
+        for row in rows:
+            old_id = str(row['server_id'])
             if old_id in songs:
                 continue
-            candidates = paths.get(_path(old['file_path']), [])
-            if len(candidates) != 1 or candidates[0] not in by_id:
+            candidates = paths.get(_path(row['file_path']), [])
+            if len(candidates) != 1:
                 continue
             new_id = candidates[0]
-            if not _same_recording(dict(old), songs[new_id]):
+            if not _same_recording(dict(row), songs[new_id]):
                 continue
-            columns = [column for column in old.keys() if column not in owned and old[column] not in (None, '')]
-            if columns:
-                assignments = ', '.join(f'"{c}"=CASE WHEN "{c}" IS NULL OR "{c}"=? THEN ? ELSE "{c}" END' for c in columns)
-                values = [value for c in columns for value in ('', old[c])]
-                conn.execute(f'UPDATE tracks SET {assignments} WHERE id=?', values + [new_id])
-            for table, column in [('manual_library_track_matches', 'library_track_id'), ('sync_match_cache', 'server_track_id')]:
-                if table in tables:
-                    conn.execute(f'UPDATE {table} SET {column}=? WHERE {column}=? AND server_source=?', (new_id, old_id, 'navidrome'))
-            # Preserve declared foreign-key references before removing the old row.
-            for table, column in references:
-                conn.execute(f'UPDATE "{table}" SET "{column}"=? WHERE "{column}"=?', (new_id, old_id))
-            conn.execute("DELETE FROM tracks WHERE id=? AND server_source='navidrome'", (old_id,))
+            if new_id in live_ids:
+                # The sync already filed the live id, on this row or on a twin
+                # it created for the same file. UNIQUE(entity_type,
+                # server_source, server_id) would reject a second claim, and a
+                # duplicate catalogue row is core/library2/dedup_repair.py's
+                # business, not ours. Drop the obsolete mapping and stop.
+                conn.execute("DELETE FROM lib2_media_server_mappings WHERE id=?",
+                             (row['mapping_id'],))
+                repaired += 1
+                continue
+            conn.execute(
+                "UPDATE lib2_media_server_mappings "
+                "SET server_id=?, last_seen_at=CURRENT_TIMESTAMP WHERE id=?",
+                (new_id, row['mapping_id']))
+            # the projection follows the mapping, so the compatibility reads
+            # (get_all_track_ids_for_server, the server_source CASE in the
+            # ownership queries) do not keep answering with the dead id
+            conn.execute(
+                "UPDATE lib2_tracks SET server_id=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND server_source='navidrome' AND server_id=?",
+                (new_id, row['track_id'], old_id))
+            for table, column in (('manual_library_track_matches', 'library_track_id'),
+                                  ('sync_match_cache', 'server_track_id')):
+                try:
+                    conn.execute(
+                        f'UPDATE {table} SET {column}=? WHERE {column}=? AND server_source=?',
+                        (new_id, old_id, 'navidrome'))
+                except Exception as exc:  # noqa: BLE001
+                    # these two are caches; a schema that predates either of
+                    # them must not abort the repair
+                    from utils.logging_config import get_logger
+                    get_logger('navidrome_identity').debug(
+                        "identity repoint skipped for %s.%s: %s", table, column, exc)
+            live_ids.add(new_id)
             repaired += 1
         conn.commit()
     return repaired

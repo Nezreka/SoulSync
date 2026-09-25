@@ -137,27 +137,10 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
 
         db = MusicDatabase()
 
-        # Repoint one file, returning how many library rows moved with it.
-        #
-        # The count is the publish's proof that the library knows where the file
-        # went; an audio file that repoints nothing leaves the library pointing
-        # at a staging path this publish is about to remove. None means the count
-        # carries no meaning — "unknown", not "zero" — and an unknown must not
-        # fail a publish that may well have worked.
-        #
-        # THAT PROOF ONLY EXISTS ON A 'soulsync' SERVER. Rows with a staged path
-        # are written by record_soulsync_library_entry, which is gated on the
-        # active media server being soulsync — on a Plex/Navidrome/Jellyfin
-        # install there is legitimately NO row until the server scans the
-        # PUBLISHED files. Reading that 0 as a failure made every atomic album
-        # publish on a media-server install roll itself back and strand the album
-        # in .soulsync_atomic_staging forever (Lil-Uzi-Chimp, Docker + Navidrome:
-        # two direct albums landed, the one staged album stuck). The UPDATE still
-        # runs — a row from an earlier soulsync-mode session deserves repointing
-        # — but its count is only evidence where the rows are ours to expect.
-        #
-        # Shared with the startup recovery (#1289), which republishes an
-        # abandoned staging tree and needs the identical rule.
+        # Repoint one file, returning how many library rows moved with it --
+        # the publish's proof that the catalogue knows where the file went
+        # (L2-002). Shared with the startup recovery (#1289); the reasoning for
+        # why a zero is evidence on this branch lives with the helper.
         from core.downloads.atomic_recovery import make_db_path_updater
         _db_update = make_db_path_updater(db)
 
@@ -597,6 +580,14 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
 # ---------------------------------------------------------------------------
 # on_download_completed
 # ---------------------------------------------------------------------------
+
+# Statuses that mean "this task will not do any more work". `already_owned` is
+# here because a task that stood down against a sibling that already has the
+# file has genuinely finished — leaving it out let a deduped task hold its batch
+# in 'downloading' forever, since the batch waits for every queue entry to reach
+# a terminal state.
+_FINISHED_TASK_STATUSES = ('completed', 'failed', 'cancelled', 'not_found',
+                           'already_owned')
 
 
 def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
@@ -1059,7 +1050,7 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                         finished_count += 1
                     else:
                         retrying_count += 1
-                elif task_status in ['completed', 'failed', 'cancelled', 'not_found']:
+                elif task_status in _FINISHED_TASK_STATUSES:
                     finished_count += 1
             else:
                 # Task ID in queue but not in download_tasks - treat as completed to prevent blocking
@@ -1203,7 +1194,7 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                             finished_count += 1
                         else:
                             retrying_count += 1
-                    elif task_status in ['completed', 'failed', 'cancelled', 'not_found']:
+                    elif task_status in _FINISHED_TASK_STATUSES:
                         finished_count += 1
                 else:
                     # Task ID in queue but not in download_tasks - treat as completed to prevent blocking

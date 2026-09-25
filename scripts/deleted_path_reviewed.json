@@ -1,0 +1,22 @@
+{
+  "004b733b8f6e": "N/A: JS->TS shell port. Our library-globals.js delta moved to src/shell/library-globals.ts in the 3.3.2 sync.",
+  "1f10da278636": "N/A: JS->TS shell port of blocklist.js, no behaviour.",
+  "1feeab26af54": "N/A: the artist-detail lift moved a test file we had already deleted.",
+  "2d56f85b84fd": "DECLINED (frontend half): the backend merged. LV2 queues only tracks that already have a file, so there is no missing row for the prefetch to auto-download.",
+  "4af30ed86632": "PORTED (bio half): LV2 already had the toggle; the overflow measurement so it only shows when the text is cut is in now. The 1%/100% download-row half is shared code and merged.",
+  "52763a6d6d6d": "N/A: upstream deleted its own planning docs and a screenshot.",
+  "5283de408376": "Ported: ConcertsSection is mounted on the Library-v2 artist page under the video shelf, MBID from artist.provider_ids.musicbrainz (which now also reads the promoted lib2_artists.musicbrainz_id).",
+  "5287bebe9fe6": "PORTED: getServiceUrl as -library-v2.service-links.ts, Discogs master/release routing included",
+  "76722daeafa1": "N/A: the downloads-page rebuild deleted its own side panel; nothing to port.",
+  "84c9871cb4fc": "PORTED: album + artist play buttons, as -library-v2.play.ts and the LV2 album row / artist hero",
+  "9626bb1ab464": "OURS, already lib2: our own merged commit, on files retired here.",
+  "97100d49dd81": "PORTED: get_unmatched_import_summary on lib2 + the LV2 banner (UnmatchedImportsBanner)",
+  "9d5a3e489630": "N/A: the JS->TS shell port touched a deleted legacy test file only.",
+  "a4320740c52e": "OURS, already lib2: our own merged commit, on files retired here.",
+  "aa177ce938fa": "N/A: refactor inside quality_upgrade{,_scanner}.py, both RETIRED_JOB_IDS here \u2014 LV2 owns the upgrade verdict.",
+  "afb681880dc7": "Declined for the deleted page's toggle: Library v2 has no Standard/Enhanced control, it splits the same two sources as 'My Library' and 'All Releases'. The helper.js half merged and is still asserted; renaming the LV2 labels to match is an open UI decision.",
+  "b85a12460de9": "OURS, already lib2: our own merged commit, on files retired here.",
+  "cc66f79153f2": "VERIFIED not applicable: the LV2 duplicates tab has no delete at all, and the ADR-05 preview groups by resolved real path, so two rows on one file are one item and deleting it retires both. Pinned in tests/library2/test_file_delete.py. The lifecycle.py half of the commit merged normally.",
+  "ebda7f301190": "OURS, already lib2: our own merged commit, test file only.",
+  "f5908f07ed80": "PORTED: LV2 queues from lib2_track_files directly, so the check-tracks ownership round-trip is not needed here"
+}

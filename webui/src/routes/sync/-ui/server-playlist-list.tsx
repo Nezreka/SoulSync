@@ -13,7 +13,7 @@
 
 import type { CSSProperties, ReactElement } from 'react';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
 
@@ -265,7 +265,7 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
     }
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     void load();
   }, [load]);
 

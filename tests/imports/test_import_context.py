@@ -355,3 +355,42 @@ def test_get_import_source_reads_underscore_source_from_nested_dicts():
     # context-level 'source' still wins over nested
     assert get_import_source({"source": "spotify", "track_info": {"_source": "deezer"}}) == "spotify"
     assert get_import_source({}) == ""
+
+
+# --- cover art from a Library-v2 wishlist payload ---------------------------
+# `album.images[0]` is SoulSync's own RELATIVE artwork URL for a Library-v2 row,
+# because the browser should prefer the locally cached cover. This process
+# cannot resolve a relative URL, so cover.jpg and embedded tag art have to skip
+# to the first absolute entry instead of indexing the list.
+
+def test_cover_art_skips_the_relative_local_artwork_url():
+    from core.imports.resolution import _fetchable_album_image_url
+
+    assert _fetchable_album_image_url([
+        {"url": "/api/library/v2/artwork/album/4158"},
+        {"url": "https://i.scdn.co/image/cover"},
+    ]) == "https://i.scdn.co/image/cover"
+
+
+def test_cover_art_is_empty_when_only_the_local_endpoint_is_offered():
+    """Better nothing than a URL urlopen will raise `unknown url type` on."""
+    from core.imports.resolution import _fetchable_album_image_url
+
+    assert _fetchable_album_image_url([{"url": "/api/library/v2/artwork/album/9"}]) == ""
+
+
+def test_cover_art_still_takes_a_plain_cdn_list_unchanged():
+    """Non-Library-v2 payloads are untouched: the first entry is still used."""
+    from core.imports.resolution import _fetchable_album_image_url
+
+    assert _fetchable_album_image_url([
+        {"url": "https://i.scdn.co/image/big"},
+        {"url": "https://i.scdn.co/image/small"},
+    ]) == "https://i.scdn.co/image/big"
+
+
+def test_cover_art_tolerates_junk_entries():
+    from core.imports.resolution import _fetchable_album_image_url
+
+    assert _fetchable_album_image_url(None) == ""
+    assert _fetchable_album_image_url([None, {}, {"url": ""}]) == ""

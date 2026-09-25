@@ -53,6 +53,7 @@ import re
 import threading
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -232,11 +233,23 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # The filename crosses to the browser in search responses and
             # comes back on grab. Indexer URLs can carry API keys / signed
             # params, so only an opaque server-side token travels (P0-03).
-            token = get_candidate_store().put(
+            # Ours: a token is bound to the result KIND it was minted for, so
+            # a track candidate cannot be grabbed as an album. Upstream's
+            # delta ported onto both: the indexer's categories travel with the
+            # candidate, because `evaluate_release` judges on that evidence
+            # before it falls back to parsing the title.
+            candidate_metadata = {'categories': list(result.categories or [])}
+            track_token = get_candidate_store().put(
                 _encode_candidate(download_url, result.magnet_uri),
-                metadata={'categories': list(result.categories or [])},
+                result_kind="track",
+                metadata=candidate_metadata,
             )
-            filename = f"{token}{_FILENAME_SEP}{result.title}"
+            album_token = get_candidate_store().put(
+                _encode_candidate(download_url, result.magnet_uri),
+                result_kind="album",
+                metadata=candidate_metadata,
+            )
+            filename = f"{track_token}{_FILENAME_SEP}{result.title}"
             audio_quality = audio_quality_from_release(
                 result.title,
                 result.categories,
@@ -261,8 +274,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 # Pre-fill artist + title so TrackResult.__post_init__
                 # doesn't auto-parse the filename — our filename starts
                 # with the indexer download URL, which would otherwise
-                # show up as "by download?apikey=..." in the UI.
-                artist=parsed_artist or result.indexer_name or 'Torrent',
+                # show up as "by download?apikey=..." in the UI. The
+                # indexer (e.g. "NZBGeek") is metadata about WHERE the
+                # result came from, never a substitute artist name — it
+                # only ever goes into _source_metadata below.
+                artist=parsed_artist or 'Unknown Artist',
                 title=parsed_title or result.title,
                 album=parsed_title or None,
                 track_number=None,
@@ -279,6 +295,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 },
             )
             tracks.append(tr)
+            album_track = replace(
+                tr, filename=f"{album_token}{_FILENAME_SEP}{result.title}")
             albums.append(AlbumResult(
                 username='torrent',
                 album_path=f"torrent/{result.guid}",
@@ -286,7 +304,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 artist=parsed_artist or None,
                 track_count=1,    # unknown until download finishes
                 total_size=result.size,
-                tracks=[tr],
+                tracks=[album_track],
                 dominant_quality=quality,
                 year=None,
             ))

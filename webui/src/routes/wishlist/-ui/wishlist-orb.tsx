@@ -7,15 +7,19 @@ import {
   failingTitle,
   orbAnimationDelay,
   orbImage,
+  orbImageFallback,
   orbRingCovers,
   orbSizeClass,
   trackCountLabel,
 } from '../-wishlist.helpers';
+import { WishlistCover } from './wishlist-cover';
 
 interface Props {
   group: WishlistArtistGroup;
   index: number;
   artistImages: Map<string, string>;
+  /** CDN photos to paint while a cold local artwork build runs. */
+  artistImageFallbacks?: Map<string, string>;
   currentCycle: string;
   /** A wishlist run is in flight; the orb shows its working state. */
   processing: boolean;
@@ -30,6 +34,7 @@ export function WishlistOrb({
   group,
   index,
   artistImages,
+  artistImageFallbacks,
   currentCycle,
   processing,
   expanded,
@@ -51,6 +56,7 @@ export function WishlistOrb({
   if (expanded) everExpandedRef.current = true;
 
   const image = orbImage(group, artistImages);
+  const imageFallback = orbImageFallback(group, artistImages, artistImageFallbacks ?? new Map());
   const ringCovers = orbRingCovers(group);
   const hasAlbums = group.albums.length > 0;
   const pulse = hasAlbums && currentCycle === 'albums';
@@ -74,11 +80,14 @@ export function WishlistOrb({
         onClick={onToggleExpand}
       >
         <div className="wl-orb-glow" />
-        {image ? (
-          <img className="wl-orb-img" src={image} alt="" />
-        ) : (
-          <div className="wl-orb-initials">{group.name.substring(0, 2).toUpperCase()}</div>
-        )}
+        <WishlistCover
+          className="wl-orb-img"
+          src={image}
+          fallback={imageFallback}
+          placeholder={
+            <div className="wl-orb-initials">{group.name.substring(0, 2).toUpperCase()}</div>
+          }
+        />
         <div className="wl-orb-ring" />
 
         {ringCovers.length > 0 ? (
@@ -141,11 +150,11 @@ export function WishlistOrb({
                 }}
               >
                 <div className="wl-album-tile-art">
-                  {album.image ? (
-                    <img src={album.image} alt="" />
-                  ) : (
-                    <div className="wl-album-tile-fallback">💿</div>
-                  )}
+                  <WishlistCover
+                    src={album.image}
+                    fallback={album.imageFallback}
+                    placeholder={<div className="wl-album-tile-fallback">💿</div>}
+                  />
                 </div>
                 <div className="wl-album-tile-info">
                   <div className="wl-album-tile-name">{album.name}</div>
@@ -188,11 +197,11 @@ export function WishlistOrb({
                 data-track-id={single.id}
                 title={single.failing ? failingTitle(single) : undefined}
               >
-                {single.image ? (
-                  <img src={single.image} alt="" />
-                ) : (
-                  <span className="wl-moon-fallback">⭐</span>
-                )}
+                <WishlistCover
+                  src={single.image}
+                  fallback={single.imageFallback}
+                  placeholder={<span className="wl-moon-fallback">⭐</span>}
+                />
                 {single.failing ? <span className="wl-moon-failing-badge">⚠</span> : null}
                 <div className="wl-moon-label">{single.track}</div>
                 <button

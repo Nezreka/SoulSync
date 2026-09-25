@@ -178,41 +178,50 @@ class WebMetadataUpdateWorker:
             return True  # Process if we can't determine status
     
     def _check_db_artist(self, artist_name):
-        """Check SoulSync DB for existing artist metadata (genres, spotify_artist_id).
+        """Check the Library-v2 catalogue for existing artist metadata.
 
-        NOTE: DB thumb_url is a Plex/Jellyfin internal path, NOT a downloadable URL.
-        Photos must be checked via the media server object, not the DB.
+        This is the only path that carries SoulSync data back into the media
+        server: the genres below are pushed to Plex/Jellyfin, and the Spotify id
+        saves a provider search. It used to read the legacy ``artists`` table
+        (``search_artists`` + ``api_get_artist`` for the id); both fields live on
+        the lib2 row, which is the single catalogue everything is moving to
+        (docs §32.3.1).
 
-        Returns (db_artist_dict, has_genres, spotify_artist_id) or (None, False, None) if not found."""
+        NOTE: the stored image url is a media-server internal path, NOT a
+        downloadable URL. Photos must be checked via the media server object,
+        never from the catalogue.
+
+        Returns (artist_dict, has_genres, spotify_id) or (None, False, None).
+        """
         if not self._db:
             return None, False, None
         try:
-            db_artists = self._db.search_artists(artist_name, limit=5)
-            if not db_artists:
+            from core.library2.queries import find_artists_by_name
+
+            conn = self._db._get_connection()
+            try:
+                candidates = find_artists_by_name(conn, artist_name, limit=5)
+            finally:
+                conn.close()
+            if not candidates:
                 return None, False, None
-            # Find best name match
+            # Find best name match. The 0.85 floor is what stops one artist's
+            # genres being pushed onto another; a LIKE match alone is not proof.
             best = None
             best_score = 0.0
             norm_name = self.matching_engine.normalize_string(artist_name)
-            for dba in db_artists:
+            for candidate in candidates:
                 score = self.matching_engine.similarity_score(
-                    norm_name, self.matching_engine.normalize_string(dba.name))
+                    norm_name,
+                    self.matching_engine.normalize_string(candidate["name"]))
                 if score > best_score:
                     best_score = score
-                    best = dba
+                    best = candidate
             if not best or best_score < 0.85:
                 return None, False, None
-            has_genres = bool(best.genres and len(best.genres) > 0)
-            # Get spotify_artist_id from raw DB row (not in dataclass)
-            spotify_artist_id = None
-            try:
-                raw = self._db.api_get_artist(best.id)
-                if raw:
-                    spotify_artist_id = raw.get('spotify_artist_id')
-            except Exception as e:
-                logger.debug("get spotify_artist_id failed: %s", e)
-            return best, has_genres, spotify_artist_id
-        except Exception:
+            return best, bool(best["genres"]), best["spotify_id"]
+        except Exception as e:
+            logger.debug("lib2 artist lookup failed for %r: %s", artist_name, e)
             return None, False, None
 
     def update_artist_metadata(self, artist):
@@ -273,7 +282,7 @@ class WebMetadataUpdateWorker:
                         # Spotify failed — apply DB genres if available, skip photos/art
                         changes_made = []
                         if needs_genres and db_has_genres and db_artist:
-                            if self._apply_db_genres(artist, db_artist.genres):
+                            if self._apply_db_genres(artist, db_artist["genres"]):
                                 changes_made.append("genres (DB)")
                         if changes_made:
                             self.media_client.update_artist_biography(artist)
@@ -295,7 +304,7 @@ class WebMetadataUpdateWorker:
                         # No good Spotify match — still try DB genres
                         changes_made = []
                         if needs_genres and db_has_genres and db_artist:
-                            if self._apply_db_genres(artist, db_artist.genres):
+                            if self._apply_db_genres(artist, db_artist["genres"]):
                                 changes_made.append("genres (DB)")
                         if changes_made:
                             self.media_client.update_artist_biography(artist)
@@ -315,7 +324,7 @@ class WebMetadataUpdateWorker:
             # Update genres — use DB if available, otherwise Spotify
             if needs_genres:
                 if db_has_genres and db_artist:
-                    genres_updated = self._apply_db_genres(artist, db_artist.genres)
+                    genres_updated = self._apply_db_genres(artist, db_artist["genres"])
                     if genres_updated:
                         changes_made.append("genres (DB)")
                     elif spotify_artist:

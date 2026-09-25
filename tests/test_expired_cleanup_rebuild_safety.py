@@ -7,10 +7,11 @@ B1 — ``get_origin_cleanup_candidates`` must report play_count as UNKNOWN
 across the two path namespaces (SoulSync's post-processed path vs whatever the
 media server reported) rather than only on an exact string.
 
-B2 — a library rebuild must stamp itself, and everything downloaded before
-that stamp must be permanently out of scope. Otherwise the wipe destroys
-play_count while library_history keeps created_at, and the next run deletes
-tracks the user played hundreds of times.
+B2 — a full refresh must not destroy the signal that protects a download, and
+must not hand out a blanket amnesty either. Under Library v2 a refresh DETACHES
+the server instead of deleting the catalogue, so play_count survives and
+protects the track on its own merits (L2-012). An honoured stamp from an older,
+genuinely destructive build still puts everything before it out of scope.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import pytest
 
 from core.repair_jobs.expired_download_cleaner import ExpiredDownloadCleanerJob
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 OLD = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat()
 
@@ -42,20 +44,32 @@ def _download(db, hid, file_path, created_at=OLD, origin="playlist"):
 
 
 def _track(db, tid, file_path, play_count, server_source="plex"):
-    """tracks.album_id / artist_id are NOT NULL, so a track needs its parents."""
+    """A catalogue track the media server owns, with its active file.
+
+    Addressed by the server's own id (``tid``) so a re-scan after a rebuild
+    updates the same row instead of stacking a second one — which would make
+    the rebuild test pass while the old play count was still there.
+    """
     conn = db._get_connection()
-    conn.execute(
-        "INSERT OR IGNORE INTO artists (id, name, server_source) VALUES (?,?,?)",
-        ("ar1", "Artist", server_source))
-    conn.execute(
-        "INSERT OR IGNORE INTO albums (id, artist_id, title, server_source) "
-        "VALUES (?,?,?,?)", ("al1", "ar1", "Album", server_source))
-    conn.execute(
-        "INSERT OR REPLACE INTO tracks (id, album_id, artist_id, title, file_path, "
-        "play_count, server_source) VALUES (?,?,?,?,?,?,?)",
-        (tid, "al1", "ar1", f"Track {tid}", file_path, play_count, server_source),
-    )
+    artist_id = seed_artist(conn, server_id="ar1", name="Artist",
+                            server_source=server_source)
+    album_id = seed_album(conn, server_id="al1", title="Album",
+                          artist_id=artist_id, server_source=server_source)
+    row = conn.execute(
+        "SELECT id FROM lib2_tracks WHERE server_source=? AND server_id=?",
+        (server_source, tid)).fetchone()
+    if row:
+        track_id = int(row[0])
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                     (file_path, track_id))
+    else:
+        track_id = seed_track(conn, server_id=tid, title=f"Track {tid}",
+                              album_id=album_id, artist_id=artist_id,
+                              server_source=server_source, file_path=file_path)
+    conn.execute("UPDATE lib2_tracks SET play_count=? WHERE id=?",
+                 (play_count, track_id))
     conn.commit()
+    return track_id
 
 
 # ── B1: play_count is unknown, not zero ───────────────────────────────────
@@ -109,11 +123,23 @@ def test_a_genuinely_unrelated_track_does_not_match(db):
 
 # ── B2: the rebuild stamp ─────────────────────────────────────────────────
 
-def test_clear_server_data_stamps_the_rebuild(db):
-    _track(db, "t1", "/music/a.flac", 3)
-    assert db.get_preference("library_rebuilt_at") is None
+def test_a_full_refresh_keeps_the_play_count_and_stamps_nothing(db):
+    """L2-012: the refresh detaches the server, it does not wipe the library.
+    Stamping a destructive rebuild that did not happen grandfathered every
+    older download permanently, and every further refresh moved the boundary
+    forward again."""
+    _track(db, "t1", "/music/a.flac", 17)
+
     db.clear_server_data("plex")
-    assert db.get_preference("library_rebuilt_at"), "rebuild was not recorded"
+
+    assert db.get_preference("library_rebuilt_at") is None
+    conn = db._get_connection()
+    try:
+        assert conn.execute(
+            "SELECT MAX(play_count) FROM lib2_tracks").fetchone()[0] == 17
+        assert conn.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 1
+    finally:
+        conn.close()
 
 
 class _Ctx:
@@ -156,15 +182,37 @@ def test_an_expired_unplayed_download_is_still_proposed(db):
     assert len(_scan(db)) == 1
 
 
-def test_nothing_is_proposed_after_a_rebuild(db):
+def test_a_played_download_survives_a_full_refresh(db):
     """The disaster case, end to end. A much-played download, then a library
-    refresh: the track row (and its play_count) is destroyed, history keeps
-    the original created_at. Without the stamp this is deleted."""
+    refresh. The detach keeps the play_count, so the track protects itself —
+    no stamp, and no amnesty for anything else."""
     _download(db, 1, "/music/Artist/Album/01 Track.flac")
     _track(db, "t1", "/music/Artist/Album/01 Track.flac", 40)
-    db.clear_server_data("plex")           # play_count gone, history intact
+    db.clear_server_data("plex")
     _track(db, "t1", "/music/Artist/Album/01 Track.flac", 0)   # re-scanned
-    assert _scan(db) == [], "a rebuilt library proposed deleting a played track"
+
+    assert _scan(db) == [], "a refreshed library proposed deleting a played track"
+
+
+def test_an_old_unplayed_download_stays_eligible_after_a_full_refresh(db):
+    """The other half of L2-012. The refresh used to stamp a rebuild that never
+    happened, which put every pre-existing download out of scope forever."""
+    _download(db, 1, "/music/Artist/Album/01 Track.flac")
+    _track(db, "t1", "/music/Artist/Album/01 Track.flac", 0)
+    db.clear_server_data("plex")
+    _track(db, "t1", "/music/Artist/Album/01 Track.flac", 0)   # re-scanned
+
+    assert len(_scan(db)) == 1
+
+
+def test_a_stamp_from_an_older_destructive_build_is_still_honoured(db):
+    """Installations that really did wipe their catalogue keep the boundary
+    they were given; it just stops moving forward."""
+    db.set_preference("library_rebuilt_at", datetime.now(timezone.utc).isoformat())
+    _download(db, 1, "/music/Artist/Album/01 Track.flac")
+    _track(db, "t1", "/music/Artist/Album/01 Track.flac", 0)
+
+    assert _scan(db) == []
 
 
 def test_a_download_made_after_the_rebuild_is_still_in_scope(db):

@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { RecommendedArtist } from './-discover.recommended';
 
 import { ADV_ENDPOINT } from './-discover.adventurousness';
-import { watchingIdsFrom, watchlistCheckIds } from './-discover.recommended';
+import { enrichUpdates, watchingIdsFrom, watchlistCheckIds } from './-discover.recommended';
 import { watchlistRequest, watchlistToast } from './-discover.your-artists-actions';
 
 /**
@@ -93,18 +93,14 @@ export function useRecommended(onToast: (toast: RecToast) => void): RecommendedC
       // it took the whole Discovery page down instead of leaving placeholders.
       const data = (await res.json()) as {
         success?: boolean;
-        artists?: Record<string, { image_url?: string } | undefined>;
+        artists?: Record<string, { image_url?: string }>;
       };
-      const payload = data.artists;
-      if (!data.success || !payload || typeof payload !== 'object') return;
-      // Built out here on purpose: the updater must be a plain merge, so a
-      // shape we did not expect can never escape into the render phase again.
-      const found: Record<string, string> = {};
-      for (const [artistId, artist] of Object.entries(payload)) {
-        if (artistId && artist?.image_url) found[artistId] = artist.image_url;
-      }
-      if (Object.keys(found).length === 0) return;
-      setImages((prev) => ({ ...prev, ...found }));
+      const updates = enrichUpdates(data);
+      setImages((prev) => {
+        const next = { ...prev };
+        for (const update of updates) next[update.artistId] = update.imageUrl;
+        return next;
+      });
     } catch {
       /* cards keep their placeholders (1034) */
     }

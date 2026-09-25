@@ -44,7 +44,9 @@ import {
 // tracks.duration is stored in MILLISECONDS (music_database.py:424); this
 // panel used to print it raw with an "s" suffix, so a 3:58 song read
 // "238000s" (#1210).
-import { formatDurationMs } from '../../artist-detail/-artist-detail.enhanced';
+// The artist-detail `enhanced` family is gone on this branch (Library v2
+// replaced it); the same helper still lives beside the sync server view.
+import { formatDurationMs } from '../../sync/-sync.server';
 
 type Details = Record<string, unknown>;
 

@@ -1,10 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import {
-  checkTracksBody,
-  mergeOwnership,
-  ownedCount,
-} from '../-artist-detail.owned-tracks';
+import { checkTracksBody, mergeOwnership, ownedCount } from '../-artist-detail.owned-tracks';
 
 /**
  * What this artist is playing, and what they actually played.
@@ -58,7 +54,10 @@ interface ConcertsPayload {
 /** "Berghain, Berlin" — skipping whichever half is missing rather than
  *  rendering a stray comma. */
 export function placeLabel(parts: Array<string | undefined>): string {
-  return parts.map((p) => (p || '').trim()).filter(Boolean).join(', ');
+  return parts
+    .map((p) => (p || '').trim())
+    .filter(Boolean)
+    .join(', ');
 }
 
 /** Setlist.fm dates are dd-MM-yyyy, which every Date parser reads as either
@@ -118,9 +117,10 @@ export function ConcertsSection({ artistName, mbid }: ConcertsSectionProps) {
     if (playing) return;
     setPlaying(key);
     try {
-      const rows: Array<Record<string, unknown>> = setlist.songs.map(
-        (title) => ({ name: title, title }),
-      );
+      const rows: Array<Record<string, unknown>> = setlist.songs.map((title) => ({
+        name: title,
+        title,
+      }));
       const resp = await fetch('/api/library/check-tracks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -129,7 +129,10 @@ export function ConcertsSection({ artistName, mbid }: ConcertsSectionProps) {
       const owned = resp.ok ? await resp.json() : null;
       const merged = mergeOwnership(rows, owned?.owned_tracks).filter((t) => t.file_path);
       if (!merged.length) {
-        window.showToast?.(`You don't own any of the ${setlist.song_count} songs from that show`, 'info');
+        window.showToast?.(
+          `You don't own any of the ${setlist.song_count} songs from that show`,
+          'info',
+        );
         return;
       }
       const queue = merged.map((t) => ({
@@ -137,7 +140,10 @@ export function ConcertsSection({ artistName, mbid }: ConcertsSectionProps) {
         artist: artistName,
         artists: [{ name: artistName }],
       }));
-      await window.playTrackList?.(queue, `${artistName} — ${placeLabel([setlist.venue, setlist.city])}`);
+      await window.playTrackList?.(
+        queue,
+        `${artistName} — ${placeLabel([setlist.venue, setlist.city])}`,
+      );
       // Say what is missing rather than quietly playing a short set.
       if (merged.length < setlist.songs.length) {
         window.showToast?.(

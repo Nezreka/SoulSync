@@ -9,25 +9,38 @@ from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.deezer_client import DeezerClient
 from core.worker_utils import (
-    _names_equivalent,
-    accept_artist_match,
     artist_name_matches,
     idle_backoff_seconds,
     interruptible_sleep,
-    owned_album_titles,
     pick_artist_by_catalog,
     release_titles,
-    set_album_api_track_count,
 )
-from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
-from core.library.artist_credits import (
-    AlbumCreditsBackfill,
-    CreditsBackfill,
-    try_save_album_credits,
-    try_save_track_credits,
+from core.library2.worker_support import (
+    MATCHED,
+    accept_artist_match,
+    honor_stored_match,
+    owned_album_titles,
+    provider_id_conflict,
 )
 
 logger = get_logger("deezer_worker")
+
+def _parent_artist_id(conn, entity_type: str, entity_id) -> Optional[int]:
+    """The lib2 artist that owns an album or track.
+
+    A track's artist is two joins away in lib2 — track → album → primary artist —
+    where legacy carried ``tracks.artist_id`` on the row itself.
+    """
+    sql = {
+        'album': "SELECT primary_artist_id FROM lib2_albums WHERE id=?",
+        'track': ("SELECT al.primary_artist_id FROM lib2_tracks t "
+                  "JOIN lib2_albums al ON al.id=t.album_id WHERE t.id=?"),
+    }.get(entity_type)
+    if not sql:
+        return None
+    row = conn.execute(sql, (entity_id,)).fetchone()
+    return row[0] if row else None
+
 
 
 class DeezerWorker:
@@ -60,10 +73,6 @@ class DeezerWorker:
 
         # Retry configuration
         self.retry_days = 30
-        # tracks matched before the worker kept artist credits. one /track call
-        # each, so small batches, about the pace of a normal match
-        self._credits_backfill = CreditsBackfill('deezer', batch_size=3)
-        self._album_credits_backfill = AlbumCreditsBackfill('deezer', batch_size=3)
 
         # Name matching threshold
         self.name_similarity_threshold = 0.80
@@ -182,114 +191,26 @@ class DeezerWorker:
         logger.info("Deezer worker thread finished")
 
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
-        """Get next item to process from priority queue (artists -> albums -> tracks)"""
+        """Get next item to process from the Library-v2 catalogue.
+
+        Priority, retry window and the pinned-group override all live in
+        ``core.library2.worker_queue`` — the same rules every enrichment worker uses
+        (docs §32.3.1 stage 2). ``include_parent_id`` puts the parent artist's
+        Deezer id on an album or track item, which ``_verify_artist_id`` compares
+        the result against.
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_pending
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Pinned-group override (Manage Enrichment Workers): process one
-            # entity type first, then fall through to the normal chain. Unset or
-            # exhausted ⇒ default artist→album→track order, unchanged.
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
-            _prio = read_enrichment_priority('deezer')
-            if _prio:
-                _pi = priority_pending_item(cursor, 'deezer', _prio)
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted artists
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE deezer_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 2: Unattempted albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.deezer_id AS artist_deezer_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.deezer_match_status IS NULL AND a.id IS NOT NULL
-                ORDER BY a.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_deezer_id': row[3]}
-
-            # Priority 3: Unattempted tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.deezer_id AS artist_deezer_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.deezer_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_deezer_id': row[3]}
-
-            # Priority 3b: artist credits. rematched albums and tracks, then
-            # the one-time sweeps of ones matched before we kept them. albums
-            # first, there are far fewer and they're what collab pages need
-            album_backfill = self._album_credits_backfill.next_batch(cursor)
-            if album_backfill:
-                return {'type': 'album_credits_backfill', 'id': album_backfill[0][0],
-                        'albums': album_backfill,
-                        'name': f"Artist credits for {len(album_backfill)} albums"}
-            backfill = self._credits_backfill.next_batch(cursor)
-            if backfill:
-                return {'type': 'credits_backfill', 'id': backfill[0][0], 'tracks': backfill,
-                        'name': f"Artist credits for {len(backfill)} tracks"}
-
-            # Priority 4: Retry 'not_found' artists after retry_days
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE deezer_match_status IN ('not_found', 'error') AND deezer_last_attempted < ?
-                ORDER BY deezer_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 5: Retry 'not_found' albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.deezer_id AS artist_deezer_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.deezer_match_status IN ('not_found', 'error') AND a.deezer_last_attempted < ?
-                ORDER BY a.deezer_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_deezer_id': row[3]}
-
-            # Priority 6: Retry 'not_found' tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.deezer_id AS artist_deezer_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.deezer_match_status IN ('not_found', 'error') AND t.deezer_last_attempted < ?
-                ORDER BY t.deezer_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_deezer_id': row[3]}
-
-            return None
+            return next_pending(
+                conn, 'deezer',
+                retry_after_days=self.retry_days,
+                pinned=read_enrichment_priority('deezer') or None,
+                include_parent_id=True,
+            )
 
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
@@ -312,12 +233,9 @@ class DeezerWorker:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
         if not norm_query or not norm_result:
-            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
-            # "...") would compare at SequenceMatcher ratio 1.0 against any
-            # other such title — fall back to exact raw comparison instead.
-            raw_q = (query_name or '').strip().lower()
-            raw_r = (result_name or '').strip().lower()
-            return bool(raw_q) and raw_q == raw_r
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return bool(raw_query) and raw_query == raw_result
 
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
@@ -370,42 +288,36 @@ class DeezerWorker:
         return True
 
     def _correct_artist_deezer_id(self, item: Dict[str, Any], correct_deezer_id: str):
-        """Correct the parent artist's deezer_id based on a more specific album/track match"""
+        """Correct the parent artist's Deezer id from a more specific album/track
+        match. The name guard in ``_verify_artist_id`` has already run."""
         conn = None
         try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
+            from core.library2.provider_writes import write_provider_enrichment
 
-            table = 'albums' if item['type'] == 'album' else 'tracks'
-            cursor.execute(f"SELECT artist_id FROM {table} WHERE id = ?", (item['id'],))
-            row = cursor.fetchone()
-            if not row:
+            conn = self.db._get_connection()
+            artist_id = _parent_artist_id(conn, item['type'], item['id'])
+            if artist_id is None:
                 return
 
-            artist_id = row[0]
-            # #988: never overwrite with a Deezer id already owned by a
-            # DIFFERENTLY-named artist — that's the exact smear (Beatles' id 1
-            # onto The Outfield). Same-named holders legitimately share an id.
-            cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,))
-            _self_row = cursor.fetchone()
-            this_name = (_self_row[0] if _self_row else '') or (item.get('artist') or '')
-            cursor.execute(
-                "SELECT name FROM artists WHERE deezer_id = ? AND id != ?",
-                (str(correct_deezer_id), artist_id))
-            for (other_name,) in cursor.fetchall():
-                if not _names_equivalent(this_name, other_name):
-                    logger.warning(
-                        f"Refusing Deezer-ID correction: id {correct_deezer_id} is "
-                        f"already held by '{other_name}' (≠ '{this_name}') — avoiding a "
-                        f"shared/duplicate id (artist #{artist_id})")
-                    return
+            # #988: never overwrite with an id already owned by a DIFFERENTLY-named
+            # artist — that is the exact smear (Beatles' id 1 onto The Outfield).
+            # Same-named holders legitimately share an id.
+            this_name = conn.execute(
+                "SELECT name FROM lib2_artists WHERE id = ?", (artist_id,)
+            ).fetchone()
+            this_name = (this_name[0] if this_name else '') or (item.get('artist') or '')
+            conflict = provider_id_conflict(
+                conn, 'deezer', correct_deezer_id, artist_id, this_name)
+            if conflict:
+                logger.warning(
+                    f"Refusing Deezer-ID correction: id {correct_deezer_id} is "
+                    f"already held by '{conflict}' (≠ '{this_name}') — avoiding a "
+                    f"shared/duplicate id (artist #{artist_id})")
+                return
 
-            cursor.execute("""
-                UPDATE artists SET
-                    deezer_id = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (correct_deezer_id, artist_id))
+            write_provider_enrichment(
+                conn, entity_type='artist', entity_id=artist_id,
+                service='deezer', provider_id=correct_deezer_id)
             conn.commit()
 
             logger.info(f"Corrected artist #{artist_id} Deezer ID to {correct_deezer_id}")
@@ -418,16 +330,6 @@ class DeezerWorker:
 
     def _process_item(self, item: Dict[str, Any]):
         """Process a single item (artist, album, or track)"""
-        if item.get('type') in ('credits_backfill', 'album_credits_backfill'):
-            # not a match, so nothing to mark as error if it fails
-            try:
-                if item['type'] == 'album_credits_backfill':
-                    self._process_album_credits_backfill(item)
-                else:
-                    self._process_credits_backfill(item)
-            except Exception as e:
-                logger.error(f"Error backfilling Deezer artist credits: {e}")
-            return
         try:
             item_type = item['type']
             item_id = item['id']
@@ -451,18 +353,13 @@ class DeezerWorker:
                 logger.error(f"Error updating item status: {e2}")
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an entity already has a deezer_id (e.g. from manual match)."""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            return None
+        """The Deezer id already stored for this entity, if any."""
         conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT deezer_id FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'deezer')
         except Exception:
             return None
         finally:
@@ -473,12 +370,8 @@ class DeezerWorker:
         """Process an artist: search Deezer, verify, store metadata"""
         existing_id = self._get_existing_id('artist', artist_id)
         if existing_id:
-            # Has an id but status may still be NULL (e.g. an id-only manual
-            # match) and _get_next_item selects NULL rows every loop — stamp
-            # 'matched' so this artist stops re-selecting and blocking the
-            # queue (#964, the JioSaavn fix applied here too).
-            self._mark_status('artist', artist_id, 'matched')
             logger.debug(f"Preserving existing Deezer ID for artist '{artist_name}': {existing_id}")
+            self._mark_status('artist', artist_id, 'matched')
             return
 
         # Multi-candidate search (was single search_artist) so same-name artists
@@ -486,9 +379,14 @@ class DeezerWorker:
         # overlaps the albums this library owns.
         results = self.client.search_artists(artist_name, limit=5)
         gated = [a for a in (results or []) if artist_name_matches(artist_name, getattr(a, 'name', ''))]
+        conn = self.db._get_connection()
+        try:
+            _owned = owned_album_titles(conn, artist_id)
+        finally:
+            conn.close()
         chosen, _overlap = pick_artist_by_catalog(
             gated,
-            owned_album_titles(self.db, artist_id),
+            _owned,
             lambda a: release_titles(self.client.get_artist_albums_list(a.id)),
         )
 
@@ -497,10 +395,14 @@ class DeezerWorker:
         result = self.client.get_artist_info(chosen.id) if chosen else None
         if result:
             result_name = result.get('name', '')
-            ok, reason = accept_artist_match(
-                self.db, 'deezer_id', result.get('id'), artist_id,
-                artist_name, result_name,
-            )
+            conn = self.db._get_connection()
+            try:
+                ok, reason = accept_artist_match(
+                    conn, 'deezer', result.get('id'), artist_id,
+                    artist_name, result_name,
+                )
+            finally:
+                conn.close()
             if ok:
                 self._update_artist(artist_id, result)
                 self.stats['matched'] += 1
@@ -534,19 +436,17 @@ class DeezerWorker:
         # refresh path via the stored ID, picking up label / genres /
         # explicit updates without ever overwriting the manual match.
         _stored = honor_stored_match(
-            db=self.db, entity_table='albums', entity_id=album_id,
-            id_column='deezer_id',
-            client_fetch_fn=self.client.get_album_raw,
-            on_match_fn=self._refresh_album_via_stored_id,
-            mark_status_fn=self._mark_status,
-            status_column='deezer_match_status',
+            self.db, entity_type='album', entity_id=album_id,
+            service='deezer',
+            fetch=self.client.get_album_raw,
+            on_match=self._refresh_album_via_stored_id,
             log_prefix='Deezer',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -594,19 +494,17 @@ class DeezerWorker:
         """Process a track: search Deezer, verify, fetch full details for BPM, store metadata"""
         # Issue #501: honor manual matches (see _process_album).
         _stored = honor_stored_match(
-            db=self.db, entity_table='tracks', entity_id=track_id,
-            id_column='deezer_id',
-            client_fetch_fn=self.client.get_track_raw,
-            on_match_fn=self._refresh_track_via_stored_id,
-            mark_status_fn=self._mark_status,
-            status_column='deezer_match_status',
+            self.db, entity_type='track', entity_id=track_id,
+            service='deezer',
+            fetch=self.client.get_track_raw,
+            on_match=self._refresh_track_via_stored_id,
             log_prefix='Deezer',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -652,244 +550,106 @@ class DeezerWorker:
 
     def _update_artist(self, artist_id: int, data: Dict[str, Any]):
         """Store Deezer metadata for an artist"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
+        self._write('artist', artist_id, data.get('id'),
+                    backfill={'image_url': data.get('picture_xl')})
 
-            cursor.execute("""
-                UPDATE artists SET
-                    deezer_id = ?,
-                    deezer_match_status = 'matched',
-                    deezer_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                str(data.get('id')),
-                artist_id
-            ))
-
-            # Backfill thumb_url if artist has no image
-            thumb_url = data.get('picture_xl')
-            if thumb_url:
-                cursor.execute("""
-                    UPDATE artists SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (thumb_url, artist_id))
-
-            conn.commit()
-
-        except Exception as e:
-            logger.error(f"Error updating artist #{artist_id} with Deezer data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
-
-    def _update_album(self, album_id: int, search_data: Dict[str, Any], full_data: Optional[Dict[str, Any]]):
+    def _update_album(self, album_id: int, search_data: Dict[str, Any],
+                      full_data: Optional[Dict[str, Any]]):
         """Store Deezer metadata for an album"""
+        data = full_data or search_data
+        backfill = {
+            'image_url': search_data.get('cover_xl')
+            or (data.get('cover_xl') if full_data else None),
+            'label': data.get('label') if full_data else None,
+            'explicit': 1 if data.get('explicit_lyrics') else 0,
+        }
+        if full_data:
+            genre_names = [g.get('name') for g
+                           in (full_data.get('genres', {}) or {}).get('data', [])
+                           if g.get('name')]
+            if genre_names:
+                from core.genre_filter import filter_genres
+                from core.settings import config_manager as _cfg
+                _filtered = filter_genres(genre_names, _cfg)
+                if _filtered:
+                    backfill['genres'] = json.dumps(_filtered)
+        # `record_type` has no lib2 counterpart to backfill: lib2_albums.album_type
+        # always carries a classification the importer and MB reconcile own, so there
+        # is no empty state to fill. Deezer's word goes to the payload.
+        self._write('album', album_id, search_data.get('id'), backfill=backfill,
+                    payload={'record_type': data.get('record_type')},
+                    total_tracks=(full_data.get('nb_tracks') if full_data else None)
+                    or search_data.get('nb_tracks'),
+                    # every album artist; only the full record has contributors
+                    credits=(full_data or {}).get('contributors'))
+
+    def _update_track(self, track_id: int, search_data: Dict[str, Any],
+                      full_data: Optional[Dict[str, Any]]):
+        """Store Deezer metadata for a track"""
+        data = full_data or search_data
+        backfill = {'explicit': 1 if data.get('explicit_lyrics') else 0}
+        bpm = data.get('bpm') if full_data else None
+        if bpm and bpm > 0:
+            backfill['bpm'] = float(bpm)
+        self._write('track', track_id, search_data.get('id'), backfill=backfill,
+                    # every artist on the track; only the full record has them
+                    credits=(full_data or {}).get('contributors'))
+
+    def _write(self, entity_type: str, entity_id: int, provider_id,
+               backfill: Optional[Dict[str, Any]] = None,
+               payload: Optional[Dict[str, Any]] = None,
+               total_tracks: Any = None, credits=None):
+        """One write path for all three entity types (docs §32.3.1 stage 2).
+
+        Everything outside Deezer's own id is backfill — artwork, label, genres and
+        the explicit flag are shared with better sources and with the user's choice.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+            from core.library2.worker_support import set_expected_track_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Use full_data if available, otherwise fall back to search_data
-            data = full_data or search_data
-
-            label = data.get('label') if full_data else None
-            explicit = 1 if data.get('explicit_lyrics') else 0
-            record_type = data.get('record_type')  # album, single, ep, compilation
-
-            cursor.execute("""
-                UPDATE albums SET
-                    deezer_id = ?,
-                    deezer_match_status = 'matched',
-                    deezer_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                str(search_data.get('id')),
-                album_id
-            ))
-
-            # every album artist. the full /album record has contributors,
-            # the search hit only the primary
-            if full_data:
-                try_save_album_credits(cursor, album_id, 'deezer', full_data.get('contributors'))
-
-            # Update label if available
-            if label:
-                cursor.execute("""
-                    UPDATE albums SET label = ?
-                    WHERE id = ? AND (label IS NULL OR label = '')
-                """, (label, album_id))
-
-            # Update explicit flag
-            if full_data and 'explicit_lyrics' in full_data:
-                cursor.execute("""
-                    UPDATE albums SET explicit = ?
-                    WHERE id = ? AND explicit IS NULL
-                """, (explicit, album_id))
-
-            # Update record_type
-            if record_type:
-                cursor.execute("""
-                    UPDATE albums SET record_type = ?
-                    WHERE id = ? AND (record_type IS NULL OR record_type = '')
-                """, (record_type, album_id))
-
-            # Backfill thumb_url if album has no image
-            thumb_url = search_data.get('cover_xl') or (data.get('cover_xl') if full_data else None)
-            if thumb_url:
-                cursor.execute("""
-                    UPDATE albums SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (thumb_url, album_id))
-
-            # Backfill genres from full album data
-            if full_data:
-                genres_data = full_data.get('genres', {}).get('data', [])
-                if genres_data:
-                    genre_names = [g.get('name') for g in genres_data if g.get('name')]
-                    if genre_names:
-                        from core.genre_filter import filter_genres
-                        from core.settings import config_manager as _cfg
-                        genre_names = filter_genres(genre_names, _cfg)
-                    if genre_names:
-                        cursor.execute("""
-                            UPDATE albums SET genres = ?
-                            WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                        """, (json.dumps(genre_names), album_id))
-
-            # Cache the authoritative expected track count for the Album
-            # Completeness repair job. Deezer's field is `nb_tracks`; prefer
-            # full_data over search_data so we pick up the richer count when
-            # the full album lookup ran. Helper handles the int conversion
-            # and skip-on-missing semantics.
-            set_album_api_track_count(
-                cursor,
-                album_id,
-                (full_data.get('nb_tracks') if full_data else None) or search_data.get('nb_tracks'),
+            write_provider_enrichment(
+                conn, entity_type=entity_type, entity_id=entity_id,
+                service='deezer',
+                payload=payload,
+                provider_id=str(provider_id) if provider_id else None,
+                backfill={k: v for k, v in (backfill or {}).items() if v is not None}
+                or None,
             )
-
+            if entity_type == 'album':
+                # The authoritative expected total for the Album Completeness job.
+                set_expected_track_count(conn, entity_id, total_tracks)
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='deezer', status='matched')
+            # every artist Deezer credits, not just the one it is filed under
+            from core.library2.provider_credits import link_credited_artists
+            link_credited_artists(conn, entity_type, entity_id, 'deezer', credits)
             conn.commit()
-
         except Exception as e:
-            logger.error(f"Error updating album #{album_id} with Deezer data: {e}")
+            logger.error(f"Error updating {entity_type} #{entity_id} with Deezer data: {e}")
             raise
         finally:
             if conn:
                 conn.close()
-
-    def _update_track(self, track_id: int, search_data: Dict[str, Any], full_data: Optional[Dict[str, Any]]):
-        """Store Deezer metadata for a track (BPM is the crown jewel)"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            data = full_data or search_data
-
-            bpm = data.get('bpm') if full_data else None
-            explicit = 1 if data.get('explicit_lyrics') else 0
-
-            cursor.execute("""
-                UPDATE tracks SET
-                    deezer_id = ?,
-                    deezer_match_status = 'matched',
-                    deezer_last_attempted = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                str(search_data.get('id')),
-                track_id
-            ))
-
-            # every artist on the track. only the full /track record has
-            # contributors, the search result just has the primary artist
-            if full_data:
-                try_save_track_credits(cursor, track_id, 'deezer', full_data.get('contributors'))
-
-            # Update BPM if available and non-zero
-            if bpm and bpm > 0:
-                cursor.execute("""
-                    UPDATE tracks SET bpm = ?
-                    WHERE id = ? AND (bpm IS NULL OR bpm = 0)
-                """, (float(bpm), track_id))
-
-            # Update explicit flag
-            if full_data and 'explicit_lyrics' in full_data:
-                cursor.execute("""
-                    UPDATE tracks SET explicit = ?
-                    WHERE id = ? AND explicit IS NULL
-                """, (explicit, track_id))
-
-            conn.commit()
-
-        except Exception as e:
-            logger.error(f"Error updating track #{track_id} with Deezer data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
-
-    def _process_album_credits_backfill(self, item: Dict[str, Any]):
-        """album artists for albums matched before we kept them, off the full
-        /album record."""
-        for album_id, deezer_album_id, _ in item['albums']:
-            if self.should_stop:
-                break
-            full = self.client.get_album_raw(deezer_album_id)
-            if not full:
-                continue
-            conn = None
-            try:
-                conn = self.db._get_connection()
-                try_save_album_credits(conn.cursor(), album_id, 'deezer', full.get('contributors'))
-                conn.commit()
-            finally:
-                if conn:
-                    conn.close()
-
-    def _process_credits_backfill(self, item: Dict[str, Any]):
-        """credits for tracks matched before we kept them, off the full /track
-        record (cached when the match fetched it recently)."""
-        saved = 0
-        for track_id, deezer_track_id, _album_id in item['tracks']:
-            if self.should_stop:
-                break
-            full = self.client.get_track_raw(deezer_track_id)
-            if not full:
-                continue
-            conn = None
-            try:
-                conn = self.db._get_connection()
-                if try_save_track_credits(conn.cursor(), track_id, 'deezer', full.get('contributors')):
-                    saved += 1
-                conn.commit()
-            finally:
-                if conn:
-                    conn.close()
-        logger.debug("Deezer credits backfill: %d/%d tracks", saved, len(item['tracks']))
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
-        """Mark an entity (artist, album, or track) with a match status"""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            logger.error(f"Unknown entity type: {entity_type}")
-            return
+        """Record the outcome of an attempt in the provider ledger.
 
+        Replaces the legacy `deezer_match_status`/`_last_attempted` column pair.
+        Both `not_found` and `error` become due again after the retry
+        window; a source-wide outage is handled by the worker's own backoff
+        before an attempt is ever recorded, so it cannot become a tight loop.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    deezer_match_status = ?,
-                    deezer_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='deezer', status=status)
             conn.commit()
         except Exception as e:
             logger.error(f"Error marking {entity_type} #{entity_id} status: {e}")
@@ -898,23 +658,12 @@ class DeezerWorker:
                 conn.close()
 
     def _count_pending_items(self) -> int:
-        """Count how many items still need processing across all entity types"""
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM artists WHERE deezer_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE deezer_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE deezer_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-
-            row = cursor.fetchone()
-            return row[0] if row else 0
-
+            return pending_count(conn, 'deezer', retry_after_days=self.retry_days)
         except Exception as e:
             logger.error(f"Error counting pending items: {e}")
             return 0
@@ -923,64 +672,12 @@ class DeezerWorker:
                 conn.close()
 
     def _get_progress_breakdown(self) -> Dict[str, Dict[str, int]]:
-        """Get progress breakdown by entity type"""
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            progress = {}
-
-            # Artists progress
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN deezer_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM artists
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['artists'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            # Albums progress
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN deezer_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM albums
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['albums'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            # Tracks progress
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN deezer_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM tracks
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['tracks'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            return progress
-
+            return progress_breakdown(conn, 'deezer')
         except Exception as e:
             logger.error(f"Error getting progress breakdown: {e}")
             return {}

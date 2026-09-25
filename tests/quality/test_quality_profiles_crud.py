@@ -36,7 +36,7 @@ def test_get_quality_profile_dict_shape_unchanged(db):
     assert isinstance(profile["fallback_enabled"], bool)
     assert profile["search_mode"] in ("priority", "best_quality")
     assert isinstance(profile["rank_candidates_by_quality"], bool)
-    assert profile["upgrade_policy"] in ("acceptable", "until_cutoff", "until_top")
+    assert profile["upgrade_policy"] in ("none", "acceptable", "until_cutoff", "until_top")
     assert isinstance(profile["upgrade_cutoff_index"], int)
 
 
@@ -149,41 +149,88 @@ def test_delete_repoints_wishlist_references_to_null(db):
 
     conn = db._get_connection()
     try:
+        # Keyed `<track>::<album>` since composite ids became canonical.
         row = conn.execute(
-            "SELECT quality_profile_id FROM wishlist_tracks WHERE spotify_track_id='sp-del-1'"
+            "SELECT quality_profile_id FROM wishlist_tracks "
+            "WHERE spotify_track_id = 'sp-del-1' OR spotify_track_id LIKE 'sp-del-1::%'"
         ).fetchone()
     finally:
         conn.close()
+    assert row is not None
     assert row["quality_profile_id"] is None
 
 
-def test_delete_repoints_library_track_references_to_null(db):
-    """Same as the wishlist case, but for tracks.quality_profile_id — added
-    later than the wishlist column, and easy to forget to wire into the same
-    cleanup (caught in review: it was)."""
-    pid = db.create_quality_profile("Doomed Library", {"ranked_targets": []})
+def _seed_lib2_quality_references(db, profile_id):
     conn = db._get_connection()
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Album')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, quality_profile_id) "
-            "VALUES (1, 1, 1, 'Track', ?)",
-            (pid,),
-        )
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists(name, quality_profile_id) VALUES(?, ?)",
+            (f"Artist {profile_id}", profile_id),
+        ).lastrowid
+        album_id = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, quality_profile_id) "
+            "VALUES(?, ?, ?)",
+            (artist_id, f"Album {profile_id}", profile_id),
+        ).lastrowid
+        track_id = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, quality_profile_id) "
+            "VALUES(?, ?, ?)",
+            (album_id, f"Track {profile_id}", profile_id),
+        ).lastrowid
         conn.commit()
+        return artist_id, album_id, track_id
     finally:
         conn.close()
+
+
+def _lib2_quality_references(db, ids):
+    artist_id, album_id, track_id = ids
+    conn = db._get_connection()
+    try:
+        return (
+            conn.execute(
+                "SELECT quality_profile_id FROM lib2_artists WHERE id=?",
+                (artist_id,),
+            ).fetchone()[0],
+            conn.execute(
+                "SELECT quality_profile_id FROM lib2_albums WHERE id=?",
+                (album_id,),
+            ).fetchone()[0],
+            conn.execute(
+                "SELECT quality_profile_id FROM lib2_tracks WHERE id=?",
+                (track_id,),
+            ).fetchone()[0],
+        )
+    finally:
+        conn.close()
+
+
+def test_delete_repoints_lib2_references_to_current_default(db):
+    """The library's own assignments — the counterpart of the wishlist case.
+    A library reference is easy to forget to wire into the same cleanup
+    (caught in review once: it was). Note the difference from the wishlist:
+    there "no profile" is NULL, in the catalogue it is the current default
+    plus `quality_profile_explicit = 0`, because the column is NOT NULL and a
+    trigger rejects a pointer to a profile that no longer exists."""
+    pid = db.create_quality_profile("Doomed Lib2", {"ranked_targets": []})
+    ids = _seed_lib2_quality_references(db, pid)
+    default_id = next(p["id"] for p in db.list_quality_profiles() if p["is_default"])
 
     ok, reason = db.delete_quality_profile(pid)
-    assert ok is True and reason == ""
 
-    conn = db._get_connection()
-    try:
-        row = conn.execute("SELECT quality_profile_id FROM tracks WHERE id=1").fetchone()
-    finally:
-        conn.close()
-    assert row["quality_profile_id"] is None
+    assert ok is True and reason == ""
+    assert _lib2_quality_references(db, ids) == (default_id, default_id, default_id)
+
+
+def test_delete_default_repoints_lib2_references_to_promoted_profile(db):
+    ids = _seed_lib2_quality_references(db, 1)
+
+    ok, reason = db.delete_quality_profile(1)
+
+    assert ok is True and reason == ""
+    promoted_id = next(p["id"] for p in db.list_quality_profiles() if p["is_default"])
+    assert promoted_id != 1
+    assert _lib2_quality_references(db, ids) == (promoted_id, promoted_id, promoted_id)
 
 
 def test_delete_clears_matching_auto_import_override(db, monkeypatch):

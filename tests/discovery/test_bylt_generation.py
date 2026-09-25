@@ -30,10 +30,10 @@ def db(tmp_path):
     conn = d._get_connection()
     cur = conn.cursor()
     # two seeds the user plays. NEITHER is on the watchlist - that is the point
-    cur.execute("INSERT INTO artists (id, name, deezer_id, genres) "
-                "VALUES (1,'Katy Perry','111','[\"pop\"]')")
-    cur.execute("INSERT INTO artists (id, name, deezer_id, genres) "
-                "VALUES (2,'Ariana Grande','222','[\"pop\"]')")
+    cur.execute("INSERT INTO lib2_artists (id, name, name_key, external_ids, genres) "
+                "VALUES (1,'Katy Perry','katy perry','{\"deezer\":\"111\"}','[\"pop\"]')")
+    cur.execute("INSERT INTO lib2_artists (id, name, name_key, external_ids, genres) "
+                "VALUES (2,'Ariana Grande','ariana grande','{\"deezer\":\"222\"}','[\"pop\"]')")
     for artist, plays in (("Katy Perry", 30), ("Ariana Grande", 20)):
         for _ in range(plays):
             cur.execute("INSERT INTO listening_history (title, artist, played_at) "
@@ -201,8 +201,8 @@ def test_edges_from_a_colliding_provider_id_never_cross_seeds(db):
     conn = db._get_connection()
     cur = conn.cursor()
     # an iTunes artist whose id happens to equal Katy Perry's deezer id
-    cur.execute("INSERT INTO artists (id, name, itunes_artist_id) "
-                "VALUES (3,'Collider','111')")
+    cur.execute("INSERT INTO lib2_artists (id, name, name_key, external_ids) "
+                "VALUES (3,'Collider','collider','{\"itunes\":\"111\"}')")
     cur.execute("INSERT INTO similar_artists (source_artist_id, source_provider, "
                 "similar_artist_name, similarity_rank, profile_id) "
                 "VALUES ('111','itunes','Wrong Band',1,1)")

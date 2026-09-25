@@ -246,11 +246,17 @@ class TestFallbackRereleaseGuard:
         d = MusicDatabase(str(tmp_path / "m.db"))
         conn = d._get_connection()
         cur = conn.cursor()
-        cur.execute("INSERT INTO artists (id, name) VALUES ('AR1','Meshuggah')")
-        cur.execute("INSERT INTO albums (id, artist_id, title, year) VALUES ('AL1','AR1','Chaosphere',1998)")
-        cur.execute("INSERT INTO albums (id, artist_id, title, year) VALUES ('AL2','AR1','Rare Trax',2001)")
-        cur.execute("INSERT INTO tracks (id, album_id, artist_id, title) VALUES ('T1','AL1','AR1','Concatenation')")
-        cur.execute("INSERT INTO tracks (id, album_id, artist_id, title) VALUES ('T2','AL2','AR1','Vanished')")
+        from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
+        artist = seed_artist(cur, server_id='AR1', name='Meshuggah')
+        chaosphere = seed_album(cur, server_id='AL1', artist_id=artist,
+                                title='Chaosphere', year=1998)
+        rare_trax = seed_album(cur, server_id='AL2', artist_id=artist,
+                               title='Rare Trax', year=2001)
+        seed_track(cur, server_id='T1', title='Concatenation', album_id=chaosphere,
+                   artist_id=artist, file_path='/m/concatenation.flac')
+        seed_track(cur, server_id='T2', title='Vanished', album_id=rare_trax,
+                   artist_id=artist, file_path='/m/vanished.flac')
         conn.commit(); conn.close()
         return d
 

@@ -1,9 +1,15 @@
 """Per-target cover-art apply (Pache711: 'select one or the other to fix').
 
-A missing-cover-art finding now offers album art AND artist art as
-independently applyable targets. _fix_missing_cover_art routes on _fix_action:
+A missing-cover-art finding offers album art AND artist art as independently
+applyable targets. ``_fix_missing_cover_art`` routes on ``_fix_action``:
 'album' (default), 'artist', or 'both'. Verified against a real SQLite DB so
 the UPDATE statements are exercised.
+
+The subject is ``lib2:1`` because that is the only kind ``missing_cover_art``
+emits. These ran against a bare ``'al1'`` while the handler still carried a
+legacy branch behind that check — so they exercised the version no finding
+could reach, and the artwork columns they asserted on (``albums.thumb_url``,
+``artists.thumb_url``) are not the ones the apply writes.
 """
 
 from __future__ import annotations
@@ -45,19 +51,25 @@ from core.repair_worker import RepairWorker
 
 class _DB:
     def __init__(self, path):
+        from core.library2.schema import ensure_library_v2_schema
+
         self.path = str(path)
         conn = self._get_connection()
-        c = conn.cursor()
-        c.execute("CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT, thumb_url TEXT, updated_at TEXT)")
-        c.execute("CREATE TABLE albums (id TEXT PRIMARY KEY, title TEXT, artist_id TEXT, thumb_url TEXT, musicbrainz_release_id TEXT, updated_at TEXT)")
-        c.execute("CREATE TABLE tracks (id TEXT PRIMARY KEY, album_id TEXT, file_path TEXT)")
-        c.execute("INSERT INTO artists VALUES ('ar1', 'Forre Sterra', 'http://old/artist.jpg', NULL)")
-        c.execute("INSERT INTO albums VALUES ('al1', 'For You', 'ar1', NULL, NULL, NULL)")
+        ensure_library_v2_schema(conn)
+        conn.execute(
+            "INSERT INTO lib2_artists (id, name, sort_name, image_url) "
+            "VALUES (1, 'Forre Sterra', 'Forre Sterra', 'http://old/artist.jpg')")
+        conn.execute(
+            "INSERT INTO lib2_albums (id, primary_artist_id, title, image_url) "
+            "VALUES (1, 1, 'For You', NULL)")
+        conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (1, 1, 'Song')")
         conn.commit()
         conn.close()
 
     def _get_connection(self):
-        return sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def _worker(tmp_path):
@@ -70,15 +82,16 @@ def _worker(tmp_path):
 
 def _thumbs(w):
     conn = w.db._get_connection()
-    c = conn.cursor()
-    alb = c.execute("SELECT thumb_url FROM albums WHERE id='al1'").fetchone()[0]
-    art = c.execute("SELECT thumb_url FROM artists WHERE id='ar1'").fetchone()[0]
-    conn.close()
+    try:
+        alb = conn.execute("SELECT image_url FROM lib2_albums WHERE id=1").fetchone()[0]
+        art = conn.execute("SELECT image_url FROM lib2_artists WHERE id=1").fetchone()[0]
+    finally:
+        conn.close()
     return alb, art
 
 
 DETAILS = {
-    'album_id': 'al1', 'album_title': 'For You', 'artist': 'Forre Sterra',
+    'album_id': 'lib2:1', 'album_title': 'For You', 'artist': 'Forre Sterra',
     'found_artwork_url': 'http://new/album.jpg',
     'found_artist_url': 'http://new/artist.jpg',
 }
@@ -86,7 +99,7 @@ DETAILS = {
 
 def test_artist_only_sets_artist_leaves_album(tmp_path):
     w = _worker(tmp_path)
-    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'artist'})
+    res = w._fix_missing_cover_art('album', 'lib2:1', None, {**DETAILS, '_fix_action': 'artist'})
     assert res['success'] and res['action'] == 'applied_artist_art'
     album_thumb, artist_thumb = _thumbs(w)
     assert artist_thumb == 'http://new/artist.jpg'   # artist updated
@@ -95,7 +108,7 @@ def test_artist_only_sets_artist_leaves_album(tmp_path):
 
 def test_album_only_sets_album_leaves_artist(tmp_path):
     w = _worker(tmp_path)
-    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'album'})
+    res = w._fix_missing_cover_art('album', 'lib2:1', None, {**DETAILS, '_fix_action': 'album'})
     assert res['success']
     album_thumb, artist_thumb = _thumbs(w)
     assert album_thumb == 'http://new/album.jpg'     # album updated
@@ -105,7 +118,7 @@ def test_album_only_sets_album_leaves_artist(tmp_path):
 def test_default_action_is_album_only(tmp_path):
     # No _fix_action → behaves exactly like the old "Apply Art" (album only).
     w = _worker(tmp_path)
-    w._fix_missing_cover_art('album', 'al1', None, dict(DETAILS))
+    w._fix_missing_cover_art('album', 'lib2:1', None, dict(DETAILS))
     album_thumb, artist_thumb = _thumbs(w)
     assert album_thumb == 'http://new/album.jpg'
     assert artist_thumb == 'http://old/artist.jpg'
@@ -113,7 +126,7 @@ def test_default_action_is_album_only(tmp_path):
 
 def test_both_sets_album_and_artist(tmp_path):
     w = _worker(tmp_path)
-    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'both'})
+    res = w._fix_missing_cover_art('album', 'lib2:1', None, {**DETAILS, '_fix_action': 'both'})
     assert res['success']
     album_thumb, artist_thumb = _thumbs(w)
     assert album_thumb == 'http://new/album.jpg'
@@ -123,7 +136,7 @@ def test_both_sets_album_and_artist(tmp_path):
 
 def test_artist_action_without_found_artist_url_fails_cleanly(tmp_path):
     w = _worker(tmp_path)
-    res = w._fix_missing_cover_art('album', 'al1', None,
+    res = w._fix_missing_cover_art('album', 'lib2:1', None,
                                    {**DETAILS, 'found_artist_url': None, '_fix_action': 'artist'})
     assert res['success'] is False
     album_thumb, artist_thumb = _thumbs(w)
@@ -134,10 +147,13 @@ def test_artist_action_without_found_artist_url_fails_cleanly(tmp_path):
 
 def _add_track(w, path):
     conn = w.db._get_connection()
-    c = conn.cursor()
-    c.execute("INSERT INTO tracks VALUES ('t1', 'al1', ?)", (str(path),))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(
+            "INSERT INTO lib2_track_files (track_id, path, format, is_primary) "
+            "VALUES (1, ?, 'mp3', 1)", (str(path),))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _apply_returns(monkeypatch, **art_result):
@@ -154,7 +170,7 @@ def test_already_arted_reports_present_not_readonly(tmp_path, monkeypatch):
     f = tmp_path / 'song.mp3'; f.write_bytes(b'x')
     _add_track(w, f)
     _apply_returns(monkeypatch, skipped=1)
-    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'album'})
+    res = w._fix_missing_cover_art('album', 'lib2:1', None, {**DETAILS, '_fix_action': 'album'})
     assert res['success'] is True
     assert 'already present' in res['message'].lower()
     assert 'read-only' not in res['message'].lower()
@@ -165,7 +181,7 @@ def test_failed_writes_blame_permissions_not_readonly(tmp_path, monkeypatch):
     f = tmp_path / 'song.mp3'; f.write_bytes(b'x')
     _add_track(w, f)
     _apply_returns(monkeypatch, failed=1)
-    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'album'})
+    res = w._fix_missing_cover_art('album', 'lib2:1', None, {**DETAILS, '_fix_action': 'album'})
     assert res['success'] is True
     assert 'permission' in res['message'].lower()
     assert 'read-only' not in res['message'].lower()
@@ -176,7 +192,7 @@ def test_genuine_read_only_still_hard_fails(tmp_path, monkeypatch):
     f = tmp_path / 'song.mp3'; f.write_bytes(b'x')
     _add_track(w, f)
     _apply_returns(monkeypatch, read_only_fs=True)
-    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'album'})
+    res = w._fix_missing_cover_art('album', 'lib2:1', None, {**DETAILS, '_fix_action': 'album'})
     assert res['success'] is False
     assert 'read-only' in res['error'].lower()
 
@@ -186,5 +202,5 @@ def test_embedded_success_message(tmp_path, monkeypatch):
     f = tmp_path / 'song.mp3'; f.write_bytes(b'x')
     _add_track(w, f)
     _apply_returns(monkeypatch, embedded=1)
-    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'album'})
+    res = w._fix_missing_cover_art('album', 'lib2:1', None, {**DETAILS, '_fix_action': 'album'})
     assert res['success'] is True and 'embedded into 1' in res['message']

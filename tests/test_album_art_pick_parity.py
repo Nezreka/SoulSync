@@ -35,29 +35,34 @@ def client():
     return web_server.app.test_client()
 
 
+# The endpoint addresses an album by the id the picker was opened with, which on
+# the v2 catalogue is the lib2 row id; ALBUM_ID is the row the fixture created.
+ALBUM_ID: dict = {}
+
+
 @pytest.fixture
 def seeded():
+    from tests.support.catalogue_seed import seed_album, seed_artist
+
     db = web_server.get_database()
     conn = db._get_connection()
     try:
-        conn.execute("INSERT OR REPLACE INTO artists (id, name, thumb_url) VALUES (?,?,?)",
-                     ('art-9', 'Parity Artist', 'http://server/artist.jpg'))
-        conn.execute("INSERT OR REPLACE INTO albums (id, artist_id, title, thumb_url) "
-                     "VALUES (?,?,?,?)",
-                     ('jf-guid-9', 'art-9', 'Parity Album', 'http://server/cover.jpg'))
-        for table, row_id in (('artists', 'art-9'), ('albums', 'jf-guid-9')):
-            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()
-                    if r[1].endswith('_match_status')]
-            for col in cols:
-                conn.execute(f"UPDATE {table} SET {col} = 'not_found' WHERE id = ?", (row_id,))
+        artist = seed_artist(conn, server_id='art-9', name='Parity Artist',
+                             server_source='jellyfin',
+                             image_url='http://server/artist.jpg')
+        album = seed_album(conn, server_id='jf-guid-9', title='Parity Album',
+                           artist_id=artist, server_source='jellyfin',
+                           image_url='http://server/cover.jpg')
+        ALBUM_ID['album'] = album
+        ALBUM_ID['artist'] = artist
         conn.commit()
     finally:
         conn.close()
     yield db
     conn = db._get_connection()
     try:
-        conn.execute("DELETE FROM albums WHERE id = ?", ('jf-guid-9',))
-        conn.execute("DELETE FROM artists WHERE id = ?", ('art-9',))
+        conn.execute("DELETE FROM lib2_albums WHERE id = ?", (album,))
+        conn.execute("DELETE FROM lib2_artists WHERE id = ?", (artist,))
         conn.commit()
     finally:
         conn.close()
@@ -66,8 +71,9 @@ def seeded():
 def _row(db, album_id):
     conn = db._get_connection()
     try:
-        return conn.execute("SELECT thumb_url, art_locked FROM albums WHERE id = ?",
-                            (album_id,)).fetchone()
+        return conn.execute(
+            "SELECT image_url AS thumb_url, art_locked FROM lib2_albums WHERE id = ?",
+            (album_id,)).fetchone()
     finally:
         conn.close()
 
@@ -133,7 +139,7 @@ def test_pick_locks_pushes_and_writes_cover(client, seeded, tmp_path, monkeypatc
     monkeypatch.setattr(_artist_detail, 'media_server_engine', _Engine(fake))
     monkeypatch.setattr(_artist_detail, 'config_manager', _Config())
 
-    r = client.post('/api/album/jf-guid-9/art', json={'url': CUSTOM})
+    r = client.post(f"/api/album/{ALBUM_ID['album']}/art", json={'url': CUSTOM})
 
     assert r.status_code == 200
     body = r.get_json()
@@ -141,7 +147,7 @@ def test_pick_locks_pushes_and_writes_cover(client, seeded, tmp_path, monkeypatc
     assert body['cover_written'] is True
     assert fake.pushed == [('jf-guid-9', JPEG)]
     assert (tmp_path / 'cover.jpg').read_bytes() == JPEG
-    row = _row(seeded, 'jf-guid-9')
+    row = _row(seeded, ALBUM_ID['album'])
     assert row['thumb_url'] == CUSTOM and row['art_locked'] == 1
 
 
@@ -167,7 +173,7 @@ def test_pick_reaches_a_plex_album_through_fetch_item(client, seeded, monkeypatc
     monkeypatch.setattr(_artist_detail, 'media_server_engine', _Engine(fake))
     monkeypatch.setattr(_artist_detail, 'config_manager', _Config())
 
-    r = client.post('/api/album/jf-guid-9/art', json={'url': CUSTOM})
+    r = client.post(f"/api/album/{ALBUM_ID['album']}/art", json={'url': CUSTOM})
     assert r.get_json()['server_updated'] is True
     assert fake.pushed == ['jf-guid-9']
 
@@ -178,11 +184,11 @@ def test_html_url_is_refused_before_anything_is_pinned(client, seeded, monkeypat
     monkeypatch.setattr(_artist_detail, 'media_server_engine', _Engine(fake))
     monkeypatch.setattr(_artist_detail, 'config_manager', _Config())
 
-    r = client.post('/api/album/jf-guid-9/art', json={'url': 'https://example.invalid/page'})
+    r = client.post(f"/api/album/{ALBUM_ID['album']}/art", json={'url': 'https://example.invalid/page'})
 
     assert r.status_code == 400
     assert fake.pushed == []
-    row = _row(seeded, 'jf-guid-9')
+    row = _row(seeded, ALBUM_ID['album'])
     assert row['thumb_url'] == 'http://server/cover.jpg' and not row['art_locked']
 
 
@@ -195,9 +201,9 @@ def test_failed_download_still_locks_the_pick(client, seeded, monkeypatch):
     monkeypatch.setattr(_artist_detail, 'media_server_engine', _Engine(fake))
     monkeypatch.setattr(_artist_detail, 'config_manager', _Config())
 
-    r = client.post('/api/album/jf-guid-9/art', json={'url': CUSTOM})
+    r = client.post(f"/api/album/{ALBUM_ID['album']}/art", json={'url': CUSTOM})
     body = r.get_json()
     assert r.status_code == 200
     assert body['server_updated'] is False and body['cover_written'] is False
     assert fake.pushed == []
-    assert _row(seeded, 'jf-guid-9')['art_locked'] == 1
+    assert _row(seeded, ALBUM_ID['album'])['art_locked'] == 1

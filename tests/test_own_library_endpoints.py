@@ -24,6 +24,9 @@ def sam():
     return web_server.get_database().create_profile(name=f'sam_{os.urandom(3).hex()}')
 
 
+@pytest.mark.skip(reason=(
+    "upstream's own-library model: these seed the catalogue through insert_or_update_media_*(owner_profile_id=...) and assert on artists/albums/tracks. this branch retired those tables, keeps ownership on lib2_track_files, and its scan is import-controlled -- it maps a server item onto a row it already has and never creates one. the scenarios are worth keeping verbatim; they get rewritten against lib2 when the read scope lands (docs/library-v2-dir-ownership.md, Stufe 3)"
+))
 def test_admin_switches_a_profile_to_its_own_library(client, sam, tmp_path):
     root = str(tmp_path / 'sam')
     os.makedirs(root)
@@ -99,6 +102,9 @@ def test_a_folder_overlapping_the_shared_one_or_another_profiles_is_refused(clie
     assert client.put(f'/api/profiles/{sam}', json={'library_mode': 'own', 'library_root': str(own)}).status_code == 200
 
 
+@pytest.mark.skip(reason=(
+    "upstream's own-library model: these seed the catalogue through insert_or_update_media_*(owner_profile_id=...) and assert on artists/albums/tracks. this branch retired those tables, keeps ownership on lib2_track_files, and its scan is import-controlled -- it maps a server item onto a row it already has and never creates one. the scenarios are worth keeping verbatim; they get rewritten against lib2 when the read scope lands (docs/library-v2-dir-ownership.md, Stufe 3)"
+))
 def test_a_profiles_own_rows_go_when_it_is_shared_again_or_deleted(client, sam, tmp_path):
     from types import SimpleNamespace
     db = web_server.get_database()

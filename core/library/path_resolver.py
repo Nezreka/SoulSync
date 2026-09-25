@@ -166,6 +166,24 @@ def _collect_base_dirs(
     return out
 
 
+def library_base_dirs(
+    config_manager: Any = None,
+    *,
+    transfer_folder: Optional[str] = None,
+    download_folder: Optional[str] = None,
+    plex_client: Any = None,
+) -> List[str]:
+    """The existing directories a stored library path can be resolved against.
+
+    The public form of the search roots the suffix walk uses: transfer and
+    download folders, Plex-reported library locations, and
+    ``library.music_paths``. Callers that need to judge whether some path
+    belongs to the library at all — rather than resolve one file — ask here,
+    instead of reaching for the private collector.
+    """
+    return _collect_base_dirs(transfer_folder, download_folder, config_manager, plex_client)
+
+
 def resolve_library_file_path(
     file_path: Any,
     *,

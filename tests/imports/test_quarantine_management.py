@@ -555,3 +555,92 @@ def test_siblings_must_be_captured_before_accepted_entry_leaves_quarantine(tmp_p
     delete_quarantine_entry(str(tmp_path), id1)  # simulate approve restoring it
 
     assert find_quarantine_siblings(str(tmp_path), id1) == []  # too late now
+
+
+# ──────────────────────────────────────────────────────────────────────
+# §27 dd28-49 / dd28-50 — where quarantine entries land, and collisions
+# ──────────────────────────────────────────────────────────────────────
+
+def test_quarantine_dir_is_docker_resolved(tmp_path, monkeypatch):
+    """dd28-49: every other consumer resolves the download path first.
+
+    Writing entries to the *unresolved* path meant that with a Windows-style
+    drive path configured under Docker they landed where approve/delete/list
+    could never find them again.
+    """
+    import core.imports.guards as guards
+    import core.imports.paths as paths
+
+    configured = r"C:\\downloads"
+    resolved = str(tmp_path / "resolved-downloads")
+    os.makedirs(resolved, exist_ok=True)
+
+    monkeypatch.setattr(
+        guards, "_get_config_manager",
+        lambda: type("_C", (), {"get": staticmethod(lambda *_a, **_k: configured)})(),
+    )
+    monkeypatch.setattr(
+        paths, "docker_resolve_path",
+        lambda p: resolved if p == configured else p,
+    )
+    monkeypatch.setattr(guards, "safe_move_file", lambda src, dst: open(dst, "wb").close())
+
+    source = tmp_path / "candidate.flac"
+    source.write_bytes(b"\x00")
+
+    out = guards.move_to_quarantine(str(source), {}, "integrity", trigger="integrity")
+
+    assert out.startswith(resolved), f"entry landed outside the resolved root: {out}"
+    assert os.path.isdir(os.path.join(resolved, "ss_quarantine"))
+
+
+def test_two_candidates_in_the_same_second_do_not_overwrite_each_other(
+    tmp_path, monkeypatch,
+):
+    """dd28-50: the multi-candidate retry walk is exactly this shape.
+
+    The filename is ``<second-resolution timestamp>_<stem>``, and
+    ``safe_move_file`` overwrites its destination — so the second candidate
+    silently destroyed the first entry AND its sidecar.
+    """
+    import core.imports.guards as guards
+    import core.imports.paths as paths
+
+    root = str(tmp_path / "dl")
+    os.makedirs(root, exist_ok=True)
+    monkeypatch.setattr(
+        guards, "_get_config_manager",
+        lambda: type("_C", (), {"get": staticmethod(lambda *_a, **_k: root)})(),
+    )
+    monkeypatch.setattr(paths, "docker_resolve_path", lambda p: p)
+    monkeypatch.setattr(guards, "safe_move_file", lambda src, dst: open(dst, "wb").close())
+
+    # Freeze the clock so both entries share a timestamp, as they do in a
+    # back-to-back candidate walk.
+    import datetime as _dt
+
+    frozen = _dt.datetime(2026, 7, 28, 3, 0, 0)
+
+    class _FrozenDateTime(_dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen
+
+    monkeypatch.setattr(guards, "datetime", _FrozenDateTime)
+
+    first_src = tmp_path / "Song.flac"
+    first_src.write_bytes(b"\x01")
+    first = guards.move_to_quarantine(str(first_src), {}, "integrity")
+
+    second_src = tmp_path / "other" / "Song.flac"
+    second_src.parent.mkdir(parents=True, exist_ok=True)
+    second_src.write_bytes(b"\x02")
+    second = guards.move_to_quarantine(str(second_src), {}, "integrity")
+
+    assert first != second, "the second candidate overwrote the first entry"
+    assert os.path.exists(first) and os.path.exists(second)
+
+    entries = list_quarantine_entries(os.path.join(root, "ss_quarantine"))
+    assert len(entries) == 2, f"expected both candidates to survive, got {entries}"
+    assert entry_id_from_quarantined_filename(first) != \
+        entry_id_from_quarantined_filename(second)

@@ -1,4 +1,4 @@
-"""Find and clear corrupted source-id assignments on the ``artists`` table.
+"""Find and clear corrupted source-id assignments in Library v2.
 
 Background
 ----------
@@ -39,26 +39,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# source -> (id column, match-status column) on the ``artists`` table.
-SOURCE_COLUMNS = {
-    'deezer': ('deezer_id', 'deezer_match_status'),
-    'spotify': ('spotify_artist_id', 'spotify_match_status'),
-    'itunes': ('itunes_artist_id', 'itunes_match_status'),
-    'musicbrainz': ('musicbrainz_id', 'musicbrainz_match_status'),
-    'discogs': ('discogs_id', 'discogs_match_status'),
-    'audiodb': ('audiodb_id', 'audiodb_match_status'),
-    'qobuz': ('qobuz_id', 'qobuz_match_status'),
-    'tidal': ('tidal_id', 'tidal_match_status'),
-}
+SOURCES = ('deezer', 'spotify', 'itunes', 'musicbrainz', 'discogs',
+           'audiodb', 'qobuz', 'tidal')
 
 
 def _norm(name: str) -> str:
     """Loose name key — lowercased, whitespace-collapsed."""
     return ' '.join((name or '').lower().split())
-
-
-def _artists_columns(conn) -> set:
-    return {r[1] for r in conn.execute("PRAGMA table_info(artists)")}
 
 
 def find_corrupt_clusters(database: Any) -> list[dict]:
@@ -68,14 +55,14 @@ def find_corrupt_clusters(database: Any) -> list[dict]:
     members: [(artist_id, name), ...]}``. A cluster is corrupt when one id is
     held by artists with more than one distinct (normalized) name.
     """
+    from core.library2.provider_ids import provider_id_sql
+
     clusters: list[dict] = []
     with database._get_connection() as conn:
-        existing = _artists_columns(conn)
-        for source, (id_col, status_col) in SOURCE_COLUMNS.items():
-            if id_col not in existing:
-                continue
+        for source in SOURCES:
+            id_col = provider_id_sql(source)
             rows = conn.execute(
-                f"SELECT {id_col}, id, name FROM artists "
+                f"SELECT {id_col}, id, name FROM lib2_artists "
                 f"WHERE {id_col} IS NOT NULL AND {id_col} != ''"
             ).fetchall()
             by_id: dict = {}
@@ -86,7 +73,6 @@ def find_corrupt_clusters(database: Any) -> list[dict]:
                     clusters.append({
                         'source': source,
                         'id_column': id_col,
-                        'status_column': status_col,
                         'source_id': sid,
                         'members': members,
                     })
@@ -123,11 +109,18 @@ def clear_corrupt_source_ids(database: Any, dry_run: bool = True) -> dict:
             for c in clusters:
                 ids = [aid for aid, _ in c['members']]
                 placeholders = ','.join('?' for _ in ids)
+                source = c['source']
+                if source in ('spotify', 'musicbrainz'):
+                    conn.execute(
+                        f"UPDATE lib2_artists SET {source}_id=NULL "
+                        f"WHERE id IN ({placeholders})", ids)
+                else:
+                    conn.execute(
+                        f"UPDATE lib2_artists SET external_ids=json_remove(external_ids, ?) "
+                        f"WHERE id IN ({placeholders})", [f'$.{source}', *ids])
                 conn.execute(
-                    f"UPDATE artists SET {c['id_column']} = NULL, "
-                    f"{c['status_column']} = NULL WHERE id IN ({placeholders})",
-                    ids,
-                )
+                    f"DELETE FROM lib2_provider_attempts WHERE entity_type='artist' "
+                    f"AND service=? AND entity_id IN ({placeholders})", [source, *ids])
             conn.commit()
         logger.info(
             f"Cleared {report['artist_count']} corrupt source ids across "
@@ -135,4 +128,37 @@ def clear_corrupt_source_ids(database: Any, dry_run: bool = True) -> dict:
             f"re-derive them correctly"
         )
 
+    return report
+
+
+def repair_imported_state(database: Any) -> dict:
+    """Apply one-time corruption repairs after legacy rows reached Library v2."""
+    with database._get_connection() as conn:
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_artists'"
+        ).fetchone() is None:
+            return {'skipped': 'no_catalogue'}
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
+            "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        )
+        markers = {row[0] for row in conn.execute("SELECT name FROM lib2_upgrade_repairs")}
+        conn.commit()
+    report = clear_corrupt_source_ids(database, dry_run=False)
+    with database._get_connection() as conn:
+        if 'lib2_genius_search_fix' not in markers:
+            for table in ('lib2_artists', 'lib2_tracks'):
+                conn.execute(
+                    f"UPDATE {table} SET external_ids=json_remove(external_ids,'$.genius'), "
+                    "enrichment=json_remove(enrichment,'$.genius')"
+                )
+            conn.execute("DELETE FROM lib2_provider_attempts WHERE service='genius'")
+            conn.execute("INSERT INTO lib2_upgrade_repairs(name) VALUES('lib2_genius_search_fix')")
+            report['genius_reset'] = True
+        if 'lib2_soulid_v2_migration' not in markers:
+            report['soul_ids_cleared'] = conn.execute(
+                "UPDATE lib2_artists SET soul_id=NULL WHERE soul_id IS NOT NULL"
+            ).rowcount
+            conn.execute("INSERT INTO lib2_upgrade_repairs(name) VALUES('lib2_soulid_v2_migration')")
+        conn.commit()
     return report

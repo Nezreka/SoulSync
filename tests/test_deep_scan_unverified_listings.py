@@ -24,6 +24,7 @@ from core.database_update_worker import DatabaseUpdateWorker
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 
 # ── one library, three servers ─────────────────────────────────────────────
@@ -50,18 +51,20 @@ def seeded(tmp_path, monkeypatch):
     monkeypatch.setattr('core.database_update_worker.get_database', lambda path=None: db)
 
     def seed(server):
+        # the catalogue keys on its own ids and keeps the server's in
+        # server_id, so the ids these tests address rows by are seeded there
         with db._get_connection() as conn:
             for ar in ARTISTS:
-                conn.execute("INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-                             (ar, f"Artist {ar}", server))
+                artist_id = seed_artist(conn, server_id=ar, name=f"Artist {ar}",
+                                        server_source=server)
                 for al in _albums_of(ar):
-                    conn.execute("INSERT INTO albums (id, title, artist_id, server_source) VALUES (?, ?, ?, ?)",
-                                 (al, f"Album {al}", ar, server))
+                    album_id = seed_album(conn, server_id=al, title=f"Album {al}",
+                                          artist_id=artist_id, server_source=server)
                     for n, t in enumerate(_tracks_of(al)):
-                        conn.execute(
-                            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, "
-                            "file_path, server_source) VALUES (?, ?, ?, ?, ?, 100, ?, ?)",
-                            (t, al, ar, f"Track {n}", n + 1, f"/m/{t}.flac", server))
+                        seed_track(conn, server_id=t, title=f"Track {n}",
+                                   album_id=album_id, artist_id=artist_id,
+                                   server_source=server, track_number=n + 1,
+                                   duration=100, file_path=f"/m/{t}.flac")
             conn.commit()
         return db
 
@@ -69,9 +72,10 @@ def seeded(tmp_path, monkeypatch):
 
 
 def _remaining(db, server):
-    with db._get_connection() as conn:
-        rows = conn.execute("SELECT id FROM tracks WHERE server_source = ?", (server,)).fetchall()
-    return {r[0] for r in rows}
+    """The server track ids the catalogue still attributes to that server.
+    Removal detaches the server's contribution rather than deleting the row,
+    so this is the same question the scan asks before it removes anything."""
+    return db.get_all_track_ids_for_server(server)
 
 
 def _all_track_ids():
@@ -415,11 +419,17 @@ def test_jellyfin_per_item_listings_page_past_the_old_cap(seeded, monkeypatch):
         server.artists['ar2'][f"ar2-al{a}"] = []
     db = seeded.seed('jellyfin')
     with db._get_connection() as conn:
+        album_id = conn.execute(
+            "SELECT id FROM lib2_albums WHERE server_source='jellyfin' AND server_id=?",
+            (big,)).fetchone()[0]
+        artist_id = conn.execute(
+            "SELECT id FROM lib2_artists WHERE server_source='jellyfin' AND server_id='ar1'"
+        ).fetchone()[0]
         for n in range(TRACKS_PER_ALBUM, 250):
             t = f"{big}-t{n}"
-            conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, "
-                         "server_source) VALUES (?, ?, 'ar1', ?, ?, 100, ?, 'jellyfin')",
-                         (t, big, f"Track {n}", n + 1, f"/m/{t}.flac"))
+            seed_track(conn, server_id=t, title=f"Track {n}", album_id=album_id,
+                       artist_id=artist_id, server_source='jellyfin',
+                       track_number=n + 1, duration=100, file_path=f"/m/{t}.flac")
         conn.commit()
     client = _jellyfin(server, bulk='all_fail')
     w = DatabaseUpdateWorker(media_client=client, database_path=seeded.path,
@@ -431,9 +441,16 @@ def test_jellyfin_per_item_listings_page_past_the_old_cap(seeded, monkeypatch):
     assert len(artist_pages) >= 2, "the 230-album artist was fetched in one request"
     assert len(_remaining(db, 'jellyfin')) == 100 - TRACKS_PER_ALBUM + 250
     assert w.removed_tracks == 0
+    # upstream asserts 230 here because its scan INSERTS a row per listed
+    # album. This catalogue is import-controlled: a scan maps a server album
+    # onto a row that already exists and never invents one, so the number to
+    # pin is that the paging did not cost the artist any of the rows it has.
     with db._get_connection() as conn:
-        albums = conn.execute("SELECT COUNT(*) FROM albums WHERE artist_id = 'ar2'").fetchone()[0]
-    assert albums == 230
+        albums = conn.execute(
+            "SELECT COUNT(*) FROM lib2_albums al JOIN lib2_artists a"
+            "    ON a.id = al.primary_artist_id"
+            " WHERE a.server_source='jellyfin' AND a.server_id='ar2'").fetchone()[0]
+    assert albums == ALBUMS_PER_ARTIST
 
 
 # ── plex-shaped (plexapi raises) ───────────────────────────────────────────
@@ -540,21 +557,41 @@ def test_a_failed_fence_query_skips_removal_instead_of_deleting(seeded, monkeypa
     assert _remaining(db, 'navidrome') == _all_track_ids()
 
 
+def test_the_fence_reaches_a_credited_track_on_someone_elses_album(tmp_path):
+    """A Various Artists release: the album's primary artist is the VA row, so
+    reaching tracks only through lib2_albums.primary_artist_id leaves an
+    unverified artist's tracks outside the fence and the scan deletes them."""
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    with db._get_connection() as conn:
+        guest = seed_artist(conn, server_id='guest', name='Guest',
+                            server_source='navidrome')
+        various = seed_artist(conn, server_id='va', name='Various Artists',
+                              server_source='navidrome')
+        compilation = seed_album(conn, server_id='comp', title='Comp',
+                                 artist_id=various, server_source='navidrome')
+        seed_track(conn, server_id='guest-track', title='Guest Song',
+                   album_id=compilation, artist_id=guest,
+                   server_source='navidrome', file_path='/g.flac')
+        conn.commit()
+
+    assert db.get_track_ids_under_scopes('navidrome', {'guest'}, set()) == {'guest-track'}
+
+
 def test_get_track_ids_under_scopes(tmp_path):
     db = MusicDatabase(str(tmp_path / 'm.db'))
     with db._get_connection() as conn:
-        for ar in ('ar1', 'ar2'):
-            conn.execute("INSERT INTO artists (id, name, server_source) VALUES (?, ?, 'navidrome')", (ar, ar))
-        for al, ar in (('al1', 'ar1'), ('al2', 'ar1'), ('al3', 'ar2')):
-            conn.execute("INSERT INTO albums (id, title, artist_id, server_source) VALUES (?, ?, ?, 'navidrome')", (al, al, ar))
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source) VALUES "
-                     "('t1', 'al1', 'ar1', 'a', '/a', 'navidrome')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source) VALUES "
-                     "('t2', 'al2', 'ar1', 'b', '/b', 'navidrome')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source) VALUES "
-                     "('t3', 'al3', 'ar2', 'c', '/c', 'navidrome')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source) VALUES "
-                     "('t4', 'al3', 'ar2', 'd', '/d', 'plex')")
+        artists = {ar: seed_artist(conn, server_id=ar, name=ar, server_source='navidrome')
+                   for ar in ('ar1', 'ar2')}
+        albums = {al: seed_album(conn, server_id=al, title=al, artist_id=artists[ar],
+                                 server_source='navidrome')
+                  for al, ar in (('al1', 'ar1'), ('al2', 'ar1'), ('al3', 'ar2'))}
+        for t, al, letter in (('t1', 'al1', 'a'), ('t2', 'al2', 'b'), ('t3', 'al3', 'c')):
+            seed_track(conn, server_id=t, title=letter, album_id=albums[al],
+                       server_source='navidrome', file_path=f'/{letter}')
+        # a different server's row under the same album, which the fence must
+        # not claim: the scan that asks is only ever removing its own
+        seed_track(conn, server_id='t4', title='d', album_id=albums['al3'],
+                   server_source='plex', file_path='/d')
         conn.commit()
     assert db.get_track_ids_under_scopes('navidrome', set(), set()) == set()
     assert db.get_track_ids_under_scopes('navidrome', {'ar1'}, set()) == {'t1', 't2'}

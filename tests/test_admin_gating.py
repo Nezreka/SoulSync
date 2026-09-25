@@ -30,9 +30,8 @@ GATED = [
     ('DELETE', '/api/v1/api-keys-internal/revoke/abc'),
     ('POST', '/api/plex/clear-library'),
     ('PUT', '/api/library/clear-match'),
-    ('DELETE', '/api/library/track/123'),
-    ('DELETE', '/api/library/album/123'),
-    ('POST', '/api/library/tracks/delete-batch'),
+    # (the three legacy library-delete endpoints went with the artist-detail
+    #  page — Library V2 has its own, gated the same way)
     ('POST', '/api/database/update'),
     ('POST', '/api/database/update/stop'),
     ('POST', '/api/database/backup'),
@@ -82,6 +81,255 @@ def test_profile_scoped_wishlist_clear_not_overgated(client, nonadmin):
     assert _call(client, 'POST', '/api/wishlist/clear').status_code != 403
 
 
+def test_nonadmin_cannot_attach_library_v2_context(client, nonadmin):
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/song.flac',
+        'lib2_track_id': 1,
+    })
+
+    assert response.status_code == 403
+    assert response.get_json()['error'] == 'Admin access required'
+
+
+def test_normal_nonadmin_download_is_not_admin_gated(client, nonadmin):
+    response = client.post('/api/download', json={'title': 'incomplete'})
+
+    assert response.status_code == 400
+    assert response.get_json()['error'] == 'Missing username or filename.'
+
+
+def test_library_v2_profile_reaches_download_pipeline(client, monkeypatch):
+    from core.library2.schema import ensure_library_v2_schema
+
+    database = web_server.get_database()
+    conn = database._get_connection()
+    ensure_library_v2_schema(conn)
+    cur = conn.cursor()
+    # The lib2 FK triggers (audit P1-01) reject quality_profile_ids that
+    # don't exist in the app-wide quality_profiles table — create the row
+    # this test assigns instead of assuming bare ids pass.
+    cur.execute(
+        "INSERT OR IGNORE INTO quality_profiles(id, name) VALUES(7, 'Route Profile')")
+    cur.execute("INSERT INTO lib2_artists(name) VALUES('Route Artist')")
+    artist_id = cur.lastrowid
+    cur.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, quality_profile_id, "
+        "quality_profile_explicit) VALUES(?, 'Route Album', 7, 1)", (artist_id,))
+    album_id = cur.lastrowid
+    cur.execute(
+        "INSERT INTO lib2_tracks(album_id, title, quality_profile_id, "
+        "quality_profile_explicit) VALUES(?, 'Route Track', 7, 1)", (album_id,))
+    track_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*_args):
+            return object()
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    monkeypatch.setattr(web_server, 'run_async', lambda _result: 'download-id')
+    monkeypatch.setattr(web_server, 'add_activity_item', lambda *_args: None)
+
+    key = web_server._make_context_key('user', 'folder/song.flac')
+    web_server.matched_downloads_context.pop(key, None)
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/song.flac',
+        'title': 'Route Track',
+        'artist': 'Route Artist',
+        'album_name': 'Route Album',
+        'quality_profile_id': 999,
+        'lib2_track_id': track_id,
+        'source_info': {
+            'upgrade_check': True,
+            'lib2_track_id': track_id + 999,
+            'quality_profile_id': 999,
+        },
+        'lib2_entity': {'track_id': track_id + 999},
+    })
+
+    assert response.status_code == 200
+    context = web_server.matched_downloads_context.pop(key)
+    assert context['lib2_entity']['track_id'] == track_id
+    assert context['track_info']['quality_profile_id'] == 7
+    assert context['track_info']['name'] == 'Route Track'
+    assert context['track_info']['artists'] == [{'name': 'Route Artist'}]
+    assert 'source_info' not in context['track_info']
+    from core.imports.upgrade_intent import get_upgrade_intent
+    assert get_upgrade_intent(context).track_id == track_id
+
+
+def test_track_scoped_album_grab_is_rejected_before_dispatch(client, monkeypatch):
+    """An album search result must never bind every bundled file to one track."""
+    from core.library2 import grab_context
+
+    monkeypatch.setattr(
+        grab_context,
+        'resolve_lib2_grab_context',
+        lambda _db, _data: ('ok', {
+            'track_id': 7,
+            'album_id': 3,
+            'quality_profile_id': 1,
+        }),
+    )
+    dispatched = []
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*args):
+            dispatched.append(args)
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    response = client.post('/api/download', json={
+        'result_type': 'album',
+        'lib2_track_id': 7,
+        'tracks': [{
+            'username': 'peer',
+            'filename': 'album/01.flac',
+            'size': 10,
+        }],
+    })
+
+    assert response.status_code == 400
+    assert 'Album results cannot be grabbed' in response.get_json()['error']
+    assert dispatched == []
+
+
+def test_a_plain_basic_search_pick_becomes_a_pinned_batch(client, monkeypatch):
+    """Upstream 097589c38: a basic-search pick is a real batch now -- one pinned
+    task per file, on the Downloads page, with the monitor and verification.
+    Its acquisition correlation happens in the batch worker's candidate walk,
+    not in the route; and the batch carries the library the request selected,
+    so the file lands where the page was pointed (#1199)."""
+    dispatched = []
+    prepared = []
+    monkeypatch.setattr(web_server._pinned_batch, 'dispatch_pinned_batch',
+                        lambda batch_id, task_ids, deps: dispatched.append((batch_id, task_ids)))
+    monkeypatch.setattr(web_server, '_prepare_manual_grab',
+                        lambda *a, **k: prepared.append(a) or None)
+    monkeypatch.setattr(web_server, 'add_activity_item', lambda *_args: None)
+
+    response = client.post('/api/download', json={
+        'username': 'user',
+        'filename': 'folder/pinned.flac',
+        'title': 'Pinned Track',
+        'artist': 'Pinned Artist',
+    })
+
+    assert response.status_code == 200
+    batch_id = response.get_json()['batch_id']
+    assert dispatched and dispatched[0][0] == batch_id
+    assert prepared == []
+    batch = web_server.download_batches.pop(batch_id)
+    assert 'library_owner_id' in batch
+    for task_id in dispatched[0][1]:
+        web_server.download_tasks.pop(task_id, None)
+
+
+def test_admin_manual_download_without_lib2_context_is_correlated(client, monkeypatch):
+    """A release-level source (torrent/usenet/lidarr) is not pinnable and keeps
+    the direct route: prepared, dispatched, then bound."""
+    calls = []
+    order = []
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*_args):
+            order.append('dispatch')
+            return object()
+
+    def _capture(username, search_result, lib2_ctx, **kwargs):
+        order.append('prepare')
+        calls.append((username, search_result, lib2_ctx, kwargs))
+        return {"download_id": "manual-shadow", "request_id": "arq1-shadow"}
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    monkeypatch.setattr(web_server, 'run_async', lambda _result: 'download-id')
+    monkeypatch.setattr(web_server, 'add_activity_item', lambda *_args: None)
+    monkeypatch.setattr(web_server, '_prepare_manual_grab', _capture)
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab,
+        'bind_correlated_grab_transfer',
+        lambda markers, transfer_id: order.append(
+            ('bind', markers['download_id'], transfer_id)),
+    )
+
+    key = web_server._make_context_key('torrent', 'folder/shadow.flac')
+    web_server.matched_downloads_context.pop(key, None)
+    response = client.post('/api/download', json={
+        'username': 'torrent',
+        'filename': 'folder/shadow.flac',
+        'title': 'Shadow Track',
+        'artist': 'Shadow Artist',
+        'album_name': 'Shadow Album',
+    })
+
+    assert response.status_code == 200
+    assert len(calls) == 1
+    assert order == [
+        'prepare',
+        'dispatch',
+        ('bind', 'manual-shadow', 'download-id'),
+    ]
+    assert calls[0][2] is None
+    assert calls[0][1]['title'] == 'Shadow Track'
+    context = web_server.matched_downloads_context.pop(key)
+    assert context['_acquisition_grab_download_id'] == 'manual-shadow'
+
+
+def test_manual_enforcement_blocks_dispatch_when_preparation_fails(
+        client, monkeypatch):
+    download_calls = []
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*args):
+            download_calls.append(args)
+            return object()
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    monkeypatch.setattr(web_server, '_prepare_manual_grab', lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        web_server, '_manual_acquisition_preparation_required', lambda _u: True)
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab, 'correlation_enforcement_enabled', lambda: True)
+    outcomes = []
+    from core.acquisition import correlation_coverage
+    monkeypatch.setattr(
+        correlation_coverage,
+        'record_correlation_outcome_fail_open',
+        lambda consumer, outcome: outcomes.append((consumer, outcome)),
+    )
+
+    response = client.post('/api/download', json={
+        'username': 'torrent',
+        'filename': 'folder/not-started.flac',
+        'title': 'Not Started',
+        'artist': 'Artist',
+    })
+
+    assert response.status_code == 503
+    assert response.get_json()['error'].startswith(
+        'Acquisition preparation unavailable')
+    assert download_calls == []
+    assert outcomes == [('manual', 'blocked')]
+
+
+def test_manual_enforcement_exempts_non_recording_sources(monkeypatch):
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab, 'correlation_enforcement_enabled', lambda: True)
+    monkeypatch.setattr(
+        web_server, '_manual_acquisition_preparation_required', lambda _u: False)
+
+    assert not web_server._manual_acquisition_dispatch_blocked('usenet', None)
+
+
 # ---------------------------------------------------------------------------
 # a second admin is an admin. the shell shows Settings to every is_admin
 # profile, the video gate and the newer music endpoints check the same flag,
@@ -125,3 +373,64 @@ def test_quick_switch_editable_agrees_with_the_gate(client, nonadmin):
     db = web_server.get_database()
     db.update_profile(nonadmin, is_admin=1)
     assert client.get('/api/profiles/me/active-sources').get_json()['editable'] is True
+
+
+
+# ---------------------------------------------------------------------------
+# ...and a second admin is an admin on the LIBRARY V2 side too. ADR-01 gives v2
+# one authoritative intent, stored under ADMIN_PROFILE_ID — that is a row key
+# and stays 1. Who may write it is a separate question, and it was asked as a
+# literal `profile == 1`: after the upstream merge the shell offered a second
+# admin the Library page and every mutation behind it answered 403.
+# ---------------------------------------------------------------------------
+
+def test_second_admin_may_write_library_v2(client, second_admin):
+    assert client.get('/api/library/v2/enabled').get_json()['can_write'] is True
+
+
+def test_nonadmin_may_not_write_library_v2(client, nonadmin):
+    assert client.get('/api/library/v2/enabled').get_json()['can_write'] is False
+
+
+def test_second_admin_passes_the_library_v2_mutation_guard(client, second_admin):
+    # not 403 = the guard let them through; the body is rejected on its merits
+    assert client.post('/api/library/v2/acquisition/requests', json={}).status_code != 403
+
+
+def test_nonadmin_is_still_refused_by_the_library_v2_mutation_guard(client, nonadmin):
+    response = client.post('/api/library/v2/acquisition/requests', json={})
+    assert response.status_code == 403
+    assert 'admin' in response.get_json()['error'].lower()
+
+
+def test_the_download_lib2_gate_tells_a_second_admin_from_a_non_admin(client, nonadmin):
+    """Asserted as a CONTRAST, on one payload, because either half alone is
+    hollow: "a second admin gets 400" also holds if the gate never ran, and
+    "a non-admin gets 403" also holds if the gate refuses everyone. Only the
+    pair pins that the gate ran AND told them apart.
+
+    The payload is deliberately incomplete. The gate sits before the
+    username/filename check, so whoever passes it stops at a 400 — a complete
+    one would be dispatched for real (no orchestrator stub, a live slskd
+    lookup, worker threads), and the first version of this test hung the whole
+    suite on exactly that.
+    """
+    payload = {'lib2_track_id': 1}
+    refused = client.post('/api/download', json=payload)
+    assert refused.status_code == 403
+    assert refused.get_json()['error'] == 'Admin access required'
+
+    database = web_server.get_database()
+    second = database.create_profile(name=f'admin2_{os.urandom(3).hex()}', is_admin=True)
+    with client.session_transaction() as sess:
+        sess['profile_id'] = second
+
+    allowed = client.post('/api/download', json=payload)
+    assert allowed.status_code == 400
+    assert allowed.get_json()['error'] == 'Missing username or filename.'
+
+
+def test_a_demoted_second_admin_loses_library_v2_write_access(client, second_admin):
+    assert client.get('/api/library/v2/enabled').get_json()['can_write'] is True
+    web_server.get_database().update_profile(second_admin, is_admin=0)
+    assert client.get('/api/library/v2/enabled').get_json()['can_write'] is False

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from core.library.expired_cleanup import (
     retention_cutoff,
     is_expired,
     select_expired,
 )
+from core.repair_jobs.expired_download_cleaner import delete_origin_download
 
 NOW = datetime(2026, 6, 7, tzinfo=timezone.utc)
 
@@ -93,3 +95,121 @@ def test_select_expired_filters():
     # starts failing on a date nobody touched anything — it armed on 2026-07-27.
     out = select_expired(entries, watchlist_retention="off", playlist_retention="2mo", now=NOW)
     assert [e["id"] for e in out] == [1]
+
+
+def test_automatic_delete_syncs_v2_before_removing_retry_history(monkeypatch, tmp_path):
+    path = tmp_path / "expired.flac"
+    path.write_bytes(b"audio")
+    calls = []
+
+    class _DB:
+        def delete_track_by_file_path(self, value):
+            calls.append(("legacy", value))
+
+        def delete_library_history_rows(self, ids):
+            calls.append(("history", ids))
+            return 1
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_sync.annotate_finding_details",
+        lambda *_args, **kwargs: {
+            **kwargs["details"],
+            "library_v2": {"track_ids": [7], "file_ids": [9]},
+        },
+    )
+
+    def sync(*_args, **kwargs):
+        calls.append(("sync", kwargs))
+        assert path.exists() is False
+        return {"reason": "synchronized", "files": 1}
+
+    monkeypatch.setattr("core.library2.maintenance_sync.sync_repair_change", sync)
+
+    outcome = delete_origin_download(
+        _DB(),
+        {
+            "id": 42,
+            "file_path": str(path),
+            "origin": "playlist",
+            "origin_context": "mix",
+        },
+        object(),
+    )
+
+    assert outcome["error"] is None
+    assert outcome["file_deleted"] is True
+    assert outcome["removed"] == 1
+    assert outcome["library_v2"]["reason"] == "synchronized"
+    assert [call[0] for call in calls] == ["legacy", "sync", "history"]
+
+
+def test_sync_failure_keeps_history_row_for_retry(monkeypatch, tmp_path):
+    path = tmp_path / "expired.flac"
+    path.write_bytes(b"audio")
+    history_calls = []
+
+    class _DB:
+        def delete_track_by_file_path(self, _value):
+            return 1
+
+        def delete_library_history_rows(self, ids):
+            history_calls.append(ids)
+            return 1
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_sync.annotate_finding_details",
+        lambda *_args, **kwargs: kwargs["details"],
+    )
+    monkeypatch.setattr(
+        "core.library2.maintenance_sync.sync_repair_change",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("locked")),
+    )
+
+    outcome = delete_origin_download(
+        _DB(), {"id": 42, "file_path": str(path)}, object(),
+    )
+
+    assert "synchronization failed" in outcome["error"]
+    assert history_calls == []
+
+
+def test_navidrome_virtual_path_is_reported_not_swallowed(monkeypatch):
+    """An unresolvable path is a mapping failure, not "already gone".
+
+    Navidrome hands SoulSync virtual paths unless "Report Real Path" is on.
+    Deleting the catalogue row for one of those would drop a track whose file
+    is still on disk, so the cleanup refuses and says how to fix it.
+    """
+    touched = []
+
+    class _DB:
+        def delete_track_by_file_path(self, value):
+            touched.append(value)
+
+        def delete_library_history_rows(self, ids):
+            touched.append(ids)
+            return 1
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_sync.annotate_finding_details",
+        lambda *_args, **kwargs: kwargs["details"],
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.expired_download_cleaner.resolve_library_file_path",
+        lambda *_args, **_kwargs: None,
+    )
+
+    cfg = SimpleNamespace(
+        get=lambda _key, default=None: default,
+        get_active_media_server=lambda: "navidrome",
+    )
+    outcome = delete_origin_download(
+        _DB(),
+        {"id": 12, "file_path": "Muse/The Wow! Signal/01-06 - Hexagons.flac"},
+        cfg,
+    )
+
+    assert outcome["removed"] == 0
+    assert outcome["file_deleted"] is False
+    assert "Report Real Path" in outcome["error"]
+    assert touched == []

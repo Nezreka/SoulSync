@@ -29,6 +29,11 @@ export interface FindingGroup {
   severity_max: string;
   last_seen?: string | null;
   job_ids?: string[];
+  /** Pending rows in this group that would overwrite a value someone set by
+   *  hand. Counted server-side: "apply all" and "apply all except my own
+   *  edits" are two different requests, and the choice has to be made before
+   *  the click — not after walking every finding's diff. */
+  manual_conflicts?: number;
 }
 
 /** One row of `GET /api/repair/finding-types`. The backend owns this: the

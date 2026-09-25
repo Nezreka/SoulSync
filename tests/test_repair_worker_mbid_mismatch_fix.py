@@ -1,5 +1,6 @@
 """_fix_mbid_mismatch: stripping the bad MBID off the file must also
-clear tracks.musicbrainz_recording_id when it still holds that SAME bad value — otherwise
+clear the catalogue's recording MBID (lib2_tracks.musicbrainz_id) when it still
+holds that SAME bad value — otherwise
 the export MBID waterfall's DB rung (core/exports/export_sources.py) keeps resolving the
 wrong recording straight out of the DB even after the file itself was cleaned up.
 """
@@ -51,10 +52,10 @@ def test_clears_db_column_when_it_matches_the_bad_mbid(tmp_path, monkeypatch):
     w = _worker(tmp_path, fake_db, monkeypatch=monkeypatch)
 
     details = {'mbid': BAD_MBID, 'mb_title': 'Wrong Song', 'title': 'Right Song'}
-    res = w._fix_mbid_mismatch('track', '10', str(src), details)
+    res = w._fix_mbid_mismatch('track', 'lib2:10', str(src), details)
 
     assert res['success'] is True
-    assert fake_db.calls == [('10', BAD_MBID)]
+    assert fake_db.calls == [(10, BAD_MBID)]
     assert fake_db.current_mbid is None
 
 
@@ -69,10 +70,10 @@ def test_leaves_db_column_alone_when_it_no_longer_matches(tmp_path, monkeypatch)
     w = _worker(tmp_path, fake_db, monkeypatch=monkeypatch)
 
     details = {'mbid': BAD_MBID, 'mb_title': 'Wrong Song', 'title': 'Right Song'}
-    res = w._fix_mbid_mismatch('track', '10', str(src), details)
+    res = w._fix_mbid_mismatch('track', 'lib2:10', str(src), details)
 
     assert res['success'] is True
-    assert fake_db.calls == [('10', BAD_MBID)]   # asked, but guard in the DB layer refused
+    assert fake_db.calls == [(10, BAD_MBID)]   # asked, but guard in the DB layer refused
     assert fake_db.current_mbid == OTHER_MBID    # untouched
 
 
@@ -87,7 +88,7 @@ def test_does_not_touch_db_when_tag_removal_finds_nothing(tmp_path, monkeypatch)
     w = _worker(tmp_path, fake_db, remove_mbid_result=False, monkeypatch=monkeypatch)
 
     details = {'mbid': BAD_MBID, 'mb_title': 'Wrong Song', 'title': 'Right Song'}
-    res = w._fix_mbid_mismatch('track', '10', str(src), details)
+    res = w._fix_mbid_mismatch('track', 'lib2:10', str(src), details)
 
     assert res['success'] is False
     assert fake_db.calls == []
@@ -99,15 +100,21 @@ def test_does_not_touch_db_when_tag_removal_finds_nothing(tmp_path, monkeypatch)
 # with a case-sensitive `=` or it silently matches 0 rows ──
 
 def _seed_track(db, track_id, mbid):
+    from tests.support.catalogue_seed import seed_album, seed_artist
     with db._get_connection() as conn:
-        conn.execute("INSERT OR IGNORE INTO artists (id, name, server_source) VALUES (1, 'A', 'test')")
-        conn.execute("INSERT OR IGNORE INTO albums (id, title, artist_id, server_source) VALUES (1, 'Alb', 1, 'test')")
+        artist_id = seed_artist(conn, server_id=f"a{track_id}", name="A", server_source="test")
+        album_id = seed_album(conn, server_id=f"al{track_id}", title="Alb",
+                              artist_id=artist_id, server_source="test")
         conn.execute(
-            "INSERT INTO tracks (id, title, file_path, artist_id, album_id, "
-            "musicbrainz_recording_id, server_source) VALUES (?, 'T', '/x.mp3', 1, 1, ?, 'test')",
-            (track_id, mbid),
-        )
+            "INSERT INTO lib2_tracks (id, album_id, title, musicbrainz_id, server_source)"
+            " VALUES (?, ?, 'T', ?, 'test')", (track_id, album_id, mbid))
         conn.commit()
+
+
+def _mbid(db, track_id):
+    with db._get_connection() as conn:
+        return conn.execute("SELECT musicbrainz_id FROM lib2_tracks WHERE id=?",
+                            (track_id,)).fetchone()[0]
 
 
 def test_clear_track_recording_mbid_is_case_insensitive(tmp_path):
@@ -119,9 +126,7 @@ def test_clear_track_recording_mbid_is_case_insensitive(tmp_path):
     cleared = db.clear_track_recording_mbid_if_matches(30, MIXED_CASE_MBID.upper())
 
     assert cleared is True
-    with db._get_connection() as conn:
-        row = conn.execute("SELECT musicbrainz_recording_id FROM tracks WHERE id=30").fetchone()
-    assert row[0] is None
+    assert _mbid(db, 30) is None
 
 
 def test_clear_track_recording_mbid_case_insensitive_still_guards_different_value(tmp_path):
@@ -133,9 +138,7 @@ def test_clear_track_recording_mbid_case_insensitive_still_guards_different_valu
     cleared = db.clear_track_recording_mbid_if_matches(31, MIXED_CASE_MBID.upper())
 
     assert cleared is False
-    with db._get_connection() as conn:
-        row = conn.execute("SELECT musicbrainz_recording_id FROM tracks WHERE id=31").fetchone()
-    assert row[0] == OTHER_MBID
+    assert _mbid(db, 31) == OTHER_MBID
 
 
 def test_fix_mbid_mismatch_end_to_end_clears_case_mismatched_db_value(tmp_path, monkeypatch):
@@ -157,9 +160,7 @@ def test_fix_mbid_mismatch_end_to_end_clears_case_mismatched_db_value(tmp_path, 
     )
 
     details = {'mbid': MIXED_CASE_MBID.upper(), 'mb_title': 'Wrong Song', 'title': 'Right Song'}
-    res = w._fix_mbid_mismatch('track', '32', str(src), details)
+    res = w._fix_mbid_mismatch('track', 'lib2:32', str(src), details)
 
     assert res['success'] is True
-    with db._get_connection() as conn:
-        row = conn.execute("SELECT musicbrainz_recording_id FROM tracks WHERE id=32").fetchone()
-    assert row[0] is None
+    assert _mbid(db, 32) is None

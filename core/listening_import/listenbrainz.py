@@ -385,8 +385,21 @@ class ListenBrainzListeningImportWorker:
             return ""
 
     def _resolve_db_track_ids(self, events: List[Dict[str, Any]]) -> None:
+        """Point every listen at its catalogue row (``lib2_track_id``).
+
+        The same query as the Last.fm importer's: Library v2 is the catalogue,
+        the artist half matches on the indexed ``name_key`` fold (SQLite's
+        ``LOWER()`` is ASCII-only, iss29-D13), and the id is a CATALOGUE id, so
+        it goes in ``lib2_track_id`` -- ``db_track_id`` is the media server's
+        own id namespace (INT-01).
+        """
+        from core.library2.importer import normalize_name
+
+        def _key(name: Any) -> str:
+            return normalize_name(str(name or ""))
+
         pairs = sorted({
-            ((ev.get("title") or "").strip().lower(), (ev.get("artist") or "").strip().lower())
+            ((ev.get("title") or "").strip().lower(), _key(ev.get("artist")))
             for ev in events if ev.get("title")
         })
         if not pairs:
@@ -401,17 +414,21 @@ class ListenBrainzListeningImportWorker:
                 args = [v for pair in chunk for v in pair]
                 cursor.execute(
                     f"""
-                    SELECT LOWER(t.title), LOWER(ar.name), t.id
-                    FROM tracks t
-                    JOIN artists ar ON ar.id = t.artist_id
-                    WHERE (LOWER(t.title), LOWER(ar.name)) IN ({placeholders})
+                    SELECT LOWER(t.title), ar.name_key, t.id
+                    FROM lib2_tracks t
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE (LOWER(t.title), ar.name_key) IN ({placeholders})
                     """,
                     args,
                 )
-                for title_l, artist_l, track_id in cursor.fetchall():
-                    found.setdefault((title_l, artist_l), track_id)
+                for title_l, artist_key, track_id in cursor.fetchall():
+                    found.setdefault((title_l, artist_key), track_id)
             for ev in events:
-                ev["db_track_id"] = found.get(((ev.get("title") or "").strip().lower(), (ev.get("artist") or "").strip().lower()))
+                ev["lib2_track_id"] = found.get((
+                    (ev.get("title") or "").strip().lower(),
+                    _key(ev.get("artist")),
+                ))
         finally:
             conn.close()
 

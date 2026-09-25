@@ -7,10 +7,14 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.bandcamp_client import BandcampClient
-from core.worker_utils import interruptible_sleep, set_album_api_track_count
-from core.enrichment.manual_match_honoring import MATCHED, honor_stored_match
+from core.worker_utils import interruptible_sleep
+from core.library2.worker_support import MATCHED, honor_stored_match
 
 logger = get_logger("bandcamp_worker")
+
+# Bandcamp's band/label pages carry too little structured data for an artist
+# pass; releases and their tracks are the whole surface.
+_ENTITY_TYPES = ('album', 'track')
 
 
 class BandcampWorker:
@@ -166,83 +170,29 @@ class BandcampWorker:
         logger.info("Bandcamp worker thread finished")
 
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
-        """Get next album or track to process from the priority queue.
+        """Get next album or track to process from the Library-v2 catalogue.
 
-        Albums are prioritized ahead of tracks: matching the containing
-        album first captures the full tracklist's Bandcamp URLs in one
+        Priority, retry window and the pinned-group override all live in
+        ``core.library2.worker_queue`` — the same rules every enrichment worker
+        uses (docs §32.3.1 stage 2). Albums come before tracks: matching the
+        containing album first captures the full tracklist's Bandcamp URLs in one
         fetch, so by the time a track is picked up it can often reuse an
-        already-matched sibling instead of triggering its own search."""
+        already-matched sibling instead of triggering its own search. Bandcamp has
+        no artist pass, so artists are never offered.
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_pending
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Manage Enrichment Workers override: if the user pinned an entity
-            # type to run first, drain it before the normal album->track chain.
-            # Read every call so toggling it takes effect live (bandcamp has no
-            # artist pass, so only album/track are meaningful here).
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
             _prio = read_enrichment_priority('bandcamp')
-            if _prio:
-                _pi = priority_pending_item(cursor, 'bandcamp', _prio)
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted albums
-            cursor.execute("""
-                SELECT al.id, al.title, ar.name AS artist_name
-                FROM albums al
-                JOIN artists ar ON al.artist_id = ar.id
-                WHERE al.bandcamp_match_status IS NULL AND al.id IS NOT NULL
-                ORDER BY al.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 2: Unattempted tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.bandcamp_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 3: Retry 'not_found' albums
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            cursor.execute("""
-                SELECT al.id, al.title, ar.name AS artist_name
-                FROM albums al
-                JOIN artists ar ON al.artist_id = ar.id
-                WHERE al.bandcamp_match_status IN ('not_found', 'error') AND al.bandcamp_last_attempted < ?
-                ORDER BY al.bandcamp_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 4: Retry 'not_found' tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.bandcamp_match_status IN ('not_found', 'error') AND t.bandcamp_last_attempted < ?
-                ORDER BY t.bandcamp_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            return None
-
+            return next_pending(
+                conn, 'bandcamp',
+                retry_after_days=self.retry_days,
+                pinned=_prio if _prio in _ENTITY_TYPES else None,
+                entity_types=_ENTITY_TYPES,
+            )
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
             return None
@@ -266,25 +216,25 @@ class BandcampWorker:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
         if not norm_query or not norm_result:
-            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
-            # "...") would compare at SequenceMatcher ratio 1.0 against any
-            # other such title — fall back to exact raw comparison instead.
-            raw_q = (query_name or '').strip().lower()
-            raw_r = (result_name or '').strip().lower()
-            return bool(raw_q) and raw_q == raw_r
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return bool(raw_query) and raw_query == raw_result
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         return similarity >= self.name_similarity_threshold
 
     def _get_existing_url(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an album/track already has a bandcamp_url (e.g. from manual match)."""
-        table = 'albums' if entity_type == 'album' else 'tracks'
+        """The Bandcamp URL already stored for this album/track, if any.
+
+        Bandcamp's canonical identity IS the release URL — there is no id-to-page
+        lookup — so it is what lands in ``external_ids['bandcamp']``, set by a
+        manual match or an earlier run.
+        """
         conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT bandcamp_url FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'bandcamp')
         except Exception:
             return None
         finally:
@@ -316,7 +266,7 @@ class BandcampWorker:
     def _release_to_result(self, release: Dict[str, Any], stored_url: str, fallback_title: str) -> Dict[str, Any]:
         """Shape a get_release_metadata() release into the dict _update_entity
         expects. The release page carries no numeric id, so id stays None and
-        _update_entity's COALESCE preserves any previously-recorded bandcamp_id."""
+        _update_entity's merge preserves any previously-recorded id."""
         return {
             'id': None,
             'url': release.get('url') or stored_url,
@@ -346,19 +296,16 @@ class BandcampWorker:
         # release URL (no id->page lookup exists), so it stands in for the
         # numeric id other workers pass here.
         _stored = honor_stored_match(
-            db=self.db, entity_table='albums', entity_id=album_id,
-            id_column='bandcamp_url',
-            client_fetch_fn=self.client.get_release_metadata,
-            on_match_fn=self._refresh_album_via_stored_url,
-            mark_status_fn=self._mark_status,
-            status_column='bandcamp_match_status',
+            self.db, entity_type='album', entity_id=album_id, service='bandcamp',
+            fetch=self.client.get_release_metadata,
+            on_match=self._refresh_album_via_stored_url,
             log_prefix='Bandcamp',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -383,19 +330,16 @@ class BandcampWorker:
     def _process_track(self, track_id: int, track_name: str, artist_name: str):
         """Process a track: honor a stored match by id-refresh, else search."""
         _stored = honor_stored_match(
-            db=self.db, entity_table='tracks', entity_id=track_id,
-            id_column='bandcamp_url',
-            client_fetch_fn=self.client.get_release_metadata,
-            on_match_fn=self._refresh_track_via_stored_url,
-            mark_status_fn=self._mark_status,
-            status_column='bandcamp_match_status',
+            self.db, entity_type='track', entity_id=track_id, service='bandcamp',
+            fetch=self.client.get_release_metadata,
+            on_match=self._refresh_track_via_stored_url,
             log_prefix='Bandcamp',
         )
         if _stored:
-            # L2-005: a stored ID the source could not confirm right now is
-            # NOT released to a fuzzy name search below — a transient provider
-            # failure is not evidence that the ID is wrong, and searching
-            # overwrote deliberately chosen matches with whatever came back.
+            # L2-005: a stored id the provider could not confirm right now is
+            # NOT released to the fuzzy name search below — a transient failure
+            # is not evidence that the id is wrong, and searching overwrote
+            # deliberately chosen matches with whatever came back.
             if _stored == MATCHED:
                 self.stats['matched'] += 1
             return
@@ -415,66 +359,60 @@ class BandcampWorker:
 
     def _update_entity(self, entity_type: str, entity_id: int, result: Dict[str, Any]):
         """Store Bandcamp metadata for an album or track"""
-        table = 'albums' if entity_type == 'album' else 'tracks'
         conn = None
         try:
             conn = self.db._get_connection()
-            cursor = conn.cursor()
 
             bandcamp_id = str(result.get('id')) if result.get('id') else None
             bandcamp_url = result.get('url')
             tags = result.get('tags') or []
-            tags_json = json.dumps(tags) if tags else None
             label = result.get('label')
 
-            # bandcamp_id is COALESCEd rather than overwritten outright: the
-            # "already matched, re-fetch from existing bandcamp_url" path above
-            # (_process_album/_process_track) has no numeric id to report and
-            # passes result['id']=None, which would otherwise null out a
-            # previously-recorded id on every re-enrichment pass — silently
-            # breaking anything that keys off bandcamp_id (e.g. the enhanced
-            # library view's per-track match chip, the artist enrichment
-            # coverage percentage) even though the item is still matched.
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    bandcamp_id = COALESCE(?, bandcamp_id),
-                    bandcamp_match_status = 'matched',
-                    bandcamp_last_attempted = CURRENT_TIMESTAMP,
-                    bandcamp_url = ?,
-                    bandcamp_tags = ?,
-                    bandcamp_label = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (bandcamp_id, bandcamp_url, tags_json, label, entity_id))
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+            from core.library2.worker_support import set_expected_track_count
 
-            # Feed the shared album columns the peer workers write, so a Bandcamp
-            # match enriches the album's real metadata — not just its bandcamp_*
-            # namespace. The release JSON-LD already carries all of this in the
-            # one fetch. Backfill-only (WHERE ... IS NULL) so we never clobber a
-            # value another source or the user set. Albums only: tracks have no
-            # album-level columns. Bandcamp's hotlink-protected art is served via
-            # image_cache, so thumb_url is deliberately left alone.
+            # The numeric id is merged rather than overwritten: the "already
+            # matched, re-fetch from the stored URL" path above
+            # (_process_album/_process_track) has no id to report and passes
+            # result['id']=None, which would otherwise null out a
+            # previously-recorded id on every re-enrichment pass — silently
+            # breaking anything that keys off it (the per-track match chip, the
+            # artist enrichment coverage percentage) even though the item is still
+            # matched. write_provider_enrichment drops empty keys, so an absent id
+            # leaves the stored one alone.
+            backfill = {}
             if entity_type == 'album':
+                # Feed the shared album columns the peer workers write, so a
+                # Bandcamp match enriches the album's real metadata — not just its
+                # own namespace. The release JSON-LD already carries all of this in
+                # the one fetch. Backfill-only, so we never clobber a value another
+                # source or the user set. Albums only: tracks have no album-level
+                # columns. Bandcamp's hotlink-protected art is served via
+                # image_cache, so image_url is deliberately left alone.
                 if label:
-                    cursor.execute(
-                        "UPDATE albums SET label = ? WHERE id = ? AND (label IS NULL OR label = '')",
-                        (label, entity_id))
-                release_date = result.get('release_date')
-                if release_date:
-                    cursor.execute(
-                        "UPDATE albums SET release_date = ? WHERE id = ? AND (release_date IS NULL OR release_date = '')",
-                        (release_date, entity_id))
+                    backfill['label'] = label
+                if result.get('release_date'):
+                    backfill['release_date'] = result['release_date']
                 if tags:
                     from core.genre_filter import filter_genres
                     from core.settings import config_manager as _cfg
                     genre_names = filter_genres(list(tags), _cfg)
                     if genre_names:
-                        cursor.execute(
-                            "UPDATE albums SET genres = ? WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')",
-                            (json.dumps(genre_names), entity_id))
-                # Expected track count for the Album Completeness repair job.
-                set_album_api_track_count(cursor, entity_id, result.get('total_tracks'))
+                        backfill['genres'] = json.dumps(genre_names)
 
+            write_provider_enrichment(
+                conn, entity_type=entity_type, entity_id=entity_id,
+                service='bandcamp',
+                payload={'id': bandcamp_id, 'tags': tags or None, 'label': label},
+                provider_id=bandcamp_url,
+                backfill=backfill or None,
+            )
+            if entity_type == 'album':
+                # Expected track count for the Album Completeness repair job.
+                set_expected_track_count(conn, entity_id, result.get('total_tracks'))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='bandcamp', status='matched')
             conn.commit()
 
         except Exception as e:
@@ -485,19 +423,20 @@ class BandcampWorker:
                 conn.close()
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
-        """Mark an album/track with a match status"""
-        table = 'albums' if entity_type == 'album' else 'tracks'
+        """Record the outcome of an attempt in the provider ledger.
+
+        Replaces the legacy `bandcamp_match_status`/`_last_attempted` column pair.
+        Both `not_found` and `error` become due again after the retry
+        window; a source-wide outage is handled by the worker's own backoff
+        before an attempt is ever recorded, so it cannot become a tight loop.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    bandcamp_match_status = ?,
-                    bandcamp_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='bandcamp', status=status)
             conn.commit()
         except Exception as e:
             logger.error(f"Error marking {entity_type} #{entity_id} status: {e}")
@@ -509,16 +448,11 @@ class BandcampWorker:
         """Count how many albums + tracks still need processing"""
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM albums WHERE bandcamp_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE bandcamp_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            return pending_count(conn, 'bandcamp', retry_after_days=self.retry_days,
+                                 entity_types=_ENTITY_TYPES)
         except Exception as e:
             logger.error(f"Error counting pending items: {e}")
             return 0
@@ -530,28 +464,10 @@ class BandcampWorker:
         """Get progress breakdown by entity type"""
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            progress = {}
-
-            for entity, table in [('albums', 'albums'), ('tracks', 'tracks')]:
-                cursor.execute(f"""
-                    SELECT
-                        COUNT(*) AS total,
-                        SUM(CASE WHEN bandcamp_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                    FROM {table}
-                """)
-                row = cursor.fetchone()
-                if row:
-                    total, processed = row[0], row[1] or 0
-                    progress[entity] = {
-                        'matched': processed,
-                        'total': total,
-                        'percent': int((processed / total * 100) if total > 0 else 0)
-                    }
-
-            return progress
-
+            return progress_breakdown(conn, 'bandcamp', entity_types=_ENTITY_TYPES)
         except Exception as e:
             logger.error(f"Error getting progress breakdown: {e}")
             return {}

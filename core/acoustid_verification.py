@@ -253,9 +253,8 @@ class AcoustIDVerification:
         This is the ONE verification path. The library scan calls it too
         (``core/repair_jobs/acoustid_scanner``) rather than repeating the
         availability check, the lookup, the score gate, the MusicBrainz
-        enrichment of title-less recordings and the alias wiring — which is how
-        those five drifted apart in the first place, while only the final
-        decision was shared.
+        enrichment and the alias wiring — which is how those five drifted apart
+        in the first place, while only the final decision was shared.
 
         Args:
             audio_file_path: Path to the downloaded audio file
@@ -264,8 +263,8 @@ class AcoustIDVerification:
             context: Optional dict. Used for download-specific hints on the way
                 in, and written back on the way out with what this lookup saw
                 (``_acoustid_recordings``, ``_acoustid_best_score``,
-                ``_acoustid_decision``) so a caller needing the evidence does
-                not have to fingerprint the file a second time.
+                ``_acoustid_recording_mbids``, ``_acoustid_decision``) so a
+                caller needing the evidence does not have to fingerprint twice.
             min_score: Override the fingerprint-confidence floor. The scan
                 exposes it as a job setting; the download uses the constant.
 
@@ -273,10 +272,10 @@ class AcoustIDVerification:
             Tuple of (VerificationResult, reason_message)
         """
         try:
-            # Step 1: Check availability. A caller that injected its own client
-            # has already decided the client is usable, and need not implement
-            # the probe — the library scan passes whatever the job context
-            # carries.
+            # Step 1: Check availability. A caller that injected its own
+            # client has already decided the client is usable, and need not
+            # implement the probe — the library scan passes whatever the job
+            # context carries.
             probe_available = getattr(self.acoustid_client, 'is_available', None)
             if callable(probe_available):
                 available, reason = probe_available()
@@ -293,7 +292,7 @@ class AcoustIDVerification:
                 lookup = self.acoustid_client.lookup_with_status(audio_file_path) or {}
             else:
                 # Older client shape: dict-or-None, with no way to tell a real
-                # no-match from a failed lookup. Treated as a no-match, which is
+                # no-match from a failed lookup. Treated as no-match, which is
                 # the safe reading — it makes no claim about the file.
                 lookup = self.acoustid_client.fingerprint_and_lookup(audio_file_path) or {}
             status = lookup.get('status')
@@ -318,6 +317,13 @@ class AcoustIDVerification:
             if not recordings:
                 return VerificationResult.SKIP, "No match in AcoustID database"
 
+            # Hand the caller the recording identity this verdict was made
+            # against. The same audio always fingerprints to the same MBIDs, so
+            # a later library scan can tell "I am looking at the same recording
+            # the import already judged" from "the fingerprint now says
+            # something else" — without going back through title/artist strings,
+            # which for cross-script metadata differ between the two paths and
+            # were what made the scan disagree with the download.
             if isinstance(context, dict):
                 context['_acoustid_best_score'] = best_score
 
@@ -332,6 +338,17 @@ class AcoustIDVerification:
                 msg = f"AcoustID fingerprint score too low ({best_score:.2f}) to verify"
                 logger.info(msg)
                 return VerificationResult.SKIP, msg
+
+            # Only now are these "the recording identity this verdict was made
+            # against" — the contract a later scan reads them under. Written
+            # above the floor they also described lookups that never reached a
+            # verdict at all.
+            if isinstance(context, dict):
+                mbids = acoustid_result.get('recording_mbids') or [
+                    rec.get('mbid') for rec in recordings if rec.get('mbid')
+                ]
+                context['_acoustid_recording_mbids'] = sorted(
+                    {str(m) for m in mbids if m})
 
             # Enrich recordings that are missing title/artist via MusicBrainz lookup
             recordings = _enrich_recordings_from_musicbrainz(recordings)
@@ -403,14 +420,14 @@ class AcoustIDVerification:
             return result, outcome.reason
 
         except Exception as e:
-            # An unexpected fault in OUR code, or in a lookup it depends on, is
+            # An unexpected fault in OUR code or in a lookup it depends on is
             # not a statement about the file. Reported as SKIP it became one:
-            # the library scan turns a SKIP on an untagged file into
-            # 'unverified', so a database error or a MusicBrainz outage
-            # mid-verification got written down as a verdict — and with
-            # `require_verified` on, the download path turns the same SKIP into
-            # a rejection. ERROR says what it is, and both callers already
-            # handle it without touching the file's standing.
+            # the library scan persists a SKIP as 'skip' — "checked, no claim" —
+            # so a database error or a MusicBrainz outage mid-verification got
+            # written down as a completed check, and with `require_verified` on,
+            # the download path turned the same SKIP into a rejection. ERROR
+            # says what it is; both callers already handle it without touching
+            # the file's standing.
             logger.error(f"Unexpected error during AcoustID verification: {e}")
             return VerificationResult.ERROR, f"Verification error: {str(e)}"
 

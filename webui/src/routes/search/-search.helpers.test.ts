@@ -16,6 +16,8 @@ import {
   formatVideoDuration,
   formatViewCount,
   hasAnyResults,
+  inLibraryArtistPath,
+  libraryV2DiscoveryArtistPath,
   isIdLookupQuery,
   labelDetailPath,
   labelMetaLine,
@@ -400,6 +402,66 @@ describe('detail paths', () => {
     expect(artistDetailPath(42, null)).toBe('/artist-detail/library/42');
     expect(artistDetailPath(42, '')).toBe('/artist-detail/library/42');
     expect(artistDetailPath(42, '   ')).toBe('/artist-detail/library/42');
+  });
+
+  /**
+   * The "In Your Library" section is the one place a search result points at
+   * something the user already owns, so it opens the page that can manage it.
+   * The old vanilla search sent every one of them to the legacy artist page,
+   * which is the bug this replaces (docs/library-v2-issues.md §10/§11).
+   */
+  it('opens an "In Your Library" hit in Library v2 when v2 knows the artist', () => {
+    // ldp-05 (iss29-B05): a search arrival lands on the legacy artist page's
+    // shape — full discography, cards, rich header. Without these params the
+    // deep link fell back to the in-library defaults, so the same artist looked
+    // different depending on whether v2 had mapped it.
+    expect(inLibraryArtistPath({ id: 42, library_v2_id: 7 })).toBe(
+      '/library?artist=7&releases=all&releaseView=cards&header=rich',
+    );
+  });
+
+  /**
+   * The other half of the same decision: a result the library does NOT have
+   * opens Library V2's discovery view directly. It used to point at
+   * `/artist-detail/<source>/<id>` and lean on that route redirecting a second
+   * time — which still works, and is what a bookmark hits, but search holds
+   * every value V2 needs and should link to the real destination.
+   */
+  it('sends a provider artist straight into Library V2 discovery', () => {
+    expect(libraryV2DiscoveryArtistPath('sp1', 'spotify', 'Found Artist')).toBe(
+      '/library?discover=spotify%3Asp1&discoverName=Found%20Artist' +
+        '&releases=all&releaseView=cards&header=rich',
+    );
+  });
+
+  it('carries no name when there is none, and never an empty one', () => {
+    // The name is a fallback identity for sources with no id lookup; an empty
+    // one is not an identity and must not become `discoverName=`.
+    expect(libraryV2DiscoveryArtistPath('sp1', 'spotify')).toBe(
+      '/library?discover=spotify%3Asp1&releases=all&releaseView=cards&header=rich',
+    );
+    expect(libraryV2DiscoveryArtistPath('sp1', 'spotify', '')).toBe(
+      '/library?discover=spotify%3Asp1&releases=all&releaseView=cards&header=rich',
+    );
+  });
+
+  it('lowercases the source and encodes the pair, so the route can split it', () => {
+    // `discover` is parsed as `<source>:<id>`; an unencoded colon or slash in
+    // either half would split it somewhere else entirely.
+    expect(libraryV2DiscoveryArtistPath('a/b', 'Deezer')).toBe(
+      '/library?discover=deezer%3Aa%2Fb&releases=all&releaseView=cards&header=rich',
+    );
+    expect(libraryV2DiscoveryArtistPath(311, 'bandcamp', 'AC/DC')).toBe(
+      '/library?discover=bandcamp%3A311&discoverName=AC%2FDC' +
+        '&releases=all&releaseView=cards&header=rich',
+    );
+  });
+
+  it('falls back to artist detail when v2 has not mapped the artist', () => {
+    // No v2 id means no v2 row — routing there would open an artist that does
+    // not exist. Both an absent and an explicitly null id take the fallback.
+    expect(inLibraryArtistPath({ id: 42 })).toBe('/artist-detail/library/42');
+    expect(inLibraryArtistPath({ id: 42, library_v2_id: null })).toBe('/artist-detail/library/42');
   });
 
   it('lowercases the source, as _normalizeArtistDetailSource does', () => {

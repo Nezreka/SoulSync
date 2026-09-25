@@ -55,121 +55,6 @@ def db(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Backfill migration
-# ---------------------------------------------------------------------------
-
-class TestBackfillMigration:
-    def test_lastfm_url_set_but_status_null_gets_matched(self, db):
-        with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, lastfm_url) VALUES (?, ?, ?)",
-                ("a1", "Artist A", "https://last.fm/music/Artist%20A"),
-            )
-            cur.execute(
-                "INSERT INTO artists (id, name, lastfm_url, lastfm_match_status) VALUES (?, ?, ?, ?)",
-                ("a2", "Artist B", "https://last.fm/music/B", "matched"),
-            )
-            cur.execute(
-                "INSERT INTO artists (id, name) VALUES (?, ?)",
-                ("a3", "Artist C"),  # no url, status stays NULL
-            )
-            conn.commit()
-
-            # Run backfill a second time (first already ran during __init__)
-            db._backfill_match_status_for_existing_ids(cur)
-            conn.commit()
-
-            rows = cur.execute(
-                "SELECT name, lastfm_match_status FROM artists ORDER BY name"
-            ).fetchall()
-
-        by_name = {r[0]: r[1] for r in rows}
-        assert by_name["Artist A"] == "matched"
-        assert by_name["Artist B"] == "matched"  # untouched
-        assert by_name["Artist C"] is None  # no id => no backfill
-
-    def test_musicbrainz_release_id_on_albums(self, db):
-        with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name) VALUES (?, ?)",
-                ("art1", "A"),
-            )
-            cur.execute(
-                "INSERT INTO albums (id, artist_id, title, musicbrainz_release_id) "
-                "VALUES (?, ?, ?, ?)",
-                ("alb1", "art1", "Album X", "mb-release-uuid"),
-            )
-            conn.commit()
-
-            db._backfill_match_status_for_existing_ids(cur)
-            conn.commit()
-
-            status = cur.execute(
-                "SELECT musicbrainz_match_status FROM albums WHERE title = 'Album X'"
-            ).fetchone()[0]
-        assert status == "matched"
-
-    def test_musicbrainz_recording_id_on_tracks(self, db):
-        with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("INSERT INTO artists (id, name) VALUES ('art2', 'A')")
-            cur.execute(
-                "INSERT INTO albums (id, artist_id, title) VALUES (?, ?, 'Alb')",
-                ("alb2", "art2"),
-            )
-            cur.execute(
-                "INSERT INTO tracks (id, artist_id, album_id, title, musicbrainz_recording_id) "
-                "VALUES (?, ?, ?, ?, ?)",
-                ("trk1", "art2", "alb2", "T1", "mb-rec-uuid"),
-            )
-            conn.commit()
-
-            db._backfill_match_status_for_existing_ids(cur)
-            conn.commit()
-
-            status = cur.execute(
-                "SELECT musicbrainz_match_status FROM tracks WHERE title = 'T1'"
-            ).fetchone()[0]
-        assert status == "matched"
-
-    def test_tidal_and_qobuz_ids_backfilled(self, db):
-        with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, tidal_id, qobuz_id) VALUES (?, ?, ?, ?)",
-                ("art3", "A", "tidal123", "qobuz456"),
-            )
-            conn.commit()
-
-            db._backfill_match_status_for_existing_ids(cur)
-            conn.commit()
-
-            row = cur.execute(
-                "SELECT tidal_match_status, qobuz_match_status FROM artists WHERE id = 'art3'"
-            ).fetchone()
-        assert tuple(row) == ("matched", "matched")
-
-    def test_empty_string_id_is_not_backfilled(self, db):
-        with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, tidal_id) VALUES (?, ?, ?)",
-                ("art4", "Empty", ""),
-            )
-            conn.commit()
-
-            db._backfill_match_status_for_existing_ids(cur)
-            conn.commit()
-
-            status = cur.execute(
-                "SELECT tidal_match_status FROM artists WHERE id = 'art4'"
-            ).fetchone()[0]
-        assert status is None
-
-
-# ---------------------------------------------------------------------------
 # _get_existing_id column-mapping correctness
 # ---------------------------------------------------------------------------
 
@@ -195,22 +80,55 @@ class TestGetExistingIdColumnMapping:
             conn.commit()
         return "art_x", "alb_x", "trk_x"
 
-    def test_lastfm_worker_reads_lastfm_url_for_all_entity_types(self, db):
-        # Import lazily so test collection doesn't fail if config_manager is unavailable.
+    def test_lastfm_worker_reads_its_url_from_lib2_external_ids(self, db):
+        """Last.fm has moved to Library v2 (docs §32.3.1 stage 2), so its
+        existence check reads ``lib2_*.external_ids`` rather than the legacy
+        ``lastfm_url`` column. The behaviour being pinned is unchanged: the check
+        must actually find the id, or every row is re-processed forever."""
+        import json
+
         from core import lastfm_worker as lw
 
-        artist_id, album_id, track_id = self._insert_tree(db)
+        ids = json.dumps({"lastfm": "https://last.fm/a"})
+        with db._get_connection() as conn:
+            cur = conn.cursor()
+            artist_id = cur.execute(
+                "INSERT INTO lib2_artists(name, sort_name, external_ids) "
+                "VALUES('A','A',?)", (ids,)).lastrowid
+            album_id = cur.execute(
+                "INSERT INTO lib2_albums(primary_artist_id,title,album_type,external_ids) "
+                "VALUES(?,'Album','album',?)", (artist_id, ids)).lastrowid
+            track_id = cur.execute(
+                "INSERT INTO lib2_tracks(album_id,title,external_ids) "
+                "VALUES(?,'Track',?)", (album_id, ids)).lastrowid
+            conn.commit()
 
         with patch.object(lw.LastFMWorker, "_init_client", return_value=None):
             worker = lw.LastFMWorker(db)
             assert worker._get_existing_id("artist", artist_id) == "https://last.fm/a"
-            assert worker._get_existing_id("album", album_id) == "https://last.fm/album"
-            assert worker._get_existing_id("track", track_id) == "https://last.fm/track"
+            assert worker._get_existing_id("album", album_id) == "https://last.fm/a"
+            assert worker._get_existing_id("track", track_id) == "https://last.fm/a"
 
-    def test_musicbrainz_worker_reads_correct_column_per_entity(self, db):
+    def test_musicbrainz_worker_finds_the_mbid_on_every_entity(self, db):
+        """The original bug was a per-entity column map that queried all three as
+        ``musicbrainz_id``, so albums and tracks silently never found theirs. lib2
+        keeps the mbid under one name on every entity, which removes the map — but
+        the guarantee still has to hold, so it is still pinned."""
         from core import musicbrainz_worker as mbw
 
-        artist_id, album_id, track_id = self._insert_tree(db)
+        with db._get_connection() as conn:
+            cur = conn.cursor()
+            artist_id = cur.execute(
+                "INSERT INTO lib2_artists(name, sort_name, musicbrainz_id) "
+                "VALUES('A','A','mb-artist')").lastrowid
+            album_id = cur.execute(
+                "INSERT INTO lib2_albums(primary_artist_id,title,album_type,"
+                "musicbrainz_id) VALUES(?,'Album','album','mb-release')",
+                (artist_id,)).lastrowid
+            track_id = cur.execute(
+                "INSERT INTO lib2_tracks(album_id,title,musicbrainz_id) "
+                "VALUES(?,'Track','mb-rec')", (album_id,)).lastrowid
+            conn.commit()
 
         with patch.object(mbw, "MusicBrainzService", return_value=MagicMock()):
             worker = mbw.MusicBrainzWorker(db)
@@ -233,20 +151,20 @@ def _read_status(db, table: str, column: str, row_id: int):
 
 class TestLastFMWorkerMarksMatched:
     def test_existing_url_triggers_matched_status(self, db):
+        """Same guarantee as before, in the new home: finding an existing id must
+        record the attempt, or the worker re-selects that row on every loop. The
+        status now lives in the provider-attempt ledger instead of
+        ``artists.lastfm_match_status``."""
+        import json
+
         from core import lastfm_worker as lw
+        from core.library2.provider_attempts import attempt_state
 
         with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, lastfm_url) VALUES (?, ?, ?)",
-                ("art_lf", "A", "https://last.fm/a"),
-            )
-            artist_id = "art_lf"
-            # Explicitly null out status to simulate legacy row
-            cur.execute(
-                "UPDATE artists SET lastfm_match_status = NULL WHERE id = ?",
-                (artist_id,),
-            )
+            artist_id = conn.execute(
+                "INSERT INTO lib2_artists(name, sort_name, external_ids) "
+                "VALUES('A','A',?)",
+                (json.dumps({"lastfm": "https://last.fm/a"}),)).lastrowid
             conn.commit()
 
         with patch.object(lw.LastFMWorker, "_init_client", return_value=None):
@@ -256,24 +174,23 @@ class TestLastFMWorkerMarksMatched:
             # Client must NOT be called because we short-circuited.
             worker.client.get_artist_info.assert_not_called()
 
-        assert _read_status(db, "artists", "lastfm_match_status", artist_id) == "matched"
+        with db._get_connection() as conn:
+            state = attempt_state(conn, entity_type="artist", entity_id=artist_id)
+        assert state["lastfm"]["status"] == "matched"
 
 
 class TestTidalWorkerMarksMatched:
     def test_existing_tidal_id_triggers_matched_status(self, db):
+        """Finding an existing id must record the attempt, or the worker re-selects
+        that row on every loop. The status lives in the provider-attempt ledger now
+        instead of ``artists.tidal_match_status``."""
         from core import tidal_worker as tw
+        from core.library2.provider_attempts import attempt_state
 
         with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, tidal_id) VALUES (?, ?, ?)",
-                ("art_td", "A", "tidal-123"),
-            )
-            artist_id = "art_td"
-            cur.execute(
-                "UPDATE artists SET tidal_match_status = NULL WHERE id = ?",
-                (artist_id,),
-            )
+            artist_id = conn.execute(
+                "INSERT INTO lib2_artists(name, sort_name, external_ids) "
+                "VALUES('A','A',?)", ('{"tidal": "tidal-xyz"}',)).lastrowid
             conn.commit()
 
         fake_client = MagicMock()
@@ -281,24 +198,22 @@ class TestTidalWorkerMarksMatched:
         worker._process_artist(artist_id, "A")
 
         fake_client.search_artist.assert_not_called()
-        assert _read_status(db, "artists", "tidal_match_status", artist_id) == "matched"
-
+        with db._get_connection() as conn:
+            state = attempt_state(conn, entity_type="artist", entity_id=artist_id)
+        assert state["tidal"]["status"] == "matched"
 
 class TestQobuzWorkerMarksMatched:
     def test_existing_qobuz_id_triggers_matched_status(self, db):
+        """Finding an existing id must record the attempt, or the worker re-selects
+        that row on every loop. The status lives in the provider-attempt ledger now
+        instead of ``artists.qobuz_match_status``."""
         from core import qobuz_worker as qw
+        from core.library2.provider_attempts import attempt_state
 
         with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, qobuz_id) VALUES (?, ?, ?)",
-                ("art_qz", "A", "qobuz-xyz"),
-            )
-            artist_id = "art_qz"
-            cur.execute(
-                "UPDATE artists SET qobuz_match_status = NULL WHERE id = ?",
-                (artist_id,),
-            )
+            artist_id = conn.execute(
+                "INSERT INTO lib2_artists(name, sort_name, external_ids) "
+                "VALUES('A','A',?)", ('{"qobuz": "qobuz-xyz"}',)).lastrowid
             conn.commit()
 
         fake_client = MagicMock()
@@ -306,8 +221,9 @@ class TestQobuzWorkerMarksMatched:
         worker._process_artist(artist_id, "A")
 
         fake_client.search_artist.assert_not_called()
-        assert _read_status(db, "artists", "qobuz_match_status", artist_id) == "matched"
-
+        with db._get_connection() as conn:
+            state = attempt_state(conn, entity_type="artist", entity_id=artist_id)
+        assert state["qobuz"]["status"] == "matched"
 
 class TestMusicBrainzWorkerMarksMatched:
     def test_existing_mbid_triggers_matched_status_via_service(self, db):
@@ -315,11 +231,9 @@ class TestMusicBrainzWorkerMarksMatched:
 
         with db._get_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, musicbrainz_id) VALUES (?, ?, ?)",
-                ("art_mb", "A", "mb-uuid"),
-            )
-            artist_id = "art_mb"
+            artist_id = cur.execute(
+                "INSERT INTO lib2_artists(name, sort_name, musicbrainz_id) "
+                "VALUES('A','A','mb-uuid')").lastrowid
             conn.commit()
 
         fake_service = MagicMock()

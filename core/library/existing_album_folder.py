@@ -109,12 +109,16 @@ def _find_album(db: Any, spotify_album_id: Optional[str], album_name: Optional[s
 
 
 def _row_release_id(db: Any, album_id: Any) -> str:
-    """The album row's musicbrainz release id, "" when unknown."""
+    """The album row's musicbrainz release id, "" when unknown.
+
+    The album comes from the catalogue lookups above, which are Library v2 on
+    this branch, so the id is a ``lib2_albums`` id and the release id lives in
+    its ``musicbrainz_id`` (the *release*, not the group)."""
     conn = None
     try:
         conn = db._get_connection()
         row = conn.execute(
-            "SELECT musicbrainz_release_id FROM albums WHERE id = ?", (str(album_id),),
+            "SELECT musicbrainz_id FROM lib2_albums WHERE id = ?", (int(album_id),),
         ).fetchone()
         return str((row[0] if row else "") or "").strip()
     except Exception as e:

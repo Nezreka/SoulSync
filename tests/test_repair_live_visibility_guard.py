@@ -19,9 +19,18 @@ from core.repair_worker import RepairWorker
 
 
 def _seed(db, tmp_path, n=40, on_disk=True):
+    """Seed the NATIVE catalogue — the preflight samples ``lib2_track_files``.
+
+    (Upstream seeds the legacy ``tracks`` table; this branch no longer creates
+    it, and a sample of zero rows would fall under the floor and report the
+    library visible however broken the paths are.)
+    """
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES (1, 'A', 'test')")
-        conn.execute("INSERT INTO albums (id, title, artist_id, server_source) VALUES (1, 'Alb', 1, 'test')")
+        conn.execute(
+            "INSERT INTO lib2_artists (id, name, name_key) VALUES (1, 'A', 'a')")
+        conn.execute(
+            "INSERT INTO lib2_albums (id, title, primary_artist_id) "
+            "VALUES (1, 'Alb', 1)")
         for i in range(n):
             if on_disk:
                 p = tmp_path / "Transfer" / "A" / ("t%02d.flac" % i)
@@ -32,8 +41,11 @@ def _seed(db, tmp_path, n=40, on_disk=True):
                 # what a Navidrome-virtual catalogue looks like from here
                 path = "/navidrome/virtual/A/Alb/t%02d.flac" % i
             conn.execute(
-                "INSERT INTO tracks (id, title, artist_id, album_id, file_path, server_source) "
-                "VALUES (?, ?, 1, 1, ?, 'test')", (str(i), "t%02d" % i, path))
+                "INSERT INTO lib2_tracks (id, title, album_id) VALUES (?, ?, 1)",
+                (i + 1, "t%02d" % i))
+            conn.execute(
+                "INSERT INTO lib2_track_files (track_id, path, is_primary, file_state) "
+                "VALUES (?, ?, 1, 'active')", (i + 1, path))
         conn.commit()
 
 
@@ -126,11 +138,15 @@ def test_jobs_that_do_not_write_files_are_never_gated(tmp_path, monkeypatch):
 
 
 def test_every_file_writing_job_carries_the_flag():
-    """The guard only helps if the dangerous jobs are actually flagged. These five
-    move or rewrite real library files from catalogue paths."""
+    """The guard only helps if the dangerous jobs are actually flagged. These
+    four move or rewrite real library files from catalogue paths.
+
+    (Upstream lists five; ``unknown_artist_fixer`` was a legacy-table job this
+    branch deleted, so it is not on the list here.)
+    """
     from core.repair_jobs import get_all_jobs
     flagged = {jid for jid, cls in get_all_jobs().items()
                if getattr(cls, 'writes_library_files', False)}
     for jid in ('library_reorganize', 'library_retag', 'track_number_repair',
-                'unknown_artist_fixer', 'comma_artist_splitter'):
+                'comma_artist_splitter'):
         assert jid in flagged, jid + " moves/rewrites files but is not gated"

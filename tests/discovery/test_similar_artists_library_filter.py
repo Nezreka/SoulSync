@@ -1,4 +1,5 @@
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 
 def _names(artists):
@@ -13,11 +14,25 @@ def _own_seeds(db, *source_ids):
     real.
     """
     with db._get_connection() as conn:
-        conn.executemany(
-            "INSERT INTO artists (name, server_source, spotify_artist_id) VALUES (?, ?, ?)",
-            [(f"Seed Owner {sid}", "navidrome", sid) for sid in source_ids],
-        )
+        for sid in source_ids:
+            _library_artist(conn, f"Seed Owner {sid}", sid)
         conn.commit()
+
+
+def _library_artist(conn, name, spotify_id, owner_profile_id=None):
+    """A Library v2 artist that is really in a library: an active file under
+    it, stamped for the library it lives in (NULL = the shared one)."""
+    artist_id = seed_artist(conn, server_id=f"seed-{spotify_id}", name=name,
+                            server_source="navidrome")
+    conn.execute("UPDATE lib2_artists SET spotify_id=? WHERE id=?", (spotify_id, artist_id))
+    album_id = seed_album(conn, server_id=f"seed-al-{spotify_id}", title=f"{name} LP",
+                          artist_id=artist_id, server_source="navidrome")
+    track_id = seed_track(conn, server_id=f"seed-t-{spotify_id}", title="Song",
+                          album_id=album_id, artist_id=artist_id, server_source="navidrome",
+                          file_path=f"/music/{spotify_id}/song.flac")
+    conn.execute("UPDATE lib2_track_files SET owner_profile_id=? WHERE track_id=?",
+                 (owner_profile_id, track_id))
+    return artist_id
 
 
 def test_top_similar_artists_can_exclude_active_server_library_artists(tmp_path):
@@ -61,19 +76,28 @@ def test_top_similar_artists_can_exclude_active_server_library_artists(tmp_path)
     )
 
     with db._get_connection() as conn:
-        conn.executemany(
-            """
-            INSERT INTO artists (name, server_source, spotify_artist_id, deezer_id, musicbrainz_id)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [
-                ("Library Alias", "navidrome", "sp-owned", None, None),
-                ("Library Deezer Alias", "navidrome", None, "dz-owned", None),
-                ("Library MusicBrainz Alias", "navidrome", None, None, "mb-owned"),
-                ("owned by name", "navidrome", None, None, None),
-                ("Different Server Artist", "plex", "sp-other-server", None, None),
-            ],
-        )
+        library = [
+            ("Library Alias", "navidrome", "sp-owned", None, None),
+            ("Library Deezer Alias", "navidrome", None, "dz-owned", None),
+            ("Library MusicBrainz Alias", "navidrome", None, None, "mb-owned"),
+            ("owned by name", "navidrome", None, None, None),
+            ("Different Server Artist", "plex", "sp-other-server", None, None),
+        ]
+        for index, (name, server, spotify, deezer, mbid) in enumerate(library):
+            artist_id = seed_artist(conn, server_id=f"lib-{index}", name=name,
+                                    server_source=server)
+            conn.execute(
+                "UPDATE lib2_artists SET spotify_id=?, musicbrainz_id=?,"
+                "       external_ids=CASE WHEN ? IS NULL THEN external_ids"
+                "                         ELSE json_set(external_ids,'$.deezer',?) END"
+                " WHERE id=?",
+                (spotify, mbid, deezer, deezer, artist_id))
+            if name == "Different Server Artist":
+                conn.execute(
+                    "INSERT INTO lib2_media_server_mappings "
+                    "(entity_type,entity_id,server_source,server_id) "
+                    "VALUES('artist',?,'navidrome','nav-mapped')", (artist_id,),
+                )
         conn.commit()
 
     artists = db.get_top_similar_artists(
@@ -82,7 +106,7 @@ def test_top_similar_artists_can_exclude_active_server_library_artists(tmp_path)
         exclude_library_server="navidrome",
     )
 
-    assert _names(artists) == {"Different Server Artist", "Fresh Artist"}
+    assert _names(artists) == {"Fresh Artist"}
 
 
 def test_top_similar_artists_can_require_musicbrainz_source(tmp_path):
@@ -120,10 +144,11 @@ def test_top_similar_artists_keeps_existing_behavior_without_library_filter(tmp_
     with db._get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO artists (name, server_source, spotify_artist_id)
-            VALUES (?, ?, ?)
+            INSERT INTO lib2_artists (name, name_key, spotify_id,
+                                      server_source, server_id)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            ("Owned Artist", "navidrome", "sp-owned"),
+            ("Owned Artist", "owned artist", "sp-owned", "navidrome", "na-1"),
         )
         conn.commit()
 
@@ -243,10 +268,8 @@ def test_watchlist_artist_with_no_provider_id_still_seeds(tmp_path):
 def test_another_profiles_library_does_not_seed_your_recommendations(tmp_path):
     db = MusicDatabase(str(tmp_path / "music.db"))
     with db._get_connection() as conn:
-        conn.execute(
-            "INSERT INTO artists (name, server_source, spotify_artist_id, owner_profile_id) VALUES (?, ?, ?, ?)",
-            ("Their Artist", "jellyfin", "sp-theirs", 2),
-        )
+        conn.execute("INSERT INTO profiles (id, name) VALUES (2, 'Kim')")
+        _library_artist(conn, "Their Artist", "sp-theirs", owner_profile_id=2)
         conn.commit()
     db.add_or_update_similar_artist(source_artist_id="sp-theirs", similar_artist_name="Theirs",
                                     similar_artist_spotify_id="sp-x", profile_id=1)

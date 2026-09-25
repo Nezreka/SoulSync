@@ -443,7 +443,13 @@ function ArtistVideoRailItem({
   );
 }
 
-export function ArtistVideosSection({ artistName }: { artistName?: string | null }) {
+export function ArtistVideosSection({
+  artistName,
+  standalone = false,
+}: {
+  artistName?: string | null;
+  standalone?: boolean;
+}) {
   const [status, setStatus] = useState<Status>('idle');
   // everything yt-dlp has handed back for this artist, uncurated
   const [pool, setPool] = useState<SearchVideo[]>([]);
@@ -652,7 +658,7 @@ export function ArtistVideosSection({ artistName }: { artistName?: string | null
     slotRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   }, []);
 
-  if (status === 'idle' || status === 'empty') return null;
+  if (!standalone && (status === 'idle' || status === 'empty')) return null;
 
   const countLabel =
     status === 'loading'
@@ -663,7 +669,7 @@ export function ArtistVideosSection({ artistName }: { artistName?: string | null
     <section className="artist-videos-section" id="artist-videos-section" aria-live="polite">
       <div className="artist-videos-topline">
         <div>
-          <span className="artist-videos-kicker">Video shelf</span>
+          <span className="artist-videos-kicker">{standalone ? 'YouTube' : 'Video shelf'}</span>
           <h3>Music Videos</h3>
         </div>
         <div className="artist-videos-actions">
@@ -683,7 +689,9 @@ export function ArtistVideosSection({ artistName }: { artistName?: string | null
         </div>
       </div>
 
-      {status === 'error' ? (
+      {status === 'empty' ? (
+        <div className="artist-videos-empty">No music videos found for this artist.</div>
+      ) : status === 'error' ? (
         <div className="artist-videos-empty">Music videos are unavailable right now.</div>
       ) : status === 'loading' && !featured ? (
         <div className="artist-videos-loading">

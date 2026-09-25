@@ -172,3 +172,139 @@ class TestMoveSiblingToDestination:
             str(src), str(tmp_path / "new" / "X.opus"),
         )
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# iss29-E02: the sibling move must not destroy an existing destination file
+# ---------------------------------------------------------------------------
+
+
+class TestSiblingMoveNeverOverwrites:
+    """The canonical move refuses to overwrite; the sibling move must too.
+
+    ``_rename_track_in_place`` checks the destination and returns
+    'destination already exists' rather than clobbering — its docstring calls
+    this out as "never silent data loss". But the sibling carry ran *before*
+    that check and used a bare ``shutil.move``, which on POSIX resolves to
+    ``os.rename`` for a regular file and overwrites without error, without a
+    log line and without a counter.
+
+    Reachable whenever lossy-copy is on and a previous partial run (or a second
+    edition) already put a file with the canonical's post-rename stem in the
+    destination.
+    """
+
+    def test_refuses_to_overwrite_an_existing_destination(self, tmp_path):
+        src_dir = tmp_path / "Old"
+        dst_dir = tmp_path / "New"
+        src_dir.mkdir()
+        dst_dir.mkdir()
+        sibling_src = src_dir / "05 Song.mp3"
+        sibling_src.write_bytes(b"the sibling being moved")
+        # Someone else's file already occupies the destination name.
+        occupied = dst_dir / "05 - Song.mp3"
+        occupied.write_bytes(b"a DIFFERENT recording that must survive")
+
+        canonical_dst = dst_dir / "05 - Song.flac"
+        result = _move_sibling_to_destination(str(sibling_src), str(canonical_dst))
+
+        assert result is None, "an occupied destination must be reported as a failure"
+        assert occupied.read_bytes() == b"a DIFFERENT recording that must survive"
+        assert sibling_src.exists(), "the source must be left in place, not silently lost"
+
+    def test_still_moves_when_the_destination_is_free(self, tmp_path):
+        src_dir = tmp_path / "Old"
+        dst_dir = tmp_path / "New"
+        src_dir.mkdir()
+        sibling_src = src_dir / "05 Song.mp3"
+        sibling_src.write_bytes(b"payload")
+
+        canonical_dst = dst_dir / "05 - Song.flac"
+        result = _move_sibling_to_destination(str(sibling_src), str(canonical_dst))
+
+        assert result == str(dst_dir / "05 - Song.mp3")
+        assert (dst_dir / "05 - Song.mp3").read_bytes() == b"payload"
+        assert not sibling_src.exists()
+
+
+class TestRenameInPlaceOrdersTheSiblingCarry:
+    """A failed canonical rename must not leave the siblings moved.
+
+    Siblings used to be carried across BEFORE the canonical's own rename. When
+    that rename then failed, the album ended up split over two directories with
+    no error path that could put it back.
+    """
+
+    def test_a_failing_canonical_rename_leaves_siblings_at_the_source(self, tmp_path, monkeypatch):
+        from core import library_reorganize
+
+        src_dir = tmp_path / "Old"
+        dst_dir = tmp_path / "New"
+        src_dir.mkdir()
+        canonical = src_dir / "05 Song.flac"
+        sibling = src_dir / "05 Song.mp3"
+        canonical.write_bytes(b"flac")
+        sibling.write_bytes(b"mp3")
+
+        def _boom(*_args, **_kwargs):
+            raise OSError("disk went away mid-rename")
+
+        monkeypatch.setattr(library_reorganize.os, "rename", _boom)
+
+        ok, err = library_reorganize._rename_track_in_place(
+            str(canonical), str(dst_dir / "05 - Song.flac")
+        )
+
+        assert ok is False
+        assert err
+        assert sibling.exists(), "sibling must not be stranded in the destination"
+        assert not (dst_dir / "05 - Song.mp3").exists()
+
+
+# ---------------------------------------------------------------------------
+# iss29-E05: lyrics Library V2 wrote must survive a reorganize
+# ---------------------------------------------------------------------------
+
+
+class TestSidecarsAreCarriedNotDeleted:
+    """"Fetch Lyrics" then "Reorganize" used to empty the lyrics column.
+
+    The full run stages only the audio, so the ``.lrc`` was never carried to the
+    destination — and the finalisation step then deleted it at the source. lib2
+    writes exactly these files, so reorganize was destroying its own
+    application's data. Both other movers in the project (``_fix_path_mismatch``,
+    ``_rename_to_basename``) carry the sidecar.
+    """
+
+    def test_lrc_follows_the_track_to_its_new_name(self, tmp_path):
+        from core.library_reorganize import _carry_track_sidecars
+
+        src_dir = tmp_path / "Old"
+        dst_dir = tmp_path / "New"
+        src_dir.mkdir()
+        dst_dir.mkdir()
+        (src_dir / "05 Song.lrc").write_text("[00:01.00]a lyric line")
+        (src_dir / "05 Song.nfo").write_text("notes")
+
+        _carry_track_sidecars(str(src_dir / "05 Song.flac"), str(dst_dir / "05 - Song.flac"))
+
+        assert (dst_dir / "05 - Song.lrc").read_text() == "[00:01.00]a lyric line"
+        assert (dst_dir / "05 - Song.nfo").read_text() == "notes"
+        assert not (src_dir / "05 Song.lrc").exists()
+        assert not (src_dir / "05 Song.nfo").exists()
+
+    def test_a_sidecar_already_at_the_destination_is_not_clobbered(self, tmp_path):
+        from core.library_reorganize import _carry_track_sidecars
+
+        src_dir = tmp_path / "Old"
+        dst_dir = tmp_path / "New"
+        src_dir.mkdir()
+        dst_dir.mkdir()
+        (src_dir / "05 Song.lrc").write_text("source copy")
+        (dst_dir / "05 - Song.lrc").write_text("destination copy")
+
+        _carry_track_sidecars(str(src_dir / "05 Song.flac"), str(dst_dir / "05 - Song.flac"))
+
+        # The destination wins, and the source folder is left prunable.
+        assert (dst_dir / "05 - Song.lrc").read_text() == "destination copy"
+        assert not (src_dir / "05 Song.lrc").exists()

@@ -22,6 +22,13 @@ from utils.logging_config import get_logger
 
 logger = get_logger("lastfm_import")
 
+
+def _name_key(name: Any) -> str:
+    """The catalogue's folded artist key (indexed, and not ASCII-only)."""
+    from core.library2.importer import normalize_name
+
+    return normalize_name(str(name or ""))
+
 STATE_KEY = "lastfm_listening_import_state"
 SOURCE = "lastfm"
 PAGE_LIMIT = 200
@@ -373,8 +380,18 @@ class LastFMListeningImportWorker:
             return ""
 
     def _resolve_db_track_ids(self, events: List[Dict[str, Any]]) -> None:
+        """Point every scrobble at its catalogue row (``lib2_track_id``).
+
+        Library v2 is the catalogue (docs §32.3.1), so this reads
+        ``lib2_tracks`` — the legacy ``tracks``/``artists`` pair this arrived
+        against no longer exists here. The artist half matches on the indexed
+        ``name_key`` fold rather than ``LOWER(name)``: SQLite's ``LOWER()`` is
+        ASCII-only, so an accented artist never matched (iss29-D13). Same
+        query as ``listening_stats_worker._resolve_db_track_ids_batch``, which
+        fills the identical column for the media-server importer.
+        """
         pairs = sorted({
-            ((ev.get("title") or "").strip().lower(), (ev.get("artist") or "").strip().lower())
+            ((ev.get("title") or "").strip().lower(), _name_key(ev.get("artist")))
             for ev in events if ev.get("title")
         })
         if not pairs:
@@ -389,17 +406,28 @@ class LastFMListeningImportWorker:
                 args = [v for pair in chunk for v in pair]
                 cursor.execute(
                     f"""
-                    SELECT LOWER(t.title), LOWER(ar.name), t.id
-                    FROM tracks t
-                    JOIN artists ar ON ar.id = t.artist_id
-                    WHERE (LOWER(t.title), LOWER(ar.name)) IN ({placeholders})
+                    SELECT LOWER(t.title), ar.name_key, t.id
+                    FROM lib2_tracks t
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE (LOWER(t.title), ar.name_key) IN ({placeholders})
                     """,
                     args,
                 )
-                for title_l, artist_l, track_id in cursor.fetchall():
-                    found.setdefault((title_l, artist_l), track_id)
+                for title_l, artist_key, track_id in cursor.fetchall():
+                    found.setdefault((title_l, artist_key), track_id)
             for ev in events:
-                ev["db_track_id"] = found.get(((ev.get("title") or "").strip().lower(), (ev.get("artist") or "").strip().lower()))
+                # INT-01: this resolves against `lib2_tracks`, so the id is a
+                # CATALOGUE id and belongs in `lib2_track_id` — the column every
+                # stats reader joins on. Writing it to `db_track_id` (the media
+                # server's own id namespace) left Last.fm plays with no cover,
+                # no artist link and no genre, and the startup backfill then read
+                # the same value as a LEGACY track id, so a numeric collision
+                # could link the play to a completely different track.
+                ev["lib2_track_id"] = found.get((
+                    (ev.get("title") or "").strip().lower(),
+                    _name_key(ev.get("artist")),
+                ))
         finally:
             conn.close()
 
@@ -447,7 +475,7 @@ def normalize_lastfm_scrobble(track: Dict[str, Any]) -> Optional[Dict[str, Any]]
         "played_at": _iso_from_ts(uts),
         "duration_ms": _int(track.get("duration"), 0),
         "server_source": SOURCE,
-        "db_track_id": None,
+        "lib2_track_id": None,
     }
 
 

@@ -37,36 +37,55 @@ def resolve_playable_tracks(db, wanted: List[Dict[str, Any]]) -> Dict[str, Any]:
     conn = db._get_connection()
     try:
         cursor = conn.cursor()
-        # migration-added columns may be absent on old installs
-        cursor.execute("PRAGMA table_info(tracks)")
-        track_cols = {r[1] for r in cursor.fetchall()}
+        # migration-added columns may be absent on old installs. In v2 the
+        # audio facts live on the FILE row, not the recording.
+        cursor.execute("PRAGMA table_info(lib2_track_files)")
+        file_cols = {r[1] for r in cursor.fetchall()}
         extra = "".join(
-            f"t.{c}, " for c in ("bitrate", "sample_rate") if c in track_cols
+            f"f.{c}, " for c in ("bitrate", "sample_rate") if c in file_cols
         )
         # A mix used to run one full LOWER(title) scan for every entry. Read
-        # candidate titles once, then disambiguate by artist without losing order.
+        # candidate titles once, then disambiguate by artist without losing
+        # order. (Upstream's optimisation, ported onto the v2 catalogue: the
+        # win is in the number of scans, and it is the same win here.)
         titles = sorted({_norm(str(item.get("title") or item.get("name") or ""))
                          for item in wanted} - {""})
         candidates = {}
         if titles:
             placeholders = ",".join("?" for _ in titles)
+            # One preferred file per recording, same selection the album-play
+            # query uses — a track with several copies must not enter the queue
+            # twice, and the row the player gets has to name a live file.
             cursor.execute(
                 f"""
                 SELECT t.id, t.title, t.duration, {extra}
-                       t.file_path, al.title AS album,
-                       COALESCE(al.thumb_url, ar.thumb_url) AS image_url,
-                       ar.name AS artist, t.artist_id, t.album_id
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  AND LOWER(t.title) IN ({placeholders})
+                       f.path AS file_path,
+                       al.title AS album,
+                       COALESCE(al.image_url, ar.image_url) AS image_url,
+                       COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
+                       COALESCE(ar.canonical_artist_id, ar.id) AS artist_id,
+                       t.album_id
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                JOIN lib2_track_files f ON f.id = (
+                    SELECT preferred.id
+                    FROM lib2_track_files preferred
+                    WHERE preferred.track_id = t.id
+                      AND preferred.path IS NOT NULL
+                      AND TRIM(preferred.path) != ''
+                      AND COALESCE(preferred.file_state, 'active') = 'active'
+                    ORDER BY preferred.is_primary DESC, preferred.id
+                    LIMIT 1
+                )
+                WHERE LOWER(t.title) IN ({placeholders})
                 ORDER BY t.id
                 """, titles,
             )
             for candidate in cursor.fetchall():
                 candidate = dict(candidate)
-                candidates.setdefault((_norm(candidate["title"]), _norm(candidate["artist"])), candidate)
+                candidates.setdefault(
+                    (_norm(candidate["title"]), _norm(candidate["artist"])), candidate)
         seen_paths = set()
         for item in wanted:
             title = _norm(str(item.get("title") or item.get("name") or ""))

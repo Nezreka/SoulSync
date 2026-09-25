@@ -259,14 +259,15 @@ def delete_replaced_track(
     can't read literally — without it we'd delete the row but orphan the file)."""
     if not replace_track_id:
         return None
-    cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (replace_track_id,))
+    cursor.execute(
+        "SELECT id, path FROM lib2_track_files WHERE track_id=? "
+        "AND COALESCE(file_state,'active')='active' "
+        "ORDER BY is_primary DESC, id LIMIT 1", (replace_track_id,))
     row = cursor.fetchone()
     if row is None:
         return None
-    old_path = (row["file_path"] if not isinstance(row, (tuple, list)) else row[0]) or ""
-    if not old_path:
-        cursor.execute("DELETE FROM tracks WHERE id = ?", (replace_track_id,))
-        return None
+    file_id = row["id"] if not isinstance(row, (tuple, list)) else row[0]
+    old_path = (row["path"] if not isinstance(row, (tuple, list)) else row[1]) or ""
 
     # Resolve the old stored path to its real on-disk location up front.
     real_path = old_path
@@ -284,10 +285,13 @@ def delete_replaced_track(
         if _canonical(real_path) in landed or _canonical(old_path) in landed:
             return None
 
-    cursor.execute("DELETE FROM tracks WHERE id = ?", (replace_track_id,))
+    from core.library2.track_files import set_file_state
+    set_file_state(cursor.connection, file_id, "deleted")
     # Only unlink if no surviving row still points at this file (rows store the
     # stored path, so compare against the stored path, not the resolved one).
-    cursor.execute("SELECT 1 FROM tracks WHERE file_path = ? LIMIT 1", (old_path,))
+    cursor.execute(
+        "SELECT 1 FROM lib2_track_files WHERE path=? "
+        "AND COALESCE(file_state,'active')='active' LIMIT 1", (old_path,))
     if cursor.fetchone() is not None:
         return None
     try:

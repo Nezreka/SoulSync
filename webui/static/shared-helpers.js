@@ -1760,6 +1760,13 @@ async function navigateToMirroredPlaylist(playlistRef, source = 'spotify') {
     }
 }
 
+// A second Quality Profile picker for search-intent modals used to live here.
+// Upstream's quality-profiles foundation (our PR #1076) landed the acquisition
+// picker for the SAME modal footer — `downloadModalQualityProfileSelectHtml`
+// below — so the dialog showed two "Quality Profile" selects and ours silently
+// outranked the merged one in the request body. Removed in favour of the
+// upstream control, which is the one the server-side precedence documents.
+
 async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist, showLoadingOverlayParam = true, contextType = 'artist_album') {
     if (showLoadingOverlayParam) {
         showLoadingOverlay('Loading album...');
@@ -2029,7 +2036,6 @@ function updateArtistDownloadsSection() {
     }
     downloadsUpdateTimeout = setTimeout(() => {
         showArtistDownloadsSection();
-        showLibraryDownloadsSection();
         showBeatportDownloadsSection();
         updateDashboardDownloads();
     }, 300); // 300ms debounce

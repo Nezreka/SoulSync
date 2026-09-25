@@ -159,7 +159,8 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
             try:
                 cached = db.read_sync_match_cache(spotify_id, active_server)
                 if cached:
-                    db_track_check = db.get_track_by_id(cached['server_track_id'])
+                    db_track_check = db.get_track_by_server_id(
+                        cached['server_track_id'], active_server)
                     if db_track_check:
                         class DatabaseTrackCached:
                             def __init__(self, db_t):

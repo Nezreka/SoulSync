@@ -15,6 +15,7 @@ import pytest
 from core.library.expired_cleanup import path_suffix_key
 from core.repair_jobs.expired_download_cleaner import ExpiredDownloadCleanerJob
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_library_track
 
 OLD = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat()
 TRACK = "/music/Artist/Album/01 Track.flac"
@@ -37,15 +38,15 @@ def _download(db, hid=1, file_path=TRACK):
 
 
 def _track(db, tid="t1", file_path=TRACK, play_count=0):
+    """The catalogue row behind the download, with its active file."""
     conn = db._get_connection()
-    conn.execute("INSERT OR IGNORE INTO artists (id, name, server_source) VALUES (?,?,?)",
-                 ("ar1", "Artist", "plex"))
-    conn.execute("INSERT OR IGNORE INTO albums (id, artist_id, title, server_source) "
-                 "VALUES (?,?,?,?)", ("al1", "ar1", "Album", "plex"))
-    conn.execute("INSERT OR REPLACE INTO tracks (id, album_id, artist_id, title, "
-                 "file_path, play_count, server_source) VALUES (?,?,?,?,?,?,?)",
-                 (tid, "al1", "ar1", "Track", file_path, play_count, "plex"))
+    track_id = seed_library_track(
+        conn, artist="Artist", album="Album", title="Track",
+        track_server_id=tid, file_path=file_path)
+    conn.execute("UPDATE lib2_tracks SET play_count=? WHERE id=?",
+                 (play_count, track_id))
     conn.commit()
+    return track_id
 
 
 class _Ctx:
