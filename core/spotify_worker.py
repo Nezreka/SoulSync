@@ -661,6 +661,7 @@ class SpotifyWorker:
             album_type=api_album_dict.get('album_type', 'album'),
             release_date=api_album_dict.get('release_date', ''),
             total_tracks=api_album_dict.get('total_tracks', 0),
+            artists=api_album_dict.get('artists'),
         )
         self._update_album(album_id, adapter)
 
@@ -670,7 +671,10 @@ class SpotifyWorker:
         backfill, so the dict shape is irrelevant beyond carrying the
         stored ID through."""
         adapter = SimpleNamespace(id=api_track_dict.get('id') or stored_id)
-        self._update_track_from_search(track_id, adapter)
+        # official get_track_details flattens artists to names; the raw dict
+        # under raw_data still has the ids. the free path returns the raw dict
+        raw = api_track_dict.get('raw_data') or api_track_dict
+        self._update_track_from_search(track_id, adapter, artists=raw.get('artists'))
 
     def _process_album_individual(self, item: Dict[str, Any]):
         album_id = item['id']
@@ -820,23 +824,52 @@ class SpotifyWorker:
         # goes in the payload, which loses nothing and overwrites nobody.
         self._write('album', album_id, album_obj.id, backfill=backfill,
                     payload={'album_type': album_obj.album_type},
-                    total_tracks=getattr(album_obj, 'total_tracks', 0))
+                    total_tracks=getattr(album_obj, 'total_tracks', 0),
+                    credits=self._album_artists(album_obj))
 
     def _update_track(self, track_id: int, track_data: Dict[str, Any]):
         """Store Spotify metadata for a track (from get_album_tracks dict)"""
         backfill = {}
         if 'explicit' in track_data:
             backfill['explicit'] = 1 if track_data['explicit'] else 0
-        self._write('track', track_id, track_data.get('id', ''), backfill=backfill)
+        self._write('track', track_id, track_data.get('id', ''), backfill=backfill,
+                    credits=track_data.get('artists'))
 
-    def _update_track_from_search(self, track_id: int, track_obj):
+    def _update_track_from_search(self, track_id: int, track_obj, artists=None):
         """Store Spotify metadata for a track (from Track dataclass, individual search)"""
-        self._write('track', track_id, track_obj.id)
+        if artists is None:
+            # the Track dataclass keeps artist names only; the raw result it
+            # came from is in the metadata cache, with the ids
+            artists = self._cached_track_artists(str(track_obj.id))
+        self._write('track', track_id, track_obj.id, credits=artists)
+
+    # ── Artist credits (upstream 3.4.6) ────────────────────────────────
+
+    @staticmethod
+    def _album_artists(album_obj):
+        """album artists with ids off an Album dataclass (names and ids in two
+        parallel lists) or a raw dict's artists."""
+        names = getattr(album_obj, 'artists', None)
+        ids = getattr(album_obj, 'artist_ids', None)
+        if names and ids and len(names) == len(ids) and all(isinstance(n, str) for n in names):
+            return [{'name': n, 'id': i} for n, i in zip(names, ids, strict=True)]
+        return names
+
+    @staticmethod
+    def _cached_track_artists(spotify_track_id: str):
+        """the credited artists (with ids) off the cached raw track, or None."""
+        try:
+            from core.metadata.cache import get_metadata_cache
+            raw = get_metadata_cache().get_entity('spotify', 'track', spotify_track_id)
+        except Exception as e:  # noqa: BLE001 - a credit is decoration
+            logger.debug("credit cache lookup failed for %s: %s", spotify_track_id, e)
+            return None
+        return (raw or {}).get('artists')
 
     def _write(self, entity_type: str, entity_id: int, provider_id,
                backfill: Optional[Dict[str, Any]] = None,
                payload: Optional[Dict[str, Any]] = None,
-               total_tracks: Any = None):
+               total_tracks: Any = None, credits=None):
         """One write path for all three entity types (docs §32.3.1 stage 2).
 
         Spotify's id is promoted to a real ``spotify_id`` column as well as
@@ -863,6 +896,9 @@ class SpotifyWorker:
                 set_expected_track_count(conn, entity_id, total_tracks)
             record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
                            service='spotify', status='matched')
+            # every artist Spotify credits, not just the one it is filed under
+            from core.library2.provider_credits import link_credited_artists
+            link_credited_artists(conn, entity_type, entity_id, 'spotify', credits)
             conn.commit()
         except Exception as e:
             logger.error(f"Error updating {entity_type} #{entity_id} with Spotify data: {e}")

@@ -764,7 +764,15 @@ class ConfigManager:
                 # that contains it and tag it as that album, so it groups with its
                 # album-mates and gets the album cover (not the single's). Off by
                 # default — it's an extra per-import metadata lookup.
-                "single_to_album": False
+                "single_to_album": False,
+                "tags": {
+                    # the multi-value ARTISTS tag next to the display string,
+                    # so navidrome/jellyfin link a song to every artist on it.
+                    # on for fresh installs only. these defaults are never
+                    # merged into a saved config, so existing installs keep
+                    # tagging the way they always have
+                    "write_multi_artist": True,
+                },
             },
             "musicbrainz": {
                 "base_url": "https://musicbrainz.org/ws/2",

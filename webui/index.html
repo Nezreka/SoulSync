@@ -4915,7 +4915,6 @@
                                                         <option value="qobuz">Qobuz Only</option>
                                                         <option value="hifi">HiFi Only (Free Lossless)</option>
                                                         <option value="deezer_dl">Deezer Only</option>
-                                                        <option value="amazon">Amazon Music Only</option>
                                                         <option value="lidarr">Lidarr Only</option>
                                                         <option value="soundcloud">SoundCloud Only</option>
                                                         <option value="torrent">Torrent Only (via Prowlarr)</option>
@@ -5318,22 +5317,6 @@
                                                         </button>
                                                         <span id="deezer-download-status" class="setting-help-text"
                                                             style="margin-left: 8px;"></span>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <!-- Amazon Music Download Settings (shown only when amazon mode is selected) -->
-                                            <div id="amazon-download-settings-container" class="src-config-panel">
-                                                <div class="form-group">
-                                                    <label>Connection:</label>
-                                                    <div class="form-actions" style="margin-top: 4px;">
-                                                        <button class="test-button"
-                                                            onclick="testAmazonConnection()">Test Connection</button>
-                                                        <span id="amazon-connection-status" class="setting-help-text"
-                                                            style="margin-left: 8px;"></span>
-                                                    </div>
-                                                    <div class="setting-help-text">
-                                                        No account required — T2Tunes is a public Amazon Music proxy.
                                                     </div>
                                                 </div>
                                             </div>
@@ -7508,7 +7491,7 @@
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                     <small class="settings-hint setting-help-body" hidden>Which sources
                                                         a book search asks. Separate from the music chain on purpose
-                                                        &mdash; Tidal, Qobuz, HiFi, Deezer and Amazon carry no
+                                                        &mdash; Tidal, Qobuz, HiFi and Deezer carry no
                                                         audiobooks at all, so a book on the music chain would burn an
                                                         attempt on each of them before it could succeed. The clients
                                                         themselves are the same ones music uses; only the order and the

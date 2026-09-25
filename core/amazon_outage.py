@@ -59,3 +59,21 @@ def next_poll_delay_seconds(outage_streak: int) -> int:
     if outage_streak <= 0:
         return _NORMAL_DELAY
     return min(_OUTAGE_BASE * (2 ** min(outage_streak - 1, 6)), _OUTAGE_CAP)
+
+
+# the public instance amazon_client defaults to. it shut down for good (#1300),
+# it redirects to /unavailable and refuses the api.
+DEAD_PUBLIC_HOST = "t2tunes.site"
+
+
+def amazon_enrichment_should_run(config) -> bool:
+    """whether the amazon worker starts unpaused at boot.
+
+    needs both an explicit opt-in (amazon_enrichment_paused=False) and a
+    self-hosted amazon.base_url. the default points at the dead public host,
+    so anyone who opted in before it died goes back to paused."""
+    if config.get("amazon_enrichment_paused", True):
+        return False
+    base = (config.get("amazon.base_url", "") or "").strip().lower()
+    host = re.sub(r"^https?://", "", base).split("/", 1)[0]
+    return bool(host) and host not in (DEAD_PUBLIC_HOST, "www." + DEAD_PUBLIC_HOST)

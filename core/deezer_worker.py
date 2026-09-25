@@ -579,7 +579,9 @@ class DeezerWorker:
         self._write('album', album_id, search_data.get('id'), backfill=backfill,
                     payload={'record_type': data.get('record_type')},
                     total_tracks=(full_data.get('nb_tracks') if full_data else None)
-                    or search_data.get('nb_tracks'))
+                    or search_data.get('nb_tracks'),
+                    # every album artist; only the full record has contributors
+                    credits=(full_data or {}).get('contributors'))
 
     def _update_track(self, track_id: int, search_data: Dict[str, Any],
                       full_data: Optional[Dict[str, Any]]):
@@ -589,12 +591,14 @@ class DeezerWorker:
         bpm = data.get('bpm') if full_data else None
         if bpm and bpm > 0:
             backfill['bpm'] = float(bpm)
-        self._write('track', track_id, search_data.get('id'), backfill=backfill)
+        self._write('track', track_id, search_data.get('id'), backfill=backfill,
+                    # every artist on the track; only the full record has them
+                    credits=(full_data or {}).get('contributors'))
 
     def _write(self, entity_type: str, entity_id: int, provider_id,
                backfill: Optional[Dict[str, Any]] = None,
                payload: Optional[Dict[str, Any]] = None,
-               total_tracks: Any = None):
+               total_tracks: Any = None, credits=None):
         """One write path for all three entity types (docs §32.3.1 stage 2).
 
         Everything outside Deezer's own id is backfill — artwork, label, genres and
@@ -620,6 +624,9 @@ class DeezerWorker:
                 set_expected_track_count(conn, entity_id, total_tracks)
             record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
                            service='deezer', status='matched')
+            # every artist Deezer credits, not just the one it is filed under
+            from core.library2.provider_credits import link_credited_artists
+            link_credited_artists(conn, entity_type, entity_id, 'deezer', credits)
             conn.commit()
         except Exception as e:
             logger.error(f"Error updating {entity_type} #{entity_id} with Deezer data: {e}")

@@ -27,6 +27,7 @@ import {
   navigateToArtistDetail,
   playLibraryTrack,
 } from './library-globals';
+import './library-switch';
 import {
   _mlmClose,
   _mlmDeleteMatch,
@@ -54,13 +55,12 @@ import {
   toggleOriginEntry,
   toggleOriginGroup,
 } from './origin-history';
-import './library-switch';
 import './server-activity';
 import {
   closeServiceSwitchModal,
   openServiceSwitchModal,
+  openServiceSwitchSettings,
   setActiveSource,
-  setDownloadMode,
   switchServiceSwitchTab,
 } from './service-switch';
 import { closeTrackDetail, openTrackDetail } from './track-detail';
@@ -104,7 +104,7 @@ export const SHELL_WINDOW_EXPORTS = {
   closeServiceSwitchModal,
   switchServiceSwitchTab,
   setActiveSource,
-  setDownloadMode,
+  openServiceSwitchSettings,
   // library-globals.js (ported aug 26; the state objects self-assign inside)
   navigateToArtistDetail,
   playLibraryTrack,

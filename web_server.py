@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.5"
+_SOULSYNC_BASE_VERSION = "3.4.6"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -240,6 +240,7 @@ from core.tidal_worker import TidalWorker
 from core.qobuz_worker import QobuzWorker
 from core.hydrabase_worker import HydrabaseWorker
 from core.amazon_worker import AmazonWorker
+from core.amazon_outage import amazon_enrichment_should_run as _amazon_enrichment_should_run
 from core.hydrabase_client import HydrabaseClient
 from core.automation_engine import AutomationEngine
 
@@ -19886,7 +19887,9 @@ try:
     # (T2Tunes) that can be down, so it stays paused unless the user has
     # explicitly enabled it (amazon_enrichment_paused=False). This stops an
     # instance outage from grinding/log-flooding installs that never opted in.
-    if config_manager.get('amazon_enrichment_paused', True):
+    # the public t2tunes.site is gone for good (#1300), so an opt-in pointed at
+    # it just hammers a dead host. only a self-hosted amazon.base_url can run.
+    if not _amazon_enrichment_should_run(config_manager):
         amazon_worker.pause()
         logger.info("Amazon enrichment worker initialized (paused — enable it in Settings)")
     else:

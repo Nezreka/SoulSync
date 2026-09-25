@@ -574,7 +574,9 @@ declare global {
     closeServiceSwitchModal?: () => void;
     switchServiceSwitchTab?: (tab: string) => void;
     setActiveSource?: (kind: string, id: string) => Promise<void>;
-    setDownloadMode?: (which: string) => Promise<void>;
+    openServiceSwitchSettings?: (kind: string) => void;
+    switchServiceKind?: (kind: string) => void;
+    switchDownloadChain?: (kind: string) => void;
     closeWatchlistHistoryModal?: () => void;
     toggleWatchlistHistoryRun?: (runId: string, btn: HTMLElement) => Promise<void>;
     /** src/shell ports (aug 26, batch 3): library-globals, track-detail,

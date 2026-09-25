@@ -2,10 +2,10 @@
  * Video-side Service Status — the sidebar dots (data-video-only section) + the switch modal.
  *
  * Mirrors the music service-switch look (reuses the .ss-* modal classes) but the video side has
- * its OWN sources: TMDB/TVDB metadata (required, status-only), the video media server (Plex/
- * Jellyfin — switchable), and the video download preference (soulseek/torrent/usenet + a hybrid
- * order — switchable). Reads /api/video/service-status; writes /api/video/server and
- * /api/video/downloads/config. The music side is untouched.
+ * its OWN sources: TMDB/TVDB metadata (required), the video media server (Plex/Jellyfin) and the
+ * video download chain. All three are shown here, not changed: a server switch means a fresh
+ * library scan and the chain has its own editor, so each gets a way into Settings (#1301).
+ * Reads /api/video/service-status.
  */
 (function () {
     'use strict';
@@ -27,7 +27,6 @@
         tvdb: { name: 'TVDB', logo: '/static/img/brands/tvdb.svg', emoji: '📺' }
     };
     var SRC_LABEL = { soulseek: 'Soulseek', torrent: 'Torrent', extto: 'EXT.to', usenet: 'Usenet' };
-    var SRV_LABEL = { plex: 'Plex', jellyfin: 'Jellyfin' };
 
     // A service logo (img, with emoji fallback on load error) — mirrors the music _ssCard media.
     function media(cls, logo, emoji, dark) {
@@ -196,44 +195,50 @@
             '<div class="ss-hint">TMDB &amp; TVDB are <strong>required</strong> and can\'t be swapped &mdash; the video side matches and enriches everything from them. Set the keys in <strong>Settings &rarr; Connections</strong>.</div>';
     }
 
+    // one quiet line of why, one way into the right Settings spot
+    function foot(kind, note) {
+        var label = kind === 'server' ? 'Change in Settings' : 'Edit in Settings';
+        return '<div class="ss-foot"><p class="ss-foot-note">' + note + '</p>' +
+            '<button class="ss-cta" onclick="_vssOpenSettings(\'' + kind + '\')">' + label +
+            '<span class="ss-cta-arrow" aria-hidden="true">&rarr;</span></button></div>';
+    }
+
     function panelServer() {
         var s = _data.server || {};
-        var out = '<div class="ss-grid">';
-        ['plex', 'jellyfin'].forEach(function (srv) {
-            var info = SRV_INFO[srv], configured = !!s[srv];
-            out += card(info.name, info.logo, info.emoji, s.active === srv, !configured,
-                configured ? "_vssSetServer('" + srv + "')" : null,
-                configured ? null : 'Not set up', info.dark);
-        });
-        out += '</div>';
-        if (!s.plex && !s.jellyfin) {
-            out += '<div class="ss-hint">No video server configured yet &mdash; add Plex or Jellyfin in <strong>Settings &rarr; Connections</strong>.</div>';
-        }
-        return out;
+        var info = SRV_INFO[s.active] || null;
+        var others = ['plex', 'jellyfin'].filter(function (srv) { return srv !== s.active && s[srv]; })
+            .map(function (srv) { return SRV_INFO[srv].name; });
+        return '<div class="ss-facts">' +
+                '<div class="ss-fact"><span class="ss-fact-k">Server</span><span class="ss-fact-v">' +
+                    (info ? media('ss-chain-logo', info.logo, info.emoji, info.dark) : '') +
+                    esc(s.name || 'None yet') + '</span></div>' +
+                '<div class="ss-fact"><span class="ss-fact-k">Status</span><span class="ss-fact-v">' +
+                    '<span class="ss-dot ss-dot--' + (s.configured ? 'ok' : 'bad') + '"></span>' +
+                    (s.configured ? 'Set up' : 'Not set up yet') + '</span></div>' +
+                '<div class="ss-fact"><span class="ss-fact-k">Also set up</span><span class="ss-fact-v' +
+                    (others.length ? '' : ' ss-fact-v--quiet') + '">' +
+                    (others.length ? esc(others.join(', ')) : 'No other servers') + '</span></div>' +
+            '</div>' +
+            foot('server', 'Switching servers starts the video library over with a fresh scan, so it lives in Settings.');
     }
 
     function panelDownload() {
-        // The chain editor moved to Settings -> Downloads, where music, video
-        // and audiobooks are all edited by one widget. Three implementations of
-        // the same {mode, hybrid_order} had drifted into three different looks
-        // and behaviours; this one is now a read-only summary plus a way in.
         var d = _data.download || {};
         var mode = d.mode || 'soulseek';
         var order = (mode === 'hybrid' && d.hybrid_order && d.hybrid_order.length)
             ? d.hybrid_order : [mode];
-        var rows = order.map(function (src, i) {
+        var steps = order.map(function (src, i) {
             var info = DL_INFO[src] || { name: src, emoji: '\u2b07\ufe0f', logo: null };
-            return '<div class="ss-hybrid-item" data-src="' + src + '">' +
-                '<span class="ss-hybrid-rank">' + (i + 1) + '</span>' +
-                media('ss-hybrid-logo', info.logo, info.emoji) +
-                '<span class="ss-hybrid-name">' + esc(info.name) + '</span></div>';
+            return '<li class="ss-chain-step">' +
+                '<span class="ss-chain-rank">' + (i + 1) + '</span>' +
+                '<span class="ss-chain-disc">' + media('ss-chain-logo', info.logo, info.emoji) + '</span>' +
+                '<span class="ss-chain-name">' + esc(info.name) + '</span></li>';
         }).join('');
-        return '<div class="ss-hint">' +
-            (order.length > 1
-                ? 'Hybrid \u2014 each source is tried in order, the first that has the file wins.'
-                : 'Single source.') +
-            ' Change it in <strong>Settings \u2192 Downloads</strong>, on the Video tab.</div>' +
-            '<div class="ss-hybrid-list" id="vss-hybrid-list">' + rows + '</div>';
+        return '<div class="ss-section-title">' + (order.length > 1 ? 'Download chain' : 'Download source') + '</div>' +
+            '<ol class="ss-chain">' + steps + '</ol>' +
+            foot('download', order.length > 1
+                ? 'Tried top to bottom until one has the file. The chain is edited in Settings.'
+                : 'Every video download comes from here. Add a second source in Settings and it becomes hybrid.');
     }
 
     // ── actions ──────────────────────────────────────────────────────────────────
@@ -242,29 +247,28 @@
         toast('Only an admin can change sources', true);
         return false;
     }
-    function saveServer(srv) {
-        return fetch(API + '/server', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ server: srv })
-        }).then(function (r) { return r.json(); });
-    }
-    function saveDownload(patch) {
-        return fetch(API + '/downloads/config', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(patch)
-        }).then(function (r) { return r.json(); });
-    }
-
     window._vssTab = function (t) { _tab = t; render(); };
-    window._vssSetServer = function (srv) {
-        if (!guardAdmin()) return;
-        saveServer(srv).then(function (res) {
-            if (res && (res.status === 'saved' || res.server)) { toast('Video server set to ' + (SRV_LABEL[srv] || srv)); load(); }
-            else toast((res && res.error) || 'Could not switch server', true);
-        }).catch(function () { toast('Could not switch server', true); });
+    // the video half of each settings tab: connections -> video side, the
+    // server section; downloads -> the video chain
+    window._vssOpenSettings = function (kind) {
+        closeVideoServiceSwitchModal();
+        if (typeof navigateToPage === 'function') navigateToPage('settings');
+        setTimeout(function () {
+            try {
+                if (typeof switchSettingsTab === 'function') switchSettingsTab(kind === 'server' ? 'connections' : 'downloads');
+                if (kind === 'server' && typeof window.switchServiceKind === 'function') window.switchServiceKind('video');
+                if (kind === 'download' && typeof window.switchDownloadChain === 'function') window.switchDownloadChain('video');
+            } catch (e) { /* best effort: settings is open either way */ }
+            setTimeout(function () {
+                var el = document.querySelector(kind === 'server' ? '[data-video-server-toggle="plex"]' : '#download-chain-widget');
+                var spot = el && (kind === 'server' ? (el.closest('.settings-group') || el) : el);
+                if (!spot) return;
+                spot.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                spot.classList.add('ss-landed');
+                setTimeout(function () { spot.classList.remove('ss-landed'); }, 2200);
+            }, 140);
+        }, 80);
     };
-    // _vssSetSource / _vssMode went with the editor they served. Changing the
-    // chain happens on Settings -> Downloads now, for all three media types.
 
     window.openVideoServiceSwitchModal = function (tab) {
         if (!guardAdmin()) return;

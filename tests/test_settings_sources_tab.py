@@ -27,7 +27,6 @@ _SOURCE_CONTAINERS = (
     "qobuz-settings-container",
     "hifi-download-settings-container",
     "deezer-download-settings-container",
-    "amazon-download-settings-container",
     "soundcloud-download-settings-container",
     "lidarr-download-settings-container",
     # the real config moved here from the Downloads tab; these three are

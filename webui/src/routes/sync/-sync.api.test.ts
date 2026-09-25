@@ -26,7 +26,6 @@ import {
   fetchSourceDiscoveryStatus,
   clearMirroredDiscovery,
   deleteMirroredPlaylist,
-  deleteMirroredPlaylists,
   fetchDeezerArlPlaylistTracks,
   fetchMirroredPlaylist,
   fetchSpotifyPlaylistTracks,
@@ -35,6 +34,7 @@ import {
   prepareMirroredDiscovery,
   resetSourceDiscovery,
   fetchSourcePlaylists,
+  deleteMirroredPlaylists,
   patchMirroredCustomName,
   patchMirroredSourceRef,
   fetchSourcePlaylistsStates,
@@ -366,19 +366,17 @@ describe('mirrored playlist endpoints', () => {
     expect(calls[0]).toMatchObject({ url: '/api/mirrored-playlists/7', method: 'DELETE' });
   });
 
-  it('batch delete POSTs the whole selection to one endpoint (#1219)', async () => {
-    // Select mode deletes many at once; one request, ids in the body, and the
-    // per-id verdict comes back so the page can say what survived.
-    stubFetch({ success: true, deleted: [7, 9], not_deleted: [8] });
-    await expect(deleteMirroredPlaylists([7, 8, 9])).resolves.toEqual({
+  it('batch delete POSTs the ids and hands back what the server says it removed (#1219)', async () => {
+    stubFetch({ success: true, deleted: [3, 5], not_deleted: [9] });
+    await expect(deleteMirroredPlaylists([3, 5, 9])).resolves.toEqual({
       success: true,
-      deleted: [7, 9],
-      not_deleted: [8],
+      deleted: [3, 5],
+      not_deleted: [9],
     });
     expect(calls[0]).toMatchObject({
       url: '/api/mirrored-playlists/batch-delete',
       method: 'POST',
-      body: { ids: [7, 8, 9] },
+      body: { ids: [3, 5, 9] },
       headers: { 'Content-Type': 'application/json' },
     });
   });

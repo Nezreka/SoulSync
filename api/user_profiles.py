@@ -356,8 +356,23 @@ def _qs_metadata_sources():
     sources += [name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)]
     return sources
 _QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
-# Single download sources (everything the mode accepts except 'hybrid').
-_QS_DOWNLOAD_SOURCES = ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'torrent', 'usenet']
+
+
+def _qs_download_chain(mode, hybrid_order):
+    """The music download chain as settings saved it, each source with whether
+    it's set up (None when that can't be told). one source is single-source
+    mode, two or more is hybrid, same as the settings chain editor."""
+    if mode == 'hybrid':
+        order = [hybrid_order] if isinstance(hybrid_order, str) else (hybrid_order or [])
+        ids = [s for s in order if isinstance(s, str) and s]
+    else:
+        ids = [mode] if mode else []
+    try:
+        orchestrator = _download_orchestrator()
+        status = orchestrator.get_source_status() if orchestrator else {}
+    except Exception:
+        status = {}
+    return [{'id': s, 'ready': status.get(s)} for s in ids]
 
 
 def _qs_metadata_available(source):
@@ -1381,10 +1396,12 @@ def get_active_sources():
                 'active': config_manager.get_active_media_server(),
                 'options': [{'id': s, 'available': _qs_server_available(s)} for s in _QS_MEDIA_SERVERS],
             },
+            # read-only here (#1301): the chain is edited in settings, where one
+            # source is single mode and two or more is hybrid
             'download': {
                 'mode': mode,
                 'hybrid_order': hybrid_order,
-                'options': [{'id': s} for s in _QS_DOWNLOAD_SOURCES],
+                'chain': _qs_download_chain(mode, hybrid_order),
             },
         })
     except Exception as e:
@@ -1394,13 +1411,24 @@ def get_active_sources():
 @bp.route('/api/profiles/active-sources', methods=['POST'])
 @admin_only
 def set_active_sources():
-    """Set the GLOBAL active metadata source / media server / download mode +
-    hybrid order (whichever fields are present). Admin-only; reuses the same
-    setters + client reloads the Settings save performs so changes take effect
-    immediately."""
+    """Set the GLOBAL active metadata source. Admin-only; reuses the same setter
+    the Settings save performs so the change takes effect immediately.
+
+    the media server and the download chain used to be switchable here too, one
+    click with no questions (#1301). switching servers means a fresh library
+    scan, and the download chain has its own editor in settings that this one
+    kept drifting from. both are changed in settings now; asking here says so.
+    """
     try:
         data = request.json or {}
         changed = []
+
+        if 'media_server' in data:
+            return jsonify({'success': False,
+                            'error': 'Change the media server in Settings, under Connections'}), 400
+        if 'download_mode' in data or 'hybrid_order' in data:
+            return jsonify({'success': False,
+                            'error': 'Change download sources in Settings, under Downloads'}), 400
 
         if 'metadata_source' in data:
             src = data['metadata_source']
@@ -1415,35 +1443,6 @@ def set_active_sources():
                 return jsonify({'success': False, 'error': _primary_err}), 400
             invalidate_metadata_status_caches()
             changed.append('metadata')
-
-        if 'media_server' in data:
-            srv = data['media_server']
-            if srv not in _QS_MEDIA_SERVERS:
-                return jsonify({'success': False, 'error': 'Unknown media server'}), 400
-            config_manager.set_active_media_server(srv)
-            for s in ('plex', 'jellyfin', 'navidrome'):
-                c = _media_server_engine().client(s)
-                if c:
-                    if s == 'plex':
-                        c.server = None
-                    else:
-                        c.reload_config()
-            changed.append('server')
-
-        if 'download_mode' in data:
-            mode = data['download_mode']
-            if mode not in (_QS_DOWNLOAD_SOURCES + ['hybrid']):
-                return jsonify({'success': False, 'error': 'Unknown download mode'}), 400
-            config_manager.set('download_source.mode', mode)
-            changed.append('download')
-
-        if 'hybrid_order' in data and isinstance(data['hybrid_order'], list):
-            clean = [s for s in data['hybrid_order'] if s in _QS_DOWNLOAD_SOURCES]
-            config_manager.set('download_source.hybrid_order', clean)
-            changed.append('download')
-
-        if 'download' in changed and _download_orchestrator():
-            _download_orchestrator().reload_settings()
 
         return jsonify({'success': True, 'changed': sorted(set(changed))})
     except Exception as e:

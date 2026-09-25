@@ -167,10 +167,52 @@ def test_active_sources_read_shape(client):
 def test_admin_sets_global_active_sources(client):
     assert client.post('/api/profiles/active-sources', json={'metadata_source': 'itunes'}).get_json()['success']
     assert client.get('/api/profiles/me/active-sources').get_json()['metadata']['active'] == 'itunes'
-    # hybrid + order round-trips
-    client.post('/api/profiles/active-sources', json={'download_mode': 'hybrid', 'hybrid_order': ['hifi', 'soulseek']})
-    dl = client.get('/api/profiles/me/active-sources').get_json()['download']
-    assert dl['mode'] == 'hybrid' and dl['hybrid_order'] == ['hifi', 'soulseek']
+
+
+# ── #1301: server + download are shown here, changed in settings ──
+
+def test_server_and_download_can_not_be_switched_from_the_quick_modal(client):
+    from core.settings import config_manager
+    config_manager.set('download_source.mode', 'soulseek')
+    config_manager.set('download_source.hybrid_order', ['soulseek'])
+    server_before = config_manager.get_active_media_server()
+
+    for patch in ({'media_server': 'jellyfin'}, {'download_mode': 'hybrid'},
+                  {'hybrid_order': ['hifi', 'soulseek']},
+                  {'metadata_source': 'itunes', 'media_server': 'jellyfin'}):
+        resp = client.post('/api/profiles/active-sources', json=patch)
+        assert resp.status_code == 400
+        assert 'Settings' in resp.get_json()['error']
+
+    assert config_manager.get_active_media_server() == server_before
+    assert config_manager.get('download_source.mode') == 'soulseek'
+    assert config_manager.get('download_source.hybrid_order') == ['soulseek']
+
+
+def test_download_chain_reads_back_as_settings_saved_it(client):
+    from core.settings import config_manager
+    import api.user_profiles as up
+
+    class _Orch:
+        def get_source_status(self):
+            return {'deezer_dl': True, 'soulseek': False}
+
+    orig = up._download_orchestrator
+    up._download_orchestrator = lambda: _Orch()
+    try:
+        config_manager.set('download_source.mode', 'hybrid')
+        config_manager.set('download_source.hybrid_order', ['deezer_dl', 'soulseek', 'amazon'])
+        chain = client.get('/api/profiles/me/active-sources').get_json()['download']['chain']
+        # deezer and amazon are real chain members now, not missing from the list
+        assert chain == [{'id': 'deezer_dl', 'ready': True},
+                         {'id': 'soulseek', 'ready': False},
+                         {'id': 'amazon', 'ready': None}]
+
+        config_manager.set('download_source.mode', 'deezer_dl')
+        chain = client.get('/api/profiles/me/active-sources').get_json()['download']['chain']
+        assert chain == [{'id': 'deezer_dl', 'ready': True}]
+    finally:
+        up._download_orchestrator = orig
 
 
 def test_admin_can_set_jiosaavn_as_primary_metadata_source(client):
