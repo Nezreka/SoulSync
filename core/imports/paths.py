@@ -13,6 +13,7 @@ from utils.logging_config import get_logger
 # Album grouping lives in core.imports.album_naming; this module keeps the
 # imported helper because the path builder still needs it.
 from core.imports.album_types import album_types_config, format_album_types
+from core.imports.compilation import is_various_artists_credit
 from core.imports.album_naming import resolve_album_group
 from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
@@ -471,8 +472,9 @@ def _replace_template_variables(template: str, context: dict) -> str:
     result = result.replace("$disambiguation", clean_context.get("disambiguation", ""))
     result = result.replace("$albumartist", album_artist_value)
     result = result.replace("$albumtype", clean_context.get("albumtype", "Album"))
-    # Before $album: "$atypes" starts with "$album", so a plain left-to-right
-    # replace would consume it and leave a stray "type s" in the path.
+    # Order is not load-bearing here — "$atypes" and "$album" share only "$a",
+    # so neither can consume the other. ($albumtype above genuinely does start
+    # with $album, which is why THAT one has to come first.)
     result = result.replace("$atypes", clean_context.get("atypes", ""))
     result = result.replace("$playlist", clean_context.get("playlist_name", ""))
     result = result.replace("$artistletter", artist_letter(clean_context.get("artist", "U")))
@@ -926,7 +928,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         atypes_value = format_album_types(
             album_context,
             album_types_config(_get_config_manager()),
-            is_compilation=bool(is_explicit_comp) or raw_album_type in ("compilation", "compile"),
+            is_various_artists=is_various_artists_credit(album_context),
         )
     except Exception as _at_err:  # noqa: BLE001 - a label must never fail an import
         logger.debug("[atypes] could not build release-type labels: %s", _at_err)

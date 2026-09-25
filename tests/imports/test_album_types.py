@@ -81,17 +81,17 @@ def test_real_library_shapes():
         assert format_album_types(ctx, BEETS_CONFIG) == expected, ctx
 
 
-def test_ignore_va_drops_the_compilation_marker_for_various_artists():
+def test_ignore_va_drops_the_marker_for_a_various_artists_credit():
     """A VA compilation already lives under Compilations/; repeating it is noise.
     The same release NOT flagged as VA keeps its marker."""
     ctx = {"album_type": "album", "secondary_types": ["Compilation"]}
-    assert format_album_types(ctx, BEETS_CONFIG, is_compilation=True) == ""
-    assert format_album_types(ctx, BEETS_CONFIG, is_compilation=False) == "[Anthology]"
+    assert format_album_types(ctx, BEETS_CONFIG, is_various_artists=True) == ""
+    assert format_album_types(ctx, BEETS_CONFIG, is_various_artists=False) == "[Anthology]"
 
 
 def test_ignore_va_only_drops_the_listed_types():
     ctx = {"album_type": "album", "secondary_types": ["Live", "Compilation"]}
-    assert format_album_types(ctx, BEETS_CONFIG, is_compilation=True) == "[Live]"
+    assert format_album_types(ctx, BEETS_CONFIG, is_various_artists=True) == "[Live]"
 
 
 # --- config shapes ------------------------------------------------------
@@ -137,9 +137,11 @@ def _render(template, ctx):
     return paths._replace_template_variables(template, ctx)
 
 
-def test_atypes_is_substituted_before_album():
-    """"$atypes" starts with "$album", so a naive left-to-right replace turns it
-    into the album name followed by a stray "type s"."""
+def test_atypes_and_album_do_not_collide():
+    """They share only "$a", so neither can consume the other — unlike
+    $albumtype, which really does start with $album and has to be replaced
+    first. Pinned because a future variable named "$al..." would not be so
+    lucky, and this is where that breaks."""
     out = _render("$albumartist/[$year]$atypes $album", {
         "artist": "Slothrust", "album": "Audiotree Live", "year": "2017",
         "atypes": "[EP][Live]", "title": "t",
@@ -183,3 +185,62 @@ def test_a_leaked_atypes_token_never_reaches_a_directory_name():
     """Defensive: the global pass already substituted it, but a raw token in a
     folder name is the one failure worth a spare replace."""
     assert paths._clean_folder_segment("$atypes Album", "", "", False) == "Album"
+
+
+# --- review follow-ups (PR #1302) ---------------------------------------
+
+def test_a_single_artist_anthology_keeps_its_compilation_label():
+    """MusicBrainz gives Tool's Salival primary=Album, secondary=[Live,
+    Compilation], and map_release_group_type turns that into
+    album_type="compilation" — so keying ignore_va off the TYPE dropped
+    [Anthology] from a release that is not various artists at all.
+
+    Built from the real mapper's output, because the hand-written
+    album_type="album" contexts elsewhere in this file are a shape the
+    pipeline never actually produces."""
+    from core.metadata.release_type import map_release_group_type
+
+    album_type = map_release_group_type("Album", ["Live", "Compilation"])
+    assert album_type == "compilation", "guards the premise, not the fix"
+
+    salival = {"album_type": album_type, "secondary_types": ["Live", "Compilation"],
+               "artists": [{"name": "Tool"}]}
+    assert format_album_types(salival, BEETS_CONFIG, is_various_artists=False) == "[Live][Anthology]"
+
+
+def test_a_various_artists_compilation_still_drops_the_label():
+    """The rule still fires where it should: a release actually credited to
+    Various Artists is already under Compilations/."""
+    from core.metadata.release_type import map_release_group_type
+
+    va = {"album_type": map_release_group_type("Album", ["Compilation"]),
+          "secondary_types": ["Compilation"],
+          "artists": [{"name": "Various Artists"}]}
+    assert format_album_types(va, BEETS_CONFIG, is_various_artists=True) == ""
+
+
+def test_the_va_signal_reads_the_credit_not_the_type():
+    from core.imports.compilation import is_various_artists_credit
+    from core.metadata.release_type import map_release_group_type
+
+    assert is_various_artists_credit({"artists": [{"name": "Various Artists"}]}) is True
+    assert is_various_artists_credit({"artists": [{"name": "Tool"}]}) is False
+    # typed a compilation, credited to one artist -> not VA
+    assert is_various_artists_credit(
+        {"album_type": map_release_group_type("Album", ["Compilation"]),
+         "artists": [{"name": "Tool"}]}) is False
+
+
+def test_the_m3u_folder_uses_the_same_substitution():
+    """web_server keeps a hand-maintained copy of the template replacer, so a
+    new variable has to be added there too or the M3U lands in a directory
+    literally named "[2019]$atypes Tokyo"."""
+    import web_server
+
+    ctx = {"artist": "Julien Baker", "albumartist": "Julien Baker", "album": "Tokyo",
+           "title": "t", "track_number": 1, "disc_number": 1, "year": "2019", "quality": ""}
+    tmpl = "$albumartist/[$year]$atypes $album"
+    assert web_server._apply_path_template(tmpl, ctx) == "Julien Baker/[2019] Tokyo"
+    assert web_server._apply_path_template(
+        tmpl, dict(ctx, atypes="[EP][Live]", album="Audiotree Live", year="2017")
+    ) == "Julien Baker/[2017][EP][Live] Audiotree Live"

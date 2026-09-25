@@ -32,6 +32,11 @@ Emission order follows the CONFIGURED order, not the order the source happened
 to list them in, so the same release always produces the same folder name.
 Sources disagree about ordering and a folder name that depends on which one
 answered is a folder that splits.
+
+Only MusicBrainz publishes secondary types. Spotify, Deezer and iTunes carry a
+primary type alone, so on those sources this realistically emits ``[EP]`` and
+``[Single]`` and nothing else — the qualifiers that make the variable
+interesting need an MB-backed release.
 """
 
 from __future__ import annotations
@@ -149,7 +154,7 @@ def release_types(album_ctx: Optional[Mapping[str, Any]]) -> set:
 
 def format_album_types(album_ctx: Optional[Mapping[str, Any]],
                        config: Optional[Mapping[str, Any]] = None,
-                       *, is_compilation: bool = False) -> str:
+                       *, is_various_artists: bool = False) -> str:
     """The ``$atypes`` value for a release — possibly, and usually, empty.
 
     Empty is the common case and the point of the variable: a plain album
@@ -165,7 +170,11 @@ def format_album_types(album_ctx: Optional[Mapping[str, Any]],
     if not present:
         return ""
 
-    skip = _ignore_va(config.get("ignore_va")) if is_compilation else set()
+    # ignore_va is about the CREDIT, not the type. MusicBrainz gives a single
+    # artist's own anthology secondary=[Compilation], which map_release_group_type
+    # turns into album_type="compilation" — keying off that dropped [Anthology]
+    # from Tool's Salival, which is not a various-artists release.
+    skip = _ignore_va(config.get("ignore_va")) if is_various_artists else set()
     open_b, close_b = _brackets(config.get("bracket", DEFAULT_BRACKET))
 
     out = []

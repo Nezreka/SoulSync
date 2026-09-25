@@ -14050,6 +14050,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     _bracket_map = {
         'albumartist': album_artist_value,
         'albumtype': clean_context.get('albumtype', 'Album'),
+        'atypes': clean_context.get('atypes', ''),
         'playlist': clean_context.get('playlist_name', ''),
         'artistletter': _shared_artist_letter(clean_context.get('artist', 'U')),
         'artist': clean_context.get('artist', 'Unknown Artist'),
@@ -14069,6 +14070,11 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$disambiguation', clean_context.get('disambiguation', ''))
     result = result.replace('$albumartist', album_artist_value)
     result = result.replace('$albumtype', clean_context.get('albumtype', 'Album'))
+    # This replacer is a hand-maintained copy of core.imports.paths, so a new
+    # variable has to be added here too or it survives into the folder name:
+    # an album template of "[$year]$atypes $album" put the M3U in a directory
+    # literally called "[2019]$atypes Tokyo".
+    result = result.replace('$atypes', clean_context.get('atypes', ''))
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
