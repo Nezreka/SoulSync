@@ -217,10 +217,16 @@ def normalize_title(s: Any) -> str:
     """Fold a title to a comparable key: strip accents, lowercase, '&'→'and',
     punctuation → space, drop a single leading article. 'The Dark Knight' and
     'dark.knight' both fold to 'dark knight'."""
-    s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode("ascii")
+    raw = str(s or "")
+    s = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
     s = s.lower().replace("&", " and ")
     s = re.sub(r"[^a-z0-9]+", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
+    if not s:
+        # #1306: a title in a non-latin script folded to nothing, and a
+        # wanted title of nothing let ANY release through. keep its letters.
+        from core.text.fold import fold_title
+        return fold_title(raw.replace("&", " and "), drop_brackets=False)
     return _ARTICLE.sub("", s, count=1)
 
 

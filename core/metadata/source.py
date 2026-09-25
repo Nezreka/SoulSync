@@ -202,10 +202,10 @@ def _tag_enabled(cfg, path: str) -> bool:
 def _names_match(a: str, b: str, threshold: float = 0.75) -> bool:
     if not a or not b:
         return False
-    from difflib import SequenceMatcher
-
-    norm = lambda s: re.sub(r"[^a-z0-9 ]", "", re.sub(r"\(.*?\)", "", s).lower()).strip()
-    return SequenceMatcher(None, norm(a), norm(b)).ratio() >= threshold
+    # any script, and two names that fold to nothing never match (#1306:
+    # two japanese titles both emptied to "" and read as a 1.0 match)
+    from core.text.fold import title_similarity
+    return title_similarity(a, b) >= threshold
 
 
 def _normalize_release_date_tag(value: Any) -> str:
