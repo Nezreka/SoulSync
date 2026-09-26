@@ -15,9 +15,9 @@ import { escapeHtml } from './html';
 
 declare global {
   /* eslint-disable no-var */
-  var showConfirmDialog: (opts: {
+  var showConfirmDialog: ((opts: {
     title: string; message: string; confirmText?: string; cancelText?: string;
-  }) => Promise<boolean>;
+  }) => Promise<boolean>) | undefined;
   var showCandidatesModal: (taskId: string) => void;
   /* eslint-enable no-var */
 }
@@ -245,7 +245,7 @@ async function _tdAccept(button: HTMLButtonElement, entryId: string | number | u
     window.showToast?.('Cannot accept — missing quarantine id.', 'error');
     return;
   }
-  const confirmed = await showConfirmDialog({
+  const confirmed = await showConfirmDialog?.({
     title: 'Accept Quarantined File',
     message: 'Import this file and skip the quarantine checks for this approved pass?',
     confirmText: 'Accept & Import',

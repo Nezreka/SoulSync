@@ -31,7 +31,7 @@ declare global {
   var currentPage: string;
   var audioPlayer: HTMLAudioElement | null;
   var npRepeatMode: string;
-  var navigateToPage: (pageId: string, options?: Record<string, unknown>) => void;
+  var navigateToPage: ((pageId: string, options?: Record<string, unknown>) => void) | undefined;
   var setTrackInfo: (info: Record<string, unknown>) => void;
   var showLoadingAnimation: () => void;
   var hideLoadingAnimation: () => void;
@@ -225,7 +225,7 @@ export function navigateToArtistDetail(
       String(artistId) === String(artistDetailPageState.currentArtistId) &&
       String(normalizedSource || '') === String(artistDetailPageState.currentArtistSource || '')) {
     if (currentPage !== 'artist-detail') {
-      navigateToPage('artist-detail', {
+      navigateToPage?.('artist-detail', {
         artistId,
         artistSource: normalizedSource,
         skipRouteChange: options.skipRouteChange === true,
@@ -285,7 +285,7 @@ export function navigateToArtistDetail(
   // Hand off. React owns this route outright now - this function's remaining
   // job is the state written above, which a dozen globals over in
   // stats-automations.js and the Enhanced modals read back out.
-  navigateToPage('artist-detail', {
+  navigateToPage?.('artist-detail', {
     artistId,
     artistSource: normalizedSource,
     skipRouteChange: options.skipRouteChange === true,
