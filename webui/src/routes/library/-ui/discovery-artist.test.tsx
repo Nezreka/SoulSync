@@ -1,15 +1,16 @@
 import { createMemoryHistory } from '@tanstack/react-router';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
-/** ldp-01/ldp-02: an artist the catalogue has never heard of has to render
- *  inside Library V2, from provider data alone, without writing anything. */
-function renderDiscovery(entry: string) {
+/** ldp-01/ldp-02: an artist the catalogue has never heard of opens on
+ *  upstream's artist page, from provider data alone, without writing anything.
+ *  Library v2 adds the release bookmark and its own track list for a release. */
+function renderAt(entry: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
   const router = createAppRouter({ history, queryClient });
@@ -20,10 +21,9 @@ function renderDiscovery(entry: string) {
   };
 }
 
-const DISCOVERY_URL =
-  '/library?discover=%22spotify%3Asp-1%22&discoverName=%22Boards%20of%20Canada%22';
+const ARTIST_URL = '/artist-detail/spotify/sp-1?name=Boards%20of%20Canada';
 
-describe('Library V2 discovery mode', () => {
+describe('an artist the catalogue does not hold', () => {
   let resolveResponse: number | null;
   let materializeCalls: unknown[];
   let monitoredAlbums: unknown[];
@@ -31,6 +31,11 @@ describe('Library V2 discovery mode', () => {
 
   beforeEach(() => {
     window.SoulSyncWebShellBridge = createShellBridge();
+    window.showToast = vi.fn();
+    window.loadSimilarArtists = vi.fn();
+    window.cancelSimilarArtistsLoad = vi.fn();
+    window.observeLazyBackgrounds = vi.fn();
+    window.openDownloadMissingModalForArtistAlbum = vi.fn();
     resolveResponse = null;
     materializeCalls = [];
     monitoredAlbums = [];
@@ -57,28 +62,26 @@ describe('Library V2 discovery mode', () => {
         monitoredTracks.push(await request.json());
         return HttpResponse.json({ success: true, artist_id: 55, album_id: 77, track_id: 88 });
       }),
+      http.get('/api/library/v2/discovery/track-status', () =>
+        HttpResponse.json({ success: true, statuses: {} }),
+      ),
       http.get('/api/artist-detail/:id', () =>
         HttpResponse.json({
           success: true,
-          artist: {
-            id: 'sp-1',
-            name: 'Boards of Canada',
-            image_url: 'https://cdn.test/artist.jpg',
-            genres: ['idm'],
-            lastfm_listeners: 1_200_000,
-            lastfm_playcount: 45_000_000,
-          },
+          artist: { id: 'sp-1', name: 'Boards of Canada', image_url: 'https://cdn.test/a.jpg' },
           discography: {
             albums: [
               {
                 id: 'a1',
                 title: 'Music Has the Right to Children',
+                album_type: 'album',
                 release_date: '1998-04-20',
+                track_count: 1,
               },
-              { id: 'a2', title: 'Live at Warp', release_date: '2001-01-01' },
             ],
             eps: [],
             singles: [],
+            source: 'spotify',
           },
         }),
       ),
@@ -93,147 +96,85 @@ describe('Library V2 discovery mode', () => {
           tracks: [{ id: 't1', name: 'Roygbiv', track_number: 1, duration_ms: 148000 }],
         }),
       ),
-      http.get('/api/artist/:id/top-tracks', () =>
-        HttpResponse.json({
-          success: true,
-          tracks: [
-            {
-              id: 'sp-t1',
-              name: 'Roygbiv',
-              album: { id: 'sp-a1', name: 'Music Has the Right' },
-            },
-          ],
-        }),
-      ),
-      http.get('/api/artist/0/lastfm-top-tracks', () =>
-        HttpResponse.json({
-          success: true,
-          tracks: [{ name: 'Roygbiv', playcount: 4_200_000 }],
-        }),
-      ),
       http.get('/api/library/v2/artists/55', () =>
         HttpResponse.json({ success: false, error: 'not seeded' }, { status: 404 }),
       ),
-      http.get('/api/library/v2/discovery/track-status', () =>
-        HttpResponse.json({
-          success: true,
-          statuses: { Roygbiv: { track_id: 9, monitored: true } },
-        }),
+      http.post('/api/watchlist/check', () =>
+        HttpResponse.json({ success: true, is_watching: false }),
       ),
-    );
-  });
-
-  it('renders a provider-only artist without creating a catalogue row', async () => {
-    renderDiscovery(DISCOVERY_URL);
-
-    expect(await screen.findByRole('heading', { name: 'Boards of Canada' })).toBeInTheDocument();
-    // Legacy hero facts the user explicitly asked to keep (ldp-05).
-    expect(screen.getByText('1.2M')).toBeInTheDocument();
-    expect(screen.getByText('45M')).toBeInTheDocument();
-    expect(screen.getByText('Music Has the Right to Children')).toBeInTheDocument();
-    // No library to compare against, so no ownership badge claims these
-    // releases are forever "Checking…" (legacy did the same for a source
-    // artist).
-    expect(document.querySelector('.completion-overlay')).toBeNull();
-    // Read-only until the user asks for something (issues §28.6 question 1).
-    expect(materializeCalls).toHaveLength(0);
-  });
-
-  it('filters the discography with the ported legacy filter bar (ldp-04)', async () => {
-    renderDiscovery(DISCOVERY_URL);
-    await screen.findByText('Live at Warp');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Live' }));
-
-    await waitFor(() => expect(screen.queryByText('Live at Warp')).not.toBeInTheDocument());
-    expect(screen.getByText('Music Has the Right to Children')).toBeInTheDocument();
-  });
-
-  it('falls back to display-only Last.fm rows when the source has no ranking', async () => {
-    server.use(
       http.get('/api/artist/:id/top-tracks', () =>
-        HttpResponse.json({ success: false, tracks: [] }),
+        HttpResponse.json({ success: true, tracks: [] }),
       ),
+      http.get('/api/artist/0/lastfm-top-tracks', () =>
+        HttpResponse.json({ success: true, tracks: [] }),
+      ),
+      http.get('/api/artist/:name/concerts', () =>
+        HttpResponse.json({ success: true, configured: false, events: [] }),
+      ),
+      http.get('/api/artist/:id/videos', () => HttpResponse.json({ success: true, videos: [] })),
     );
-    renderDiscovery(DISCOVERY_URL);
-
-    expect(await screen.findByText('Popular on Last.fm')).toBeInTheDocument();
-    expect(screen.getByText('Roygbiv')).toBeInTheDocument();
-    // A Last.fm row is a name and a playcount — no album, no ids. Bookmarking
-    // one invented an album that matched nothing, so legacy never offered the
-    // action on these rows either.
-    expect(document.querySelector('.hero-top-track-download')).toBeNull();
   });
 
-  it('shows an already-wanted top track as bookmarked on a fresh load', async () => {
-    // The tick used to live purely in component state, so it disappeared the
-    // moment the page was reloaded even though the wishlist row existed.
-    renderDiscovery(DISCOVERY_URL);
-
-    expect(await screen.findByTitle('Bookmarked — this track is now wanted')).toBeInTheDocument();
+  afterEach(() => {
+    window.SoulSyncWebShellBridge = undefined;
+    delete document.body.dataset.artistSource;
   });
 
-  it('monitoring the artist materializes and monitors it in one explicit action', async () => {
-    const { router } = renderDiscovery(DISCOVERY_URL);
-    await screen.findByRole('heading', { name: 'Boards of Canada' });
+  it("renders upstream's artist page without creating a catalogue row", async () => {
+    renderAt(ARTIST_URL);
 
-    fireEvent.click(screen.getByRole('button', { name: /Monitor artist/ }));
-
-    await waitFor(() => expect(materializeCalls).toHaveLength(1));
-    expect(materializeCalls[0]).toMatchObject({
-      source: 'spotify',
-      provider_id: 'sp-1',
-      name: 'Boards of Canada',
-      monitored: true,
-    });
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ artist: 55 }));
-  });
-
-  it('opens a provider release without materializing the artist', async () => {
-    const { router } = renderDiscovery(DISCOVERY_URL);
-    const card = await screen.findByText('Music Has the Right to Children');
-
-    fireEvent.click(card);
-
-    await waitFor(() =>
-      expect(router.state.location.search).toMatchObject({
-        discover: 'spotify:sp-1',
-        discoverAlbum: 'spotify:a1',
-      }),
-    );
-    expect(
-      await screen.findByRole('heading', { name: 'Music Has the Right to Children' }),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Boards of Canada/ }));
-    expect(await screen.findByRole('heading', { name: 'Boards of Canada' })).toBeInTheDocument();
+    expect(await screen.findByText('Music Has the Right to Children')).toBeInTheDocument();
+    expect(document.querySelector('.artist-detail-page')).not.toBeNull();
+    // Read-only until the user asks for something (issues §28.6 question 1).
     expect(materializeCalls).toHaveLength(0);
     expect(monitoredAlbums).toHaveLength(0);
   });
 
-  it('monitors an album directly from its discovery card', async () => {
-    renderDiscovery(DISCOVERY_URL);
+  it('monitors a release from the bookmark on its card', async () => {
+    renderAt(ARTIST_URL);
     await screen.findByText('Music Has the Right to Children');
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Start monitoring' })[0]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Start monitoring' }));
 
     await waitFor(() => expect(monitoredAlbums).toHaveLength(1));
     expect(monitoredAlbums[0]).toMatchObject({
       source: 'spotify',
       artist_source: 'spotify',
       artist_provider_id: 'sp-1',
+      artist_name: 'Boards of Canada',
       album_provider_id: 'a1',
       album_name: 'Music Has the Right to Children',
+      album_type: 'album',
+      track_count: 1,
     });
+    expect(await screen.findByRole('button', { name: 'Monitored' })).toBeDisabled();
+    // The bookmark is not a click on the card.
+    expect(window.openDownloadMissingModalForArtistAlbum).not.toHaveBeenCalled();
     expect(materializeCalls).toHaveLength(0);
   });
 
-  it('monitors one track directly from the provider album preview', async () => {
-    server.use(
-      http.get('/api/library/v2/discovery/track-status', () =>
-        HttpResponse.json({ success: true, statuses: {} }),
-      ),
+  it('opens a release as a Library v2 track list, not the download dialog', async () => {
+    const { router } = renderAt(ARTIST_URL);
+
+    fireEvent.click(await screen.findByText('Music Has the Right to Children'));
+
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        discover: 'spotify:sp-1',
+        discoverName: 'Boards of Canada',
+        discoverAlbum: 'spotify:a1',
+        discoverAlbumName: 'Music Has the Right to Children',
+      }),
     );
-    renderDiscovery(DISCOVERY_URL);
+    expect(
+      await screen.findByRole('heading', { name: 'Music Has the Right to Children' }),
+    ).toBeInTheDocument();
+    expect(window.openDownloadMissingModalForArtistAlbum).not.toHaveBeenCalled();
+    expect(monitoredAlbums).toHaveLength(0);
+  });
+
+  it('monitors one track from that track list, then goes back to the artist page', async () => {
+    const { router } = renderAt(ARTIST_URL);
     fireEvent.click(await screen.findByText('Music Has the Right to Children'));
     await screen.findByRole('heading', { name: 'Music Has the Right to Children' });
 
@@ -251,13 +192,16 @@ describe('Library V2 discovery mode', () => {
       monitored: true,
     });
     expect(await screen.findByRole('button', { name: 'Roygbiv is monitored' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Boards of Canada/ }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1'));
     expect(materializeCalls).toHaveLength(0);
-    expect(monitoredAlbums).toHaveLength(0);
   });
 
-  it('hands an artist that already exists straight to the catalogue page', async () => {
+  it('sends an artist the catalogue already holds to Library v2', async () => {
     resolveResponse = 42;
-    const { router } = renderDiscovery(DISCOVERY_URL);
+    const { router } = renderAt(ARTIST_URL);
 
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({
@@ -267,6 +211,16 @@ describe('Library V2 discovery mode', () => {
         header: 'rich',
       }),
     );
-    expect(router.state.location.search).not.toHaveProperty('discover');
+    expect(router.state.location.pathname).toBe('/library');
+  });
+
+  it('still answers the old Library v2 discovery link', async () => {
+    const { router } = renderAt(
+      '/library?discover=%22spotify%3Asp-1%22&discoverName=%22Boards%20of%20Canada%22',
+    );
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1'));
+    expect(router.state.location.search).toMatchObject({ name: 'Boards of Canada' });
+    expect(await screen.findByText('Music Has the Right to Children')).toBeInTheDocument();
   });
 });

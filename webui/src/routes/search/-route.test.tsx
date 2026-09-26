@@ -446,17 +446,16 @@ describe('where a result card points', () => {
     });
   }
 
-  it('sends an owned artist to its Library V2 page and a found one into discovery', async () => {
+  it('sends an owned artist to its Library V2 page and a found one to the artist page', async () => {
     // The href IS the feature. The first version guessed `/artist-detail/<id>`,
     // which matches no route and resolves to nothing — clicking an artist did
     // nothing at all, and no test noticed.
     //
-    // Both halves land on /library now rather than on the legacy artist route.
-    // Search already holds every value Library V2 needs, so it links to the
-    // real destination instead of bouncing through the redirect; `releases`,
-    // `releaseView` and `header` are what make an arrival from search show the
-    // full discography as cards under the rich header (ldp-05) instead of the
-    // in-library defaults.
+    // An owned artist links straight to Library V2; `releases`, `releaseView`
+    // and `header` are what make an arrival from search show the full
+    // discography as cards under the rich header (ldp-05) instead of the
+    // in-library defaults. A found one opens upstream's artist page under the
+    // source it came from, which checks the catalogue itself.
     server.use(
       http.post('/api/enhanced-search', () =>
         HttpResponse.json({
@@ -487,8 +486,7 @@ describe('where a result card points', () => {
 
     const found = screen.getByText('Found Artist');
     expect(found.closest('a')?.getAttribute('href')).toBe(
-      '/library?discover=spotify%3Asp1&discoverName=Found%20Artist' +
-        '&releases=all&releaseView=cards&header=rich',
+      '/artist-detail/spotify/sp1?name=Found%20Artist',
     );
   });
 

@@ -541,20 +541,6 @@ export interface ProviderRelease {
   } | null;
 }
 
-export interface ProviderArtistDetail {
-  artist: {
-    id: string;
-    name: string;
-    image_url?: string | null;
-    genres?: string[];
-    lastfm_bio?: string | null;
-    lastfm_listeners?: number | null;
-    lastfm_playcount?: number | null;
-    followers?: number | null;
-  };
-  discography: { albums?: ProviderRelease[]; eps?: ProviderRelease[]; singles?: ProviderRelease[] };
-}
-
 export interface ProviderAlbumTrack {
   id?: string;
   name?: string;
@@ -575,27 +561,6 @@ export interface ProviderAlbumDetail {
   images?: Array<{ url?: string }>;
   artists?: Array<{ id?: string; name?: string }>;
   tracks?: ProviderAlbumTrack[];
-}
-
-/** The artist page for someone who isn't in the catalogue. Reuses the endpoint
- *  the legacy page already used — nothing new had to be built server-side. */
-export async function fetchProviderArtistDetail(input: {
-  source: string;
-  providerId: string;
-  name: string;
-}): Promise<ProviderArtistDetail> {
-  const payload = await readJson<
-    { success: boolean; error?: string } & Partial<ProviderArtistDetail>
-  >(
-    apiClient.get(`artist-detail/${encodeURIComponent(input.providerId)}`, {
-      searchParams: { source: input.source, name: input.name },
-      timeout: 60_000, // a cold provider discography walk is not fast
-    }),
-  );
-  if (!payload.success || !payload.artist) {
-    throw new Error(payload.error || 'Could not load this artist');
-  }
-  return { artist: payload.artist, discography: payload.discography ?? {} };
 }
 
 /** Provider-only release detail. Merely opening it must remain side-effect free. */
@@ -633,26 +598,6 @@ export async function resolveLibraryV2DiscoveryArtist(input: {
     }),
   );
   if (!payload.success) throw new Error(payload.error || 'Artist lookup failed');
-  return payload.artist_id;
-}
-
-/** One explicit intent: create the provider artist and monitor it atomically. */
-export async function monitorLibraryV2DiscoveryArtist(input: {
-  source: string;
-  providerId: string;
-  name: string;
-}): Promise<number> {
-  const payload = await readJson<{ success: boolean; artist_id: number; error?: string }>(
-    apiClient.post('library/v2/discovery/artist', {
-      json: {
-        source: input.source,
-        provider_id: input.providerId,
-        name: input.name,
-        monitored: true,
-      },
-    }),
-  );
-  if (!payload.success) throw new Error(payload.error || 'Could not monitor this artist');
   return payload.artist_id;
 }
 

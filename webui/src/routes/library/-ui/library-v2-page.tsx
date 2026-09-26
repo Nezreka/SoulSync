@@ -27,11 +27,8 @@ import {
   fetchArtistTopTracks,
   fetchLibraryV2DiscoveryTrackStatus,
   fetchProviderAlbumDetail,
-  fetchProviderArtistDetail,
   monitorLibraryV2DiscoveryTrack,
   monitorLibraryV2DiscoveryAlbum,
-  monitorLibraryV2DiscoveryArtist,
-  resolveLibraryV2DiscoveryArtist,
   type ArtistTopTrack,
   type ProviderAlbumDetail,
   type ProviderAlbumTrack,
@@ -4440,12 +4437,6 @@ export function LibraryV2Page() {
             artistProviderId={discover.providerId}
             artistName={discover.name}
           />
-        ) : discover && !search.artist ? (
-          <DiscoveryArtistView
-            source={discover.source}
-            providerId={discover.providerId}
-            name={discover.name}
-          />
         ) : search.artist ? (
           <ArtistDetailView artistId={search.artist} />
         ) : search.section === 'wanted' ? (
@@ -5530,7 +5521,7 @@ function useUrlSyncedFilter(
  *  Opening an artist from inside Library V2 always starts in the V2 shape —
  *  My Library, table, compact header — regardless of what the previous
  *  artist's URL happened to carry. Coming from search is the opposite case
- *  and is set by `DISCOVERY_ARTIST_VIEW` below. */
+ *  and is set by the artist-detail route. */
 function openArtistSearch<T extends Record<string, unknown>>(previous: T, artistId: number) {
   return {
     ...previous,
@@ -5541,15 +5532,6 @@ function openArtistSearch<T extends Record<string, unknown>>(previous: T, artist
     header: 'compact' as const,
   };
 }
-
-/** Arriving from a search result: the full discography, in the card view, with
- *  the rich header — i.e. exactly what the legacy artist page showed, so the
- *  switch to Library V2 is not something a user has to notice. */
-const DISCOVERY_ARTIST_VIEW = {
-  releases: 'all' as const,
-  releaseView: 'cards' as const,
-  header: 'rich' as const,
-};
 
 function visibleReleases(
   entries: LibraryV2AlbumSummary[],
@@ -5837,35 +5819,6 @@ function providerCard(release: ProviderRelease): DiscographyCard {
   };
 }
 
-function ProviderMonitorButton({
-  monitored,
-  busy,
-  onClick,
-}: {
-  monitored: boolean;
-  busy: boolean;
-  onClick: () => void;
-}) {
-  const canWish = useLibraryV2CanWish();
-  return (
-    <div className={styles.cardMonitor} onClick={(event) => event.stopPropagation()}>
-      <button
-        type="button"
-        className={`${styles.monitorBtn} ${monitored ? styles.monitorOn : ''}`}
-        aria-label={monitored ? 'Monitored' : busy ? 'Starting monitoring' : 'Start monitoring'}
-        aria-pressed={monitored}
-        title={monitored ? 'Monitored' : 'Monitor this release'}
-        disabled={!canWish || busy || monitored}
-        onClick={onClick}
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d={BOOKMARK_PATH} strokeLinejoin="round" />
-        </svg>
-      </button>
-    </div>
-  );
-}
-
 /** The completion badge pinned to a card's corner (`library.js:2181-2220`). */
 function completionOverlay(card: DiscographyCard): {
   cls: string;
@@ -5890,20 +5843,10 @@ function ReleaseCardGrid({
   cards,
   onOpen,
   openTitle,
-  showOwnership = true,
-  onProviderMonitor,
-  monitoringProviderId,
-  monitoredProviderIds,
 }: {
   cards: DiscographyCard[];
   onOpen?: (card: DiscographyCard) => void;
   openTitle?: string;
-  /** Off for a provider artist: there is no library to compare against, so legacy omitted the
-   *  badge rather than claim every release is "Checking…" forever (`library.js:2178`). */
-  showOwnership?: boolean;
-  onProviderMonitor?: (card: DiscographyCard) => void;
-  monitoringProviderId?: string | null;
-  monitoredProviderIds?: ReadonlySet<string>;
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
   useLazyBackgrounds(gridRef, cards.map((c) => c.key).join('|'));
@@ -5915,9 +5858,8 @@ function ReleaseCardGrid({
           title: card.title,
           album_type: card.albumType,
         });
-        const overlay = showOwnership ? completionOverlay(card) : null;
-        const state =
-          !showOwnership || card.owned ? '' : card.owned === null ? ' checking' : ' missing';
+        const overlay = completionOverlay(card);
+        const state = card.owned ? '' : card.owned === null ? ' checking' : ' missing';
         return (
           <div
             key={card.key}
@@ -5933,12 +5875,6 @@ function ReleaseCardGrid({
               <div className={styles.cardMonitor} onClick={(e) => e.stopPropagation()}>
                 <MonitorToggle entity="albums" id={card.albumId} monitored={card.monitored} />
               </div>
-            ) : card.providerId && onProviderMonitor ? (
-              <ProviderMonitorButton
-                monitored={monitoredProviderIds?.has(card.providerId) === true}
-                busy={monitoringProviderId === card.providerId}
-                onClick={() => onProviderMonitor(card)}
-              />
             ) : null}
             {overlay ? (
               <div
@@ -6549,16 +6485,6 @@ function useDiscographyFilters() {
   return { filters, setFilters };
 }
 
-function visibleCards(cards: DiscographyCard[], filters: DiscographyFilterState) {
-  return cards.filter((card) =>
-    passesDiscographyFilters(
-      { title: card.title, album_type: card.albumType },
-      filters,
-      card.owned,
-    ),
-  );
-}
-
 const providerTrackTitle = (track: ProviderAlbumTrack) => track.name || track.title || '';
 const providerTrackKey = (track: ProviderAlbumTrack, index: number) =>
   String(track.id || `${track.disc_number || 1}:${track.track_number || index + 1}`);
@@ -6790,248 +6716,7 @@ function DiscoveryAlbumView({
   );
 }
 
-/** ldp-01/ldp-02: an artist with no catalogue row at all, rendered from provider data alone.
- *  Browsing is read-only; only an explicit Monitor action materializes catalogue rows. */
 type GroupLabel = 'Albums' | 'EPs' | 'Singles';
-
-function DiscoveryArtistView({
-  source,
-  providerId,
-  name,
-}: {
-  source: string;
-  providerId: string;
-  name: string;
-}) {
-  const navigate = useNavigate();
-  const { filters, setFilters } = useDiscographyFilters();
-  const [adopting, setAdopting] = useState(false);
-  const [monitoringAlbum, setMonitoringAlbum] = useState<string | null>(null);
-  const [monitoredAlbums, setMonitoredAlbums] = useState<Set<string>>(() => new Set());
-  const [error, setError] = useState<string | null>(null);
-  const otherSources = useOtherSources({
-    providerId,
-    artistName: name,
-    baseSource: source,
-  });
-
-  const existing = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'discovery-resolve', source, providerId, name],
-    queryFn: () => resolveLibraryV2DiscoveryArtist({ source, providerId, name }),
-  });
-  const knownArtistId = existing.data ?? null;
-  const detail = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'discovery-detail', source, providerId, name],
-    queryFn: () => fetchProviderArtistDetail({ source, providerId, name }),
-    enabled: existing.isSuccess && knownArtistId === null,
-    staleTime: 5 * 60_000,
-  });
-
-  /** Arriving at an artist we already have is not discovery — hand straight
-   *  over to the real Library V2 page, with the rich header preselected
-   *  because the user came from a search result (ldp-05). */
-  useEffect(() => {
-    if (!knownArtistId) return;
-    void navigate({
-      search: (p) => ({
-        ...p,
-        ...DISCOVERY_ARTIST_VIEW,
-        artist: knownArtistId,
-        discover: undefined,
-        discoverName: undefined,
-      }),
-      replace: true,
-    });
-  }, [knownArtistId, navigate]);
-
-  async function monitorArtist() {
-    if (adopting) return;
-    setAdopting(true);
-    setError(null);
-    try {
-      const artistId = await monitorLibraryV2DiscoveryArtist({ source, providerId, name });
-      await navigate({
-        search: (p) => ({
-          ...p,
-          ...DISCOVERY_ARTIST_VIEW,
-          artist: artistId,
-          discover: undefined,
-          discoverName: undefined,
-        }),
-        replace: true,
-      });
-    } catch (e) {
-      setError(mutationErrorMessage(e, 'Could not add this artist'));
-      setAdopting(false);
-    }
-  }
-
-  async function monitorAlbum(card: DiscographyCard) {
-    if (!card.providerId || monitoringAlbum) return;
-    setMonitoringAlbum(card.providerId);
-    setError(null);
-    try {
-      await monitorLibraryV2DiscoveryAlbum({
-        source: card.gapSource || source,
-        artistSource: source,
-        artistProviderId: providerId,
-        artistName: artist.name || name,
-        albumProviderId: card.providerId,
-        albumName: card.title,
-        albumType: card.albumType,
-        releaseDate: card.releaseDate,
-        imageUrl: card.imageUrl,
-        trackCount: card.totalTracks,
-      });
-      setMonitoredAlbums((current) => new Set(current).add(card.providerId!));
-    } catch (e) {
-      setError(mutationErrorMessage(e, 'Could not monitor this release'));
-    } finally {
-      setMonitoringAlbum(null);
-    }
-  }
-
-  if (existing.isLoading || knownArtistId) {
-    return <div className={styles.loading}>Loading…</div>;
-  }
-  if (detail.isLoading) {
-    return <div className={styles.loading}>Loading Artist Discography…</div>;
-  }
-  if (existing.isError || detail.isError || !detail.data) {
-    return (
-      <div className={styles.page}>
-        <BackLink
-          onClick={() =>
-            void navigate({
-              search: (p) => ({
-                ...p,
-                discover: undefined,
-                discoverName: undefined,
-              }),
-            })
-          }
-        >
-          ← All artists
-        </BackLink>
-        <div className={styles.emptyState}>
-          <h2>Could not load this artist</h2>
-          <p>
-            {mutationErrorMessage(
-              existing.error ?? detail.error,
-              'The metadata source did not answer.',
-            )}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const { artist, discography } = detail.data;
-  const groups: Array<[GroupLabel, ProviderRelease[]]> = [
-    ['Albums', discography.albums ?? []],
-    ['EPs', discography.eps ?? []],
-    ['Singles', discography.singles ?? []],
-  ];
-  const categoryOf = {
-    Albums: 'albums',
-    EPs: 'eps',
-    Singles: 'singles',
-  } as const;
-  const bucketOf = { Albums: 'album', EPs: 'ep', Singles: 'single' } as const;
-
-  return (
-    <div className={styles.page}>
-      <BackLink
-        onClick={() =>
-          void navigate({
-            search: (p) => ({
-              ...p,
-              discover: undefined,
-              discoverName: undefined,
-            }),
-          })
-        }
-      >
-        ← All artists
-      </BackLink>
-      {error ? <div className={`${styles.grabBanner} ${styles.grab_err}`}>{error}</div> : null}
-      <LegacyArtistHero
-        name={artist.name || name}
-        imageUrl={artist.image_url ?? ''}
-        genres={artist.genres ?? []}
-        bio={artist.lastfm_bio ?? null}
-        listeners={artist.lastfm_listeners ?? null}
-        playcount={artist.lastfm_playcount ?? null}
-        followers={artist.followers ?? null}
-        sections={groups.map(([label, releases]) => ({
-          label,
-          owned: 0,
-          total: releases.length,
-        }))}
-        providerId={providerId}
-        source={source}
-        actions={
-          <ActionButton
-            icon="monitor"
-            label={adopting ? 'Adding…' : 'Monitor artist'}
-            title="Monitor this artist"
-            requiresWish
-            busy={adopting}
-            onClick={() => void monitorArtist()}
-          />
-        }
-      />
-      <DiscographyFilterBar
-        state={filters}
-        onChange={setFilters}
-        otherSources={otherSources.enabled}
-        otherSourcesBusy={otherSources.busy}
-        onToggleOtherSources={otherSources.available ? otherSources.toggle : undefined}
-      />
-      <DiscographySections>
-        {groups.map(([label, releases]) => {
-          if (!filters.categories[categoryOf[label as keyof typeof categoryOf]]) return null;
-          const cards = visibleCards(
-            [
-              ...releases.map(providerCard),
-              ...otherSources.byBucket(bucketOf[label as GroupLabel]),
-            ],
-            filters,
-          );
-          if (cards.length === 0) return null;
-          return (
-            <DiscographySection
-              key={label}
-              title={label}
-              stats={<span>{cards.length} releases</span>}
-            >
-              <ReleaseCardGrid
-                cards={cards}
-                showOwnership={false}
-                openTitle="Open release"
-                monitoringProviderId={monitoringAlbum}
-                monitoredProviderIds={monitoredAlbums}
-                onProviderMonitor={(card) => void monitorAlbum(card)}
-                onOpen={(card) =>
-                  void navigate({
-                    search: (p) => ({
-                      ...p,
-                      discoverAlbum: `${card.gapSource || source}:${card.providerId}`,
-                      discoverAlbumName: card.title,
-                      discoverAlbumType: card.albumType,
-                      discoverAlbumImage: card.imageUrl || undefined,
-                      discoverAlbumDate: card.releaseDate || undefined,
-                    }),
-                  })
-                }
-              />
-            </DiscographySection>
-          );
-        })}
-      </DiscographySections>
-    </div>
-  );
-}
 
 /** ldp-05: the rich hero for an artist that IS in the catalogue. Same layout
  *  as the discovery hero — that is the point, a user arriving from search

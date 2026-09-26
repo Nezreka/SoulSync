@@ -591,6 +591,59 @@ def sync_watchlist_removal(
         return {"matched": 0, "demonitored": 0}
 
 
+def sync_watchlist_addition(
+    db: Any,
+    *,
+    name: Optional[str],
+    provider_id: Optional[str] = None,
+    source: Optional[str] = None,
+    profile_id: int = 1,
+) -> Optional[int]:
+    """The add half of the Watchlist → Library edge (see ``sync_watchlist_removal``).
+
+    A user-facing Watchlist add monitors the artist in Library v2 right away:
+    its catalogue row is resolved or created, flagged monitored, given an
+    explicit rule and its wanted projection recomputed, which is exactly what
+    Library v2's "Monitor artist" does. Without it an artist added from the
+    artist page or Discover had no catalogue row until a download created one,
+    so the artist page kept treating it as unknown.
+
+    ``provider_id`` is only a lookup hint and may be None: pass it only when
+    its source is known, because a wrong namespace would stick to the row.
+    The forward mirror is not enqueued, since the Watchlist row this reacts to
+    exists already. Admin only, like the removal edge (ADR-01). Never raises;
+    returns the lib2 artist id or None.
+    """
+    try:
+        if not _is_admin_profile(profile_id):
+            return None
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return None
+        from core.library2.autolink import find_or_create_artist
+        from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+        from core.library2.wanted import recompute_wanted_for_entity
+
+        conn = db._get_connection()
+        try:
+            artist_id = find_or_create_artist(
+                conn, clean_name,
+                spotify_id=(str(provider_id).strip() or None) if provider_id else None,
+                source=source or None, create=True)
+            if artist_id is None:
+                return None
+            conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (artist_id,))
+            record_rule(conn, "artist", artist_id, True, PROVENANCE_USER, profile_id=profile_id)
+            recompute_wanted_for_entity(conn, "artists", artist_id, profile_id=profile_id)
+            conn.commit()
+            return int(artist_id)
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("watchlist forward-sync skipped: %s", exc)
+        return None
+
+
 def sync_wishlist_removal(
     db: Any,
     config_manager: Any,
@@ -1032,6 +1085,7 @@ __all__ = [
     "reconcile_artist_watchlist",
     "reconcile_track_wishlist",
     "sync_scanned_tracks_wishlist",
+    "sync_watchlist_addition",
     "sync_watchlist_removal",
     "sync_wishlist_removal",
 ]

@@ -311,6 +311,10 @@ export function navigateToArtistDetail(
   navigateToPage?.('artist-detail', {
     artistId,
     artistSource: normalizedSource,
+    // Without it the URL this builds drops ?name=, which is all a Bandcamp
+    // artist has to resolve by. Bit whenever boot adopted a redirect onto the
+    // artist page, e.g. an old /library?discover= link.
+    artistName,
     skipRouteChange: options.skipRouteChange === true,
   });
 }

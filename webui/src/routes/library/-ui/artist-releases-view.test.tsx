@@ -561,6 +561,44 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(document.querySelector('.artist-hero-badges')).not.toBeNull();
   });
 
+  it('falls back to display-only Last.fm rows when the source has no ranking', async () => {
+    server.use(
+      http.get('/api/artist/0/lastfm-top-tracks', () =>
+        HttpResponse.json({ success: true, tracks: [{ name: 'Glory Box', playcount: 4_200_000 }] }),
+      ),
+    );
+    renderArtist('/library?artist=1&header=rich');
+
+    expect(await screen.findByText('Popular on Last.fm')).toBeInTheDocument();
+    expect(screen.getByText('Glory Box')).toBeInTheDocument();
+    // A Last.fm row is a name and a playcount — no album, no ids. Bookmarking
+    // one invented an album that matched nothing, so legacy never offered the
+    // action on these rows either.
+    expect(document.querySelector('.hero-top-track-download')).toBeNull();
+  });
+
+  it('shows an already-wanted top track as bookmarked on a fresh load', async () => {
+    // The tick used to live purely in component state, so it disappeared the
+    // moment the page was reloaded even though the wishlist row existed.
+    server.use(
+      http.get('/api/artist/:id/top-tracks', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [{ id: 'sp-t1', name: 'Glory Box', album: { id: 'sp-a1', name: 'Dummy' } }],
+        }),
+      ),
+      http.get('/api/library/v2/discovery/track-status', () =>
+        HttpResponse.json({
+          success: true,
+          statuses: { 'Glory Box': { track_id: 9, monitored: true } },
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&header=rich');
+
+    expect(await screen.findByTitle('Bookmarked — this track is now wanted')).toBeInTheDocument();
+  });
+
   it('uses the same bookmark glyph as every other monitor control', async () => {
     server.use(
       http.get('/api/artist/:id/top-tracks', () =>

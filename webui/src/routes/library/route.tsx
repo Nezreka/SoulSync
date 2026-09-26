@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
@@ -14,8 +14,22 @@ import { LibraryV2Page } from './-ui/library-v2-page';
 
 export const Route = createFileRoute('/library')({
   validateSearch: libraryV2SearchSchema,
-  beforeLoad: ({ context }) => {
+  beforeLoad: ({ context, search }) => {
     guardPageAccess(context.shell.bridge, 'library');
+    // An artist the catalogue does not hold opens on the artist-detail page.
+    // `discover=<source>:<id>` on its own is what that used to be here, and it
+    // still arrives from bookmarks, history and the album view's back link.
+    // Split on the FIRST colon: provider ids can contain one.
+    const discover = search.discover ?? '';
+    const split = discover.indexOf(':');
+    if (split > 0 && !search.discoverAlbum && !search.artist && !search.album) {
+      throw redirect({
+        to: '/artist-detail/$source/$id',
+        params: { source: discover.slice(0, split), id: discover.slice(split + 1) },
+        search: { name: search.discoverName ?? '' },
+        replace: true,
+      });
+    }
   },
   loaderDeps: ({ search }) => ({
     q: search.q,

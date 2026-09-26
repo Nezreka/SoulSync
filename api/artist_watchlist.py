@@ -33,6 +33,10 @@ from utils.logging_config import get_logger
 
 logger = get_logger("api.artist_watchlist")
 
+# A Spotify artist id: 22 base62 characters. What add_to_watchlist can trust
+# about an id whose source it only guessed.
+_SPOTIFY_ID_RE = re.compile(r"[0-9A-Za-z]{22}")
+
 bp = Blueprint("artist_watchlist", __name__)
 
 # Injected by configure() at boot.
@@ -638,6 +642,9 @@ def add_to_watchlist():
             except Exception as e:
                 logger.debug("watchlist artist source lookup failed: %s", e)
         fallback_source = _get_metadata_fallback_source()   # always defined — image block below reads it
+        # Named by the caller or read off our own row. A guessed source is
+        # fine for the Watchlist row but must not become a catalogue id.
+        source_is_known = bool(source)
         if not source:
             # The fallback source is a hint, not a storable provider: hydrabase,
             # jiosaavn and bandcamp are in METADATA_SOURCE_PRIORITY but have no
@@ -654,6 +661,20 @@ def add_to_watchlist():
         )
         if success:
             database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
+            # The Watchlist is artist monitoring: the artist gets its Library v2
+            # row and is monitored there now, as "Monitor artist" does, not
+            # only once a download creates the row. A Spotify id is recognisable
+            # on its own; any other guess is left to the name.
+            from core.library2.monitor_sync import sync_watchlist_addition
+            id_is_trusted = source_is_known or (
+                source == 'spotify' and _SPOTIFY_ID_RE.fullmatch(str(artist_id)) is not None)
+            sync_watchlist_addition(
+                database,
+                name=artist_name,
+                provider_id=artist_id if id_is_trusted else None,
+                source=source if id_is_trusted else None,
+                profile_id=get_current_profile_id(),
+            )
 
         if success:
 

@@ -21,6 +21,7 @@ from core.library2.monitor_sync import (
     reconcile_artist_watchlist,
     reconcile_track_wishlist,
     sync_scanned_tracks_wishlist,
+    sync_watchlist_addition,
     sync_watchlist_removal,
     sync_wishlist_removal,
 )
@@ -325,6 +326,80 @@ def test_demonitor_no_match_is_noop(imported_conn):
     result = demonitor_lib2_artists_for_removed_watchlist(
         db, ["ghost-id"], "Ghost Artist", profile_id=1)
     assert result == {"matched": 0, "demonitored": 0}
+
+
+# --- Forward edge: a Watchlist add monitors the artist in Library v2 --------
+
+
+def test_watchlist_add_creates_and_monitors_an_unknown_artist(imported_conn):
+    """Upstream's artist page (and Discover) add to the Watchlist; the artist
+    has no catalogue row yet and must get one, monitored, right away."""
+    conn = imported_conn
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    artist_id = sync_watchlist_addition(
+        db, name="Boards of Canada", provider_id="2VAvhf61GgLYmC6C8anyX1",
+        source="spotify", profile_id=1)
+
+    assert artist_id is not None
+    row = conn.execute("SELECT name, monitored, spotify_id FROM lib2_artists WHERE id=?",
+                       (artist_id,)).fetchone()
+    assert dict(row) == {"name": "Boards of Canada", "monitored": 1,
+                         "spotify_id": "2VAvhf61GgLYmC6C8anyX1"}
+    rule = conn.execute(
+        "SELECT monitored, provenance FROM lib2_monitor_rules "
+        "WHERE entity_type='artist' AND entity_id=? AND profile_id=1", (artist_id,)).fetchone()
+    assert dict(rule) == {"monitored": 1, "provenance": PROVENANCE_USER}
+    # The Watchlist row is what triggered this; mirroring it back would loop.
+    assert db.watchlist_added == []
+
+
+def test_watchlist_add_monitors_the_existing_row(imported_conn):
+    conn = imported_conn
+    existing = _add_artist(conn, "Portishead", monitored=0, spotify_id="6liAMWkVf5LH7YR9yfFy1Y")
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    artist_id = sync_watchlist_addition(
+        db, name="Portishead", provider_id="6liAMWkVf5LH7YR9yfFy1Y",
+        source="spotify", profile_id=1)
+
+    assert artist_id == existing
+    assert conn.execute("SELECT COUNT(*) FROM lib2_artists WHERE name='Portishead'"
+                        ).fetchone()[0] == 1
+    assert conn.execute("SELECT monitored FROM lib2_artists WHERE id=?", (existing,)
+                        ).fetchone()[0] == 1
+
+
+def test_watchlist_add_without_a_trusted_id_goes_by_name(imported_conn):
+    """A numeric id whose source was only guessed must not be written as a
+    provider id: it would stick to the row under the wrong namespace."""
+    conn = imported_conn
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    artist_id = sync_watchlist_addition(db, name="Burial", profile_id=1)
+
+    row = conn.execute("SELECT spotify_id, external_ids, monitored FROM lib2_artists WHERE id=?",
+                       (artist_id,)).fetchone()
+    assert row["spotify_id"] is None
+    assert row["external_ids"] in (None, "{}")
+    assert row["monitored"] == 1
+
+
+def test_watchlist_add_is_admin_only_and_never_raises(imported_conn):
+    conn = imported_conn
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    before = conn.execute("SELECT COUNT(*) FROM lib2_artists").fetchone()[0]
+
+    assert sync_watchlist_addition(db, name="Somebody Else's", profile_id=2) is None
+    assert sync_watchlist_addition(db, name="  ", profile_id=1) is None
+
+    class _Broken:
+        def _get_connection(self):
+            raise sqlite3.OperationalError("database is locked")
+
+    assert sync_watchlist_addition(_Broken(), name="Locked", profile_id=1) is None
+    assert conn.execute("SELECT COUNT(*) FROM lib2_artists").fetchone()[0] == before
 
 
 def test_demonitor_name_fallback_is_noop_when_ambiguous(imported_conn):
