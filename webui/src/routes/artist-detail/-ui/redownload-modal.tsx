@@ -5,6 +5,7 @@ import type {
   RedownloadCandidate,
   RedownloadMetadataResponse,
   RedownloadMetadataResult,
+  RejectedSummary,
 } from '../-artist-detail.redownload';
 
 import {
@@ -14,6 +15,8 @@ import {
   METADATA_SOURCE_ICONS,
   METADATA_SOURCE_LABELS,
   msClock,
+  overrideBlockedReason,
+  overrideConfirm,
   pollRedownloadProgress,
   scoreClass,
   searchRedownloadMetadata,
@@ -22,6 +25,7 @@ import {
   streamRedownloadSources,
   trackFormatBadge,
 } from '../-artist-detail.redownload';
+import { decisionPill, rejectionSummary } from '../../../features/downloads/decisions';
 
 /**
  * The 3-step redownload modal (showTrackRedownloadModal, library.js:3348):
@@ -50,9 +54,7 @@ export function RedownloadModal({
   const [choice, setChoice] = useState<{ source: string; index: number } | null>(null);
 
   const [candidates, setCandidates] = useState<RedownloadCandidate[]>([]);
-  const [columns, setColumns] = useState<{ source: string; candidates: RedownloadCandidate[] }[]>(
-    [],
-  );
+  const [columns, setColumns] = useState<SourceColumnData[]>([]);
   const [streamDone, setStreamDone] = useState(false);
   const [streamError, setStreamError] = useState('');
   const [pickedIdx, setPickedIdx] = useState<number | null>(null);
@@ -103,8 +105,8 @@ export function RedownloadModal({
     meta._source = choice.source;
     chosenMetaRef.current = meta;
     setStep(2);
-    void streamRedownloadSources(track.id, meta, (source, fresh, all) => {
-      setColumns((prev) => [...prev, { source, candidates: fresh }]);
+    void streamRedownloadSources(track.id, meta, (source, fresh, all, rejected) => {
+      setColumns((prev) => [...prev, { source, candidates: fresh, rejected }]);
       setCandidates([...all]);
     })
       .then(() => setStreamDone(true))
@@ -118,8 +120,8 @@ export function RedownloadModal({
   const selectedIdx = pickedIdx ?? (bestIdx >= 0 ? bestIdx : null);
   const anySelectable = candidates.some((c) => !c.blacklisted);
 
-  const startDownload = async () => {
-    const candidate = selectedIdx != null ? candidates[selectedIdx] : null;
+  const startDownload = async (chosen?: RedownloadCandidate) => {
+    const candidate = chosen ?? (selectedIdx != null ? candidates[selectedIdx] : null);
     if (!candidate) {
       window.showToast?.('Select a download source', 'error');
       return;
@@ -239,6 +241,8 @@ export function RedownloadModal({
                     selectedIdx={selectedIdx}
                     bestIdx={bestIdx}
                     onPick={setPickedIdx}
+                    expected={chosenMetaRef.current ?? {}}
+                    onOverride={(row) => void startDownload(row)}
                     key={column.source}
                   />
                 ))
@@ -315,7 +319,11 @@ export function RedownloadModal({
                 disabled={!anySelectable}
                 onClick={() => void startDownload()}
               >
-                {anySelectable ? 'Download Selected' : 'Waiting for results...'}
+                {anySelectable
+                  ? 'Download Selected'
+                  : streamDone
+                    ? 'No match to download'
+                    : 'Waiting for results...'}
               </button>
             </div>
           </div>
@@ -404,17 +412,29 @@ function MetadataColumns({
   );
 }
 
+interface SourceColumnData {
+  source: string;
+  candidates: RedownloadCandidate[];
+  rejected: RejectedSummary;
+}
+
 function SourceColumn({
   column,
   selectedIdx,
   bestIdx,
   onPick,
+  expected,
+  onOverride,
 }: {
-  column: { source: string; candidates: RedownloadCandidate[] };
+  column: SourceColumnData;
   selectedIdx: number | null;
   bestIdx: number;
   onPick: (globalIdx: number) => void;
+  expected: RedownloadMetadataResult;
+  onOverride: (row: RedownloadCandidate) => void;
 }) {
+  const [showRejected, setShowRejected] = useState(false);
+  const { rejected } = column;
   return (
     <div className="rdl-src-col">
       <div className="rdl-src-col-header">
@@ -426,13 +446,14 @@ function SourceColumn({
       </div>
       <div className="rdl-src-col-body">
         {column.candidates.length === 0 ? (
-          <div className="rdl-src-col-empty">No results</div>
+          <div className="rdl-src-col-empty">
+            {rejected.total > 0 ? 'Nothing passed' : 'No results'}
+          </div>
         ) : (
           column.candidates.slice(0, 10).map((c) => {
             const confPct = Math.round((c.confidence || 0) * 100);
             const confCls = scoreClass(confPct);
             const isRec = c._globalIdx === bestIdx;
-            const dur = msClock(c.duration);
             return (
               <label
                 className={`rdl-src-item${c.blacklisted ? ' blacklisted' : ''}${isRec ? ' recommended' : ''}`}
@@ -456,18 +477,7 @@ function SourceColumn({
                     </div>
                     {isRec ? <span className="rdl-src-recommended">Best</span> : null}
                   </div>
-                  <div className="rdl-src-item-details">
-                    {c.quality ? <span className="rdl-src-fmt">{c.quality}</span> : null}
-                    {c.bitrate ? <span className="rdl-src-detail">{c.bitrate}k</span> : null}
-                    <span className="rdl-src-detail">{c.size_display}</span>
-                    {dur ? <span className="rdl-src-detail">{dur}</span> : null}
-                    {column.source === 'soulseek' ? (
-                      <span className="rdl-src-detail rdl-src-user">{c.username}</span>
-                    ) : null}
-                    {column.source === 'soulseek' && c.free_upload_slots != null ? (
-                      <span className="rdl-src-detail">{c.free_upload_slots} slots</span>
-                    ) : null}
-                  </div>
+                  <CandidateDetails row={c} source={column.source} />
                   <div className="rdl-src-conf-bar">
                     <div
                       className={`rdl-src-conf-fill ${confCls}`}
@@ -481,7 +491,169 @@ function SourceColumn({
             );
           })
         )}
+        {rejected.total > 0 ? (
+          <div className="rdl-rej">
+            <button
+              type="button"
+              className="rdl-rej-toggle"
+              aria-expanded={showRejected}
+              onClick={() => setShowRejected((v) => !v)}
+            >
+              {showRejected ? 'Hide' : 'Show'} {rejected.total} rejected
+            </button>
+            {showRejected ? (
+              <>
+                <div className="rdl-rej-summary">{rejectionSummary(rejected.counts)}</div>
+                {rejected.rows.map((row) => (
+                  <RejectedRow
+                    row={row}
+                    source={column.source}
+                    expected={expected}
+                    onOverride={onOverride}
+                    key={`${row.username}|${row.filename}`}
+                  />
+                ))}
+                {rejected.rows.length < rejected.total ? (
+                  <div className="rdl-rej-more">
+                    Showing the closest {rejected.rows.length} of {rejected.total}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function CandidateDetails({ row, source }: { row: RedownloadCandidate; source: string }) {
+  const dur = msClock(row.duration);
+  return (
+    <div className="rdl-src-item-details">
+      {row.quality ? <span className="rdl-src-fmt">{row.quality}</span> : null}
+      {row.bitrate ? <span className="rdl-src-detail">{row.bitrate}k</span> : null}
+      <span className="rdl-src-detail">{row.size_display}</span>
+      {dur ? <span className="rdl-src-detail">{dur}</span> : null}
+      {source === 'soulseek' ? (
+        <span className="rdl-src-detail rdl-src-user">{row.username}</span>
+      ) : null}
+      {source === 'soulseek' && row.free_upload_slots != null ? (
+        <span className="rdl-src-detail">{row.free_upload_slots} slots</span>
+      ) : null}
+    </div>
+  );
+}
+
+function RejectedRow({
+  row,
+  source,
+  expected,
+  onOverride,
+}: {
+  row: RedownloadCandidate;
+  source: string;
+  expected: RedownloadMetadataResult;
+  onOverride: (row: RedownloadCandidate) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const blocked = overrideBlockedReason(row);
+  const stage = row.decision?.stage || 'decision';
+
+  const grab = async () => {
+    const ok = await window.showConfirmDialog?.(
+      overrideConfirm(row, expected, expected.duration_ms),
+    );
+    if (ok) onOverride(row);
+  };
+
+  return (
+    <div
+      className={`rdl-src-item rdl-rej-item${open ? ' open' : ''}`}
+      data-code={row.decision?.code}
+    >
+      <div className="rdl-src-radio-placeholder" />
+      <div className="rdl-src-item-body">
+        <div className="rdl-src-item-top">
+          <div className="rdl-src-item-name" title={String(row.filename || '')}>
+            {row.display_name}
+          </div>
+          <span className={`rdl-rej-pill stage-${stage}`}>
+            {decisionPill(row, expected.duration_ms)}
+          </span>
+        </div>
+        <CandidateDetails row={row} source={source} />
+        <div className="rdl-rej-actions">
+          <button
+            type="button"
+            className="rdl-rej-why"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? 'Hide details' : 'Why?'}
+          </button>
+          <button
+            type="button"
+            className="rdl-rej-grab"
+            disabled={blocked != null}
+            title={blocked ?? undefined}
+            onClick={() => void grab()}
+          >
+            Grab anyway
+          </button>
+        </div>
+        {open ? <Evidence row={row} expected={expected} blocked={blocked} /> : null}
+      </div>
+    </div>
+  );
+}
+
+function Evidence({
+  row,
+  expected,
+  blocked,
+}: {
+  row: RedownloadCandidate;
+  expected: RedownloadMetadataResult;
+  blocked: string | null;
+}) {
+  const d = row.decision;
+  const score = d?.score ?? row.confidence;
+  const lines: [string, string, string][] = [
+    ['Title', expected.name || '', row.title || row.display_name || ''],
+    ['Artist', expected.artist || '', row.artist || ''],
+    ['Length', msClock(expected.duration_ms), msClock(row.duration)],
+    ['Quality', 'your profile', row.quality_label || row.quality || ''],
+  ];
+  return (
+    <div className="rdl-rej-evidence">
+      <div className="rdl-rej-reason">
+        {d?.detail || decisionPill(row, expected.duration_ms)}
+        {score != null ? (
+          <span className="rdl-rej-score"> · match {Math.round(score * 100)}%</span>
+        ) : null}
+      </div>
+      <table className="rdl-rej-grid">
+        <thead>
+          <tr>
+            <th scope="col">
+              <span className="lib-sr-only">Field</span>
+            </th>
+            <th scope="col">Wanted</th>
+            <th scope="col">Found</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map(([label, want, found]) => (
+            <tr key={label}>
+              <th scope="row">{label}</th>
+              <td>{want || '—'}</td>
+              <td>{found || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {blocked ? <div className="rdl-rej-blocked">{blocked}</div> : null}
     </div>
   );
 }

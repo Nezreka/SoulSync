@@ -519,6 +519,36 @@ def test_user_manual_pick_injects_acoustid_bypass_into_post_process_context():
     assert ctx["_user_manual_pick"] is True
 
 
+def test_quality_override_on_a_manual_pick_also_skips_the_quality_guard():
+    """The inspector's "grab anyway" on a below-profile row: without this
+    the file downloads, the import quality guard quarantines it, and the
+    override did nothing but waste a download."""
+    deps = _build_deps()
+    _seed_task("t_override_q")
+    download_tasks["t_override_q"]["_user_manual_pick"] = True
+    download_tasks["t_override_q"]["_override_quality"] = True
+
+    result = dc.attempt_download_with_candidates(
+        "t_override_q", [_Candidate(filename="mp3.mp3", confidence=0.99)], _Track(),
+        batch_id="b1", deps=deps)
+
+    assert result is True
+    ctx = matched_downloads_context["user1::mp3.mp3"]
+    assert ctx["_skip_quarantine_check"] == ["acoustid", "quality", "bit_depth"]
+
+
+def test_quality_override_flag_is_ignored_without_a_manual_pick():
+    deps = _build_deps()
+    _seed_task("t_override_auto")
+    download_tasks["t_override_auto"]["_override_quality"] = True
+
+    dc.attempt_download_with_candidates(
+        "t_override_auto", [_Candidate(filename="auto2.flac", confidence=0.99)], _Track(),
+        batch_id="b1", deps=deps)
+
+    assert "_skip_quarantine_check" not in matched_downloads_context["user1::auto2.flac"]
+
+
 def test_auto_search_pick_does_not_inject_acoustid_bypass():
     """The bypass is ONLY for user-initiated manual picks. Auto-search
     candidate picks (which run during the normal download flow) must

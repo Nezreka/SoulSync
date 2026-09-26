@@ -3,9 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EnhancedAlbum } from './-artist-detail.enhanced';
 import type { RedownloadCandidate } from './-artist-detail.redownload';
 
+import { decisionPill, rejectionSummary } from '../../features/downloads/decisions';
 import {
   bestCandidateIndex,
   msClock,
+  overrideBlockedReason,
+  overrideConfirm,
+  startRedownloadRequest,
   pollRedownloadProgress,
   redownloadAlbumFlow,
   scoreClass,
@@ -226,5 +230,144 @@ describe('redownloadAlbumFlow (#911)', () => {
       'warning',
     );
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('rejected candidates', () => {
+  const rej = (
+    code: string,
+    stage: string,
+    detail = '',
+    extra: Partial<RedownloadCandidate> = {},
+  ) =>
+    ({
+      _globalIdx: -1,
+      decision: { accepted: false, code, stage, detail, score: 0.4 },
+      ...extra,
+    }) as RedownloadCandidate;
+
+  it('keeps rejected rows out of the selectable list', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            `${JSON.stringify({
+              source: 'soulseek',
+              candidates: [{ display_name: 'ok', confidence: 0.9 }],
+              rejected: [{ display_name: 'live', confidence: 0.99 }],
+              rejected_total: 7,
+              rejected_counts: { version_conflict: 5, match_weak: 2 },
+            })}\n{"done":true}\n`,
+          ),
+      ),
+    );
+    let summary: {
+      total: number;
+      rows: RedownloadCandidate[];
+      counts: Record<string, number>;
+    } | null = null;
+    const all = await streamRedownloadSources(1, {}, (_source, _fresh, _all, rejected) => {
+      summary = rejected;
+    });
+    expect(all.map((c) => c.display_name)).toEqual(['ok']);
+    // A rejected row can outscore everything and still never be the pick.
+    expect(bestCandidateIndex(all)).toBe(0);
+    expect(summary!.total).toBe(7);
+    expect(summary!.rows[0]._globalIdx).toBe(-1);
+    expect(rejectionSummary(summary!.counts)).toBe('5 wrong version · 2 weak match');
+  });
+
+  it('an old-shape line with no rejected fields still parses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"source":"tidal","candidates":[]}\n')),
+    );
+    let total = -1;
+    await streamRedownloadSources(1, {}, (_s, _f, _a, rejected) => {
+      total = rejected.total;
+    });
+    expect(total).toBe(0);
+  });
+
+  it('turns codes into short pills', () => {
+    expect(
+      decisionPill(
+        rej(
+          'version_conflict',
+          'version',
+          'live version, asked for the original (match 0.58 before the penalty)',
+        ),
+      ),
+    ).toBe('version: live');
+    expect(
+      decisionPill(
+        rej('version_conflict', 'version', "asked for the live version, this isn't marked live"),
+      ),
+    ).toBe('not live');
+    expect(
+      decisionPill(rej('duration_mismatch', 'duration', '', { duration: 30_000 }), 238_000),
+    ).toBe('too short');
+    expect(
+      decisionPill(rej('duration_mismatch', 'duration', '', { duration: 400_000 }), 238_000),
+    ).toBe('too long');
+    expect(decisionPill(rej('below_profile', 'quality'))).toBe('below your profile');
+    expect(decisionPill(rej('some_future_code', 'policy'))).toBe('some future code');
+    expect(decisionPill({})).toBe('');
+  });
+
+  it('refuses overrides the pipeline would undo anyway', () => {
+    expect(overrideBlockedReason(rej('preview', 'preview'))).toMatch(/preview clips/);
+    expect(overrideBlockedReason(rej('duration_mismatch', 'duration'))).toMatch(/length/);
+    expect(overrideBlockedReason(rej('blacklisted', 'policy'))).toMatch(/blacklist/);
+    expect(overrideBlockedReason(rej('match_weak', 'identity'))).toBeNull();
+    expect(overrideBlockedReason(rej('below_profile', 'quality'))).toBeNull();
+  });
+
+  it('warns harder about identity than quality', () => {
+    const want = { name: 'Fade Into You', artist: 'Mazzy Star' };
+    const identity = overrideConfirm(
+      rej('artist_mismatch', 'identity', 'Hope Sandoval vs Mazzy Star'),
+      want,
+    );
+    expect(identity.destructive).toBe(true);
+    expect(identity.message).toContain('"Fade Into You" by Mazzy Star');
+    expect(identity.message).toContain('AcoustID');
+    const version = overrideConfirm(
+      rej('version_conflict', 'version', 'live version, asked for the original'),
+      want,
+    );
+    expect(version.destructive).toBe(true);
+    const quality = overrideConfirm(
+      rej('below_profile', 'quality', "MP3 320 doesn't meet the quality profile"),
+      want,
+    );
+    expect(quality.destructive).toBe(false);
+    expect(quality.message).toContain('quality check after download is skipped for this one file');
+    for (const opts of [identity, version, quality]) {
+      expect(opts.message).toContain('Your settings stay as they are');
+    }
+  });
+
+  it('sends the overridden rule with the start request, and nothing for a normal pick', async () => {
+    const fetchSpy = vi.fn(
+      async () => new Response(JSON.stringify({ success: true, task_id: 't' })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    await startRedownloadRequest(1, {}, rej('below_profile', 'quality'), true);
+    await startRedownloadRequest(
+      1,
+      {},
+      {
+        _globalIdx: 0,
+        decision: { accepted: true, code: 'accepted', stage: 'decision', detail: '', score: 1 },
+      },
+      true,
+    );
+    const bodies = fetchSpy.mock.calls.map((call) =>
+      JSON.parse(String((call as unknown as [string, RequestInit])[1].body)),
+    );
+    expect(bodies[0].override).toEqual({ code: 'below_profile', stage: 'quality' });
+    expect(bodies[1].override).toBeUndefined();
   });
 });

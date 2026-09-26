@@ -11240,60 +11240,29 @@ def redownload_search_sources(track_id):
 
         logger.info(f"[Redownload] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
 
+        from core.downloads.candidate_pool import build_source_rows, empty_source_rows
+
         def _search_one_source(source_name, client):
-            """Search a single download source and return formatted candidates."""
-            source_candidates = []
+            """Search one source; every hit comes back with the decision on it."""
+            evaluated = []
             # These clients are searched directly rather than through the
             # orchestrator, so nothing else would enter the item's profile
             # context and quality_tier_for_source would ask each source for the
             # tier the APP default wants.
             from core.quality.source_map import quality_profile_context
-            for _qi, q in enumerate(search_queries):
+            for q in search_queries:
                 try:
                     with quality_profile_context(quality_profile_id):
                         tracks_result, _ = run_async(client.search(q, timeout=20))
                     if not tracks_result:
                         continue
-                    valid = get_valid_candidates(tracks_result, track_obj, q,
-                                                 quality_profile_id)
-                    for candidate in valid:
-                        is_bl = database.is_blacklisted(candidate.username, candidate.filename)
-                        display_name = os.path.basename(candidate.filename.replace('\\', '/'))
-                        ext = os.path.splitext(display_name)[1].lstrip('.').upper()
-                        quality = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else candidate.quality or ''
-                        svc = source_name if source_name != 'default' else 'hybrid'
-                        uname = candidate.username
-                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon'):
-                            svc = uname
-                        source_candidates.append({
-                            'username': uname,
-                            'filename': candidate.filename,
-                            'display_name': display_name,
-                            'size': candidate.size or 0,
-                            'size_display': f"{(candidate.size or 0) / 1048576:.1f} MB",
-                            'bitrate': candidate.bitrate or 0,
-                            'quality': quality,
-                            'duration': candidate.duration or 0,
-                            'confidence': round(getattr(candidate, 'confidence', 0), 3),
-                            'source_service': svc,
-                            'source_query': q,
-                            'blacklisted': is_bl,
-                            'free_upload_slots': getattr(candidate, 'free_upload_slots', 0),
-                            'upload_speed': getattr(candidate, 'upload_speed', 0),
-                            'queue_length': getattr(candidate, 'queue_length', 0),
-                        })
+                    evaluated.append((q, evaluate_candidates(
+                        tracks_result, track_obj, q, quality_profile_id)))
                 except Exception as e:
                     logger.debug(f"[Redownload] {source_name} search failed for query '{q}': {e}")
-            # Deduplicate within source
-            seen = set()
-            unique = []
-            for c in source_candidates:
-                key = f"{c['username']}|{c['filename']}"
-                if key not in seen:
-                    seen.add(key)
-                    unique.append(c)
-            unique.sort(key=lambda c: (-int(not c['blacklisted']), -c['confidence']))
-            return unique
+            return build_source_rows(
+                evaluated, source_name=source_name, is_blacklisted=database.is_blacklisted,
+            )
 
         # Stream NDJSON — one line per source as it completes
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -11304,10 +11273,9 @@ def redownload_search_sources(track_id):
                 for future in as_completed(futures):
                     source_name = futures[future]
                     try:
-                        results = future.result()
-                        yield json.dumps({'source': source_name, 'candidates': results}) + '\n'
+                        yield json.dumps({'source': source_name, **future.result()}) + '\n'
                     except Exception as e:
-                        yield json.dumps({'source': source_name, 'candidates': [], 'error': str(e)}) + '\n'
+                        yield json.dumps({'source': source_name, **empty_source_rows(str(e))}) + '\n'
             yield json.dumps({'done': True}) + '\n'
 
         return app.response_class(generate_stream(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
@@ -15120,6 +15088,7 @@ def stop_duplicate_cleaner():
 # ===============================
 
 from core.downloads.validation import (
+    evaluate_candidates,
     get_valid_candidates,
     init as _init_download_validation,
 )
