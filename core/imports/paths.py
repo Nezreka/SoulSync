@@ -13,6 +13,8 @@ from utils.logging_config import get_logger
 # Album grouping lives in core.imports.album_naming; this module keeps the
 # imported helper because the path builder still needs it.
 from core.imports.album_naming import resolve_album_group
+from core.imports.album_types import album_types_config, format_album_types
+from core.imports.compilation import is_various_artists_credit
 from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
     extract_artist_name,
@@ -448,6 +450,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
     bracket_map = {
         "albumartist": album_artist_value,
         "albumtype": clean_context.get("albumtype", "Album"),
+        "atypes": clean_context.get("atypes", ""),
         "playlist": clean_context.get("playlist_name", ""),
         "artistletter": artist_letter(clean_context.get("artist", "U")),
         "artist": clean_context.get("artist", "Unknown Artist"),
@@ -469,6 +472,10 @@ def _replace_template_variables(template: str, context: dict) -> str:
     result = result.replace("$disambiguation", clean_context.get("disambiguation", ""))
     result = result.replace("$albumartist", album_artist_value)
     result = result.replace("$albumtype", clean_context.get("albumtype", "Album"))
+    # Order is not load-bearing here — "$atypes" and "$album" share only "$a",
+    # so neither can consume the other. ($albumtype above genuinely does start
+    # with $album, which is why THAT one has to come first.)
+    result = result.replace("$atypes", clean_context.get("atypes", ""))
     result = result.replace("$playlist", clean_context.get("playlist_name", ""))
     result = result.replace("$artistletter", artist_letter(clean_context.get("artist", "U")))
     result = result.replace("$artist", clean_context.get("artist", "Unknown Artist"))
@@ -571,6 +578,10 @@ def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
     part = part.replace("$discnum", disc_value_raw)
     part = part.replace("$disc", disc_value)
     part = part.replace("$cdnum", "")
+    # Same no-op guard, same reason: $atypes is substituted in the global pass
+    # above, and a raw token leaking into a directory name is the failure worth
+    # spending one replace to prevent.
+    part = part.replace("$atypes", "")
     part = re.sub(r"\s*\[\s*\]", "", part)
     part = re.sub(r"\s*\(\s*\)", "", part)
     part = re.sub(r"\s*\{\s*\}", "", part)
@@ -909,6 +920,36 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
     total_tracks = (album_context.get("total_tracks", 0) or 0) if album_context else 0
     album_type_display = get_album_type_display(raw_album_type, total_tracks)
 
+    # $atypes: every qualifier the release actually carries, bracketed, and
+    # nothing at all for a plain album — the beets convention, so a library
+    # organised by beets before SoulSync keeps one layout instead of two.
+    # Computed here so the album and single contexts below cannot disagree.
+    try:
+        # Only single<->ep is resolved from the track count, and only when the
+        # source actually said one of them. get_album_type_display infers a
+        # type from the count alone when the source is silent, which is right
+        # for $albumtype — it must always produce a word — and wrong here: a
+        # release tagged only [live] would start claiming [EP] off a five-track
+        # count that nobody called an EP. $atypes says nothing when the source
+        # says nothing; that is the whole point of it.
+        _raw_primary = str(
+            (album_context or {}).get("album_type")
+            or (album_context or {}).get("record_type")
+            or ""
+        ).strip().lower()
+        _atypes_primary = (
+            album_type_display.strip().lower() if _raw_primary in ("single", "ep") else None
+        )
+        atypes_value = format_album_types(
+            album_context,
+            album_types_config(_get_config_manager()),
+            is_various_artists=is_various_artists_credit(album_context),
+            primary_override=_atypes_primary,
+        )
+    except Exception as _at_err:  # noqa: BLE001 - a label must never fail an import
+        logger.debug("[atypes] could not build release-type labels: %s", _at_err)
+        atypes_value = ""
+
     if album_info and album_info.get("is_album"):
         clean_track_name = get_import_clean_title(context, album_info=album_info, default=original_search.get("title", "Unknown Track"))
         raw_track_number = album_info.get("track_number", 1)
@@ -992,6 +1033,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "year": year,
             "quality": context.get("_audio_quality", ""),
             "albumtype": album_type_display,
+            "atypes": atypes_value,
             "_artists_list": _album_artists_for_collab if _album_artists_for_collab else _artists,
             "_itunes_artist_id": _itunes_aid,
             # #1299: the one thing telling same-named releases apart.
@@ -1174,6 +1216,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         "year": year,
         "quality": context.get("_audio_quality", ""),
         "albumtype": album_type_display,
+        "atypes": atypes_value,
         "_artists_list": _artists,
         "_itunes_artist_id": _itunes_aid,
     }

@@ -6,6 +6,11 @@ import time
 from typing import Dict, Any, Optional
 from cryptography.fernet import Fernet, InvalidToken
 from pathlib import Path
+from core.imports.album_types import (
+    DEFAULT_BRACKET as _ATYPE_DEFAULT_BRACKET,
+    DEFAULT_IGNORE_VA as _ATYPE_DEFAULT_IGNORE_VA,
+    DEFAULT_TYPES as _ATYPE_DEFAULT_TYPES,
+)
 from utils.logging_config import get_logger
 
 
@@ -853,6 +858,25 @@ class ConfigManager:
                     # Plex both read. Series segments collapse when a book has no
                     # series, exactly as the podcast season folder does.
                     "audiobook_path": "$author/$series/$seriespos - $title",
+                },
+                # $atypes — beets-compatible release-type labels for folder
+                # names. Empty for a plain album, bracketed and concatenated
+                # for anything that carries qualifiers ("[EP][Live]"). Only
+                # used by templates that mention $atypes, so this is inert
+                # unless a user opts in. Shapes match the beets albumtypes
+                # plugin so a config can be pasted across: "types" also accepts
+                # beets' list-of-single-key-maps form.
+                # Sourced from core.imports.album_types rather than repeated
+                # here: these defaults also apply in code for installs whose
+                # stored config predates the setting, and two copies would let
+                # a fresh install and an existing one disagree about what
+                # $atypes emits.
+                "album_types": {
+                    "types": dict(_ATYPE_DEFAULT_TYPES),
+                    "bracket": _ATYPE_DEFAULT_BRACKET,
+                    # A various-artists compilation already lives under
+                    # Compilations/; repeating the qualifier is noise.
+                    "ignore_va": list(_ATYPE_DEFAULT_IGNORE_VA),
                 },
                 "detect_multi_artist_compilations": True,
             },
