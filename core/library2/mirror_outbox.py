@@ -250,6 +250,17 @@ def enqueue_artist_watchlist(conn, artist_id: int, monitored: bool, *,
 # ---------------------------------------------------------------------------
 
 
+def _asks_first(db, profile_id: int) -> bool:
+    """Is this a profile whose wishlist rows are requests (no download rights)?"""
+    from core.permissions import profile_can_download
+    try:
+        if int(profile_id) == 1:
+            return False
+        return not profile_can_download(db.get_profile(int(profile_id)))
+    except Exception:  # noqa: BLE001 - unreadable: treat the row as an ordinary add
+        return False
+
+
 def _execute_op(db, op: str, data: Dict[str, Any], profile_id: int,
                 user_initiated: bool) -> None:
     """Replay one mirror op against the legacy tables. Raises on failure.
@@ -259,13 +270,27 @@ def _execute_op(db, op: str, data: Dict[str, Any], profile_id: int,
     exceptions count as failures to retry.
     """
     if op == "wishlist_add":
-        db.add_to_wishlist(data.get("payload") or {},
+        # A profile without download rights keeps a wishlist of requests the
+        # scheduled run leaves alone until an admin approves them (upstream
+        # core/requests/music.py). What this mirror writes is never such an
+        # ask: that profile cannot monitor (E-13, wishes_in_own_library), so
+        # the intent is the admin's -- made in its library -- and lands
+        # approved instead of waiting for an approval nobody is asked for.
+        payload = data.get("payload") or {}
+        approved = _asks_first(db, profile_id)
+        db.add_to_wishlist(payload,
                            source_type=data.get("source_type", "album"),
                            source_info=data.get("source_info") or {},
                            user_initiated=user_initiated,
                            profile_id=profile_id,
                            quality_profile_id=data.get("quality_profile_id"),
-                           raise_on_error=True)
+                           raise_on_error=True,
+                           **({"request_approved": True} if approved else {}))
+        if approved:
+            from core.wishlist.identity import wishlist_key_from_payload
+            row_key = wishlist_key_from_payload(payload) or payload.get("id")
+            if row_key:
+                db.approve_request_rows(profile_id, [row_key])
     elif op == "wishlist_remove":
         # SYNC-02: rows queued with an album withdraw exactly that release.
         # Rows without one (queued by an older build, or a track whose release

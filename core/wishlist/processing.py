@@ -1129,6 +1129,10 @@ def process_wishlist_automatically(
 
                 # Check if wishlist has tracks across all profiles
                 database = runtime.get_profiles_database()
+                # a profile without download rights keeps a wishlist of
+                # requests: the scheduler only downloads the rows an admin
+                # approved (it used to grab every profile's whole list)
+                from core.permissions import profile_can_download
                 all_profiles = database.get_all_profiles()
                 if scoped:
                     scoped_profile_ids = requested_profile_ids or {int(runtime.profile_id)}
@@ -1138,6 +1142,25 @@ def process_wishlist_automatically(
                     ]
                     if len(scoped_profile_ids) == 1:
                         runtime.profile_id = next(iter(scoped_profile_ids))
+                approved_only = {p['id']: not profile_can_download(p) for p in all_profiles}
+
+                def _count(p):
+                    if approved_only[p['id']]:
+                        return wishlist_service.get_wishlist_count(profile_id=p['id'], approved_only=True)
+                    return wishlist_service.get_wishlist_count(profile_id=p['id'])
+
+                def _tracks(p):
+                    if approved_only[p['id']]:
+                        tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id'],
+                                                                                   approved_only=True)
+                    else:
+                        tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id'])
+                    # A6: remembered so a multi-profile playlist scope
+                    # can dispatch each profile's tracks under its own
+                    # profile_id instead of collapsing everything onto
+                    # whatever runtime.profile_id happens to be set to.
+                    _tag_wishlist_owner(tracks, p['id'])
+                    return tracks
 
                 raw_wishlist_tracks = []
                 if scoped:
@@ -1145,23 +1168,12 @@ def process_wishlist_automatically(
                         logger.info('[Auto-Wishlist] Empty playlist scope; nothing to process')
                         return
                     for profile in all_profiles:
-                        profile_tracks = wishlist_service.get_wishlist_tracks_for_download(
-                            profile_id=profile['id']
-                        )
-                        # A6: remembered so a multi-profile playlist scope
-                        # can dispatch each profile's tracks under its own
-                        # profile_id instead of collapsing everything onto
-                        # whatever runtime.profile_id happens to be set to.
-                        _tag_wishlist_owner(profile_tracks, profile['id'])
                         raw_wishlist_tracks.extend(
-                            _tracks_in_scope(profile_tracks, requested_track_ids)
+                            _tracks_in_scope(_tracks(profile), requested_track_ids)
                         )
                     count = len(raw_wishlist_tracks)
                 else:
-                    count = sum(
-                        wishlist_service.get_wishlist_count(profile_id=p['id'])
-                        for p in all_profiles
-                    )
+                    count = sum(_count(p) for p in all_profiles)
                 logger.info(f"[Auto-Wishlist] Wishlist count check: {count} tracks found across {len(all_profiles)} profiles")
                 runtime.update_automation_progress(automation_id, progress=10, phase='Checking wishlist',
                                                    log_line=f'{count} tracks across {len(all_profiles)} profiles', log_type='info')
@@ -1213,9 +1225,7 @@ def process_wishlist_automatically(
                 if not scoped:
                     raw_wishlist_tracks = []
                     for profile in all_profiles:
-                        profile_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=profile['id'])
-                        _tag_wishlist_owner(profile_tracks, profile['id'])
-                        raw_wishlist_tracks.extend(profile_tracks)
+                        raw_wishlist_tracks.extend(_tracks(profile))
                 if not raw_wishlist_tracks:
                     logger.warning("No tracks returned from wishlist service.")
                     return

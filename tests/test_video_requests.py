@@ -197,7 +197,8 @@ def test_admin_detection_reads_the_real_global():
     # the bare global like every other video module.
     assert "window.currentProfile" not in _REQ_JS
     assert "typeof currentProfile !== 'undefined'" in _REQ_JS
-    assert "data-vreq-approve" in _REQ_JS and "data-vreq-withdraw" in _REQ_JS
+    # members withdraw from the row's ⋯ menu now, admins keep one approve button
+    assert "data-vreq-approve" in _REQ_JS and "label: 'Withdraw'" in _REQ_JS
 
 
 def test_no_download_profiles_get_the_request_button():

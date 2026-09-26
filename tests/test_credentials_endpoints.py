@@ -475,7 +475,7 @@ def test_verify_launch_pin_rate_limited_after_flood(client):
         conn.execute("UPDATE profiles SET pin_hash = ? WHERE id = 1",
                      (generate_password_hash('1234', method='pbkdf2:sha256'),))
         conn.commit()
-    web_server._launch_pin_limiter.record_success('127.0.0.1')  # clean slate
+    web_server._launch_pin_limiter.reset()  # clean slate
     try:
         for _ in range(10):
             assert client.post('/api/profiles/verify-launch-pin',
@@ -484,7 +484,7 @@ def test_verify_launch_pin_rate_limited_after_flood(client):
         assert r.status_code == 429
         assert 'Retry-After' in r.headers
     finally:
-        web_server._launch_pin_limiter.record_success('127.0.0.1')
+        web_server._launch_pin_limiter.reset()
         with db._get_connection() as conn:
             conn.execute("UPDATE profiles SET pin_hash = NULL WHERE id = 1")
             conn.commit()

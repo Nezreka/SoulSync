@@ -78,6 +78,7 @@ class Track:
     disc_number: Optional[int] = None
     album_type: Optional[str] = None
     total_tracks: Optional[int] = None
+    explicit: Optional[bool] = None
 
     @classmethod
     def from_itunes_track(cls, track_data: Dict[str, Any], clean_artist_name: Optional[str] = None) -> 'Track':
@@ -119,7 +120,9 @@ class Track:
             image_url=album_image_url,
             release_date=track_data.get('releaseDate', '').split('T')[0] if track_data.get('releaseDate') else None,
             album_type=album_type,
-            total_tracks=track_count or None
+            total_tracks=track_count or None,
+            explicit=(track_data.get('trackExplicitness') == 'explicit'
+                      if track_data.get('trackExplicitness') else None),
         )
 
 @dataclass

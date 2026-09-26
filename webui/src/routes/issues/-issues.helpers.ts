@@ -20,13 +20,13 @@ export const ISSUE_CATEGORY_META: Record<
     label: 'Wrong Metadata',
     icon: '✎',
     description: 'Title, artist, year, or other tags are incorrect',
-    applies: ['track', 'album'],
+    applies: ['track', 'album', 'artist'],
   },
   wrong_cover: {
     label: 'Wrong Cover Art',
     icon: '📷',
-    description: 'The artwork is wrong or missing',
-    applies: ['album'],
+    description: 'The artwork or photo is wrong or missing',
+    applies: ['album', 'artist'],
   },
   wrong_artist: {
     label: 'Wrong Artist',
@@ -138,10 +138,22 @@ export function getIssueArtwork(snapshot: IssueSnapshot): string {
   return String(snapshot.thumb_url || snapshot.album_thumb || snapshot.artist_thumb || '');
 }
 
-export function formatIssueDate(value?: string): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
+/**
+ * sqlite hands back 'YYYY-MM-DD HH:MM:SS' in utc with no zone. new Date()
+ * reads that shape as LOCAL time, so every stamp was off by the utc offset.
+ * a string that already carries a zone (or a bare date) is left alone.
+ */
+export function parseIssueDate(value?: string | null): Date | null {
+  if (!value) return null;
+  const text = String(value).trim();
+  const naive = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/.exec(text);
+  const date = naive ? new Date(`${naive[1]}T${naive[2]}Z`) : new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function formatIssueDate(value?: string | null): string {
+  const date = parseIssueDate(value);
+  if (!date) return '';
   return date.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -149,6 +161,64 @@ export function formatIssueDate(value?: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+/** "just now", "5m ago", "3h ago", "2d ago", then the date */
+export function formatIssueAgo(value?: string | null, now: number = Date.now()): string {
+  const date = parseIssueDate(value);
+  if (!date) return '';
+  const seconds = Math.max(0, Math.round((now - date.getTime()) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** "Kim hit this too", "Kim and 2 others hit this too" */
+export function formatFollowers(names: string[]): string {
+  const clean = names.map((name) => name.trim()).filter(Boolean);
+  if (!clean.length) return '';
+  if (clean.length === 1) return `${clean[0]} hit this too`;
+  const others = clean.length - 1;
+  return `${clean[0]} and ${others} ${others === 1 ? 'other' : 'others'} hit this too`;
+}
+
+/** the artist page an issue's item lives on, or null when the snapshot never caught one */
+export function getIssueArtistLink(
+  issue: IssueRecord,
+  snapshot: IssueSnapshot,
+): { artistId: string; artistName: string } | null {
+  const artistId = issue.entity_type === 'artist' ? issue.entity_id : snapshot.artist_id;
+  if (artistId == null || artistId === '') return null;
+  const artistName = String(
+    (issue.entity_type === 'artist' ? snapshot.name : snapshot.artist_name) || '',
+  );
+  return { artistId: String(artistId), artistName };
+}
+
+/** a case-insensitive match over what a person would type to find an issue */
+export function issueMatchesText(issue: IssueRecord, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  const snapshot = parseSnapshot(issue.snapshot_data);
+  const hay = [
+    issue.title,
+    issue.description,
+    issue.reporter_name,
+    snapshot.title,
+    snapshot.name,
+    snapshot.artist_name,
+    snapshot.album_title,
+    getIssueCategoryMeta(issue.category)?.label,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return hay.includes(needle);
 }
 
 export function formatStatusLabel(status: string): string {

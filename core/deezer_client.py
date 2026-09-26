@@ -196,6 +196,7 @@ class Track:
     disc_number: Optional[int] = None
     album_type: Optional[str] = None
     total_tracks: Optional[int] = None
+    explicit: Optional[bool] = None
 
     @classmethod
     def from_deezer_track(cls, track_data: Dict[str, Any]) -> 'Track':
@@ -259,6 +260,8 @@ class Track:
             disc_number=track_data.get('disk_number', 1),
             album_type=album_type,
             total_tracks=nb_tracks,
+            explicit=(bool(track_data['explicit_lyrics'])
+                      if track_data.get('explicit_lyrics') is not None else None),
         )
 
 

@@ -61,6 +61,14 @@ def register_routes(bp):
             # client filter Radarr never shipped.
             movies = db.calendar_movie_releases(start.isoformat(), end.isoformat())
 
+            # kids profiles: episodes go by their show's rating, movie events by
+            # the library's. before the counts, so the day dots agree.
+            from .kids import filter_library_items, filter_tmdb_items, video_cap
+            cap = video_cap()
+            if cap is not None:
+                eps = filter_library_items(db, eps, cap, "show", id_key="show_id")
+                movies = filter_tmdb_items(db, [{**m, "kind": "movie"} for m in movies], cap)
+
             # Acquisition state per episode. The calendar knew the air date and
             # whether a file existed, which cannot tell an episode nothing is
             # looking for from one that is downloading right now.
@@ -127,6 +135,8 @@ def register_routes(bp):
             eps = get_video_db().calendar_upcoming(
                 start.isoformat(), end.isoformat(),
                 server_source=resolve_video_server(), watchlist_only=(scope != "all"))
+            from .kids import filter_library_items, video_cap
+            eps = filter_library_items(get_video_db(), eps, video_cap(), "show", id_key="show_id")
             lines = ["BEGIN:VCALENDAR", "VERSION:2.0",
                      "PRODID:-//SoulSync//Video Calendar//EN",
                      "X-WR-CALNAME:SoulSync Airings", "CALSCALE:GREGORIAN"]

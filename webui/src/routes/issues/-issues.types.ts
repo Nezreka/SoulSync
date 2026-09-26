@@ -36,6 +36,8 @@ export const ISSUE_SEARCH_CATEGORY_VALUES = ['all', ...ISSUE_CATEGORY_VALUES] as
 export const issueSearchSchema = z.object({
   status: z.enum(ISSUE_SEARCH_STATUS_VALUES).default('open').catch('open'),
   category: z.enum(ISSUE_SEARCH_CATEGORY_VALUES).default('all').catch('all'),
+  // optional, not defaulted: an absent entity keeps the url as it was
+  entity: z.enum(ISSUE_ENTITY_TYPE_VALUES).optional().catch(undefined),
   issueId: z.coerce.number().int().positive().optional().catch(undefined),
 });
 
@@ -111,6 +113,59 @@ export interface IssueRecord {
   reporter_name?: string | null;
   reporter_color?: string | null;
   reporter_avatar?: string | null;
+  /** 1 when the reporter has news they haven't opened yet */
+  reporter_unread?: number | boolean | null;
+  fix_action?: IssueFixAction | null;
+  /** detail only */
+  comments?: IssueComment[];
+  /** detail only: people who reported the same thing */
+  followers?: IssueFollower[];
+}
+
+export type IssueFixActionId =
+  | 'reidentify'
+  | 'edit_metadata'
+  | 'pick_art'
+  | 'redownload'
+  | 'wishlist_missing'
+  | 'find_duplicates';
+
+export interface IssueFixAction {
+  // a string, not the union: an id this build doesn't know falls back to the item page
+  id: string;
+  label: string;
+}
+
+export interface IssueComment {
+  id: number;
+  author_id?: number | null;
+  author_name?: string | null;
+  kind: 'comment' | 'event';
+  body: string;
+  created_at?: string;
+}
+
+export interface IssueFollower {
+  follower_id: number;
+  follower_name?: string | null;
+  created_at?: string;
+}
+
+export interface CreateIssueResult {
+  id: number | null;
+  /** an open report for the same thing already existed, the caller now follows it */
+  merged: boolean;
+  /** the caller had already reported it */
+  already: boolean;
+}
+
+export interface IssueUpdatePayload {
+  status?: IssueStatus;
+  priority?: IssuePriority;
+  category?: string;
+  admin_response?: string;
+  title?: string;
+  description?: string;
 }
 
 export interface IssueCounts {
@@ -119,6 +174,8 @@ export interface IssueCounts {
   resolved: number;
   dismissed: number;
   total: number;
+  /** a member's own reports with news they haven't opened */
+  updates?: number;
 }
 
 export interface IssueListResponse {

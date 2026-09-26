@@ -51,4 +51,46 @@ class AttemptLimiter:
         self._failures.pop(key, None)
 
 
-__all__ = ["AttemptLimiter"]
+    def reset(self) -> None:
+        """forget every client (tests, and an admin clearing lockouts)."""
+        self._failures.clear()
+
+
+class TargetedLimiter:
+    """failed-attempt limiter keyed by (client, target account).
+
+    AttemptLimiter keyed by ip alone let one success wipe the client's whole
+    history: a member with a working password or pin could guess someone
+    else's 9 times, sign in as themselves, and go again forever. here a
+    success only clears the account that succeeded, and a second per-client
+    budget that no success ever clears caps spraying across many accounts.
+    """
+
+    def __init__(self, max_attempts: int = 10, window_seconds: int = 300,
+                 max_client_attempts: int = 30):
+        self._per_target = AttemptLimiter(max_attempts, window_seconds)
+        self._per_client = AttemptLimiter(max_client_attempts, window_seconds)
+
+    @staticmethod
+    def _key(client: str, target) -> str:
+        return f"{client}|{str(target).strip().lower()}"
+
+    def is_locked(self, client: str, target, now: float) -> Tuple[bool, int]:
+        locked, retry = self._per_target.is_locked(self._key(client, target), now)
+        if locked:
+            return locked, retry
+        return self._per_client.is_locked(client, now)
+
+    def record_failure(self, client: str, target, now: float) -> None:
+        self._per_target.record_failure(self._key(client, target), now)
+        self._per_client.record_failure(client, now)
+
+    def record_success(self, client: str, target) -> None:
+        self._per_target.record_success(self._key(client, target))
+
+    def reset(self) -> None:
+        self._per_target.reset()
+        self._per_client.reset()
+
+
+__all__ = ["AttemptLimiter", "TargetedLimiter"]

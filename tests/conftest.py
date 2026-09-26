@@ -1488,3 +1488,35 @@ def isolated_async_loop():
             borrowed_loop.call_soon_threadsafe(borrowed_loop.stop)
         if borrowed_thread is not None:
             borrowed_thread.join(timeout=5)
+
+
+@pytest.fixture(autouse=True)
+def _web_server_clients_start_as_the_admin():
+    """a web_server test client starts as the admin who picked their card.
+
+    a browser with no profile in its session is only the admin on a
+    single-profile install (core.security.session_profile). the suite shares
+    one db that gathers many profiles, so a bare test client used to ride the
+    old "no session = admin" fallback. tests that want a browser with nothing
+    picked clear the session themselves (``session_transaction().clear()``).
+    """
+    import sys
+
+    ws = sys.modules.get('web_server')
+    if ws is None or not hasattr(ws, 'app'):
+        yield
+        return
+    from flask.testing import FlaskClient
+
+    class _AdminSessionClient(FlaskClient):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            with self.session_transaction() as sess:
+                sess.setdefault('profile_id', 1)
+
+    saved = ws.app.test_client_class
+    ws.app.test_client_class = _AdminSessionClient
+    try:
+        yield
+    finally:
+        ws.app.test_client_class = saved

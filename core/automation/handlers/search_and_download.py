@@ -21,6 +21,14 @@ def auto_search_and_download(config: Dict[str, Any], deps: AutomationDeps) -> Di
     if not query:
         event_data = config.get('_event_data', {})
         query = (event_data.get('query', '') or '').strip()
+        # /api/v1/request already started this download; doing it again here
+        # queued the same track twice
+        if query and event_data.get('download_started_by'):
+            if automation_id:
+                deps.update_progress(
+                    automation_id, log_line=f'Already downloading: {query}', log_type='info',
+                )
+            return {'status': 'skipped', 'query': query, 'reason': 'already started by the request api'}
     if not query:
         if automation_id:
             deps.update_progress(

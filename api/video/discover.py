@@ -23,6 +23,28 @@ from utils.logging_config import get_logger
 logger = get_logger("video_api.discover")
 
 
+def _kids_items(items):
+    """kids profiles: tmdb cards the library can't vouch for stay off discover."""
+    from . import get_video_db
+    from .kids import filter_tmdb_items, video_cap
+    cap = video_cap()
+    if cap is None:
+        return items
+    return filter_tmdb_items(get_video_db(), items, cap)
+
+
+def _kids_rails(rails):
+    from .kids import video_cap
+    if video_cap() is None:
+        return rails
+    out = []
+    for r in rails:
+        items = _kids_items(r.get("items") or [])
+        if items:
+            out.append({**r, "items": items})
+    return out
+
+
 def register_routes(bp):
     @bp.route("/discover/hero", methods=["GET"])
     def video_discover_hero():
@@ -46,7 +68,7 @@ def register_routes(bp):
         except Exception:
             logger.exception("discover hero failed")
             items = []
-        return jsonify({"items": items})
+        return jsonify({"items": _kids_items(items)})
 
     @bp.route("/discover/taste", methods=["GET"])
     def video_discover_taste():
@@ -94,7 +116,7 @@ def register_routes(bp):
                          if it.get("tmdb_id") != s["tmdb_id"]]
                 if len(items) >= 4:
                     rails.append({"title": "More like " + s["title"], "items": items[:30]})
-            return jsonify({"rails": rails})
+            return jsonify({"rails": _kids_rails(rails)})
         except Exception:
             logger.exception("discover morelike failed")
             return jsonify({"rails": []})
@@ -119,7 +141,7 @@ def register_routes(bp):
             rec_lists = [eng.recommendations(s["kind"], s["tmdb_id"])
                          for s in seeds if s.get("tmdb_id")]
             items = blend_recommendations(rec_lists, exclude_ids=seed_ids, limit=40)
-            return jsonify({"items": items})
+            return jsonify({"items": _kids_items(items)})
         except Exception:
             logger.exception("discover foryou failed")
             return jsonify({"items": []})
@@ -173,7 +195,7 @@ def register_routes(bp):
                 if len(missing) >= 3:
                     rails.append({"title": "More from " + person["name"], "kind": "person",
                                   "items": missing})
-            return jsonify({"rails": rails})
+            return jsonify({"rails": _kids_rails(rails)})
         except Exception:
             logger.exception("discover gaps failed")
             return jsonify({"rails": []})
@@ -187,6 +209,12 @@ def register_routes(bp):
             tmdb_id = int(request.args.get("tmdb_id"))
         except (TypeError, ValueError):
             return jsonify({"trailer": None})
+        # a trailer is playback: over-cap titles get none for kids profiles
+        from . import get_video_db
+        from .kids import restricted_response, tmdb_title_allowed, video_cap
+        cap = video_cap()
+        if cap is not None and not tmdb_title_allowed(get_video_db(), kind, tmdb_id, cap):
+            return restricted_response()
         try:
             tr = get_video_enrichment_engine().trailer(kind, tmdb_id)
         except Exception:
@@ -405,7 +433,7 @@ def register_routes(bp):
                                 ran_out = True       # an empty page = TMDB has no more
                         offset += WAVE
                 has_more, next_page = not ran_out, page + offset
-            return jsonify({"items": items, "page": page,
+            return jsonify({"items": _kids_items(items), "page": page,
                             "has_more": has_more, "next_page": next_page})
         except Exception:
             logger.exception("discover list failed (key=%s)", key)

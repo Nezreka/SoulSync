@@ -134,9 +134,9 @@ def _profile() -> int:
     Every call used to take the default of 1, which meant every profile shared
     profile 1's wishlist and watchlist.
     """
-    from .helpers import parse_profile_id
+    from .helpers import acting_profile_id
 
-    return parse_profile_id(request)
+    return acting_profile_id(request)
 
 
 def _download_denied():

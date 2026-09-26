@@ -16,6 +16,7 @@ export const shellPageIds = [
   'import',
   'settings',
   'issues',
+  'requests',
   'help',
   'hydrabase',
   'chat',
@@ -50,6 +51,7 @@ export const shellRouteManifest: readonly ShellRouteDefinition[] = [
   { pageId: 'stats', path: '/stats', kind: 'react' },
   { pageId: 'settings', path: '/settings', kind: 'legacy' },
   { pageId: 'issues', path: '/issues', kind: 'react' },
+  { pageId: 'requests', path: '/requests', kind: 'react' },
   { pageId: 'help', path: '/help', kind: 'legacy' },
   { pageId: 'hydrabase', path: '/hydrabase', kind: 'legacy' },
   { pageId: 'chat', path: '/chat', kind: 'legacy' },
@@ -64,8 +66,10 @@ export const reactShellRoutes = shellRouteManifest.filter((route) => route.kind 
 export const legacyShellRoutes = shellRouteManifest.filter((route) => route.kind === 'legacy');
 
 export function normalizeShellPath(pathname: string): string {
-  const base = document.querySelector<HTMLMetaElement>('meta[name="soulsync-url-base"]')?.content || '';
-  if (base && (pathname === base || pathname.startsWith(base + '/'))) pathname = pathname.slice(base.length) || '/';
+  const base =
+    document.querySelector<HTMLMetaElement>('meta[name="soulsync-url-base"]')?.content || '';
+  if (base && (pathname === base || pathname.startsWith(base + '/')))
+    pathname = pathname.slice(base.length) || '/';
   if (!pathname) return '/';
   if (pathname === '/') return '/';
   const normalized = pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;

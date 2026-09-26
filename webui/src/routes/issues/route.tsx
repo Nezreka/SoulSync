@@ -18,6 +18,7 @@ export const Route = createFileRoute('/issues')({
   loaderDeps: ({ search }) => ({
     status: search.status,
     category: search.category,
+    entity: search.entity,
     issueId: search.issueId ?? null,
   }),
   loader: async ({ context, deps }) => {
@@ -30,7 +31,7 @@ export const Route = createFileRoute('/issues')({
     // failures through useQuery and render their own error states.
     await Promise.allSettled([
       context.queryClient.ensureQueryData(issueCountsQueryOptions(profile.profileId)),
-      context.queryClient.ensureQueryData(issueListQueryOptions(profile.profileId, deps)),
+      context.queryClient.ensureInfiniteQueryData(issueListQueryOptions(profile.profileId, deps)),
       deps.issueId
         ? context.queryClient.ensureQueryData(
             issueDetailQueryOptions(profile.profileId, deps.issueId),
