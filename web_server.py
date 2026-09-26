@@ -11824,7 +11824,11 @@ from api.discover_routes import (  # noqa: E402
 )
 
 
+from core.discovery.blocked import WORKS as _BLOCKED_WORKS, hide_blocked_in_response as _hide_blocked_artists  # noqa: E402
+
+
 @app.route('/api/library/radio')
+@_hide_blocked_artists({'tracks': _BLOCKED_WORKS})
 def library_radio():
     """Get a smart queue of similar tracks for radio mode auto-play.
 

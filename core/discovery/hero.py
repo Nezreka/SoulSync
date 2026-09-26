@@ -185,10 +185,18 @@ def get_discover_hero():
 
         logger.info(f"[Discover Hero] Found {len(valid_artists)} valid artists for source: {active_source}")
 
-        # Filter out blacklisted artists
-        blacklisted = database.get_discovery_blacklist_names()
-        if blacklisted:
-            valid_artists = [a for a in valid_artists if a.similar_artist_name.lower() not in blacklisted]
+        # this profile's blocked artists never make the hero (before the cut to
+        # 10, so a block doesn't leave the rotation short)
+        from core.discovery.blocked import BlockedArtists
+        blocked = BlockedArtists.load(database, get_current_profile_id())
+        if not blocked.is_empty:
+            valid_artists = [a for a in valid_artists if not blocked.blocks_artist({
+                'artist_name': a.similar_artist_name,
+                'spotify_artist_id': a.similar_artist_spotify_id,
+                'itunes_artist_id': a.similar_artist_itunes_id,
+                'deezer_artist_id': getattr(a, 'similar_artist_deezer_id', None),
+                'musicbrainz_id': getattr(a, 'similar_artist_musicbrainz_id', None),
+            })]
 
         # Take top 10 (already ordered by least-recently-featured, then quality)
         similar_artists = valid_artists[:10]

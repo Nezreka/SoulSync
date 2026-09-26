@@ -19412,73 +19412,6 @@ class MusicDatabase:
             logger.error(f"Error removing from blacklist: {e}")
             return False
 
-    # ==================== Discovery Artist Blacklist Methods ====================
-
-    def add_to_discovery_blacklist(self, artist_name: str, spotify_id: str = None,
-                                   itunes_id: str = None, deezer_id: str = None) -> bool:
-        """Block an artist from appearing in discovery results."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO discovery_artist_blacklist
-                (artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id)
-                VALUES (?, ?, ?, ?)
-            """, (artist_name.strip(), spotify_id, itunes_id, deezer_id))
-            conn.commit()
-            return True
-        except Exception as e:
-            logger.error(f"Error adding to discovery blacklist: {e}")
-            return False
-
-    def remove_from_discovery_blacklist(self, blacklist_id: int) -> bool:
-        """Remove an artist from the discovery blacklist."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM discovery_artist_blacklist WHERE id = ?", (blacklist_id,))
-            conn.commit()
-            return cursor.rowcount > 0
-        except Exception as e:
-            logger.error(f"Error removing from discovery blacklist: {e}")
-            return False
-
-    def get_discovery_blacklist(self) -> list:
-        """Get all blacklisted discovery artists."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id, created_at
-                FROM discovery_artist_blacklist ORDER BY created_at DESC
-            """)
-            return [dict(r) for r in cursor.fetchall()]
-        except Exception as e:
-            logger.error(f"Error getting discovery blacklist: {e}")
-            return []
-
-    def get_discovery_blacklist_names(self) -> set:
-        """Set of blacklisted artist names (lowercased) for discovery filtering.
-
-        Unions the legacy discovery_artist_blacklist with the new unified
-        blocklist's artist entries (across all profiles), so a ban added via
-        either path filters discovery. The legacy table is migrated into the
-        blocklist on upgrade but kept as a rollback safety net."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT LOWER(artist_name) FROM discovery_artist_blacklist")
-            names = {r[0] for r in cursor.fetchall()}
-            try:
-                cursor.execute("SELECT LOWER(name) FROM blocklist WHERE entity_type = 'artist'")
-                names.update(r[0] for r in cursor.fetchall())
-            except Exception as _bl_err:  # noqa: BLE001 — old schema may predate blocklist
-                logger.debug("blocklist union skipped in discovery names: %s", _bl_err)
-            return names
-        except Exception as e:
-            logger.error(f"Error getting discovery blacklist names: {e}")
-            return set()
-
     # ==================== Blocklist (artist/album/track) ====================
 
     def _migrate_discovery_blacklist_into_blocklist(self, cursor):
@@ -19488,13 +19421,23 @@ class MusicDatabase:
         Replicated to EVERY existing profile so no existing discovery ban
         silently stops working under the new per-profile model. Idempotent
         (skips a (profile, name) already present). The old table is left in
-        place as a rollback safety net."""
+        place as a rollback safety net.
+
+        Runs once. It used to run on every start, so an artist a profile
+        unblocked came back on the next restart; the discover page's blocked
+        artists modal now writes the blocklist, so nothing new lands in the
+        old table after this."""
         try:
+            cursor.execute("SELECT 1 FROM metadata WHERE key = "
+                           "'discovery_blacklist_migrated_v1' LIMIT 1")
+            if cursor.fetchone():
+                return
             cursor.execute(
                 "SELECT artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id "
                 "FROM discovery_artist_blacklist")
             legacy = cursor.fetchall()
             if not legacy:
+                self._mark_discovery_blacklist_migrated(cursor)
                 return
             try:
                 cursor.execute("SELECT id FROM profiles")
@@ -19518,11 +19461,20 @@ class MusicDatabase:
                         "itunes_id, deezer_id, match_status) VALUES (?, 'artist', ?, ?, ?, ?, 'matched')",
                         (pid, name, row[1], row[2], row[3]))
                     migrated += 1
+            self._mark_discovery_blacklist_migrated(cursor)
             if migrated:
                 logger.info("Migrated %d discovery-blacklist artist entr(ies) into the "
                             "unified blocklist across %d profile(s)", migrated, len(profile_ids))
         except Exception as e:
             logger.debug("discovery→blocklist migration skipped: %s", e)
+
+    @staticmethod
+    def _mark_discovery_blacklist_migrated(cursor):
+        try:
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) "
+                           "VALUES ('discovery_blacklist_migrated_v1', '1')")
+        except Exception as e:  # noqa: BLE001 - worst case it runs again
+            logger.debug("discovery blacklist migration flag not written: %s", e)
 
     def add_blocklist_entry(self, profile_id: int, entity_type: str, name: str,
                             spotify_id: str = None, itunes_id: str = None,

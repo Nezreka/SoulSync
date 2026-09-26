@@ -41,8 +41,8 @@ class _FakeDb:
         self.top_calls += 1
         return list(self.artists)
 
-    def get_discovery_blacklist_names(self):
-        return set()
+    def get_blocklist(self, *_a, **_kw):
+        return []
 
     def mark_artists_featured(self, _names):
         pass

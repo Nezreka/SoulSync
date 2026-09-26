@@ -31,6 +31,7 @@ from core.discovery.endpoints import (
 from core.profile_context import get_current_profile_id
 from core.runtime_state import add_activity_item
 from utils.logging_config import get_logger
+from core.discovery.blocked import WORKS, hide_blocked_in_response as _hide_blocked
 
 logger = get_logger("web_server")
 
@@ -94,6 +95,7 @@ def get_listenbrainz_collaborative():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/listenbrainz/playlist/<playlist_mbid>', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_listenbrainz_playlist_tracks(playlist_mbid):
     """Get tracks from a specific ListenBrainz playlist (from cache, with on-demand refresh)"""
     try:

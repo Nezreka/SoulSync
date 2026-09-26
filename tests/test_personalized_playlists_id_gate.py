@@ -65,13 +65,11 @@ class _FakeDatabase:
                 artist_genres TEXT,
                 track_data_json TEXT
             );
-            CREATE TABLE discovery_artist_blacklist (
-                artist_name TEXT PRIMARY KEY
-            );
-            -- Unified blocklist — discovery filtering now unions artist bans
-            -- from here too (Phase 1 blocklist). Minimal shape for the subquery.
+            -- The profile blocklist; discovery filters on this profile's
+            -- artist bans. Minimal shape for the subquery.
             CREATE TABLE blocklist (
                 id INTEGER PRIMARY KEY,
+                profile_id INTEGER NOT NULL DEFAULT 1,
                 entity_type TEXT,
                 name TEXT
             );
@@ -105,10 +103,10 @@ class _FakeDatabase:
         )
         self._conn.commit()
 
-    def blacklist(self, artist_name):
+    def blacklist(self, artist_name, profile_id=1):
         self._conn.execute(
-            "INSERT INTO discovery_artist_blacklist (artist_name) VALUES (?)",
-            (artist_name,),
+            "INSERT INTO blocklist (profile_id, entity_type, name) VALUES (?, 'artist', ?)",
+            (profile_id, artist_name),
         )
         self._conn.commit()
 
@@ -205,6 +203,29 @@ def test_discovery_helper_filters_blacklisted_artists(service):
         fetch_limit=100,
     )
     assert [t['track_name'] for t in tracks] == ['Keep']
+
+
+def test_discovery_helper_filters_only_this_profiles_blocks(service):
+    """Blocks are per profile: another profile's block doesn't thin this mix."""
+    from core.profile_context import reset_background_profile, set_background_profile
+
+    svc, db = service
+    db.insert_discovery_track(
+        source='spotify', spotify_track_id='sp1', track_name='Theirs',
+        artist_name='Their Block', album_name='X',
+    )
+    db.blacklist('their block', profile_id=2)
+
+    def names():
+        return [t['track_name'] for t in svc._select_discovery_tracks(
+            source='spotify', order_by='track_name', fetch_limit=100)]
+
+    assert names() == ['Theirs']
+    token = set_background_profile(2)
+    try:
+        assert names() == []
+    finally:
+        reset_background_profile(token)
 
 
 def test_discovery_helper_honors_source_filter(service):
