@@ -673,9 +673,11 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         # The user explicitly picked this candidate via the
                         # candidates modal — trust their metadata judgement
                         # over AcoustID disagreement so manual picks don't
-                        # loop back into quarantine. Integrity + bit-depth
-                        # gates still run because those check the new file's
-                        # actual condition, not its identity.
+                        # loop back into quarantine. On a quality override
+                        # (grab anyway) the quality/bit-depth gates are
+                        # skipped too: the user knowingly took a
+                        # below-profile file, so quarantining it for the
+                        # profile it just overrode would be wrong.
                         matched_downloads_context[context_key]['_skip_quarantine_check'] = (
                             ['acoustid', 'quality', 'bit_depth'] if quality_overridden else 'acoustid'
                         )

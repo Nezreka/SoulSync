@@ -74,9 +74,21 @@ def get_discover_hero():
         logger.info(f"Discover hero using source: {active_source}")
 
         _cache_key = (get_current_profile_id(), active_source)
+        from core.discovery.feedback import Taste
+        _hero_taste = Taste.load(database, get_current_profile_id())
         _cached = _HERO_CACHE.get(_cache_key)
         if _cached and _time.time() < _cached[0]:
-            return jsonify(_cached[1])
+            if _hero_taste.is_empty:
+                return jsonify(_cached[1])
+            # less like this ranks lower everywhere: sink disliked artists
+            # below the visible cut even on a cached hero. the cached payload
+            # is shared, so sort a copy.
+            _payload = dict(_cached[1])
+            _payload['artists'] = sorted(
+                _payload.get('artists') or [],
+                key=lambda a: _hero_taste.artist_factor(a.get('artist_name')),
+                reverse=True)
+            return jsonify(_payload)
 
         # Import fallback client for non-Spotify lookups
         itunes_client = _get_metadata_fallback_client()
@@ -197,6 +209,15 @@ def get_discover_hero():
                 'deezer_artist_id': getattr(a, 'similar_artist_deezer_id', None),
                 'musicbrainz_id': getattr(a, 'similar_artist_musicbrainz_id', None),
             })]
+
+        if not _hero_taste.is_empty:
+            # less like this ranks lower everywhere: sink disliked artists
+            # below the top-10 cut. the sort is stable, so the
+            # least-recently-featured rotation holds among equally-liked
+            # artists.
+            valid_artists = sorted(valid_artists,
+                                   key=lambda a: _hero_taste.artist_factor(a.similar_artist_name),
+                                   reverse=True)
 
         # Take top 10 (already ordered by least-recently-featured, then quality)
         similar_artists = valid_artists[:10]

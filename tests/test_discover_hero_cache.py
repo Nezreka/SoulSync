@@ -117,3 +117,41 @@ def test_hero_cards_carry_the_explanation(app_ctx, monkeypatch):
         'seeds': [{'name': 'Autechre', 'id': None, 'source': None}]}
     # no resolvable source: still the shape, confidence from how many point here
     assert by_name['SZA']['explanation'] == {'kind': 'similar_to', 'seeds': [], 'confidence': 0.88}
+
+
+def _less_row(name: str) -> dict:
+    return {'kind': 'less', 'entity_type': 'artist', 'name': name,
+            'artist_name': None, 'seed_context_json': None, 'ids_json': '{}',
+            'created_at': '2026-09-26 00:00:00', 'expires_at': None}
+
+
+def test_less_like_this_sinks_the_hero(app_ctx, monkeypatch):
+    # "less like this" ranks lower everywhere, hero included.
+    db = _FakeDb([_artist('Aphex Twin'), _artist('SZA')])
+    db.get_recommendation_sources = lambda names, profile_id=1: {}
+    db.get_discovery_feedback = lambda profile_id: [_less_row('Aphex Twin')]
+    monkeypatch.setattr(hero, 'get_database', lambda: db)
+
+    names = [a['artist_name'] for a in hero.get_discover_hero().get_json()['artists']]
+    assert names[0] == 'SZA'
+    assert names[-1] == 'Aphex Twin'
+
+
+def test_less_like_this_reranks_the_cached_hero(app_ctx, monkeypatch):
+    # The re-rank also applies on a cache hit: the payload is cached, the
+    # feedback is not, and the heavy query must not re-run.
+    db = _FakeDb([_artist('Aphex Twin'), _artist('SZA')])
+    db.get_recommendation_sources = lambda names, profile_id=1: {}
+    db.feedback_rows = []
+    db.get_discovery_feedback = lambda profile_id: list(db.feedback_rows)
+    monkeypatch.setattr(hero, 'get_database', lambda: db)
+
+    first = hero.get_discover_hero().get_json()
+    assert [a['artist_name'] for a in first['artists']][0] == 'Aphex Twin'
+
+    db.feedback_rows = [_less_row('Aphex Twin')]
+    second = hero.get_discover_hero().get_json()
+    names = [a['artist_name'] for a in second['artists']]
+    assert names[0] == 'SZA'
+    assert names[-1] == 'Aphex Twin'
+    assert db.top_calls == 1

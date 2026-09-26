@@ -107,13 +107,17 @@ def _discover_bylt_key():
     the key used to carry neither, so a source switch or a fresh generation
     kept serving the previous answer for up to half an hour. reading the
     generation id here is one indexed row and it makes the cache follow the
-    content instead of the clock.
+    content instead of the clock. the taste fingerprint rides along so a
+    more/less answer re-ranks the shelf on the next request, the way the
+    other re-ranked shelves do.
     """
     try:
         from core.discovery.bylt_store import read_generation
+        from core.discovery.feedback import Taste
         source = _get_active_discovery_source()
         gen = read_generation(get_database(), get_current_profile_id()) or {}
-        return f"{source}:{gen.get('generation_id') or 'none'}"
+        taste = Taste.load(get_database(), get_current_profile_id()).fingerprint()
+        return f"{source}:{gen.get('generation_id') or 'none'}:{taste}"
     except Exception:
         return 'unknown'
 
@@ -2135,8 +2139,9 @@ def post_discovery_feedback():
                                       entity, data.get('explanation'))
         if not new_id:
             return jsonify({"success": False, "error": "that can't be recorded"}), 400
-        # nothing to invalidate: hiding runs outside the shelf cache, and the
-        # re-ranked shelves key on this profile's feedback
+        # nothing to invalidate: hiding runs outside the shelf cache; the
+        # re-ranked shelves (similar artists, listening recs) key on this
+        # profile's feedback, and BYLT picks it up on its next generation
         return jsonify({"success": True, "id": new_id, "action": action})
     except Exception as e:
         logger.error(f"Error recording discovery feedback: {e}")

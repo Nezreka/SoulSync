@@ -69,7 +69,7 @@ class BlockedArtists:
                     if row.get(col):
                         ids[source].add(str(row[col]))
         except Exception as exc:  # noqa: BLE001 - never take a page down
-            logger.debug("blocklist read failed: %s", exc)
+            logger.warning("blocklist read failed, serving unfiltered: %s", exc)
         from core.discovery.feedback import Taste
         taste = Taste.load(database, profile_id)
         names |= taste.snoozed_artists
@@ -254,10 +254,12 @@ def hide_blocked_in_response(spec: Dict[str, str]):
             try:
                 return _filter_response(response, spec)
             except Exception as exc:  # noqa: BLE001 - the page matters more
-                logger.debug("blocked-artist filter skipped for %s: %s", view.__name__, exc)
+                logger.warning("blocked-artist filter skipped for %s, serving unfiltered: %s",
+                               view.__name__, exc)
                 return response
-        # functools.wraps copies the view's name onto the wrapper; this is how
-        # a guard test can tell the filter is really there
+        # the marker alone can't prove the filter is the OUTERMOST wrapper
+        # (functools.wraps copies __dict__ outward), so the guard test
+        # identifies the filter by its code object instead
         wrapper.hides_blocked_artists = True
         return wrapper
     return decorate

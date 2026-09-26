@@ -298,6 +298,15 @@ def _prune(database, profile_id: int, today: date) -> None:
                     "AND item_date < ?", (profile_id, today.isoformat()))
         cur.execute("DELETE FROM discovery_inbox WHERE profile_id = ? AND state = 'dismissed' "
                     "AND updated_at < ?", (profile_id, _stamp(_now() - KEEP_DISMISSED)))
+        # a new release stops being news NEW_RELEASE_DAYS after its date; drop
+        # the unread ones (a saved one the user explicitly kept stays)
+        cur.execute("DELETE FROM discovery_inbox WHERE profile_id = ? AND kind = 'new_release' "
+                    "AND state IN ('unread', 'added') AND item_date < ?",
+                    (profile_id, (today - timedelta(days=NEW_RELEASE_DAYS)).isoformat()))
+        # expired "not now" answers are filtered out of reads; delete them so
+        # the table doesn't grow. same text comparison the read query uses.
+        cur.execute("DELETE FROM discovery_feedback WHERE profile_id = ? AND kind = 'not_now' "
+                    "AND expires_at IS NOT NULL AND expires_at <= datetime('now')", (profile_id,))
         conn.commit()
 
 

@@ -502,8 +502,9 @@ def _failing_ids(database, profile_id: int) -> set:
     try:
         with database._get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT spotify_track_id FROM wishlist_tracks WHERE retry_count >= ?",
-                        (FAILING_RETRIES,))
+            cur.execute("SELECT spotify_track_id FROM wishlist_tracks "
+                        "WHERE retry_count >= ? AND profile_id = ?",
+                        (FAILING_RETRIES, profile_id))
             return {str(r[0]) for r in cur.fetchall() if r[0]}
     except Exception as exc:  # noqa: BLE001 - unknown means not failing
         logger.debug("wishlist failure read failed: %s", exc)

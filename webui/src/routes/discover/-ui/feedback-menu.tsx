@@ -103,7 +103,8 @@ export function FeedbackMenu({
         window.showToast?.(feedbackToast(action, entity), 'success');
         if (action === 'not_now' || action === 'block') onHidden?.();
         // hiding can touch any shelf; more and less re-rank the artist ones;
-        // a save lands in the inbox
+        // a save lands in the inbox, whose nav badge polls on its own timer
+        if (action === 'save') window.refreshDiscoverInboxBadge?.();
         void queryClient?.invalidateQueries({ queryKey: ['discover'] });
       })
       .catch(() => {

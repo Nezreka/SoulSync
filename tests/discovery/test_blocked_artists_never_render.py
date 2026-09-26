@@ -13,6 +13,7 @@ import pytest
 
 from core.discovery.blocked import (
     ARTISTS, GRAPH, NAMES, WORKS, BlockedArtists, hide_blocked,
+    hide_blocked_in_response,
 )
 from database.music_database import MusicDatabase
 
@@ -285,7 +286,7 @@ def test_library_radio_route(client, db, monkeypatch):
 # the guard: a discover surface can't forget
 # ---------------------------------------------------------------------------
 
-# Discover GETs that return no artist, album or track rows to render.
+# Discover GET/POST routes that return no artist, album or track rows to render.
 NOT_A_SURFACE = {
     '/api/discover/adventurousness',
     '/api/discover/popularity-backfill/status',
@@ -316,13 +317,53 @@ NOT_A_SURFACE = {
     '/api/discover/album/<source>/<album_id>',
     '/api/discovery/lookback-period',        # settings
     '/api/discovery/hemisphere',             # settings
+    # POST surfaces that return no artist, album or track rows to render
+    '/api/discover/resolve-playable',  # matches the caller's own list against their own library; echoes input
+    '/api/discover/similar-artists/enrich',  # enriches caller-supplied ids from an already-filtered shelf
+    '/api/discover/spotify-library/refresh',  # "refresh started" ack for a background sync
+    '/api/discover/refresh',  # counts + message, no rows
+    '/api/discover/seasonal/refresh',  # "refresh started" ack for a background job
+    '/api/discover/popularity-backfill/start',  # backfill state, no rows
+    '/api/discover/popularity-backfill/cancel',  # backfill state, no rows
+    '/api/discover/inbox/<int:item_id>/state',  # one success bool
+    '/api/discover/inbox/dismiss-all',  # how many dismissed, no rows
+    '/api/discover/inbox/refresh',  # "started" ack for the background refresh
+    # POST /api/discover/recipes returns a mix card, but mixes exclude blocked
+    # artists at build time (skip_artist + blocked-fingerprint rebuild, pinned
+    # by test_blocked_artists_are_never_in_a_mix)
+    '/api/discover/recipes',
+    '/api/discover/recipes/<int:recipe_id>/keep',  # returns a playlist id, no rows
+    '/api/discover/artist-map/perf',  # 204 debug sink for the map's render timings
+    '/api/discover/your-artists/refresh',  # "refresh started" ack for a background refresh
+    '/api/discover/your-albums/refresh',  # "refresh started" ack for a background refresh
+    '/api/discover_downloads/snapshot',  # persists the caller's download bubbles; save ack only
 }
 
 
+# The blocked-artist filter wrapper's code object, for the order check below.
+# functools.wraps copies __dict__ (and with it the hides_blocked_artists
+# marker) onto every outer wrapper, so the marker alone can't tell whether the
+# filter wraps the shelf cache or sits inside it. Code objects are NOT copied
+# by wraps: every wrapper hide_blocked_in_response builds shares this one.
+_FILTER_CODE = hide_blocked_in_response({})(lambda: None).__code__
+
+
 def _is_hidden(view) -> bool:
-    # outermost only: under a shelf cache the filter must wrap the cache, or a
-    # cached response would skip it (and a new block would wait out the TTL)
-    return bool(getattr(view, 'hides_blocked_artists', False))
+    """True only when the blocked-artist filter is the OUTERMOST wrapper.
+
+    Under a shelf cache the filter must wrap the cache: a cached response
+    would otherwise skip the filter and a new block would wait out the TTL.
+    Walks the __wrapped__ chain (both decorators use functools.wraps, so it is
+    intact); the first frame has to be the filter's.
+    """
+    if getattr(view, '__code__', None) is _FILTER_CODE:
+        return True
+    node = getattr(view, '__wrapped__', None)
+    while node is not None:
+        if getattr(node, '__code__', None) is _FILTER_CODE:
+            return False  # present, but inside another wrapper: not outermost
+        node = getattr(node, '__wrapped__', None)
+    return False
 
 
 def test_every_discover_surface_filters_blocked_artists():
@@ -331,13 +372,18 @@ def test_every_discover_surface_filters_blocked_artists():
     missing = []
     for rule in web_server.app.url_map.iter_rules():
         path = rule.rule
-        if 'GET' not in (rule.methods or ()) or not (
-                path.startswith('/api/discover') or path.startswith('/api/personalized/playlist')):
+        methods = {m for m in (rule.methods or ()) if m in ('GET', 'POST')}
+        if not methods:
+            continue
+        if not (path.startswith('/api/discover')
+                or path.startswith('/api/personalized/playlist')
+                or path == '/api/library/radio'):
             continue
         if path in NOT_A_SURFACE:
             continue
         if not _is_hidden(web_server.app.view_functions[rule.endpoint]):
-            missing.append(path)
+            missing.append(f"{path} [{'|'.join(sorted(methods))}]")
     assert not missing, (
-        f"discover routes that could render a blocked artist: {missing}. "
-        "decorate them with hide_blocked_in_response, or add them to NOT_A_SURFACE with why")
+        "discover routes that could render a blocked artist: "
+        f"{missing}. decorate them with hide_blocked_in_response, "
+        "or add them to NOT_A_SURFACE with why")
