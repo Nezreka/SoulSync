@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nezreka/SoulSync/releases"><img alt="Version" src="https://img.shields.io/badge/version-3.4.5-8b5cf6?style=flat-square"></a>
+  <a href="https://github.com/Nezreka/SoulSync/releases"><img alt="Version" src="https://img.shields.io/badge/version-3.4.7-8b5cf6?style=flat-square"></a>
   <a href="https://hub.docker.com/r/boulderbadgedad/soulsync"><img alt="Docker" src="https://img.shields.io/badge/docker-boulderbadgedad%2Fsoulsync-2496ED?style=flat-square&logo=docker&logoColor=white"></a>
   <a href="https://discord.gg/wGvKqVQwmy"><img alt="Discord" src="https://img.shields.io/badge/discord-join-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
   <a href="./license.txt"><img alt="License" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
@@ -63,7 +63,7 @@ Most self-hosted media setups are a relay race: one app wants things, another se
 
 | | |
 |---|---|
-| **Download sources** | Soulseek (slskd), Tidal, Qobuz, Deezer, HiFi, Amazon Music, YouTube, SoundCloud, Lidarr, Torrent and Usenet (via Prowlarr). One source or a drag-ordered hybrid chain. |
+| **Download sources** | Soulseek (slskd), Tidal, Qobuz, Deezer, HiFi, YouTube, SoundCloud, Lidarr, Torrent and Usenet (via Prowlarr). One source or a drag-ordered hybrid chain. |
 | **Metadata** | Spotify (with or without an account), Apple Music / iTunes, Deezer, Discogs, MusicBrainz, plus 14 background enrichment workers |
 | **Media servers** | Plex, Jellyfin, Navidrome, or **SoulSync Standalone** (no server needed) |
 | **Playlist sources** | Spotify, Tidal, Qobuz, Deezer, YouTube, YouTube Music, Apple Music links, ListenBrainz, Last.fm, Beatport, SoulSync's own mixes, and CSV / TSV / TXT / M3U files |
@@ -122,7 +122,7 @@ One search box with three modes.
 | **Qobuz** | up to Hi-Res Max (24-bit/192 kHz) |
 | **Deezer** | ARL token, FLAC → MP3 320 → MP3 128 fallback |
 | **HiFi** | free lossless via public instances, no account, automatic failover |
-| **Amazon Music** | FLAC / Opus / EAC3 |
+| **Amazon Music** | RETIRED — the public proxy it relied on is gone; saved chains silently drop it |
 | **YouTube** | yt-dlp, cookies supported |
 | **SoundCloud** | anonymous |
 | **Lidarr** | hand an album to Lidarr's indexers, import only the tracks you need |
@@ -138,14 +138,14 @@ One search box with three modes.
 - **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention.
 - **Tagging**: Picard-style **MusicBrainz release preflight** pins one release per album so every track agrees. Tags are written with mutagen (ID3v2.4, FLAC, Vorbis, MP4), enriched in the order you choose.
 - **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
-- **File organization**: templates for albums, singles, compilations, playlists, music videos, podcasts and audiobooks (`$albumartist/$album/$track - $title` and friends).
+- **File organization**: templates for albums, singles, playlists, music videos, podcasts and audiobooks (`$albumartist/$albumartist - $album/$track - $title` and friends).
 
 ## Discover
 
 A personal front page shaped by your library, your listening and your watchlist.
 
 - **Start Here**: a "next best move" card plus zones for *For You*, *New & Missing*, *Your Taste Map* and *Browse & Build*.
-- **Your Mixes**: *Fresh Tape* (new from artists you follow), *The Archives* (a weekly dig through your own library), *Hidden Gems*, *Popular Picks*, *Discovery Shuffle*, *Your Listening Mix*, and decade *Time Machine* mixes. Download or sync any of them to your server.
+- **Your Mixes**: *Fresh Tape* (new from artists you follow), *The Archives* (your Spotify Discover Weekly, refreshed weekly), *Hidden Gems*, *Popular Picks*, *Discovery Shuffle*, *Your Listening Mix*, and decade *Time Machine* mixes. Download or sync any of them to your server.
 - **Adventurousness dial**: drag from "safe" to "deep cuts" and the recommendations re-rank live.
 - **Recommended artists**, **Because you listen to…**, **New releases for you**, **New in your genres**, **Albums you're missing**, **More from your labels**, **Deep cuts**.
 - **Stations**: endless artist radio, or a stable 40-track snapshot you can download or sync.
@@ -167,6 +167,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 
 - **Watchlist**: follow artists and labels. SoulSync scans for new releases on a schedule, with per-artist rules (albums, EPs, singles, live, remixes, compilations), lookback windows, scan source and auto-download. The **Artist Inspector** shows linked IDs per provider and recent releases, and a **Blocklist** keeps things you never want.
 - **Wishlist**: everything wanted, retried automatically with progressive backoff. Browse it as a **Nebula** (an orb per artist, albums and singles in orbit) or a dense list, find what keeps failing, or pick a source by hand.
+- **Requests**: Overseerr-style for music too — profiles without download rights add to their wishlist like anyone else, and the scheduled run only downloads what an admin approved.
 
 ## Import
 
@@ -212,13 +213,13 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 
 **Library**
 - Movies, shows and YouTube channels from **Plex** or **Jellyfin**, with incremental, full and deep scans, per-title sync, and a path resolver for mismatched Docker / NAS mounts.
-- **13 enrichment workers**: TMDB, TVDB, OMDb (IMDb, Rotten Tomatoes, Metacritic, awards), fanart.tv, OpenSubtitles, Trakt, TVmaze, AniList, Wikidata, SponsorBlock, DeArrow, Return YouTube Dislike and YouTube dates.
+- **15 enrichment workers**: TMDB, TVDB, OMDb (IMDb, Rotten Tomatoes, Metacritic), fanart.tv, OpenSubtitles, Trakt, TVmaze, AniList, Wikidata, SponsorBlock, DeArrow, Return YouTube Dislike, streaming (where-to-watch), Mediastinger (credits scenes) and awards — plus a background YouTube upload-date enricher.
 - **Bulk edit & field locks**: edits are written to SoulSync and pushed to your server, and locked fields are never overwritten by enrichment.
 
 **Detail pages**
 - Trailer-backed heroes with Play / Resume on your server.
 - Every rating, cast and crew, where to watch, collections and acquisition history.
-- Four episode layouts, and season tools: grab, search, wishlist, monitor.
+- Four season views, and season tools: grab, search, wishlist, monitor.
 - Person, studio, channel and playlist pages.
 
 **Finding things**
@@ -249,6 +250,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Codec, HDR and audio preferences, size limits and minimum seeders.
   - A separate YouTube profile.
 - **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames, NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
+- **Downloads page**: Downloads / Review / Clients views with live batches, a review queue and download-client management — the same setup as the music side.
 
 **Making it yours**
 - **Overlay Studio**: a Kometa-style visual poster editor.
@@ -284,7 +286,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
   - Import listening history, run maintenance, clean up, back up.
   - Search & download, or run your own scripts.
 - **Then**: Discord, Telegram, Pushbullet, a webhook, a script, or a signal that chains into another automation, with per-step conditions and `{variables}`.
-- **Automation Hub**: install ready-made pipelines in one click, such as *Playlist Pipeline*, *New Music*, *Nightly Operations*, *Quality Assurance* and *Full Hands-Free*.
+- **Automation Hub**: install ready-made pipelines in one click, such as *Playlist Pipeline (All-in-One)*, *New Music Pipeline*, *Nightly Operations*, *Quality Assurance Pipeline* and *Full Hands-Free Pipeline*.
 
 ## Profiles & access
 
@@ -296,6 +298,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
   - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
   - Reverse-proxy and sub-path aware.
 - **Own library per profile** (Plex / Jellyfin): a profile can have its own folder and server library.
+- **Content caps** (video): per-profile G / PG / PG-13 / R limits, enforced across the video side.
 
 ## Chat & arcade
 
@@ -320,7 +323,7 @@ Soulseek rooms and private messages through slskd, in a Discord-style layout.
 ## Mobile, PWA & theming
 
 - Fully responsive, and installable as a **PWA** (cover art cached for speed, never stale pages).
-- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce effects** / **Max performance** switches for low-power devices.
+- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce Visual Effects** / **Max Performance** switches for low-power devices.
 
 ---
 
@@ -347,7 +350,7 @@ The image runs as a non-root user with `PUID` / `PGID` / `UMASK` support, and bu
 | Channel | Image | What it is |
 |---|---|---|
 | **Stable** | `boulderbadgedad/soulsync:latest` | Promoted from `dev` to `main` when a release is ready. Recommended. |
-| **Pinned** | `boulderbadgedad/soulsync:3.4.5` or `ghcr.io/nezreka/soulsync:3.4.5` | A permanent tag for each stable release |
+| **Pinned** | `boulderbadgedad/soulsync:3.4.7` or `ghcr.io/nezreka/soulsync:3.4.7` | A permanent tag for each stable release |
 | **Dev** | `ghcr.io/nezreka/soulsync:dev` | Rebuilt on every push to `dev`. New features first, occasional rough edges |
 | **Nightly** | `ghcr.io/nezreka/soulsync:nightly` | Built at 04:00 UTC when `dev` changed that day |
 | **Snapshot** | `ghcr.io/nezreka/soulsync:dev-YYYYMMDD-<sha>` | An exact dev build to pin to |
@@ -461,9 +464,9 @@ Useful environment variables: `PUID`, `PGID`, `UMASK`, `TZ`, `SOULSYNC_URL_BASE`
 - **Frontend**: a React 19 + TypeScript app (TanStack Router and Query, Vite) running alongside the original vanilla-JS shell, which is being migrated page by page. Live updates arrive over WebSockets.
 - **Core pieces**:
   - **Matching engine**: version-aware fuzzy matching, aliases, cross-script names, and manual overrides that always win.
-  - **Download orchestrator**: 11 sources, a hybrid chain, quality-profile ranking, album bundles, retries.
+  - **Download orchestrator**: 10 sources, a hybrid chain, quality-profile ranking, album bundles, retries.
   - **Import pipeline**: verification, quarantine, MusicBrainz preflight, tagging, art, lyrics, ReplayGain, atomic publish.
-  - **Enrichment workers**: 14 music and 13 video, each yielding to user activity.
+  - **Enrichment workers**: 14 music and 15 video, each yielding to user activity.
   - **Automation engine**: event bus, signal chains, cycle guards.
   - **SoulID**: deterministic cross-instance IDs for artists, albums and tracks.
 
