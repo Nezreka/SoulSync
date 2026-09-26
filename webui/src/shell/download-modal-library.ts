@@ -11,7 +11,8 @@
  *
  * Its "Monitor" button (the old "Add to Wishlist", the same in the Add to
  * Wishlist dialog) hands the tracks it added to `monitorAddedTracks`, which
- * starts their download at once instead of waiting for the next wishlist run.
+ * starts their download at once instead of waiting for the next wishlist run,
+ * and monitors the album itself when every one of its tracks was picked.
  *
  * Both are reached through window from the classic scripts: one line in
  * `applyProgressiveTrackRendering` (every variant of the dialog calls it once
@@ -170,18 +171,55 @@ export async function startMonitoredDownloads(
   }
 }
 
+/** One track "Monitor" added: its wishlist row and the release it landed on. */
+export interface AddedRow {
+  id?: string | number | null;
+  /** The Library v2 album id; absent when nothing was materialized (non-admin). */
+  album?: number | null;
+}
+
 /**
- * The end of a "Monitor" click: start the downloads and word the toast.
+ * Monitor the release itself when every one of its tracks was picked.
  *
- * `added` counts the tracks the server accepted, `trackIds` the ones it
- * actually added (an owned track it skipped has nothing to download).
+ * Only then: picking a few tracks wants those tracks, picking all of them wants
+ * the album, which also covers tracks the provider adds to it later. Needs one
+ * Library v2 release behind all the rows; a playlist spans many and never gets
+ * here.
+ */
+async function monitorRelease(rows: AddedRow[]): Promise<boolean> {
+  const albums = new Set(rows.map((row) => row.album).filter((id) => id != null));
+  if (albums.size !== 1) return false;
+  const [albumId] = albums;
+  try {
+    const response = await fetch(`/api/library/v2/albums/${albumId}/monitor`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ monitored: true }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The end of a "Monitor" click: monitor the release when all of it was
+ * picked, start the downloads, and word the toast.
+ *
+ * `added` counts the tracks the server accepted, `rows` the ones it actually
+ * added (an owned track it skipped has nothing to download). `wholeRelease`
+ * says the pick was every track of one album.
  */
 export async function monitorAddedTracks(
   added: number,
-  trackIds: Array<string | number | null | undefined>,
+  rows: AddedRow[],
+  wholeRelease = false,
 ): Promise<string> {
-  const outcome = await startMonitoredDownloads(trackIds);
-  const what = `Monitoring ${added} track${added === 1 ? '' : 's'}`;
+  const release = wholeRelease && (await monitorRelease(rows));
+  const outcome = await startMonitoredDownloads(rows.map((row) => row.id));
+  const what = release
+    ? `Monitoring the album (${added} track${added === 1 ? '' : 's'})`
+    : `Monitoring ${added} track${added === 1 ? '' : 's'}`;
   if (outcome === 'started') return `${what} — download started`;
   if (outcome === 'busy') return `${what} — the running wishlist pass takes them`;
   if (outcome === 'failed') return `${what} — the download could not start, still wanted`;

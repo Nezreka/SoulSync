@@ -156,12 +156,19 @@ describe('the download dialog knows the library as soon as it opens', () => {
 
 describe('Monitor downloads what it added right away', () => {
   let requests: Array<{ track_ids: string[] }>;
+  let releases: string[];
   let status: number;
 
   beforeEach(() => {
     requests = [];
+    releases = [];
     status = 200;
     server.use(
+      http.post('/api/library/v2/albums/:id/monitor', async ({ params, request }) => {
+        expect(await request.json()).toEqual({ monitored: true });
+        releases.push(String(params.id));
+        return HttpResponse.json({ success: true });
+      }),
       http.post('/api/wishlist/download_missing', async ({ request }) => {
         requests.push((await request.json()) as { track_ids: string[] });
         return status === 409
@@ -183,15 +190,51 @@ describe('Monitor downloads what it added right away', () => {
 
   it('says so when the wishlist run is busy or the start fails', async () => {
     status = 409;
-    expect(await monitorAddedTracks(2, ['t1', 't2'])).toBe(
+    expect(await monitorAddedTracks(2, [{ id: 't1' }, { id: 't2' }])).toBe(
       'Monitoring 2 tracks — the running wishlist pass takes them',
     );
     status = 500;
-    expect(await monitorAddedTracks(1, ['t1'])).toBe(
+    expect(await monitorAddedTracks(1, [{ id: 't1' }])).toBe(
       'Monitoring 1 track — the download could not start, still wanted',
     );
     status = 200;
-    expect(await monitorAddedTracks(1, ['t1'])).toBe('Monitoring 1 track — download started');
+    expect(await monitorAddedTracks(1, [{ id: 't1' }])).toBe(
+      'Monitoring 1 track — download started',
+    );
     expect(await monitorAddedTracks(3, [])).toBe('Monitoring 3 tracks');
+  });
+
+  it('monitors the album itself when every track of it was picked', async () => {
+    const rows = [
+      { id: 't1::a', album: 7 },
+      { id: 't2::a', album: 7 },
+      { id: 't3::a', album: 7 },
+    ];
+
+    expect(await monitorAddedTracks(3, rows, true)).toBe(
+      'Monitoring the album (3 tracks) — download started',
+    );
+    expect(releases).toEqual(['7']);
+    expect(requests).toEqual([{ track_ids: ['t1::a', 't2::a', 't3::a'] }]);
+  });
+
+  it('leaves the album alone when only some tracks were picked', async () => {
+    expect(await monitorAddedTracks(1, [{ id: 't1::a', album: 7 }], false)).toBe(
+      'Monitoring 1 track — download started',
+    );
+    expect(releases).toHaveLength(0);
+  });
+
+  it('never monitors an album for tracks from several releases', async () => {
+    await monitorAddedTracks(
+      2,
+      [
+        { id: 'x', album: 7 },
+        { id: 'y', album: 8 },
+      ],
+      true,
+    );
+    await monitorAddedTracks(1, [{ id: 'z', album: null }], true);
+    expect(releases).toHaveLength(0);
   });
 });

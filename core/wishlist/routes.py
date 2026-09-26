@@ -1015,7 +1015,7 @@ def add_album_track_to_wishlist(
             # quarantines, or never starts. Best-effort/fail-open (never
             # raises), so it can't affect the already-succeeded wishlist add.
             from core.library2.materialize import materialize_wishlist_intent
-            materialize_wishlist_intent({
+            materialized = materialize_wishlist_intent({
                 "id": track.get("id"),
                 "name": track.get("name"),
                 "artists": [artist],
@@ -1025,12 +1025,14 @@ def add_album_track_to_wishlist(
             }, profile_id=runtime.profile_id,
                actor_profile_id=runtime.profile_id)
             # The key the row went in under (`<track>::<album>` when releases
-            # are kept apart), so a caller can hand exactly this row to
-            # /api/wishlist/download_missing -- the dialog's "Monitor" does.
+            # are kept apart) and the Library v2 release it landed on, so the
+            # dialog's "Monitor" can download exactly this row and, when every
+            # track of the release was picked, monitor the release itself.
             from core.wishlist.identity import wishlist_key_from_payload
             return {"success": True,
                     "message": f"Added '{track.get('name')}' to wishlist",
-                    "wishlist_id": wishlist_key_from_payload(track_data) or None}, 200
+                    "wishlist_id": wishlist_key_from_payload(track_data) or None,
+                    "lib2_album_id": (materialized or {}).get("album_id")}, 200
 
         runtime.logger.error("Failed to add track '%s' to wishlist", track.get("name"))
         return {"success": False, "error": "Failed to add track to wishlist"}, 200

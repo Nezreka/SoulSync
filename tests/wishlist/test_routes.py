@@ -600,8 +600,10 @@ def test_add_album_track_to_wishlist_builds_spotify_payload_and_merges_context()
     assert status == 200
     # wishlist_id is the row key, so the dialog's "Monitor" can download
     # exactly this row: one per release while duplicates are allowed.
-    assert payload == {"success": True, "message": "Added 'Song One' to wishlist",
-                       "wishlist_id": "track-1::album-1"}
+    # (lib2_album_id is whatever release the real materialize created)
+    assert {k: v for k, v in payload.items() if k != "lib2_album_id"} == {
+        "success": True, "message": "Added 'Song One' to wishlist",
+        "wishlist_id": "track-1::album-1"}
     assert len(service.add_calls) == 1
     add_call = service.add_calls[0]
     assert add_call["failure_reason"] == "Added from library (incomplete album)"
@@ -650,6 +652,28 @@ def test_add_album_track_to_wishlist_materializes_lib2_entity_on_success(monkeyp
     assert materialize_payload["album"] == album
     assert materialize_payload["track_number"] == 2
     assert materialize_payload["disc_number"] == 1
+
+
+def test_add_album_track_to_wishlist_names_the_release_it_landed_on(monkeypatch):
+    """The dialog's "Monitor" monitors the whole release when every track was
+    picked; for that it needs the Library v2 album the add materialized."""
+    import core.library2.materialize as materialize_module
+
+    monkeypatch.setattr(
+        materialize_module, "materialize_wishlist_intent",
+        lambda payload, **kwargs: {"artist_id": 3, "album_id": 7, "track_id": 11})
+
+    runtime, _service, _db, _logger, _activity_calls = _build_runtime()
+    payload, status = add_album_track_to_wishlist(
+        runtime,
+        track={"id": "track-1", "name": "Song One"},
+        artist={"id": "artist-1", "name": "Artist One"},
+        album={"id": "album-1", "name": "Album One"},
+    )
+
+    assert status == 200
+    assert payload["lib2_album_id"] == 7
+    assert payload["wishlist_id"] == "track-1::album-1"
 
 
 def test_add_album_track_to_wishlist_skips_materialize_when_add_fails(monkeypatch):
