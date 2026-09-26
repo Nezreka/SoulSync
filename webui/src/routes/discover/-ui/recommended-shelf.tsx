@@ -105,7 +105,7 @@ export function RecommendedShelf({
         {visible.map((artist) => (
           <RecommendedMiniCard
             key={`${artist.artist_id ?? ''}:${artist.artist_name ?? ''}`}
-            card={recommendedCard(artist, source, kind)}
+            card={recommendedCard(artist, source)}
             imageOverride={images[artist.artist_id ?? '']}
             watching={watchingIds.has(artist.artist_id ?? '')}
             buildDetailPath={buildDetailPath}

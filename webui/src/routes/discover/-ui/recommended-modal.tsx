@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import type { RecommendedArtist } from '../-discover.recommended';
 
-import { recommendationReason, recommendationReasonTitle } from '../-discover.helpers';
+import { explanationLine, explanationTitle } from '../-discover.explanation';
 import {
   recModalCountLabel,
   recModalGenres,
@@ -204,9 +204,9 @@ function ModalCard({
           <span className="recommended-card-name">{name}</span>
           <span
             className="recommended-card-similarity"
-            title={recommendationReasonTitle(artist as never)}
+            title={explanationTitle(artist.explanation)}
           >
-            {recommendationReason(artist as never)}
+            {explanationLine(artist.explanation)}
           </span>
           <div className="recommended-card-genres">
             {recModalGenres(artist).map((g) => (

@@ -4510,6 +4510,8 @@ class WatchlistScanner:
                 logger.info("[Listening Recs] no recommendations yet (no similar-artist coverage)")
                 return
 
+            from core.discovery.explain import consensus_confidence, explanation
+
             def _enrich(r):
                 m = artist_meta_by_name.get(r.name.lower(), {})
                 genres = m.get('genres')
@@ -4519,6 +4521,8 @@ class WatchlistScanner:
                     except Exception:
                         genres = None
                 return {'name': r.name, 'seed_count': r.seed_count, 'seeds': r.seeds[:5],
+                        'explanation': explanation('listened', r.seeds[:5],
+                                                   consensus_confidence(r.seed_count)),
                         'score': r.score, 'spotify_artist_id': m.get('spotify_artist_id'),
                         'itunes_artist_id': m.get('itunes_artist_id'),
                         'deezer_artist_id': m.get('deezer_artist_id'),

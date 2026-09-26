@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DiscoverHeroArtist } from '../-discover.types';
 import type { DiscoverSectionProps } from './discover-section';
 
+import { HERO_WATCHLIST_SUBTITLE } from '../-discover.hero';
 import { DiscoverHero } from './discover-hero';
 import { DiscoverSection } from './discover-section';
 
@@ -67,12 +68,28 @@ describe('the hero', () => {
     expect(container.querySelector('.hero-genres')).toBeNull();
   });
 
+  it('says a watchlist fallback artist is on your watchlist, not similar to anything', () => {
+    const { container } = render(
+      <DiscoverHero {...heroProps({ artist: artist({ is_watchlist: true }) })} />,
+    );
+    expect(container.querySelector('#discover-hero-subtitle')!.textContent).toBe(
+      HERO_WATCHLIST_SUBTITLE,
+    );
+  });
+
   it('subtitles with the per-artist REASON, carrying the full list as a title', () => {
     // The vanilla sets the subtitle to the "because you have X, Y" line per
     // artist (468); static copy is only the pre-load placeholder.
     const { container } = render(
       <DiscoverHero
-        {...heroProps({ artist: artist({ because: ['Squarepusher', 'Autechre'] } as never) })}
+        {...heroProps({
+          artist: artist({
+            explanation: {
+              kind: 'similar_to',
+              seeds: [{ name: 'Squarepusher' }, { name: 'Autechre' }],
+            },
+          }),
+        })}
       />,
     );
     const sub = container.querySelector('#discover-hero-subtitle')!;

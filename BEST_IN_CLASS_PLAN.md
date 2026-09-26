@@ -45,7 +45,29 @@ attempt was reverted, so nothing below is inherited from it.)
   cutoff as `below_cutoff`; "Apply Quality Upgrades" automation action
   (until_cutoff profiles only, capped per run, only exists if added).
   commit b1551261.
-- [ ] phase 5
+- [x] phase 5a: blocked artists never render. worse than suspected: discovery
+  never read the profile blocklist at all, and the two surfaces that filtered
+  (hero, recent releases) plus the discovery-pool sql used a global union of
+  every profile's blocks. now one definition (`core/discovery/blocked.py`),
+  applied to every discover GET that renders artists/albums/tracks, outside
+  the shelf cache. a guard test fails for a new discover route that is neither
+  filtered nor listed as "not a surface". daily mixes drop blocked seeds at
+  generation (their subtitle is text) and rebuild when the blocks change. the
+  discover page's blocked-artists modal now edits the profile blocklist; its
+  old global table was being re-migrated on every start, so an unblock came
+  back after a restart. commit a1d25e2a. also fixed on the way: three
+  wishlist source guards still pinned the vanilla jump phase 2 removed
+  (1dd94fd9).
+- [x] phase 5b: one explanation shape. `core/discovery/explain.py`, under
+  `explanation` (not `why`: artist cards already use `why` for chips and BYLT
+  rows for a note). written by the producers: the listening-recs scan, BYLT
+  generation, daily mixes, stations, and the similar-artist and hero cards.
+  stored data from before (listening recs, BYLT generations) gets the plain
+  version from its seeds. the ui words it in one place
+  (`-discover.explanation.ts`), wording pinned to the old copy by the
+  vanilla differential. stations write it but don't show it (the line would
+  repeat the station's name); it's there for 5c's seed context.
+- [ ] phase 5c
 - [ ] phase 6
 - [ ] phase 7
 - [ ] phase 0 checklists

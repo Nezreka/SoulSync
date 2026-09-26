@@ -21,12 +21,13 @@ import random
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
+from core.discovery.explain import explanation
 from utils.logging_config import get_logger
 
 logger = get_logger("personalized.daily_mixes")
 
 CURATED_KEY = "daily_mixes_v2"
-PAYLOAD_VERSION = 3
+PAYLOAD_VERSION = 4
 MAX_MIXES = 6
 MIX_SIZE = 40
 DISCOVERY_PER_MIX = 8
@@ -344,6 +345,10 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
             "tracks": tracks,
             "owned_count": len(owned_tracks),
             "total": len(tracks),
+            # made from artists you play; confidence is the share of it that
+            # is already yours rather than discovery flavor
+            "explanation": explanation("listened", cluster['artists'],
+                                       len(owned_tracks) / len(tracks) if tracks else None),
         })
     return {
         "mixes": mixes,
@@ -352,7 +357,8 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
         # the blocks this was built under: a new block rebuilds it
         "blocked": blocked.fingerprint(),
         # payload version: bump to invalidate stored payloads whose SHAPE or
-        # content rules changed (v3 = library durations stay in milliseconds)
+        # content rules changed (v3 = library durations stay in milliseconds,
+        # v4 = each mix carries its explanation)
         "v": PAYLOAD_VERSION,
     }
 

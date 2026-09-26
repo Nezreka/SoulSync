@@ -15,13 +15,8 @@
  * the layout — the user should see both react.
  */
 
-import {
-  listeningRecommendationReason,
-  listeningRecommendationReasonTitle,
-  recommendationReason,
-  recommendationReasonTitle,
-  whyIcon,
-} from './-discover.helpers';
+import { type Explanation, explanationLine, explanationTitle } from './-discover.explanation';
+import { whyIcon } from './-discover.helpers';
 
 /** `items.slice(0, 18)` in both sections (1052, 1092). */
 export const RECOMMENDED_CARD_LIMIT = 18;
@@ -35,6 +30,8 @@ export interface RecommendedArtist {
   image_url?: string;
   source?: string;
   why?: { type?: string; label?: string }[];
+  /** Why it is recommended, written by the server (`-discover.explanation.ts`). */
+  explanation?: Explanation;
   spotify_artist_id?: string;
   deezer_artist_id?: string;
   itunes_artist_id?: string;
@@ -83,11 +80,6 @@ export const RECOMMENDED_SECTIONS: Record<'recommended' | 'listening', Recommend
 };
 
 /** The reason pair each section injects (966-967, 1094-1095). */
-export const REASON_FNS = {
-  recommended: { reason: recommendationReason, title: recommendationReasonTitle },
-  listening: { reason: listeningRecommendationReason, title: listeningRecommendationReasonTitle },
-};
-
 /** `data.source || 'spotify'` (1048, 1091) — the fallback source. */
 export const DEFAULT_REC_SOURCE = 'spotify';
 
@@ -125,12 +117,7 @@ export interface RecommendedCard {
  * `artist.source` wins over the section's source, so a mixed-source response
  * still links each card to the right provider.
  */
-export function recommendedCard(
-  artist: RecommendedArtist,
-  sectionSource: string,
-  kind: 'recommended' | 'listening' = 'recommended',
-): RecommendedCard {
-  const fns = REASON_FNS[kind];
+export function recommendedCard(artist: RecommendedArtist, sectionSource: string): RecommendedCard {
   const chips = (artist.why ?? []).slice(0, WHY_CHIP_LIMIT).map((w) => ({
     type: w.type ?? '',
     label: w.label ?? '',
@@ -159,8 +146,8 @@ export function recommendedCard(
     source: artist.source || sectionSource || '',
     image: artist.image_url ?? null,
     chips,
-    reason: fns.reason(artist as never),
-    reasonTitle: fns.title(artist as never),
+    reason: explanationLine(artist.explanation),
+    reasonTitle: explanationTitle(artist.explanation),
     showChips: chips.length > 0,
   };
 }

@@ -41,13 +41,6 @@ export interface NormalizedTrack {
   durationMs: number;
 }
 
-/** An artist recommendation carrying the "because you have X" provenance. */
-export interface RecommendedArtistLike {
-  because?: string[];
-  occurrence_count?: number;
-  [key: string]: unknown;
-}
-
 /**
  * Strip featured-artist noise from an artist name.
  *
@@ -148,32 +141,6 @@ export function discoverTrackToSpotifyShape(track: DiscoverTrackLike): Record<st
   return s;
 }
 
-/**
- * "Because you have X" — why a similar-artist recommendation surfaced.
- *
- * Returns RAW text; React escapes it. See the file header for why this differs
- * from the vanilla, which escaped inline for innerHTML.
- */
-export function recommendationReason(artist: RecommendedArtistLike | null | undefined): string {
-  const names = (artist && artist.because) || [];
-  if (names.length === 1) return `Because you have ${names[0]}`;
-  if (names.length === 2) return `Because you have ${names[0]} & ${names[1]}`;
-  if (names.length >= 3) {
-    const shown = names.slice(0, 2).join(', ');
-    return `Because you have ${shown} +${names.length - 2} more`;
-  }
-  const n = (artist && artist.occurrence_count) || 0;
-  return n > 1 ? `Similar to ${n} artists in your library` : 'Similar to an artist in your library';
-}
-
-/** The full provenance list, for the tooltip. Never escaped in the vanilla either. */
-export function recommendationReasonTitle(
-  artist: RecommendedArtistLike | null | undefined,
-): string {
-  const names = (artist && artist.because) || [];
-  return names.length ? `In your library: ${names.join(', ')}` : '';
-}
-
 /** Glyph for a recommendation's "why" category. */
 export function whyIcon(type: string | null | undefined): string {
   return type === 'genre'
@@ -185,32 +152,4 @@ export function whyIcon(type: string | null | undefined): string {
         : type === 'explore'
           ? '🧭'
           : '✨';
-}
-
-/**
- * "Because you listen to X" — the play-weighted sibling of recommendationReason
- * (#913 listening recommendations). Same shape, different copy, and a different
- * zero-case: play data implies artists you play, not artists you merely own.
- *
- * Returns RAW text; React escapes it.
- */
-export function listeningRecommendationReason(
-  artist: RecommendedArtistLike | null | undefined,
-): string {
-  const names = (artist && artist.because) || [];
-  if (names.length === 1) return `Because you listen to ${names[0]}`;
-  if (names.length === 2) return `Because you listen to ${names[0]} & ${names[1]}`;
-  if (names.length >= 3) {
-    const shown = names.slice(0, 2).join(', ');
-    return `Because you listen to ${shown} +${names.length - 2} more`;
-  }
-  return 'From artists you play often';
-}
-
-/** Tooltip counterpart for the listening recommendations. */
-export function listeningRecommendationReasonTitle(
-  artist: RecommendedArtistLike | null | undefined,
-): string {
-  const names = (artist && artist.because) || [];
-  return names.length ? `You listen to: ${names.join(', ')}` : '';
 }

@@ -2,14 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { loadVanilla } from '../../test/vanilla-extract';
 import { advColor, advState, advWaveY } from './-discover.adventurousness';
+import { explanationLine, explanationTitle } from './-discover.explanation';
 import {
   cleanArtistName,
   discoverTrackToSpotifyShape,
-  listeningRecommendationReason,
-  listeningRecommendationReasonTitle,
   normalizeTrack,
-  recommendationReason,
-  recommendationReasonTitle,
   whyIcon,
 } from './-discover.helpers';
 import { buildDiscoverArtistContext } from './-discover.seasonal';
@@ -144,38 +141,29 @@ describe('discoverTrackToSpotifyShape', () => {
   });
 });
 
-describe('the recommendation reason strings', () => {
-  const cases: unknown[] = [
-    { because: ['One'] },
-    { because: ['One', 'Two'] },
-    { because: ['One', 'Two', 'Three'] },
-    { because: ['One', 'Two', 'Three', 'Four', 'Five'] },
-    { because: [] },
-    { because: [], occurrence_count: 1 },
-    { because: [], occurrence_count: 5 },
-    { occurrence_count: 0 },
-    {},
-    null,
-    undefined,
-    // The escaping case: raw here, escaped by React at render.
-    { because: ['AC/DC & Friends', '<b>bold</b>'] },
+describe('the explanation line keeps the vanilla wording for named seeds', () => {
+  // The vanilla built these from a `because` list per shelf; the server now
+  // writes one explanation shape and the screen only words it. Where seeds
+  // are named, the words must not change.
+  const cases: string[][] = [
+    ['One'],
+    ['One', 'Two'],
+    ['One', 'Two', 'Three'],
+    ['One', 'Two', 'Three', 'Four', 'Five'],
+    // raw here, escaped by React at render
+    ['AC/DC & Friends', '<b>bold</b>'],
   ];
-  for (const [i, input] of cases.entries()) {
-    it(`recommendationReason matches for case ${i}`, () => {
-      expect(recommendationReason(input as never)).toBe(V._recommendationReason(input));
+  for (const [i, names] of cases.entries()) {
+    const seeds = names.map((name) => ({ name }));
+    it(`similar_to matches _recommendationReason for case ${i}`, () => {
+      const e = { kind: 'similar_to', seeds };
+      expect(explanationLine(e)).toBe(V._recommendationReason({ because: names }));
+      expect(explanationTitle(e)).toBe(V._recommendationReasonTitle({ because: names }));
     });
-    it(`recommendationReasonTitle matches for case ${i}`, () => {
-      expect(recommendationReasonTitle(input as never)).toBe(V._recommendationReasonTitle(input));
-    });
-    it(`listeningRecommendationReason matches for case ${i}`, () => {
-      expect(listeningRecommendationReason(input as never)).toBe(
-        V._listeningRecommendationReason(input),
-      );
-    });
-    it(`listeningRecommendationReasonTitle matches for case ${i}`, () => {
-      expect(listeningRecommendationReasonTitle(input as never)).toBe(
-        V._listeningRecommendationReasonTitle(input),
-      );
+    it(`listened matches _listeningRecommendationReason for case ${i}`, () => {
+      const e = { kind: 'listened', seeds };
+      expect(explanationLine(e)).toBe(V._listeningRecommendationReason({ because: names }));
+      expect(explanationTitle(e)).toBe(V._listeningRecommendationReasonTitle({ because: names }));
     });
   }
 });

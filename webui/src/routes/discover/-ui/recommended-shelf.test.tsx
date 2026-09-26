@@ -196,8 +196,11 @@ describe('the card', () => {
         {...props({
           artists: [
             artist({
-              because: ['Squarepusher', 'Autechre', 'Plaid'],
-            } as Partial<RecommendedArtist>),
+              explanation: {
+                kind: 'similar_to',
+                seeds: [{ name: 'Squarepusher' }, { name: 'Autechre' }, { name: 'Plaid' }],
+              },
+            }),
           ],
         })}
       />,
@@ -207,14 +210,14 @@ describe('the card', () => {
     expect(sub).toHaveAttribute('title', 'In your library: Squarepusher, Autechre, Plaid');
   });
 
-  it('reads the reason differently per shelf', () => {
-    // The two shelves inject different reason functions; sharing one would make
-    // the listening shelf explain itself as a similarity match.
-    const a = artist({ occurrence_count: 4 } as Partial<RecommendedArtist>);
-    const { container, rerender } = render(<RecommendedShelf {...props({ artists: [a] })} />);
-    const first = container.querySelector('.ya-card-sub')!.textContent;
-    rerender(<RecommendedShelf {...props({ kind: 'listening', artists: [a] })} />);
-    expect(container.querySelector('.ya-card-sub')!.textContent).not.toBe(first);
+  it('words each card from the explanation the server wrote', () => {
+    // The listening shelf's cards say "listen to" because the scan that made
+    // them wrote kind 'listened', not because the shelf guesses.
+    const a = artist({ explanation: { kind: 'listened', seeds: [{ name: 'Tool' }] } });
+    const { container } = render(
+      <RecommendedShelf {...props({ kind: 'listening', artists: [a] })} />,
+    );
+    expect(container.querySelector('.ya-card-sub')!.textContent).toBe('Because you listen to Tool');
   });
 
   it('adds to the watchlist with the id, the name and the id source', () => {

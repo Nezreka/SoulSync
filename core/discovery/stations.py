@@ -138,7 +138,9 @@ def build_stations(database, profile_id: int = 1,
                 [_norm(n) for n in every_companion])
             playable_companions = {row[0] for row in cur.fetchall()}
 
+    from core.discovery.explain import explanation, seed as explain_seed
     from core.metadata import normalize_image_url
+    top_weight = max((float(s.get('weight') or 0) for s in seeds), default=0.0)
     for s in seeds:
         key = _norm(s['name'])
         row = by_name.get(key)
@@ -159,10 +161,23 @@ def build_stations(database, profile_id: int = 1,
             # named, but not guaranteed by any playback contract
             "related": unverified[:RELATED_NAMES],
             "playable_tracks": int(row.get("playable") or 0),
+            # a station is recommended because you play its artist; confidence
+            # is how heavily, next to your most-played
+            "explanation": explanation("listened", [explain_seed(row["name"], *_first_source_id(row))],
+                                       (float(s.get('weight') or 0) / top_weight) if top_weight else None),
         })
         if len(stations) >= max_stations:
             break
     return stations
+
+
+def _first_source_id(row: Dict[str, Any]):
+    """(id, source) of the first provider id an artists row carries."""
+    for source, column in (("spotify", "spotify_artist_id"), ("itunes", "itunes_artist_id"),
+                           ("deezer", "deezer_id"), ("musicbrainz", "musicbrainz_id")):
+        if row.get(column):
+            return str(row[column]), source
+    return None, None
 
 
 # ── the finite station preview ──────────────────────────────────────────────

@@ -105,6 +105,8 @@ export const HERO_LOADING_SUBTITLE =
   'Warming up your recommendations — the first visit after a restart takes a few seconds.';
 export const HERO_EMPTY_TITLE = 'No Recommendations Yet';
 export const HERO_EMPTY_SUBTITLE = 'Run a watchlist scan to generate personalized recommendations';
+/** The watchlist fallback: nothing recommended these, so say what they are. */
+export const HERO_WATCHLIST_SUBTITLE = 'On your watchlist';
 
 // ── Interactions ────────────────────────────────────────────────────────────
 

@@ -104,3 +104,16 @@ def test_empty_answers_stay_uncached(app_ctx, monkeypatch):
     db.artists = [_artist('SZA')]
     out2 = hero.get_discover_hero().get_json()
     assert out2['artists'][0]['artist_name'] == 'SZA'
+
+
+def test_hero_cards_carry_the_explanation(app_ctx, monkeypatch):
+    db = _FakeDb([_artist('Aphex Twin'), _artist('SZA')])
+    db.get_recommendation_sources = lambda names, profile_id=1: {'Aphex Twin': ['Autechre']}
+    monkeypatch.setattr(hero, 'get_database', lambda: db)
+
+    by_name = {a['artist_name']: a for a in hero.get_discover_hero().get_json()['artists']}
+    assert by_name['Aphex Twin']['explanation'] == {
+        'kind': 'similar_to', 'confidence': 0.5,
+        'seeds': [{'name': 'Autechre', 'id': None, 'source': None}]}
+    # no resolvable source: still the shape, confidence from how many point here
+    assert by_name['SZA']['explanation'] == {'kind': 'similar_to', 'seeds': [], 'confidence': 0.88}

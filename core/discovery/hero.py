@@ -201,6 +201,16 @@ def get_discover_hero():
         # Take top 10 (already ordered by least-recently-featured, then quality)
         similar_artists = valid_artists[:10]
 
+        # the artists of yours that point at each one, for the explanation
+        from core.discovery.explain import consensus_confidence, explanation
+        try:
+            sources_by_name = database.get_recommendation_sources(
+                [a.similar_artist_name for a in similar_artists],
+                profile_id=get_current_profile_id()) or {}
+        except Exception as e:
+            logger.debug("hero recommendation-sources lookup failed: %s", e)
+            sources_by_name = {}
+
         # Convert to JSON format — use cached metadata, only fetch from API if missing
         hero_artists = []
         for artist in similar_artists:
@@ -224,6 +234,10 @@ def get_discover_hero():
                 "similarity_rank": artist.similarity_rank,
                 "source": active_source
             }
+            because = sources_by_name.get(artist.similar_artist_name) or []
+            artist_data["explanation"] = explanation(
+                'similar_to', because,
+                consensus_confidence(len(because) or artist.occurrence_count))
 
             # Use cached metadata if available
             if artist.image_url:

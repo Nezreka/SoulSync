@@ -36,6 +36,9 @@ from core.discovery.hero import get_discover_hero as _discover_hero_get
 from core.discovery.blocked import (  # noqa: E402
     ARTISTS, GRAPH, NAMES, WORKS, hide_blocked_in_response as _hide_blocked,
 )
+from core.discovery.explain import (  # noqa: E402
+    consensus_confidence as _consensus_confidence, explanation as _explanation,
+)
 from core.library.service_search import _search_service
 from core.metadata import normalize_image_url as fix_artist_image_url
 from core.metadata.cache import get_metadata_cache
@@ -331,7 +334,7 @@ def hydrate_discover_downloads():
 
 
 @bp.route('/api/discover/hero', methods=['GET'])
-@_hide_blocked({'artists': ARTISTS})
+@_hide_blocked({'artists': ARTISTS, 'artists[].explanation.seeds': NAMES})
 def get_discover_hero():
     return _discover_hero_get()
 
@@ -378,7 +381,7 @@ def _discover_primary_genre(item):
 
 
 @bp.route('/api/discover/similar-artists', methods=['GET'])
-@_hide_blocked({'artists': ARTISTS, 'artists[].because': NAMES})
+@_hide_blocked({'artists': ARTISTS, 'artists[].explanation.seeds': NAMES})
 @_discover_shelf_cache(key_extra=_discover_dial_key)
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
@@ -447,9 +450,10 @@ def get_discover_similar_artists():
             if artist.popularity:
                 artist_data["popularity"] = artist.popularity
             # "because you have X, Y, Z" — the artists of yours that point here
-            because = sources_by_name.get(artist.similar_artist_name)
-            if because:
-                artist_data["because"] = because
+            because = sources_by_name.get(artist.similar_artist_name) or []
+            artist_data["explanation"] = _explanation(
+                'similar_to', because,
+                _consensus_confidence(len(because) or artist.occurrence_count))
             result_artists.append(artist_data)
 
         # Re-rank: genre/tag affinity (always-on) + the adventurousness popularity penalty (dial).
@@ -488,7 +492,8 @@ def get_discover_similar_artists():
             from core.discovery.listening_recommendations import why_chips
             for a in result_artists:
                 _w = why_chips(genre_affinity=a.get('_why_genre', 0.0), popularity=a.get('popularity'),
-                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0),
+                               seed_count=len(sources_by_name.get(a.get('artist_name')) or [])
+                               or int(a.get('occurrence_count') or 0),
                                level=_adv_level)   # adaptive: "Off your usual path" on the adventurous end
                 if _w:
                     a['why'] = _w
@@ -638,7 +643,7 @@ def _autostart_popularity_backfill():
 
 
 @bp.route('/api/discover/listening-recommendations', methods=['GET'])
-@_hide_blocked({'artists': ARTISTS, 'artists[].because': NAMES})
+@_hide_blocked({'artists': ARTISTS, 'artists[].explanation.seeds': NAMES})
 @_discover_shelf_cache(key_extra=_discover_dial_key)
 def get_discover_listening_recommendations():
     """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
@@ -727,9 +732,10 @@ def get_discover_listening_recommendations():
                 entry["image_url"] = fix_artist_image_url(img)
             if a.get('genres'):
                 entry["genres"] = a['genres'][:3]
-            # "because you listen to X, Y, Z" — the most-played artists that point here.
-            if a.get('seeds'):
-                entry["because"] = a['seeds']
+            # "because you listen to X, Y, Z" — written by the scan that made the
+            # rec; recs stored before the shape existed get it from their seeds
+            entry["explanation"] = a.get('explanation') or _explanation(
+                'listened', a.get('seeds') or [], _consensus_confidence(a.get('seed_count')))
             result_artists.append(entry)
 
         # Spread the shown picks across genres (broader discovery). No-ops on small lists.
@@ -1917,7 +1923,8 @@ def get_hidden_gems_playlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/personalized/daily-mixes', methods=['GET'])
-@_hide_blocked({'mixes[].tracks': WORKS, 'mixes[].artists': NAMES})
+@_hide_blocked({'mixes[].tracks': WORKS, 'mixes[].artists': NAMES,
+                'mixes[].explanation.seeds': NAMES})
 def get_daily_mixes():
     """Daily Mixes - taste-clustered blends of owned + discovery tracks.
 

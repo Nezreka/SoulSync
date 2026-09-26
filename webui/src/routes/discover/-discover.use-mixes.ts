@@ -17,6 +17,7 @@ import {
   fetchSeasonalPlaylist,
 } from './-discover.api';
 import { decadeMix, type AvailableDecade } from './-discover.decade-shelf';
+import { type Explanation, explanationLine } from './-discover.explanation';
 import { discoverLimiter } from './-discover.limiter';
 import { seasonalHasPlaylist, seasonalMixTitles } from './-discover.seasonal';
 
@@ -200,7 +201,7 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
     }
   }
 
-  // Daily Mixes - one card per taste cluster, subtitled by its artists.
+  // Daily Mixes - one card per taste cluster, subtitled by why it exists.
   const dailyOutcome = daily.data as SectionOutcome<Record<string, unknown>> | undefined;
   const dailyPayload = dailyOutcome?.kind === 'ok' ? dailyOutcome.data : undefined;
   if (dailyPayload && Array.isArray(dailyPayload.mixes)) {
@@ -210,7 +211,8 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
       mixes.push({
         key: raw.key,
         title: String(raw.name || raw.key),
-        subtitle: String(raw.subtitle || ''),
+        subtitle:
+          explanationLine(raw.explanation as Explanation | undefined) || String(raw.subtitle || ''),
         tracks,
       });
     }

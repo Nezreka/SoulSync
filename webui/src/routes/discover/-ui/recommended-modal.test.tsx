@@ -113,7 +113,16 @@ describe('the modal', () => {
   it('carries a similarity line with its long-form title', () => {
     const { container } = render(
       <RecommendedModal
-        {...props({ artists: [artist({ because: ['Squarepusher', 'Autechre'] } as never)] })}
+        {...props({
+          artists: [
+            artist({
+              explanation: {
+                kind: 'similar_to',
+                seeds: [{ name: 'Squarepusher' }, { name: 'Autechre' }],
+              },
+            }),
+          ],
+        })}
       />,
     );
     const line = container.querySelector('.recommended-card-similarity')!;

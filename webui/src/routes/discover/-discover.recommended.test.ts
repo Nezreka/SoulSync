@@ -119,12 +119,26 @@ describe('the shared card', () => {
     expect(recommendedCard(artist({ why: [] }), 'spotify').showChips).toBe(false);
   });
 
-  it('uses a DIFFERENT reason function per section', () => {
-    const a = artist({ similar_to: 'Autechre', match_count: 3 } as Partial<RecommendedArtist>);
-    const rec = recommendedCard(a, 'spotify', 'recommended');
-    const lis = recommendedCard(a, 'spotify', 'listening');
-    expect(rec.reason).toBeTypeOf('string');
-    expect(lis.reason).toBeTypeOf('string');
+  it('words the explanation the server wrote, whichever shelf it is on', () => {
+    const similar = recommendedCard(
+      artist({ explanation: { kind: 'similar_to', seeds: [{ name: 'Autechre' }] } }),
+      'spotify',
+    );
+    expect(similar.reason).toBe('Because you have Autechre');
+    expect(similar.reasonTitle).toBe('In your library: Autechre');
+    const listened = recommendedCard(
+      artist({
+        explanation: {
+          kind: 'listened',
+          seeds: [{ name: 'Tool' }, { name: 'Deftones' }, { name: 'Soen' }],
+          confidence: 0.88,
+        },
+      }),
+      'spotify',
+    );
+    expect(listened.reason).toBe('Because you listen to Tool, Deftones +1 more');
+    expect(listened.reasonTitle).toBe('You listen to: Tool, Deftones, Soen');
+    expect(recommendedCard(artist(), 'spotify').reason).toBe('');
   });
 
   it('defaults a nameless artist to empty strings rather than undefined', () => {

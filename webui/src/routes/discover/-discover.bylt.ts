@@ -25,6 +25,8 @@
  * and its test.
  */
 
+import { type Explanation, explanationLine } from './-discover.explanation';
+
 /** The container this section creates for itself. */
 export const BYLT_CONTAINER_ID = 'discover-bylt-sections';
 
@@ -81,6 +83,8 @@ export interface ByltSection {
   artist_name?: string;
   artist_image?: string;
   reason?: ByltReason;
+  /** Why the shelf exists, written by the server (`-discover.explanation.ts`). */
+  explanation?: Explanation;
   presentation?: ByltPresentation;
   requested?: number;
   resolved?: number;
@@ -307,6 +311,10 @@ export function byltShelfVirtualId(section: ByltSection): string {
   return `discover_bylt_${seed}`;
 }
 
+/** The shelf's name as a queue or a synced playlist: its explanation. */
 export function byltShelfTitle(section: ByltSection): string {
-  return `Because you listen to ${section.artist_name ?? ''}`.trim();
+  return (
+    explanationLine(section.explanation) ||
+    `Because you listen to ${section.artist_name ?? ''}`.trim()
+  );
 }
