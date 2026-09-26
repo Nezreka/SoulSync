@@ -2746,10 +2746,13 @@ def _has_remaining_audio(directory: str) -> bool:
     """Return True if `directory` contains any audio files. Used as the
     safety check before stripping album-level sidecars: if a track
     failed to move, leave its cover art and friends in place."""
+    from core.library.residual_files import is_appledouble
     if not os.path.isdir(directory):
         return False
     try:
         for name in os.listdir(directory):
+            if is_appledouble(name):
+                continue   # a macOS `._track.flac` splits to '.flac' but isn't audio
             full = os.path.join(directory, name)
             if not os.path.isfile(full):
                 continue

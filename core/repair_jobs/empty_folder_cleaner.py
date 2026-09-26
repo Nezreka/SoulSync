@@ -24,7 +24,7 @@ from typing import Iterable, List
 
 from core.library.residual_files import JUNK_FILES, is_disposable, is_junk  # noqa: F401 — JUNK_FILES/is_junk re-exported
 from core.repair_jobs import register_job
-from core.repair_jobs.base import is_internal_transfer_dir, JobContext, JobResult, RepairJob
+from core.repair_jobs.base import is_internal_transfer_dir, JobContext, JobResult, RepairJob, walk_library
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.empty_folder_cleaner")
@@ -185,7 +185,7 @@ class EmptyFolderCleanerJob(RepairJob):
         if not root or not os.path.isdir(root):
             return 0
         total = 0
-        for _dp, dirnames, _f in os.walk(root):
+        for _dp, dirnames, _f in walk_library(root):
             total += len(dirnames)
         return total
 
@@ -211,6 +211,8 @@ def remove_empty_folder(folder_path: str, *, junk_files: List[str], remove_junk:
         return {'removed': False, 'error': 'Refusing to remove the library root'}
 
     def _purgeable(e: str) -> bool:
+        if isdir(os.path.join(folder_path, e)):
+            return False   # only files are leftovers; a subdir holds entries of its own
         return (remove_junk and is_junk(e)) or (remove_disposable and is_disposable(e))
 
     # Re-check at apply time: only purgeable leftovers now? (Anything else = leave it.)
