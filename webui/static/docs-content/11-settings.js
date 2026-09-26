@@ -14,7 +14,7 @@ SoulSync needs credentials for the services it queries for metadata and enrichme
 
 - **Spotify** — Client ID, Client Secret, and Redirect URI (from the Spotify Developer Dashboard). Powers metadata, discovery, and playlist sync.
 - **slskd** — slskd URL and API key, entered on the Soulseek source panel (Downloads / Sources tabs). Powers Soulseek downloading.
-- **Tidal** — Client ID, Client Secret, and Redirect URI. Log in with the Authenticate button — it finishes in the browser with a test playback to confirm.
+- **Tidal** — Client ID, Client Secret, and Redirect URI. Log in with the Authenticate button — it opens Tidal's authorization page in the browser, and the callback is just a success page: close the window and you're connected.
 - **Last.fm** — API key, API secret, and your username. Powers scrobbling, similar artists, and listening-history import.
 - **Genius** — Client access token for lyrics.
 - **Qobuz** — Email and password, or a pasted auth token when login hits a CAPTCHA. Powers metadata enrichment and Qobuz downloads.
@@ -90,9 +90,11 @@ The chain editor lives on the Downloads tab: drag sources from **Available** int
 
 ## Behavior
 
-- **iTunes country** — which store region to search, with fallback options if a release isn't available in your region
-- **Lossy copy settings** — optionally keep a lossy copy of each track alongside the lossless original
-- **YouTube cookies** — authenticate with a browser profile or a \`cookies.txt\` file when YouTube rate-limits anonymous downloads
+These live on other tabs, not Downloads:
+
+- **Storefront Country (iTunes)** — on the **Connections** tab, under the iTunes / Apple Music service card: which store region to search, with fallback options if a release isn't available in your region
+- **Lossy copy** — on the **Quality** tab ("Create lossy copy of downloaded FLAC files"): optionally keep a lossy copy of each downloaded FLAC alongside the original
+- **YouTube cookies** — on the **Sources** tab, in the YouTube source panel ("YouTube Browser Cookies" / "Paste cookies.txt"): authenticate with a browser profile or a \`cookies.txt\` file when YouTube rate-limits anonymous downloads
 
 ![Downloads settings](settings-downloads.jpg)
 `
@@ -117,7 +119,7 @@ The chain editor lives on the Downloads tab: drag sources from **Available** int
 ## Performance
 
 - **Search timeout** — how long to spend searching per track before giving up
-- **Discovery lookback** — how far back the discovery engine looks for new releases
+- **Lookback Period** — how far back the discovery engine looks for new releases
 `
         },
         {
@@ -125,12 +127,11 @@ The chain editor lives on the Downloads tab: drag sources from **Available** int
             title: 'Quality Profiles',
             lede: 'Define exactly what "good enough" means for your downloads.',
             body: `
-Quality profiles define the acceptable formats and bitrates for downloads, plus upgrade behavior:
+Quality profiles define which formats are acceptable for downloads, and when a file is "good enough" to stop upgrading:
 
-- **Preferred formats** — e.g. FLAC first, then MP3 320
-- **Minimum quality** — reject anything below this
-- **Upgrade behavior** — replace lower-quality files when better copies are found
-- **Per-artist overrides** — marked "planned" in settings itself; not available yet
+- **Quality priority (drag to reorder — 1st = most preferred)** — the ranked list of format targets (e.g. FLAC first, then MP3 320); a download source that matches no target is skipped
+- **Upgrade until** — **Any accepted target** stops once a file matches any target; **Selected target or better** keeps replacing lower-quality files until they reach the selected cutoff target or better
+- **Quick Presets** — one-click starting points for common quality setups
 
 ![Quality profiles](dl-quality-profiles.jpg)
 

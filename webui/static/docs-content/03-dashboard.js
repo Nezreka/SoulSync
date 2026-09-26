@@ -6,19 +6,19 @@ registerDocsSection({
         {
             id: 'dash-overview',
             title: 'Overview & Stats',
-            lede: 'Your command center: library stats, alerts, sync pipelines, and quick actions — all updating live.',
+            lede: 'Your command center: library stats, alerts, and sync pipelines — all updating live.',
             body: `
 ## Layout
 
 The dashboard is organized into bands that appear when they have something to show:
 
-- **Header** — library stats (artists, albums, tracks) and **worker orbs** showing enrichment status per service. **Quick navigation tiles** jump straight to Watchlist and Wishlist, with live badges and the next watchlist scan countdown.
+- **Header** — library stats (artists, albums, tracks) and **worker orbs** showing enrichment status per service.
 - **Alerts band** — the exception surface. It renders *nothing* while every core connection is healthy, and shouts only when a human is needed (a service disconnected, a scan failed, etc.).
 - **Active downloads** — appears full-width while anything is downloading, with live progress.
 - **Listen band** — **Library Radio** (an endless shuffle of your own collection) and **Your Mixes** (the doorway to Discover's daily mixes).
 - **Content rails** — what's new in your library: recently added albums, new releases from watched artists.
 - **Listening history** — what you've been playing, once history exists.
-- **Sidebar** — the **Playlist sync** rail (your sync pipelines with live phases), a compact Automations card, and quick navigation tiles.
+- **Sidebar** — the **Playlist sync** rail (your sync pipelines with live phases), a compact Automations card, and **quick navigation tiles** that jump straight to Watchlist and Wishlist, with live badges and the next watchlist scan countdown.
 - **Footer** — quick settings toggles.
 
 Stats update in real time over WebSocket — no page refresh needed.
@@ -216,30 +216,24 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Cache Maintenance | Cleans expired metadata cache entries |
 
 > [!WARNING]
-> **Mass orphan safety:** if the orphan detector flags more than 20 findings with the mass-orphan flag set, a **"Witness Me"** confirmation requires you to type the phrase before any deletions proceed — preventing accidental mass deletion from path mismatches.
+> **Mass orphan safety:** when the orphan detector's mass-orphan guard trips (over half the scanned files look like orphans — usually a DB↔filesystem path mismatch, not real orphans), the scan refuses to create any findings at all, so there's nothing to bulk-delete. The **"Witness Me"** type-the-phrase confirmation exists for bulk orphan deletes, but it can't trigger while the guard refuses findings.
 `
         },
         {
             id: 'dash-activity',
-            title: 'Activity Feed',
-            lede: 'A real-time stream of everything happening in SoulSync.',
+            title: 'Recent Activity',
+            lede: 'The dashboard has no dedicated activity feed — here is where recent events actually surface.',
             body: `
-## What you'll see
+## Where recent events surface
 
-The activity feed shows recent system events as they happen — no refresh needed:
+The dashboard does not render an activity feed. Recent activity shows up in the bands that own it:
 
-- Downloads started, completed, or failed
-- Playlist syncs and discovery runs
-- Watchlist scans and new releases found
-- Automation runs
-- Enrichment worker progress
-- Settings changes
-- System errors
+- **Alerts band** — exceptions that need a human (a service disconnected, a scan failed, etc.). Renders nothing while every core connection is healthy.
+- **Active downloads** — downloads in progress, full-width, with live progress. Finished work moves to the history on the Active Downloads page.
+- **Automations card** — recent and upcoming automation runs, in the sidebar.
+- **Listening history** — what you've been playing, once history exists.
 
-The feed shows the most recent events and updates live over WebSocket. For older history, check the application logs (see [Understanding Logs](#ts-logs)).
-
-> [!TIP]
-> Errors in the activity feed usually link to the relevant docs page — click **Learn more →** on any notification to jump straight to the explanation.
+Stats and bands update in real time over WebSocket — no page refresh needed. For older history, check the application logs (see [Understanding Logs](#ts-logs)).
 `
         },
     ]

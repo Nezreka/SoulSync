@@ -134,7 +134,7 @@ The Issues page is the **manual issue tracker**: nothing here is ever written by
 Issues are grouped by category — wrong track, wrong metadata, wrong cover, wrong artist, wrong album, duplicate tracks, missing tracks, audio quality, incomplete album, other — each with a status (**open**, **in progress**, **resolved**, **dismissed**) and a priority (**low**, **normal**, **high**). Filter by status and category to work through them, and update issues individually or in bulk.
 
 > [!NOTE]
-> The **"witness me"** type-the-phrase confirmation doesn't live here — it gates orphan fixes in **Library Maintenance**: when a bulk orphan fix targets more than 20 findings *and* the backend flags a mass-orphan situation (over half the scanned files look like orphans, which usually means a path mismatch rather than real orphans), you must type **witness me** before any files are deleted.
+> The **"witness me"** type-the-phrase confirmation doesn't live here — it gates bulk orphan deletes in **Library Maintenance**: a delete targeting more than 20 orphan findings where at least one finding carries the backend's \`mass_orphan\` flag. But the current backend never sets that flag — when the orphan-file scan trips its mass-orphan guard (over half the scanned files look like orphans, which usually means a DB↔filesystem path mismatch rather than real orphans), it refuses to create any findings at all, so the confirmation can't trigger today.
 `
         },
     ]

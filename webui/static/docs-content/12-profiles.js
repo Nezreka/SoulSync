@@ -18,7 +18,7 @@ Profiles give everyone their own space inside a shared SoulSync installation. Ea
 - Side access and allowed pages
 - Connected music accounts (see [Your Accounts](#docs/prof-accounts))
 
-**Shared across all profiles**: the music library itself, settings, and automations. Profiles are about personalization and permissions, not separate servers. Automations are shared — but access to the Automations page is a grantable permission, not admin-only.
+**Shared across all profiles**: settings, and the music library by default — though a profile can have its **own library** instead (\`library_mode == 'own'\`), with its own output folder on Plex or Jellyfin. **Automations are per-profile**: each profile runs its own automations; only system automations are shared across profiles. Profiles are about personalization and permissions, not separate servers — and access to the Automations page is a grantable permission, not admin-only.
 
 ![Profile picker](profiles-picker.jpg)
 `
@@ -48,7 +48,7 @@ Admins can **Turn off** a profile without deleting it. Everything of theirs is k
 
 ## Audit log
 
-The **Activity** tab records every profile admin action — creation, deletion, permission changes, PIN resets, sign-outs, device sign-outs, invites — as a plain sentence showing who did what and when. Useful for shared households where more than one person has admin rights.
+The **Activity** tab records profile admin actions — creation, deletion, permission changes, PIN resets, sign-out-everywhere, invites — as a plain sentence showing who did what and when. Individual device sign-outs are only logged when an admin signs out a device on someone else's profile, not their own; recovery-question changes aren't logged. Useful for shared households where more than one person has admin rights.
 
 ## Sign out everywhere
 
@@ -122,7 +122,7 @@ A profile has two separate secrets — don't mix them up:
 
 ## PIN
 
-A short (4–20 digits) code asked **when anyone opens the profile**, for privacy within the household. Admins can set or clear anyone's PIN from the profile editor; clearing it also turns off the launch lock, since a PIN-less profile accepts anything.
+A short (4–20 digits) code asked **when anyone opens the profile**, for privacy within the household. Admins can set or clear anyone's PIN from the profile editor. Clearing a PIN only turns off the launch lock for profile 1 (the admin profile) — clearing anyone else's PIN leaves the launch lock as it was.
 
 ## Login password
 

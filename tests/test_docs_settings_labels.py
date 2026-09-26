@@ -43,6 +43,11 @@ _ROOT = Path(__file__).resolve().parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
 _SETTINGS_JS = (_ROOT / "webui" / "static" / "settings.js").read_text(encoding="utf-8")
 _DOCS_DIR = _ROOT / "webui" / "static" / "docs-content"
+# The Tools page is React-rendered (webui/src); its card titles and button
+# labels don't reach the static corpus above.
+_REACT_SERVER_CARDS = (
+    _ROOT / "webui" / "src" / "routes" / "tools" / "-ui" / "server-cards.tsx"
+).read_text(encoding="utf-8")
 
 # Where settings labels can appear in the rendered UI.
 _CORPUS = "\n".join((_INDEX, _SETTINGS_JS))
@@ -77,7 +82,6 @@ LABELS: list[tuple[str, str]] = [
     ("Auto-save M3U file when downloading playlists", "05-sync.js"),
     # Buttons
     ("Test Connection", "13-troubleshooting.js"),
-    ("Scan Library", "13-troubleshooting.js"),
     ("Compact Database (VACUUM)", "11-settings.js"),
     ("Enable Incremental Vacuum", "11-settings.js"),
     # Processing & organization settings
@@ -108,6 +112,12 @@ LABELS: list[tuple[str, str]] = [
     ("Discogs", "11-settings.js"),
     ("AcoustID", "11-settings.js"),
     ("ListenBrainz", "11-settings.js"),
+    ("YouTube Browser Cookies", "11-settings.js"),
+    ("Paste cookies.txt", "11-settings.js"),
+    ("Create lossy copy of downloaded FLAC files", "11-settings.js"),
+    ("Lookback Period", "11-settings.js"),
+    ("Storefront Country", "11-settings.js"),
+    ("Upgrade until", "11-settings.js"),
 ]
 
 # (visible tab label, data-tab slug) — the settings nav in index.html.
@@ -140,26 +150,9 @@ ALLOWLIST: dict[str, str] = {}
 # wording — real drift candidates for a future docs copy pass, but not
 # verbatim labels, so asserting them would be flaky by construction.
 EXCLUDED: dict[str, str] = {
-    "Input Path": "docs 01-getting-started.js; UI label is 'Download Folder (input):' — docs paraphrase",
-    "Output Path": "docs 01-getting-started.js; UI label is 'Music Library Folder (output):' — docs paraphrase",
-    "Import Path": "docs 01-getting-started.js; no verbatim UI match (UI uses 'Import Folder')",
-    "iTunes country": "matches only the element id 'itunes-country'; visible label is 'Storefront Country:'",
-    "YouTube cookies": "matches only element ids + a JS string fragment; visible labels are 'YouTube Browser Cookies:' / 'Paste cookies.txt:'",
-    "Lossy copy settings": "docs paraphrase; UI copy says 'lossy copy of downloaded FLAC files'",
-    "Metadata enhancement": "matches only an HTML comment in index.html, not a visible label",
-    "Embedded art": "no verbatim UI match found",
-    "Audio fingerprinting": "no verbatim UI match found",
+    "YouTube cookies": "short prose name in docs; the exact UI labels ('YouTube Browser Cookies' / 'Paste cookies.txt') are quoted in the same sentence and asserted in LABELS",
     "Multi-disc labels": "docs paraphrase kept alongside the exact label; UI label is 'Multi-Disc Folder Label:' (asserted in LABELS)",
-    "Move behavior": "no verbatim UI match found",
-    "Discovery lookback": "matches only JS comments in settings.js; visible label is 'Lookback Period:'",
-    "Preferred formats": "docs paraphrase; UI label is 'Preferred Format:'",
-    "Minimum quality": "no verbatim UI match found",
-    "Upgrade behavior": "no verbatim UI match found",
-    "Per-artist overrides": "no verbatim UI match found (JS has only a 'Per-artist/' fragment)",
-    "quality scan": "no verbatim UI match found",
-    "Replace lower quality on import": "docs paraphrase superseded by the exact UI label 'Replace lower quality files on import' (asserted in LABELS)",
-    "HiFi health check": "no verbatim UI match found",
-    "Auto-Backup Database": "no verbatim UI match found (docs describe a system automation)",
+    "Auto-Backup Database": "verified real: the system automation name in core/automation_engine.py (music + video variants, every 3 days) — not a UI label, so not asserted against the corpus",
 }
 
 
@@ -203,4 +196,28 @@ def test_settings_nav_tab_present(tab_label: str, slug: str):
     assert pattern.search(_INDEX), (
         f"settings tab {tab_label!r} has no visible stg-tab-label in index.html — "
         "the docs' Settings pages describe this tab"
+    )
+
+
+def test_tools_media_server_scan_card_button():
+    """The docs' troubleshooting page names the Tools page's Media Server Scan
+    card and its Scan Library button (13-troubleshooting.js). That card is
+    React-rendered, so the static settings corpus can't see it — assert
+    against the React source directly. (The old LABELS entry only passed
+    because the *video* Library Scan button in index.html happens to share
+    the label.)"""
+    docs = _DOCS_N["13-troubleshooting.js"]
+    assert "scan library" in docs, (
+        "docs no longer name the Scan Library button — update this test"
+    )
+    assert "media server scan" in docs, (
+        "docs no longer name the Media Server Scan card — update this test"
+    )
+    assert 'title="Media Server Scan"' in _REACT_SERVER_CARDS, (
+        "the Media Server Scan card is gone from the React Tools page — "
+        "update the docs"
+    )
+    assert ">Scan Library</span>" in _REACT_SERVER_CARDS, (
+        "the Media Server Scan card's button is no longer labelled "
+        "'Scan Library' — update the docs"
     )

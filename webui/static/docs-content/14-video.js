@@ -285,7 +285,7 @@ registerDocsSection({
             body: `
 The **Library** page is your owned movies and shows as a poster wall.
 
-- **Filter** by resolution, genre, monitored state, and more
+- **Filter** by status (all / owned / wanted / watched / unwatched), resolution, genre, and more
 - **Sort** by title, added date, release year, or rating
 - The page **remembers your scroll position** when you navigate away and come back
 
@@ -558,7 +558,7 @@ YouTube grabs use their own separate quality selector rather than the movie/TV l
             title: 'Import Lists',
             lede: 'Turn lists you curate elsewhere — TMDB, IMDb, Plex Watchlist — into titles SoulSync goes and gets.',
             body: `
-**Import lists** sync an external list into your video wishlist. SoulSync periodically pulls each list in — every title becomes something the pipeline will search for and download.
+**Import lists** sync an external list into your video acquisition lists. SoulSync periodically pulls each list in — movies go to the video wishlist, shows are followed on the watchlist with the list's monitor policy — and the pipeline then searches for and downloads them.
 
 ## Supported sources
 
@@ -572,7 +572,7 @@ YouTube grabs use their own separate quality selector rather than the movie/TV l
 ::: steps
 1. Open **Video → Settings → Downloads** (admin) and add a list: choose the source and paste the list URL or identifier.
 2. Pick the quality profile new titles should use.
-3. Save — the next sync imports any titles you don't already have as wishlist items.
+3. Save — the next sync imports any titles you don't already have (movies as wishlist items, shows as watchlist follows).
 :::
 
 > [!TIP]
@@ -985,7 +985,7 @@ registerDocsSection({
             title: 'Auth Model',
             lede: 'Session-authenticated internal API — your browser session, not API keys.',
             body: `
-The video API lives under \`/api/video\` and is **session-authenticated** — it uses your logged-in browser session and active profile, *not* the \`sk_\` API keys the public [REST API](#api-auth) uses. It's the app's own internal API; there is no key-authenticated public surface for the video side.
+The video API lives under \`/api/video\` and is **session-authenticated** — it uses your logged-in browser session and active profile, *not* the \`sk_\` API keys the public [REST API](#api-auth) uses. It's the app's own internal API — separate from the key-authenticated public video v1 surface (\`/api/v1/video/*\`, documented under [Video](#api-video)).
 
 A single blueprint-level gate enforces these rules on every request:
 
@@ -1009,7 +1009,7 @@ Base path: \`/api/video\`. Read-only content endpoints, open to any video-enable
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | \`/dashboard\` | Dashboard tiles: counts, activity, continue-watching, health |
+| GET | \`/dashboard\` | Dashboard tiles: stats + recent (continue-watching and health are separate endpoints) |
 | GET | \`/library\` | Owned movies & shows with filters, sort, pagination |
 | GET | \`/library/resolutions\`, \`/library/genres\` | Facet values for the library filters |
 | GET | \`/detail/{kind}/{id}\` | Full detail record (seasons/episodes for shows) |
@@ -1038,7 +1038,7 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
 | POST | \`/downloads/cancel\`, \`/downloads/clear\` | Cancel / clear queue items | video |
 | GET/POST | \`/downloads/quality\`, \`/downloads/quality/profiles\`, \`/downloads/quality/formats\` | Quality profiles & custom formats | admin (write) |
 | GET/POST | \`/downloads/config\`, \`/downloads/config/import-lists\` | Download & import-list config | admin (write) |
-| GET/POST/DELETE | \`/downloads/blocklist\` | Release blocklist | admin |
+| GET/POST/DELETE | \`/downloads/blocklist\` | Release blocklist | video (GET open); admin (writes) |
 | GET/POST | \`/downloads/slskd\` | Soulseek credentials/config | admin |
 | GET | \`/wishlist\`, \`/wishlist/counts\` | Wanted & cutoff-unmet | video |
 | POST | \`/wishlist/search\`, \`/wishlist/search-all\` | Search Now for wishlist items | can_download |
@@ -1048,7 +1048,7 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
 | GET | \`/watchlist\`, \`/watchlist/counts\` | Followed people/studios | video |
 | POST | \`/watchlist/add\` | Follow a person/studio | can_download |
 | POST | \`/watchlist/remove\` | Unfollow a person/studio | can_download |
-| POST | \`/watchlist/person/{id}/settings\`, \`/watchlist/studio/{id}/settings\` | Per-follow settings | video |
+| POST | \`/watchlist/person/{id}/settings\`, \`/watchlist/studio/{id}/settings\` | Per-follow settings | can_download |
 | POST | \`/requests\` | Submit a member request | video |
 | POST | \`/requests/{id}/approve\`, \`/requests/{id}/deny\` | Approve / deny a request | admin |
 | DELETE | \`/requests/{id}\` | Withdraw your own request (admins: any) | video |
@@ -1076,11 +1076,11 @@ Base path: \`/api/video\`. **Admin-only** for every method.
 | GET/POST/PUT | \`/repair/jobs...\`, \`/repair/status\`, \`/repair/toggle\`, \`/repair/pause\`, \`/repair/resume\` | Library Maintenance jobs & scheduler |
 | GET/POST | \`/repair/findings...\` | Findings: fix, bulk-fix, resolve, dismiss, clear |
 | GET/POST | \`/import/failed\`, \`/import/{id}/place\`, \`/import/{id}/dismiss\` | Manual import of failed downloads |
-| GET | \`/backups\` | List backups | admin |
-| POST | \`/backups\` | Create a backup | admin |
-| POST | \`/backups/restore\` | Stage a restore (applies on next restart) | admin |
-| DELETE | \`/backups/restore\` | Cancel a staged restore | admin |
-| GET | \`/backups/<name>/download\` | Download a backup file | admin |
+| GET | \`/backups\` | List backups |
+| POST | \`/backups\` | Create a backup |
+| POST | \`/backups/restore\` | Stage a restore (applies on next restart) |
+| DELETE | \`/backups/restore\` | Cancel a staged restore |
+| GET | \`/backups/<name>/download\` | Download a backup file |
 `
         },
         {
@@ -1092,7 +1092,9 @@ Base path: \`/api/video\`. Credential-exposing endpoints are **admin (any method
 
 | Method | Path | Purpose | Auth |
 |--------|------|---------|------|
-| GET/POST | \`/server\`, \`/server-config\`, \`/server-config/test\` | Media-server connection | admin |
+| GET | \`/server\` | Media-server connection | open (any video profile) |
+| POST | \`/server\` | Media-server connection | admin |
+| GET/POST | \`/server-config\`, \`/server-config/test\` | Media-server connection | admin |
 | GET/POST | \`/libraries\`, \`/jellyfin/users\`, \`/jellyfin/user\` | Managed libraries & Jellyfin user | admin |
 | GET/POST | \`/enrichment/config\`, \`/enrichment/priority\`, \`/enrichment/retry-all-failed\` | Enrichment services & priority | admin |
 | GET/POST | \`/notifications\`, \`/notifications/test\` | Notification config & test | admin |

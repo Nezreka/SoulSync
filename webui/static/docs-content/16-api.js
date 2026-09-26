@@ -339,12 +339,12 @@ curl -H "Authorization: Bearer sk_..." \\
 | GET | \`/video/watchlist\` | Watched shows, people, and studios |
 | POST | \`/video/watchlist\` | Follow — \`{kind: show|person|studio, tmdb_id, title, poster_url?}\` |
 | DELETE | \`/video/watchlist\` | Unfollow — \`{kind, tmdb_id}\` |
-| POST | \`/video/scan\` | Request a library scan — \`{mode?: incremental|deep|full}\`; \`409\` if a scan is already running |
+| POST | \`/video/scan\` | Request a library scan — \`{mode?: incremental|deep|full}\` (default \`full\`); returns 200 \`{"status":"in_progress"}\` if a scan is already running |
 | GET | \`/video/scan/status\` | Scan status |
 | GET | \`/video/downloads\` | Active video downloads |
 | GET | \`/video/downloads/status\` | Video download status |
 | GET | \`/video/downloads/history\` | Video download history |
-| GET | \`/video/calendar\` | Upcoming and recent episodes/releases — \`?start=&end=\` as ISO dates |
+| GET | \`/video/calendar\` | Upcoming and recent episodes/releases — \`?start=\` (ISO date, default today), \`?days=\` (1–31, default 7), \`?scope=\` (\`watchlist\` or \`all\`) |
 | GET | \`/video/requests\` | List video requests |
 | POST | \`/video/requests\` | Create — \`{kind: movie|show, tmdb_id, title, year?, poster_url?, note?, monitor?}\` |
 | POST | \`/video/requests/{request_id}/approve\` | Approve a video request |
@@ -388,11 +388,11 @@ socket.on("downloads:batch_update", (payload) => console.log(payload));
 | \`tool:logs\` / \`tool:metadata\` | Tool output streamed |
 | \`logs:live\` | Live log lines |
 | \`chat:room_message\` / \`chat:room_protocol\` / \`chat:unread\` | Chat updates |
-| \`mirrored_playlist_created\` | A mirrored playlist was created |
-| \`app_started\` | Server finished starting |
 
 > [!NOTE]
 > Event names are namespaced (\`downloads:batch_update\`, not \`download_progress\`). If you are migrating from an older integration, update your listeners — the flat names from earlier versions no longer fire.
+>
+> \`app_started\` and \`mirrored_playlist_created\` are automation-engine trigger events, not Socket.IO events — react to them with an automation, not a socket listener.
 `
         },
     ]

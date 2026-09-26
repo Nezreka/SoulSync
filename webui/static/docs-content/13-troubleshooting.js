@@ -77,7 +77,7 @@ Paste it into a GitHub issue or the Discord when asking for help — it answers 
 ## Automation didn't fire
 
 1. Check the automation card: last run time, last result, and next-run countdown.
-2. Click **Runs: N** on the automation card to open its run-history modal.
+2. Click **N runs** on the automation card to open its run-history modal.
 3. For signal chains, check that the upstream automation actually fired its signal — and remember the 10-second cooldown and 5-level depth limit.
 4. Look in \`app.log\` for the automation name around the expected fire time.
 `

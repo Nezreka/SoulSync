@@ -24,12 +24,12 @@ Type an artist, album, or track name and results appear in a categorized dropdow
 - Click an **album** to open the download modal with per-track selection
 - Click a **track** to open the download modal for that specific song
 - **Preview tracks** — the play button on track results streams a short preview from your download source before you commit to a download
-- **Multi-source tabs** — switch between metadata sources using the tabs above the results (Spotify, iTunes, Deezer, and more). Each source has its own catalog, so a track missing on one may appear on another
+- **Mode tabs** — switch what you search with the tabs above the results: **Catalog** (metadata search), **Videos**, or **Files** (raw file search). Within Catalog, pick the metadata source from the **Search with** dropdown (Spotify, iTunes, Deezer, and more). Each source has its own catalog, so a track missing on one may appear on another
 
 ![Enhanced search results](dl-enhanced-search.jpg)
 
 > [!TIP]
-> If a search comes up empty, try a different metadata source tab first — catalogs differ between Spotify, iTunes, and Deezer, especially for regional or older releases.
+> If a search comes up empty, try a different metadata source in the **Search with** dropdown first — catalogs differ between Spotify, iTunes, and Deezer, especially for regional or older releases.
 `
         },
         {
@@ -37,7 +37,7 @@ Type an artist, album, or track name and results appear in a categorized dropdow
             title: 'Basic Search',
             lede: 'Query your download sources directly and see exactly what files are available — format, bitrate, uploader, and availability.',
             body: `
-Toggle to **Basic Search** mode to query your configured download source directly. Instead of metadata-first results, you see the raw files available with full detail: format, bitrate, quality score, file size, uploader name, upload speed, and availability. A source chip row above the results lets you pick which configured source to search; with nothing picked, the search uses the orchestrator's default — your single source, or the first source in your hybrid chain.
+Switch to the **Files** tab to query your configured download source directly. Instead of metadata-first results, you see the raw files available with full detail: format, bitrate, quality score, file size, uploader name, upload speed, and availability. A source chip row above the results lets you pick which configured source to search; with nothing picked, the search uses the orchestrator's default — your single source, or the first source in your hybrid chain.
 
 ## Filters
 
@@ -58,7 +58,7 @@ Narrow results by:
             title: 'Download Sources',
             lede: 'Ten download sources plus Hybrid mode — configure them in Settings and let SoulSync pick the best one.',
             body: `
-SoulSync downloads from multiple sources, configured in **Settings → Sources**. Each has different strengths:
+SoulSync downloads from multiple sources. Connect each source in **Settings → Sources**, and set their try-order (the hybrid chain) in **Settings → Downloads**. Each has different strengths:
 
 | Source | Description | Best for |
 |--------|-------------|----------|
@@ -75,7 +75,7 @@ SoulSync downloads from multiple sources, configured in **Settings → Sources**
 | **Hybrid** | Tries your primary source first, then falls back through alternates automatically | Best overall success rate |
 
 > [!TIP]
-> **Hybrid mode** is recommended for most users. It tries your primary source first, then falls back through your configured priority order. All sources can be ordered via drag-and-drop in Settings → Sources.
+> **Hybrid mode** is recommended for most users. It tries your primary source first, then falls back through your configured priority order. Order all sources via drag-and-drop in Settings → Downloads.
 
 ## YouTube settings
 

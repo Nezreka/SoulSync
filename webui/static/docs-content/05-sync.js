@@ -15,7 +15,7 @@ The Sync page imports playlists from **Spotify**, **YouTube**, **YouTube Music**
 ## The sync lifecycle
 
 ::: steps
-1. **Import** a playlist from any source tab (or paste a public URL)
+1. **Import** a playlist via **+ Add playlist** (or paste a public URL)
 2. The playlist becomes **mirrored** — saved with its track list and metadata
 3. Non-Spotify playlists go through **discovery** — raw titles are matched to official metadata
 4. **Sync** the playlist to push its tracks into your [wishlist](#art-wishlist) for downloading
@@ -89,9 +89,9 @@ Like YouTube playlists, Tidal playlists go through the [discovery pipeline](#syn
             title: 'Deezer Playlists',
             lede: 'Your personal Deezer playlists, loaded with the same ARL token you use for downloads.',
             body: `
-If you have a **Deezer ARL token** configured (Settings → Downloads), the Deezer tab shows all your personal playlists — working just like Spotify playlists. Click **Refresh** to load them, then click any playlist to view tracks and download.
+If you have a **Deezer ARL token** configured (Settings → Connections → Sources), the Deezer panel — opened from **+ Add playlist** — shows all your personal playlists — working just like Spotify playlists. Click **Refresh** to load them, then click any playlist to view tracks and download.
 
-- Requires an ARL token (a browser cookie from deezer.com — configure in Settings → Downloads)
+- Requires an ARL token (a browser cookie from deezer.com — configure in Settings → Connections → Sources)
 - **Sync / Download** opens the playlist details modal with the full track listing
 - **Download Missing Tracks** analyzes your library and downloads what's missing
 - **Sync Playlist** syncs tracks to your media server
@@ -121,7 +121,7 @@ Import any public Deezer playlist by URL without needing an ARL token. Paste a D
             title: 'ListenBrainz',
             lede: 'Browse and import playlists from your ListenBrainz account.',
             body: `
-If ListenBrainz is configured in Settings, the Sync page includes a ListenBrainz tab:
+If ListenBrainz is configured in Settings, **+ Add playlist** opens a ListenBrainz panel:
 
 - **Your Playlists** — playlists you've created on ListenBrainz
 - **Collaborative** — playlists shared with you by other users
@@ -192,7 +192,7 @@ Every parsed playlist from any source is automatically **mirrored**. The Mirrore
 
 ## Auto-sync schedules
 
-Mirrored playlists can refresh and re-sync on a schedule from the **Auto-Sync schedule board**:
+Mirrored playlists can refresh and re-sync on a schedule from the **Bulk schedule** button:
 
 - Pick an interval per playlist — from every hour up to weekly (1, 2, 4, 8, 12, 16, 24, 48, 72, or 168 hours)
 - Weekly schedules let you choose specific days
@@ -204,7 +204,7 @@ Mirrored playlists can refresh and re-sync on a schedule from the **Auto-Sync sc
             title: 'Sync History',
             lede: 'A log of every sync operation — what ran, when, and how it went.',
             body: `
-The **Sync History** button in the page header opens a modal showing every playlist sync, album download, and wishlist processing operation with timestamps, track counts, and completion status.
+The **Activity** button in the page header opens a modal with two tabs. **Syncs you ran** shows every playlist sync, album download, and wishlist processing operation with timestamps, track counts, and completion status; **Scheduled runs** covers auto-sync pipeline runs.
 
 - Shows playlist name, source, track count, and completion stats
 - Filter by source (Spotify, YouTube, Tidal, etc.)

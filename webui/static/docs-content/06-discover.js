@@ -44,7 +44,7 @@ Each playlist can be played in the media player, downloaded, or synced to your m
 
 ## Genre Explorer
 
-A row of genre pills at the top of the Discover page. Each pill shows an artist count and whether the genre has been explored — click one to open a **Genre Deep Dive** of that genre's artists.
+A row of genre pills in the **Explore & Build** zone near the bottom of the Discover page. Each pill shows an artist count and whether the genre has been explored — click one to open a **Genre Deep Dive** of that genre's artists.
 
 ![Genre browser](disc-genre-browser.jpg)
 
@@ -85,7 +85,7 @@ Search for 1–5 seed artists, select them, and click **Generate**. SoulSync fin
 The Discover page includes auto-generated seasonal content based on the current time of year, plus two curated sections:
 
 - **Fresh Tape** (Release Radar) — latest drops from recent releases
-- **The Archives** (Discovery Weekly) — curated content from your collection
+- **The Archives** (Spotify Discover Weekly) — discovery picks sourced from your Spotify Discover Weekly
 
 Both can be synced to your media server with live progress tracking.
 `
@@ -95,12 +95,12 @@ Both can be synced to your media server with live progress tracking.
             title: 'Time Machine',
             lede: 'Browse your discovery pool by decade, from the 1950s to today.',
             body: `
-Browse discovery pool content by **decade** — tabs from the 1950s through the 2020s. Each decade pulls top tracks from pool artists active in that era.
+Browse discovery pool content by **decade** — a **Decades** shelf of mix cards from the 1950s through the 2020s. Each decade pulls top tracks from pool artists active in that era.
 
 ![Time Machine decade browser](disc-time-machine.jpg)
 
 > [!TIP]
-> Time Machine is perfect for themed listening — throw on the 70s tab for a dinner party or the 90s tab for a nostalgia trip.
+> Time Machine is perfect for themed listening — throw on the 70s mix for a dinner party or the 90s mix for a nostalgia trip.
 `
         },
         {

@@ -66,7 +66,7 @@ Once your services are connected, do these five things to get the most out of So
 1. **Go to the Sync page** — click Sync in the sidebar.
 2. **Load your playlists** — click Refresh to pull your Spotify playlists (or paste a playlist URL directly).
 3. **Click Sync on a playlist** — SoulSync matches every track against your library and adds the missing ones to your wishlist.
-4. **Wait for auto-processing** — the wishlist processor runs on a schedule and downloads queued tracks. To start immediately, run **Process Wishlist** from Automations or the Sync page.
+4. **Wait for auto-processing** — the wishlist processor runs on a schedule and downloads queued tracks. To start immediately, run **Process Wishlist** from Automations.
 :::
 
 > [!TIP]
@@ -95,7 +95,7 @@ Once your services are connected, do these five things to get the most out of So
             lede: 'Bring music files you already own into SoulSync with proper metadata and organization.',
             body: `
 ::: steps
-1. **Place files in your import folder** — put album folders (e.g. \`Artist - Album/\`) in the Import Path configured in Settings.
+1. **Place files in your import folder** — put album folders (e.g. \`Artist - Album/\`) in the Import Folder configured in Settings.
 2. **Go to the Import page** — SoulSync detects the files and suggests album matches (the Inbox).
 3. **Confirm or correct the match** — if the suggestion is wrong, search for the right album by artist and album (or identify files by AcoustID fingerprint).
 4. **Match tracks** — drag each file onto the correct track slot, or tap a file then tap a track.
@@ -112,13 +112,13 @@ Once your services are connected, do these five things to get the most out of So
             lede: 'Link your media server so downloaded music appears in your library and streams in the built-in player.',
             body: `
 ::: steps
-1. **Go to Settings** — scroll to the Media Server section.
+1. **Go to Settings** — scroll to the Server Connections section.
 2. **Enter your server details** — URL plus credentials: Plex (URL + Token), Jellyfin/Emby (URL + API Key), or Navidrome (URL + Username + Password). Then select your music library from the dropdown.
-3. **Click Test Connection** — a green checkmark confirms the connection works.
+3. **Click Test** — a green checkmark confirms the connection works.
 :::
 
 > [!TIP]
-> Make sure your **Output Path** points to the same folder your media server monitors — that's how new downloads automatically appear in your library. See [Folder Setup](#gs-folders).
+> Make sure your **Music Library Folder (output)** points to the same folder your media server monitors — that's how new downloads automatically appear in your library. See [Folder Setup](#gs-folders).
 `
         },
     ]

@@ -245,11 +245,11 @@ Each automation card shows its **last run time**, **run count**, and last result
 ![Automation execution history](auto-history.jpg)
 
 - **Run Now** executes any automation immediately, regardless of schedule. The result updates on the card in real time, and running automations display a glow effect.
-- **Stall detection**: if an action runs for more than 2 hours without completing, it's automatically flagged as stalled and terminated to prevent resource leaks.
-- **Run history** — click **Runs: N** on any automation card to open its **Run History** modal: the last 50 runs, newest first, each with a status badge (completed, failed, running, …), how long ago it started, its duration, a result summary, and expandable log lines. When there are more than 50 runs, the footer shows "Showing X of Y runs".
+- **Stall detection**: if an action runs for more than 2 hours without completing, its progress is marked **Timed out** in the log — nothing is killed, it's just flagged so you can see the run stalled.
+- **Run history** — click **N runs** on any automation card to open its **Run History** modal: the last 50 runs, newest first, each with a status badge (completed, failed, running, …), how long ago it started, its duration, a result summary, and expandable log lines. When there are more than 50 runs, the footer shows "Showing X of Y runs".
 
 > [!TIP]
-> Debugging a misbehaving automation? Click **Runs: N** on its card and expand the failed run's log lines — then look at the app logs for the full story.
+> Debugging a misbehaving automation? Click **N runs** on its card and expand the failed run's log lines — then look at the app logs for the full story.
 `
         },
         {
