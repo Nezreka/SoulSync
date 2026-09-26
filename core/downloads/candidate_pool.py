@@ -117,6 +117,53 @@ def _safe_blacklisted(is_blacklisted, username, filename) -> bool:
         return False
 
 
+ALTERNATIVES_KEPT = 10
+
+
+def _brief(candidate, decision: Decision) -> dict:
+    """The few fields a stored decision needs; paths reduced to the file name."""
+    username = getattr(candidate, 'username', '') or ''
+    source = username if username in _SERVICE_USERNAMES | {'torrent', 'usenet'} else 'soulseek'
+    row = candidate_row(candidate, decision, source_name=source, query='')
+    return {k: row[k] for k in (
+        'username', 'display_name', 'source_service', 'quality', 'quality_label',
+        'bitrate', 'size', 'duration', 'confidence', 'decision',
+    )}
+
+
+def summarize_pool(pairs: Iterable[tuple], chosen_key: Optional[tuple] = None,
+                   limit: int = ALTERNATIVES_KEPT) -> dict:
+    """What an automatic search saw, small enough to store per task.
+
+    ``pairs`` is every (candidate, Decision) the search judged, across
+    queries; ``chosen_key`` is the (username, filename) actually taken. The
+    alternatives are the best of the rest: accepted runners-up first, then the
+    closest rejections. Counts always cover everything.
+    """
+    picked: dict = {}
+    for candidate, decision in pairs:
+        key = (getattr(candidate, 'username', ''), getattr(candidate, 'filename', ''))
+        held = picked.get(key)
+        if held is None or (decision.accepted and not held[1].accepted):
+            picked[key] = (candidate, decision)
+
+    chosen = picked.pop(tuple(chosen_key), None) if chosen_key else None
+    rest = sorted(
+        picked.values(),
+        key=lambda t: (not t[1].accepted,
+                       float('inf') if t[1].score is None else -t[1].score),
+    )
+    rejected = [d for _, d in rest if not d.accepted]
+    return {
+        'chosen': _brief(*chosen) if chosen else None,
+        'alternatives': [_brief(c, d) for c, d in rest[:max(0, limit)]],
+        'accepted_total': sum(1 for _, d in rest if d.accepted) + (
+            1 if chosen and chosen[1].accepted else 0),
+        'rejected_total': len(rejected),
+        'rejected_counts': rejection_counts(rejected),
+    }
+
+
 def empty_source_rows(error: Optional[str] = None) -> dict:
     out = {'candidates': [], 'rejected': [], 'rejected_total': 0, 'rejected_counts': {}}
     if error:

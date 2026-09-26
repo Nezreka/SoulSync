@@ -7341,7 +7341,15 @@ def get_task_detail(task_id):
         except Exception as hist_err:
             logger.debug(f"track-detail history lookup failed: {hist_err}")
 
-        detail = build_track_detail(task, history)
+        decision = task.get('decision_summary')
+        if not decision:
+            try:
+                decision = get_database().get_download_decision(task_id)
+            except Exception as dec_err:
+                logger.debug(f"track-detail decision lookup failed: {dec_err}")
+                decision = None
+
+        detail = build_track_detail(task, history, decision)
         return jsonify({"success": True, "detail": detail})
     except Exception as e:
         logger.error(f"get_task_detail error: {e}")
@@ -15478,6 +15486,7 @@ def _build_task_worker_deps():
         on_download_completed=lambda b, t, success: _on_download_completed(b, t, success=success),
         recover_worker_slot=_recover_worker_slot,
         try_version_mismatch_fallback=_try_version_mismatch_fallback_for_worker,
+        evaluate_candidates=evaluate_candidates,
     )
 
 

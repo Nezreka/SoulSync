@@ -49147,6 +49147,32 @@ div.artist-hero-badge {
     border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;
     padding: 10px 14px; display: flex; flex-direction: column; gap: 6px;
 }
+.td-decision {
+    border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;
+    padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+}
+.td-decision-title { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: rgba(255, 255, 255, 0.5); }
+.td-decision-subtitle { font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.4); margin-top: 2px; }
+.td-decision-win { display: flex; flex-direction: column; gap: 2px; }
+.td-decision-win .td-decision-name { font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, 0.92); }
+.td-decision-summary { margin: 0; font-size: 12.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.72); }
+.td-decision-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.td-decision-item { display: flex; align-items: flex-start; gap: 10px; }
+.td-decision-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.td-decision-name { font-size: 12.5px; color: rgba(255, 255, 255, 0.8); overflow-wrap: anywhere; }
+.td-decision-meta { font-size: 11px; color: rgba(255, 255, 255, 0.4); }
+.td-decision-pill {
+    --pill: 158, 158, 158;
+    flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    background: rgba(var(--pill), 0.13); color: rgb(var(--pill)); white-space: nowrap;
+}
+.td-decision-pill.stage-ok { --pill: 102, 187, 106; }
+.td-decision-pill.stage-identity { --pill: 239, 83, 80; }
+.td-decision-pill.stage-version { --pill: 186, 104, 200; }
+.td-decision-pill.stage-duration,
+.td-decision-pill.stage-preview { --pill: 255, 183, 77; }
+.td-decision-pill.stage-quality { --pill: 100, 181, 246; }
+.td-decision-pill.stage-availability { --pill: 176, 190, 197; }
 .td-prov-row { display: flex; gap: 10px; font-size: 13px; }
 .td-prov-k { flex: 0 0 92px; color: rgba(255, 255, 255, 0.5); }
 .td-prov-v { color: rgba(255, 255, 255, 0.85); word-break: break-word; }

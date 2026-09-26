@@ -3395,6 +3395,27 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_soul_id ON track_downloads (soul_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_isrc ON track_downloads (isrc)")
 
+            # Why an automatic grab took the file it took, or why nothing
+            # passed: the winner, the closest alternatives and a count of
+            # rejections by reason code (core/downloads/decisions.py). One row
+            # per download task; cleared with the download history.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS download_decisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    track_download_id INTEGER,
+                    task_key TEXT NOT NULL,
+                    track_title TEXT,
+                    track_artist TEXT,
+                    quality_profile_id INTEGER,
+                    outcome TEXT NOT NULL,
+                    chosen_json TEXT,
+                    alternatives_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dd_task_key ON download_decisions (task_key)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dd_track_download ON download_decisions (track_download_id)")
+
             # Durable record of completed TORRENT grabs so the seeding sweep
             # (core/downloads/seeding.py) can manage the tail: seed until the
             # ratio/time goals are met, then remove the torrent from the client.
@@ -21259,6 +21280,133 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    # ==================== Download Decisions ====================
+
+    DOWNLOAD_DECISIONS_KEPT = 5000
+
+    def record_download_decision(self, task_key: str, *, outcome: str, summary: dict,
+                                 track_title: str = '', track_artist: str = '',
+                                 quality_profile_id=None) -> Optional[int]:
+        """Store (or replace) the decision behind one download task.
+
+        ``summary`` is ``core.downloads.candidate_pool.summarize_pool`` output.
+        A task that retries replaces its row, so each task has one answer. The
+        table keeps the newest DOWNLOAD_DECISIONS_KEPT rows.
+        """
+        if not task_key:
+            return None
+        conn = None
+        try:
+            chosen = summary.get('chosen')
+            rest = {k: v for k, v in summary.items() if k != 'chosen'}
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM download_decisions WHERE task_key = ?", (str(task_key),))
+            cursor.execute(
+                """INSERT INTO download_decisions
+                   (task_key, track_title, track_artist, quality_profile_id, outcome,
+                    chosen_json, alternatives_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (str(task_key), track_title or '', track_artist or '', quality_profile_id,
+                 outcome, json.dumps(chosen) if chosen else None, json.dumps(rest)),
+            )
+            new_id = cursor.lastrowid
+            cursor.execute(
+                "DELETE FROM download_decisions WHERE id <= ?",
+                (new_id - self.DOWNLOAD_DECISIONS_KEPT,),
+            )
+            conn.commit()
+            return new_id
+        except Exception as e:
+            logger.debug("Error recording download decision for %s: %s", task_key, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def get_download_decision(self, task_key: str) -> Optional[dict]:
+        if not task_key:
+            return None
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                """SELECT id, track_download_id, task_key, track_title, track_artist,
+                          quality_profile_id, outcome, chosen_json, alternatives_json, created_at
+                   FROM download_decisions WHERE task_key = ? ORDER BY id DESC LIMIT 1""",
+                (str(task_key),),
+            ).fetchone()
+            return self._download_decision_row(row) if row else None
+        except Exception as e:
+            logger.debug("Error reading download decision for %s: %s", task_key, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def get_download_decision_for_track_download(self, track_download_id) -> Optional[dict]:
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                """SELECT id, track_download_id, task_key, track_title, track_artist,
+                          quality_profile_id, outcome, chosen_json, alternatives_json, created_at
+                   FROM download_decisions WHERE track_download_id = ? ORDER BY id DESC LIMIT 1""",
+                (int(track_download_id),),
+            ).fetchone()
+            return self._download_decision_row(row) if row else None
+        except Exception as e:
+            logger.debug("Error reading download decision for download %s: %s", track_download_id, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def link_download_decision(self, task_key: str, track_download_id) -> bool:
+        """Tie a task's decision to the track_downloads row its file became."""
+        if not task_key or track_download_id is None:
+            return False
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.execute(
+                "UPDATE download_decisions SET track_download_id = ? WHERE task_key = ?",
+                (int(track_download_id), str(task_key)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug("Error linking download decision for %s: %s", task_key, e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def _download_decision_row(row) -> dict:
+        def _load(text, fallback):
+            try:
+                return json.loads(text) if text else fallback
+            except (TypeError, ValueError):
+                return fallback
+
+        rest = _load(row['alternatives_json'], {})
+        return {
+            'id': row['id'],
+            'track_download_id': row['track_download_id'],
+            'task_key': row['task_key'],
+            'track_title': row['track_title'] or '',
+            'track_artist': row['track_artist'] or '',
+            'quality_profile_id': row['quality_profile_id'],
+            'outcome': row['outcome'],
+            'chosen': _load(row['chosen_json'], None),
+            'alternatives': rest.get('alternatives', []),
+            'accepted_total': rest.get('accepted_total', 0),
+            'rejected_total': rest.get('rejected_total', 0),
+            'rejected_counts': rest.get('rejected_counts', {}),
+            'created_at': row['created_at'],
+        }
+
     def clear_completed_download_history(self) -> int:
         """Delete the persisted completed-download history shown on the Downloads
         page (every event_type='download' row). This also clears the verification
@@ -21272,8 +21420,11 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM library_history WHERE event_type IN ('download', 'podcast')")
+            removed = cursor.rowcount
+            # The "why this file" records belong to the same history.
+            cursor.execute("DELETE FROM download_decisions")
             conn.commit()
-            return cursor.rowcount
+            return removed
         except Exception as e:
             logger.error("Error clearing completed download history: %s", e)
             return 0
