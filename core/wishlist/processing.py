@@ -884,7 +884,17 @@ def _prepare_and_run_manual_wishlist_batch(
         # The standalone /api/wishlist/cleanup endpoint still runs that pass when
         # users explicitly ask for maintenance.
 
-        raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
+        # a profile that asks first (no download rights) keeps a wishlist of
+        # requests. an admin working in its library (E-12) downloads what was
+        # approved; the rest waits on the Requests page, which is where the
+        # requester hears about it -- same rule as the scheduled run
+        from core.library2.mirror_outbox import profile_asks_first
+        if profile_asks_first(db, manual_profile_id):
+            raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(
+                profile_id=manual_profile_id, approved_only=True)
+            logger.info("[Manual-Wishlist] Profile %s asks first: approved requests only", manual_profile_id)
+        else:
+            raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
         if not raw_wishlist_tracks:
             logger.warning("[Manual-Wishlist] No tracks in wishlist after cleanup — marking batch complete")
             with runtime.tasks_lock:

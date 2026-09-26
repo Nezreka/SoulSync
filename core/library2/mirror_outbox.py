@@ -250,11 +250,12 @@ def enqueue_artist_watchlist(conn, artist_id: int, monitored: bool, *,
 # ---------------------------------------------------------------------------
 
 
-def _asks_first(db, profile_id: int) -> bool:
-    """Is this a profile whose wishlist rows are requests (no download rights)?"""
+def profile_asks_first(db, profile_id) -> bool:
+    """Is this a profile whose wishlist rows are requests (no download rights,
+    upstream core/requests/music.py)? Profile 1 never is."""
     from core.permissions import profile_can_download
     try:
-        if int(profile_id) == 1:
+        if not profile_id or int(profile_id) == 1:
             return False
         return not profile_can_download(db.get_profile(int(profile_id)))
     except Exception:  # noqa: BLE001 - unreadable: treat the row as an ordinary add
@@ -277,7 +278,7 @@ def _execute_op(db, op: str, data: Dict[str, Any], profile_id: int,
         # the intent is the admin's -- made in its library -- and lands
         # approved instead of waiting for an approval nobody is asked for.
         payload = data.get("payload") or {}
-        approved = _asks_first(db, profile_id)
+        approved = profile_asks_first(db, profile_id)
         db.add_to_wishlist(payload,
                            source_type=data.get("source_type", "album"),
                            source_info=data.get("source_info") or {},
