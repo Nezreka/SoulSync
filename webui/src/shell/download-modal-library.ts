@@ -56,9 +56,28 @@ function trackArtist(track: ModalTrack): string {
   return String(track.artist_name || track.artist || '').trim();
 }
 
-function statusFor(row: PresenceRow | undefined): { text: string; cls: string } {
+/** Library v2's bookmark, the one every monitor control there draws. */
+const BOOKMARK_PATH = 'M5 3.5A1.5 1.5 0 0 1 6.5 2h11A1.5 1.5 0 0 1 19 3.5V22l-7-4.2L5 22V3.5z';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function bookmarkIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('class', 'match-bookmark');
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', BOOKMARK_PATH);
+  svg.appendChild(path);
+  return svg;
+}
+
+function statusFor(row: PresenceRow | undefined): {
+  text: string;
+  cls: string;
+  bookmark?: boolean;
+} {
   if (row?.in_library) return { text: '✅ In library', cls: 'match-found' };
-  if (row?.in_wishlist) return { text: '🔖 Monitored', cls: 'match-monitored' };
+  if (row?.in_wishlist) return { text: 'Monitored', cls: 'match-monitored', bookmark: true };
   return { text: '❌ Missing', cls: 'match-missing' };
 }
 
@@ -131,6 +150,7 @@ export async function hydrateDownloadModalLibraryStatus(
     if (!cell || !cell.classList.contains('match-checking')) return;
     const status = statusFor(answer);
     cell.textContent = status.text;
+    if (status.bookmark) cell.prepend(bookmarkIcon());
     cell.className = `track-match-status ${status.cls}`;
   });
   // The counters belong to the analysis once it has reported; before that

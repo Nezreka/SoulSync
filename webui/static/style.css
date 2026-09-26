@@ -26396,10 +26396,17 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     text-shadow: 0 0 12px rgba(96, 165, 250, 0.35);
     animation: dms-status-pulse 1.5s ease-in-out infinite;
 }
-/* Library v2: a track the user already wants, known as soon as the dialog opens */
+/* Library v2: a track the user already wants, known as soon as the dialog
+   opens. Drawn with Library v2's bookmark, filled, where the others have a dot. */
 .download-missing-modal-content .download-tracks-table .match-monitored {
-    color: #a78bfa;
-    text-shadow: 0 0 12px rgba(167, 139, 250, 0.35);
+    color: rgb(var(--accent-rgb));
+}
+.download-missing-modal-content .download-tracks-table .match-monitored .match-bookmark {
+    width: 11px;
+    height: 11px;
+    margin-right: 6px;
+    vertical-align: -1px;
+    fill: currentColor;
 }
 .download-missing-modal-content .download-tracks-table .download-searching {
     color: #60a5fa;
@@ -77852,9 +77859,9 @@ body.em-scroll-lock { overflow: hidden; }
 }
 
 .track-match-status.match-monitored {
-    --row-state-border: rgba(167, 139, 250, 0.35);
-    --row-state-bg: rgba(167, 139, 250, 0.1);
-    --row-state-fg: #a78bfa;
+    --row-state-border: rgba(var(--accent-rgb), 0.35);
+    --row-state-bg: rgba(var(--accent-rgb), 0.1);
+    --row-state-fg: rgb(var(--accent-rgb));
 }
 
 .track-match-status.match-checking {

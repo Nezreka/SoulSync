@@ -64,8 +64,12 @@ describe('the download dialog knows the library as soon as it opens', () => {
     ]);
     expect(cell('p1', 0).textContent).toBe('✅ In library');
     expect(cell('p1', 0).className).toBe('track-match-status match-found');
-    expect(cell('p1', 1).textContent).toBe('🔖 Monitored');
+    expect(cell('p1', 1).textContent).toBe('Monitored');
     expect(cell('p1', 1).className).toBe('track-match-status match-monitored');
+    // Library v2's bookmark, not an emoji
+    expect(cell('p1', 1).querySelector('svg.match-bookmark path')?.getAttribute('d')).toMatch(
+      /^M5 3\.5/,
+    );
     expect(cell('p1', 2).textContent).toBe('❌ Missing');
     expect(cell('p1', 2).className).toBe('track-match-status match-missing');
     expect(document.getElementById('stat-found-p1')!.textContent).toBe('1');
