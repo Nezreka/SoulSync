@@ -66,21 +66,29 @@ def test_css_covers_every_class():
 
 # ── phase 2: manual-search jump ───────────────────────────────────────────────
 
-def test_manual_search_jump_still_reaches_the_search_page():
-    # The handoff drives the VANILLA search page's DOM (it polls for the
-    # Soulseek source icon), so it stays in api-monitor.js and is invoked.
+def test_manual_search_opens_the_file_inspector():
+    # "Search manually" is for when the automatic download failed: the person
+    # wants a FILE. It opens the candidate inspector on the wishlist's own
+    # source search and downloads exactly the pick. The old jump to the
+    # vanilla search page is gone, so there is one path, not two.
+    insp = (_ROOT / "webui" / "src" / "features" / "downloads" / "inspector-modal.tsx").read_text(
+        encoding="utf-8", errors="replace")
+    fn = insp[insp.index("export function openWishlistInspector"):]
+    fn = fn[:fn.index("\nexport function", 10)]
+    assert "searchUrl: '/api/wishlist/inspect'" in fn
+    assert "'/api/wishlist/inspect/download'" in fn
     api = (_ROOT / "webui" / "static" / "api-monitor.js").read_text(
         encoding="utf-8", errors="replace")
-    assert "function _searchWishlistTrackManually" in api
-    assert "navigateToPage('search')" in api
-    assert "enhanced-search-input" in api
+    assert "_searchWishlistTrackManually" not in api
 
 
 def test_both_track_surfaces_get_the_search_button():
     assert "wl-tile-track-search" in _ORB
     assert "wl-moon-search-btn" in _ORB
-    # both call the vanilla handoff with the artist AND the track
-    assert _ORB.count("window._searchWishlistTrackManually?.(") == 2
+    # both open the inspector with the row id, the track and the artist
+    assert _ORB.count("openWishlistInspector({") == 2
+    assert _ORB.count("name: single.track") + _ORB.count("name: track.track") == 2
+    assert _ORB.count("artist: single.artist") + _ORB.count("artist: track.artist") == 2
 
 
 # ── deliberately dropped when the page moved to React ────────────────────────

@@ -177,3 +177,25 @@ def test_old_duration_payload_is_rebuilt(db):
     result = get_or_build_daily_mixes(db)
     assert result['v'] == PAYLOAD_VERSION
     assert all(mix['key'] != 'bad-cached-duration' for mix in result['mixes'])
+
+
+def test_a_blocked_artist_founds_no_mix_and_names_none(db):
+    """The subtitle is text the response filter can't reach, so blocks apply
+    where the mixes are built."""
+    db.add_blocklist_entry(1, 'artist', 'Justice')
+    db.add_blocklist_entry(1, 'artist', 'SebastiAn')
+    payload = generate_daily_mixes(db, today=date(2026, 8, 25))
+    for mix in payload['mixes']:
+        assert 'Justice' not in mix['artists']
+        assert 'Justice' not in mix['subtitle']
+        names = [t['artists'][0]['name'] for t in mix['tracks']]
+        assert 'Justice' not in names and 'SebastiAn' not in names
+
+
+def test_a_new_block_rebuilds_the_stored_mixes(db):
+    first = get_or_build_daily_mixes(db)
+    assert any('Justice' in m['artists'] for m in first['mixes'])
+    assert get_or_build_daily_mixes(db)['generated_at'] == first['generated_at']
+    db.add_blocklist_entry(1, 'artist', 'Justice')
+    rebuilt = get_or_build_daily_mixes(db)
+    assert not any('Justice' in m['artists'] for m in rebuilt['mixes'])

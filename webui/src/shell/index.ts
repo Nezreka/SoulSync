@@ -20,6 +20,7 @@ import {
   unblockEntry,
 } from './blocklist';
 import { patchChatMessages } from './chat-morph';
+import { refreshDiscoverInboxBadge, startDiscoverInboxBadge } from './discover-inbox-badge';
 import {
   _handoffLibrarySearchToEnhancedSearch,
   _updateSidebarLibraryBreadcrumb,
@@ -125,6 +126,9 @@ export const SHELL_WINDOW_EXPORTS = {
   // server-activity.js (ported aug 26): self-assigns window.ServerActivity
   // chat.js renderMessages patches the list instead of rebuilding it (sept 24)
   patchChatMessages,
+  // the Discover inbox badge (sept 26)
+  refreshDiscoverInboxBadge,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);
+startDiscoverInboxBadge();

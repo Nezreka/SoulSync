@@ -264,6 +264,14 @@ export function LibraryArtistCard({
         </h3>
         <div className="library-artist-stats">
           {tracks ? <span className="library-artist-stat">{tracks}</span> : null}
+          {artist.upgradable_count ? (
+            <span
+              className="library-artist-stat library-artist-upgradable"
+              title="Tracks below their quality profile"
+            >
+              {artist.upgradable_count} could be better
+            </span>
+          ) : null}
         </div>
       </div>
     </a>

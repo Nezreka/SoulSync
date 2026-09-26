@@ -1,5 +1,9 @@
+import { QueryClientContext } from '@tanstack/react-query';
+import { useContext, useState } from 'react';
+
 import type { BlacklistEntry, BlacklistSearchArtist } from '../-discover.blacklist';
 
+import { resetDiscoverTaste } from '../-discover.api';
 import {
   BLACKLIST_EMPTY,
   BLACKLIST_LOAD_FAILED,
@@ -119,11 +123,58 @@ export function BlacklistModal({
           )}
         </div>
         <div className="discover-blacklist-modal-footer">
+          <ResetTaste />
           <button type="button" className="watch-all-btn watch-all-btn-cancel" onClick={onClose}>
             Close
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+export const RESET_TASTE_HINT =
+  'Forget every more, less and not now you told discovery. Blocks stay.';
+
+/**
+ * Reset taste: clears the ⋯ answers (more / less like this, not now). It sits
+ * with the blocks because that's where you manage what discovery avoids, and
+ * it says so, because it deliberately leaves them alone.
+ */
+export function ResetTaste() {
+  const queryClient = useContext(QueryClientContext);
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const reset = () => {
+    setBusy(true);
+    resetDiscoverTaste()
+      .then((res) => {
+        if (res.success === false) throw new Error(res.error || 'not reset');
+        const n = res.cleared ?? 0;
+        window.showToast?.(
+          n ? `Reset ${n} answer${n === 1 ? '' : 's'}. Blocks kept.` : 'Nothing to reset',
+          'success',
+        );
+        void queryClient?.invalidateQueries({ queryKey: ['discover'] });
+      })
+      .catch(() => window.showToast?.("Couldn't reset. Try again in a moment.", 'error'))
+      .finally(() => {
+        setBusy(false);
+        setArmed(false);
+      });
+  };
+
+  return (
+    <button
+      type="button"
+      className={`watch-all-btn discover-reset-taste-btn${armed ? ' armed' : ''}`}
+      title={RESET_TASTE_HINT}
+      disabled={busy}
+      onClick={() => (armed ? reset() : setArmed(true))}
+      onBlur={() => setArmed(false)}
+    >
+      {busy ? 'Resetting…' : armed ? 'Reset taste? Blocks stay' : 'Reset taste'}
+    </button>
   );
 }

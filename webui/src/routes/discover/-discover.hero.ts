@@ -105,6 +105,8 @@ export const HERO_LOADING_SUBTITLE =
   'Warming up your recommendations — the first visit after a restart takes a few seconds.';
 export const HERO_EMPTY_TITLE = 'No Recommendations Yet';
 export const HERO_EMPTY_SUBTITLE = 'Run a watchlist scan to generate personalized recommendations';
+/** The watchlist fallback: nothing recommended these, so say what they are. */
+export const HERO_WATCHLIST_SUBTITLE = 'On your watchlist';
 
 // ── Interactions ────────────────────────────────────────────────────────────
 
@@ -217,4 +219,13 @@ export function heroWatchlistButtonState(
 /** POST body for the per-artist check (550-554). */
 export function heroWatchlistCheckBody(artistId: string): { artist_id: string } {
   return { artist_id: artistId };
+}
+
+/** Every provider id a hero artist carries, for the feedback and block records. */
+export function heroIds(artist: DiscoverHeroArtist): Record<string, string> {
+  const ids: Record<string, string> = {};
+  if (artist.spotify_artist_id) ids.spotify = artist.spotify_artist_id;
+  if (artist.itunes_artist_id) ids.itunes = artist.itunes_artist_id;
+  if (artist.musicbrainz_artist_id) ids.musicbrainz = artist.musicbrainz_artist_id;
+  return ids;
 }

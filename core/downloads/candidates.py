@@ -374,7 +374,10 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         # the file; we trust their selection over AcoustID disagreement so
         # repeated manual picks don't loop back into quarantine.
         user_manual_pick = bool(task.get('_user_manual_pick', False))
-    
+        # The inspector's "grab anyway" on a below-profile row: the user saw
+        # the quality and took it, for this one grab.
+        quality_overridden = user_manual_pick and bool(task.get('_override_quality', False))
+
     # Try each candidate until one succeeds (like GUI's fallback logic)
     for candidate_index, candidate in enumerate(candidates):
         # Check cancellation before each attempt
@@ -670,14 +673,19 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         # The user explicitly picked this candidate via the
                         # candidates modal — trust their metadata judgement
                         # over AcoustID disagreement so manual picks don't
-                        # loop back into quarantine. Integrity + bit-depth
-                        # gates still run because those check the new file's
-                        # actual condition, not its identity.
-                        matched_downloads_context[context_key]['_skip_quarantine_check'] = 'acoustid'
+                        # loop back into quarantine. On a quality override
+                        # (grab anyway) the quality/bit-depth gates are
+                        # skipped too: the user knowingly took a
+                        # below-profile file, so quarantining it for the
+                        # profile it just overrode would be wrong.
+                        matched_downloads_context[context_key]['_skip_quarantine_check'] = (
+                            ['acoustid', 'quality', 'bit_depth'] if quality_overridden else 'acoustid'
+                        )
                         matched_downloads_context[context_key]['_user_manual_pick'] = True
                         logger.info(
-                            "[Context] User manual pick — bypassing AcoustID for "
+                            "[Context] User manual pick — bypassing AcoustID%s for "
                             "task=%s username=%s filename=%s",
+                            " and the quality profile" if quality_overridden else "",
                             task_id, username, os.path.basename(filename),
                         )
                     elif track_info and track_info.get('_skip_acoustid'):

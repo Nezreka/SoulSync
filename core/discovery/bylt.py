@@ -518,6 +518,19 @@ def shelf_reason(seed_name: str, selected: Sequence[Candidate]) -> dict:
             "evidence": []}
 
 
+def shelf_explanation(seed_identity: "SeedIdentity", selected: Sequence[Candidate]) -> dict:
+    """the one explanation shape (core/discovery/explain.py): a shelf exists
+    because you listen to its seed. confidence is how much of it rests on a
+    direct similarity edge rather than a shared genre, the weaker link."""
+    from core.discovery.explain import explanation, seed
+    source, sid = (seed_identity.ids[0] if seed_identity.ids else (None, None))
+    confidence = None
+    if selected:
+        direct = sum(1 for c in selected if c.relation == "direct")
+        confidence = 0.5 + 0.4 * direct / len(selected)
+    return explanation("listened", [seed(seed_identity.name, sid, source)], confidence)
+
+
 @dataclass
 class Shelf:
     seed: SeedIdentity
@@ -615,6 +628,7 @@ def section_from_shelf(shelf: Shelf, *, seed_image: Optional[str] = None) -> dic
         "seed_ids": [list(pair) for pair in shelf.seed.ids],
         "seed_image": seed_image,
         "reason": shelf_reason(shelf.seed.name, shelf.selected),
+        "explanation": shelf_explanation(shelf.seed, shelf.selected),
         "presentation": presentation_for(shelf.selected),
         "diagnostics": dict(shelf.diagnostics),
         "tracks": tracks,

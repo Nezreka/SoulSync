@@ -1565,6 +1565,9 @@ def _register_automation_handlers():
         run_repair_job_now=lambda job_id, respect_enabled=False: (
             repair_worker.run_job_now(job_id, respect_enabled=respect_enabled)
             if repair_worker else None),
+        bulk_fix_repair_findings=(
+            (lambda finding_ids: repair_worker.bulk_fix_findings(finding_ids=finding_ids))
+            if repair_worker else None),
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -7341,7 +7344,15 @@ def get_task_detail(task_id):
         except Exception as hist_err:
             logger.debug(f"track-detail history lookup failed: {hist_err}")
 
-        detail = build_track_detail(task, history)
+        decision = task.get('decision_summary')
+        if not decision:
+            try:
+                decision = get_database().get_download_decision(task_id)
+            except Exception as dec_err:
+                logger.debug(f"track-detail decision lookup failed: {dec_err}")
+                decision = None
+
+        detail = build_track_detail(task, history, decision)
         return jsonify({"success": True, "detail": detail})
     except Exception as e:
         logger.error(f"get_task_detail error: {e}")
@@ -7423,6 +7434,9 @@ def download_selected_candidate(task_id):
             # pick something else if it fails". Stays set until the task
             # reaches a terminal state.
             task['_user_manual_pick'] = True
+            # a "grab anyway" on a below-profile row in the inspector
+            from core.downloads.decisions import is_quality_override
+            task['_override_quality'] = is_quality_override(data.get('override'))
             # Reset retry counters so previous auto-attempts don't
             # immediately exhaust the manual pick.
             task.pop('stuck_retry_count', None)
@@ -8176,6 +8190,7 @@ def get_library_artists():
         limit = int(request.args.get('limit', 75))
         watchlist_filter = request.args.get('watchlist', 'all')
         source_filter = request.args.get('source_filter', '')
+        quality_filter = request.args.get('quality', '')
 
         # Get database instance
         database = get_database()
@@ -8188,7 +8203,8 @@ def get_library_artists():
             limit=limit,
             watchlist_filter=watchlist_filter,
             profile_id=get_current_profile_id(),
-            source_filter=source_filter
+            source_filter=source_filter,
+            quality_filter=quality_filter,
         )
 
         # Fix image URLs for all artists
@@ -8567,6 +8583,10 @@ def get_artist_enhanced_detail(artist_id):
         active_server = config_manager.get_active_media_server()
         server_connected = media_server_engine.is_connected() if media_server_engine else False
         result['server_type'] = active_server if server_connected else None
+
+        # which tracks the quality jobs say could be better
+        from core.quality.upgrades import annotate_enhanced_payload
+        annotate_enhanced_payload(database, result)
 
         return jsonify(result)
     except Exception as e:
@@ -11181,6 +11201,83 @@ def redownload_search_metadata(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector', upgrade=False):
+    """Search every configured download source for one track and stream the
+    verdicts: NDJSON, one line per source as it answers, then {"done": true}.
+
+    The candidate inspector is the only thing that fans out like this, and
+    only when a person opens it; automatic downloads stay on source priority.
+    Each line carries the accepted rows (ranked as before) and the rejected
+    ones with their reasons (core/downloads/candidate_pool.py).
+
+    ``upgrade``: judge as an upgrade — a hit must also reach the profile's
+    upgrade cutoff (core/quality/upgrades.py), not just what the everyday
+    download filter would take.
+    """
+    search_queries = matching_engine.generate_download_queries(track_obj)
+    if not search_queries:
+        artist = track_obj.artists[0] if track_obj.artists else ''
+        search_queries = [f"{artist} {track_obj.name}".strip()]
+    # First two queries: enough to catch the usual naming, fast enough to wait on.
+    search_queries = search_queries[:2]
+    database = get_database()
+
+    # Every configured source individually — hybrid search stops at the first hit.
+    download_clients = {}
+    try:
+        if download_orchestrator and hasattr(download_orchestrator, 'configured_clients'):
+            download_clients = dict(download_orchestrator.configured_clients())
+    except Exception as e:
+        logger.warning(f"[{log_tag}] Error getting download clients: {e}")
+    if not download_clients:
+        download_clients = {'default': download_orchestrator}
+
+    logger.info(f"[{log_tag}] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
+
+    from core.downloads.candidate_pool import build_source_rows, empty_source_rows
+    from core.quality.source_map import quality_profile_context
+
+    bar = None
+    if upgrade:
+        from core.quality.upgrades import apply_upgrade_bar, upgrade_bar
+        bar = upgrade_bar(quality_profile_id)
+
+    def _search_one_source(source_name, client):
+        evaluated = []
+        for q in search_queries:
+            try:
+                # These clients are searched directly rather than through the
+                # orchestrator, so nothing else would enter the item's profile
+                # context and quality_tier_for_source would ask each source for
+                # the tier the APP default wants.
+                with quality_profile_context(quality_profile_id):
+                    tracks_result, _ = run_async(client.search(q, timeout=20))
+                if not tracks_result:
+                    continue
+                pairs = evaluate_candidates(tracks_result, track_obj, q, quality_profile_id)
+                if bar is not None:
+                    pairs = apply_upgrade_bar(pairs, *bar)
+                evaluated.append((q, pairs))
+            except Exception as e:
+                logger.debug(f"[{log_tag}] {source_name} search failed for query '{q}': {e}")
+        return build_source_rows(
+            evaluated, source_name=source_name, is_blacklisted=database.is_blacklisted,
+        )
+
+    def generate_stream():
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {pool.submit(_search_one_source, name, client): name for name, client in download_clients.items()}
+            for future in as_completed(futures):
+                source_name = futures[future]
+                try:
+                    yield json.dumps({'source': source_name, **future.result()}) + '\n'
+                except Exception as e:
+                    yield json.dumps({'source': source_name, **empty_source_rows(str(e))}) + '\n'
+        yield json.dumps({'done': True}) + '\n'
+
+    return app.response_class(generate_stream(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
+
+
 @app.route('/api/library/track/<track_id>/redownload/search-sources', methods=['POST'])
 def redownload_search_sources(track_id):
     """Search all active download sources for a track using the selected metadata."""
@@ -11201,7 +11298,6 @@ def redownload_search_sources(track_id):
             explicit=parse_strict_int(data.get('quality_profile_id')),
         )
 
-        # Build a track-like object for query generation
         from core.itunes_client import Track as MetaTrack
         track_obj = MetaTrack(
             id=metadata.get('id', ''),
@@ -11211,106 +11307,10 @@ def redownload_search_sources(track_id):
             duration_ms=metadata.get('duration_ms', 0),
             popularity=0,
         )
-
-        # Generate search queries
-        search_queries = matching_engine.generate_download_queries(track_obj)
-        if not search_queries:
-            search_queries = [f"{metadata.get('artist', '')} {metadata['name']}".strip()]
-
-        # Use first 2 queries for speed
-        search_queries = search_queries[:2]
-
-        # Search ALL configured download sources individually (not through hybrid which stops at first hit)
-        candidates = []
-        database = get_database()
-
-        # Get all available download source clients via the orchestrator's
-        # generic accessor — replaces the old per-source if/hasattr chain
-        # that Cin called out as defeating the purpose of the registry refactor.
-        download_clients = {}
-        try:
-            if download_orchestrator and hasattr(download_orchestrator, 'configured_clients'):
-                download_clients = dict(download_orchestrator.configured_clients())
-        except Exception as e:
-            logger.warning(f"[Redownload] Error getting download clients: {e}")
-
-        if not download_clients:
-            # Fallback: use orchestrator directly
-            download_clients = {'default': download_orchestrator}
-
-        logger.info(f"[Redownload] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
-
-        def _search_one_source(source_name, client):
-            """Search a single download source and return formatted candidates."""
-            source_candidates = []
-            # These clients are searched directly rather than through the
-            # orchestrator, so nothing else would enter the item's profile
-            # context and quality_tier_for_source would ask each source for the
-            # tier the APP default wants.
-            from core.quality.source_map import quality_profile_context
-            for _qi, q in enumerate(search_queries):
-                try:
-                    with quality_profile_context(quality_profile_id):
-                        tracks_result, _ = run_async(client.search(q, timeout=20))
-                    if not tracks_result:
-                        continue
-                    valid = get_valid_candidates(tracks_result, track_obj, q,
-                                                 quality_profile_id)
-                    for candidate in valid:
-                        is_bl = database.is_blacklisted(candidate.username, candidate.filename)
-                        display_name = os.path.basename(candidate.filename.replace('\\', '/'))
-                        ext = os.path.splitext(display_name)[1].lstrip('.').upper()
-                        quality = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else candidate.quality or ''
-                        svc = source_name if source_name != 'default' else 'hybrid'
-                        uname = candidate.username
-                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon'):
-                            svc = uname
-                        source_candidates.append({
-                            'username': uname,
-                            'filename': candidate.filename,
-                            'display_name': display_name,
-                            'size': candidate.size or 0,
-                            'size_display': f"{(candidate.size or 0) / 1048576:.1f} MB",
-                            'bitrate': candidate.bitrate or 0,
-                            'quality': quality,
-                            'duration': candidate.duration or 0,
-                            'confidence': round(getattr(candidate, 'confidence', 0), 3),
-                            'source_service': svc,
-                            'source_query': q,
-                            'blacklisted': is_bl,
-                            'free_upload_slots': getattr(candidate, 'free_upload_slots', 0),
-                            'upload_speed': getattr(candidate, 'upload_speed', 0),
-                            'queue_length': getattr(candidate, 'queue_length', 0),
-                        })
-                except Exception as e:
-                    logger.debug(f"[Redownload] {source_name} search failed for query '{q}': {e}")
-            # Deduplicate within source
-            seen = set()
-            unique = []
-            for c in source_candidates:
-                key = f"{c['username']}|{c['filename']}"
-                if key not in seen:
-                    seen.add(key)
-                    unique.append(c)
-            unique.sort(key=lambda c: (-int(not c['blacklisted']), -c['confidence']))
-            return unique
-
-        # Stream NDJSON — one line per source as it completes
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        def generate_stream():
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                futures = {pool.submit(_search_one_source, name, client): name for name, client in download_clients.items()}
-                for future in as_completed(futures):
-                    source_name = futures[future]
-                    try:
-                        results = future.result()
-                        yield json.dumps({'source': source_name, 'candidates': results}) + '\n'
-                    except Exception as e:
-                        yield json.dumps({'source': source_name, 'candidates': [], 'error': str(e)}) + '\n'
-            yield json.dumps({'done': True}) + '\n'
-
-        return app.response_class(generate_stream(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
+        return _inspect_sources_stream(
+            track_obj, quality_profile_id, log_tag='Redownload',
+            upgrade=bool(data.get('upgrade')),
+        )
 
     except Exception as e:
         logger.error(f"Error in redownload source search: {e}", exc_info=True)
@@ -11329,6 +11329,107 @@ def redownload_start(track_id):
     if dl_err:
         return dl_err
     return _redownload_start_impl(track_id)
+
+
+# CANDIDATE INSPECTOR — the same per-source view, opened from a failed
+# download or a wishlist item instead of a library track.
+
+@app.route('/api/downloads/task/<task_id>/inspect', methods=['POST'])
+def inspect_task_sources(task_id):
+    """Every source's hits for a download task's track, with the verdicts.
+    A pick goes back through /download-candidate."""
+    try:
+        with tasks_lock:
+            task = download_tasks.get(task_id)
+            track_info = dict(task.get('track_info') or {}) if isinstance(task, dict) else None
+        if track_info is None:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+        if not track_info.get('name'):
+            return jsonify({"success": False, "error": "This download has no track name to search for"}), 400
+        return _inspect_sources_stream(
+            _pinned_batch.track_object(track_info),
+            track_info.get('quality_profile_id'),
+            log_tag='Inspector',
+        )
+    except Exception as e:
+        logger.error(f"Error in task source inspection: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _wishlist_track_for_inspector(track_id):
+    """The wishlist row, formatted the way wishlist downloads format it, for
+    the current profile. None when it isn't there (or isn't theirs)."""
+    if not track_id:
+        return None
+    from core.wishlist.service import WishlistService
+    row = get_database().get_wishlist_track(str(track_id), profile_id=get_current_profile_id())
+    if not row:
+        return None
+    return WishlistService.format_track_for_download(row)
+
+
+@app.route('/api/wishlist/inspect', methods=['POST'])
+def inspect_wishlist_sources():
+    """Search manually for one wishlist track: every source, with the verdicts."""
+    try:
+        data = request.get_json() or {}
+        track = _wishlist_track_for_inspector(data.get('track_id'))
+        if not track:
+            return jsonify({"success": False, "error": "That track isn't on your wishlist"}), 404
+        return _inspect_sources_stream(
+            _pinned_batch.track_object(track), track.get('quality_profile_id'),
+            log_tag='Inspector',
+        )
+    except Exception as e:
+        logger.error(f"Error in wishlist source inspection: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/wishlist/inspect/download', methods=['POST'])
+def download_wishlist_pick():
+    """Download the exact file picked in the inspector for a wishlist track.
+
+    A pinned one-task batch: that file, no hunting for another if it fails.
+    The task carries the wishlist row's own metadata, so a success tags it
+    properly and takes it off the wishlist the usual way.
+    """
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
+    try:
+        data = request.get_json() or {}
+        candidate = data.get('candidate') or {}
+        if not candidate.get('username') or not candidate.get('filename'):
+            return jsonify({"success": False, "error": "candidate with username and filename required"}), 400
+        if not _pinned_batch.is_pinnable(candidate.get('username')):
+            return jsonify({"success": False, "error": (
+                "Torrent and Usenet hits are whole releases and can't be picked one track at a time. "
+                "Use Download on the wishlist instead.")}), 400
+        track = _wishlist_track_for_inspector(data.get('track_id'))
+        if not track:
+            return jsonify({"success": False, "error": "That track isn't on your wishlist"}), 404
+
+        from core.downloads.decisions import is_quality_override
+        name = f"Wishlist: {track.get('artist_name') or 'Unknown'} - {track.get('name') or 'Unknown'}"
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(
+                candidate=_pinned_batch.candidate_from_result(candidate),
+                track_info=dict(track),
+            )],
+            name=name, profile_id=get_current_profile_id(),
+            source_page='Wishlist', playlist_prefix='wishlist_pick',
+        )
+        if is_quality_override(data.get('override')):
+            with tasks_lock:
+                for task_id in task_ids:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['_override_quality'] = True
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        add_activity_item("", "Wishlist Download Started", name, "Now")
+        return jsonify({"success": True, "batch_id": batch_id, "task_id": task_ids[0]})
+    except Exception as e:
+        logger.error(f"Error starting wishlist pick: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route('/api/library/artist/<artist_id>/sync', methods=['POST'])
@@ -11723,7 +11824,11 @@ from api.discover_routes import (  # noqa: E402
 )
 
 
+from core.discovery.blocked import WORKS as _BLOCKED_WORKS, hide_blocked_in_response as _hide_blocked_artists  # noqa: E402
+
+
 @app.route('/api/library/radio')
+@_hide_blocked_artists({'tracks': _BLOCKED_WORKS})
 def library_radio():
     """Get a smart queue of similar tracks for radio mode auto-play.
 
@@ -15120,6 +15225,7 @@ def stop_duplicate_cleaner():
 # ===============================
 
 from core.downloads.validation import (
+    evaluate_candidates,
     get_valid_candidates,
     init as _init_download_validation,
 )
@@ -15509,6 +15615,7 @@ def _build_task_worker_deps():
         on_download_completed=lambda b, t, success: _on_download_completed(b, t, success=success),
         recover_worker_slot=_recover_worker_slot,
         try_version_mismatch_fallback=_try_version_mismatch_fallback_for_worker,
+        evaluate_candidates=evaluate_candidates,
     )
 
 

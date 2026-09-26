@@ -106,6 +106,10 @@ const emptyState = (message: string): EmptyPolicy => ({ kind: 'empty-state', mes
 export const DEFAULT_EMPTY_MESSAGE = 'Nothing to show';
 
 export const SECTION_EMPTY_POLICY: Partial<Record<DiscoverSectionId, EmptyPolicy>> = {
+  // Made For You holds 'Build a mix', so it stays with nothing in it yet.
+  'your-mixes-section': emptyState(
+    'Your mixes show up here after a watchlist scan. You can build your own now.',
+  ),
   // hideWhenEmpty: true — these vanish.
   'recommended-artists-section': HIDE,
   'listening-recs-section': HIDE,

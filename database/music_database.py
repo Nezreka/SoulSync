@@ -3395,6 +3395,27 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_soul_id ON track_downloads (soul_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_isrc ON track_downloads (isrc)")
 
+            # Why an automatic grab took the file it took, or why nothing
+            # passed: the winner, the closest alternatives and a count of
+            # rejections by reason code (core/downloads/decisions.py). One row
+            # per download task; cleared with the download history.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS download_decisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    track_download_id INTEGER,
+                    task_key TEXT NOT NULL,
+                    track_title TEXT,
+                    track_artist TEXT,
+                    quality_profile_id INTEGER,
+                    outcome TEXT NOT NULL,
+                    chosen_json TEXT,
+                    alternatives_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dd_task_key ON download_decisions (task_key)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dd_track_download ON download_decisions (track_download_id)")
+
             # Durable record of completed TORRENT grabs so the seeding sweep
             # (core/downloads/seeding.py) can manage the tail: seed until the
             # ratio/time goals are met, then remove the torrent from the client.
@@ -3503,6 +3524,68 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_spotify ON blocklist (spotify_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_name ON blocklist (name COLLATE NOCASE)")
             self._migrate_discovery_blacklist_into_blocklist(cursor)
+
+            # What a profile told discovery about a recommendation: more /
+            # less like this, or not now (expires). Blocks are NOT here, they
+            # live in the blocklist, so resetting taste never clears them.
+            # One row per (profile, entity, kind); more and less replace each
+            # other. core/discovery/feedback.py reads it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    entity_type TEXT NOT NULL,        -- artist | album | track
+                    entity_key TEXT NOT NULL,         -- normalised artist[, title]
+                    name TEXT NOT NULL,
+                    artist_name TEXT,
+                    ids_json TEXT,                    -- {source: id}
+                    kind TEXT NOT NULL,               -- more | less | not_now
+                    seed_context_json TEXT,           -- the explanation it was shown with
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP              -- not_now only
+                )
+            """)
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_discovery_feedback_entity "
+                           "ON discovery_feedback (profile_id, entity_type, entity_key, kind)")
+
+            # The discovery inbox: releases, upcoming releases, saved recs and
+            # concerts worth coming back to, per profile. A refresh adds items
+            # as unread and never resets a state someone chose.
+            # core/discovery/inbox.py owns it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_inbox (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    kind TEXT NOT NULL,               -- new_release | upcoming | saved_rec | concert
+                    entity_key TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist_name TEXT,
+                    image_url TEXT,
+                    item_date TEXT,                   -- release or event date, YYYY-MM-DD
+                    payload_json TEXT,
+                    state TEXT NOT NULL DEFAULT 'unread',  -- unread | saved | dismissed | added
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (profile_id, kind, entity_key)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_inbox_state "
+                           "ON discovery_inbox (profile_id, state)")
+
+            # Renewable mixes: a recipe (seeds / genres, years, source mix,
+            # length, schedule) per row; each generation is stored as a
+            # curated payload keyed mix_recipe_<id>. core/personalized/recipes.py.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mix_recipes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    recipe_json TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mix_recipes_profile "
+                           "ON mix_recipes (profile_id)")
 
             # Liked artists pool — aggregated followed/liked artists from connected services
             cursor.execute("""
@@ -18215,7 +18298,7 @@ class MusicDatabase:
                 'server_source': server_source
             }
 
-    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "") -> Dict[str, Any]:
+    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "", quality_filter: str = "") -> Dict[str, Any]:
         """
         Get artists for the library page with search, filtering, and pagination
 
@@ -18226,6 +18309,8 @@ class MusicDatabase:
             limit: Number of results per page
             watchlist_filter: Filter by watchlist status ("all", "watched", "unwatched")
             source_filter: Filter by metadata source match (e.g. "spotify", "!spotify" for unmatched)
+            quality_filter: "upgradable" keeps artists with a track the quality
+                jobs say could be better (a pending finding)
 
         Returns:
             Dict containing artists list, pagination info, and total count
@@ -18273,6 +18358,21 @@ class MusicDatabase:
                             where_conditions.append(f"({col} IS NULL OR {col} = '')")
                         else:
                             where_conditions.append(f"({col} IS NOT NULL AND {col} != '')")
+
+                from core.quality.upgrades import UPGRADE_JOBS
+                _upgrade_jobs_sql = ','.join('?' * len(UPGRADE_JOBS))
+                # artists (by name, like the dedup below) owning a track with a
+                # pending quality finding. Non-correlated: evaluated once.
+                _upgradable_names_sql = f"""
+                    SELECT ar.name, ar.server_source FROM repair_findings f
+                    JOIN tracks t ON t.id = f.entity_id
+                    JOIN artists ar ON ar.id = t.artist_id
+                    WHERE f.status = 'pending' AND f.entity_type = 'track'
+                      AND f.job_id IN ({_upgrade_jobs_sql})
+                """
+                if quality_filter == 'upgradable':
+                    where_conditions.append(f"(a.name, a.server_source) IN ({_upgradable_names_sql})")
+                    params.extend(UPGRADE_JOBS)
 
                 # Get active server for filtering
                 from core.settings import config_manager
@@ -18369,6 +18469,7 @@ class MusicDatabase:
                 # Step 3: Batch-fetch album/track counts only for the 75 artists on this page
                 artist_ids_on_page = [row['id'] for row in artist_rows]
                 counts_map = {}
+                upgradable_map: Dict[Any, int] = {}
                 if artist_ids_on_page:
                     # Get all artist IDs that share names with the page artists (for dedup merging)
                     name_pairs = [(row['name'], row['server_source']) for row in artist_rows]
@@ -18416,6 +18517,26 @@ class MusicDatabase:
                         cid = name_to_canonical.get(key)
                         if cid:
                             counts_map[cid] = (album_count, track_count)
+
+                    # tracks that could be better, per artist on this page
+                    try:
+                        cursor.execute(f"""
+                            SELECT ar.name AS artist_name, ar.server_source AS artist_source,
+                                   COUNT(DISTINCT f.entity_id) AS n
+                            FROM repair_findings f
+                            JOIN tracks t ON t.id = f.entity_id
+                            JOIN artists ar ON ar.id = t.artist_id
+                            WHERE f.status = 'pending' AND f.entity_type = 'track'
+                              AND f.job_id IN ({_upgrade_jobs_sql})
+                              AND ({' OR '.join(or_clauses)})
+                            GROUP BY ar.name, ar.server_source
+                        """, (*UPGRADE_JOBS, *or_params))
+                        for urow in cursor.fetchall():
+                            cid = name_to_canonical.get((urow['artist_name'], urow['artist_source']))
+                            if cid:
+                                upgradable_map[cid] = urow['n'] or 0
+                    except Exception as upgrade_err:
+                        logger.debug("upgradable counts skipped: %s", upgrade_err)
 
                 rows = artist_rows
 
@@ -18467,6 +18588,7 @@ class MusicDatabase:
                         'amazon_id': row['amazon_id'],
                         'album_count': counts_map.get(row['id'], (0, 0))[0],
                         'track_count': counts_map.get(row['id'], (0, 0))[1],
+                        'upgradable_count': upgradable_map.get(row['id'], 0),
                         'is_watched': bool(is_watched)
                     }
                     artists.append(artist_data)
@@ -18476,7 +18598,25 @@ class MusicDatabase:
                 has_prev = page > 1
                 has_next = page < total_pages
 
+                # every track in this library view that could be better, for
+                # the filter's label
+                upgradable_total = 0
+                try:
+                    cursor.execute(f"""
+                        SELECT COUNT(DISTINCT f.entity_id) AS n
+                        FROM repair_findings f
+                        JOIN tracks t ON t.id = f.entity_id
+                        JOIN artists a ON a.id = t.artist_id
+                        WHERE f.status = 'pending' AND f.entity_type = 'track'
+                          AND f.job_id IN ({_upgrade_jobs_sql})
+                          AND a.server_source = ? AND {scope_sql}
+                    """, (*UPGRADE_JOBS, active_server, *scope_params))
+                    upgradable_total = cursor.fetchone()['n'] or 0
+                except Exception as upgrade_err:
+                    logger.debug("upgradable total skipped: %s", upgrade_err)
+
                 return {
+                    'upgradable_total': upgradable_total,
                     'artists': artists,
                     'pagination': {
                         'page': page,
@@ -19334,73 +19474,6 @@ class MusicDatabase:
             logger.error(f"Error removing from blacklist: {e}")
             return False
 
-    # ==================== Discovery Artist Blacklist Methods ====================
-
-    def add_to_discovery_blacklist(self, artist_name: str, spotify_id: str = None,
-                                   itunes_id: str = None, deezer_id: str = None) -> bool:
-        """Block an artist from appearing in discovery results."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO discovery_artist_blacklist
-                (artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id)
-                VALUES (?, ?, ?, ?)
-            """, (artist_name.strip(), spotify_id, itunes_id, deezer_id))
-            conn.commit()
-            return True
-        except Exception as e:
-            logger.error(f"Error adding to discovery blacklist: {e}")
-            return False
-
-    def remove_from_discovery_blacklist(self, blacklist_id: int) -> bool:
-        """Remove an artist from the discovery blacklist."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM discovery_artist_blacklist WHERE id = ?", (blacklist_id,))
-            conn.commit()
-            return cursor.rowcount > 0
-        except Exception as e:
-            logger.error(f"Error removing from discovery blacklist: {e}")
-            return False
-
-    def get_discovery_blacklist(self) -> list:
-        """Get all blacklisted discovery artists."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id, created_at
-                FROM discovery_artist_blacklist ORDER BY created_at DESC
-            """)
-            return [dict(r) for r in cursor.fetchall()]
-        except Exception as e:
-            logger.error(f"Error getting discovery blacklist: {e}")
-            return []
-
-    def get_discovery_blacklist_names(self) -> set:
-        """Set of blacklisted artist names (lowercased) for discovery filtering.
-
-        Unions the legacy discovery_artist_blacklist with the new unified
-        blocklist's artist entries (across all profiles), so a ban added via
-        either path filters discovery. The legacy table is migrated into the
-        blocklist on upgrade but kept as a rollback safety net."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT LOWER(artist_name) FROM discovery_artist_blacklist")
-            names = {r[0] for r in cursor.fetchall()}
-            try:
-                cursor.execute("SELECT LOWER(name) FROM blocklist WHERE entity_type = 'artist'")
-                names.update(r[0] for r in cursor.fetchall())
-            except Exception as _bl_err:  # noqa: BLE001 — old schema may predate blocklist
-                logger.debug("blocklist union skipped in discovery names: %s", _bl_err)
-            return names
-        except Exception as e:
-            logger.error(f"Error getting discovery blacklist names: {e}")
-            return set()
-
     # ==================== Blocklist (artist/album/track) ====================
 
     def _migrate_discovery_blacklist_into_blocklist(self, cursor):
@@ -19410,13 +19483,23 @@ class MusicDatabase:
         Replicated to EVERY existing profile so no existing discovery ban
         silently stops working under the new per-profile model. Idempotent
         (skips a (profile, name) already present). The old table is left in
-        place as a rollback safety net."""
+        place as a rollback safety net.
+
+        Runs once. It used to run on every start, so an artist a profile
+        unblocked came back on the next restart; the discover page's blocked
+        artists modal now writes the blocklist, so nothing new lands in the
+        old table after this."""
         try:
+            cursor.execute("SELECT 1 FROM metadata WHERE key = "
+                           "'discovery_blacklist_migrated_v1' LIMIT 1")
+            if cursor.fetchone():
+                return
             cursor.execute(
                 "SELECT artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id "
                 "FROM discovery_artist_blacklist")
             legacy = cursor.fetchall()
             if not legacy:
+                self._mark_discovery_blacklist_migrated(cursor)
                 return
             try:
                 cursor.execute("SELECT id FROM profiles")
@@ -19440,11 +19523,20 @@ class MusicDatabase:
                         "itunes_id, deezer_id, match_status) VALUES (?, 'artist', ?, ?, ?, ?, 'matched')",
                         (pid, name, row[1], row[2], row[3]))
                     migrated += 1
+            self._mark_discovery_blacklist_migrated(cursor)
             if migrated:
                 logger.info("Migrated %d discovery-blacklist artist entr(ies) into the "
                             "unified blocklist across %d profile(s)", migrated, len(profile_ids))
         except Exception as e:
             logger.debug("discovery→blocklist migration skipped: %s", e)
+
+    @staticmethod
+    def _mark_discovery_blacklist_migrated(cursor):
+        try:
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) "
+                           "VALUES ('discovery_blacklist_migrated_v1', '1')")
+        except Exception as e:  # noqa: BLE001 - worst case it runs again
+            logger.debug("discovery blacklist migration flag not written: %s", e)
 
     def add_blocklist_entry(self, profile_id: int, entity_type: str, name: str,
                             spotify_id: str = None, itunes_id: str = None,
@@ -19497,6 +19589,78 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error removing blocklist entry: {e}")
             return False
+
+    # ==================== Discovery feedback ====================
+
+    def set_discovery_feedback(self, profile_id: int, entity_type: str, entity_key: str,
+                               name: str, kind: str, artist_name: str = None,
+                               ids_json: str = None, seed_context_json: str = None,
+                               expires_at: str = None) -> Optional[int]:
+        """Record one piece of feedback, replacing the same kind for the same
+        entity. ``more`` and ``less`` are opposites: setting one drops the
+        other. Returns the row id."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            opposite = {'more': 'less', 'less': 'more'}.get(kind)
+            if opposite:
+                cursor.execute(
+                    "DELETE FROM discovery_feedback WHERE profile_id = ? AND entity_type = ? "
+                    "AND entity_key = ? AND kind = ?", (profile_id, entity_type, entity_key, opposite))
+            cursor.execute(
+                "DELETE FROM discovery_feedback WHERE profile_id = ? AND entity_type = ? "
+                "AND entity_key = ? AND kind = ?", (profile_id, entity_type, entity_key, kind))
+            cursor.execute(
+                "INSERT INTO discovery_feedback (profile_id, entity_type, entity_key, name, "
+                "artist_name, ids_json, kind, seed_context_json, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (profile_id, entity_type, entity_key, name, artist_name, ids_json, kind,
+                 seed_context_json, expires_at))
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error recording discovery feedback: {e}")
+            return None
+
+    def get_discovery_feedback(self, profile_id: int) -> list:
+        """This profile's feedback still in force (an expired not-now is not)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, entity_type, entity_key, name, artist_name, ids_json, kind, "
+                "seed_context_json, created_at, expires_at FROM discovery_feedback "
+                "WHERE profile_id = ? AND (expires_at IS NULL OR expires_at > datetime('now')) "
+                "ORDER BY created_at DESC, id DESC", (profile_id,))
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f"discovery feedback read failed: {e}")
+            return []
+
+    def remove_discovery_feedback(self, profile_id: int, feedback_id: int) -> bool:
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_feedback WHERE id = ? AND profile_id = ?",
+                           (int(feedback_id), profile_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing discovery feedback: {e}")
+            return False
+
+    def clear_discovery_feedback(self, profile_id: int) -> int:
+        """Reset taste: every more / less / not-now for the profile. Blocks
+        are in the blocklist and stay."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_feedback WHERE profile_id = ?", (profile_id,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error clearing discovery feedback: {e}")
+            return 0
 
     def get_blocklist(self, profile_id: int, entity_type: str = None) -> list:
         """List blocklist entries for a profile, newest first."""
@@ -21259,6 +21423,133 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    # ==================== Download Decisions ====================
+
+    DOWNLOAD_DECISIONS_KEPT = 5000
+
+    def record_download_decision(self, task_key: str, *, outcome: str, summary: dict,
+                                 track_title: str = '', track_artist: str = '',
+                                 quality_profile_id=None) -> Optional[int]:
+        """Store (or replace) the decision behind one download task.
+
+        ``summary`` is ``core.downloads.candidate_pool.summarize_pool`` output.
+        A task that retries replaces its row, so each task has one answer. The
+        table keeps the newest DOWNLOAD_DECISIONS_KEPT rows.
+        """
+        if not task_key:
+            return None
+        conn = None
+        try:
+            chosen = summary.get('chosen')
+            rest = {k: v for k, v in summary.items() if k != 'chosen'}
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM download_decisions WHERE task_key = ?", (str(task_key),))
+            cursor.execute(
+                """INSERT INTO download_decisions
+                   (task_key, track_title, track_artist, quality_profile_id, outcome,
+                    chosen_json, alternatives_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (str(task_key), track_title or '', track_artist or '', quality_profile_id,
+                 outcome, json.dumps(chosen) if chosen else None, json.dumps(rest)),
+            )
+            new_id = cursor.lastrowid
+            cursor.execute(
+                "DELETE FROM download_decisions WHERE id <= ?",
+                (new_id - self.DOWNLOAD_DECISIONS_KEPT,),
+            )
+            conn.commit()
+            return new_id
+        except Exception as e:
+            logger.debug("Error recording download decision for %s: %s", task_key, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def get_download_decision(self, task_key: str) -> Optional[dict]:
+        if not task_key:
+            return None
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                """SELECT id, track_download_id, task_key, track_title, track_artist,
+                          quality_profile_id, outcome, chosen_json, alternatives_json, created_at
+                   FROM download_decisions WHERE task_key = ? ORDER BY id DESC LIMIT 1""",
+                (str(task_key),),
+            ).fetchone()
+            return self._download_decision_row(row) if row else None
+        except Exception as e:
+            logger.debug("Error reading download decision for %s: %s", task_key, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def get_download_decision_for_track_download(self, track_download_id) -> Optional[dict]:
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                """SELECT id, track_download_id, task_key, track_title, track_artist,
+                          quality_profile_id, outcome, chosen_json, alternatives_json, created_at
+                   FROM download_decisions WHERE track_download_id = ? ORDER BY id DESC LIMIT 1""",
+                (int(track_download_id),),
+            ).fetchone()
+            return self._download_decision_row(row) if row else None
+        except Exception as e:
+            logger.debug("Error reading download decision for download %s: %s", track_download_id, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def link_download_decision(self, task_key: str, track_download_id) -> bool:
+        """Tie a task's decision to the track_downloads row its file became."""
+        if not task_key or track_download_id is None:
+            return False
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.execute(
+                "UPDATE download_decisions SET track_download_id = ? WHERE task_key = ?",
+                (int(track_download_id), str(task_key)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug("Error linking download decision for %s: %s", task_key, e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def _download_decision_row(row) -> dict:
+        def _load(text, fallback):
+            try:
+                return json.loads(text) if text else fallback
+            except (TypeError, ValueError):
+                return fallback
+
+        rest = _load(row['alternatives_json'], {})
+        return {
+            'id': row['id'],
+            'track_download_id': row['track_download_id'],
+            'task_key': row['task_key'],
+            'track_title': row['track_title'] or '',
+            'track_artist': row['track_artist'] or '',
+            'quality_profile_id': row['quality_profile_id'],
+            'outcome': row['outcome'],
+            'chosen': _load(row['chosen_json'], None),
+            'alternatives': rest.get('alternatives', []),
+            'accepted_total': rest.get('accepted_total', 0),
+            'rejected_total': rest.get('rejected_total', 0),
+            'rejected_counts': rest.get('rejected_counts', {}),
+            'created_at': row['created_at'],
+        }
+
     def clear_completed_download_history(self) -> int:
         """Delete the persisted completed-download history shown on the Downloads
         page (every event_type='download' row). This also clears the verification
@@ -21272,8 +21563,17 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM library_history WHERE event_type IN ('download', 'podcast')")
+            removed = cursor.rowcount
             conn.commit()
-            return cursor.rowcount
+            # The "why this file" records belong to the same history. Best
+            # effort, after the commit: a missing table must never cost the
+            # clear the user asked for.
+            try:
+                cursor.execute("DELETE FROM download_decisions")
+                conn.commit()
+            except Exception as dec_err:
+                logger.debug("Could not clear download decisions: %s", dec_err)
+            return removed
         except Exception as e:
             logger.error("Error clearing completed download history: %s", e)
             return 0

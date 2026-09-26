@@ -55,6 +55,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'cleanup_wishlist',
     'update_discovery_pool',
     'start_quality_scan',
+    'apply_quality_upgrades',
     'backup_database',
     'refresh_beatport_cache',
     'clean_search_history',

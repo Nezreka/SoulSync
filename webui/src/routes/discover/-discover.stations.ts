@@ -19,6 +19,8 @@
  * testable without a DOM.
  */
 
+import type { Explanation } from './-discover.explanation';
+
 export interface Station {
   artist_id: string | number;
   name: string;
@@ -28,6 +30,8 @@ export interface Station {
   /** Named by the similarity graph, but NOT guaranteed by any playback path. */
   related?: string[];
   playable_tracks?: number;
+  /** Why it's recommended (server-written); the ⋯ menu's seed context. */
+  explanation?: Explanation;
 }
 
 export interface StationTrack {

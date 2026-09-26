@@ -33,6 +33,12 @@ from api.source_playlists import (
     _save_source_bubble_snapshot,
 )
 from core.discovery.hero import get_discover_hero as _discover_hero_get
+from core.discovery.blocked import (  # noqa: E402
+    ARTISTS, GRAPH, NAMES, WORKS, hide_blocked_in_response as _hide_blocked,
+)
+from core.discovery.explain import (  # noqa: E402
+    consensus_confidence as _consensus_confidence, explanation as _explanation,
+)
 from core.library.service_search import _search_service
 from core.metadata import normalize_image_url as fix_artist_image_url
 from core.metadata.cache import get_metadata_cache
@@ -101,13 +107,17 @@ def _discover_bylt_key():
     the key used to carry neither, so a source switch or a fresh generation
     kept serving the previous answer for up to half an hour. reading the
     generation id here is one indexed row and it makes the cache follow the
-    content instead of the clock.
+    content instead of the clock. the taste fingerprint rides along so a
+    more/less answer re-ranks the shelf on the next request, the way the
+    other re-ranked shelves do.
     """
     try:
         from core.discovery.bylt_store import read_generation
+        from core.discovery.feedback import Taste
         source = _get_active_discovery_source()
         gen = read_generation(get_database(), get_current_profile_id()) or {}
-        return f"{source}:{gen.get('generation_id') or 'none'}"
+        taste = Taste.load(get_database(), get_current_profile_id()).fingerprint()
+        return f"{source}:{gen.get('generation_id') or 'none'}:{taste}"
     except Exception:
         return 'unknown'
 
@@ -119,6 +129,14 @@ def _discover_dial_key():
         return str(config_manager.get('discover.adventurousness', 0.3))
     except Exception:
         return '0.3'
+
+
+def _discover_rank_key():
+    """The two re-ranked artist shelves: the dial, and this profile's more /
+    less feedback, so an answer re-ranks that profile's shelf and no other."""
+    from core.discovery.feedback import Taste
+    return (_discover_dial_key(),
+            Taste.load(get_database(), get_current_profile_id()).fingerprint())
 
 
 # injected by configure()
@@ -150,6 +168,7 @@ def create_blueprint():
     return bp
 
 @bp.route('/api/discover/stations', methods=['GET'])
+@_hide_blocked({'stations': ARTISTS, 'stations[].with': NAMES, 'stations[].related': NAMES})
 def get_recommended_stations():
     """Recommended Stations - the user's heaviest recent artists as one-click
     artist radio (startArtistRadioById plays the library's own tracks)."""
@@ -163,6 +182,7 @@ def get_recommended_stations():
 
 
 @bp.route('/api/discover/stations/<artist_id>/snapshot', methods=['POST'])
+@_hide_blocked({'snapshot.tracks': WORKS})
 def get_station_snapshot(artist_id):
     """A finite, inspectable preview of one station.
 
@@ -326,6 +346,7 @@ def hydrate_discover_downloads():
 
 
 @bp.route('/api/discover/hero', methods=['GET'])
+@_hide_blocked({'artists': ARTISTS, 'artists[].explanation.seeds': NAMES})
 def get_discover_hero():
     return _discover_hero_get()
 
@@ -372,7 +393,8 @@ def _discover_primary_genre(item):
 
 
 @bp.route('/api/discover/similar-artists', methods=['GET'])
-@_discover_shelf_cache(key_extra=_discover_dial_key)
+@_hide_blocked({'artists': ARTISTS, 'artists[].explanation.seeds': NAMES})
+@_discover_shelf_cache(key_extra=_discover_rank_key)
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
     try:
@@ -440,9 +462,10 @@ def get_discover_similar_artists():
             if artist.popularity:
                 artist_data["popularity"] = artist.popularity
             # "because you have X, Y, Z" — the artists of yours that point here
-            because = sources_by_name.get(artist.similar_artist_name)
-            if because:
-                artist_data["because"] = because
+            because = sources_by_name.get(artist.similar_artist_name) or []
+            artist_data["explanation"] = _explanation(
+                'similar_to', because,
+                _consensus_confidence(len(because) or artist.occurrence_count))
             result_artists.append(artist_data)
 
         # Re-rank: genre/tag affinity (always-on) + the adventurousness popularity penalty (dial).
@@ -454,7 +477,9 @@ def get_discover_similar_artists():
         _taste = _discover_genre_taste(database, _pid)
         _plays = database.get_play_counts_by_name(
             [a.get('artist_name') for a in result_artists], _pid) if result_artists else {}
-        if result_artists and (_adv_level > 0 or _taste or _plays):
+        from core.discovery.feedback import Taste
+        _taste_fb = Taste.load(database, _pid)
+        if result_artists and (_adv_level > 0 or _taste or _plays or not _taste_fb.is_empty):
             try:
                 from core.discovery.listening_recommendations import (
                     apply_adventurous_blend, genre_affinity, novelty_score)
@@ -462,6 +487,9 @@ def get_discover_similar_artists():
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
                     a['_base'] = _oc + (10.0 - _rank) * 0.1              # consensus base
+                    # more / less like this, through the artists of yours that point here
+                    a['_base'] *= _taste_fb.rec_factor(
+                        a.get('artist_name'), sources_by_name.get(a.get('artist_name')) or [])
                     _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
                     a['_aff'] = a['_why_genre'] = _aff                    # _why_genre feeds the "why" chips
                     a['_nov'] = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
@@ -481,7 +509,8 @@ def get_discover_similar_artists():
             from core.discovery.listening_recommendations import why_chips
             for a in result_artists:
                 _w = why_chips(genre_affinity=a.get('_why_genre', 0.0), popularity=a.get('popularity'),
-                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0),
+                               seed_count=len(sources_by_name.get(a.get('artist_name')) or [])
+                               or int(a.get('occurrence_count') or 0),
                                level=_adv_level)   # adaptive: "Off your usual path" on the adventurous end
                 if _w:
                     a['why'] = _w
@@ -631,7 +660,8 @@ def _autostart_popularity_backfill():
 
 
 @bp.route('/api/discover/listening-recommendations', methods=['GET'])
-@_discover_shelf_cache(key_extra=_discover_dial_key)
+@_hide_blocked({'artists': ARTISTS, 'artists[].explanation.seeds': NAMES})
+@_discover_shelf_cache(key_extra=_discover_rank_key)
 def get_discover_listening_recommendations():
     """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
 
@@ -670,7 +700,13 @@ def get_discover_listening_recommendations():
             _names = [a.get('name') for a in stored]
             plays = database.get_play_counts_by_name(_names, _pid) if stored else {}
             pops = database.get_similar_artist_popularities(_names) if stored else {}  # for the "why" chips + dial
+            # what you told discovery (more / less like this) scales the score
+            from core.discovery.feedback import Taste
+            _taste_fb = Taste.load(database, _pid)
             for a in stored:
+                if not _taste_fb.is_empty:
+                    a['score'] = float(a.get('score') or 0) * _taste_fb.rec_factor(
+                        a.get('name'), a.get('seeds') or [])
                 if a.get('popularity') is None:
                     a['popularity'] = pops.get((a.get('name') or '').strip().lower())
                 aff = genre_affinity(a.get('genres') or [], taste) if taste else 0.0
@@ -719,9 +755,10 @@ def get_discover_listening_recommendations():
                 entry["image_url"] = fix_artist_image_url(img)
             if a.get('genres'):
                 entry["genres"] = a['genres'][:3]
-            # "because you listen to X, Y, Z" — the most-played artists that point here.
-            if a.get('seeds'):
-                entry["because"] = a['seeds']
+            # "because you listen to X, Y, Z" — written by the scan that made the
+            # rec; recs stored before the shape existed get it from their seeds
+            entry["explanation"] = a.get('explanation') or _explanation(
+                'listened', a.get('seeds') or [], _consensus_confidence(a.get('seed_count')))
             result_artists.append(entry)
 
         # Spread the shown picks across genres (broader discovery). No-ops on small lists.
@@ -743,6 +780,7 @@ def get_discover_listening_recommendations():
 
 
 @bp.route('/api/discover/personalized/listening-mix', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_discover_listening_mix():
     """#913: the "Listening Mix" playlist row — a playable track mix from the artists you'd
     love based on what you actually listen to.
@@ -878,6 +916,7 @@ def enrich_similar_artists():
 
 
 @bp.route('/api/discover/spotify-library', methods=['GET'])
+@_hide_blocked({'albums': WORKS})
 def get_spotify_library():
     """Get cached Spotify library albums with ownership status. Only available when Spotify is authenticated."""
     try:
@@ -990,6 +1029,7 @@ def refresh_spotify_library():
 
 
 @bp.route('/api/discover/recent-releases', methods=['GET'])
+@_hide_blocked({'albums': WORKS})
 @_discover_shelf_cache()
 def get_discover_recent_releases():
     """Get cached recent albums from watchlist and similar artists"""
@@ -1036,11 +1076,6 @@ def get_discover_recent_releases():
                 except Exception as e:
                     logger.debug("recent album cover fetch failed: %s", e)
 
-        # Filter out blacklisted artists
-        blacklisted = database.get_discovery_blacklist_names()
-        if blacklisted:
-            albums = [a for a in albums if a.get('artist_name', '').lower() not in blacklisted]
-
         # Ownership: which of these new releases are ALREADY in the library.
         # The fuzzy matcher the download pipeline itself uses, so the badge
         # agrees with what a download would decide. ~20 checks per 30-min
@@ -1061,6 +1096,7 @@ def get_discover_recent_releases():
 
 
 @bp.route('/api/discover/release-radar', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_discover_release_radar():
     """Get release radar playlist - curated selection that stays consistent until next update"""
     try:
@@ -1134,6 +1170,7 @@ def get_discover_release_radar():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/because-you-listen-to', methods=['GET'])
+@_hide_blocked({'sections': ARTISTS, 'sections[].tracks': WORKS})
 @_discover_shelf_cache(key_extra=_discover_bylt_key)
 def get_discover_because_you_listen_to():
     """'Because You Listen To' - one stored generation, served whole.
@@ -1249,6 +1286,7 @@ def _bylt_owned_lookup(database, sections):
 
 
 @bp.route('/api/discover/undiscovered-albums', methods=['GET'])
+@_hide_blocked({'albums': WORKS})
 @_discover_shelf_cache()
 def get_discover_undiscovered_albums():
     """Albums by artists you listen to that aren't in your library — from cache."""
@@ -1279,6 +1317,7 @@ def get_discover_undiscovered_albums():
         return jsonify({'success': True, 'albums': []})
 
 @bp.route('/api/discover/genre-new-releases', methods=['GET'])
+@_hide_blocked({'albums': WORKS})
 @_discover_shelf_cache()
 def get_discover_genre_new_releases():
     """Recent releases matching your top genres — from cache."""
@@ -1297,6 +1336,7 @@ def get_discover_genre_new_releases():
         return jsonify({'success': True, 'albums': []})
 
 @bp.route('/api/discover/label-explorer', methods=['GET'])
+@_hide_blocked({'albums': WORKS})
 @_discover_shelf_cache()
 def get_discover_label_explorer():
     """Popular albums from labels in your library — from cache."""
@@ -1321,6 +1361,7 @@ def get_discover_label_explorer():
         return jsonify({'success': True, 'albums': [], 'labels': []})
 
 @bp.route('/api/discover/deep-cuts', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 @_discover_shelf_cache()
 def get_discover_deep_cuts():
     """Low-popularity tracks from artists you listen to — from cache."""
@@ -1364,6 +1405,7 @@ def get_discover_genre_explorer():
         return jsonify({'success': True, 'genres': []})
 
 @bp.route('/api/discover/genre-deep-dive', methods=['GET'])
+@_hide_blocked({'artists': ARTISTS, 'albums': WORKS, 'tracks': WORKS})
 def get_discover_genre_deep_dive():
     """Get artists + albums for a genre — from cache."""
     try:
@@ -1433,6 +1475,7 @@ def resolve_cache_album():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/discover/weekly', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_discover_weekly():
     """Get discovery weekly playlist - curated selection that stays consistent until next update"""
     try:
@@ -1626,6 +1669,7 @@ def diagnose_discover_data():
 # ========================================
 
 @bp.route('/api/discover/seasonal/current', methods=['GET'])
+@_hide_blocked({'albums': WORKS})
 @_discover_shelf_cache()
 def get_current_seasonal_content():
     """Auto-detect and return current season's content"""
@@ -1667,6 +1711,7 @@ def get_current_seasonal_content():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/seasonal/<season_key>/albums', methods=['GET'])
+@_hide_blocked({'albums': WORKS})
 def get_seasonal_albums(season_key):
     """Get albums for a specific season"""
     try:
@@ -1696,6 +1741,7 @@ def get_seasonal_albums(season_key):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/seasonal/<season_key>/playlist', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_seasonal_playlist(season_key):
     """Get curated playlist for a specific season"""
     try:
@@ -1833,6 +1879,7 @@ def refresh_seasonal_content():
 # ========================================
 
 @bp.route('/api/discover/personalized/decade/<int:decade>', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_decade_playlist(decade):
     """Get tracks from a specific decade"""
     try:
@@ -1854,6 +1901,7 @@ def get_decade_playlist(decade):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/personalized/popular-picks', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_popular_picks_playlist():
     """Get high popularity tracks from discovery pool"""
     try:
@@ -1874,6 +1922,7 @@ def get_popular_picks_playlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/personalized/hidden-gems', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_hidden_gems_playlist():
     """Get hidden gems (low popularity) from discovery pool"""
     try:
@@ -1897,6 +1946,8 @@ def get_hidden_gems_playlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/personalized/daily-mixes', methods=['GET'])
+@_hide_blocked({'mixes[].tracks': WORKS, 'mixes[].artists': NAMES,
+                'mixes[].explanation.seeds': NAMES})
 def get_daily_mixes():
     """Daily Mixes - taste-clustered blends of owned + discovery tracks.
 
@@ -1924,6 +1975,7 @@ def get_daily_mixes():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/personalized/discovery-shuffle', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_discovery_shuffle():
     """Get Discovery Shuffle playlist - random tracks from discovery pool"""
     try:
@@ -2000,6 +2052,27 @@ def get_blocklist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _add_to_blocklist(entity_type, name, ids, parent_name=None):
+    """Add to the current profile's blocklist, resolving the OTHER sources now
+    (best-effort) so the ban is cross-source from the first scan. Failures
+    just leave a source unmatched."""
+    ids = {'spotify_id': None, 'itunes_id': None, 'deezer_id': None,
+           'musicbrainz_id': None, **{k: v for k, v in ids.items() if v}}
+    try:
+        from core.blocklist.backfill import resolve_missing_ids
+        from core.blocklist.runtime import build_resolvers
+        probe = {'entity_type': entity_type, 'name': name,
+                 'parent_name': parent_name, **ids}
+        ids.update(resolve_missing_ids(probe, build_resolvers()))
+    except Exception as e:
+        logger.debug("blocklist add backfill skipped: %s", e)
+    return get_database().add_blocklist_entry(
+        get_current_profile_id(), entity_type, name,
+        spotify_id=ids['spotify_id'], itunes_id=ids['itunes_id'],
+        deezer_id=ids['deezer_id'], musicbrainz_id=ids['musicbrainz_id'],
+        parent_name=parent_name)
+
+
 @bp.route('/api/blocklist', methods=['POST'])
 def add_blocklist():
     try:
@@ -2018,28 +2091,298 @@ def add_blocklist():
         if col and source_id:
             ids[col] = source_id
 
-        # Resolve the OTHER sources now (best-effort) so the ban is cross-source
-        # from the first scan. Failures just leave a source unmatched.
-        try:
-            from core.blocklist.backfill import resolve_missing_ids
-            from core.blocklist.runtime import build_resolvers
-            probe = {'entity_type': entity_type, 'name': name,
-                     'parent_name': data.get('parent_name'), **ids}
-            ids.update(resolve_missing_ids(probe, build_resolvers()))
-        except Exception as e:
-            logger.debug("blocklist add backfill skipped: %s", e)
-
-        new_id = get_database().add_blocklist_entry(
-            get_current_profile_id(), entity_type, name,
-            spotify_id=ids['spotify_id'], itunes_id=ids['itunes_id'],
-            deezer_id=ids['deezer_id'], musicbrainz_id=ids['musicbrainz_id'],
-            parent_name=data.get('parent_name'))
+        new_id = _add_to_blocklist(entity_type, name, ids, data.get('parent_name'))
         if not new_id:
             return jsonify({"success": False, "error": "Could not add entry"}), 500
         logger.info("Blocklisted %s '%s'", entity_type, name)
         return jsonify({"success": True, "id": new_id})
     except Exception as e:
         logger.error(f"Error adding blocklist entry: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── discovery feedback (plan 5c): more / less / not now / block ──
+
+_FEEDBACK_ACTIONS = ('more', 'less', 'not_now', 'block', 'save')
+
+
+@bp.route('/api/discover/feedback', methods=['POST'])
+def post_discovery_feedback():
+    """One answer from a recommendation's ⋯ menu. ``entity`` is {type, name,
+    artist_name?, ids?: {source: id}}; ``explanation`` is the one it was shown
+    with. Block writes the blocklist (the artist, for a track or album); save
+    puts it in the inbox's saved list."""
+    try:
+        from core.discovery import feedback as _feedback
+        data = request.get_json() or {}
+        action = str(data.get('action') or '')
+        entity = data.get('entity') if isinstance(data.get('entity'), dict) else {}
+        if action not in _FEEDBACK_ACTIONS:
+            return jsonify({"success": False, "error": "unknown action"}), 400
+        if action == 'save':
+            # keep it for later: the inbox's saved list, not a taste signal
+            from core.discovery import inbox as _inbox
+            new_id = _inbox.save_rec(get_database(), get_current_profile_id(), entity,
+                                     data.get('explanation'), str(data.get('image_url') or ''))
+        elif action == 'block':
+            is_artist = entity.get('type') == 'artist'
+            name = (entity.get('name') if is_artist else entity.get('artist_name')) or ''
+            if not str(name).strip():
+                return jsonify({"success": False, "error": "nothing to block"}), 400
+            ids = {}
+            if is_artist:
+                ids = {f'{src}_id': v for src, v in (entity.get('ids') or {}).items()
+                       if src in ('spotify', 'itunes', 'deezer', 'musicbrainz') and v}
+            new_id = _add_to_blocklist('artist', str(name).strip(), ids)
+        else:
+            new_id = _feedback.record(get_database(), get_current_profile_id(), action,
+                                      entity, data.get('explanation'))
+        if not new_id:
+            return jsonify({"success": False, "error": "that can't be recorded"}), 400
+        # nothing to invalidate: hiding runs outside the shelf cache; the
+        # re-ranked shelves (similar artists, listening recs) key on this
+        # profile's feedback, and BYLT picks it up on its next generation
+        return jsonify({"success": True, "id": new_id, "action": action})
+    except Exception as e:
+        logger.error(f"Error recording discovery feedback: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/feedback', methods=['GET'])
+def list_discovery_feedback():
+    """This profile's feedback still in force, newest first."""
+    try:
+        rows = get_database().get_discovery_feedback(get_current_profile_id())
+        return jsonify({"success": True, "feedback": [
+            {k: r.get(k) for k in ('id', 'entity_type', 'name', 'artist_name', 'kind',
+                                   'created_at', 'expires_at')} for r in rows]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/feedback/<int:feedback_id>', methods=['DELETE'])
+def undo_discovery_feedback(feedback_id):
+    try:
+        ok = get_database().remove_discovery_feedback(get_current_profile_id(), feedback_id)
+        return jsonify({"success": ok})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/feedback', methods=['DELETE'])
+def reset_discovery_taste():
+    """Forget every more / less / not now. Blocks stay: they're the blocklist."""
+    try:
+        cleared = get_database().clear_discovery_feedback(get_current_profile_id())
+        return jsonify({"success": True, "cleared": cleared})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── the discovery inbox (plan 6) ──
+
+_INBOX_USER_STATES = ('unread', 'saved', 'dismissed')
+
+
+@bp.route('/api/discover/inbox', methods=['GET'])
+@_hide_blocked({'items': WORKS})
+def get_discovery_inbox():
+    """What's worth coming back to. ``view`` is new (unread) or saved. A
+    stale inbox starts a background refresh and answers with what it has;
+    the sources line says which ones didn't answer last time."""
+    try:
+        from core.discovery import inbox as _inbox
+        database, pid = get_database(), get_current_profile_id()
+        view = 'saved' if request.args.get('view') == 'saved' else 'new'
+        if _inbox.is_stale(database, pid):
+            _inbox.refresh_in_background(database, pid)
+        status = _inbox.status(database, pid)
+        return jsonify({
+            "success": True, "view": view,
+            "items": _inbox.list_items(database, pid, view),
+            "counts": {"unread": _inbox.unread_count(database, pid)},
+            "sources": status.get('sources') or {},
+            "unanswered": _inbox.unanswered(status),
+            "refreshed_at": status.get('refreshed_at'),
+            "refreshing": _inbox.is_refreshing(pid),
+        })
+    except Exception as e:
+        logger.error(f"Error reading the discovery inbox: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/inbox/counts', methods=['GET'])
+def get_discovery_inbox_counts():
+    """The nav badge: how many are new. Asking also lets a stale inbox
+    refresh in the background, so the badge can grow without anyone opening
+    Discover first."""
+    try:
+        from core.discovery import inbox as _inbox
+        database, pid = get_database(), get_current_profile_id()
+        if _inbox.is_stale(database, pid):
+            _inbox.refresh_in_background(database, pid)
+        return jsonify({"success": True, "unread": _inbox.unread_count(database, pid)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/inbox/<int:item_id>/state', methods=['POST'])
+def set_discovery_inbox_state(item_id):
+    """Save, dismiss, or put back as new. Added is observed, not set."""
+    try:
+        from core.discovery import inbox as _inbox
+        state = str((request.get_json() or {}).get('state') or '')
+        if state not in _INBOX_USER_STATES:
+            return jsonify({"success": False, "error": "unknown state"}), 400
+        ok = _inbox.set_state(get_database(), get_current_profile_id(), item_id, state)
+        return jsonify({"success": ok})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/inbox/dismiss-all', methods=['POST'])
+def dismiss_discovery_inbox():
+    try:
+        from core.discovery import inbox as _inbox
+        n = _inbox.dismiss_all_unread(get_database(), get_current_profile_id())
+        return jsonify({"success": True, "dismissed": n})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/inbox/refresh', methods=['POST'])
+def refresh_discovery_inbox():
+    try:
+        from core.discovery import inbox as _inbox
+        started = _inbox.refresh_in_background(get_database(), get_current_profile_id())
+        return jsonify({"success": True, "started": started})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── renewable mixes: recipes (plan 7) ──
+
+def _recipe_card(row, payload):
+    """One recipe as a mix card, in the daily-mix shape the page renders."""
+    from core.discovery.explain import explanation as _expl
+    recipe = row.get('recipe') or {}
+    payload = payload or {}
+    return {
+        "key": f"recipe_{row['id']}",
+        "recipe_id": row['id'],
+        "name": recipe.get('name') or 'Mix',
+        "recipe": recipe,
+        "explanation": payload.get('explanation') or _expl(
+            'listened' if recipe.get('seeds') else 'genre',
+            recipe.get('seeds') or recipe.get('genres') or []),
+        "tracks": payload.get('tracks') or [],
+        "counts": payload.get('counts') or {},
+        "replaced": payload.get('replaced') or 0,
+        "generated_at": payload.get('generated_at'),
+    }
+
+
+@bp.route('/api/discover/recipes', methods=['GET'])
+@_hide_blocked({'mixes[].tracks': WORKS})
+def list_mix_recipes():
+    """Every recipe with its current mix, renewed if its schedule says so."""
+    try:
+        from core.personalized import recipes as _recipes
+        database, pid = get_database(), get_current_profile_id()
+        mixes = []
+        for row in _recipes.list_recipes(database, pid):
+            try:
+                payload = _recipes.get_or_build(database, pid, row['id'])
+            except Exception as exc:  # noqa: BLE001 - one bad recipe never hides the rest
+                logger.warning("recipe %s failed to build: %s", row['id'], exc)
+                payload = None
+            mixes.append(_recipe_card(row, payload))
+        return jsonify({"success": True, "mixes": mixes})
+    except Exception as e:
+        logger.error(f"Error listing mix recipes: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _recipe_from_request():
+    from core.personalized.recipes import Recipe
+    return Recipe.from_dict(request.get_json() or {})
+
+
+@bp.route('/api/discover/recipes', methods=['POST'])
+def create_mix_recipe():
+    try:
+        from core.personalized import recipes as _recipes
+        try:
+            recipe = _recipe_from_request()
+        except ValueError as ve:
+            return jsonify({"success": False, "error": str(ve)}), 400
+        database, pid = get_database(), get_current_profile_id()
+        rid = _recipes.save_recipe(database, pid, recipe)
+        row = _recipes.get_recipe(database, pid, rid)
+        return jsonify({"success": True, "mix": _recipe_card(row, _recipes.get_or_build(database, pid, rid))})
+    except Exception as e:
+        logger.error(f"Error creating mix recipe: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/recipes/<int:recipe_id>', methods=['PUT'])
+def update_mix_recipe(recipe_id):
+    try:
+        from core.personalized import recipes as _recipes
+        try:
+            recipe = _recipe_from_request()
+        except ValueError as ve:
+            return jsonify({"success": False, "error": str(ve)}), 400
+        database, pid = get_database(), get_current_profile_id()
+        if not _recipes.save_recipe(database, pid, recipe, recipe_id):
+            return jsonify({"success": False, "error": "no such recipe"}), 404
+        row = _recipes.get_recipe(database, pid, recipe_id)
+        return jsonify({"success": True,
+                        "mix": _recipe_card(row, _recipes.get_or_build(database, pid, recipe_id))})
+    except Exception as e:
+        logger.error(f"Error updating mix recipe: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/recipes/<int:recipe_id>', methods=['DELETE'])
+def delete_mix_recipe(recipe_id):
+    try:
+        from core.personalized import recipes as _recipes
+        ok = _recipes.delete_recipe(get_database(), get_current_profile_id(), recipe_id)
+        return jsonify({"success": ok}), (200 if ok else 404)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/recipes/<int:recipe_id>/refresh', methods=['POST'])
+@_hide_blocked({'mix.tracks': WORKS})
+def refresh_mix_recipe(recipe_id):
+    """A new generation now, whatever the schedule says."""
+    try:
+        from core.personalized import recipes as _recipes
+        database, pid = get_database(), get_current_profile_id()
+        payload = _recipes.get_or_build(database, pid, recipe_id, force=True)
+        if payload is None:
+            return jsonify({"success": False, "error": "no such recipe"}), 404
+        return jsonify({"success": True,
+                        "mix": _recipe_card(_recipes.get_recipe(database, pid, recipe_id), payload)})
+    except Exception as e:
+        logger.error(f"Error refreshing mix recipe: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/recipes/<int:recipe_id>/keep', methods=['POST'])
+def keep_mix_recipe(recipe_id):
+    """Keep this one: the current generation becomes a normal playlist."""
+    try:
+        from core.personalized import recipes as _recipes
+        name = str((request.get_json(silent=True) or {}).get('name') or '')
+        playlist_id = _recipes.keep(get_database(), get_current_profile_id(), recipe_id, name)
+        if not playlist_id:
+            return jsonify({"success": False, "error": "nothing to keep yet"}), 400
+        return jsonify({"success": True, "playlist_id": playlist_id})
+    except Exception as e:
+        logger.error(f"Error keeping mix recipe: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2074,51 +2417,60 @@ def remove_blocklist(entry_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# The discover page's Blocked Artists modal. It used to keep its own global
+# list (discovery_artist_blacklist); it now reads and writes this profile's
+# artist blocklist, so both screens edit the one list discovery obeys.
+
 @bp.route('/api/discover/artist-blacklist', methods=['GET'])
 def get_discovery_artist_blacklist():
-    """Get all blacklisted discovery artists."""
+    """This profile's blocked artists, in the modal's shape."""
     try:
-        database = get_database()
-        entries = database.get_discovery_blacklist()
+        rows = get_database().get_blocklist(get_current_profile_id(), entity_type='artist')
+        entries = [{
+            'id': r.get('id'),
+            'artist_name': r.get('name'),
+            'spotify_artist_id': r.get('spotify_id'),
+            'itunes_artist_id': r.get('itunes_id'),
+            'deezer_artist_id': r.get('deezer_id'),
+            'created_at': r.get('created_at'),
+        } for r in rows or []]
         return jsonify({"success": True, "entries": entries})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/artist-blacklist', methods=['POST'])
 def add_discovery_artist_blacklist():
-    """Block an artist from appearing in discovery results."""
+    """Block an artist (this profile's blocklist)."""
     try:
         data = request.get_json() or {}
-        artist_name = data.get('artist_name', '').strip()
+        artist_name = (data.get('artist_name') or '').strip()
         if not artist_name:
             return jsonify({"success": False, "error": "artist_name is required"}), 400
 
-        database = get_database()
-        success = database.add_to_discovery_blacklist(
-            artist_name=artist_name,
-            spotify_id=data.get('spotify_artist_id'),
-            itunes_id=data.get('itunes_artist_id'),
-            deezer_id=data.get('deezer_artist_id'),
-        )
-        if success:
+        new_id = _add_to_blocklist('artist', artist_name, {
+            'spotify_id': data.get('spotify_artist_id'),
+            'itunes_id': data.get('itunes_artist_id'),
+            'deezer_id': data.get('deezer_artist_id'),
+        })
+        if new_id:
             logger.info(f"Blocked artist from discovery: {artist_name}")
-        return jsonify({"success": success})
+        return jsonify({"success": bool(new_id)})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/artist-blacklist/<int:blacklist_id>', methods=['DELETE'])
 def remove_discovery_artist_blacklist(blacklist_id):
-    """Unblock an artist from discovery."""
+    """Unblock an artist (this profile's blocklist)."""
     try:
-        database = get_database()
-        success = database.remove_from_discovery_blacklist(blacklist_id)
-        return jsonify({"success": success})
+        ok = get_database().remove_blocklist_entry(get_current_profile_id(), blacklist_id)
+        return jsonify({"success": ok})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ── Your Artists (Liked Artists Pool) ──
 
 @bp.route('/api/discover/your-artists', methods=['GET'])
+@_hide_blocked({'artists': ARTISTS})
 def get_your_artists():
     """Get liked artists for the Discover carousel (20 random matched on active source)."""
     try:
@@ -2170,6 +2522,7 @@ def get_your_artists():
 
 
 @bp.route('/api/discover/your-artists/all', methods=['GET'])
+@_hide_blocked({'artists': ARTISTS})
 def get_your_artists_all():
     """Get all liked artists for the View All modal (paginated)."""
     try:
@@ -2399,6 +2752,7 @@ from core.artists.liked_match import (
 # ── Your Albums (Liked Albums Pool) ──
 
 @bp.route('/api/discover/your-albums', methods=['GET'])
+@_hide_blocked({'albums': WORKS})
 def get_your_albums():
     """Get liked albums with library ownership status, paginated."""
     try:
@@ -2909,6 +3263,7 @@ from core.artists.map import (
 
 
 @bp.route('/api/discover/artist-map', methods=['GET'])
+@_hide_blocked({'nodes': GRAPH})
 def get_artist_map_data():
     return _artists_map_get_artist_map_data()
 
@@ -2919,11 +3274,13 @@ def get_artist_map_genre_list():
 
 
 @bp.route('/api/discover/artist-map/genres', methods=['GET'])
+@_hide_blocked({'nodes': GRAPH})
 def get_artist_map_genres():
     return _artists_map_get_artist_map_genres()
 
 
 @bp.route('/api/discover/artist-map/explore', methods=['GET'])
+@_hide_blocked({'nodes': GRAPH})
 def get_artist_map_explore():
     return _artists_map_get_artist_map_explore()
 
@@ -2942,6 +3299,7 @@ def log_artist_map_perf():
 
 
 @bp.route('/api/discover/build-playlist/search-artists', methods=['GET'])
+@_hide_blocked({'artists': ARTISTS})
 def search_artists_for_playlist():
     """Search for artists to use as seeds for custom playlist building"""
     try:
@@ -3004,6 +3362,7 @@ def search_artists_for_playlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/build-playlist/generate', methods=['POST'])
+@_hide_blocked({'playlist.tracks': WORKS})
 def generate_custom_playlist():
     """Generate custom playlist from seed artists"""
     try:
@@ -3080,6 +3439,7 @@ def get_available_decades():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/decade/<int:decade>', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_discover_decade_playlist(decade):
     """Get tracks from a specific decade for discovery page"""
     try:
@@ -3147,6 +3507,7 @@ def get_available_genres():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/genre/<path:genre_name>', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def get_discover_genre_playlist(genre_name):
     """Get tracks from a specific genre for discovery page"""
     try:

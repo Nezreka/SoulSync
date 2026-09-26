@@ -5,6 +5,11 @@ import { server } from '@/test/msw';
 
 import {
   blacklistArtist,
+  dismissAllInbox,
+  fetchInbox,
+  setInboxState,
+  postDiscoverFeedback,
+  resetDiscoverTaste,
   enrichSimilarArtists,
   fetchAdventurousness,
   fetchArtistInfo,
@@ -246,5 +251,55 @@ describe('endpoint contracts that fail quietly', () => {
     const seen = capture('get', '/api/discover/listenbrainz/playlist/:mbid');
     await fetchLbPlaylist('a b/c');
     expect(seen[0].url.pathname).toBe('/api/discover/listenbrainz/playlist/a%20b%2Fc');
+  });
+});
+
+describe('discovery feedback', () => {
+  it('posts one answer and resets them all', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.post('*/api/discover/feedback', async ({ request }) => {
+        seen.push(`POST ${JSON.stringify(await request.json())}`);
+        return HttpResponse.json({ success: true, id: 4 });
+      }),
+      http.delete('*/api/discover/feedback', () => {
+        seen.push('DELETE');
+        return HttpResponse.json({ success: true, cleared: 2 });
+      }),
+    );
+    const res = await postDiscoverFeedback({
+      action: 'more',
+      entity: { type: 'artist', name: 'Soen' },
+    });
+    expect(res.id).toBe(4);
+    expect((await resetDiscoverTaste()).cleared).toBe(2);
+    expect(seen).toEqual([
+      'POST {"action":"more","entity":{"type":"artist","name":"Soen"}}',
+      'DELETE',
+    ]);
+  });
+});
+
+describe('the inbox', () => {
+  it('reads a view, moves an item and dismisses the new', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get('*/api/discover/inbox', ({ request }) => {
+        seen.push(`GET ${new URL(request.url).searchParams.get('view')}`);
+        return HttpResponse.json({ success: true, items: [] });
+      }),
+      http.post('*/api/discover/inbox/:id/state', async ({ params, request }) => {
+        seen.push(`STATE ${String(params.id)} ${JSON.stringify(await request.json())}`);
+        return HttpResponse.json({ success: true });
+      }),
+      http.post('*/api/discover/inbox/dismiss-all', () => {
+        seen.push('DISMISS');
+        return HttpResponse.json({ success: true, dismissed: 4 });
+      }),
+    );
+    expect((await fetchInbox('saved')).items).toEqual([]);
+    await setInboxState(7, 'saved');
+    expect((await dismissAllInbox()).dismissed).toBe(4);
+    expect(seen).toEqual(['GET saved', 'STATE 7 {"state":"saved"}', 'DISMISS']);
   });
 });

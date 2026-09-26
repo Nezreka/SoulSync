@@ -1,7 +1,7 @@
 import type { HeroWatchlistButton, WatchAllPhase } from '../-discover.hero';
 import type { DiscoverHeroArtist } from '../-discover.types';
 
-import { recommendationReason, recommendationReasonTitle } from '../-discover.helpers';
+import { explanationLine, explanationTitle } from '../-discover.explanation';
 import {
   heroGenres,
   heroIndicators,
@@ -9,12 +9,15 @@ import {
   heroShowsPopularity,
   heroWatchlistLabel,
   HERO_EMPTY_SUBTITLE,
+  HERO_WATCHLIST_SUBTITLE,
   HERO_EMPTY_TITLE,
   HERO_LOADING_SUBTITLE,
   HERO_LOADING_TITLE,
   HERO_WATCHLIST_ICON,
   watchAllState,
+  heroIds,
 } from '../-discover.hero';
+import { FeedbackMenu } from './feedback-menu';
 
 /**
  * The discover page's hero billboard.
@@ -151,13 +154,15 @@ export function DiscoverHero({
             className="discover-hero-subtitle"
             id="discover-hero-subtitle"
             // The full provenance list; the visible line truncates (468-469).
-            title={artist ? recommendationReasonTitle(artist as never) : undefined}
+            title={artist ? explanationTitle(artist.explanation) : undefined}
           >
-            {/* NOT static copy. The vanilla sets this to the "because you have
-                X, Y" line per artist (468); the static text is only the markup's
-                pre-load placeholder. Empty state still explains what to do. */}
+            {/* NOT static copy: the server's explanation for this artist. The
+                watchlist fallback has none (nothing recommended it), and says
+                what it is instead of claiming a similarity it doesn't have.
+                Empty state still explains what to do. */}
             {artist
-              ? recommendationReason(artist as never)
+              ? explanationLine(artist.explanation) ||
+                (artist.is_watchlist ? HERO_WATCHLIST_SUBTITLE : '')
               : loading
                 ? HERO_LOADING_SUBTITLE
                 : HERO_EMPTY_SUBTITLE}
@@ -221,6 +226,15 @@ export function DiscoverHero({
                 <span className="watchlist-icon">{HERO_WATCHLIST_ICON}</span>
                 <span className="watchlist-text">{watchLabel}</span>
               </button>
+              {artist?.artist_name ? (
+                <FeedbackMenu
+                  entity={{ type: 'artist', name: artist.artist_name, ids: heroIds(artist) }}
+                  explanation={artist.explanation}
+                  // the refetch drops it; move on now rather than keep showing it
+                  onHidden={() => onNavigate(1)}
+                  className="discover-hero-feedback-btn"
+                />
+              ) : null}
             </div>
           )}
         </div>

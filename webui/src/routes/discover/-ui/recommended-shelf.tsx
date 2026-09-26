@@ -11,6 +11,7 @@ import {
   RECOMMENDED_SECTIONS,
 } from '../-discover.recommended';
 import { DiscoverSection } from './discover-section';
+import { FeedbackMenu } from './feedback-menu';
 
 /**
  * The two recommendation shelves.
@@ -105,7 +106,7 @@ export function RecommendedShelf({
         {visible.map((artist) => (
           <RecommendedMiniCard
             key={`${artist.artist_id ?? ''}:${artist.artist_name ?? ''}`}
-            card={recommendedCard(artist, source, kind)}
+            card={recommendedCard(artist, source)}
             imageOverride={images[artist.artist_id ?? '']}
             watching={watchingIds.has(artist.artist_id ?? '')}
             buildDetailPath={buildDetailPath}
@@ -138,10 +139,13 @@ function RecommendedMiniCard({
   // A broken image must fall back, not leave a hole. The vanilla does this with
   // an inline onerror that rewrites the parent; state is the React equivalent.
   const [broken, setBroken] = useState(false);
+  // not now / block: the server hides it on the next load; this hides it now
+  const [hidden, setHidden] = useState(false);
   const image = imageOverride || card.image;
   // Clickable = there is a SENDABLE id; a name alone 400s at the endpoint.
   const clickable = recWatchlistClickable(card.watchId, card.artistName) && card.watchId !== '';
 
+  if (hidden) return null;
   return (
     <div
       className="ya-card recommended-artist-card"
@@ -213,6 +217,14 @@ function RecommendedMiniCard({
         </svg>
         <span className="sr-only">{watching ? REC_WATCH_ON_LABEL : REC_WATCH_ADD_LABEL}</span>
       </button>
+      {card.feedbackEntity.name ? (
+        <FeedbackMenu
+          entity={card.feedbackEntity}
+          explanation={card.explanation}
+          onHidden={() => setHidden(true)}
+          className="ya-card-feedback-btn"
+        />
+      ) : null}
     </div>
   );
 }

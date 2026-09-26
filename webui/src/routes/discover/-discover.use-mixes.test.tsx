@@ -27,6 +27,7 @@ interface StubOptions {
   playlistAvailable?: boolean;
   personalized?: unknown[];
   decades?: unknown[];
+  daily?: unknown[];
 }
 
 let hits: string[] = [];
@@ -38,6 +39,7 @@ function stub({
   playlistAvailable = true,
   personalized = [],
   decades = [],
+  daily = [],
 }: StubOptions = {}) {
   hits = [];
   const json = (body: Record<string, unknown>) => HttpResponse.json({ success: true, ...body });
@@ -67,6 +69,7 @@ function stub({
       '/api/discover/personalized/discovery-shuffle',
       '/api/discover/personalized/listening-mix',
     ].map((path) => http.get(path, () => json({ tracks: personalized }))),
+    http.get('/api/discover/personalized/daily-mixes', () => json({ mixes: daily })),
     http.get('/api/discover/decades/available', () => {
       hits.push('decades');
       return json({ decades });
@@ -88,6 +91,29 @@ afterEach(() => {
 });
 
 describe('useDiscoverMixes', () => {
+  it('subtitles a daily mix with the explanation the server wrote', async () => {
+    stub({
+      daily: [
+        {
+          key: 'daily_mix_1',
+          name: 'Daily Mix 1',
+          subtitle: 'Tool, Deftones',
+          explanation: { kind: 'listened', seeds: [{ name: 'Tool' }, { name: 'Deftones' }] },
+          tracks: [track('d')],
+        },
+        // stored before the shape: its own subtitle, as before
+        { key: 'daily_mix_2', name: 'Daily Mix 2', subtitle: 'Soen', tracks: [track('e')] },
+      ],
+    });
+    const { result } = mount();
+    await waitFor(() =>
+      expect(result.current.mixes.filter((m) => m.key.startsWith('daily_mix'))).toHaveLength(2),
+    );
+    const byKey = Object.fromEntries(result.current.mixes.map((m) => [m.key, m.subtitle]));
+    expect(byKey.daily_mix_1).toBe('Because you listen to Tool & Deftones');
+    expect(byKey.daily_mix_2).toBe('Soen');
+  });
+
   it('holds the SHARED below-fold queries until tier 1 settles', async () => {
     // seasonal + decades share cache keys with useDiscoverPage's gated tier-2
     // entries; an ungated observer here would fire them at mount and defeat

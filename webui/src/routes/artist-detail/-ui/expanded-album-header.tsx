@@ -20,6 +20,7 @@ import { redownloadAlbumFlow } from '../-artist-detail.redownload';
 import { refreshReorganizeQueue, reorganizeStateForAlbum } from '../-artist-detail.reorganize';
 import { analyzeAlbumReplayGainRequest } from '../-artist-detail.tags-rg';
 import { ActionMenu } from './action-menu';
+import { AlbumUpgradeModal } from './album-upgrade-modal';
 import { ArtPicker } from './art-picker';
 import { BatchTagPreviewModal } from './batch-tag-preview-modal';
 import {
@@ -340,6 +341,8 @@ function AdminAlbumActions({
   const [rgBusy, setRgBusy] = useState(false);
   const [reorganizing, setReorganizing] = useState(false);
   const [redownloadBusy, setRedownloadBusy] = useState(false);
+  const [upgradingAlbum, setUpgradingAlbum] = useState(false);
+  const upgradable = Number(album.upgradable_count) || 0;
 
   const writeAllTags = () => {
     // writeAlbumTags (5449): only tracks that actually have a file.
@@ -440,6 +443,21 @@ function AdminAlbumActions({
           )}
         />
       </div>
+
+      {upgradable > 0 ? (
+        <button
+          type="button"
+          className="enhanced-upgrade-album-btn lib-btn"
+          title="Tracks on this album are below your quality profile. Find better copies."
+          onClick={(e) => {
+            e.stopPropagation();
+            setUpgradingAlbum(true);
+          }}
+        >
+          <span aria-hidden="true">↑</span>
+          <span>Upgrade {upgradable}</span>
+        </button>
+      ) : null}
 
       <button
         type="button"
@@ -557,6 +575,14 @@ function AdminAlbumActions({
       ) : null}
       {reorganizing ? (
         <ReorganizeModal album={album} onClose={() => setReorganizing(false)} />
+      ) : null}
+      {upgradingAlbum ? (
+        <AlbumUpgradeModal
+          album={album}
+          artistName={artistName}
+          onReload={onReassigned}
+          onClose={() => setUpgradingAlbum(false)}
+        />
       ) : null}
       {reassigning ? (
         <ReassignModal

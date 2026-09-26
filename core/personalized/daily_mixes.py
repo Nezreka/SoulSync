@@ -21,12 +21,13 @@ import random
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
+from core.discovery.explain import explanation
 from utils.logging_config import get_logger
 
 logger = get_logger("personalized.daily_mixes")
 
 CURATED_KEY = "daily_mixes_v2"
-PAYLOAD_VERSION = 3
+PAYLOAD_VERSION = 4
 MAX_MIXES = 6
 MIX_SIZE = 40
 DISCOVERY_PER_MIX = 8
@@ -274,6 +275,16 @@ def _discovery_tracks_for(database, artist_names: Sequence[str], limit: int,
     return out
 
 
+def _taste(database, profile_id: int):
+    from core.discovery.feedback import Taste
+    return Taste.load(database, profile_id)
+
+
+def _blocked_artists(database, profile_id: int):
+    from core.discovery.blocked import BlockedArtists
+    return BlockedArtists.load(database, profile_id)
+
+
 def generate_daily_mixes(database, profile_id: int = 1, *,
                          max_mixes: int = MAX_MIXES,
                          mix_size: int = MIX_SIZE,
@@ -286,6 +297,13 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
     recent = database.get_top_artists('30d', 200, profile_id=profile_id) or []
     seeds = build_recency_weighted_seeds(
         top, {a['name']: a.get('play_count', 0) for a in recent})
+    # a blocked artist founds no mix and names none (the subtitle is text the
+    # response filter can't reach); cut before the seed cap so it costs no slot
+    blocked = _blocked_artists(database, profile_id)
+    seeds = [s for s in seeds if not blocked.blocks_name(s.get('name'))]
+    # more / less like this reweights the seeds before the cap
+    taste = _taste(database, profile_id)
+    seeds = taste.adjust_seeds(seeds)
     seeds = sorted(seeds, key=lambda s: -s['weight'])[:MAX_SEEDS]
     seed_names = [_norm(s['name']) for s in seeds]
 
@@ -315,7 +333,11 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
         for a in artist_keys:
             for s in (similars.get(a) or []):
                 nm = _norm(s.get('name'))
-                if nm and nm not in owned and nm not in similar_names:
+                # the discovery flavor is a list, not a ranking, so an artist
+                # you asked for less of just isn't in it
+                if (nm and nm not in owned and nm not in similar_names
+                        and not blocked.blocks_name(nm)
+                        and taste.artist_factor(nm) >= 1.0):
                     similar_names.append(nm)
         discovery = _discovery_tracks_for(
             database, similar_names[:30], discovery_per_mix, profile_id)
@@ -334,13 +356,22 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
             "tracks": tracks,
             "owned_count": len(owned_tracks),
             "total": len(tracks),
+            # made from artists you play; confidence is the share of it that
+            # is already yours rather than discovery flavor
+            "explanation": explanation("listened", cluster['artists'],
+                                       len(owned_tracks) / len(tracks) if tracks else None),
         })
     return {
         "mixes": mixes,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "profile_id": profile_id,
+        # the blocks and the feedback this was built under: either changing
+        # rebuilds it
+        "blocked": blocked.fingerprint(),
+        "taste": taste.fingerprint(),
         # payload version: bump to invalidate stored payloads whose SHAPE or
-        # content rules changed (v3 = library durations stay in milliseconds)
+        # content rules changed (v3 = library durations stay in milliseconds,
+        # v4 = each mix carries its explanation)
         "v": PAYLOAD_VERSION,
     }
 
@@ -358,7 +389,9 @@ def get_or_build_daily_mixes(database, profile_id: int = 1, *,
         except Exception as e:
             logger.debug(f"stored daily mixes unreadable: {e}")
         if (isinstance(stored, dict) and stored.get("mixes")
-                and stored.get("v") == PAYLOAD_VERSION):
+                and stored.get("v") == PAYLOAD_VERSION
+                and stored.get("blocked") == _blocked_artists(database, profile_id).fingerprint()
+                and stored.get("taste") == _taste(database, profile_id).fingerprint()):
             try:
                 age = datetime.now(timezone.utc) - datetime.fromisoformat(
                     stored.get("generated_at", ""))

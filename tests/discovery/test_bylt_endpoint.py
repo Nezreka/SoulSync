@@ -24,7 +24,14 @@ from core.discovery import bylt_store  # noqa: E402
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    # a single-profile install, as these tests assume: other test modules
+    # leave profiles in the shared database, and with more than one a request
+    # with no profile chosen answers profile_required
+    from core.security import session_profile as _sp
+    _resolve = _sp.resolve_session_profile
+    monkeypatch.setattr(_sp, 'resolve_session_profile',
+                        lambda **kw: _resolve(**{**kw, 'profile_count': 1}))
     discover_routes._DISCOVER_SHELF_CACHE.clear()
     db = web_server.get_database()
     conn = db._get_connection()

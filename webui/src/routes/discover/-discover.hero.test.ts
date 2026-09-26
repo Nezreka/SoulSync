@@ -11,6 +11,7 @@ import {
   HERO_SLIDE_MS,
   HERO_WATCHLIST_ICON,
   heroArtistId,
+  heroIds,
   heroAutoAdvances,
   heroGenres,
   heroJumpIndex,
@@ -294,5 +295,19 @@ describe('the hero watchlist state check', () => {
 
   it('posts just the artist id', () => {
     expect(heroWatchlistCheckBody('a1')).toEqual({ artist_id: 'a1' });
+  });
+});
+
+describe('heroIds', () => {
+  it('carries every provider id the artist has, for feedback and blocks', () => {
+    expect(
+      heroIds({
+        artist_id: 'x',
+        artist_name: 'Soen',
+        spotify_artist_id: 'sp',
+        itunes_artist_id: null,
+        musicbrainz_artist_id: 'mb',
+      }),
+    ).toEqual({ spotify: 'sp', musicbrainz: 'mb' });
   });
 });

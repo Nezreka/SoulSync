@@ -21,6 +21,7 @@ import { useRef, useState } from 'react';
 import type { Station } from '../-discover.stations';
 
 import { stationSubtitle } from '../-discover.stations';
+import { FeedbackMenu } from './feedback-menu';
 
 export type { Station } from '../-discover.stations';
 export { fetchStations, stationSubtitle } from '../-discover.stations';
@@ -114,6 +115,7 @@ function StationCard({
   const startingRef = useRef(false);
   const [starting, setStarting] = useState(false);
   const [radioError, setRadioError] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(false);
   const startRadio = async () => {
     if (startingRef.current) return;
     startingRef.current = true;
@@ -128,9 +130,16 @@ function StationCard({
       setStarting(false);
     }
   };
+  if (hidden) return null;
   return (
     <div className="discover-station-card">
       <span className="discover-station-badge">RADIO</span>
+      <FeedbackMenu
+        entity={{ type: 'artist', name: station.name }}
+        explanation={station.explanation}
+        onHidden={() => setHidden(true)}
+        className="discover-station-feedback-btn"
+      />
       <span
         className="discover-station-art"
         style={station.image_url ? { backgroundImage: `url(${station.image_url})` } : undefined}
