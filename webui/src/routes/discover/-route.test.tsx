@@ -64,9 +64,7 @@ function bodyFor(url: string): Record<string, unknown> {
           requested: 1,
           resolved: 1,
           unavailable: 0,
-          tracks: [
-            { id: 'm1', name: 'Moonwinds', artist: 'Purrple Cat', album: 'Moon Album' },
-          ],
+          tracks: [{ id: 'm1', name: 'Moonwinds', artist: 'Purrple Cat', album: 'Moon Album' }],
         },
       ],
     };

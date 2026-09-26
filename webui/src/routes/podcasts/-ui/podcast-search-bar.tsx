@@ -154,7 +154,10 @@ export function PodcastSearchBar({
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               const trimmed = value.trim();
-              if ((trimmed.startsWith('http://') || trimmed.startsWith('https://')) && onSelectFeedUrl) {
+              if (
+                (trimmed.startsWith('http://') || trimmed.startsWith('https://')) &&
+                onSelectFeedUrl
+              ) {
                 e.preventDefault();
                 onSelectFeedUrl(trimmed);
               }

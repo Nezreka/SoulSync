@@ -38,7 +38,9 @@ declare global {
   var startStream: (result: Record<string, unknown>) => void;
   var startAudioPlayback: () => Promise<void>;
   var clearTrack: () => void;
-  var showToast: ((message: string, type?: string, durationOrContext?: number | string) => void) | undefined;
+  var showToast:
+    | ((message: string, type?: string, durationOrContext?: number | string) => void)
+    | undefined;
   /* eslint-enable no-var */
 }
 
@@ -109,7 +111,9 @@ const _ARTIST_DETAIL_BACK_LABELS: Record<string, string> = {
 // Stack of origins for the back-button label. Each entry: {type:'page', pageId}
 // or {type:'artist', name}. Pushed on forward navigation, popped on back.
 // Separate from browser history - only used for the label display.
-const _artistDetailLabelStack: Array<{ type: 'page'; pageId: string } | { type: 'artist'; name: string }> = [];
+const _artistDetailLabelStack: Array<
+  { type: 'page'; pageId: string } | { type: 'artist'; name: string }
+> = [];
 let _artistDetailGoingBack = false;
 
 // Exported for the React artist-detail page, which renders the back button.
@@ -135,7 +139,8 @@ const artistDetailPageState: ArtistDetailPageState = {
 // Exported for the React artist-detail page and for the classic scripts that
 // used to read the global lexical binding bare (their bare reads now fall
 // through the scope chain to this window property - same object, not a copy).
-window.artistDetailPageState = artistDetailPageState as unknown as typeof window.artistDetailPageState;
+window.artistDetailPageState =
+  artistDetailPageState as unknown as typeof window.artistDetailPageState;
 
 export function clearArtistDetailPageState(): void {
   if (artistDetailPageState.completionController) {
@@ -151,8 +156,10 @@ export function clearArtistDetailPageState(): void {
 // core.js declares PAGE_WILL_CHANGE_EVENT as a global lexical const and has
 // run by the time the shell bundle loads; the literal fallback keeps this
 // module loadable standalone (tests) and matches core.js:3 byte for byte.
-const _PAGE_WILL_CHANGE = typeof PAGE_WILL_CHANGE_EVENT !== 'undefined'
-  ? PAGE_WILL_CHANGE_EVENT : 'ss:webui-page-will-change';
+const _PAGE_WILL_CHANGE =
+  typeof PAGE_WILL_CHANGE_EVENT !== 'undefined'
+    ? PAGE_WILL_CHANGE_EVENT
+    : 'ss:webui-page-will-change';
 window.addEventListener(_PAGE_WILL_CHANGE, (event) => {
   const detail = (event as CustomEvent<{ fromPageId?: string; toPageId?: string }>).detail || {};
   if (detail.fromPageId === 'artist-detail' && detail.toPageId !== 'artist-detail') {
@@ -174,8 +181,8 @@ export function _updateSidebarLibraryBreadcrumb(): void {
   const textEl = btn.querySelector('.nav-text') as HTMLElement | null;
   if (!textEl) return;
 
-  const onArtistDetail = (typeof currentPage === 'string' && currentPage === 'artist-detail');
-  const artistName = onArtistDetail ? (artistDetailPageState.currentArtistName || '') : '';
+  const onArtistDetail = typeof currentPage === 'string' && currentPage === 'artist-detail';
+  const artistName = onArtistDetail ? artistDetailPageState.currentArtistName || '' : '';
 
   if (!onArtistDetail || !artistName) {
     // Default state: plain "Library" label. Use textContent so we wipe
@@ -221,9 +228,11 @@ export function navigateToArtistDetail(
   // Skip reload if already on this exact artist/source (prevents double-fetch
   // when the router fires activateLegacyPath after navigating to an
   // /artist-detail/:source/:id URL).
-  if (artistId &&
-      String(artistId) === String(artistDetailPageState.currentArtistId) &&
-      String(normalizedSource || '') === String(artistDetailPageState.currentArtistSource || '')) {
+  if (
+    artistId &&
+    String(artistId) === String(artistDetailPageState.currentArtistId) &&
+    String(normalizedSource || '') === String(artistDetailPageState.currentArtistSource || '')
+  ) {
     if (currentPage !== 'artist-detail') {
       navigateToPage?.('artist-detail', {
         artistId,
@@ -233,7 +242,9 @@ export function navigateToArtistDetail(
     }
     return;
   }
-  console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`);
+  console.log(
+    `🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`,
+  );
 
   // Maintain the label stack. Back navigations pop; forward navigations push.
   // Only treat the flag as a back-nav signal when we're still on artist-detail -
@@ -250,10 +261,15 @@ export function navigateToArtistDetail(
       _artistDetailLabelStack.length = 0; // fresh chain from a non-artist page
     }
     if (currentPage === 'artist-detail' && artistDetailPageState.currentArtistName) {
-      _artistDetailLabelStack.push({ type: 'artist', name: artistDetailPageState.currentArtistName });
+      _artistDetailLabelStack.push({
+        type: 'artist',
+        name: artistDetailPageState.currentArtistName,
+      });
     } else {
-      const pageId = (typeof currentPage === 'string' && currentPage && currentPage !== 'artist-detail')
-        ? currentPage : 'library';
+      const pageId =
+        typeof currentPage === 'string' && currentPage && currentPage !== 'artist-detail'
+          ? currentPage
+          : 'library';
       _artistDetailLabelStack.push({ type: 'page', pageId });
     }
   }
@@ -330,9 +346,16 @@ export async function playLibraryTrack(
       const _dbData = (await _dbResp.json()) as {
         success?: boolean;
         track?: {
-          id?: number; title?: string; file_path?: string; bitrate?: number;
-          artist_id?: number; album_id?: number; image_url?: string;
-          album_thumb_url?: string; album_title?: string; artist_name?: string;
+          id?: number;
+          title?: string;
+          file_path?: string;
+          bitrate?: number;
+          artist_id?: number;
+          album_id?: number;
+          image_url?: string;
+          album_thumb_url?: string;
+          album_title?: string;
+          artist_name?: string;
         };
       };
       if (_dbData && _dbData.success && _dbData.track) {
@@ -442,7 +465,7 @@ export async function playLibraryTrack(
     }
 
     // Re-apply repeat-one loop property
-    if (audioPlayer) audioPlayer.loop = (npRepeatMode === 'one');
+    if (audioPlayer) audioPlayer.loop = npRepeatMode === 'one';
     // Stream state is already "ready" - start audio playback directly
     await startAudioPlayback();
   } catch (error) {

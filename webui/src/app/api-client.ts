@@ -1,7 +1,8 @@
-import { appURL } from '@/platform/url-base';
 import type { ResponsePromise } from 'ky';
 
 import ky, { HTTPError } from 'ky';
+
+import { appURL } from '@/platform/url-base';
 
 const apiBaseUrl =
   typeof globalThis.location === 'object'

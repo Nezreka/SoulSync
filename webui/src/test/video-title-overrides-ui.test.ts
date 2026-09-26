@@ -16,9 +16,9 @@ import { extractFunction } from './vanilla-extract';
 const SRC = readFileSync(resolve(process.cwd(), 'static/video/video-manage-panel.js'), 'utf8');
 
 // eslint-disable-next-line @typescript-eslint/no-implied-eval
-const parseList = new Function(
-  `${extractFunction('parseList', SRC)}\nreturn parseList;`,
-)() as (t: string) => string[];
+const parseList = new Function(`${extractFunction('parseList', SRC)}\nreturn parseList;`)() as (
+  t: string,
+) => string[];
 
 function overrides(html: string) {
   const overlay = document.createElement('div');
@@ -109,7 +109,6 @@ describe('the override panel is wired like the quality profile beside it', () =>
   });
 });
 
-
 describe('manual alternative titles', () => {
   const JS = readFileSync(resolve(process.cwd(), 'static/video/video-manage-panel.js'), 'utf8');
 
@@ -136,8 +135,9 @@ describe('manual alternative titles', () => {
     // Aliases WIDEN what matches; everything under "Acquisition overrides"
     // narrows it. Filing it there would read as one more restriction.
     const body = JS.slice(JS.indexOf('function bodyHtml'), JS.indexOf('function inputHtml2'));
-    expect(body.indexOf("inputHtml2('aliases'"))
-      .toBeLessThan(body.indexOf('Acquisition overrides'));
+    expect(body.indexOf("inputHtml2('aliases'")).toBeLessThan(
+      body.indexOf('Acquisition overrides'),
+    );
   });
 
   it('groups the acquisition settings under their own heading', () => {
@@ -145,7 +145,7 @@ describe('manual alternative titles', () => {
     // state", so a section about posters appeared to own the quality ladder.
     const body = JS.slice(JS.indexOf('function bodyHtml'), JS.indexOf('function inputHtml2'));
     const artwork = body.indexOf('Artwork &amp; state');
-    const acq = body.indexOf("'<div class=\"vmg-sect\">Acquisition</div>'");
+    const acq = body.indexOf('\'<div class="vmg-sect">Acquisition</div>\'');
     const profile = body.indexOf('data-vmg-quality-profile');
     expect(acq).toBeGreaterThan(artwork);
     expect(profile).toBeGreaterThan(acq);

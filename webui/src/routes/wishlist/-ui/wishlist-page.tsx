@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
+import { clearAudiobookWishlist } from '@/routes/audiobooks/-audiobooks.api';
 
 import type { ParsedWishlistTrack } from '../-wishlist.types';
 
@@ -15,7 +16,6 @@ import {
   wishlistStatsQueryOptions,
   wishlistTracksQueryOptions,
 } from '../-wishlist.api';
-import { clearAudiobookWishlist } from '@/routes/audiobooks/-audiobooks.api';
 import {
   buildArtistImageMap,
   filterWishlistGroups,

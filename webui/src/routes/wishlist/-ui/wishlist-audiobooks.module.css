@@ -30,11 +30,17 @@
   gap: 24px;
   padding: 20px 24px;
   border-radius: 18px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.015) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.045) 0%,
+    rgba(255, 255, 255, 0.015) 100%
+  );
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
   overflow: hidden;
   flex-wrap: wrap;
 }
@@ -93,7 +99,8 @@
 }
 
 @keyframes heroPulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
@@ -161,20 +168,31 @@
   padding: 0 22px;
   border: 1px solid rgba(var(--accent-rgb), 0.5);
   border-radius: 12px;
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.95) 0%, rgba(var(--accent-rgb), 0.8) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.95) 0%,
+    rgba(var(--accent-rgb), 0.8) 100%
+  );
   color: #ffffff;
   font-size: 13.5px;
   font-weight: 650;
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
-  box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
-  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+  box-shadow:
+    0 6px 20px rgba(var(--accent-rgb), 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    opacity 0.18s ease;
 }
 
 .searchNow:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 10px 26px rgba(var(--accent-rgb), 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 10px 26px rgba(var(--accent-rgb), 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .searchNow:active:not(:disabled) {
@@ -197,7 +215,9 @@
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .notice {
@@ -207,7 +227,11 @@
   font-size: 13px;
   font-weight: 500;
   color: #ffffff;
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.16) 0%, rgba(var(--accent-rgb), 0.08) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.16) 0%,
+    rgba(var(--accent-rgb), 0.08) 100%
+  );
   border: 1px solid rgba(var(--accent-rgb), 0.35);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
   backdrop-filter: blur(10px);
@@ -250,7 +274,10 @@
   font-family: inherit;
   outline: none;
   box-sizing: border-box;
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .searchInput:focus {
@@ -281,7 +308,9 @@
   border-radius: 50%;
   width: 22px;
   height: 22px;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .searchClear:hover {
@@ -317,7 +346,11 @@
   font-weight: 580;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .filter:hover {
@@ -358,7 +391,11 @@
 }
 
 .filterOn {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9) 0%, rgba(var(--accent-rgb), 0.75) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.9) 0%,
+    rgba(var(--accent-rgb), 0.75) 100%
+  );
   border-color: rgba(var(--accent-rgb), 0.3);
   color: #ffffff;
   box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.28);
@@ -396,7 +433,9 @@
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .viewBtn:hover {
@@ -426,8 +465,12 @@
 }
 
 @keyframes abShimmer {
-  0% { background-position: -400px 0; }
-  100% { background-position: 400px 0; }
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
 }
 
 .empty {
@@ -473,7 +516,9 @@
   font-weight: 600;
   text-decoration: none;
   cursor: pointer;
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
 }
 
 .browseLink:hover {
@@ -501,7 +546,11 @@
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 }
 
 .card:hover {
@@ -545,7 +594,11 @@
   font-weight: 700;
   z-index: 5;
   opacity: 0;
-  transition: opacity 0.18s ease, background 0.18s ease, transform 0.18s ease, color 0.18s ease;
+  transition:
+    opacity 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease,
+    color 0.18s ease;
 }
 
 .card:hover .quickRemove,
@@ -591,7 +644,12 @@
 .spineSheen {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.15) 0%, rgba(0, 0, 0, 0.4) 3.5%, transparent 9%);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.15) 0%,
+    rgba(0, 0, 0, 0.4) 3.5%,
+    transparent 9%
+  );
   pointer-events: none;
   z-index: 2;
 }
@@ -752,7 +810,10 @@
   max-width: fit-content;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .narratorLocked {
@@ -839,7 +900,11 @@
   border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .action:hover {
@@ -849,13 +914,21 @@
 }
 
 .actionPrimary {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.28) 0%, rgba(var(--accent-rgb), 0.18) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.28) 0%,
+    rgba(var(--accent-rgb), 0.18) 100%
+  );
   border-color: rgba(var(--accent-rgb), 0.5);
   color: #ffffff;
 }
 
 .actionPrimary:hover {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.45) 0%, rgba(var(--accent-rgb), 0.3) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.45) 0%,
+    rgba(var(--accent-rgb), 0.3) 100%
+  );
   border-color: rgba(var(--accent-rgb), 0.7);
 }
 
@@ -885,7 +958,10 @@
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .shelfRow:hover {

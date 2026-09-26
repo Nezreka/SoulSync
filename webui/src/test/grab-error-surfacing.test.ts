@@ -20,16 +20,15 @@ import { describe, expect, it } from 'vitest';
  * just never given one.
  */
 
-const VIEW = readFileSync(
-  resolve(process.cwd(), 'static/video/video-download-view.js'),
-  'utf8',
-);
+const VIEW = readFileSync(resolve(process.cwd(), 'static/video/video-download-view.js'), 'utf8');
 
 const POST = VIEW.slice(VIEW.indexOf('function postJSON'), VIEW.indexOf('function contentHTML'));
 /** The same slice with comment lines dropped. The fix's own comment quotes the
  *  old broken expression, so a bare "must not contain" matches the explanation
  *  rather than any live code. */
-const POST_CODE = POST.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+const POST_CODE = POST.split('\n')
+  .filter((l) => !l.trim().startsWith('//'))
+  .join('\n');
 
 describe('postJSON on a failure', () => {
   it('no longer discards the body on a non-2xx', () => {
@@ -54,7 +53,9 @@ describe('postJSON on a failure', () => {
   it('still says something when the body is not JSON at all', () => {
     // a proxy error page or an empty 502 has no {error} to read
     expect(POST).toContain('.catch(function () {');
-    expect(POST).toContain("return r.ok ? null : { ok: false, error: 'Request failed (HTTP ' + r.status + ')' };");
+    expect(POST).toContain(
+      "return r.ok ? null : { ok: false, error: 'Request failed (HTTP ' + r.status + ')' };",
+    );
   });
 
   it('marks a failed response as not ok, so callers take the failure branch', () => {

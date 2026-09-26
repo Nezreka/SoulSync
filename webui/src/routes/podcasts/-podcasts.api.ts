@@ -359,6 +359,3 @@ export async function subscribeOpmlFeeds(
 export function getOpmlExportUrl(profileId: number = 1): string {
   return `/api/podcasts/opml/export?profile_id=${profileId}`;
 }
-
-
-

@@ -440,7 +440,8 @@ export function liveDetailLines(dl: AdlDownload): Array<[string, string]> {
   if (d.username) {
     // Streaming plugins use the source name as the username, so repeating it
     // says nothing; a Soulseek row names the actual peer.
-    const isPeer = (d.source || '') === 'Soulseek' || (d.source || '').toLowerCase().includes('soulseek');
+    const isPeer =
+      (d.source || '') === 'Soulseek' || (d.source || '').toLowerCase().includes('soulseek');
     lines.push(['Source', isPeer ? `Soulseek · peer ${d.username}` : d.source || d.username]);
   }
   if (d.release_title) lines.push(['Release', d.release_title]);

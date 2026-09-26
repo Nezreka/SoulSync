@@ -404,4 +404,3 @@ export async function scanWatchlistPodcasts(): Promise<{
   assertSuccess(payload, 'Failed to scan podcasts');
   return payload;
 }
-

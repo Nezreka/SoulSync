@@ -19,30 +19,7 @@ import {
   switchBlocklistTab,
   unblockEntry,
 } from './blocklist';
-import {
-  connectMyAccount,
-  closeMyAccountsModal,
-  disconnectMyAccount,
-  openMyAccountsModal,
-  openPersonalSettings,
-  saveMyAccountToken,
-} from './my-accounts';
-import {
-  closeDownloadOriginsModal,
-  deleteSelectedOriginEntries,
-  openDownloadOriginsModal,
-  switchDownloadOriginTab,
-  toggleAllOriginEntries,
-  toggleOriginEntry,
-  toggleOriginGroup,
-} from './origin-history';
-import {
-  closeServiceSwitchModal,
-  openServiceSwitchModal,
-  openServiceSwitchSettings,
-  setActiveSource,
-  switchServiceSwitchTab,
-} from './service-switch';
+import { patchChatMessages } from './chat-morph';
 import {
   _handoffLibrarySearchToEnhancedSearch,
   _updateSidebarLibraryBreadcrumb,
@@ -60,12 +37,32 @@ import {
   _mlmSourceDebounce,
   openManualLibraryMatchTool,
 } from './manual-library-match';
+import {
+  connectMyAccount,
+  closeMyAccountsModal,
+  disconnectMyAccount,
+  openMyAccountsModal,
+  openPersonalSettings,
+  saveMyAccountToken,
+} from './my-accounts';
+import {
+  closeDownloadOriginsModal,
+  deleteSelectedOriginEntries,
+  openDownloadOriginsModal,
+  switchDownloadOriginTab,
+  toggleAllOriginEntries,
+  toggleOriginEntry,
+  toggleOriginGroup,
+} from './origin-history';
 import './server-activity';
 import {
-  closeTrackDetail,
-  openTrackDetail,
-} from './track-detail';
-import { patchChatMessages } from './chat-morph';
+  closeServiceSwitchModal,
+  openServiceSwitchModal,
+  openServiceSwitchSettings,
+  setActiveSource,
+  switchServiceSwitchTab,
+} from './service-switch';
+import { closeTrackDetail, openTrackDetail } from './track-detail';
 import {
   closeWatchlistHistoryModal,
   openWatchlistHistoryModal,
