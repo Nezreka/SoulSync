@@ -136,3 +136,56 @@ def test_a_source_that_throws_still_gets_a_well_formed_line(client, monkeypatch)
     for line in by_source.values():
         assert line['candidates'] == [] and line['rejected'] == []
         assert line['error'] == 'source fell over'
+
+
+def test_upgrade_mode_turns_accepted_but_below_cutoff_hits_into_rejections(client, monkeypatch):
+    from core.quality.model import QualityTarget
+    import core.quality.upgrades as upgrades
+
+    seen = []
+
+    def bar(profile_id):
+        seen.append(profile_id)
+        return [QualityTarget(label='FLAC 24-bit', format='flac', bit_depth=24)], 0, 'FLAC 24-bit'
+
+    monkeypatch.setattr(upgrades, 'upgrade_bar', bar)
+    resp = client.post('/api/library/track/42/redownload/search-sources', json={
+        'upgrade': True,
+        'metadata': {'name': 'Fade Into You', 'artist': 'Mazzy Star',
+                     'album': 'So Tonight That I Might See', 'duration_ms': 238_000},
+    })
+    lines = [json.loads(line) for line in resp.get_data(as_text=True).splitlines() if line.strip()]
+    tidal = next(line for line in lines if line.get('source') == 'tidal')
+    # tid||1 is a plain FLAC that states no bit depth: can't be ruled out.
+    assert [c['filename'] for c in tidal['candidates']] == ['tid||1']
+    assert seen, 'upgrade mode never asked for the bar'
+
+
+def test_upgrade_mode_rejects_a_lossy_hit_below_the_cutoff(client, monkeypatch):
+    from core.quality.model import QualityTarget
+    import core.quality.upgrades as upgrades
+
+    monkeypatch.setattr(upgrades, 'upgrade_bar', lambda pid: (
+        [QualityTarget(label='FLAC 16-bit', format='flac', bit_depth=16)], 0, 'FLAC 16-bit'))
+    orch = web_server.download_orchestrator
+    orch.configured_clients()['tidal'].hits = [
+        _hit(username='tidal', filename='tid||mp3', quality='mp3', bitrate=320)]
+    resp = client.post('/api/library/track/42/redownload/search-sources', json={
+        'upgrade': True,
+        'metadata': {'name': 'Fade Into You', 'artist': 'Mazzy Star', 'duration_ms': 238_000},
+    })
+    lines = [json.loads(line) for line in resp.get_data(as_text=True).splitlines() if line.strip()]
+    tidal = next(line for line in lines if line.get('source') == 'tidal')
+    assert tidal['candidates'] == []
+    assert tidal['rejected'][0]['decision']['code'] == 'below_cutoff'
+    assert tidal['rejected'][0]['decision']['detail'] == (
+        "MP3 320kbps doesn't reach your upgrade cutoff (FLAC 16-bit)")
+
+
+def test_without_the_flag_nothing_is_held_to_the_cutoff(client, monkeypatch):
+    import core.quality.upgrades as upgrades
+
+    monkeypatch.setattr(upgrades, 'upgrade_bar',
+                        lambda pid: pytest.fail('bar consulted outside upgrade mode'))
+    by_source = _stream(client)
+    assert by_source['tidal']['candidates']

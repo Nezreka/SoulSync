@@ -1565,6 +1565,9 @@ def _register_automation_handlers():
         run_repair_job_now=lambda job_id, respect_enabled=False: (
             repair_worker.run_job_now(job_id, respect_enabled=respect_enabled)
             if repair_worker else None),
+        bulk_fix_repair_findings=(
+            (lambda finding_ids: repair_worker.bulk_fix_findings(finding_ids=finding_ids))
+            if repair_worker else None),
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -8187,6 +8190,7 @@ def get_library_artists():
         limit = int(request.args.get('limit', 75))
         watchlist_filter = request.args.get('watchlist', 'all')
         source_filter = request.args.get('source_filter', '')
+        quality_filter = request.args.get('quality', '')
 
         # Get database instance
         database = get_database()
@@ -8199,7 +8203,8 @@ def get_library_artists():
             limit=limit,
             watchlist_filter=watchlist_filter,
             profile_id=get_current_profile_id(),
-            source_filter=source_filter
+            source_filter=source_filter,
+            quality_filter=quality_filter,
         )
 
         # Fix image URLs for all artists
@@ -8578,6 +8583,10 @@ def get_artist_enhanced_detail(artist_id):
         active_server = config_manager.get_active_media_server()
         server_connected = media_server_engine.is_connected() if media_server_engine else False
         result['server_type'] = active_server if server_connected else None
+
+        # which tracks the quality jobs say could be better
+        from core.quality.upgrades import annotate_enhanced_payload
+        annotate_enhanced_payload(database, result)
 
         return jsonify(result)
     except Exception as e:
@@ -11192,7 +11201,7 @@ def redownload_search_metadata(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector'):
+def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector', upgrade=False):
     """Search every configured download source for one track and stream the
     verdicts: NDJSON, one line per source as it answers, then {"done": true}.
 
@@ -11200,6 +11209,10 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
     only when a person opens it; automatic downloads stay on source priority.
     Each line carries the accepted rows (ranked as before) and the rejected
     ones with their reasons (core/downloads/candidate_pool.py).
+
+    ``upgrade``: judge as an upgrade — a hit must also reach the profile's
+    upgrade cutoff (core/quality/upgrades.py), not just what the everyday
+    download filter would take.
     """
     search_queries = matching_engine.generate_download_queries(track_obj)
     if not search_queries:
@@ -11224,6 +11237,11 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
     from core.downloads.candidate_pool import build_source_rows, empty_source_rows
     from core.quality.source_map import quality_profile_context
 
+    bar = None
+    if upgrade:
+        from core.quality.upgrades import apply_upgrade_bar, upgrade_bar
+        bar = upgrade_bar(quality_profile_id)
+
     def _search_one_source(source_name, client):
         evaluated = []
         for q in search_queries:
@@ -11236,8 +11254,10 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
                     tracks_result, _ = run_async(client.search(q, timeout=20))
                 if not tracks_result:
                     continue
-                evaluated.append((q, evaluate_candidates(
-                    tracks_result, track_obj, q, quality_profile_id)))
+                pairs = evaluate_candidates(tracks_result, track_obj, q, quality_profile_id)
+                if bar is not None:
+                    pairs = apply_upgrade_bar(pairs, *bar)
+                evaluated.append((q, pairs))
             except Exception as e:
                 logger.debug(f"[{log_tag}] {source_name} search failed for query '{q}': {e}")
         return build_source_rows(
@@ -11287,7 +11307,10 @@ def redownload_search_sources(track_id):
             duration_ms=metadata.get('duration_ms', 0),
             popularity=0,
         )
-        return _inspect_sources_stream(track_obj, quality_profile_id, log_tag='Redownload')
+        return _inspect_sources_stream(
+            track_obj, quality_profile_id, log_tag='Redownload',
+            upgrade=bool(data.get('upgrade')),
+        )
 
     except Exception as e:
         logger.error(f"Error in redownload source search: {e}", exc_info=True)

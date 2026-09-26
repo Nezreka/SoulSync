@@ -27,6 +27,7 @@ REASON_CODES = {
     'outranked': 'identity',
     'version_conflict': 'version',
     'below_profile': 'quality',
+    'below_cutoff': 'quality',
     'peer_queue': 'availability',
     'quarantined': 'policy',
     'too_large': 'policy',

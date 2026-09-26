@@ -52,6 +52,7 @@ export function libraryArtistsQueryOptions(profileId: number, search: LibrarySea
     watchlist: search.watchlist,
   };
   if (search.source) params.source_filter = search.source;
+  if (search.quality) params.quality = search.quality;
 
   return queryOptions({
     // Every filter is part of the key: changing any of them is a different

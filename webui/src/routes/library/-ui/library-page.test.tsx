@@ -22,6 +22,8 @@ function artist(over: Partial<LibraryArtist> & { id: number }): LibraryArtist {
 }
 
 let requested: string[] = [];
+/** What the stubbed /api/library/artists reports as could-be-better. */
+let upgradableTotal = 0;
 /** Request bodies, captured BEFORE ky consumes them — a Request cannot be
  *  cloned once its body has been read ("TypeError: unusable"). */
 let sent: { url: string; body: unknown }[] = [];
@@ -78,6 +80,7 @@ function stubFetch(
             ? {
                 success: true,
                 artists,
+                upgradable_total: upgradableTotal,
                 pagination: {
                   page: Number(new URL(url, 'http://x').searchParams.get('page') ?? 1),
                   limit: 75,
@@ -127,6 +130,50 @@ afterEach(() => {
   delete window.SoulSyncWebShellBridge;
   delete window.showLibraryDownloadsSection;
   delete window.playTrackList;
+  upgradableTotal = 0;
+});
+
+describe('Could be better', () => {
+  it('stays out of the way when nothing could be better', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    expect(screen.queryByText('Could be better')).toBeNull();
+    expect(lastQuery().has('quality')).toBe(false);
+  });
+
+  it('shows the count, filters the grid, and badges the card', async () => {
+    upgradableTotal = 7;
+    stubFetch([artist({ id: 1, name: 'Aphex Twin', track_count: 12, upgradable_count: 3 })]);
+    const { router } = renderPage();
+    const toggle = await screen.findByText('Could be better');
+    expect(toggle.closest('button')?.textContent).toContain('7');
+    expect(toggle.closest('button')?.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByText('3 could be better')).toBeTruthy();
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(lastQuery().get('quality')).toBe('upgradable'));
+    expect(router.state.location.search).toMatchObject({ quality: 'upgradable', page: 1 });
+    await waitFor(() =>
+      expect(
+        screen.getByText('Could be better').closest('button')?.getAttribute('aria-pressed'),
+      ).toBe('true'),
+    );
+  });
+
+  it('keeps the toggle while filtered, even if the count drops to zero', async () => {
+    renderPage('/library?quality=upgradable');
+    await screen.findByText('Aphex Twin');
+    expect(lastQuery().get('quality')).toBe('upgradable');
+    const toggle = screen.getByText('Could be better').closest('button')!;
+    fireEvent.click(toggle);
+    await waitFor(() => expect(lastQuery().has('quality')).toBe(false));
+  });
+
+  it('ignores a made-up quality value in the URL', async () => {
+    renderPage('/library?quality=perfect');
+    await screen.findByText('Aphex Twin');
+    expect(lastQuery().has('quality')).toBe(false);
+  });
 });
 
 describe('LibraryPage rendering', () => {

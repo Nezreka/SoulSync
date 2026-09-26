@@ -18236,7 +18236,7 @@ class MusicDatabase:
                 'server_source': server_source
             }
 
-    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "") -> Dict[str, Any]:
+    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "", quality_filter: str = "") -> Dict[str, Any]:
         """
         Get artists for the library page with search, filtering, and pagination
 
@@ -18247,6 +18247,8 @@ class MusicDatabase:
             limit: Number of results per page
             watchlist_filter: Filter by watchlist status ("all", "watched", "unwatched")
             source_filter: Filter by metadata source match (e.g. "spotify", "!spotify" for unmatched)
+            quality_filter: "upgradable" keeps artists with a track the quality
+                jobs say could be better (a pending finding)
 
         Returns:
             Dict containing artists list, pagination info, and total count
@@ -18294,6 +18296,21 @@ class MusicDatabase:
                             where_conditions.append(f"({col} IS NULL OR {col} = '')")
                         else:
                             where_conditions.append(f"({col} IS NOT NULL AND {col} != '')")
+
+                from core.quality.upgrades import UPGRADE_JOBS
+                _upgrade_jobs_sql = ','.join('?' * len(UPGRADE_JOBS))
+                # artists (by name, like the dedup below) owning a track with a
+                # pending quality finding. Non-correlated: evaluated once.
+                _upgradable_names_sql = f"""
+                    SELECT ar.name, ar.server_source FROM repair_findings f
+                    JOIN tracks t ON t.id = f.entity_id
+                    JOIN artists ar ON ar.id = t.artist_id
+                    WHERE f.status = 'pending' AND f.entity_type = 'track'
+                      AND f.job_id IN ({_upgrade_jobs_sql})
+                """
+                if quality_filter == 'upgradable':
+                    where_conditions.append(f"(a.name, a.server_source) IN ({_upgradable_names_sql})")
+                    params.extend(UPGRADE_JOBS)
 
                 # Get active server for filtering
                 from core.settings import config_manager
@@ -18390,6 +18407,7 @@ class MusicDatabase:
                 # Step 3: Batch-fetch album/track counts only for the 75 artists on this page
                 artist_ids_on_page = [row['id'] for row in artist_rows]
                 counts_map = {}
+                upgradable_map: Dict[Any, int] = {}
                 if artist_ids_on_page:
                     # Get all artist IDs that share names with the page artists (for dedup merging)
                     name_pairs = [(row['name'], row['server_source']) for row in artist_rows]
@@ -18437,6 +18455,26 @@ class MusicDatabase:
                         cid = name_to_canonical.get(key)
                         if cid:
                             counts_map[cid] = (album_count, track_count)
+
+                    # tracks that could be better, per artist on this page
+                    try:
+                        cursor.execute(f"""
+                            SELECT ar.name AS artist_name, ar.server_source AS artist_source,
+                                   COUNT(DISTINCT f.entity_id) AS n
+                            FROM repair_findings f
+                            JOIN tracks t ON t.id = f.entity_id
+                            JOIN artists ar ON ar.id = t.artist_id
+                            WHERE f.status = 'pending' AND f.entity_type = 'track'
+                              AND f.job_id IN ({_upgrade_jobs_sql})
+                              AND ({' OR '.join(or_clauses)})
+                            GROUP BY ar.name, ar.server_source
+                        """, (*UPGRADE_JOBS, *or_params))
+                        for urow in cursor.fetchall():
+                            cid = name_to_canonical.get((urow['artist_name'], urow['artist_source']))
+                            if cid:
+                                upgradable_map[cid] = urow['n'] or 0
+                    except Exception as upgrade_err:
+                        logger.debug("upgradable counts skipped: %s", upgrade_err)
 
                 rows = artist_rows
 
@@ -18488,6 +18526,7 @@ class MusicDatabase:
                         'amazon_id': row['amazon_id'],
                         'album_count': counts_map.get(row['id'], (0, 0))[0],
                         'track_count': counts_map.get(row['id'], (0, 0))[1],
+                        'upgradable_count': upgradable_map.get(row['id'], 0),
                         'is_watched': bool(is_watched)
                     }
                     artists.append(artist_data)
@@ -18497,7 +18536,25 @@ class MusicDatabase:
                 has_prev = page > 1
                 has_next = page < total_pages
 
+                # every track in this library view that could be better, for
+                # the filter's label
+                upgradable_total = 0
+                try:
+                    cursor.execute(f"""
+                        SELECT COUNT(DISTINCT f.entity_id) AS n
+                        FROM repair_findings f
+                        JOIN tracks t ON t.id = f.entity_id
+                        JOIN artists a ON a.id = t.artist_id
+                        WHERE f.status = 'pending' AND f.entity_type = 'track'
+                          AND f.job_id IN ({_upgrade_jobs_sql})
+                          AND a.server_source = ? AND {scope_sql}
+                    """, (*UPGRADE_JOBS, active_server, *scope_params))
+                    upgradable_total = cursor.fetchone()['n'] or 0
+                except Exception as upgrade_err:
+                    logger.debug("upgradable total skipped: %s", upgrade_err)
+
                 return {
+                    'upgradable_total': upgradable_total,
                     'artists': artists,
                     'pagination': {
                         'page': page,

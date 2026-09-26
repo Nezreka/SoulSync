@@ -182,8 +182,8 @@ describe('the host and its entry points', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        calls.push({ url, body: JSON.parse(String(init?.body || '{}')) });
+        const url = input instanceof Request ? input.url : input.toString();
+        calls.push({ url, body: JSON.parse(typeof init?.body === 'string' ? init.body : '{}') });
         if (url === '/api/wishlist/inspect') {
           return ndjson([
             {
@@ -227,8 +227,8 @@ describe('the host and its entry points', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        calls.push({ url, body: JSON.parse(String(init?.body || '{}')) });
+        const url = input instanceof Request ? input.url : input.toString();
+        calls.push({ url, body: JSON.parse(typeof init?.body === 'string' ? init.body : '{}') });
         if (url.endsWith('/inspect')) {
           return ndjson([{ source: 'soulseek', candidates: [ACCEPTED] }, { done: true }]);
         }

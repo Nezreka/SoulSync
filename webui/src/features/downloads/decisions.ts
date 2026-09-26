@@ -22,6 +22,7 @@ export const DECISION_LABELS: Record<string, string> = {
   outranked: 'outranked',
   version_conflict: 'wrong version',
   below_profile: 'below your profile',
+  below_cutoff: 'not an upgrade',
   peer_queue: 'busy peer',
   quarantined: 'failed before',
   too_large: 'too large',

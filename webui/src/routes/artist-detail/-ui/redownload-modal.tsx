@@ -34,10 +34,13 @@ export function RedownloadModal({
   artistName,
   onReload,
   onClose,
+  upgrade = false,
 }: {
   track: EnhancedTrack;
   album: EnhancedAlbum;
   artistName: string;
+  /** Hold every hit to the track's quality-profile cutoff: an upgrade, not a swap. */
+  upgrade?: boolean;
   /** A finished download re-fetches the enhanced payload (3871-3873). */
   onReload: () => void;
   onClose: () => void;
@@ -99,10 +102,15 @@ export function RedownloadModal({
     meta._source = choice.source;
     chosenMetaRef.current = meta;
     setStep(2);
-    void streamRedownloadSources(track.id, meta, (source, fresh, all, rejected) => {
-      setColumns((prev) => [...prev, { source, candidates: fresh, rejected }]);
-      setCandidates([...all]);
-    })
+    void streamRedownloadSources(
+      track.id,
+      meta,
+      (source, fresh, all, rejected) => {
+        setColumns((prev) => [...prev, { source, candidates: fresh, rejected }]);
+        setCandidates([...all]);
+      },
+      { upgrade },
+    )
       .then(() => setStreamDone(true))
       .catch((error: Error) => setStreamError(error.message));
   };
@@ -157,9 +165,11 @@ export function RedownloadModal({
       <div className="redownload-modal">
         <div className="redownload-header">
           <div>
-            <h3>Redownload Track</h3>
+            <h3>{upgrade ? 'Upgrade Track' : 'Redownload Track'}</h3>
             <p className="redownload-header-sub">
-              Find the correct version and download from your preferred source
+              {upgrade
+                ? 'Find a copy that reaches your quality profile, and replace this one'
+                : 'Find the correct version and download from your preferred source'}
             </p>
           </div>
           <button className="redownload-close" type="button" onClick={onClose}>

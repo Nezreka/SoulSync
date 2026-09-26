@@ -97,7 +97,10 @@ export function EnhancedTrackTable({
     anchor: HTMLElement | null;
   } | null>(null);
   const [deleting, setDeleting] = useState<EnhancedTrack | null>(null);
-  const [redownloading, setRedownloading] = useState<EnhancedTrack | null>(null);
+  const [redownloading, setRedownloading] = useState<{
+    track: EnhancedTrack;
+    upgrade: boolean;
+  } | null>(null);
   const [managingMissing, setManagingMissing] = useState<EnhancedTrack | null>(null);
   const [reidentifying, setReidentifying] = useState<EnhancedTrack | null>(null);
   const rows = sortedTrackRows(getAlbumTrackRows(album), sort);
@@ -209,7 +212,8 @@ export function EnhancedTrackTable({
               onDelete={() => setDeleting(track)}
               onMatch={(service) => setMatching({ track, service })}
               onTagPreview={() => setTagPreview(track)}
-              onRedownload={() => setRedownloading(track)}
+              onRedownload={() => setRedownloading({ track, upgrade: false })}
+              onUpgrade={() => setRedownloading({ track, upgrade: true })}
               onMissingManage={() => setManagingMissing(track)}
               onReidentify={() => setReidentifying(track)}
             />
@@ -267,11 +271,12 @@ export function EnhancedTrackTable({
       ) : null}
       {redownloading ? (
         <RedownloadModal
-          track={redownloading}
+          track={redownloading.track}
           album={album}
           artistName={String(artist?.name || '')}
           onReload={onReload}
           onClose={() => setRedownloading(null)}
+          upgrade={redownloading.upgrade}
         />
       ) : null}
       {managingMissing ? (
@@ -319,6 +324,7 @@ function TrackRow({
   onMatch,
   onTagPreview,
   onRedownload,
+  onUpgrade,
   onMissingManage,
   onReidentify,
 }: {
@@ -334,10 +340,12 @@ function TrackRow({
   onMatch: (service: string) => void;
   onTagPreview: () => void;
   onRedownload: () => void;
+  onUpgrade: () => void;
   onMissingManage: () => void;
   onReidentify: () => void;
 }) {
   const [rgBusy, setRgBusy] = useState(false);
+  const couldBeBetter = track.quality_upgrade as { current?: string } | undefined;
   const [mobileOpen, setMobileOpen] = useState(false);
   /** the source-info popover anchors beside the row's menu button. */
   const moreRef = useRef<HTMLElement | null>(null);
@@ -441,6 +449,17 @@ function TrackRow({
         value={track.title as string | null}
         onSaved={onEdited}
       >
+        {couldBeBetter && !missing ? (
+          <button
+            type="button"
+            className="enhanced-upgrade-badge"
+            title={`Could be better${couldBeBetter.current ? ` (now ${couldBeBetter.current})` : ''}. Find a copy that reaches your quality profile.`}
+            aria-label={`Upgrade ${typeof track.title === 'string' && track.title ? track.title : 'this track'}`}
+            onClick={act(() => onUpgrade())}
+          >
+            ↑
+          </button>
+        ) : null}
         <span className="lib-track-title">{trackTitle}</span>
         {missing ? <span className="enhanced-missing-track-badge">Missing</span> : null}
       </EditableCell>

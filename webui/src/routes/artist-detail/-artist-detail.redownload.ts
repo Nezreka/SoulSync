@@ -70,17 +70,19 @@ export async function searchRedownloadMetadata(
   return data;
 }
 
-/** The redownload modal's source stream (see streamInspection). */
+/**
+ * The redownload modal's source stream (see streamInspection). `upgrade`
+ * holds every hit to the track's quality-profile cutoff as well.
+ */
 export function streamRedownloadSources(
   trackId: unknown,
   metadata: RedownloadMetadataResult,
   onSource: Parameters<typeof streamInspection>[2],
+  options: { upgrade?: boolean } = {},
 ): Promise<InspectorCandidate[]> {
   return streamInspection(
     `/api/library/track/${trackId}/redownload/search-sources`,
-    {
-      metadata,
-    },
+    options.upgrade ? { metadata, upgrade: true } : { metadata },
     onSource,
   );
 }

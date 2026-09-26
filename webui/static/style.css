@@ -30281,6 +30281,38 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     white-space: nowrap;
 }
 
+.library-artist-upgradable {
+    color: #64b5f6;
+}
+
+/* "Could be better": the quality jobs' findings as a library filter */
+.library-upgrade-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 14px;
+    border: 1px solid rgba(100, 181, 246, 0.25);
+    border-radius: 10px;
+    background: rgba(100, 181, 246, 0.06);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.library-upgrade-filter:hover { background: rgba(100, 181, 246, 0.12); color: #fff; }
+.library-upgrade-filter.active {
+    background: rgba(100, 181, 246, 0.2);
+    border-color: rgba(100, 181, 246, 0.55);
+    color: #fff;
+}
+.library-upgrade-filter:focus-visible { outline: 2px solid rgba(100, 181, 246, 0.7); outline-offset: 2px; }
+.library-upgrade-filter-count {
+    min-width: 20px; padding: 1px 7px; border-radius: 999px;
+    background: rgba(100, 181, 246, 0.2); color: #bbdefb; font-size: 11px; text-align: center;
+}
+
 /* Empty State */
 .library-empty {
     display: flex;
@@ -53584,6 +53616,30 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 }
 
 /* Format Badge */
+/* "Could be better": a pending quality finding on this track */
+.enhanced-upgrade-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; margin-right: 8px; padding: 0; flex-shrink: 0;
+    border: 1px solid rgba(100, 181, 246, 0.4); border-radius: 6px;
+    background: rgba(100, 181, 246, 0.12); color: #90caf9;
+    font-size: 12px; font-weight: 800; line-height: 1; cursor: pointer; vertical-align: middle;
+}
+.enhanced-upgrade-badge:hover { background: rgba(100, 181, 246, 0.25); color: #fff; }
+.enhanced-upgrade-badge:focus-visible { outline: 2px solid rgba(100, 181, 246, 0.7); outline-offset: 1px; }
+.enhanced-upgrade-album-btn { border-color: rgba(100, 181, 246, 0.35); color: #bbdefb; }
+.enhanced-upgrade-album-btn:hover { background: rgba(100, 181, 246, 0.14); }
+
+.album-upgrade-modal { max-width: 560px; }
+.album-upgrade-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.album-upgrade-row {
+    display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px;
+}
+.album-upgrade-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.album-upgrade-title { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.9); overflow-wrap: anywhere; }
+.album-upgrade-current { font-size: 11px; color: rgba(255, 255, 255, 0.4); }
+.album-upgrade-find { flex-shrink: 0; padding: 8px 14px; font-size: 12px; }
+
 .enhanced-format-badge {
     display: inline-flex;
     align-items: center;
