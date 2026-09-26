@@ -1190,13 +1190,11 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     explicit_artist = track_info_ctx.get("_explicit_artist_context") if isinstance(track_info_ctx, dict) else None
     album_artists_for_collab = None
 
-    if isinstance(explicit_artist, dict) and explicit_artist.get("name"):
-        raw_album_artist = explicit_artist["name"]
-        album_artists_for_collab = [explicit_artist]
-    elif isinstance(explicit_artist, str) and explicit_artist:
-        raw_album_artist = explicit_artist
-        album_artists_for_collab = [{"name": explicit_artist}]
-    elif album_ctx and isinstance(album_ctx, dict):
+    # The track's own album context is ground truth — resolve it first so a
+    # batch-level hint below is sanity-checked instead of blindly trusted.
+    own_album_artist = ""
+    own_album_artists = None
+    if album_ctx and isinstance(album_ctx, dict):
         album_artists = album_ctx.get("artists", [])
         if album_artists:
             first_album_artist = album_artists[0]
@@ -1211,8 +1209,38 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
             # (bug #735: album-artist tag overwritten to "Unknown Artist" on
             # import). Only override when the album context names a real artist.
             if candidate and candidate != "Unknown Artist":
-                raw_album_artist = candidate
-                album_artists_for_collab = album_artists
+                own_album_artist = candidate
+                own_album_artists = album_artists
+
+    explicit_name = ""
+    if isinstance(explicit_artist, dict) and explicit_artist.get("name"):
+        explicit_name = str(explicit_artist["name"])
+    elif isinstance(explicit_artist, str) and explicit_artist:
+        explicit_name = explicit_artist
+
+    if explicit_name:
+        # #1316: a batch-level artist hint must never silently override the
+        # track's own album artist when they name different real artists (a
+        # poisoned wishlist batch stamped an unrelated artist on 899 tracks'
+        # album_artist tags). On disagreement trust the track data, loudly.
+        if (own_album_artist
+                and own_album_artist.strip().casefold() != explicit_name.strip().casefold()):
+            logger.warning(
+                "Metadata: explicit artist context '%s' disagrees with the track's "
+                "own album artist '%s' — trusting the track data (#1316)",
+                explicit_name, own_album_artist,
+            )
+            raw_album_artist = own_album_artist
+            album_artists_for_collab = own_album_artists
+        else:
+            raw_album_artist = explicit_name
+            album_artists_for_collab = (
+                [explicit_artist] if isinstance(explicit_artist, dict)
+                else [{"name": explicit_artist}]
+            )
+    elif own_album_artist:
+        raw_album_artist = own_album_artist
+        album_artists_for_collab = own_album_artists
 
     collab_mode = cfg.get("file_organization.collab_artist_mode", "first")
     if collab_mode == "first" and raw_album_artist:

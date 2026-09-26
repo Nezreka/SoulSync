@@ -16,6 +16,10 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("wishlist.album_grouping")
+
 
 def _extract_track_data(track: Dict[str, Any]) -> Dict[str, Any]:
     """Mirror of ``classification._extract_track_data``: unwrap nested
@@ -116,6 +120,40 @@ class WishlistGroupingResult:
     residual_tracks: List[Dict[str, Any]] = field(default_factory=list)
 
 
+def _verify_group_artist_context(group: "WishlistAlbumGroup") -> None:
+    """Cross-check a group's artist context against its tracks' own artists.
+
+    The group context is set from the first row that opened the bucket
+    (first-track-wins). #1316: a wishlist row whose stored
+    ``album.artists[0]`` was wrong stamped that wrong artist on the whole
+    batch. If every track in the group unanimously names a *different*
+    artist, the row was wrong — trust the tracks and say so loudly.
+    Unanimity is required so genuine multi-artist compilations keep the
+    row's album artist (e.g. "Various Artists").
+    """
+    claimed = (group.artist_context or {}).get("name") or ""
+    claimed_norm = claimed.strip().casefold()
+    names: Dict[str, str] = {}  # normalized -> display form
+    for track in group.tracks:
+        spotify_data = _extract_track_data(track)
+        name = _artist_name_from_track(spotify_data, track)
+        if name and name.strip():
+            names.setdefault(name.strip().casefold(), name.strip())
+    if len(names) == 1:
+        actual_norm = next(iter(names))
+        if claimed_norm and actual_norm != claimed_norm:
+            actual = names[actual_norm]
+            logger.warning(
+                "[Wishlist Album Grouping] row album artist '%s' disagrees with "
+                "the unanimous track artist '%s' for album '%s' — trusting the "
+                "tracks (#1316)",
+                claimed,
+                actual,
+                (group.album_context or {}).get("name", "?"),
+            )
+            group.artist_context["name"] = actual
+
+
 def group_wishlist_tracks_by_album(
     tracks: List[Dict[str, Any]],
     *,
@@ -199,6 +237,7 @@ def group_wishlist_tracks_by_album(
     # smaller groups to residual.
     for group in buckets.values():
         if len(group.tracks) >= min_tracks_per_album:
+            _verify_group_artist_context(group)
             result.album_groups.append(group)
         else:
             result.residual_tracks.extend(group.tracks)
