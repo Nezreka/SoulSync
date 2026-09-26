@@ -57,7 +57,6 @@ const KNOWN_GAPS: Record<string, number> = {
   '-discover.listenbrainz.ts': 8,
   '-discover.playlist-sync.ts': 4,
   '-discover.recent-releases.ts': 1,
-  '-discover.recommended.ts': 1,
   '-discover.seasonal.ts': 3,
   '-discover.types.ts': 2,
   '-discover.your-albums-actions.ts': 4,

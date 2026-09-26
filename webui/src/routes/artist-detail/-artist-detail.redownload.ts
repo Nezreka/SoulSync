@@ -1,5 +1,7 @@
+import type { InspectorCandidate } from '../../features/downloads/inspector';
 import type { EnhancedAlbum } from './-artist-detail.enhanced';
 
+import { streamInspection } from '../../features/downloads/inspector';
 import { getAlbumCanonicalSource } from './-artist-detail.enhanced-album';
 
 /**
@@ -40,48 +42,6 @@ export const METADATA_SOURCE_LABELS: Record<string, string> = {
   hydrabase: 'Hydrabase',
 };
 
-export const DOWNLOAD_SERVICE_ICONS: Record<string, string> = {
-  soulseek: '🔍',
-  youtube: '▶️',
-  tidal: '🌊',
-  qobuz: '🎵',
-  hifi: '🎧',
-  deezer_dl: '💜',
-  hybrid: '⚡',
-  lidarr: '📦',
-  amazon: '🛒',
-  soundcloud: '☁️',
-  torrent: '🧲',
-  usenet: '📰',
-};
-
-export const DOWNLOAD_SERVICE_LABELS: Record<string, string> = {
-  soulseek: 'Soulseek',
-  youtube: 'YouTube',
-  tidal: 'Tidal',
-  qobuz: 'Qobuz',
-  hifi: 'HiFi',
-  deezer_dl: 'Deezer',
-  hybrid: 'Auto',
-  lidarr: 'Lidarr',
-  amazon: 'Amazon Music',
-  soundcloud: 'SoundCloud',
-  torrent: 'Torrent',
-  usenet: 'Usenet',
-};
-
-/** 90/70 score banding shared by both steps (3446, 3640). */
-export function scoreClass(pct: number): 'high' | 'medium' | 'low' {
-  return pct >= 90 ? 'high' : pct >= 70 ? 'medium' : 'low';
-}
-
-/** m:ss from milliseconds, empty when unknown (3447, 3643). */
-export function msClock(ms: unknown): string {
-  const value = Number(ms);
-  if (!value) return '';
-  return `${Math.floor(value / 60000)}:${String(Math.floor((value % 60000) / 1000)).padStart(2, '0')}`;
-}
-
 export interface RedownloadMetadataResult {
   name?: string;
   artist?: string;
@@ -110,92 +70,39 @@ export async function searchRedownloadMetadata(
   return data;
 }
 
-export interface RedownloadCandidate {
-  display_name?: string;
-  filename?: string;
-  username?: string;
-  source_service?: string;
-  quality?: string;
-  bitrate?: number;
-  size_display?: string;
-  duration?: number;
-  confidence?: number;
-  blacklisted?: boolean;
-  free_upload_slots?: number | null;
-  _globalIdx: number;
-}
-
-/** The best pick auto-follows the stream: highest non-blacklisted confidence (3626-3630). */
-export function bestCandidateIndex(candidates: RedownloadCandidate[]): number {
-  let best = -1;
-  let bestConf = 0;
-  candidates.forEach((c, i) => {
-    if (!c.blacklisted && (c.confidence || 0) > bestConf) {
-      bestConf = c.confidence || 0;
-      best = i;
-    }
-  });
-  return best;
-}
-
 /**
- * Stream download-source results (NDJSON, one line per source). Each line's
- * candidates get global indices and are handed to onSource as they land;
- * malformed lines are skipped, matching the vanilla reader.
+ * The redownload modal's source stream (see streamInspection). `upgrade`
+ * holds every hit to the track's quality-profile cutoff as well.
  */
-export async function streamRedownloadSources(
+export function streamRedownloadSources(
   trackId: unknown,
   metadata: RedownloadMetadataResult,
-  onSource: (source: string, candidates: RedownloadCandidate[], all: RedownloadCandidate[]) => void,
-): Promise<RedownloadCandidate[]> {
-  const all: RedownloadCandidate[] = [];
-  const response = await fetch(`/api/library/track/${trackId}/redownload/search-sources`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ metadata }),
-  });
-  if (!response.body) return all;
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const data = JSON.parse(line);
-        if (data.done) continue;
-        const candidates = (data.candidates || []) as RedownloadCandidate[];
-        const startIdx = all.length;
-        candidates.forEach((c, i) => {
-          c._globalIdx = startIdx + i;
-        });
-        all.push(...candidates);
-        onSource(String(data.source), candidates, all);
-      } catch {
-        /* skip malformed lines */
-      }
-    }
-  }
-  return all;
+  onSource: Parameters<typeof streamInspection>[2],
+  options: { upgrade?: boolean } = {},
+): Promise<InspectorCandidate[]> {
+  return streamInspection(
+    `/api/library/track/${trackId}/redownload/search-sources`,
+    options.upgrade ? { metadata, upgrade: true } : { metadata },
+    onSource,
+  );
 }
 
 export async function startRedownloadRequest(
   trackId: unknown,
   metadata: RedownloadMetadataResult,
-  candidate: RedownloadCandidate,
+  candidate: InspectorCandidate,
   deleteOldFile: boolean,
 ): Promise<string> {
+  // A rejected row the user chose anyway: say which rule they overrode, for
+  // this one grab. The server only acts on quality overrides.
+  const override =
+    candidate.decision && !candidate.decision.accepted
+      ? { code: candidate.decision.code, stage: candidate.decision.stage }
+      : undefined;
   const response = await fetch(`/api/library/track/${trackId}/redownload/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ metadata, candidate, delete_old_file: deleteOldFile }),
+    body: JSON.stringify({ metadata, candidate, delete_old_file: deleteOldFile, override }),
   });
   const data = await response.json();
   if (!data.success) throw new Error(data.error);

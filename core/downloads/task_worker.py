@@ -243,6 +243,28 @@ class TaskWorkerDeps:
     on_download_completed: Callable               # (batch_id, task_id, success) -> None
     recover_worker_slot: Callable                 # (batch_id, task_id) -> None
     try_version_mismatch_fallback: Optional[Callable] = None  # (title, artist, task_id, batch_id) -> bool
+    # (results, spotify_track, query, profile_id=None) -> [(row, Decision)]. When
+    # set, the worker keeps why each hit was taken or passed over (decision_log).
+    evaluate_candidates: Optional[Callable] = None
+
+
+def _judge(deps, results, track, query, profile_id, pool):
+    """get_valid_candidates, keeping every Decision in ``pool`` when the deps
+    can explain. The accepted rows are the same list either way."""
+    evaluate = getattr(deps, 'evaluate_candidates', None)
+    if evaluate is None:
+        return deps.get_valid_candidates(results, track, query, profile_id)
+    pairs = evaluate(results, track, query, profile_id)
+    pool.extend(pairs)
+    return [row for row, decision in pairs if decision.accepted]
+
+
+def _record_decision(deps, task_id, pool, outcome, track, profile_id, merge=False):
+    if getattr(deps, 'evaluate_candidates', None) is None:
+        return
+    from core.downloads import decision_log
+    decision_log.record(task_id, pool, outcome=outcome, track=track,
+                        quality_profile_id=profile_id, merge=merge)
 
 
 def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorkerDeps) -> None:
@@ -364,6 +386,9 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
             if not cached_first:
                 _t.pop('searched_queries', None)
         if cached_first and _try_cached_candidates(task_id, batch_id, track, deps):
+            if getattr(deps, 'evaluate_candidates', None) is not None:
+                from core.downloads import decision_log
+                decision_log.note_retry_winner(task_id)
             with tasks_lock:
                 used_filename = download_tasks.get(task_id, {}).get('filename')
                 used_username = download_tasks.get(task_id, {}).get('username')
@@ -517,6 +542,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
         all_raw_results = []  # Collect raw results across queries for candidate review modal
+        decision_pool = []  # (row, Decision) for everything judged, when deps can explain
         # Sources whose per-source quarantine-retry budget is spent (exhaustive
         # mode). The monitor sets this when a source gives up; we exclude those
         # sources from the hybrid search so the chain falls through to the next
@@ -679,7 +705,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 if tracks_result:
                     result_count = len(tracks_result)
                     # Validate candidates using GUI's get_valid_candidates logic
-                    candidates = deps.get_valid_candidates(tracks_result, track, query, _profile_id)
+                    candidates = _judge(deps, tracks_result, track, query, _profile_id, decision_pool)
                     if not candidates:
                         # Catalog-first YouTube can return official songs that
                         # all fail the matcher (obscure remix, live, etc.).
@@ -711,6 +737,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             quality_first=_best_quality, quality_targets=_quality_targets,
                         )
                         if success:
+                            _record_decision(deps, task_id, decision_pool, 'chosen', track, _profile_id, cached_first)
                             # Download initiated successfully - let the download monitoring system handle completion
                             if batch_id:
                                 logger.info(f"[Modal Worker] Download initiated successfully for task {task_id} - monitoring will handle completion")
@@ -796,7 +823,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             fb_results, _ = deps.run_async(fb_client.search(fb_query, timeout=20))
                             if not fb_results:
                                 continue
-                            fb_candidates = deps.get_valid_candidates(fb_results, track, fb_query, _profile_id)
+                            fb_candidates = _judge(deps, fb_results, track, fb_query, _profile_id, decision_pool)
                             if not fb_candidates:
                                 extra = _youtube_ytsearch_fallback(
                                     deps, fb_query, track, fb_results, _profile_id)
@@ -809,6 +836,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                                         download_tasks[task_id]['cached_candidates'] = fb_candidates
                                 success = deps.attempt_download_with_candidates(task_id, fb_candidates, track, batch_id)
                                 if success:
+                                    _record_decision(deps, task_id, decision_pool, 'chosen', track, _profile_id, cached_first)
                                     return
                         except Exception as e:
                             logger.error(f"[Hybrid Fallback] {fallback_source} search failed: {e}")
@@ -830,6 +858,11 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
             if deps.try_version_mismatch_fallback(track.name, _fallback_artist, task_id, batch_id):
                 return  # fallback re-dispatched; batch completion handled by reprocess thread
 
+        _record_decision(
+            deps, task_id, decision_pool,
+            'download_failed' if any(d.accepted for _, d in decision_pool) else 'nothing_passed',
+            track, _profile_id, cached_first,
+        )
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'not_found'

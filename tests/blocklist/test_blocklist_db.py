@@ -127,6 +127,8 @@ def test_discovery_blacklist_migrated_into_blocklist(tmp_path):
     cur = conn.cursor()
     cur.execute("INSERT INTO discovery_artist_blacklist (artist_name, spotify_artist_id) "
                 "VALUES ('Nickelback', 'nb-sp')")
+    # a database from before the migration ran has no flag
+    cur.execute("DELETE FROM metadata WHERE key = 'discovery_blacklist_migrated_v1'")
     conn.commit()
     conn.close()
 
@@ -143,6 +145,12 @@ def test_discovery_blacklist_migrated_into_blocklist(tmp_path):
         spotify_track_data=_track("t5", "Photograph", "nb-sp", "Nickelback"),
         profile_id=1)
     assert ok is False
+
+    # it ran once: unblocking sticks across a restart instead of the old table
+    # putting the artist straight back
+    db3.remove_blocklist_entry(1, nb[0]["id"])
+    db4 = _reinit(path)
+    assert not [r for r in db4.get_blocklist(1) if r["name"] == "Nickelback"]
 
 
 # ── Phase 2a: shared guard with source fallback (download-queue path) ────────

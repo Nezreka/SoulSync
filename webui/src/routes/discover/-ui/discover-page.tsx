@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { WebLens } from '../-discover.artist-web';
@@ -31,6 +31,7 @@ import {
 import { CACHE_SECTIONS } from '../-discover.cache-sections';
 import { decadeClassicsName, decadeTrackToSpotify } from '../-discover.decade-shelf';
 import { normalizeTrack } from '../-discover.helpers';
+import { inboxArtistRef } from '../-discover.inbox';
 import { discoverLimiter } from '../-discover.limiter';
 import {
   lbStatusBase,
@@ -42,6 +43,7 @@ import {
 import { beginPlayIntent, playMixNow, playTrackNow, type PlayIntent } from '../-discover.playable';
 import { syncBubbleImage, toSyncTracks } from '../-discover.playlist-sync';
 import { profileKey, useProfileScope } from '../-discover.profile-scope';
+import { keepRecipe, recipeVerb, refreshRecipe, type RecipeMixCard } from '../-discover.recipes';
 import { recSource, recommendedVisible } from '../-discover.recommended';
 import {
   fetchStations,
@@ -85,11 +87,13 @@ import { ByltSections } from './bylt-sections';
 import { CacheShelf, GenreExplorerSection } from './cache-shelves';
 import { DeezerEditorialShelf } from './deezer-editorial-shelf';
 import { DiscoverHero } from './discover-hero';
+import { DiscoveryInbox } from './discovery-inbox';
 import { DownloadBar } from './download-bar';
 import { GenreDiveModal } from './genre-dive-modal';
 import { MixModal } from './mix-modal';
 import { MixShelf } from './mix-shelf';
 import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
+import { RecipeEditor } from './recipe-editor';
 import { RecommendedModal } from './recommended-modal';
 import { RecommendedShelf } from './recommended-shelf';
 import { YourAlbumsSourcesModal, YourArtistsSourcesModal } from './sources-modals';
@@ -305,6 +309,7 @@ function DiscoveryZone({ id, title, subtitle, tone, metric, children }: Discover
 export function DiscoverPage() {
   const page = useDiscoverPage();
   const mixes = useDiscoverMixes(page.aboveFoldSettled);
+  const queryClient = useQueryClient();
   const sync = usePlaylistSync((t) => toast(t.message, t.level));
   const bar = useDownloadBar();
   const albumOpen = useAlbumOpen((t) => toast(t.message, t.level));
@@ -332,6 +337,8 @@ export function DiscoverPage() {
     phase: 'loading' | 'error' | 'ready';
   } | null>(null);
   const [recModalOpen, setRecModalOpen] = useState(false);
+  // the recipe editor: a new mix, or the one being edited
+  const [recipeEditor, setRecipeEditor] = useState<{ editing: RecipeMixCard | null } | null>(null);
   const [addingAll, setAddingAll] = useState(false);
   const [expandedCaches, setExpandedCaches] = useState<Record<string, boolean>>({});
   const [explorerPromptOpen, setExplorerPromptOpen] = useState(false);
@@ -587,6 +594,31 @@ export function DiscoverPage() {
     (action: MixAction) => {
       const mix = modal.mix;
       if (!mix) return;
+      const recipe = recipeVerb(action.onclick);
+      if (recipe) {
+        const [rverb, recipeId] = recipe;
+        if (rverb === 'recipe-edit') {
+          modal.close();
+          setRecipeEditor({
+            editing: mixes.recipes.find((r) => r.recipe_id === recipeId) ?? null,
+          });
+        } else if (rverb === 'recipe-refresh') {
+          void refreshRecipe(recipeId)
+            .then(() => {
+              void queryClient.invalidateQueries({ queryKey: ['discover', 'recipes'] });
+              toast(`New tracks in ${mix.title}`, 'success');
+            })
+            .catch(() => toast("Couldn't renew the mix. Try again.", 'error'));
+        } else {
+          void keepRecipe(recipeId)
+            .then((res) => {
+              if (res.success === false) throw new Error(res.error);
+              toast(`Kept as a playlist: find it on the Sync page`, 'success');
+            })
+            .catch(() => toast("Couldn't keep this one. Try again.", 'error'));
+        }
+        return;
+      }
       const [verb, ...rest] = action.onclick.split(':');
       if (verb === 'play') {
         // resolve against the library and play what's owned RIGHT NOW; the
@@ -681,7 +713,7 @@ export function DiscoverPage() {
         // starts (1806) — a bubble at modal-open outlived a cancelled modal.
       }
     },
-    [modal, sync, bar, openTracksModal, playMixFromCard],
+    [modal, sync, bar, openTracksModal, playMixFromCard, mixes.recipes, queryClient],
   );
 
   const downloadSelection = useCallback(() => {
@@ -940,7 +972,9 @@ export function DiscoverPage() {
       if (id === 'listenbrainz') return true; // renders its own load/error states
       if (id === 'deezer-editorial') return true; // fetches and empties itself
       if (id === 'build-a-playlist') return true; // a control, like adv-wave
-      if (id === 'your-mixes-section') return mixes.mixes.length > 0;
+      // always: 'Build a mix' lives in its header, so it must be reachable
+      // before there is a single mix
+      if (id === 'your-mixes-section') return true;
       if (id === 'year-mixes-section') return mixes.decadeMixes.length > 0;
       if (id === 'discover-bylt-sections') return byltRows.length > 0;
       return page.hasContent(id);
@@ -982,6 +1016,15 @@ export function DiscoverPage() {
             mixes={mixes.mixes}
             loaded={true}
             gridId="your-mixes-grid"
+            actions={
+              <button
+                type="button"
+                className="discover-build-mix-btn"
+                onClick={() => setRecipeEditor({ editing: null })}
+              >
+                + Build a mix
+              </button>
+            }
             onOpenMix={modal.open}
             onPlayMix={playMixFromCard}
             playingKey={playingMixKey}
@@ -1471,6 +1514,13 @@ export function DiscoverPage() {
               onOpenRecommended={() => setRecModalOpen(true)}
             />
           </div>
+          <DiscoveryInbox
+            onOpenRelease={(album) => void albumOpen.openRecentAlbum(album)}
+            buildArtistPath={(item) => {
+              const ref = inboxArtistRef(item);
+              return ref ? detailPath(ref.id, ref.source, item.artist_name) : '';
+            }}
+          />
           <DiscoveryZone
             id="discover-zone-for-you"
             title="For You"
@@ -1576,6 +1626,18 @@ export function DiscoverPage() {
       )}
 
       <DownloadBar state={bar.state} onOpen={(id) => void bar.openBubble(id)} />
+
+      {recipeEditor && (
+        <RecipeEditor
+          editing={recipeEditor.editing}
+          onClose={() => setRecipeEditor(null)}
+          onSaved={(message) => {
+            setRecipeEditor(null);
+            toast(message, 'success');
+            void queryClient.invalidateQueries({ queryKey: ['discover', 'recipes'] });
+          }}
+        />
+      )}
 
       {stationPreview.station && (
         <StationModal

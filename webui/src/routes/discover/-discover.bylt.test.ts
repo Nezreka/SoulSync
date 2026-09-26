@@ -221,6 +221,12 @@ describe('action shapes', () => {
       'discover_bylt_deezer_222',
     );
     expect(byltShelfTitle(section())).toBe('Because you listen to Katy Perry');
+    // the server's explanation wins when the section carries one
+    expect(
+      byltShelfTitle(
+        section({ explanation: { kind: 'listened', seeds: [{ name: 'KATY PERRY' }] } }),
+      ),
+    ).toBe('Because you listen to KATY PERRY');
   });
 
   it('converts a whole shelf at once', () => {

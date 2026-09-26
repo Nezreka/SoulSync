@@ -14,6 +14,7 @@ owned material is labelled owned rather than presented as new to the library.
 """
 
 from typing import Any, Callable, Dict, List, Optional, Sequence
+from core.discovery.explain import explanation
 
 UNAVAILABLE_NO_ID = "missing-id"
 UNAVAILABLE_NOT_IN_POOL = "not-in-pool"
@@ -80,6 +81,9 @@ def section_payload(section: Dict[str, Any], *, owned_lookup=None,
         "artist_name": section.get("seed_name"),
         "artist_image": image_fix(seed_image) if (image_fix and seed_image) else seed_image,
         "reason": section.get("reason") or {},
+        # generations stored before the shape existed get the plain version
+        "explanation": section.get("explanation") or explanation(
+            "listened", [section.get("seed_name")] if section.get("seed_name") else []),
         "presentation": section.get("presentation") or "compact",
         "diagnostics": section.get("diagnostics") or {},
         "requested": len(rows),

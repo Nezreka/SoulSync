@@ -54,12 +54,29 @@ def _album_name(track_info: Dict[str, Any]) -> str:
     return (album or '').strip() if isinstance(album, str) else ''
 
 
-def build_track_detail(task: Dict[str, Any], history: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _decision_payload(decision: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The why-this-file block, in one shape whether it came from the live
+    task or the download_decisions table."""
+    if not isinstance(decision, dict) or not decision.get('outcome'):
+        return None
+    return {
+        'outcome': decision.get('outcome'),
+        'chosen': decision.get('chosen'),
+        'alternatives': list(decision.get('alternatives') or []),
+        'accepted_total': int(decision.get('accepted_total') or 0),
+        'rejected_total': int(decision.get('rejected_total') or 0),
+        'rejected_counts': dict(decision.get('rejected_counts') or {}),
+    }
+
+
+def build_track_detail(task: Dict[str, Any], history: Optional[Dict[str, Any]] = None,
+                       decision: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Merge a download task (+ optional library_history row) into one detail dict.
 
     The task supplies live status/source/reason/quarantine id; the history row
     (when found) supplies the durable provenance — final file path, quality,
-    AcoustID verdict, source, and the expected-vs-downloaded comparison.
+    AcoustID verdict, source, and the expected-vs-downloaded comparison. The
+    decision (when recorded) says why that file won, or why nothing did.
     """
     ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
     status = task.get('status', '') or ''
@@ -81,6 +98,7 @@ def build_track_detail(task: Dict[str, Any], history: Optional[Dict[str, Any]] =
         'thumb_url': '',
         'expected': {},
         'downloaded': {},
+        'decision': _decision_payload(decision),
     }
 
     if history:

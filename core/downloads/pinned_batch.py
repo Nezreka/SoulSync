@@ -104,13 +104,15 @@ def create_pinned_batch(
     is_album: bool = False,
     album_context: Optional[Dict[str, Any]] = None,
     artist_context: Optional[Dict[str, Any]] = None,
+    source_page: str = 'Search',
+    playlist_prefix: str = 'basic_search',
 ) -> tuple[str, List[str]]:
     """Write the batch and its tasks. one short lock, no I/O inside it.
     returns (batch_id, task_ids) in file order."""
     batch_id = str(uuid.uuid4())
     task_ids = [str(uuid.uuid4()) for _ in files]
     now = time.time()
-    playlist_id = f'basic_search_{batch_id[:8]}'
+    playlist_id = f'{playlist_prefix}_{batch_id[:8]}'
     with tasks_lock:
         download_batches[batch_id] = {
             'queue': list(task_ids),
@@ -122,7 +124,7 @@ def create_pinned_batch(
             'max_concurrent': max(len(task_ids), 1),
             'playlist_id': playlist_id,
             'playlist_name': name,
-            'source_page': 'Search',
+            'source_page': source_page,
             'phase': 'downloading',
             'total_tracks': len(task_ids),
             'completed_count': 0,
@@ -188,7 +190,7 @@ def _track_result(candidate: Dict[str, Any]):
     return tr
 
 
-def _track_object(track_info: Dict[str, Any]):
+def track_object(track_info: Dict[str, Any]):
     """the attribute-style track attempt_download_with_candidates reads"""
     from core.itunes_client import Track as MetaTrack
     artists = []
@@ -225,7 +227,7 @@ def _run_pinned_task(task_id: str, batch_id: str, deps: PinnedBatchDeps) -> None
         track_info = task.get('track_info') or {}
     try:
         started = deps.attempt_download_with_candidates(
-            task_id, [_track_result(candidate)], _track_object(track_info), batch_id)
+            task_id, [_track_result(candidate)], track_object(track_info), batch_id)
     except Exception as exc:  # noqa: BLE001 - one bad file must not wedge the batch
         logger.error("[Pinned] task %s failed to start: %s", task_id, exc, exc_info=True)
         started = False
