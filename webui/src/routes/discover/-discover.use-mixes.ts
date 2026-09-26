@@ -19,6 +19,7 @@ import {
 import { decadeMix, type AvailableDecade } from './-discover.decade-shelf';
 import { type Explanation, explanationLine } from './-discover.explanation';
 import { discoverLimiter } from './-discover.limiter';
+import { fetchRecipes, recipeMix, type RecipeMixCard } from './-discover.recipes';
 import { seasonalHasPlaylist, seasonalMixTitles } from './-discover.seasonal';
 
 /**
@@ -75,6 +76,8 @@ export interface DiscoverMixesController {
   decadeMixes: DiscoverMix[];
   /** Every mix the modal can resolve, keyed — the registry itself (4906). */
   registry: Record<string, DiscoverMix>;
+  /** Your mix recipes, for the editor (their cards are in `mixes`). */
+  recipes: RecipeMixCard[];
 }
 
 /**
@@ -115,6 +118,8 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
   // Slow external — enabled from mount, awaited by nothing.
   const releaseRadar = useQuery(mixQuery('release-radar', fetchReleaseRadar));
   const daily = useQuery(mixQuery('daily-mixes', fetchDailyMixes));
+  // your recipes: server-built, renewed on their own schedule
+  const recipeQuery = useQuery(mixQuery('recipes', fetchRecipes));
   const weekly = useQuery(mixQuery('discovery-weekly', fetchDiscoveryWeekly));
 
   const seasonalOutcome = seasonal.data as SectionOutcome<SeasonData> | undefined;
@@ -218,6 +223,11 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
     }
   }
 
+  // Your recipe mixes, after the daily ones. A new recipe shows even before
+  // it has tracks, so it can be edited.
+  const recipes = (recipeQuery.data as { mixes?: RecipeMixCard[] } | undefined)?.mixes ?? [];
+  for (const card of recipes) mixes.push(recipeMix(card));
+
   const decadesOutcome = decades.data as SectionOutcome<Record<string, unknown>> | undefined;
   const availableDecades =
     decadesOutcome?.kind === 'ok' && Array.isArray(decadesOutcome.data.decades)
@@ -228,5 +238,5 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
   const registry: Record<string, DiscoverMix> = {};
   for (const m of [...mixes, ...decadeMixes]) registry[m.key] = m;
 
-  return { mixes, decadeMixes, registry };
+  return { mixes, decadeMixes, registry, recipes };
 }

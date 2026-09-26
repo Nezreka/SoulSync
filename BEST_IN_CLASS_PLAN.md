@@ -98,7 +98,27 @@ attempt was reverted, so nothing below is inherited from it.)
 - [ ] phase 6 follow-ups: fuzzy ownership for "added" (the recent-releases
   shelf's matcher), and whether the inbox should also hold similar-artist
   releases or stay watchlist-only.
-- [ ] phase 7
+- [x] phase 7: renewable mixes. `mix_recipes` + `core/personalized/recipes.py`.
+  a recipe: seed artists and/or genres, a year range, the share from the
+  library / discovery / trending, length (10-100), renews daily / weekly /
+  only when asked. rules: one song per artist across the whole mix; a short
+  source hands its share to the others (a source set to 0% gives nothing);
+  a reserve (a quarter of the length, new artists only); a track the
+  wishlist has retried twice is swapped in place for a reserve track.
+  "trending" is the discovery pool's most popular tracks in the genres (the
+  seeds' circle when there are none): there's no per-genre chart source.
+  blocks, not-now and less-like-this keep artists out, and a change to them
+  renews the mix. storage follows the discover daily mixes (a render-ready
+  payload per recipe), not the personalized-playlist framework, whose tracks
+  need provider ids that library tracks often lack. ui: recipe mixes sit in
+  Made For You beside the daily mixes with New tracks / Keep this one / Edit
+  mix; "+ Build a mix" in the shelf header opens the editor. keep this one
+  mirrors the generation as a normal playlist (source `soulsync_mix`).
+- [ ] phase 7 follow-ups: a recipe renews when it's read, so a mix synced to a
+  media server only renews when Discover or a refresh-first pipeline reads
+  it; the Sync page shows a kept mix's raw source name (its icon/label
+  tables are pinned to the vanilla); the discover page's recipe actions
+  (refresh / keep / edit) have no page-level test, the page has no harness.
 - [ ] phase 0 checklists
 
 open question 4 (keep decisions forever?): answered. pruned with download

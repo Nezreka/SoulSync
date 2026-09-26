@@ -2255,6 +2255,132 @@ def refresh_discovery_inbox():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ── renewable mixes: recipes (plan 7) ──
+
+def _recipe_card(row, payload):
+    """One recipe as a mix card, in the daily-mix shape the page renders."""
+    from core.discovery.explain import explanation as _expl
+    recipe = row.get('recipe') or {}
+    payload = payload or {}
+    return {
+        "key": f"recipe_{row['id']}",
+        "recipe_id": row['id'],
+        "name": recipe.get('name') or 'Mix',
+        "recipe": recipe,
+        "explanation": payload.get('explanation') or _expl(
+            'listened' if recipe.get('seeds') else 'genre',
+            recipe.get('seeds') or recipe.get('genres') or []),
+        "tracks": payload.get('tracks') or [],
+        "counts": payload.get('counts') or {},
+        "replaced": payload.get('replaced') or 0,
+        "generated_at": payload.get('generated_at'),
+    }
+
+
+@bp.route('/api/discover/recipes', methods=['GET'])
+@_hide_blocked({'mixes[].tracks': WORKS})
+def list_mix_recipes():
+    """Every recipe with its current mix, renewed if its schedule says so."""
+    try:
+        from core.personalized import recipes as _recipes
+        database, pid = get_database(), get_current_profile_id()
+        mixes = []
+        for row in _recipes.list_recipes(database, pid):
+            try:
+                payload = _recipes.get_or_build(database, pid, row['id'])
+            except Exception as exc:  # noqa: BLE001 - one bad recipe never hides the rest
+                logger.warning("recipe %s failed to build: %s", row['id'], exc)
+                payload = None
+            mixes.append(_recipe_card(row, payload))
+        return jsonify({"success": True, "mixes": mixes})
+    except Exception as e:
+        logger.error(f"Error listing mix recipes: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _recipe_from_request():
+    from core.personalized.recipes import Recipe
+    return Recipe.from_dict(request.get_json() or {})
+
+
+@bp.route('/api/discover/recipes', methods=['POST'])
+def create_mix_recipe():
+    try:
+        from core.personalized import recipes as _recipes
+        try:
+            recipe = _recipe_from_request()
+        except ValueError as ve:
+            return jsonify({"success": False, "error": str(ve)}), 400
+        database, pid = get_database(), get_current_profile_id()
+        rid = _recipes.save_recipe(database, pid, recipe)
+        row = _recipes.get_recipe(database, pid, rid)
+        return jsonify({"success": True, "mix": _recipe_card(row, _recipes.get_or_build(database, pid, rid))})
+    except Exception as e:
+        logger.error(f"Error creating mix recipe: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/recipes/<int:recipe_id>', methods=['PUT'])
+def update_mix_recipe(recipe_id):
+    try:
+        from core.personalized import recipes as _recipes
+        try:
+            recipe = _recipe_from_request()
+        except ValueError as ve:
+            return jsonify({"success": False, "error": str(ve)}), 400
+        database, pid = get_database(), get_current_profile_id()
+        if not _recipes.save_recipe(database, pid, recipe, recipe_id):
+            return jsonify({"success": False, "error": "no such recipe"}), 404
+        row = _recipes.get_recipe(database, pid, recipe_id)
+        return jsonify({"success": True,
+                        "mix": _recipe_card(row, _recipes.get_or_build(database, pid, recipe_id))})
+    except Exception as e:
+        logger.error(f"Error updating mix recipe: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/recipes/<int:recipe_id>', methods=['DELETE'])
+def delete_mix_recipe(recipe_id):
+    try:
+        from core.personalized import recipes as _recipes
+        ok = _recipes.delete_recipe(get_database(), get_current_profile_id(), recipe_id)
+        return jsonify({"success": ok}), (200 if ok else 404)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/recipes/<int:recipe_id>/refresh', methods=['POST'])
+@_hide_blocked({'mix.tracks': WORKS})
+def refresh_mix_recipe(recipe_id):
+    """A new generation now, whatever the schedule says."""
+    try:
+        from core.personalized import recipes as _recipes
+        database, pid = get_database(), get_current_profile_id()
+        payload = _recipes.get_or_build(database, pid, recipe_id, force=True)
+        if payload is None:
+            return jsonify({"success": False, "error": "no such recipe"}), 404
+        return jsonify({"success": True,
+                        "mix": _recipe_card(_recipes.get_recipe(database, pid, recipe_id), payload)})
+    except Exception as e:
+        logger.error(f"Error refreshing mix recipe: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/recipes/<int:recipe_id>/keep', methods=['POST'])
+def keep_mix_recipe(recipe_id):
+    """Keep this one: the current generation becomes a normal playlist."""
+    try:
+        from core.personalized import recipes as _recipes
+        name = str((request.get_json(silent=True) or {}).get('name') or '')
+        playlist_id = _recipes.keep(get_database(), get_current_profile_id(), recipe_id, name)
+        if not playlist_id:
+            return jsonify({"success": False, "error": "nothing to keep yet"}), 400
+        return jsonify({"success": True, "playlist_id": playlist_id})
+    except Exception as e:
+        logger.error(f"Error keeping mix recipe: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/blocklist/search', methods=['GET'])
 def search_blocklist_candidates():
     """Search the active metadata source for an artist/album/track to block.

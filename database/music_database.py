@@ -3572,6 +3572,21 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_inbox_state "
                            "ON discovery_inbox (profile_id, state)")
 
+            # Renewable mixes: a recipe (seeds / genres, years, source mix,
+            # length, schedule) per row; each generation is stored as a
+            # curated payload keyed mix_recipe_<id>. core/personalized/recipes.py.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mix_recipes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    recipe_json TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mix_recipes_profile "
+                           "ON mix_recipes (profile_id)")
+
             # Liked artists pool — aggregated followed/liked artists from connected services
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS liked_artists_pool (
