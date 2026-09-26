@@ -4,18 +4,27 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type { LibraryArtist, LibraryArtistsResponse } from '../-library.types';
+import type { LibraryAlbum, LibraryArtist, LibraryArtistsResponse } from '../-library.types';
 
 import {
+  libraryAlbumsQueryOptions,
   libraryArtistsQueryOptions,
   libraryUnmatchedQueryOptions,
+  loadAlbumTracks,
   setArtistWatchlisted,
 } from '../-library.api';
-import { readArtistsResponse, watchlistArtistId } from '../-library.helpers';
+import {
+  albumQueueTrack,
+  readAlbumsResponse,
+  readArtistsResponse,
+  watchlistArtistId,
+} from '../-library.helpers';
 import { useLibraryChanged } from '../-library.live';
+import { filterJiosaavnEntries } from '../../artist-detail/-artist-detail.enrichment';
 import { loadTopTracks, trackArtistLabel } from '../../artist-detail/-artist-detail.top-tracks';
 import { Route } from '../route';
 import { ExportArtistsModal } from './export-modal';
+import { LibraryAlbumCard } from './library-album-card';
 import { LibraryArtistCard } from './library-artist-card';
 import { WatchAllModal } from './watch-all-modal';
 
@@ -34,6 +43,25 @@ const SOURCES = [
   'tidal',
   'qobuz',
 ] as const;
+/**
+ * The album view's own list. Genius is artist-only (no album column), while
+ * JioSaavn and Bandcamp exist only at album level — the same asymmetry the
+ * badges have.
+ */
+const ALBUM_SOURCES = [
+  'spotify',
+  'musicbrainz',
+  'deezer',
+  'discogs',
+  'audiodb',
+  'itunes',
+  'lastfm',
+  'tidal',
+  'qobuz',
+  'jiosaavn',
+  'bandcamp',
+] as const;
+
 const SOURCE_LABELS: Record<string, string> = {
   spotify: 'Spotify',
   musicbrainz: 'MusicBrainz',
@@ -45,6 +73,8 @@ const SOURCE_LABELS: Record<string, string> = {
   genius: 'Genius',
   tidal: 'Tidal',
   qobuz: 'Qobuz',
+  jiosaavn: 'JioSaavn',
+  bandcamp: 'Bandcamp',
 };
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -123,23 +153,47 @@ export function LibraryPage() {
     return () => clearTimeout(timer);
   }, [draft, navigate]);
 
-  const query = useQuery(libraryArtistsQueryOptions(profileId, search));
-  const { artists, pagination } = useMemo(() => {
+  // Both are declared because hooks cannot be called conditionally; only the
+  // one the current view needs is enabled, so only it fetches.
+  const albumView = search.view === 'albums';
+  const artistsQuery = useQuery({
+    ...libraryArtistsQueryOptions(profileId, search),
+    enabled: !albumView,
+  });
+  const albumsQuery = useQuery({
+    ...libraryAlbumsQueryOptions(profileId, search),
+    enabled: albumView,
+  });
+  const query = albumView ? albumsQuery : artistsQuery;
+
+  const { artists, albums, pagination } = useMemo(() => {
     try {
-      return readArtistsResponse(query.data);
+      return albumView
+        ? { artists: [], ...readAlbumsResponse(albumsQuery.data) }
+        : { albums: [], ...readArtistsResponse(artistsQuery.data) };
     } catch {
       // The thrown reason surfaces through query.error below; the grid just
       // renders empty rather than taking the page down.
       return {
         artists: [],
+        albums: [],
         pagination: { page: 1, totalPages: 0, totalCount: 0, hasPrev: false, hasNext: false },
       };
     }
-  }, [query.data]);
+  }, [albumView, albumsQuery.data, artistsQuery.data]);
+
+  // Read per render, not memoized: the JioSaavn gate lives on the shell and
+  // the badges read it the same way.
+  const sources: readonly string[] = albumView
+    ? filterJiosaavnEntries(
+        ALBUM_SOURCES.map((id) => ({ id })),
+        'id',
+      ).map((entry) => entry.id)
+    : SOURCES;
 
   const failed = query.isError || query.data?.success === false;
   const loading = query.isPending;
-  const isEmpty = !loading && artists.length === 0;
+  const isEmpty = !loading && (albumView ? albums.length === 0 : artists.length === 0);
 
   // The vanilla catch toasted a FIXED string on every failed load — not the
   // server's reason, which it only used as the thrown message. Keyed on the
@@ -148,8 +202,8 @@ export function LibraryPage() {
   const failedAt = failed ? query.errorUpdatedAt || query.dataUpdatedAt : 0;
   useEffect(() => {
     if (!failedAt) return;
-    window.showToast?.('Failed to load artists', 'error');
-  }, [failedAt]);
+    window.showToast?.(albumView ? 'Failed to load albums' : 'Failed to load artists', 'error');
+  }, [failedAt, albumView]);
 
   // Add-to-watchlist straight from a card badge.
   //
@@ -236,6 +290,38 @@ export function LibraryPage() {
     }
   };
 
+  /**
+   * Queue the tracks of an album you own.
+   *
+   * Deliberately NOT the artist card's path: that resolves a provider's ranked
+   * top tracks, where a miss is something to acquire. Here every queued row
+   * has a file, so the album plays rather than opening a download.
+   */
+  const playAlbum = async (album: LibraryAlbum) => {
+    const key = String(album.id);
+    if (playing.has(key)) return;
+    setPlaying((current) => new Set(current).add(key));
+    try {
+      const tracks = await loadAlbumTracks(album.id);
+      if (!tracks.length) {
+        window.showToast?.(`No playable tracks in ${album.title}`, 'info');
+        return;
+      }
+      await window.playTrackList?.(
+        tracks.map((track) => albumQueueTrack(track, album)),
+        album.title,
+      );
+    } catch {
+      window.showToast?.(`Could not play ${album.title}`, 'error');
+    } finally {
+      setPlaying((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
   // TRAP 0 — showLibraryDownloadsSection (shared-helpers.js) inserts a
   // #library-downloads-section node as a SIBLING before #library-artists-grid,
   // and fires on download events, not just page load. It is bound to
@@ -273,7 +359,7 @@ export function LibraryPage() {
             <span className="stat-number" id="library-artist-count">
               {pagination.totalCount}
             </span>
-            <span className="stat-label">Artists</span>
+            <span className="stat-label">{albumView ? 'Albums' : 'Artists'}</span>
           </span>
         </div>
         <button
@@ -338,34 +424,61 @@ export function LibraryPage() {
             ) : null}
           </div>
 
-          <div
-            className="watchlist-filter"
-            id="watchlist-filter"
-            role="group"
-            aria-label="Watchlist"
-          >
-            {(['all', 'watched', 'unwatched'] as const).map((f) => (
+          {/* Wears the watchlist filter's chip classes — it is the same
+              segmented control, in the same row. */}
+          <div className="watchlist-filter" role="group" aria-label="Library view">
+            {(['artists', 'albums'] as const).map((v) => (
               <button
-                key={f}
+                key={v}
                 type="button"
-                className={`watchlist-filter-btn${search.watchlist === f ? ' active' : ''}`}
-                data-filter={f}
-                onClick={() => setSearch({ watchlist: f })}
+                className={`watchlist-filter-btn${search.view === v ? ' active' : ''}`}
+                onClick={() => setSearch({ view: v })}
               >
-                {f === 'all' ? 'All' : f === 'watched' ? 'Watched' : 'Unwatched'}
+                {v === 'artists' ? 'Artists' : 'Albums'}
               </button>
             ))}
           </div>
-          {/* Only offered while filtered to unwatched — it acts on that set. */}
-          <button
-            type="button"
-            className={`library-watchlist-all-btn${search.watchlist === 'unwatched' ? '' : ' hidden'}`}
-            onClick={() => setWatchingAll(true)}
-          >
-            <span className="watchlist-all-icon">👁️</span>
-            <span className="watchlist-all-text">Watch All Unwatched</span>
-          </button>
 
+          {/* The watchlist is a property of an ARTIST. In the album grid it
+              would filter on something no card shows, so it is gone rather
+              than present and inert. */}
+          {albumView ? null : (
+            <>
+              <div
+                className="watchlist-filter"
+                id="watchlist-filter"
+                role="group"
+                aria-label="Watchlist"
+              >
+                {(['all', 'watched', 'unwatched'] as const).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    className={`watchlist-filter-btn${search.watchlist === f ? ' active' : ''}`}
+                    data-filter={f}
+                    onClick={() => setSearch({ watchlist: f })}
+                  >
+                    {f === 'all' ? 'All' : f === 'watched' ? 'Watched' : 'Unwatched'}
+                  </button>
+                ))}
+              </div>
+              {/* Only offered while filtered to unwatched — it acts on that set. */}
+              <button
+                type="button"
+                className={`library-watchlist-all-btn${search.watchlist === 'unwatched' ? '' : ' hidden'}`}
+                onClick={() => setWatchingAll(true)}
+              >
+                <span className="watchlist-all-icon">👁️</span>
+                <span className="watchlist-all-text">Watch All Unwatched</span>
+              </button>
+            </>
+          )}
+
+          {/* Both views have one, over different columns: an album's ids are
+              its own, so JioSaavn and Bandcamp are offered here and Genius,
+              which is artist-only, is not. The `source` value is shared, and
+              a key the other side has no column for is ignored rather than
+              emptying the grid. */}
           <div className="library-source-filter">
             <select
               className="library-source-filter-select"
@@ -376,14 +489,14 @@ export function LibraryPage() {
               <option value="">All Sources</option>
               {/* The `!` prefix means "unmatched to", and the backend parses it. */}
               <optgroup label="Unmatched to">
-                {SOURCES.map((s) => (
+                {sources.map((s) => (
                   <option key={`!${s}`} value={`!${s}`}>
                     No {SOURCE_LABELS[s]}
                   </option>
                 ))}
               </optgroup>
               <optgroup label="Matched to">
-                {SOURCES.map((s) => (
+                {sources.map((s) => (
                   <option key={s} value={s}>
                     Has {SOURCE_LABELS[s]}
                   </option>
@@ -423,23 +536,43 @@ export function LibraryPage() {
             put it: after the loading row, above the cards. */}
         <div ref={downloadsHost} data-library-downloads-host="" />
 
-        <div className="library-artists-grid" id="library-artists-grid">
-          {artists.map((artist, i) => (
-            <LibraryArtistCard
-              key={artist.id}
-              artist={artist}
-              index={i}
-              musicSource={window.currentMusicSourceName}
-              href={`/artist-detail/library/${artist.id}`}
-              onToggleWatch={() => watchArtist.mutate(artist)}
-              watchPending={watching.has(String(artist.id))}
-              onPlay={() => void playArtistTopTracks(artist)}
-              playPending={playing.has(String(artist.id))}
-            />
-          ))}
-        </div>
+        {albumView ? (
+          // The artists grid's own class: the two views are meant to look the
+          // same apart from what is on the tile.
+          <div className="library-artists-grid" id="library-albums-grid">
+            {albums.map((album, i) => (
+              <LibraryAlbumCard
+                key={album.id}
+                album={album}
+                index={i}
+                // `album` is what the artist page opens and scrolls to.
+                href={`/artist-detail/library/${album.artist_id}?album=${album.id}`}
+                onPlay={() => void playAlbum(album)}
+                playPending={playing.has(String(album.id))}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="library-artists-grid" id="library-artists-grid">
+            {artists.map((artist, i) => (
+              <LibraryArtistCard
+                key={artist.id}
+                artist={artist}
+                index={i}
+                musicSource={window.currentMusicSourceName}
+                href={`/artist-detail/library/${artist.id}`}
+                onToggleWatch={() => watchArtist.mutate(artist)}
+                watchPending={watching.has(String(artist.id))}
+                onPlay={() => void playArtistTopTracks(artist)}
+                playPending={playing.has(String(artist.id))}
+              />
+            ))}
+          </div>
+        )}
 
-        {isEmpty ? <LibraryEmpty query={search.q} failed={failed} /> : null}
+        {isEmpty ? (
+          <LibraryEmpty query={search.q} failed={failed} noun={albumView ? 'albums' : 'artists'} />
+        ) : null}
 
         {pagination.totalPages > 1 ? (
           <div className="library-pagination" id="library-pagination">
@@ -484,7 +617,15 @@ export function LibraryPage() {
  * looked at the search box. "X isn't in your library" is a lie when the
  * library was never successfully read, so a failure keeps the generic copy.
  */
-function LibraryEmpty({ query, failed }: { query: string; failed: boolean }) {
+function LibraryEmpty({
+  query,
+  failed,
+  noun,
+}: {
+  query: string;
+  failed: boolean;
+  noun: 'artists' | 'albums';
+}) {
   const q = query.trim();
   const searching = q.length > 0 && !failed;
 
@@ -492,7 +633,7 @@ function LibraryEmpty({ query, failed }: { query: string; failed: boolean }) {
     <div className="library-empty">
       <div className="empty-icon">{searching ? '🔎' : '🎵'}</div>
       <div className="empty-title">
-        {searching ? `"${q}" isn't in your library` : 'No artists found'}
+        {searching ? `"${q}" isn't in your library` : `No ${noun} found`}
       </div>
       <div className="empty-subtitle">
         {searching

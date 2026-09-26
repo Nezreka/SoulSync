@@ -20,6 +20,9 @@ export const artistDetailSearchSchema = z.object({
     .preprocess((v) => (v == null ? '' : String(v)), z.string())
     .optional()
     .default(''),
+  album: z
+    .preprocess((v) => (v == null || v === '' ? undefined : String(v)), z.string().optional())
+    .optional(),
 });
 
 export type ArtistDetailSearch = z.infer<typeof artistDetailSearchSchema>;

@@ -18502,6 +18502,158 @@ class MusicDatabase:
                 }
             }
 
+    def get_library_albums(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 75, profile_id: int = 1, source_filter: str = "") -> Dict[str, Any]:
+        """Albums for the library page's album view, with search, source filter
+        and pagination.
+
+        The mirror of get_library_artists: same active-server and owner-profile
+        scoping, same alphabet semantics, same pagination shape. The watchlist
+        filter is NOT accepted — it is a property of an ARTIST, and the page
+        hides it in this view rather than applying it sideways.
+
+        The track count is counted off the tracks table rather than read from
+        albums.track_count: the media-server import leaves that column NULL on
+        essentially every row, so reading it would put "0 tracks" on the card.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                where_conditions = []
+                params = []
+
+                if search_query:
+                    where_conditions.append("LOWER(al.title) LIKE LOWER(?)")
+                    params.append(f"%{search_query}%")
+
+                if letter and letter != "all":
+                    if letter == "#":
+                        where_conditions.append("SUBSTR(UPPER(al.title), 1, 1) NOT GLOB '[A-Z]'")
+                    else:
+                        where_conditions.append("UPPER(SUBSTR(al.title, 1, 1)) = UPPER(?)")
+                        params.append(letter)
+
+                # An album's provider ids live on its OWN columns, which are not
+                # the artist's: musicbrainz is a release id here, spotify and
+                # itunes are album ids, and jiosaavn and bandcamp exist only at
+                # album level. genius is artist-only and so has no entry — a
+                # filter carried over from the artists view is ignored, not
+                # applied as "no album has this", which would empty the grid.
+                if source_filter:
+                    _source_columns = {
+                        'spotify': 'al.spotify_album_id',
+                        'musicbrainz': 'al.musicbrainz_release_id',
+                        'deezer': 'al.deezer_id',
+                        'discogs': 'al.discogs_id',
+                        'audiodb': 'al.audiodb_id',
+                        'itunes': 'al.itunes_album_id',
+                        'lastfm': 'al.lastfm_url',
+                        'tidal': 'al.tidal_id',
+                        'qobuz': 'al.qobuz_id',
+                        'jiosaavn': 'al.jiosaavn_id',
+                        'bandcamp': 'al.bandcamp_url',
+                    }
+                    col = _source_columns.get(source_filter.lstrip('!'))
+                    if col:
+                        if source_filter.startswith('!'):
+                            where_conditions.append(f"({col} IS NULL OR {col} = '')")
+                        else:
+                            where_conditions.append(f"({col} IS NOT NULL AND {col} != '')")
+
+                from core.settings import config_manager
+                where_conditions.append("al.server_source = ?")
+                params.append(config_manager.get_active_media_server())
+
+                scope_sql, scope_params = self._current_scope_sql('al.owner_profile_id')
+                where_conditions.append(scope_sql)
+                params.extend(scope_params)
+
+                where_clause = " AND ".join(where_conditions)
+
+                cursor.execute(f"SELECT COUNT(*) as total_count FROM albums al WHERE {where_clause}", params)
+                total_count = cursor.fetchone()['total_count']
+
+                offset = (page - 1) * limit
+                cursor.execute(f"""
+                    SELECT
+                        al.id,
+                        al.title,
+                        al.year,
+                        al.thumb_url,
+                        al.artist_id,
+                        a.name as artist_name,
+                        al.spotify_album_id,
+                        al.musicbrainz_release_id,
+                        al.deezer_id,
+                        al.audiodb_id,
+                        al.itunes_album_id,
+                        al.lastfm_url,
+                        al.tidal_id,
+                        al.qobuz_id,
+                        al.discogs_id,
+                        al.jiosaavn_id,
+                        al.bandcamp_url,
+                        al.amazon_id,
+                        al.soul_id,
+                        (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id) as track_count
+                    FROM albums al
+                    LEFT JOIN artists a ON a.id = al.artist_id
+                    WHERE {where_clause}
+                    ORDER BY al.title COLLATE NOCASE, a.name COLLATE NOCASE
+                    LIMIT ? OFFSET ?
+                """, params + [limit, offset])
+
+                albums = [{
+                    'id': row['id'],
+                    'title': row['title'],
+                    'year': row['year'],
+                    'thumb_url': row['thumb_url'],
+                    'artist_id': row['artist_id'],
+                    'artist_name': row['artist_name'] or '',
+                    'track_count': row['track_count'],
+                    # One badge per populated id, in the card's own order
+                    'spotify_album_id': row['spotify_album_id'],
+                    'musicbrainz_release_id': row['musicbrainz_release_id'],
+                    'deezer_id': row['deezer_id'],
+                    'audiodb_id': row['audiodb_id'],
+                    'itunes_album_id': row['itunes_album_id'],
+                    'lastfm_url': row['lastfm_url'],
+                    'tidal_id': row['tidal_id'],
+                    'qobuz_id': row['qobuz_id'],
+                    'discogs_id': row['discogs_id'],
+                    'jiosaavn_id': row['jiosaavn_id'],
+                    'bandcamp_url': row['bandcamp_url'],
+                    'amazon_id': row['amazon_id'],
+                    'soul_id': row['soul_id'],
+                } for row in cursor.fetchall()]
+
+                total_pages = (total_count + limit - 1) // limit
+                return {
+                    'albums': albums,
+                    'pagination': {
+                        'page': page,
+                        'limit': limit,
+                        'total_count': total_count,
+                        'total_pages': total_pages,
+                        'has_prev': page > 1,
+                        'has_next': page < total_pages
+                    }
+                }
+
+        except Exception as e:
+            logger.error(f"Error getting library albums: {e}")
+            return {
+                'albums': [],
+                'pagination': {
+                    'page': 1,
+                    'limit': limit,
+                    'total_count': 0,
+                    'total_pages': 0,
+                    'has_prev': False,
+                    'has_next': False
+                }
+            }
+
     def get_unmatched_import_summary(self) -> Dict[str, Any]:
         """How many library tracks are parked under 'Unknown Artist' (#1202).
 
