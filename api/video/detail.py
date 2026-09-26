@@ -340,6 +340,13 @@ def register_routes(bp):
             d = None
         if not d:
             return jsonify({"error": "not found"}), 404
+        # kids: the filmography keeps only what the profile's cap allows
+        from .kids import filter_tmdb_items, video_cap
+        cap = video_cap()
+        if cap is not None and d.get("credits"):
+            from . import get_video_db
+            d = dict(d)
+            d["credits"] = filter_tmdb_items(get_video_db(), d["credits"], cap)
         return jsonify(d)
 
     @bp.route("/detail/<kind>/<int:item_id>/extras", methods=["GET"])

@@ -145,6 +145,8 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             _disc_num = normalize_disc_number(metadata.get('disc_number'))
             disc_num_str = str(_disc_num)
             write_multi = cfg.get("metadata_enhancement.tags.write_multi_artist", False)
+            from core.metadata.multi_value import genre_values
+            genres_out = genre_values(metadata.get("genre"), bool(write_multi))
             artists_list = metadata.get("_artists_list", [])
             album_artists_list = metadata.get("_album_artists_list", [])
 
@@ -179,8 +181,8 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                     audio_file.tags.add(symbols.TALB(encoding=3, text=[metadata["album"]]))
                 if metadata.get("date"):
                     audio_file.tags.add(symbols.TDRC(encoding=3, text=[metadata["date"]]))
-                if metadata.get("genre"):
-                    audio_file.tags.add(symbols.TCON(encoding=3, text=[metadata["genre"]]))
+                if genres_out:
+                    audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
                 audio_file.tags.add(symbols.TRCK(encoding=3, text=[track_num_str]))
                 audio_file.tags.add(symbols.TPOS(encoding=3, text=[disc_num_str]))
             elif is_vorbis_like(audio_file, symbols):
@@ -198,8 +200,8 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                     audio_file["album"] = [metadata["album"]]
                 if metadata.get("date"):
                     audio_file["date"] = [metadata["date"]]
-                if metadata.get("genre"):
-                    audio_file["genre"] = [metadata["genre"]]
+                if genres_out:
+                    audio_file["genre"] = genres_out
                 # Vorbis has no ID3-style "N/M" convention — TRACKNUMBER is the
                 # bare number, the total goes in its own field. "1/1" here is what
                 # displayed literally as the track number (Discord, mrderekibmusic).
@@ -221,8 +223,8 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                     audio_file["\xa9alb"] = [metadata["album"]]
                 if metadata.get("date"):
                     audio_file["\xa9day"] = [metadata["date"]]
-                if metadata.get("genre"):
-                    audio_file["\xa9gen"] = [metadata["genre"]]
+                if genres_out:
+                    audio_file["\xa9gen"] = genres_out
                 audio_file["trkn"] = [format_track_number_tuple(
                     metadata.get("track_number"), metadata.get("total_tracks")
                 )]

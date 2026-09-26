@@ -938,6 +938,45 @@ select.pf-input { appearance: auto; }
 .pf-link-row .pf-btn { min-height: 44px; }
 
 .pf-btn--block { width: 100%; min-height: 46px; }
+.pf-btn--sm { flex-shrink: 0; min-height: 34px; padding: 0 12px; font-size: 13px; }
+
+/* ── turned off: kept, dimmed, nobody gets in ── */
+
+.pf-off-pill {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    vertical-align: 1px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--pf-text-2);
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.pf-card.is-off .pf-avatar,
+.pf-tile.is-off .pf-avatar--tile { opacity: 0.4; filter: grayscale(0.7); }
+.pf-card.is-off .pf-card-name { color: var(--pf-text-2); }
+.pf-tile.is-off .pf-tile-name { color: var(--pf-text-2); }
+
+.pf-picker-note {
+    min-height: 20px;
+    margin: 22px 0 0;
+    font-size: 14px;
+    color: var(--pf-text-2);
+}
+.pf-picker-note:empty { margin: 0; min-height: 0; }
+
+/* ── devices ── */
+
+.pf-row--device { padding-right: 12px; }
+.pf-device-here { margin-left: 8px; padding: 1px 8px; font-size: 11px; vertical-align: 1px; }
+.pf-device-ip { color: var(--pf-text-3); opacity: 0.8; }
+
+/* ── invite: the folded "more" ── */
+
+.pf-invite-more { margin-top: 14px; }
+.pf-invite-more > .pf-section-title:first-of-type { margin-top: 12px; }
 
 /* ── invite landing ── */
 

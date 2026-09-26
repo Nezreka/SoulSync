@@ -52,7 +52,7 @@ export function CardCoverage(value: CardCoverageValue) {
   const failed = value.failed ?? 0;
   const countLabel =
     value.folded && value.folded > 0
-      ? `${value.matched} (${value.synced ?? (value.matched - value.folded)} synced)`
+      ? `${value.matched} (${value.synced ?? value.matched - value.folded} synced)`
       : `${value.matched}`;
   const countTitle =
     value.folded && value.folded > 0

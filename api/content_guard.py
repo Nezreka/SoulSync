@@ -6,12 +6,18 @@ through each one this hooks the app once (register(app)):
   hard block (before the route runs, 403 restricted)
     POST /api/library/play        body file_path / track_id
     GET  /stream/library-audio    ?path= / ?track_id=
+    POST /api/stream/start, GET /stream/audio
+                                  playing a soulseek search result: there's
+                                  no explicit data on a peer's file, so a
+                                  hide_explicit profile can't play them at all
 
   filtered (after the route, only for a hide_explicit profile)
     POST /api/enhanced-search                 spotify_tracks / spotify_albums
     POST /api/enhanced-search/source/<src>    ndjson tracks / albums lines
     GET  /api/album/<id>/tracks               tracks (all of them on an explicit album)
     GET  /api/library/artist/<id>/enhanced    albums and their tracks
+    POST /api/enhanced-search/by-id, GET /api/artist-detail/<id>,
+    GET  /api/artist/<id>/discography         any card flagged explicit, any depth
 
   library v2 (this branch's library pages)
     GET  /api/library/v2/artists/<id>             albums / eps / singles
@@ -40,6 +46,7 @@ from utils.logging_config import get_logger
 logger = get_logger("content_guard")
 
 _get_database = None
+_stream_is_library = None
 
 _ALBUM_TRACKS = re.compile(r"^/api/album/[^/]+/tracks$")
 _ENHANCED_ARTIST = re.compile(r"^/api/library/artist/[^/]+/enhanced$")
@@ -48,6 +55,10 @@ _LIB2_ARTIST = re.compile(r"^/api/library/v2/artists/\d+$")
 _LIB2_ALBUM = re.compile(r"^/api/library/v2/albums/\d+$")
 _LIB2_PLAY_QUEUE = re.compile(r"^/api/library/v2/artists/\d+/play-queue$")
 _LIB2_TRACK = re.compile(r"^/api/library/v2/tracks/(\d+)$")
+# payloads with explicit-flagged cards nested at any depth: cleaned whole
+# (+ gap-fill: Library v2's discovery view draws its extra releases from it)
+_DEEP = re.compile(r"^(/api/enhanced-search/by-id|/api/artist-detail/[^/]+"
+                   r"|/api/artist/[^/]+/discography(/gap-fill)?)$")
 
 
 def _hide_explicit() -> bool:
@@ -72,8 +83,23 @@ def track_is_explicit(db, file_path=None, track_id=None, lib2_track_id=None) -> 
                                          lib2_track_id=lib2_track_id, track_id=track_id)
 
 
+_UNVOUCHED_STREAMS = {("/api/stream/start", "POST"), ("/stream/audio", "GET")}
+
+
 def _guard_play():
     path = request.path
+    if (path, request.method) in _UNVOUCHED_STREAMS:
+        # /stream/audio is also how the player plays a LIBRARY track: POST
+        # /api/library/play (checked below) readies it, then the audio element
+        # fetches it here. only a stream that isn't one of those is unvouched,
+        # or a kid couldn't play even the clean tracks
+        if path == "/stream/audio" and _stream_is_library is not None:
+            try:
+                if _stream_is_library():
+                    return None
+            except Exception:  # noqa: BLE001 - unreadable state: treat it as unvouched
+                logger.debug("content guard: stream state unreadable", exc_info=True)
+        return _restricted() if _hide_explicit() else None
     lib2_tid = None
     if path == "/api/library/play" and request.method == "POST":
         data = request.get_json(silent=True) or {}
@@ -160,6 +186,13 @@ def _filter_lib2(path, response):
         return response
     response.set_data(json.dumps(data))
     return response
+def _deep_clean(value):
+    """drop explicit cards from every list, however deep."""
+    if isinstance(value, list):
+        return [_deep_clean(x) for x in value if not (isinstance(x, dict) and is_explicit(x.get("explicit")))]
+    if isinstance(value, dict):
+        return {k: _deep_clean(v) for k, v in value.items()}
+    return value
 
 
 def _filter_response(response):
@@ -167,7 +200,8 @@ def _filter_response(response):
     lib2 = (_LIB2_ARTIST.match(path) or _LIB2_ALBUM.match(path)
             or _LIB2_PLAY_QUEUE.match(path) or _LIB2_TRACK.match(path))
     wanted = (path == "/api/enhanced-search" or _SEARCH_SOURCE.match(path)
-              or _ALBUM_TRACKS.match(path) or _ENHANCED_ARTIST.match(path) or lib2)
+              or _ALBUM_TRACKS.match(path) or _ENHANCED_ARTIST.match(path) or _DEEP.match(path)
+              or lib2)
     if not wanted or response.status_code != 200 or not _hide_explicit():
         return response
     if lib2:
@@ -180,6 +214,9 @@ def _filter_response(response):
 
     data = response.get_json(silent=True)
     if not isinstance(data, dict):
+        return response
+    if _DEEP.match(path):
+        response.set_data(json.dumps(_deep_clean(data)))
         return response
     if path == "/api/enhanced-search" or _SEARCH_SOURCE.match(path):
         for key in ("spotify_tracks", "spotify_albums", "tracks", "albums"):
@@ -201,9 +238,11 @@ def _filter_response(response):
     return response
 
 
-def register(app, get_database):
-    """hook the kids guard into the app. once, from web_server."""
-    global _get_database
+def register(app, get_database, stream_is_library=None):
+    """hook the kids guard into the app. once, from web_server.
+    ``stream_is_library``: is this listener's ready stream a library track."""
+    global _get_database, _stream_is_library
     _get_database = get_database
+    _stream_is_library = stream_is_library
     app.before_request(_guard_play)
     app.after_request(_filter_response)

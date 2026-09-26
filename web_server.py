@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.6"
+_SOULSYNC_BASE_VERSION = "3.4.7"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -784,10 +784,21 @@ def _set_profile_context():
     # "sign out everywhere": a session signed in before the profile's epoch
     # moved on has no profile any more
     if _session_pid is not None:
+        from core.security import devices as _devices
         from core.security.session_epoch import session_is_current
-        if not session_is_current(pid, session.get('profile_epoch', 0),
-                                  lambda p: (get_database().get_profile(p) or {}).get('session_epoch', 0)):
-            for _k in ('profile_id', 'profile_epoch', 'login_authenticated', 'launch_pin_verified'):
+        _device_id = session.get('device_id')
+        _signed_out = not session_is_current(
+            pid, session.get('profile_epoch', 0),
+            lambda p: (get_database().get_profile(p) or {}).get('session_epoch', 0))
+        # one device signed out from the profile's device list
+        # lazily: a session without a device id never touches the db here
+        if not _signed_out and not _devices.device_is_live(
+                _device_id, lambda d: get_database().get_profile_device(d)):
+            _signed_out = True
+        if not _signed_out:
+            _devices.touch(_device_id, lambda d: get_database().touch_profile_device(d))
+        if _signed_out:
+            for _k in ('profile_id', 'profile_epoch', 'device_id', 'login_authenticated', 'launch_pin_verified'):
                 session.pop(_k, None)
             g.profile_id = None
             g.is_admin = False
@@ -834,6 +845,18 @@ def _set_profile_context():
             g.can_download = bool((profile or {}).get('can_download', True))
             g.profile_name = (profile or {}).get('name') or ("Profile %s" % pid)
             g.is_admin = bool((profile or {}).get('is_admin', False))
+            # a turned-off profile is kept but can't be used, same as gone
+            if (profile or {}).get('disabled') and not g.is_admin:
+                for _k in ('profile_id', 'profile_epoch', 'device_id', 'login_authenticated'):
+                    session.pop(_k, None)
+                g.profile_id = None
+                g.is_admin = False
+                g.can_download = False
+                g.allowed_sides = 'none'
+                if no_profile_request_is_blocked(path, request.method):
+                    return jsonify({"error": "profile_required", "profile_required": True,
+                                    "disabled": True}), 401
+                return
             # get_profile resolves defaults (non-admin NULL → 'music'), so the
             # video blueprint can gate off g without a second music-DB read.
             g.allowed_sides = (profile or {}).get('allowed_sides') or 'music'
@@ -21909,7 +21932,13 @@ app.register_blueprint(_bp_mr())
 
 # kids profiles: explicit music can't play and drops out of search/tracklists
 from api.content_guard import register as _reg_content_guard
-_reg_content_guard(app, get_database=get_database)
+def _stream_is_library():
+    sess = _current_stream_state()
+    with sess.lock:
+        return bool(sess.get("is_library")) and sess.get("status") == "ready"
+
+
+_reg_content_guard(app, get_database=get_database, stream_is_library=_stream_is_library)
 
 # profile housekeeping: admin audit log, sign out everywhere, invites, avatars
 from api.profile_admin import configure as _cfg_pa, create_blueprint as _bp_pa

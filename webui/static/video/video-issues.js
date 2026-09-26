@@ -20,6 +20,7 @@
     var state = {
         status: 'open', category: 'all', entity: 'all', text: '', scope: 'everyone',
         categories: [], issues: [], total: 0, loadingMore: false, listSeq: 0,
+        picked: new Set(),   // admin bulk select: ticked issue ids
     };
 
     function $(sel) { return document.querySelector(sel); }
@@ -283,6 +284,7 @@
                 return;
             }
             var got = d.issues || [];
+            if (reset) state.picked = new Set();
             state.issues = reset ? got : state.issues.concat(got);
             state.total = typeof d.total === 'number' ? d.total : state.issues.length;
             // a short page is the end, whatever total says (it ignores the category)
@@ -307,6 +309,11 @@
         var rows = state.issues.filter(function (i) {
             return (state.scope === 'everyone' || i.profile_id === me) && matchesText(i, needle);
         });
+        state.visible = rows;
+        // a ticked row that's filtered away isn't ticked any more
+        var shown = {};
+        rows.forEach(function (i) { shown[i.id] = true; });
+        state.picked.forEach(function (id) { if (!shown[id]) state.picked.delete(id); });
         if (!rows.length) {
             var filtered = needle || state.scope === 'mine' || state.status !== 'open' ||
                 state.category !== 'all' || state.entity !== 'all';
@@ -318,9 +325,108 @@
                     : 'Nothing open. Reports land here when someone flags a problem on an item.') +
                 '</div></div>';
         } else {
-            host.innerHTML = rows.map(cardHTML).join('');
+            host.innerHTML = rows.map(rowHTML).join('');
         }
+        host.classList.toggle('vi-list--picking', state.picked.size > 0);
         renderMore();
+        renderBulk();
+    }
+
+    // an admin's row: a tick on the art corner, then the card
+    function rowHTML(i) {
+        if (!isAdmin()) return cardHTML(i);
+        var on = state.picked.has(i.id);
+        return '<div class="vi-row' + (on ? ' vi-row--on' : '') + '">' +
+            '<input type="checkbox" class="vi-pick" data-vi-pick="' + i.id + '"' + (on ? ' checked' : '') +
+            ' aria-label="Select ' + esc(i.title) + '">' + cardHTML(i) + '</div>';
+    }
+
+    // ── bulk bar: "3 selected · Resolve · Close · Priority ▾ · Delete" ──────
+    function renderBulk() {
+        var host = $('[data-vi-list]');
+        if (!host) return;
+        var bar = host.parentNode.querySelector('[data-vi-bulk]');
+        var n = state.picked.size;
+        if (!isAdmin() || !n) { if (bar) bar.remove(); return; }
+        var total = (state.visible || []).length;
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.className = 'vi-bulk';
+            bar.setAttribute('data-vi-bulk', '');
+            bar.setAttribute('role', 'toolbar');
+            bar.setAttribute('aria-label', 'Selected issues');
+            host.parentNode.insertBefore(bar, host.nextSibling);
+        }
+        bar.innerHTML = '<span class="vi-bulk-count" aria-live="polite">' + n + ' selected</span>' +
+            (n < total ? '<button type="button" class="vi-bulk-quiet" data-vi-bulk-all>Select all ' + total + '</button>' : '') +
+            '<span class="vbb-spacer"></span>' +
+            '<button type="button" class="vi-bulk-btn" data-vi-bulk-status="resolved">Resolve</button>' +
+            '<button type="button" class="vi-bulk-btn" data-vi-bulk-status="dismissed" title="Close without a change">Close</button>' +
+            '<span class="vi-menu"><button type="button" class="vi-bulk-btn" data-vi-bulk-prio aria-haspopup="menu" aria-expanded="false">Priority ▾</button>' +
+                '<span class="vi-menu-pop vi-bulk-pop" role="menu" aria-label="Priority" hidden>' +
+                ['low', 'normal', 'high'].map(function (p) {
+                    return '<button type="button" role="menuitem" class="vi-menu-item" data-vi-bulk-set="' + p + '">' +
+                        p.charAt(0).toUpperCase() + p.slice(1) + '</button>';
+                }).join('') + '</span></span>' +
+            '<button type="button" class="vi-bulk-btn vi-bulk-danger" data-vi-bulk-del>Delete</button>' +
+            '<button type="button" class="vi-bulk-x" data-vi-bulk-clear aria-label="Clear selection">×</button>';
+    }
+
+    function bulkWords(change, r) {
+        var verb = change.delete ? 'Deleted' : change.priority ? 'Set ' + change.priority + ' priority on'
+            : change.status === 'resolved' ? 'Resolved' : 'Closed';
+        var head = verb + ' ' + (r.done || 0);
+        return r.failed ? head + ', ' + r.failed + ' didn’t change' : head;
+    }
+
+    function runBulk(change) {
+        var ids = Array.from(state.picked);
+        if (!ids.length) return;
+        var bar = $('[data-vi-bulk]');
+        if (bar) bar.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+        var body = { ids: ids };
+        Object.keys(change).forEach(function (k) { body[k] = change[k]; });
+        jsend(API + '/bulk', body).then(function (r) {
+            if (r.ok && r.body.success) {
+                toast(bulkWords(change, r.body), r.body.failed ? 'warning' : 'success');
+                state.picked = new Set();
+                loadStats();
+                loadList(true);
+            } else {
+                toast((r.body && r.body.error) || 'Couldn’t change them', 'error');
+                renderBulk();
+            }
+        });
+    }
+
+    function onBulkClick(e) {
+        if (e.target.closest('[data-vi-bulk-all]')) {
+            (state.visible || []).forEach(function (i) { state.picked.add(i.id); });
+            renderList();
+            return true;
+        }
+        if (e.target.closest('[data-vi-bulk-clear]')) { state.picked = new Set(); renderList(); return true; }
+        var st = e.target.closest('[data-vi-bulk-status]');
+        if (st) { runBulk({ status: st.getAttribute('data-vi-bulk-status') }); return true; }
+        var trig = e.target.closest('[data-vi-bulk-prio]');
+        if (trig) {
+            var pop = trig.parentNode.querySelector('.vi-bulk-pop');
+            pop.hidden = !pop.hidden;
+            trig.setAttribute('aria-expanded', String(!pop.hidden));
+            if (!pop.hidden) { var first = pop.querySelector('button'); if (first) first.focus(); }
+            return true;
+        }
+        var set = e.target.closest('[data-vi-bulk-set]');
+        if (set) { runBulk({ priority: set.getAttribute('data-vi-bulk-set') }); return true; }
+        if (e.target.closest('[data-vi-bulk-del]')) {
+            var n = state.picked.size;
+            confirmDlg({ title: n === 1 ? 'Delete this issue?' : 'Delete ' + n + ' issues?',
+                message: 'The reports and their threads are removed for good.',
+                confirmText: 'Delete', destructive: true })
+                .then(function (yes) { if (yes) runBulk({ delete: true }); });
+            return true;
+        }
+        return false;
     }
 
     function renderMore() {
@@ -460,8 +566,10 @@
                     (i.priority || 'normal') === p]);
             });
             items.push(['delete', '', 'Delete issue']);
-        } else if (mine && i.status === 'open') {
-            items.push(['delete', '', 'Withdraw report']);
+        } else if (mine) {
+            // the reporter can fix their own words while it's still being looked at
+            if (isActive(i.status)) items.push(['edit', '', 'Edit']);
+            if (i.status === 'open') items.push(['delete', '', 'Withdraw report']);
         }
         if (!items.length) return '';
         return '<div class="vi-menu">' +
@@ -469,6 +577,9 @@
                 'aria-haspopup="menu" aria-expanded="false">⋯</button>' +
             '<div class="vi-menu-pop" role="menu" hidden>' + items.map(function (it) {
                 if (it[0] === 'head') return '<div class="vi-menu-head">' + esc(it[2]) + '</div>';
+                if (it[0] === 'edit') {
+                    return '<button type="button" role="menuitem" class="vi-menu-item" data-vi-edit>' + esc(it[2]) + '</button>';
+                }
                 if (it[0] === 'delete') {
                     return '<button type="button" role="menuitem" class="vi-menu-item vi-menu-item--danger" data-vi-del>' +
                         esc(it[2]) + '</button>';
@@ -596,6 +707,37 @@
             });
         }
 
+        // title and details become fields, with save and cancel
+        function startEdit() {
+            if (ov.querySelector('.vi-own-edit')) return;
+            var titleEl = ov.querySelector('.vi-th-title');
+            titleEl.hidden = true;
+            var form = document.createElement('form');
+            form.className = 'vi-own-edit';
+            form.setAttribute('aria-label', 'Edit your report');
+            form.innerHTML = '<label class="vi-own-label">Title<input class="vmg-input" data-vi-edit-title maxlength="200"></label>' +
+                '<label class="vi-own-label">Details<textarea class="vi-response" data-vi-edit-desc maxlength="2000" rows="4"></textarea></label>' +
+                '<div class="vi-own-actions"><button type="button" class="vi-quiet" data-vi-edit-cancel>Cancel</button>' +
+                '<button type="submit" class="vi-btn-primary" data-vi-edit-save>Save</button></div>';
+            var t = form.querySelector('[data-vi-edit-title]');
+            var d = form.querySelector('[data-vi-edit-desc]');
+            var save = form.querySelector('[data-vi-edit-save]');
+            t.value = i.title || '';
+            d.value = i.description || '';
+            t.addEventListener('input', function () { save.disabled = !t.value.trim(); });
+            form.addEventListener('submit', function (ev) {
+                ev.preventDefault();
+                if (!t.value.trim()) return;
+                save.disabled = true;
+                jsend(API + '/' + i.id, { title: t.value.trim(), description: d.value.trim() }, 'PUT').then(function (r) {
+                    if (r.ok && r.body.success) { toast('Saved', 'success'); reload(); }
+                    else { save.disabled = false; toast((r.body && r.body.error) || 'Couldn’t save it', 'error'); }
+                });
+            });
+            ov.querySelector('.vi-th-hero').insertAdjacentElement('afterend', form);
+            t.focus();
+        }
+
         function closeMenu() {
             var pop = ov.querySelector('.vi-menu-pop');
             var trig = ov.querySelector('[data-vi-menu]');
@@ -624,6 +766,13 @@
                 return;
             }
             if (e.target.closest('[data-vi-send]')) { sendReply(); return; }
+            if (e.target.closest('[data-vi-edit]')) { closeMenu(); startEdit(); return; }
+            if (e.target.closest('[data-vi-edit-cancel]')) {
+                var f = ov.querySelector('.vi-own-edit');
+                if (f) f.remove();
+                ov.querySelector('.vi-th-title').hidden = false;
+                return;
+            }
             if (e.target.closest('[data-vi-fix]')) {
                 ov.remove();
                 runFix(i, snap, function () { openDetail(i.id, { offerResolve: true }); });
@@ -769,7 +918,25 @@
         if (st) st.addEventListener('change', function () { state.status = st.value; loadList(true); });
         var ct = $('[data-vi-filter-category]');
         if (ct) ct.addEventListener('change', function () { state.category = ct.value; loadList(true); });
+        document.addEventListener('change', function (e) {
+            var pick = e.target.closest && e.target.closest('[data-vi-pick]');
+            if (!pick) return;
+            var id = parseInt(pick.getAttribute('data-vi-pick'), 10);
+            if (pick.checked) state.picked.add(id); else state.picked.delete(id);
+            renderList();
+            var again = document.querySelector('[data-vi-pick="' + id + '"]');
+            if (again) again.focus();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Escape') return;
+            var pop = document.querySelector('.vi-bulk-pop:not([hidden])');
+            if (pop) { pop.hidden = true; var t = document.querySelector('[data-vi-bulk-prio]'); if (t) { t.setAttribute('aria-expanded', 'false'); t.focus(); } }
+        });
         document.addEventListener('click', function (e) {
+            if (e.target.closest('[data-vi-bulk]')) { onBulkClick(e); return; }
+            var openPop = document.querySelector('.vi-bulk-pop:not([hidden])');
+            if (openPop) { openPop.hidden = true; }
+            if (e.target.closest('[data-vi-pick]')) return;
             var more = e.target.closest('[data-vi-more-btn]');
             if (more) { if (!state.loadingMore) loadList(false); return; }
             // the report entry on an expanded episode row (video-detail.js)

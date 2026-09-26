@@ -9,8 +9,10 @@ import type {
   IssueCountsResponse,
   IssueDetailResponse,
   IssueListResponse,
+  IssuePriority,
   IssueRecord,
   IssuesSearch,
+  IssueStatus,
   IssueUpdatePayload,
 } from './-issues.types';
 
@@ -133,6 +135,50 @@ export function createIssueToast(result: CreateIssueResult): {
     };
   }
   return { message: 'Issue reported', type: 'success' };
+}
+
+/** admin triage of many at once: one status, one priority, or delete them */
+export type IssueBulkChange =
+  | { status: IssueStatus }
+  | { priority: IssuePriority }
+  | { delete: true };
+
+export interface IssueBulkResult {
+  done: number;
+  failed: number;
+}
+
+export async function bulkUpdateIssues(
+  ids: number[],
+  change: IssueBulkChange,
+): Promise<IssueBulkResult> {
+  const payload = await readJson<{
+    success: boolean;
+    done?: number;
+    failed?: number;
+    error?: string;
+  }>(apiClient.post('issues/bulk', { json: { ids, ...change } }));
+  if (!payload.success) {
+    throw new Error(payload.error || 'Failed to update the issues');
+  }
+  return { done: payload.done ?? 0, failed: payload.failed ?? 0 };
+}
+
+/** the toast after a bulk change: "Resolved 3", and what didn't take */
+export function bulkResultToast(
+  change: IssueBulkChange,
+  result: IssueBulkResult,
+): { message: string; type: 'success' | 'warning' } {
+  let verb: string;
+  if ('delete' in change) verb = 'Deleted';
+  else if ('priority' in change) verb = `Set ${change.priority} priority on`;
+  else if (change.status === 'resolved') verb = 'Resolved';
+  else if (change.status === 'dismissed') verb = 'Closed';
+  else if (change.status === 'in_progress') verb = 'Started';
+  else verb = 'Reopened';
+  const head = `${verb} ${result.done}`;
+  if (!result.failed) return { message: head, type: 'success' };
+  return { message: `${head}, ${result.failed} didn't change`, type: 'warning' };
 }
 
 export async function deleteIssue(issueId: number): Promise<void> {

@@ -828,7 +828,8 @@ CREATE TABLE IF NOT EXISTS video_requests (
     resolved_by    INTEGER,
     resolved_at    TIMESTAMP,
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    available_at   TEXT                            -- when the approved title reached the library
+    available_at   TEXT,                           -- when the approved title reached the library
+    quality_profile_id INTEGER                     -- asked-for quality profile (NULL = default)
 );
 CREATE INDEX IF NOT EXISTS idx_vreq_profile ON video_requests(profile_id);
 CREATE INDEX IF NOT EXISTS idx_vreq_status  ON video_requests(status);

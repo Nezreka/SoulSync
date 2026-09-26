@@ -139,10 +139,7 @@ export function WishlistAudiobooks({
         const narrators = (item.narrators || []).join(' ').toLowerCase();
         const series = (item.series_title || '').toLowerCase();
         return (
-          title.includes(q) ||
-          authors.includes(q) ||
-          narrators.includes(q) ||
-          series.includes(q)
+          title.includes(q) || authors.includes(q) || narrators.includes(q) || series.includes(q)
         );
       });
     }
@@ -229,7 +226,8 @@ export function WishlistAudiobooks({
 
           <p className={styles.heroDesc}>
             Searches indexers on a schedule
-            {backoffHours > 0 && ` — each title waits ${backoffHours} hours between attempts to prevent rate-limiting`}
+            {backoffHours > 0 &&
+              ` — each title waits ${backoffHours} hours between attempts to prevent rate-limiting`}
             . Customise frequency anytime on the Automations page.
           </p>
 
@@ -244,7 +242,9 @@ export function WishlistAudiobooks({
                 <span className={styles.heroStatLabel}>Looking</span>
               </div>
               <div className={styles.heroStatItem}>
-                <span className={styles.heroStatVal}>{(counts.searching ?? 0) + (counts.grabbed ?? 0)}</span>
+                <span className={styles.heroStatVal}>
+                  {(counts.searching ?? 0) + (counts.grabbed ?? 0)}
+                </span>
                 <span className={styles.heroStatLabel}>In Flight</span>
               </div>
               <div className={styles.heroStatItem}>
@@ -372,11 +372,7 @@ export function WishlistAudiobooks({
               Browse audiobooks
             </Link>
           ) : query ? (
-            <button
-              type="button"
-              className={styles.browseLink}
-              onClick={() => setQuery('')}
-            >
+            <button type="button" className={styles.browseLink} onClick={() => setQuery('')}>
               Clear filter
             </button>
           ) : null}
@@ -399,7 +395,11 @@ export function WishlistAudiobooks({
               </div>
 
               <div className={styles.shelfInfo}>
-                <Link to="/audiobooks/$asin" params={{ asin: item.asin }} className={styles.shelfTitle}>
+                <Link
+                  to="/audiobooks/$asin"
+                  params={{ asin: item.asin }}
+                  className={styles.shelfTitle}
+                >
                   {item.title}
                 </Link>
                 <div className={styles.shelfMeta}>
@@ -437,7 +437,9 @@ export function WishlistAudiobooks({
                     {item.attempt_count === 0
                       ? 'Not looked for yet'
                       : `Looked ${item.attempt_count}\u00d7 \u00b7 last ${relativeTime(item.last_attempt_at)}`}
-                    {item.last_error && <span className={styles.trailError}> · {item.last_error}</span>}
+                    {item.last_error && (
+                      <span className={styles.trailError}> · {item.last_error}</span>
+                    )}
                   </span>
                 </div>
               </div>
@@ -597,7 +599,9 @@ export function WishlistAudiobooks({
                   {item.attempt_count === 0
                     ? 'Not looked for yet'
                     : `Looked ${item.attempt_count}\u00d7 \u00b7 last ${relativeTime(item.last_attempt_at)}`}
-                  {item.last_error && <span className={styles.trailError}> · {item.last_error}</span>}
+                  {item.last_error && (
+                    <span className={styles.trailError}> · {item.last_error}</span>
+                  )}
                 </span>
               </div>
 

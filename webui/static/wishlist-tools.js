@@ -1578,7 +1578,7 @@ async function addModalTracksToWishlist(playlistId) {
         if (wishlistBtn) {
             wishlistBtn.disabled = false;
             wishlistBtn.classList.remove('loading');
-            wishlistBtn.textContent = 'Add to Wishlist';
+            wishlistBtn.textContent = wishlistAddLabel();
         }
     }
 }

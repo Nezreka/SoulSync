@@ -59,7 +59,9 @@ def auth_login():
         database = get_database()
         profile = database.get_profile_by_name(username)
         # Same generic error + a recorded failure whether the name or password is
-        # wrong — don't leak which names exist.
+        # wrong — don't leak which names exist. a turned-off profile reads the same.
+        if profile and not profile.get('is_admin') and (database.get_profile(profile['id']) or {}).get('disabled'):
+            profile = None
         if not profile or not database.verify_profile_password(profile['id'], password):
             login_limiter.record_failure(_ip, username, _now)
             return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
@@ -69,6 +71,10 @@ def auth_login():
         session['profile_id'] = profile['id']
         # the epoch this sign-in counts under ("sign out everywhere" moves it)
         session['profile_epoch'] = (database.get_profile(profile['id']) or {}).get('session_epoch', 0)
+        from core.security.devices import start_device
+        start_device(session, database.add_profile_device, profile['id'],
+                     request.headers.get('User-Agent', ''), request.remote_addr or '')
+        session['device_owner'] = profile['id']
         # A fresh login also clears any stale launch-PIN flag.
         session.pop('launch_pin_verified', None)
         return jsonify({'success': True, 'profile': {
@@ -82,9 +88,12 @@ def auth_login():
 def auth_logout():
     """Log out — clears the authenticated session."""
     try:
+        if session.get('device_id') and session.get('profile_id'):
+            get_database().revoke_profile_device(session['profile_id'], session['device_id'])
         session.pop('login_authenticated', None)
         session.pop('profile_id', None)
         session.pop('profile_epoch', None)
+        session.pop('device_id', None)
         session.pop('launch_pin_verified', None)
         return jsonify({'success': True})
     except Exception as e:
@@ -143,6 +152,10 @@ def auth_recovery_reset():
         session['profile_id'] = profile['id']
         # the epoch this sign-in counts under ("sign out everywhere" moves it)
         session['profile_epoch'] = (database.get_profile(profile['id']) or {}).get('session_epoch', 0)
+        from core.security.devices import start_device
+        start_device(session, database.add_profile_device, profile['id'],
+                     request.headers.get('User-Agent', ''), request.remote_addr or '')
+        session['device_owner'] = profile['id']
         session.pop('launch_pin_verified', None)
         return jsonify({'success': True})
     except Exception as e:

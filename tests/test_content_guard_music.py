@@ -278,3 +278,33 @@ def test_lib2_play_queue_drops_explicit_files(kid, member, tracks, monkeypatch):
     assert sorted(f['track_id'] for f in got) == sorted([tracks['clean']['id'], tracks['unknown']['id']])
     got = _client_as(member).get(f'/api/library/v2/artists/{artist_id}/play-queue').get_json()['files']
     assert len(got) == 4
+
+
+def test_kid_still_hears_the_library_track_it_was_allowed(kid, tmp_path):
+    # /api/library/play readies a (checked) library track and the player then
+    # fetches it from /stream/audio. blocking that route whole for a kid, as
+    # the soulseek guard does, silenced every library track too
+    audio = tmp_path / 'clean.flac'
+    audio.write_bytes(b'fLaC' + b'\0' * 64)
+    c = _client_as(kid)
+    with c.session_transaction() as s:
+        s['stream_sid'] = f'kidtest{uuid4().hex[:8]}'
+        sid = s['stream_sid']
+    sess = web_server.stream_state_store.get(sid)
+    with sess.lock:
+        sess.update({'status': 'ready', 'file_path': str(audio), 'stream_url': None,
+                     'is_library': True, 'error_message': None})
+    assert c.get('/stream/audio').status_code in (200, 206)
+    # a stream that isn't a library track stays unvouched
+    with sess.lock:
+        sess.update({'is_library': False})
+    assert c.get('/stream/audio').status_code == 403
+
+
+def test_library_v2_discovery_feeds_are_cleaned_too():
+    # the discovery view reads /api/artist-detail and the gap-fill releases
+    from api import content_guard as cg
+    for path in ('/api/artist-detail/abc', '/api/artist/abc/discography',
+                 '/api/artist/abc/discography/gap-fill'):
+        assert cg._DEEP.match(path), path
+    assert not cg._DEEP.match('/api/artist/abc/discography/other')

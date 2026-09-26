@@ -29,6 +29,9 @@ PAGE_LIMIT = 100
 RECENT_OVERLAP_SECONDS = 24 * 60 * 60
 TRANSIENT_PAGE_RETRIES = 4
 TRANSIENT_PAGE_RETRY_BASE_SECONDS = 5
+# how many more listens listenbrainz can hold than we imported, past the gap we
+# already know about, before an incremental sync goes back for older history.
+MISSED_HISTORY_SLACK = 50
 
 
 def _safe_error_message(error: Exception) -> str:
@@ -128,6 +131,21 @@ class ListenBrainzListeningImportWorker:
         self._cancel.set()
 
     def _run(self, username: str, full: bool) -> None:
+        was_incremental = self._crawl(username, full)
+        # an incremental sync only reads listens newer than the last one. history
+        # imported into listenbrainz later (an old spotify zip, say) lands behind
+        # that cursor, so when the account grew by more than we pulled in, go
+        # read the whole thing once. dedup keeps the rows we already have.
+        if (
+            was_incremental
+            and self._state.get("status") == "complete"
+            and not self._cancel.is_set()
+            and self._missed_older_listens(username)
+        ):
+            self._crawl(username, True, phase="Found older listens on ListenBrainz, reading your full history")
+
+    def _crawl(self, username: str, full: bool, *, phase: Optional[str] = None) -> bool:
+        """one pass over the account. returns whether it ran as an incremental sync."""
         start_ts = time.time()
         previous = self._load_state()
         if previous.get("username") and str(previous["username"]).casefold() != username.casefold():
@@ -157,7 +175,7 @@ class ListenBrainzListeningImportWorker:
         self._set_state(
             status="running",
             username=username,
-            phase="Starting ListenBrainz import" if start_page == 1 else f"Resuming ListenBrainz import at page {start_page}",
+            phase=phase or ("Starting ListenBrainz import" if start_page == 1 else f"Resuming ListenBrainz import at page {start_page}"),
             started_at=_now_iso(),
             finished_at=None,
             error=None,
@@ -281,6 +299,13 @@ class ListenBrainzListeningImportWorker:
                         else previous.get("pending_last_imported_at") or previous.get("last_imported_at")
                     ),
                 )
+                if completed_backfill and total_scrobbles:
+                    # listens we can't import (no title, same-second repeats) keep
+                    # the counts apart forever. remember that gap so it never
+                    # reads as missing history.
+                    imported_count = self._imported_count()
+                    if imported_count is not None:
+                        final_updates["reconciled_gap"] = max(0, total_scrobbles - imported_count)
             else:
                 final_updates.update(
                     backfill_complete=backfill_complete if use_incremental else False,
@@ -314,6 +339,46 @@ class ListenBrainzListeningImportWorker:
                 backfill_complete=backfill_complete if use_incremental else False,
                 pending_max_ts=current_max_ts if not use_incremental else None,
             )
+        return use_incremental
+
+    def _missed_older_listens(self, username: str) -> bool:
+        """true when listenbrainz holds more listens than we imported, beyond the known gap."""
+        try:
+            token, base_url, _ = self._credentials()
+            total = ListenBrainzClient(token=token, base_url=base_url or None).get_user_listen_count(username)
+        except Exception as e:
+            logger.debug("ListenBrainz listen count check failed: %s", _safe_error_message(e))
+            return False
+        imported_count = self._imported_count()
+        if not total or imported_count is None:
+            return False
+        gap = max(0, total - imported_count)
+        known = self._state.get("reconciled_gap")
+        if gap > _int(known) + MISSED_HISTORY_SLACK:
+            logger.info(
+                "ListenBrainz has %s listens, %s imported (known gap %s), reading full history",
+                total, imported_count, _int(known),
+            )
+            return True
+        if known is None or gap < _int(known):
+            self._set_state(reconciled_gap=gap)
+        return False
+
+    def _imported_count(self) -> Optional[int]:
+        """listenbrainz listens this pile has taken in, one alias per listen."""
+        try:
+            conn = self.db._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM listening_import_events WHERE profile_id = ? AND source = ?",
+                    (self.profile_id, SOURCE),
+                ).fetchone()
+                return int(row[0]) if row else 0
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("ListenBrainz imported count failed: %s", e)
+            return None
 
     def _get_user_listens_page(
         self,

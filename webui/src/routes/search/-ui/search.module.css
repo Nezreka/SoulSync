@@ -34,6 +34,15 @@
   color: inherit;
 }
 
+/* style.css gives .downloads-main-panel min-height: 0, so the panel shrank to
+   the window and squeezed the files list, which clips instead of scrolling:
+   13 results showed 5 and the rest were unreachable (#1313). sized to its
+   content the page scrolls, and the 64px bottom padding clears the floating
+   buttons. two classes so it wins whichever stylesheet loads last. */
+.page:global(.downloads-main-panel) {
+  min-height: auto;
+}
+
 .page :focus-visible {
   outline: 2px solid rgba(var(--accent-rgb), 0.8);
   outline-offset: 2px;

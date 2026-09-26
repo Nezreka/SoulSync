@@ -219,7 +219,9 @@ def test_navigate_to_artist_detail_only_hands_off_and_never_renders():
     # navigateToPage in the already-on-this-artist short circuit, so merely
     # finding the call somewhere in the body proves nothing -- drop the final
     # one and the function would write state and then navigate nowhere.
-    assert body.rindex("navigateToPage('artist-detail'") > body.rindex("selectedTracks.clear()"), (
+    # the call is `navigateToPage?.(` since the global is typed possibly undefined.
+    handoffs = [m.start() for m in re.finditer(r"navigateToPage(?:\?\.)?\('artist-detail'", body)]
+    assert handoffs and handoffs[-1] > body.rindex("selectedTracks.clear()"), (
         "navigateToArtistDetail writes the artist state but never hands off to the "
         "React route -- callers from Search/label-detail/enrichment would go nowhere"
     )

@@ -1480,3 +1480,44 @@
     justify-content: flex-end;
   }
 }
+
+/* the reporter editing their own title and details */
+.ownerEdit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ownerEditLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.ownerEditInput {
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.ownerEditInput:focus {
+  border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.ownerEditActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

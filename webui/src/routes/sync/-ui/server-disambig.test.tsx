@@ -46,8 +46,8 @@ function show(candidates: MirroredMatch[], onPick = vi.fn()) {
     <ServerDisambigModal
       playlistName="Road Trip"
       candidates={candidates}
-      onPick={onPick}
       now={Date.now()}
+      onPick={onPick}
       onClose={vi.fn()}
     />,
   );
@@ -132,8 +132,8 @@ describe('the modal', () => {
       <ServerDisambigModal
         playlistName="Road Trip"
         candidates={four}
-        onPick={vi.fn()}
         now={Date.now()}
+        onPick={vi.fn()}
         onClose={vi.fn()}
       />,
     );
@@ -155,8 +155,8 @@ describe('the modal', () => {
           { ...base, id: 1 },
           { ...base, id: 2, source: 'spotify' },
         ]}
-        onPick={vi.fn()}
         now={Date.now()}
+        onPick={vi.fn()}
         onClose={vi.fn()}
       />,
     );

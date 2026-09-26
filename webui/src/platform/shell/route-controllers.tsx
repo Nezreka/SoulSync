@@ -1,6 +1,7 @@
-import { appURL } from '@/platform/url-base';
 import { useRouteContext, useRouter } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect } from 'react';
+
+import { appURL } from '@/platform/url-base';
 
 import { getProfileHomePath, type ShellContext, type ShellPageId } from './bridge';
 

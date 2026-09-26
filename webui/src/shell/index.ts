@@ -19,6 +19,24 @@ import {
   switchBlocklistTab,
   unblockEntry,
 } from './blocklist';
+import { patchChatMessages } from './chat-morph';
+import {
+  _handoffLibrarySearchToEnhancedSearch,
+  _updateSidebarLibraryBreadcrumb,
+  clearArtistDetailPageState,
+  navigateToArtistDetail,
+  playLibraryTrack,
+} from './library-globals';
+import {
+  _mlmClose,
+  _mlmDeleteMatch,
+  _mlmLibraryDebounce,
+  _mlmSaveMatch,
+  _mlmSelectLibrary,
+  _mlmSelectSource,
+  _mlmSourceDebounce,
+  openManualLibraryMatchTool,
+} from './manual-library-match';
 import {
   connectMyAccount,
   closeMyAccountsModal,
@@ -37,6 +55,7 @@ import {
   toggleOriginGroup,
 } from './origin-history';
 import './library-switch';
+import './server-activity';
 import {
   closeServiceSwitchModal,
   openServiceSwitchModal,
@@ -44,29 +63,7 @@ import {
   setActiveSource,
   switchServiceSwitchTab,
 } from './service-switch';
-import {
-  _handoffLibrarySearchToEnhancedSearch,
-  _updateSidebarLibraryBreadcrumb,
-  clearArtistDetailPageState,
-  navigateToArtistDetail,
-  playLibraryTrack,
-} from './library-globals';
-import {
-  _mlmClose,
-  _mlmDeleteMatch,
-  _mlmLibraryDebounce,
-  _mlmSaveMatch,
-  _mlmSelectLibrary,
-  _mlmSelectSource,
-  _mlmSourceDebounce,
-  openManualLibraryMatchTool,
-} from './manual-library-match';
-import './server-activity';
-import {
-  closeTrackDetail,
-  openTrackDetail,
-} from './track-detail';
-import { patchChatMessages } from './chat-morph';
+import { closeTrackDetail, openTrackDetail } from './track-detail';
 import {
   closeWatchlistHistoryModal,
   openWatchlistHistoryModal,

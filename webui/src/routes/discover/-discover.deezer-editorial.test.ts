@@ -90,15 +90,17 @@ describe('openDeezerPlaylistInSync', () => {
   it('mirrors the playlist and lands the user on the mirrored tab', async () => {
     // this is the whole fix: the first version drove the RETIRED vanilla
     // sync page and did nothing at all
-    document.body.innerHTML =
-      '<button class="sync-tab-button" data-tab="mirrored"></button>';
+    document.body.innerHTML = '<button class="sync-tab-button" data-tab="mirrored"></button>';
     const clicked = vi.fn();
     document.querySelector('.sync-tab-button')!.addEventListener('click', clicked);
     const navigate = vi.fn();
     window.navigateToPage = navigate;
 
     const posted = stubLoad({
-      id: '123', name: 'Rock Essentials', owner: 'Rod', image_url: 'https://cdn/x.jpg',
+      id: '123',
+      name: 'Rock Essentials',
+      owner: 'Rod',
+      image_url: 'https://cdn/x.jpg',
       tracks: TRACKS,
     });
 
@@ -181,7 +183,9 @@ describe('progress while a playlist loads', () => {
     const error = await openDeezerPlaylistInSync(PLAYLIST, (s) => stages.push({ ...s }));
 
     expect(error).toBeNull();
-    expect(stages.some((s) => s.phase === 'loading' && s.done === 80 && s.total === 200)).toBe(true);
+    expect(stages.some((s) => s.phase === 'loading' && s.done === 80 && s.total === 200)).toBe(
+      true,
+    );
     expect(stages.some((s) => s.phase === 'loading' && s.done === 160)).toBe(true);
     // and the final stage is the quick one, so the bar can finish
     expect(stages.at(-1)?.phase).toBe('mirroring');
@@ -189,9 +193,7 @@ describe('progress while a playlist loads', () => {
 
   it('opens with the count it already knows, before the first poll', async () => {
     window.navigateToPage = vi.fn();
-    server.use(
-      http.get('/api/deezer/playlist/:id', () => HttpResponse.error()),
-    );
+    server.use(http.get('/api/deezer/playlist/:id', () => HttpResponse.error()));
     const stages: { phase: string; total?: number }[] = [];
     await openDeezerPlaylistInSync({ ...PLAYLIST, track_count: 200 }, (s) => stages.push({ ...s }));
     // the shelf already knows the playlist has 200 tracks; showing that at once

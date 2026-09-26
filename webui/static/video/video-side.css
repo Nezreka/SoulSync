@@ -2810,6 +2810,13 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vreq-status--onway { color: rgba(147, 197, 253, 0.85); }
 .vreq-status--available { color: rgb(var(--accent-light-rgb, 30, 215, 96)); }
 .vreq-status--denied { color: rgba(252, 165, 165, 0.8); }
+.vreq-status--partial { color: rgba(147, 197, 253, 0.85); }
+.vreq-status--failed { color: rgba(253, 186, 116, 0.85); }
+/* a show still arriving: episodes here out of everything asked for */
+.vreq-progress { height: 3px; max-width: 220px; margin-top: 8px; border-radius: 999px; overflow: hidden;
+    background: rgba(255, 255, 255, 0.08); }
+.vreq-progress > span { display: block; height: 100%; border-radius: inherit;
+    background: rgba(147, 197, 253, 0.8); transition: width 0.3s ease; }
 .vreq-btn { padding: 7px 14px; border-radius: 9px; font-size: 12.5px; font-weight: 700; cursor: pointer;
     border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.05); color: #fff; }
 .vreq-btn:hover { background: rgba(255, 255, 255, 0.1); }
@@ -2857,6 +2864,28 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vreq-sheet-input { width: 100%; box-sizing: border-box; padding: 9px 11px; border-radius: 10px; resize: vertical;
     font: inherit; font-size: 13px; border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.3); color: #fff; }
 .vreq-sheet-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.vreq-sheet-label--gap { margin-top: 14px; }
+.vreq-sheet-select { width: 100%; box-sizing: border-box; padding: 9px 11px; border-radius: 10px; cursor: pointer;
+    font: inherit; font-size: 13px; border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.3); color: #fff; }
+.vreq-sheet-select:focus-visible { outline: none; border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.7); }
+.vreq-sheet-select option { background: #18181c; color: #fff; }
+/* cards, for profiles that ask instead of download: the quick Request
+   action (same shape as the get button) and the Requested / Available ribbon */
+.vreq-card-btn { width: 30px; height: 30px; border-radius: 9px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.16); color: rgba(255, 255, 255, 0.88);
+    cursor: pointer; opacity: 0; transform: translateY(-2px);
+    transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease, border-color 0.18s ease; }
+.vreq-card-btn[hidden] { display: none; }
+.vreq-card-btn:hover, .vreq-card-btn:focus-visible { background: rgba(var(--accent-rgb, 88 101 242), 0.92); color: #fff;
+    border-color: rgba(var(--accent-rgb, 88 101 242), 0.92); outline: none; }
+.vreq-card-btn:disabled { opacity: 0.5; cursor: default; }
+.vsr-card:hover .vreq-card-btn, .vd-sim-card:hover .vreq-card-btn, .vwlp-card:hover .vreq-card-btn,
+.vreq-card-btn:focus-visible { opacity: 1; transform: none; }
+@media (hover: none) { .vreq-card-btn { opacity: 1; transform: none; } }
+.vsr-ribbon--req { background: rgba(59, 130, 246, 0.9); border: none; }
+.vsr-ribbon--req-here { background: rgba(34, 197, 94, 0.95); }
 @media (max-width: 640px) {
     .vreq-page { padding: 22px 16px 48px; }
     .vreq-row { flex-wrap: wrap; }
@@ -6314,6 +6343,41 @@ body[data-side="video"] #gsearch-aura {
 }
 .vi-menu-item:hover, .vi-menu-item:focus-visible { background: rgba(255,255,255,0.07); outline: none; }
 .vi-menu-item--danger { margin-top: 4px; color: #ff7b70; }
+/* admin bulk select: a tick on the art corner, a slim bar once any is ticked */
+.vi-row { position: relative; }
+.vi-pick {
+    position: absolute; top: 10px; left: 10px; z-index: 1; width: 17px; height: 17px; margin: 0;
+    accent-color: rgb(var(--accent-rgb, 88 101 242)); cursor: pointer; opacity: 0; transition: opacity .15s;
+}
+.vi-row:hover .vi-pick, .vi-pick:focus-visible, .vi-list--picking .vi-pick { opacity: 1; }
+@media (hover: none) { .vi-pick { opacity: 1; } }
+.vi-row--on .vi-card {
+    border-color: rgba(var(--accent-rgb, 88 101 242), 0.45); background: rgba(var(--accent-rgb, 88 101 242), 0.06);
+}
+.vi-bulk {
+    position: sticky; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin-top: 14px; padding: 8px 8px 8px 16px; border-radius: 14px;
+    background: rgba(22,22,26,0.96); border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.45); backdrop-filter: blur(10px);
+}
+.vi-bulk-count { font-size: 13px; font-weight: 800; color: #fff; }
+.vi-bulk-btn, .vi-bulk-quiet, .vi-bulk-x {
+    padding: 7px 12px; border: 0; border-radius: 9px; background: none; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.8);
+}
+.vi-bulk-btn:hover:not(:disabled), .vi-bulk-x:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.vi-bulk-btn:disabled { opacity: 0.5; cursor: default; }
+.vi-bulk-quiet { font-weight: 600; color: rgb(var(--accent-rgb, 88 101 242)); }
+.vi-bulk-danger { color: #ff7b70; }
+.vi-bulk-x { padding: 4px 10px; font-size: 18px; line-height: 1; color: rgba(255,255,255,0.5); }
+.vi-bulk-pop { min-width: 140px; }
+/* the reporter editing their own title and details */
+.vi-own-edit {
+    display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: 12px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+}
+.vi-own-label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.55); }
+.vi-own-actions { display: flex; justify-content: flex-end; gap: 8px; }
 /* report entry on an expanded episode row (video-detail.js) */
 .vi-ep-report {
     margin-top: 10px; padding: 0; border: 0; background: none; cursor: pointer;

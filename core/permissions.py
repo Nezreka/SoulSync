@@ -70,7 +70,7 @@ def may_manage_profile(actor_id, actor_is_admin: bool, target_id) -> bool:
 
 # what anyone may see about another profile: enough to draw the picker card
 PUBLIC_PROFILE_FIELDS = ("id", "name", "avatar_color", "avatar_url", "is_admin",
-                         "has_pin", "has_password")
+                         "has_pin", "has_password", "disabled")
 
 
 def profile_view_for(profile: Dict[str, Any], *, viewer_id, viewer_is_admin: bool) -> Dict[str, Any]:

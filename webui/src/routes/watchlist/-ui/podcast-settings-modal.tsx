@@ -106,11 +106,7 @@ export function PodcastSettingsModal({
         <div className="wl-global-modal-head">
           <div className={styles.modalShowHeader}>
             {podcast.artwork_url ? (
-              <img
-                src={podcast.artwork_url}
-                alt={podcast.title}
-                className={styles.modalShowArt}
-              />
+              <img src={podcast.artwork_url} alt={podcast.title} className={styles.modalShowArt} />
             ) : (
               <div className={styles.modalShowArtPlaceholder}>🎙️</div>
             )}

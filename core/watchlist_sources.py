@@ -90,6 +90,37 @@ def storable_source(hint, artist_id) -> str:
     return normalize_source(hint) or infer_source(artist_id)
 
 
+# library artists table column -> the provider id it carries
+_LIBRARY_ARTIST_ID_COLUMNS = ("spotify_artist_id", "itunes_artist_id", "deezer_id", "discogs_id",
+                              "musicbrainz_id", "amazon_id")
+
+
+def library_artist_provider_ids(cursor, artist_id) -> list:
+    """the provider ids of a LIBRARY artist row, when ``artist_id`` is one.
+
+    #1308: the artist page asks "is this watched?" with the library row id
+    when the artist has no spotify link. add translated that id into the
+    provider id it stores, check and remove never did, so the button always
+    read "Add to watchlist" and adding again changed nothing."""
+    aid = str(artist_id or "").strip()
+    if not aid.isdigit():
+        return []
+    # the library row is a Library v2 artist on this branch: the same ids,
+    # under the names api/artist_watchlist's add translates them from
+    from core.library2.provider_ids import ARTIST_IDS_SQL
+    row = cursor.execute(f"SELECT {', '.join(_LIBRARY_ARTIST_ID_COLUMNS)} FROM "
+                         f"(SELECT {ARTIST_IDS_SQL} FROM lib2_artists WHERE id = ? LIMIT 1)",
+                         (int(aid),)).fetchone()
+    if not row:
+        return []
+    out = []
+    for value in tuple(row):
+        v = str(value or "").strip()
+        if v and v != aid and v not in out:
+            out.append(v)
+    return out
+
+
 def artist_id_match_sql(alias: str = "") -> str:
     """``(col = ? OR col = ? ...)`` over every provider id column.
 

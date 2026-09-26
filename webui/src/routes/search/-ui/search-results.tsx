@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { acquireVerb } from '@/platform/shell/download-rights';
+
 import type {
   LibraryCheckTrack,
   SearchAlbum,
@@ -342,7 +344,7 @@ export function SearchResults({
         image={albumImage(album)}
         badge={ownership.ownedAlbums.has(identity) ? 'In library' : undefined}
         onOpen={() => onAlbumClick(album)}
-        actionLabel={`Download ${album.name ?? 'album'}`}
+        actionLabel={`${acquireVerb()} ${album.name ?? 'album'}`}
         onAction={() => onAlbumClick(album)}
       />
     );
@@ -560,7 +562,7 @@ function TopAndTracks({
             onClick={() => onAlbumClick(topAlbum)}
           >
             <DownloadIcon />
-            Download
+            {acquireVerb()}
           </button>
         }
       />
@@ -584,7 +586,7 @@ function TopAndTracks({
             </button>
             <button type="button" className={styles.button} onClick={() => onTrackClick(topTrack)}>
               <DownloadIcon />
-              Download
+              {acquireVerb()}
             </button>
           </>
         }

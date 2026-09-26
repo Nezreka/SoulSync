@@ -41,6 +41,7 @@ import {
 } from '../-tools.api';
 import { isRepairJobDryRun, prettifyRepairSettingKey } from '../-tools.core';
 import { useRepairProgressEvent, useRepairStatusEvent } from '../-tools.events';
+import { takeFindingsFocus } from '../-tools.findings-focus';
 import { FindingsSurface } from './findings-surface';
 import { Operations } from './operations';
 import { RunHistory } from './run-history';
@@ -330,10 +331,22 @@ export function MaintenanceHero() {
    * click on the same job re-fire — without it, clicking the same row twice
    * after wandering off would change nothing.
    */
-  const [jobFocus, setJobFocus] = useState<{ jobId: string; token: number } | null>(null);
+  const [jobFocus, setJobFocus] = useState<{
+    jobId: string;
+    token: number;
+    query?: string;
+  } | null>(null);
   const showJobFindings = useCallback((jobId: string) => {
     setJobFocus((previous) => ({ jobId, token: (previous?.token || 0) + 1 }));
     jumpToSection('repair-section-findings');
+  }, []);
+
+  // sent here from an issue ("find duplicates"): that job's findings, searched
+  useEffect(() => {
+    const asked = takeFindingsFocus();
+    if (!asked) return;
+    setJobFocus((previous) => ({ ...asked, token: (previous?.token || 0) + 1 }));
+    setTimeout(() => jumpToSection('repair-section-findings'), 300);
   }, []);
 
   return (

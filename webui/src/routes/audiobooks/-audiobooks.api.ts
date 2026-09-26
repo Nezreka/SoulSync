@@ -402,9 +402,7 @@ export async function setNarratorMode(
 
 export async function clearAudiobookWishlist(): Promise<boolean> {
   try {
-    const data = await readJson<MutationResponse>(
-      audiobookClient.delete('audiobooks/wishlist'),
-    );
+    const data = await readJson<MutationResponse>(audiobookClient.delete('audiobooks/wishlist'));
     return Boolean(data?.success);
   } catch (err) {
     console.error('Failed to clear audiobook wishlist:', err);
