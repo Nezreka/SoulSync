@@ -13,7 +13,14 @@ from difflib import SequenceMatcher
 from typing import Optional
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import (
+    JobContext,
+    JobResult,
+    RepairJob,
+    has_metadata_locked,
+    hand_tagged_path_keys,
+    is_hand_tagged_path,
+)
 from utils.logging_config import get_logger
 from core.matching.audio_verification import fingerprint_is_ambiguous, Decision
 from core.matching.acoustid_candidates import duration_mismatches_strongly
@@ -128,6 +135,8 @@ class AcoustIDScannerJob(RepairJob):
         if context.update_progress:
             context.update_progress(0, total)
 
+        hand_tagged = hand_tagged_path_keys(context.db)
+
         batch_count = 0
         for i, (track_id, track_info) in enumerate(track_list):
             if context.check_stop():
@@ -143,6 +152,9 @@ class AcoustIDScannerJob(RepairJob):
             if not resolved:
                 result.skipped += 1
                 continue
+
+            if track_info.get('metadata_locked') or is_hand_tagged_path(resolved, hand_tagged):
+                track_info['hand_tagged'] = True
 
             result.scanned += 1
             batch_count += 1
@@ -213,6 +225,16 @@ class AcoustIDScannerJob(RepairJob):
         # unverified / force_imported / untagged) is re-checked; force_imported
         # mismatches are reported as informational below since a mismatch
         # there is EXPECTED (the user accepted the best candidate).
+        if expected.get('hand_tagged'):
+            # hand-tagged: the user typed this release (a live set, a
+            # bootleg). it will never fingerprint as the studio cut, and
+            # retag/redownload/delete would undo what they asked for. same
+            # standing as a human-verified file
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'Skipped (hand-tagged): {fname}', log_type='skip')
+            return
+
         file_verif_status = None
         try:
             from core.tag_writer import read_file_tags as _rft
@@ -586,7 +608,8 @@ class AcoustIDScannerJob(RepairJob):
             # that want a single resolved value, but the resolution
             # priority that actually drives the comparison is reproduced
             # in `_scan_file`: track_artist → file tag → album_artist.
-            cursor.execute("""
+            locked_col = 't.metadata_locked' if has_metadata_locked(cursor, 'tracks') else '0'
+            cursor.execute(f"""
                 SELECT t.id, t.title,
                        COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
                        t.file_path, t.track_number,
@@ -595,7 +618,8 @@ class AcoustIDScannerJob(RepairJob):
                        ar.name AS album_artist,
                        t.duration,
                        ar.id AS artist_row_id,
-                       t.verification_status
+                       t.verification_status,
+                       {locked_col}
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -632,6 +656,7 @@ class AcoustIDScannerJob(RepairJob):
                     # consult both or it demotes a verified file whose tag
                     # went missing.
                     'db_verification_status': row[12] or None,
+                    'metadata_locked': bool(row[13]) if len(row) > 13 else False,
                 }
         except Exception as e:
             logger.error("Error loading tracks from DB: %s", e)

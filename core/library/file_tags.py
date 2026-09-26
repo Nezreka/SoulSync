@@ -57,6 +57,7 @@ _ID3_TEXT_FRAMES = {
 # attribute. We pick known descriptions out of those.
 _KNOWN_TXXX_DESCS = {
     "MusicBrainz Album Id": "musicbrainz_albumid",
+    "MusicBrainz Album Comment": "musicbrainz_albumcomment",
     "MusicBrainz Artist Id": "musicbrainz_artistid",
     "MusicBrainz Album Artist Id": "musicbrainz_albumartistid",
     "MusicBrainz Release Group Id": "musicbrainz_releasegroupid",
@@ -118,7 +119,7 @@ _VORBIS_ALLOWED_KEYS = frozenset({
     "isrc", "barcode", "catalognumber", "asin", "script",
     "media", "originaldate", "releasecountry", "releasestatus",
     "releasetype", "artists", "composer", "performer",
-    "musicbrainz_albumid", "musicbrainz_artistid",
+    "musicbrainz_albumid", "musicbrainz_albumcomment", "musicbrainz_artistid",
     "musicbrainz_albumartistid", "musicbrainz_releasegroupid",
     "musicbrainz_releasetrackid", "musicbrainz_trackid",
     "spotify_track_id", "spotify_artist_id", "spotify_album_id",

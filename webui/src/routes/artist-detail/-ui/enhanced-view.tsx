@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 
 import { thumb } from '@/platform/artwork-thumb';
 
-import type { EnhancedAlbum, EnhancedData } from '../-artist-detail.enhanced';
+import type { EnhancedAlbum, EnhancedData, EnhancedTrack } from '../-artist-detail.enhanced';
 
+import { albumMatchesEdit, clearArtistEdit, peekArtistEdit } from '../-artist-detail.edit-focus';
 import {
   albumRowMeta,
   enhancedSectionsFor,
-  enhancedStats,
   groupAlbumsByType,
   sectionCountLabel,
   sectionTrackTotal,
@@ -23,6 +23,7 @@ import { ArtistMetaPanel } from './artist-meta-panel';
 import { EnhancedBulkBar } from './enhanced-bulk-bar';
 import { EnhancedTrackTable } from './enhanced-track-table';
 import { ExpandedAlbumHeader } from './expanded-album-header';
+import { ChevronIcon, PlayIcon } from './lib-icons';
 
 interface Props {
   data: EnhancedData | null;
@@ -75,13 +76,17 @@ export function EnhancedView({ data, status, isAdmin, onReload }: Props) {
 
   if (status.error) {
     return (
-      <div className="enhanced-loading" style={{ color: '#ff6b6b' }}>
-        Failed to load: {status.error}
+      <div className="lib-state error">
+        <div className="enhanced-loading" style={{ color: '#ff6b6b' }}>
+          Failed to load: {status.error}
+        </div>
+        <button type="button" className="lib-btn" onClick={onReload}>
+          Try again
+        </button>
       </div>
     );
   }
-  if (status.loading || !data)
-    return <div className="enhanced-loading">Loading library data...</div>;
+  if (status.loading || !data) return <LibrarySkeleton />;
 
   const grouped = groupAlbumsByType(data.albums ?? []);
 
@@ -124,7 +129,6 @@ export function EnhancedView({ data, status, isAdmin, onReload }: Props) {
         onReload={onReload}
         onArtistPatched={() => setArtistVersion((v) => v + 1)}
       />
-      <EnhancedStatsBar data={data} />
       {enhancedSectionsFor(data.albums ?? []).map(({ type, label }) => {
         const albums = grouped[type] ?? [];
         // An empty section is omitted entirely, not rendered as a header with
@@ -156,25 +160,30 @@ export function EnhancedView({ data, status, isAdmin, onReload }: Props) {
   );
 }
 
-function EnhancedStatsBar({ data }: { data: EnhancedData }) {
-  const stats = enhancedStats(data);
+/**
+ * the loading state: the shape of the page, greyed, instead of one line of
+ * text. the text stays for screen readers and for the tests that read it.
+ */
+function LibrarySkeleton() {
   return (
-    <div className="enhanced-stats-bar">
-      <div className="enhanced-stats-items">
-        {stats.items.map((item) => (
-          <div className="enhanced-stat-item" key={item.label}>
-            <span className="enhanced-stat-value">{item.value}</span>
-            <span className="enhanced-stat-label">{item.label}</span>
+    <div className="lib-skeleton" aria-busy="true">
+      <div className="enhanced-loading lib-sr-only">Loading library data...</div>
+      <div className="lib-skeleton-card">
+        <div className="lib-skeleton-avatar" />
+        <div className="lib-skeleton-lines">
+          <div className="lib-skeleton-line w40" />
+          <div className="lib-skeleton-line w60 thin" />
+        </div>
+      </div>
+      {[0, 1, 2, 3].map((i) => (
+        <div className="lib-skeleton-row" key={i}>
+          <div className="lib-skeleton-art" />
+          <div className="lib-skeleton-lines">
+            <div className="lib-skeleton-line w30" />
+            <div className="lib-skeleton-line w50 thin" />
           </div>
-        ))}
-      </div>
-      <div className="enhanced-stats-formats">
-        {stats.badges.map((badge) => (
-          <span className={`enhanced-format-badge ${badge.className}`} key={badge.format}>
-            {badge.format} ({badge.count})
-          </span>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -201,18 +210,17 @@ function EnhancedSection({
   onReload: () => void;
 }) {
   return (
-    <div className="enhanced-section">
+    <div className="enhanced-section" data-section={type}>
       <div className="enhanced-section-header">
         <span className="enhanced-section-title">{label}</span>
         <span className="enhanced-section-count">
           {sectionCountLabel(albums.length, sectionTrackTotal(albums))}
         </span>
       </div>
-      <div className="enhanced-album-grid">
+      <div className="enhanced-album-grid lib-album-list">
         {albums.map((album) => (
           <EnhancedAlbumWrapper
             album={album}
-            type={type}
             artist={artist}
             isAdmin={isAdmin}
             selected={selected}
@@ -225,6 +233,20 @@ function EnhancedSection({
       </div>
     </div>
   );
+}
+
+/**
+ * how many of the release's tracks are not owned. before the panel has
+ * fetched the canonical tracklist this is the source's track count against
+ * what we hold; after, it is the diffed missing rows themselves.
+ */
+function albumGap(album: EnhancedAlbum, rows: EnhancedTrack[]): number {
+  const owned = (album.tracks ?? []).length;
+  if (album._canonicalTracksLoaded) {
+    return rows.filter((r) => (r as { _missingExpected?: boolean })._missingExpected).length;
+  }
+  const expected = Number(album.api_track_count || album.track_count || 0);
+  return Math.max(0, expected - owned);
 }
 
 /**
@@ -241,7 +263,6 @@ function EnhancedSection({
  */
 function EnhancedAlbumWrapper({
   album: albumProp,
-  type,
   artist,
   isAdmin,
   selected,
@@ -250,7 +271,6 @@ function EnhancedAlbumWrapper({
   onReload,
 }: {
   album: EnhancedAlbum;
-  type: string;
   artist: Record<string, unknown> | undefined;
   isAdmin: boolean;
   selected: Set<string>;
@@ -258,8 +278,32 @@ function EnhancedAlbumWrapper({
   onAlbumDeleted: () => void;
   onReload: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  // an issue's "edit details" asked for this album: open it, form and all
+  const [editFocus] = useState(() => {
+    const focus = peekArtistEdit(artist?.id as string | number | undefined);
+    return albumMatchesEdit(focus, albumProp) ? focus : null;
+  });
+  const [expanded, setExpanded] = useState(Boolean(editFocus));
   const [thumbBroken, setThumbBroken] = useState(false);
+  // the album's metadata form is behind "edit details" now, not always open
+  const [editing, setEditing] = useState(Boolean(editFocus && isAdmin && !editFocus.trackId));
+
+  useEffect(() => {
+    if (!editFocus) return;
+    clearArtistEdit();
+    // after the panel has drawn: the track row if one was asked for, else the album
+    const timer = setTimeout(() => {
+      const row = editFocus.trackId
+        ? Array.from(document.querySelectorAll<HTMLElement>('tr[data-track-id]')).find(
+            (tr) => tr.dataset.trackId === editFocus.trackId,
+          )
+        : null;
+      const target =
+        row ?? document.getElementById(`enhanced-album-wrapper-${String(albumProp.id)}`);
+      target?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [editFocus, albumProp.id]);
 
   /**
    * A saved edit is applied here rather than refetching the whole artist. The
@@ -276,6 +320,7 @@ function EnhancedAlbumWrapper({
   const meta = albumRowMeta(album);
   const rows = getAlbumTrackRows(album);
   const albumTitle = typeof album.title === 'string' && album.title ? album.title : 'Unknown';
+  const gap = albumGap(album, rows);
 
   /**
    * The canonical tracklist, fetched once the panel opens (library.js:3422).
@@ -323,10 +368,18 @@ function EnhancedAlbumWrapper({
       <div
         className={`enhanced-album-row${expanded ? ' expanded' : ''}`}
         id={`enhanced-album-row-${album.id}`}
+        role="button"
+        aria-expanded={expanded}
+        tabIndex={0}
         onClick={() => setExpanded((open) => !open)}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded((open) => !open);
+          }
+        }}
       >
-        <span className="enhanced-album-expand-icon">▶</span>
-
         <div className="enhanced-album-art-wrap">
           {album.thumb_url && !thumbBroken ? (
             <img
@@ -337,8 +390,22 @@ function EnhancedAlbumWrapper({
               onError={() => setThumbBroken(true)}
             />
           ) : (
-            <div className="enhanced-album-thumb-fallback">🎵</div>
+            <div className="enhanced-album-thumb-fallback" aria-hidden="true">
+              ♪
+            </div>
           )}
+          <button
+            type="button"
+            className="enhanced-album-play-btn"
+            aria-label={`Play ${albumTitle}`}
+            title={`Play ${albumTitle}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              playAlbum();
+            }}
+          >
+            <PlayIcon size={18} />
+          </button>
         </div>
 
         <div className="enhanced-album-info-block">
@@ -350,25 +417,24 @@ function EnhancedAlbumWrapper({
           <span className="enhanced-album-meta-line">{meta.metaLine}</span>
         </div>
 
-        <button
-          type="button"
-          className="enhanced-album-play-btn"
-          aria-label={`Play ${albumTitle}`}
-          title={`Play ${albumTitle}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            playAlbum();
-          }}
-        >
-          ▶
-        </button>
-
-        <span className={`enhanced-album-type-badge ${(type || 'album').toLowerCase()}`}>
-          {type}
-        </span>
-        {meta.primaryFormat ? (
-          <span className={`enhanced-format-badge ${meta.formatClass}`}>{meta.primaryFormat}</span>
-        ) : null}
+        <div className="lib-album-side">
+          {gap > 0 ? (
+            <span
+              className="lib-pill warn"
+              title={`${gap} of the release's tracks are not in your library`}
+            >
+              {gap} missing
+            </span>
+          ) : null}
+          {meta.primaryFormat ? (
+            <span className={`enhanced-format-badge ${meta.formatClass}`}>
+              {meta.primaryFormat}
+            </span>
+          ) : null}
+          <span className="enhanced-album-expand-icon" aria-hidden="true">
+            <ChevronIcon />
+          </span>
+        </div>
       </div>
 
       <div
@@ -389,12 +455,29 @@ function EnhancedAlbumWrapper({
                 onArtApplied={(url) => setAlbum((current) => ({ ...current, thumb_url: url }))}
                 onAlbumDeleted={onAlbumDeleted}
                 onAlbumPatched={(fresh) => setAlbum(fresh as typeof albumProp)}
+                editing={editing}
+                onToggleEdit={() => setEditing((open) => !open)}
+                artist={artist}
+                onReassigned={onReload}
               />
-              <AlbumMetaRow
-                album={album}
-                isAdmin={isAdmin}
-                onSaved={(updates) => setAlbum((current) => ({ ...current, ...updates }))}
-              />
+              {/* the admin's form is behind "edit details" now, but a
+                  non-admin has no such button — they keep the read-only row,
+                  which is the only place release date, style, mood and
+                  explicit are shown at all. */}
+              {isAdmin ? (
+                editing ? (
+                  <AlbumMetaRow
+                    album={album}
+                    isAdmin
+                    onSaved={(updates) => {
+                      setAlbum((current) => ({ ...current, ...updates }));
+                      setEditing(false);
+                    }}
+                  />
+                ) : null
+              ) : (
+                <AlbumMetaRow album={album} isAdmin={false} onSaved={() => {}} />
+              )}
               <EnhancedTrackTable
                 album={album}
                 isAdmin={isAdmin}

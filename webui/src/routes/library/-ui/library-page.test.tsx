@@ -50,10 +50,13 @@ function stubFetch(
       const url = await record(input);
       if (url.includes('/api/library/unmatched-summary')) {
         if (unmatched === 'fail') return new Response('nope', { status: 500 });
-        return new Response(JSON.stringify({ success: true, ...(unmatched ?? { count: 0, artist_id: null }) }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return new Response(
+          JSON.stringify({ success: true, ...(unmatched ?? { count: 0, artist_id: null }) }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
       }
       if (url.includes('/api/watchlist/')) {
         return new Response(JSON.stringify({ success: true }), {

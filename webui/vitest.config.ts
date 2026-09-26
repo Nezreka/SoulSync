@@ -13,6 +13,10 @@ export default mergeConfig(
       setupFiles: ['./vitest.setup.ts'],
       css: true,
       restoreMocks: true,
+      // full-route tests (watchlist, stats, podcasts, import) mount the whole
+      // page plus its queries and run past the 5s default on a loaded box or
+      // the 4-core ci runner. they pass fine with room, they're just slow.
+      testTimeout: 15000,
       // A runaway test (see route-guard.test.ts for the redirect loop that
       // once ground two workers for hours and wedged CI) must die as a visible
       // OOM naming its file, not sit at node's huge default ceiling spinning

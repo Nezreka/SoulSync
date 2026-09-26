@@ -64,3 +64,67 @@ def test_is_configured_false_with_no_arl(monkeypatch):
     monkeypatch.setattr(boot, "is_boot_phase", lambda: False)
     c = _bare_client(authenticated=False, pending_arl=None)  # no ARL configured at all
     assert c.is_configured() is False
+
+
+# a settings save calls reconnect(). on sept 24 deezer dropped the connection
+# right then ("Remote end closed connection without response") and downloads
+# stayed logged out until the next save, because a failed login was never
+# tried again.
+
+def _flaky_client(monkeypatch, results):
+    """results: what each login attempt does, True = logs in."""
+    monkeypatch.setattr(boot, "is_boot_phase", lambda: False)
+    c = _bare_client()
+    c._config = type("Cfg", (), {"get": lambda self, k, d=None: d})()
+    attempts = []
+
+    def fake_auth(arl):
+        attempts.append(arl)
+        ok = results[len(attempts) - 1]
+        c._authenticated = ok
+        return ok
+
+    c._authenticate = fake_auth
+    return c, attempts
+
+
+def test_failed_reconnect_is_retried_later(monkeypatch):
+    import core.deezer_download_client as mod
+    clock = [1000.0]
+    monkeypatch.setattr(mod.time, "time", lambda: clock[0])
+    c, attempts = _flaky_client(monkeypatch, [False, True])
+
+    assert c.reconnect("arl") is False
+    # right away: waits, doesn't hammer deezer on every status poll
+    assert c.is_configured() is False
+    assert attempts == ["arl"]
+    clock[0] += 31
+    assert c.is_configured() is True
+    assert attempts == ["arl", "arl"]
+    assert c._pending_arl is None
+
+
+def test_retry_backs_off_for_a_bad_arl(monkeypatch):
+    import core.deezer_download_client as mod
+    clock = [1000.0]
+    monkeypatch.setattr(mod.time, "time", lambda: clock[0])
+    c, attempts = _flaky_client(monkeypatch, [False] * 10)
+
+    c.reconnect("bad")
+    clock[0] += 31
+    c.is_configured()          # 2nd try fails, next wait is 60s
+    clock[0] += 31
+    c.is_configured()          # too soon
+    assert len(attempts) == 2
+    clock[0] += 30
+    c.is_configured()
+    assert len(attempts) == 3
+    assert c._pending_arl == "bad"
+
+
+def test_successful_reconnect_leaves_nothing_pending(monkeypatch):
+    c, attempts = _flaky_client(monkeypatch, [True])
+    assert c.reconnect("arl") is True
+    assert c._pending_arl is None
+    assert c.is_configured() is True
+    assert attempts == ["arl"]

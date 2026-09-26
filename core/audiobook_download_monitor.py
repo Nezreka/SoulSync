@@ -395,16 +395,28 @@ def tick(db: Any = None) -> Dict[str, int]:
         register_download,
         is_cancelled,
         mark_status,
+        set_task_metadata,
         update_progress,
     )
 
     for row in active:
         summary["checked"] += 1
+        source = str(row.get("source") or "").lower()
+        username = ""
+        release_title = str(row.get("release_title") or "")
+        if source == "soulseek":
+            from core.audiobook_soulseek import decode_refs
+            unpacked = decode_refs(row.get("client_id"))
+            username = unpacked.get("username") or ""
+            if not release_title:
+                release_title = unpacked.get("folder") or ""
         # Runtime cards disappear on restart; the durable job and client refs
         # remain. Reattach without replacing existing progress/cancellation.
         register_download(row["download_id"], row.get("title") or "Audiobook",
                           author=row.get("author") or "", protocol=row.get("source") or "",
-                          size_bytes=row.get("bytes_total") or 0, only_if_missing=True)
+                          size_bytes=row.get("bytes_total") or 0, only_if_missing=True,
+                          username=username, release_title=release_title)
+        set_task_metadata(row["download_id"], username=username, release_title=release_title)
 
         # Cancelling a card used to remove it from the page while the torrent
         # carried on downloading. Persist cancellation before runtime cleanup.
@@ -453,11 +465,12 @@ def tick(db: Any = None) -> Dict[str, int]:
             _misses.pop(row["download_id"], None)
         if patch.get("status") in ("downloading", "queued", "paused", "unavailable"):
             mark_status(row["download_id"], "downloading" if patch["status"] == "downloading" else "queued",
-                        error=patch.get("error") or ("Paused in download client" if patch["status"] == "paused" else ""))
+                        error=patch.get("error") or ("Paused in download client" if patch["status"] == "paused" else ""),
+                        release_title=release_title)
 
         asin = str(row.get("asin") or "")
         if patch.get("status") == "completed":
-            mark_status(row["download_id"], "completed", file_path=imported_path)
+            mark_status(row["download_id"], "completed", file_path=imported_path, release_title=release_title)
             # The card has served its purpose; the history lives in the
             # audiobook database, not in runtime state.
             forget(row["download_id"])
@@ -474,14 +487,12 @@ def tick(db: Any = None) -> Dict[str, int]:
         elif patch.get("status") == "staged":
             # "importing" on the card, and deliberately NOT an error: the book is
             # waiting for the rest of itself, which is a normal state a torrent
-            # passes through. Putting the reason in error_message would paint it
-            # red on the shared Downloads page as though something had gone
-            # wrong. The reason lives in the audiobook database, where the
-            # audiobook UI can show it as what it is.
+            # passes through.
             summary["staged"] += 1
-            mark_status(row["download_id"], "importing")
+            held_msg = str(patch.get("completeness") or "Completeness check held import")
+            mark_status(row["download_id"], "importing", held_reason=held_msg, release_title=release_title)
         elif patch.get("status") == "failed":
-            mark_status(row["download_id"], "failed", error=str(patch.get("error") or ""))
+            mark_status(row["download_id"], "failed", error=str(patch.get("error") or ""), release_title=release_title)
             summary["failed"] += 1
             _return_to_wishlist(database, row, str(patch.get("error") or ""))
             if asin:

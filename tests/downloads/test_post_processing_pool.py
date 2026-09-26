@@ -122,10 +122,10 @@ def test_the_task_still_moves_to_post_processing(wired):
 
 def test_search_work_still_goes_to_the_search_pool():
     """Only post-processing moves. Every place that queues a DOWNLOAD worker —
-    the retry-after-quarantine path and the monitor's restart path — keeps using
+    the retry-after-quarantine path and both monitor restart paths — keeps using
     the shared pool it always did."""
     src = _source('core/downloads/monitor.py')
-    assert src.count('missing_download_executor.submit(_download_track_worker') == 2
+    assert src.count('missing_download_executor.submit(_download_track_worker') == 3
 
 
 # ── the wiring, which no unit test can see ──────────────────────────────────

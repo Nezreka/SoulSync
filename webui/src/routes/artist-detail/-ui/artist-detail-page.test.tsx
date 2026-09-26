@@ -174,6 +174,18 @@ describe('fire-and-forget side effects', () => {
     expect(window.checkArtistEnhanceEligibility).not.toHaveBeenCalled();
   });
 
+  it('asks what a LIBRARY artist appears on', async () => {
+    renderPage();
+    await waitFor(() => expect(requested).toContain('/api/artist/42/appears-on'));
+  });
+
+  it('does not ask for a source artist, it has no library tracks', async () => {
+    stubDetail({ success: true, artist: { id: 'sp1', name: 'X' }, discography: {} });
+    renderPage();
+    await screen.findByText('X');
+    expect(requested.some((u) => u.includes('/appears-on'))).toBe(false);
+  });
+
   it('wires the watchlist button to the canonical Spotify identity', async () => {
     // Local now (initializeLibraryWatchlistButton's port): the hero checks the
     // status itself and reflects it on the button.
@@ -1011,5 +1023,52 @@ describe('the Wrong match? button', () => {
     );
     const detailLoads = requested.filter((u) => u.includes('artist-detail/42')).length;
     expect(detailLoads).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('opening a release (#1297)', () => {
+  afterEach(() => {
+    delete window.openDownloadMissingModalForArtistAlbum;
+    delete window.openAddToWishlistModal;
+    delete window.registerArtistDownload;
+    delete window.reopenActiveDownloadModal;
+  });
+
+  it('opens the download modal with the tracks, not the add-all wishlist modal', async () => {
+    const download = vi.fn(async () => {});
+    const wishlist = vi.fn(async () => {});
+    const register = vi.fn();
+    window.openDownloadMissingModalForArtistAlbum = download;
+    window.openAddToWishlistModal = wishlist as never;
+    window.registerArtistDownload = register;
+    renderPage();
+    await screen.findByText('SAW');
+
+    fireEvent.click(document.querySelector('.release-card') as HTMLElement);
+
+    await waitFor(() => expect(download).toHaveBeenCalledTimes(1));
+    const [virtualId, name, tracks, album, artist, overlay] = download.mock.calls[0] as unknown[];
+    expect(virtualId).toBe('artist_album_42_1');
+    expect(name).toBe('[Aphex Twin] SAW');
+    expect(tracks).toEqual([{ id: 1 }]);
+    expect(album).toMatchObject({ id: 1, name: 'SAW' });
+    expect(artist).toMatchObject({ id: 42, name: 'Aphex Twin' });
+    expect(overlay).toBe(false);
+    expect(register).toHaveBeenCalledWith(artist, album, 'artist_album_42_1', 'album');
+    expect(wishlist).not.toHaveBeenCalled();
+  });
+
+  it('brings back an album already downloading instead of fetching it again', async () => {
+    const download = vi.fn(async () => {});
+    window.openDownloadMissingModalForArtistAlbum = download;
+    window.reopenActiveDownloadModal = vi.fn((id: string) => id === 'artist_album_42_1');
+    renderPage();
+    await screen.findByText('SAW');
+
+    fireEvent.click(document.querySelector('.release-card') as HTMLElement);
+
+    await waitFor(() => expect(window.reopenActiveDownloadModal).toHaveBeenCalled());
+    expect(download).not.toHaveBeenCalled();
+    expect(requested.some((u) => u.includes('/api/album/'))).toBe(false);
   });
 });

@@ -41,6 +41,10 @@ describe('relativeTime (pages-extra.js:1117 — the sync-card variant)', () => {
 describe('formatDbSize', () => {
   it('flips sub-MB to KB', () => {
     expect(formatDbSize(0.5)).toBe('512 KB');
+    expect(formatDbSize(512)).toBe('512.0 MB');
+    // past a gig, nobody reads "10664.0 MB"
+    expect(formatDbSize(10664)).toBe('10.4 GB');
+    expect(formatDbSize(1024)).toBe('1.0 GB');
     expect(formatDbSize(12.34)).toBe('12.3 MB');
     expect(formatDbSize(1)).toBe('1.0 MB');
   });

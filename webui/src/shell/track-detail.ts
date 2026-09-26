@@ -15,9 +15,14 @@ import { escapeHtml } from './html';
 
 declare global {
   /* eslint-disable no-var */
-  var showConfirmDialog: (opts: {
-    title: string; message: string; confirmText?: string; cancelText?: string;
-  }) => Promise<boolean>;
+  var showConfirmDialog:
+    | ((opts: {
+        title: string;
+        message: string;
+        confirmText?: string;
+        cancelText?: string;
+      }) => Promise<boolean>)
+    | undefined;
   var showCandidatesModal: (taskId: string) => void;
   /* eslint-enable no-var */
 }
@@ -60,7 +65,7 @@ function _tdEsc(s: unknown): string {
 
 function _tdSetText(id: string, value: unknown, fallback = '—'): void {
   const el = document.getElementById(id);
-  if (el) el.textContent = (value && String(value).trim()) ? String(value) : fallback;
+  if (el) el.textContent = value && String(value).trim() ? String(value) : fallback;
 }
 
 // Release the preview <audio> so the OS file handle is freed before any move
@@ -106,7 +111,11 @@ export async function openTrackDetail(taskId: string): Promise<void> {
   let detail: TrackDetailPayload;
   try {
     const resp = await fetch(`/api/downloads/task/${encodeURIComponent(taskId)}/detail`);
-    const data = (await resp.json()) as { success?: boolean; error?: string; detail?: TrackDetailPayload };
+    const data = (await resp.json()) as {
+      success?: boolean;
+      error?: string;
+      detail?: TrackDetailPayload;
+    };
     if (!data.success) {
       window.showToast?.(data.error || 'Could not load track detail', 'error');
       return;
@@ -167,13 +176,23 @@ function _tdRender(d: TrackDetailPayload, taskId: string): void {
 
   // Expected vs downloaded (only when we have provenance)
   const prov = document.getElementById('td-provenance');
-  const exp = (d.expected && (d.expected.title || d.expected.artist));
-  const dl = (d.downloaded && (d.downloaded.title || d.downloaded.artist));
+  const exp = d.expected && (d.expected.title || d.expected.artist);
+  const dl = d.downloaded && (d.downloaded.title || d.downloaded.artist);
   if (prov) {
     if (exp || dl) {
       prov.hidden = false;
-      _tdSetText('td-exp', exp ? `${d.expected!.title}${d.expected!.artist ? ' — ' + d.expected!.artist : ''}` : '', '—');
-      _tdSetText('td-dl', dl ? `${d.downloaded!.title}${d.downloaded!.artist ? ' — ' + d.downloaded!.artist : ''}` : '', '—');
+      _tdSetText(
+        'td-exp',
+        exp ? `${d.expected!.title}${d.expected!.artist ? ' — ' + d.expected!.artist : ''}` : '',
+        '—',
+      );
+      _tdSetText(
+        'td-dl',
+        dl
+          ? `${d.downloaded!.title}${d.downloaded!.artist ? ' — ' + d.downloaded!.artist : ''}`
+          : '',
+        '—',
+      );
     } else {
       prov.hidden = true;
     }
@@ -225,8 +244,11 @@ function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): 
   };
 
   if (kind === 'quarantined') {
-    add('✓ Accept & Import', 'td-action-primary', (e) =>
-      void _tdAccept(e.currentTarget as HTMLButtonElement, d.quarantine_entry_id, taskId));
+    add(
+      '✓ Accept & Import',
+      'td-action-primary',
+      (e) => void _tdAccept(e.currentTarget as HTMLButtonElement, d.quarantine_entry_id, taskId),
+    );
     add('🔍 Search for a different result', 'td-action-secondary', () => {
       closeTrackDetail();
       if (taskId) showCandidatesModal(taskId);
@@ -240,12 +262,16 @@ function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): 
   // completed / in_progress: no destructive actions - the player + info is it.
 }
 
-async function _tdAccept(button: HTMLButtonElement, entryId: string | number | undefined, taskId: string): Promise<void> {
+async function _tdAccept(
+  button: HTMLButtonElement,
+  entryId: string | number | undefined,
+  taskId: string,
+): Promise<void> {
   if (!entryId) {
     window.showToast?.('Cannot accept — missing quarantine id.', 'error');
     return;
   }
-  const confirmed = await showConfirmDialog({
+  const confirmed = await showConfirmDialog?.({
     title: 'Accept Quarantined File',
     message: 'Import this file and skip the quarantine checks for this approved pass?',
     confirmText: 'Accept & Import',
@@ -268,13 +294,21 @@ async function _tdAccept(button: HTMLButtonElement, entryId: string | number | u
       closeTrackDetail();
       return;
     }
-    const needsRecover = /thin sidecar|recover to staging|embedded context|missing file or sidecar/i.test(data.error || '');
+    const needsRecover =
+      /thin sidecar|recover to staging|embedded context|missing file or sidecar/i.test(
+        data.error || '',
+      );
     if (needsRecover) {
       button.textContent = 'Recovering…';
-      const rec = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/recover`, { method: 'POST' });
+      const rec = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/recover`, {
+        method: 'POST',
+      });
       const recData = (await rec.json()) as { success?: boolean; error?: string };
       if (recData.success) {
-        window.showToast?.('Older entry — moved to Staging. Finish it from the Import page.', 'success');
+        window.showToast?.(
+          'Older entry — moved to Staging. Finish it from the Import page.',
+          'success',
+        );
         closeTrackDetail();
         return;
       }

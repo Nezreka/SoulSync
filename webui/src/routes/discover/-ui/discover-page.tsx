@@ -60,7 +60,6 @@ import { useDownloadBar } from '../-discover.use-download-bar';
 import { useHero } from '../-discover.use-hero';
 import { useLastfmRadio } from '../-discover.use-lastfm-radio';
 import { useListenBrainz } from '../-discover.use-listenbrainz';
-import { DeezerEditorialShelf } from './deezer-editorial-shelf';
 import { defaultLazySource, useMixModal } from '../-discover.use-mix-modal';
 import { useDiscoverMixes } from '../-discover.use-mixes';
 import { useDiscoverPage } from '../-discover.use-page';
@@ -84,6 +83,7 @@ import { BlacklistModal } from './blacklist-modal';
 import { BuildPlaylistSection } from './build-playlist';
 import { ByltSections } from './bylt-sections';
 import { CacheShelf, GenreExplorerSection } from './cache-shelves';
+import { DeezerEditorialShelf } from './deezer-editorial-shelf';
 import { DiscoverHero } from './discover-hero';
 import { DownloadBar } from './download-bar';
 import { GenreDiveModal } from './genre-dive-modal';
@@ -1150,7 +1150,7 @@ export function DiscoverPage() {
             onSelectTab={lb.selectTab}
             onSelectGroup={lb.selectGroup}
             onRefresh={() => void lb.refresh()}
-            onConnect={() => void window.openPersonalSettings?.()}
+            onConnect={() => window.openMyAccountsModal?.()}
             onOpenMix={modal.open}
             onPlayMix={playMixFromCard}
             playingKey={playingMixKey}

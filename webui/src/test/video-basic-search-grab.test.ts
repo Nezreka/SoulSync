@@ -22,7 +22,10 @@ import { extractFunction } from './vanilla-extract';
 /** The IIFE body, de-indented so extractFunction's `^function` anchor matches. */
 function searchSource(): string {
   const raw = readFileSync(resolve(process.cwd(), 'static/video/video-search.js'), 'utf8');
-  expect(raw.includes('`'), 'video-search.js grew a template literal — the dedent below is no longer safe').toBe(false);
+  expect(
+    raw.includes('`'),
+    'video-search.js grew a template literal — the dedent below is no longer safe',
+  ).toBe(false);
   return raw.replace(/^ {4}/gm, '');
 }
 
@@ -47,15 +50,27 @@ interface Lifted {
   identifyCanGrab: () => boolean;
   setIdentify: (row: Row, sourceId: string) => void;
   basicDefaultIdentifyMode: (r: Row, category: string) => string;
-  identifyGrabDescriptor: (r: Row, sourceId: string, siblings: Row[] | null) => Record<string, unknown>;
-  buildPayload: (row: Row, sourceId: string, mode: string, item: Record<string, unknown>,
-                 fields: { season: number | null; episode: number | null }) => Record<string, any>;
+  identifyGrabDescriptor: (
+    r: Row,
+    sourceId: string,
+    siblings: Row[] | null,
+  ) => Record<string, unknown>;
+  buildPayload: (
+    row: Row,
+    sourceId: string,
+    mode: string,
+    item: Record<string, unknown>,
+    fields: { season: number | null; episode: number | null },
+  ) => Record<string, any>;
 }
 
 /** Evaluate the three pure helpers with only BASIC_SEARCH_SOURCES in scope. */
 function lift(): Lifted {
   const src = searchSource();
-  const config = src.slice(src.indexOf('var BASIC_SEARCH_SOURCES = {'), src.indexOf('var BASIC_TORRENT_SOURCES'));
+  const config = src.slice(
+    src.indexOf('var BASIC_SEARCH_SOURCES = {'),
+    src.indexOf('var BASIC_TORRENT_SOURCES'),
+  );
   expect(config).toContain('soulseek');
   const body = [
     config,
@@ -79,16 +94,36 @@ function lift(): Lifted {
                          grab: identifyGrabDescriptor(row, sourceId, [row]) };
        return freshGrabPayload();
      }`,
-    'return { basicHitGrabbable: basicHitGrabbable, basicDefaultIdentifyMode: basicDefaultIdentifyMode,'
-      + ' identifyGrabDescriptor: identifyGrabDescriptor, buildPayload: buildPayload,'
-      + ' identifyCanGrab: identifyCanGrab, setIdentify: setIdentify };',
+    'return { basicHitGrabbable: basicHitGrabbable, basicDefaultIdentifyMode: basicDefaultIdentifyMode,' +
+      ' identifyGrabDescriptor: identifyGrabDescriptor, buildPayload: buildPayload,' +
+      ' identifyCanGrab: identifyCanGrab, setIdentify: setIdentify };',
   ].join('\n');
   return new Function(body)() as Lifted;
 }
 
-const SOULSEEK: Row = { title: 'Silo S03E08 1080p WEB', filename: '@@silo/Silo.S03E08.mkv', username: 'peer1', season: 3, episode: 8, size_bytes: 5 };
-const TORRENT: Row = { title: 'Silo S03E08 1080p WEB', download_url: 'https://prowlarr/dl.torrent', magnet_uri: 'magnet:?xt=1', indexer_id: 42, protocol: 'torrent', season: 3, episode: 8 } as unknown as Row;
-const EXTTO: Row = { title: 'Silo S03E08 1080p WEB', magnet_uri: 'magnet:?xt=2', season: 3, episode: 8 };
+const SOULSEEK: Row = {
+  title: 'Silo S03E08 1080p WEB',
+  filename: '@@silo/Silo.S03E08.mkv',
+  username: 'peer1',
+  season: 3,
+  episode: 8,
+  size_bytes: 5,
+};
+const TORRENT: Row = {
+  title: 'Silo S03E08 1080p WEB',
+  download_url: 'https://prowlarr/dl.torrent',
+  magnet_uri: 'magnet:?xt=1',
+  indexer_id: 42,
+  protocol: 'torrent',
+  season: 3,
+  episode: 8,
+} as unknown as Row;
+const EXTTO: Row = {
+  title: 'Silo S03E08 1080p WEB',
+  magnet_uri: 'magnet:?xt=2',
+  season: 3,
+  episode: 8,
+};
 
 describe('Basic Search grab descriptor', () => {
   it('sends a Soulseek hit as a Soulseek grab, with the other accepted hits as its retry pool', () => {
@@ -105,7 +140,13 @@ describe('Basic Search grab descriptor', () => {
     expect(d.filename).toBe('@@silo/Silo.S03E08.mkv');
     // only OTHER accepted hits with a peer — the row itself, rejects and blanks are out
     expect(d.candidates).toEqual([
-      { username: 'peer2', filename: 'other.mkv', size_bytes: 9, quality_label: undefined, title: undefined },
+      {
+        username: 'peer2',
+        filename: 'other.mkv',
+        size_bytes: 9,
+        quality_label: undefined,
+        title: undefined,
+      },
     ]);
     expect(d.download_url).toBeUndefined();
   });
@@ -115,14 +156,16 @@ describe('Basic Search grab descriptor', () => {
     const d = identifyGrabDescriptor(TORRENT, 'thepiratebay', [TORRENT]);
     expect(d.source).toBe('torrent');
     expect(d.download_url).toBe('https://prowlarr/dl.torrent');
-    expect(d.magnet_uri).toBe('magnet:?xt=1');   // #1139 fallback when the .torrent fetch fails
-    expect(d.indexer_id).toBe(42);              // the hit's real id, not the tab's slug
+    expect(d.magnet_uri).toBe('magnet:?xt=1'); // #1139 fallback when the .torrent fetch fails
+    expect(d.indexer_id).toBe(42); // the hit's real id, not the tab's slug
     expect(d.candidates).toEqual([]);
   });
 
   it('falls back to the tab for an indexer id the hit did not carry', () => {
     const { identifyGrabDescriptor } = lift();
-    expect(identifyGrabDescriptor({ title: 'x', magnet_uri: 'magnet:?y' }, '1337x', null).indexer_id).toBe('1337x');
+    expect(
+      identifyGrabDescriptor({ title: 'x', magnet_uri: 'magnet:?y' }, '1337x', null).indexer_id,
+    ).toBe('1337x');
   });
 
   it('keeps EXT.to hits branded as EXT.to and lets the server map them to a torrent', () => {
@@ -133,7 +176,7 @@ describe('Basic Search grab descriptor', () => {
     expect(d.indexer_id).toBe('extto');
     // fresh rows carry no `filename`; the release title is what identifies them
     expect(d.filename).toBe('Silo S03E08 1080p WEB');
-    expect(d.download_url).toBe('magnet:?xt=2');   // magnet stands in for a missing .torrent
+    expect(d.download_url).toBe('magnet:?xt=2'); // magnet stands in for a missing .torrent
   });
 
   it('carries the EXT.to detail page so the server can resolve the magnet at grab time', () => {
@@ -141,17 +184,23 @@ describe('Basic Search grab descriptor', () => {
     // challenged detail fetch, so the list ships link-less and the server resolves
     // the one you pick. Dropping info_url here is what made every hit unreachable.
     const { identifyGrabDescriptor } = lift();
-    const listed: Row = { title: 'Interstellar 2014 1080p BluRay',
-      info_url: 'https://ext.to/interstellar-2014-1014669/', magnet_id: '1014669' } as Row;
+    const listed: Row = {
+      title: 'Interstellar 2014 1080p BluRay',
+      info_url: 'https://ext.to/interstellar-2014-1014669/',
+      magnet_id: '1014669',
+    } as Row;
     const d = identifyGrabDescriptor(listed, 'extto', null);
     expect(d.info_url).toBe('https://ext.to/interstellar-2014-1014669/');
     expect(d.magnet_id).toBe('1014669');
-    expect(d.download_url).toBeUndefined();   // there genuinely isn't one yet
+    expect(d.download_url).toBeUndefined(); // there genuinely isn't one yet
   });
 
   it('sends usenet hits to the usenet client', () => {
     const { identifyGrabDescriptor } = lift();
-    expect(identifyGrabDescriptor({ title: 'x', download_url: 'https://i/x.nzb' }, 'usenet', null).source).toBe('usenet');
+    expect(
+      identifyGrabDescriptor({ title: 'x', download_url: 'https://i/x.nzb' }, 'usenet', null)
+        .source,
+    ).toBe('usenet');
   });
 });
 
@@ -159,16 +208,20 @@ describe('Basic Search grabbability', () => {
   it('needs a peer and a file for Soulseek, and a link for everything else', () => {
     const { basicHitGrabbable } = lift();
     expect(basicHitGrabbable(SOULSEEK, 'soulseek')).toBe(true);
-    expect(basicHitGrabbable({ title: 'x', username: 'peer' }, 'soulseek')).toBe(false);   // listing with no file
-    expect(basicHitGrabbable(SOULSEEK, 'thepiratebay')).toBe(false);                       // no magnet/.torrent
+    expect(basicHitGrabbable({ title: 'x', username: 'peer' }, 'soulseek')).toBe(false); // listing with no file
+    expect(basicHitGrabbable(SOULSEEK, 'thepiratebay')).toBe(false); // no magnet/.torrent
     expect(basicHitGrabbable(TORRENT, 'thepiratebay')).toBe(true);
-    expect(basicHitGrabbable(EXTTO, 'extto')).toBe(true);                                  // magnet only is enough
+    expect(basicHitGrabbable(EXTTO, 'extto')).toBe(true); // magnet only is enough
     // an EXT.to hit with ONLY a detail page is still grabbable — the magnet is
     // resolved server-side at grab time. Requiring a link here is what put 'No link'
     // on every single EXT.to result.
-    expect(basicHitGrabbable({ title: 'x', info_url: 'https://ext.to/x-1/' } as Row, 'extto')).toBe(true);
+    expect(basicHitGrabbable({ title: 'x', info_url: 'https://ext.to/x-1/' } as Row, 'extto')).toBe(
+      true,
+    );
     // ...but a detail page means nothing to a Prowlarr indexer, which must have a link
-    expect(basicHitGrabbable({ title: 'x', info_url: 'https://tpb/x' } as Row, 'thepiratebay')).toBe(false);
+    expect(
+      basicHitGrabbable({ title: 'x', info_url: 'https://tpb/x' } as Row, 'thepiratebay'),
+    ).toBe(false);
   });
 });
 
@@ -194,7 +247,6 @@ describe('Basic Search identify mode', () => {
   });
 });
 
-
 /**
  * The payloads the modal actually POSTs. These are the exact shapes
  * tests/test_video_search_recents.py replays against the real grab endpoint, so
@@ -206,18 +258,30 @@ describe('Basic Search grab payload', () => {
   const FILM = { tmdb_id: 157336, title: 'Interstellar', year: 2014, poster: '/i.jpg' };
 
   it('scopes an episode grab to that episode', () => {
-    const p = lift().buildPayload(TORRENT, 'thepiratebay', 'episode', SHOW, { season: 3, episode: 8 });
+    const p = lift().buildPayload(TORRENT, 'thepiratebay', 'episode', SHOW, {
+      season: 3,
+      episode: 8,
+    });
     expect(p.kind).toBe('show');
     expect(p.source).toBe('torrent');
-    expect(p.title).toBe('Silo');                       // the TMDB title, not the release name
+    expect(p.title).toBe('Silo'); // the TMDB title, not the release name
     expect(p.release_title).toBe('Silo S03E08 1080p WEB');
     expect(p.media_id).toBe(125988);
     expect(p.media_source).toBe('tmdb');
-    expect(p.search_ctx).toEqual({ scope: 'episode', title: 'Silo', year: 2023, season: 3, episode: 8 });
+    expect(p.search_ctx).toEqual({
+      scope: 'episode',
+      title: 'Silo',
+      year: 2023,
+      season: 3,
+      episode: 8,
+    });
   });
 
   it('scopes a season grab to the season with NO episode — that is what makes the monitor map the folder', () => {
-    const p = lift().buildPayload(TORRENT, 'thepiratebay', 'season', SHOW, { season: 3, episode: 8 });
+    const p = lift().buildPayload(TORRENT, 'thepiratebay', 'season', SHOW, {
+      season: 3,
+      episode: 8,
+    });
     expect(p.kind).toBe('show');
     expect(p.search_ctx.scope).toBe('season');
     expect(p.search_ctx.season).toBe(3);
@@ -225,8 +289,13 @@ describe('Basic Search grab payload', () => {
   });
 
   it('scopes a movie grab with no season/episode at all', () => {
-    const p = lift().buildPayload({ title: 'Interstellar 2014 1080p BluRay', magnet_uri: 'magnet:?m' },
-      'extto', 'movie', FILM, { season: null, episode: null });
+    const p = lift().buildPayload(
+      { title: 'Interstellar 2014 1080p BluRay', magnet_uri: 'magnet:?m' },
+      'extto',
+      'movie',
+      FILM,
+      { season: null, episode: null },
+    );
     expect(p.kind).toBe('movie');
     expect(p.source).toBe('extto');
     expect(p.search_ctx).toEqual({ scope: 'movie', title: 'Interstellar', year: 2014 });
@@ -238,10 +307,9 @@ describe('Basic Search grab payload', () => {
     expect(p.source).toBe('soulseek');
     expect(p.username).toBe('peer1');
     expect(p.filename).toBe('@@silo/Silo.S03E08.mkv');
-    expect('files' in p).toBe(false);   // grab-pack's fan-out list, not a grab field
+    expect('files' in p).toBe(false); // grab-pack's fan-out list, not a grab field
   });
 });
-
 
 /**
  * The card and the modal must never disagree about whether a release is fetchable.
@@ -254,19 +322,49 @@ describe('Basic Search grab payload', () => {
  */
 describe('the card and the modal agree on what is grabbable', () => {
   const CASES: { label: string; row: Row; sourceId: string; grabbable: boolean }[] = [
-    { label: 'EXT.to hit with only a detail page', sourceId: 'extto', grabbable: true,
-      row: { title: 'Interstellar 2014 1080p', info_url: 'https://ext.to/x-1/', magnet_id: '1' } },
+    {
+      label: 'EXT.to hit with only a detail page',
+      sourceId: 'extto',
+      grabbable: true,
+      row: { title: 'Interstellar 2014 1080p', info_url: 'https://ext.to/x-1/', magnet_id: '1' },
+    },
     { label: 'EXT.to hit with a magnet', sourceId: 'extto', grabbable: true, row: EXTTO },
-    { label: 'EXT.to hit with nothing at all', sourceId: 'extto', grabbable: false,
-      row: { title: 'Interstellar 2014 1080p' } },
-    { label: 'Prowlarr torrent with a link', sourceId: 'thepiratebay', grabbable: true, row: TORRENT },
-    { label: 'Prowlarr torrent with only a detail page', sourceId: 'thepiratebay', grabbable: false,
-      row: { title: 'x', info_url: 'https://tpb/x' } },
-    { label: 'Soulseek hit with a peer and a file', sourceId: 'soulseek', grabbable: true, row: SOULSEEK },
-    { label: 'Soulseek hit with no file', sourceId: 'soulseek', grabbable: false,
-      row: { title: 'x', username: 'peer1' } },
-    { label: 'usenet hit with an NZB', sourceId: 'usenet', grabbable: true,
-      row: { title: 'x', download_url: 'https://i/x.nzb' } },
+    {
+      label: 'EXT.to hit with nothing at all',
+      sourceId: 'extto',
+      grabbable: false,
+      row: { title: 'Interstellar 2014 1080p' },
+    },
+    {
+      label: 'Prowlarr torrent with a link',
+      sourceId: 'thepiratebay',
+      grabbable: true,
+      row: TORRENT,
+    },
+    {
+      label: 'Prowlarr torrent with only a detail page',
+      sourceId: 'thepiratebay',
+      grabbable: false,
+      row: { title: 'x', info_url: 'https://tpb/x' },
+    },
+    {
+      label: 'Soulseek hit with a peer and a file',
+      sourceId: 'soulseek',
+      grabbable: true,
+      row: SOULSEEK,
+    },
+    {
+      label: 'Soulseek hit with no file',
+      sourceId: 'soulseek',
+      grabbable: false,
+      row: { title: 'x', username: 'peer1' },
+    },
+    {
+      label: 'usenet hit with an NZB',
+      sourceId: 'usenet',
+      grabbable: true,
+      row: { title: 'x', download_url: 'https://i/x.nzb' },
+    },
   ];
 
   it.each(CASES)('$label', ({ row, sourceId, grabbable }) => {

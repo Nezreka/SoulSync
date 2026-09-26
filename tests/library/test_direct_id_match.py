@@ -45,9 +45,35 @@ def test_loose_uuid_without_url_context_is_rejected():
     assert extract_direct_id("musicbrainz", "album", f"album {MBID} deluxe") is None
 
 
-def test_non_musicbrainz_services_have_no_direct_id_yet():
+def test_non_musicbrainz_services_without_a_url_shape():
     assert extract_direct_id("spotify", "album", MBID) is None
-    assert extract_direct_id("deezer", "track", "12345") is None
+    assert extract_direct_id("spotify", "album", "12345") is None
+
+
+def test_deezer_album_url_detected():
+    from core.library.direct_id import extract_deezer_link
+    url = "https://www.deezer.com/us/album/620787111"
+    assert extract_direct_id("deezer", "album", url) == "620787111"
+    assert extract_deezer_link(url) == ("album", "620787111")
+
+
+def test_deezer_track_url_with_locale():
+    from core.library.direct_id import extract_deezer_link
+    url = "https://www.deezer.com/en/track/2914419581"
+    assert extract_direct_id("deezer", "track", url) == "2914419581"
+    assert extract_deezer_link(url) == ("track", "2914419581")
+
+
+def test_deezer_bare_numeric_id():
+    assert extract_direct_id("deezer", "album", "620787111") == "620787111"
+    assert extract_direct_id("deezer", "album", "12") is None  # too short
+    assert extract_direct_id("deezer", "album", "Raccoons") is None
+
+
+def test_deezer_short_link_rejected():
+    from core.library.direct_id import extract_deezer_link
+    assert extract_deezer_link("https://link.deezer.com/s/abc") is None
+    assert extract_direct_id("deezer", "album", "https://link.deezer.com/s/abc") is None
 
 
 # ── _search_service direct dispatch ──────────────────────────────────────────
@@ -111,3 +137,75 @@ def test_plain_query_skips_direct_lookup(monkeypatch):
     results = ss._search_service("musicbrainz", "album", "Idols")
     assert results[0]["id"] == "r1"
     mb_client.get_release.assert_not_called()       # no wasted direct lookup
+
+
+# ── Deezer URL / id dispatch ─────────────────────────────────────────────────
+
+_DEEZER_ALBUM = {
+    "id": 620787111,
+    "title": "Raccoons (Gaudi & Don Letts Remix)",
+    "cover_medium": "https://e.example/cover.jpg",
+    "artist": {"name": "Caravan Palace"},
+    "tracks": {"data": [{"id": 2914419581, "title": "Raccoons (Gaudi & Don Letts Remix)"}]},
+}
+_DEEZER_TRACK = {
+    "id": 2914419581,
+    "title": "Raccoons (Gaudi & Don Letts Remix)",
+    "artist": {"name": "Caravan Palace"},
+    "album": {
+        "id": 620787111,
+        "title": "Raccoons (Gaudi & Don Letts Remix)",
+        "cover_medium": "https://e.example/cover.jpg",
+    },
+}
+
+
+def _stub_deezer_get(monkeypatch, by_kind):
+    import core.library.service_search as ss
+
+    def fake_get(kind, entity_id):
+        return by_kind.get((kind, str(entity_id)))
+
+    monkeypatch.setattr(ss, "_deezer_get", fake_get)
+    return ss
+
+
+def test_pasted_deezer_album_url_returns_that_album(monkeypatch):
+    ss = _stub_deezer_get(monkeypatch, {("album", "620787111"): _DEEZER_ALBUM})
+    results = ss._search_service(
+        "deezer", "album", "https://www.deezer.com/us/album/620787111",
+    )
+    assert len(results) == 1
+    assert results[0]["id"] == "620787111"
+    assert results[0]["name"] == "Raccoons (Gaudi & Don Letts Remix)"
+    assert "Direct ID match" in results[0]["extra"]
+    assert "Caravan Palace" in results[0]["extra"]
+
+
+def test_deezer_track_url_while_matching_album_returns_parent_album(monkeypatch):
+    ss = _stub_deezer_get(monkeypatch, {
+        ("track", "2914419581"): _DEEZER_TRACK,
+        ("album", "620787111"): _DEEZER_ALBUM,
+    })
+    results = ss._search_service(
+        "deezer", "album", "https://www.deezer.com/track/2914419581",
+    )
+    assert len(results) == 1
+    assert results[0]["id"] == "620787111"
+
+
+def test_unresolvable_deezer_url_falls_through_to_search(monkeypatch):
+    import core.library.service_search as ss
+    monkeypatch.setattr(ss, "_deezer_get", lambda kind, eid: None)
+
+    class _Resp:
+        def json(self):
+            return {"data": [{"id": 1, "title": "fuzzy", "artist": {"name": "X"},
+                              "cover_medium": None}]}
+
+    monkeypatch.setattr("requests.get", lambda *a, **k: _Resp())
+    monkeypatch.setattr("core.deezer_throttle.wait_for_slot", lambda: True)
+    results = ss._search_service(
+        "deezer", "album", "https://www.deezer.com/album/999",
+    )
+    assert len(results) == 1 and results[0]["id"] == "1"

@@ -16,6 +16,7 @@ import {
   watchlistIdentity,
 } from '../-artist-detail.api';
 import { backButtonLabel, pushArtistOrigin, pushPageOrigin } from '../-artist-detail.back-label';
+import { peekArtistEdit } from '../-artist-detail.edit-focus';
 import {
   readEnhancedViewMode,
   showsEnhancedToggle,
@@ -33,7 +34,9 @@ import {
   albumTracksParams,
   isReleaseClickable,
   openReleaseArtist,
+  releasePlaylistName,
   releaseToAlbumData,
+  releaseVirtualPlaylistId,
   stillCheckingMessage,
 } from '../-artist-detail.open-release';
 import { checkTracksBody, mergeOwnership } from '../-artist-detail.owned-tracks';
@@ -42,6 +45,7 @@ import { useCompletionStream } from '../-artist-detail.use-completion';
 import { useEnhancedData } from '../-artist-detail.use-enhanced';
 import { useGapFill } from '../-artist-detail.use-gap-fill';
 import { clearVanillaArtist, syncVanillaArtist } from '../-artist-detail.vanilla-state';
+import { AppearsOnSection } from './appears-on-section';
 import { ArtistDetailBackButton } from './artist-detail-back-button';
 import { ArtistHero } from './artist-hero';
 import { ArtistVideosSection } from './artist-videos-section';
@@ -125,7 +129,10 @@ export function ArtistDetailPage() {
    */
   const profile = useProfile();
   const canEnhance = showsEnhancedToggle(Boolean(profile?.isAdmin), sourceOnly);
-  const [enhanced, setEnhanced] = useState(() => readEnhancedViewMode(profile?.profileId));
+  // an issue's "edit details" lands here in the enhanced view, whatever was saved
+  const [enhanced, setEnhanced] = useState(
+    () => Boolean(peekArtistEdit(id)) || readEnhancedViewMode(profile?.profileId),
+  );
   const showEnhanced = canEnhance && enhanced;
   const enhancedState = useEnhancedData(payload?.artist?.id, showEnhanced);
 
@@ -300,9 +307,13 @@ export function ArtistDetailPage() {
       return;
     }
 
+    const album = releaseToAlbumData(release);
+    const virtualId = releaseVirtualPlaylistId(artist, album);
+    // checked before the fetch, so an album mid-download just comes back up
+    if (window.reopenActiveDownloadModal?.(virtualId)) return;
+
     window.showLoadingOverlay?.('Loading album...');
     try {
-      const album = releaseToAlbumData(release);
       const params = new URLSearchParams(albumTracksParams(release, artist));
       const response = await fetch(`/api/album/${album.id}/tracks?${params}`);
       if (!response.ok) throw new Error(`Failed to load album tracks: ${response.status}`);
@@ -311,13 +322,21 @@ export function ArtistDetailPage() {
       if (!data.success || !data.tracks?.length)
         throw new Error('No tracks found for this release');
 
-      // The modal opens immediately; ownership backfills behind it.
-      window.hideLoadingOverlay?.();
-      await window.openAddToWishlistModal?.(album, artist, data.tracks, album.album_type);
-      window.lazyLoadTrackOwnership?.(artist.name, data.tracks, null, album.name);
+      // #1297 the download modal, same as an album in search: pick tracks,
+      // download them, or add the picked ones to the wishlist from there.
+      await window.openDownloadMissingModalForArtistAlbum?.(
+        virtualId,
+        releasePlaylistName(artist, album),
+        data.tracks,
+        album,
+        artist,
+        false,
+      );
+      window.registerArtistDownload?.(artist, album, virtualId, album.album_type);
     } catch (error) {
+      window.showToast?.(`Error opening album: ${(error as Error).message}`, 'error');
+    } finally {
       window.hideLoadingOverlay?.();
-      window.showToast?.(`Error opening wishlist modal: ${(error as Error).message}`, 'error');
     }
   };
 
@@ -441,6 +460,9 @@ export function ArtistDetailPage() {
         enrichment={payload.enrichment_coverage}
         watchlist={watchlistIdentity(payload)}
         canFixMatches={canEnhance}
+        // same gate as the Enhanced toggle: admin, on a LIBRARY artist. a
+        // source-only artist has no library rows to remove.
+        canDelete={canEnhance}
         onMatchesChanged={() => {
           // the hero badges come from the page payload, the chips from the
           // enhanced one; a match change has to reach both
@@ -494,6 +516,15 @@ export function ArtistDetailPage() {
           {/* Live dates and setlists. Renders nothing unless a concert
               provider is configured, so it costs an unconfigured install
               exactly one request that answers "not set up". */}
+          {/* features and collabs filed under other artists. a source-only
+              artist has no library tracks to be credited on. */}
+          {sourceOnly ? null : (
+            <AppearsOnSection
+              artistId={payload.artist?.id}
+              artistName={String(payload.artist?.name || '')}
+            />
+          )}
+
           <ConcertsSection
             artistName={String(payload?.artist?.name || '')}
             mbid={String(payload?.artist?.musicbrainz_id || '')}

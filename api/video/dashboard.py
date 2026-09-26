@@ -42,8 +42,11 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.sources import resolve_video_server
         try:
-            rows = get_video_db().continue_watching(
-                server_source=resolve_video_server(), limit=20)
+            db = get_video_db()
+            rows = db.continue_watching(server_source=resolve_video_server(), limit=20)
+            from .kids import filter_mixed_library_items, video_cap
+            # a show row's id is the episode, the rating is on show_id
+            rows = filter_mixed_library_items(db, rows, video_cap(), show_id_key="show_id")
             return jsonify({"items": rows})
         except Exception:
             logger.exception("continue watching failed")
@@ -59,6 +62,8 @@ def register_routes(bp):
             stats = db.dashboard_stats(server_source=server)
             stats["server"] = server
             stats["recent"] = db.recently_added(server_source=server, limit=20)
+            from .kids import filter_mixed_library_items, video_cap
+            stats["recent"] = filter_mixed_library_items(db, stats["recent"], video_cap())
             return jsonify(stats)
         except Exception:
             logger.exception("Failed to build video dashboard stats")

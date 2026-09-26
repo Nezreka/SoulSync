@@ -203,7 +203,12 @@ def prepare_stream_task(track_data, deps: PrepareStreamDeps):
                             logger.info(f"Download completed via API status: {original_state}")
 
                             # Wait for file to stabilise on disk before moving
-                            found_file = deps.find_downloaded_file(download_path, track_data)
+                            candidate_file = download_status.get('file_path')
+                            if candidate_file and os.path.exists(candidate_file):
+                                found_file = candidate_file
+                            else:
+                                found_file = deps.find_downloaded_file(download_path, track_data)
+
                             if found_file:
                                 _prev_sz = -1
                                 for _sc in range(4):
@@ -218,7 +223,11 @@ def prepare_stream_task(track_data, deps: PrepareStreamDeps):
 
                             # Re-find in case it wasn't found on first try
                             if not found_file:
-                                found_file = deps.find_downloaded_file(download_path, track_data)
+                                candidate_file = download_status.get('file_path')
+                                if candidate_file and os.path.exists(candidate_file):
+                                    found_file = candidate_file
+                                else:
+                                    found_file = deps.find_downloaded_file(download_path, track_data)
                             
                             # Retry file search a few times (matching GUI logic)
                             retry_attempts = 5
@@ -227,7 +236,11 @@ def prepare_stream_task(track_data, deps: PrepareStreamDeps):
                                     break
                                 logger.warning(f"File not found yet, attempt {attempt + 1}/{retry_attempts}")
                                 time.sleep(1)
-                                found_file = deps.find_downloaded_file(download_path, track_data)
+                                candidate_file = download_status.get('file_path')
+                                if candidate_file and os.path.exists(candidate_file):
+                                    found_file = candidate_file
+                                else:
+                                    found_file = deps.find_downloaded_file(download_path, track_data)
                             
                             if found_file:
                                 logger.debug(f"Found downloaded file: {found_file}")
@@ -251,14 +264,24 @@ def prepare_stream_task(track_data, deps: PrepareStreamDeps):
                                             "file_path": stream_path
                                         })
                                     
-                                    # Clean up download from slskd API
+                                    # Clean up download from API / engine
                                     try:
                                         download_id = download_status.get('id', '')
-                                        if download_id and track_data.get('username'):
-                                            success = loop.run_until_complete(
-                                                deps.download_orchestrator.signal_download_completion(
-                                                    download_id, track_data.get('username'), remove=True)
-                                            )
+                                        username = track_data.get('username')
+                                        if download_id and username:
+                                            success = False
+                                            if hasattr(deps.download_orchestrator, 'cancel_download'):
+                                                success = loop.run_until_complete(
+                                                    deps.download_orchestrator.cancel_download(
+                                                        download_id, username, remove=True
+                                                    )
+                                                )
+                                            if not success and hasattr(deps.download_orchestrator, 'signal_download_completion'):
+                                                success = loop.run_until_complete(
+                                                    deps.download_orchestrator.signal_download_completion(
+                                                        download_id, username, remove=True
+                                                    )
+                                                )
                                             if success:
                                                 logger.debug(f"Cleaned up download {download_id} from API")
                                     except Exception as e:

@@ -662,7 +662,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                         Begin Analysis
                     </button>
                     <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
-                        Add to Wishlist
+                        ${typeof wishlistAddLabel === 'function' ? wishlistAddLabel() : 'Add to Wishlist'}
                     </button>
                     <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
                         Cancel All
@@ -2777,7 +2777,7 @@ function _renderCandidatesModal(data) {
                 <input type="text"
                        class="candidates-manual-search-input"
                        id="candidates-manual-search-input"
-                       placeholder="Search, or paste a Tidal / Qobuz track link..."
+                       placeholder="Search, or paste a Tidal / Qobuz / Deezer link..."
                        maxlength="300" />
                 ${sourceControl}
                 <button class="candidates-manual-search-btn"
@@ -4569,7 +4569,16 @@ function updateModalSyncProgress(playlistId, progress) {
             const failed = progress.failed_tracks || 0;
 
             if (totalEl) totalEl.textContent = total;
-            if (matchedEl) matchedEl.textContent = matched;
+            if (matchedEl) {
+                if (progress.duplicate_tracks > 0) {
+                    const synced = progress.synced_tracks || (matched - progress.duplicate_tracks);
+                    matchedEl.textContent = `${matched} (${synced} synced)`;
+                    matchedEl.title = `${progress.duplicate_tracks} duplicate track${progress.duplicate_tracks === 1 ? '' : 's'} folded (already on playlist)`;
+                } else {
+                    matchedEl.textContent = matched;
+                    matchedEl.removeAttribute('title');
+                }
+            }
             if (failedEl) failedEl.textContent = failed;
 
             // Calculate percentage like GUI
@@ -4787,6 +4796,9 @@ let _musicSyncClearTimer = null;
 let _lastfmImportTask = null;
 let _lastfmImportClearTimer = null;
 let _lastfmImportCompletion = null;
+let _listenbrainzImportTask = null;
+let _listenbrainzImportClearTimer = null;
+let _listenbrainzImportCompletion = null;
 
 function _taskClampPct(value, fallback = 0) {
     let pct = Number(value);
@@ -5193,15 +5205,74 @@ function _lastfmImportActiveHTML() {
     return _taskCardHTML('Importing Last.fm listening', pct, line, cls, _notifActionHTML('Open Stats', 'stats'));
 }
 
+function updateListenbrainzListeningImportTask(data) {
+    if (!data) return;
+    if (_listenbrainzImportClearTimer) { clearTimeout(_listenbrainzImportClearTimer); _listenbrainzImportClearTimer = null; }
+    const terminal = ['complete', 'error', 'cancelled'].includes(data.status);
+    const active = !terminal && (data.running === true || data.status === 'running');
+    if (active) {
+        _listenbrainzImportCompletion = null;
+        _listenbrainzImportTask = { ...data, updated_at: Date.now() };
+    } else if (terminal || _listenbrainzImportTask) {
+        const key = JSON.stringify([data.username, data.started_at, data.finished_at, data.status]);
+        if (!_listenbrainzImportCompletion || _listenbrainzImportCompletion.key !== key) {
+            let stamp = String(data.finished_at || '').replace(' ', 'T');
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(stamp)) stamp += 'Z';
+            const finished = Date.parse(stamp);
+            _listenbrainzImportCompletion = {
+                key,
+                expiresAt: Math.min(Date.now(), Number.isFinite(finished) ? finished : Date.now()) + 10000,
+            };
+        }
+        const remaining = _listenbrainzImportCompletion.expiresAt - Date.now();
+        _listenbrainzImportTask = remaining > 0 ? { ...data, running: false, updated_at: Date.now() } : null;
+        if (remaining > 0) {
+            _listenbrainzImportClearTimer = setTimeout(() => {
+                _listenbrainzImportClearTimer = null;
+                _listenbrainzImportTask = null;
+                _updateOverlayBell();
+                _patchOverlayActive();
+            }, remaining);
+        }
+    }
+    _updateOverlayBell();
+    _patchOverlayActive();
+}
+
+function _listenbrainzImportActive() {
+    return !!(_listenbrainzImportTask && (_listenbrainzImportTask.running || _listenbrainzImportTask.status === 'running'));
+}
+
+function _listenbrainzImportActiveHTML() {
+    const t = _listenbrainzImportTask;
+    if (!t) return '';
+    const active = _listenbrainzImportActive();
+    const hasProgress = _taskHasPct(t.progress);
+    const pct = active
+        ? (hasProgress ? _taskClampPct(t.progress) : null)
+        : (t.status === 'complete' ? 100 : (hasProgress ? _taskClampPct(t.progress) : null));
+    const cls = t.status === 'error' ? 'error' : (!active ? 'done' : '');
+    const inserted = Number(t.inserted || 0);
+    const duplicates = Number(t.duplicates || 0);
+    const total = Number(t.total_scrobbles || t.total_listens || 0);
+    const page = Number(t.page || 0);
+    const totalPages = Number(t.total_pages || 0);
+    const pageLine = page && totalPages ? ` · page ${page.toLocaleString()}/${totalPages.toLocaleString()}` : '';
+    const line = active
+        ? `${inserted.toLocaleString()} added${duplicates ? `, ${duplicates.toLocaleString()} skipped` : ''}${total ? ` · ${total.toLocaleString()} total` : ''}${pageLine}`
+        : (t.status === 'error' ? _escToast(t.error || 'ListenBrainz import failed') : _escToast(t.phase || 'ListenBrainz listening is up to date'));
+    return _taskCardHTML('Importing ListenBrainz listening', pct, line, cls, _notifActionHTML('Open Stats', 'stats'));
+}
+
 function _musicTasksActive() {
     return _musicAutomationActive() || _musicRepairActive() || _musicWatchlistActive()
         || _musicMediaScanActive() || _musicWishlistActive() || _musicSyncActive()
-        || _lastfmImportActive();
+        || _lastfmImportActive() || _listenbrainzImportActive();
 }
 
 function _musicActiveHTML() {
     return _musicAutomationActiveHTML() + _musicSyncActiveHTML() + _musicWishlistActiveHTML()
-        + _lastfmImportActiveHTML() + _musicWatchlistActiveHTML() + _musicMediaScanActiveHTML() + _musicRepairActiveHTML();
+        + _lastfmImportActiveHTML() + _listenbrainzImportActiveHTML() + _musicWatchlistActiveHTML() + _musicMediaScanActiveHTML() + _musicRepairActiveHTML();
 }
 
 function _seedMusicAutomationTask() {
@@ -5243,6 +5314,13 @@ function _seedLastfmImportTask() {
         .catch(() => {});
 }
 
+function _seedListenbrainzImportTask() {
+    fetch('/api/listenbrainz/listening-import/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s && s.success) updateListenbrainzListeningImportTask(s); })
+        .catch(() => {});
+}
+
 function _updateOverlayBell() {
     const btn = document.getElementById('notif-bell-btn');
     if (btn) btn.classList.toggle('notif-bell-working',
@@ -5267,6 +5345,7 @@ function _ensureTaskPolling() {
             _seedMusicRepairTask();
             _seedMusicMediaScanTask();
             _seedLastfmImportTask();
+            _seedListenbrainzImportTask();
         }, 12000);
     } else if (!active && _taskPollTimer) {
         clearInterval(_taskPollTimer);
@@ -5451,7 +5530,9 @@ function _patchOverlayActive() {
     if (host) host.innerHTML = _musicActiveHTML() + _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML();
 }
 
-function showToast(message, type = 'success', helpSection = null) {
+// opts.journal === false skips the server journal: for notes the server
+// already logged itself (profile:notify)
+function showToast(message, type = 'success', helpSection = null, opts = null) {
     const toastKey = `${type}:${message}`;
     const now = Date.now();
 
@@ -5466,7 +5547,7 @@ function showToast(message, type = 'success', helpSection = null) {
     if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
     _notifState.unreadCount++;
     _updateNotifBadge();
-    _queueNotifJournal(type, message);
+    if (!opts || opts.journal !== false) _queueNotifJournal(type, message);
 
     // Show compact toast — dismiss current if showing
     const container = document.getElementById('toast-container');

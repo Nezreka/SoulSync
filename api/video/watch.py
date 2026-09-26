@@ -66,6 +66,8 @@ def register_routes(bp):
                 logger.exception("watch library search failed for %s %r", plural, q)
                 continue
             items = [it for it in (page.get("items") or []) if it.get("tmdb_id")]
+            from .kids import filter_library_items, video_cap
+            items = filter_library_items(db, items, video_cap(), kind)
             posters = {}
             if items:
                 try:
@@ -159,6 +161,13 @@ def register_routes(bp):
         if tmdb_id <= 0 or kd not in ("m", "t"):
             return None, "kd must be m|t with a tmdb id", 400
         db = get_video_db()
+        # kids profiles: an over-cap title never streams. episodes go by their
+        # show's rating. checked before any file lookup so nothing leaks.
+        from .kids import tmdb_title_allowed, video_cap
+        cap = video_cap()
+        if cap is not None and not tmdb_title_allowed(db, "movie" if kd == "m" else "show",
+                                                      tmdb_id, cap):
+            return None, "restricted", 403
         if kd == "m":
             hit = db.video_stored_file_path("movie", tmdb_id=tmdb_id)
         else:
@@ -204,7 +213,8 @@ def register_routes(bp):
         from core.video.direct_play import direct_play_verdict
         found, err, status = _party_file(request.args)
         if err:
-            return jsonify({"playable": False, "verdict": "no", "reasons": [err]}), status
+            return jsonify({"playable": False, "verdict": "no", "reasons": [err],
+                            **({"restricted": True} if status == 403 else {})}), status
         db = get_video_db()
         # Judge the STORED path, not the resolved one: it is the row the codecs
         # are keyed by, it carries the same extension, and it is the only one
@@ -231,6 +241,9 @@ def register_routes(bp):
         from core.video.direct_play import mime_for
         found, err, status = _party_file(request.args)
         if err:
+            if status == 403:
+                from .kids import restricted_response
+                return restricted_response()
             return jsonify({"error": err}), status
 
         if found.get("path"):

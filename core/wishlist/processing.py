@@ -94,7 +94,14 @@ def remove_completed_tracks_from_wishlist(
                 try:
                     track_info = task.get('track_info', {})
                     context = {'track_info': track_info, 'original_search_result': track_info}
-                    remove_from_wishlist(context)
+                    # #1289: same proof the per-track callback needs. 'completed'
+                    # is a task state, not a library state — the verification
+                    # worker's no-context branch completes a task whose file
+                    # never left the downloads folder, and an atomic batch's
+                    # tasks complete while their files are still staged (those
+                    # were already settled by the publish itself).
+                    remove_from_wishlist(context, published_path=task.get('final_file_path'),
+                                         quiet_refusal=True)
                     removed_count += 1
                 except Exception as exc:
                     logger.error(f"[Wishlist Processing] Error removing completed track from wishlist: {exc}")
@@ -505,7 +512,11 @@ def finalize_auto_wishlist_completion(
     behavior — the gate treats a missing run_id as "lone batch"."""
     tracks_added = completion_summary.get('tracks_added', 0)
     total_failed = completion_summary.get('total_failed', 0)
-    logger.error(
+    # INFO, not ERROR: this is the normal end of every sub-batch, and "0 added
+    # to wishlist" is the healthy case (nothing failed, so nothing to re-queue).
+    # At ERROR it fired several times per cycle and made a working wishlist run
+    # read as a string of failures.
+    logger.info(
         f"[Auto-Wishlist] Background processing complete: {tracks_added} added to wishlist, {total_failed} failed"
     )
 
@@ -629,7 +640,11 @@ def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, acti
         manual_match = _mlm.get_match_for_track(music_database, profile_id, track, default_source='wishlist')
         if manual_match and _mlm.match_is_live(music_database, manual_match):
             try:
-                removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True, profile_id=profile_id)
+                from core.wishlist.removal_guard import REASON_MANUAL_MATCH
+                removed = wishlist_service.mark_track_download_result(
+                    spotify_track_id, success=True, profile_id=profile_id,
+                    profile_ids=[profile_id],
+                    audit={'reason': REASON_MANUAL_MATCH})
                 if removed:
                     cleanup_removed += 1
                     logger.info(f"{log_prefix} [Manual Match] Skipped already-matched track: '{track_name}'")
@@ -637,38 +652,24 @@ def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, acti
                 logger.error(f"{log_prefix} [Manual Match] Error removing track: {_mlm_err}")
             return cleanup_removed
 
-        found_in_db = False
-        matched_artist_name = ''
-        for artist in artists:
-            if isinstance(artist, str):
-                artist_name = artist
-            elif isinstance(artist, dict) and 'name' in artist:
-                artist_name = artist['name']
-            else:
-                artist_name = str(artist)
+        from core.wishlist.library_match import find_owned_match
+        from core.wishlist.removal_guard import REASON_ALREADY_OWNED
 
+        match = find_owned_match(
+            music_database, track_name, artists, track_album, active_server,
+            log=logger, log_prefix=log_prefix)
+
+        if match:
+            db_track, confidence, matched_artist_name = match
             try:
-                db_track, confidence = music_database.check_track_exists(
-                    track_name,
-                    artist_name,
-                    confidence_threshold=0.7,
-                    server_source=active_server,
-                    album=track_album,
-                )
-
-                if db_track and confidence >= 0.7:
-                    found_in_db = True
-                    matched_artist_name = artist_name
-                    break
-            except Exception:
-                continue
-
-        if found_in_db:
-            try:
-                removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True, profile_id=profile_id)
+                removed = wishlist_service.mark_track_download_result(
+                    spotify_track_id, success=True, profile_id=profile_id,
+                    profile_ids=[profile_id],
+                    audit={'reason': REASON_ALREADY_OWNED,
+                           'final_path': getattr(db_track, 'file_path', '') or ''})
                 if removed:
                     cleanup_removed += 1
-                    logger.info(f"{log_prefix} Removed already-owned track: '{track_name}' by {matched_artist_name or artist_name}")
+                    logger.info(f"{log_prefix} Removed already-owned track: '{track_name}' by {matched_artist_name}")
             except Exception as remove_error:
                 logger.error(f"{log_prefix} Error removing track from wishlist: {remove_error}")
 
@@ -932,8 +933,25 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
 
                 # Check if wishlist has tracks across all profiles
                 database = runtime.get_profiles_database()
+                # a profile without download rights keeps a wishlist of
+                # requests: the scheduler only downloads the rows an admin
+                # approved (it used to grab every profile's whole list)
+                from core.permissions import profile_can_download
                 all_profiles = database.get_all_profiles()
-                count = sum(wishlist_service.get_wishlist_count(profile_id=p['id']) for p in all_profiles)
+                approved_only = {p['id']: not profile_can_download(p) for p in all_profiles}
+
+                def _count(p):
+                    if approved_only[p['id']]:
+                        return wishlist_service.get_wishlist_count(profile_id=p['id'], approved_only=True)
+                    return wishlist_service.get_wishlist_count(profile_id=p['id'])
+
+                def _tracks(p):
+                    if approved_only[p['id']]:
+                        return wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id'],
+                                                                                 approved_only=True)
+                    return wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id'])
+
+                count = sum(_count(p) for p in all_profiles)
                 logger.info(f"[Auto-Wishlist] Wishlist count check: {count} tracks found across {len(all_profiles)} profiles")
                 runtime.update_automation_progress(automation_id, progress=10, phase='Checking wishlist',
                                                    log_line=f'{count} tracks across {len(all_profiles)} profiles', log_type='info')
@@ -943,15 +961,19 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
 
                 logger.info(f"[Auto-Wishlist] Found {count} tracks in wishlist, starting automatic processing...")
 
-                # Check if wishlist processing is already active (auto or manual)
+                # Age alone does not prove a download is dead. The batch healer
+                # owns recovery using task/worker state; keep blocking while the
+                # batch is non-terminal, including slow downloads and held queues.
                 playlist_id = "wishlist"
                 with runtime.tasks_lock:
                     for _batch_id, batch_data in runtime.download_batches.items():
                         batch_playlist_id = batch_data.get('playlist_id')
-                        # Check for both auto ('wishlist') and manual ('wishlist_manual') batches
                         if (batch_playlist_id in ['wishlist', 'wishlist_manual'] and
-                            batch_data.get('phase') not in ['complete', 'error', 'cancelled']):
-                            logger.info(f"Wishlist processing already active in another batch ({batch_playlist_id}), skipping automatic start")
+                                batch_data.get('phase') not in ['complete', 'error', 'cancelled', 'failed']):
+                            logger.info(
+                                f"Wishlist processing already active in another batch "
+                                f"({batch_playlist_id}), skipping automatic start"
+                            )
                             return
 
                 # CRITICAL: Clean duplicates BEFORE fetching tracks to prevent count mismatches
@@ -979,7 +1001,7 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                 # Get wishlist tracks for processing - combine all profiles
                 raw_wishlist_tracks = []
                 for profile in all_profiles:
-                    raw_wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=profile['id']))
+                    raw_wishlist_tracks.extend(_tracks(profile))
                 if not raw_wishlist_tracks:
                     logger.warning("No tracks returned from wishlist service.")
                     return

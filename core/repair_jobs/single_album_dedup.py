@@ -2,10 +2,17 @@
 
 import re
 from collections import defaultdict
-from difflib import SequenceMatcher
+from core.text.fold import folded_similarity as _folded_similarity
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import (
+    JobContext,
+    JobResult,
+    RepairJob,
+    hand_tagged_path_keys,
+    is_hand_tagged_path,
+    not_locked_sql,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.single_album_dedup")
@@ -50,6 +57,9 @@ class SingleAlbumDedupJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
+            # hand-tagged: a live single the user typed would pair with the
+            # studio album track and one of them gets offered for deletion
+            locked_filter = not_locked_sql(cursor, 'tracks', 't') + not_locked_sql(cursor, 'albums', 'al')
             cursor.execute("""
                 SELECT t.id, t.title, ar.name, al.title, al.record_type, al.track_count,
                        t.file_path, t.bitrate, t.duration, al.thumb_url, ar.thumb_url,
@@ -59,7 +69,7 @@ class SingleAlbumDedupJob(RepairJob):
                 LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.title IS NOT NULL AND t.title != ''
                   AND t.file_path IS NOT NULL AND t.file_path != ''
-            """)
+            """ + locked_filter)
             tracks = cursor.fetchall()
         except Exception as e:
             logger.error("Error fetching tracks from DB: %s", e, exc_info=True)
@@ -82,11 +92,16 @@ class SingleAlbumDedupJob(RepairJob):
         # Separate tracks into singles/EPs and album tracks
         singles = []
         album_tracks = []
+        hand_tagged = hand_tagged_path_keys(context.db)
 
         for row in tracks:
             (track_id, title, artist_name, album_title, album_type,
              total_track_count, file_path, bitrate, duration,
              album_thumb, artist_thumb, track_number, artist_id) = row
+
+            # same reason, for a hand-tagged file whose row isn't locked yet
+            if is_hand_tagged_path(file_path, hand_tagged):
+                continue
 
             entry = {
                 'id': track_id,
@@ -172,12 +187,13 @@ class SingleAlbumDedupJob(RepairJob):
                     continue
 
                 # Compare titles
-                title_sim = SequenceMatcher(None, single['norm_title'], album_t['norm_title']).ratio()
+                # two titles that fold to nothing are not the same song (#1306)
+                title_sim = _folded_similarity(single['norm_title'], album_t['norm_title'])
                 if title_sim < title_threshold:
                     continue
 
                 # Compare artists
-                artist_sim = SequenceMatcher(None, single['norm_artist'], album_t['norm_artist']).ratio()
+                artist_sim = _folded_similarity(single['norm_artist'], album_t['norm_artist'])
                 if artist_sim < artist_threshold:
                     continue
 
@@ -277,9 +293,6 @@ def _extract_version_tag(text: str) -> str:
 
 
 def _normalize(text: str) -> str:
-    """Normalize text for fuzzy comparison."""
-    t = text.lower()
-    t = re.sub(r'\(.*?\)', '', t)
-    t = re.sub(r'\[.*?\]', '', t)
-    t = re.sub(r'[^a-z0-9 ]', '', t)
-    return t.strip()
+    """Normalize text for fuzzy comparison: any script (#1306)."""
+    from core.text.fold import fold_title
+    return fold_title(text or '')

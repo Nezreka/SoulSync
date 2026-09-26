@@ -1,22 +1,18 @@
 /* The audiobooks tab of the wishlist page.
-
-   Its own stylesheet rather than the wishlist page's global wl-* classes: those
-   belong to the nebula, and an audiobook list has nothing in common with it
-   beyond living on the same page. Keeping them apart is also what guarantees a
-   change here cannot move a pixel of the music view. */
+   Premium Glassmorphic Design System matching SoulSync's top-tier aesthetics. */
 
 .panel {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 22px;
   min-width: 0;
-  animation: abFade 0.25s ease both;
+  animation: abFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes abFade {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -24,129 +20,448 @@
   }
 }
 
-.head {
+/* ── Hero Banner ─────────────────────────────────────────────────────────── */
+
+.heroBanner {
+  position: relative;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 24px;
+  padding: 20px 24px;
+  border-radius: 18px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.045) 0%,
+    rgba(255, 255, 255, 0.015) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  overflow: hidden;
   flex-wrap: wrap;
 }
 
-.headText {
-  min-width: 0;
-  max-width: 640px;
+.heroBanner::before {
+  content: '';
+  position: absolute;
+  top: -40px;
+  left: -40px;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.18) 0%, transparent 70%);
+  pointer-events: none;
+  filter: blur(20px);
 }
 
-.blurb {
+.heroContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 620px;
+}
+
+.heroTagline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.heroPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.heroPulseDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 8px #34d399;
+  animation: heroPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes heroPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+}
+
+.heroTitle {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-  color: rgba(255, 255, 255, 0.5);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #ffffff;
 }
 
-.headActions {
+.heroDesc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.52);
+}
+
+.heroStats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.heroStatItem {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.heroStatVal {
+  font-size: 15px;
+  font-weight: 750;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.heroStatLabel {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.heroActions {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 14px;
 }
 
-.lastRun {
-  font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.38);
-  white-space: nowrap;
-}
-
 .searchNow {
-  height: 38px;
-  padding: 0 20px;
-  border: none;
-  border-radius: 11px;
-  background: rgba(var(--accent-rgb), 0.95);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 22px;
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  border-radius: 12px;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.95) 0%,
+    rgba(var(--accent-rgb), 0.8) 100%
+  );
   color: #ffffff;
-  font-size: 13px;
-  font-weight: 640;
+  font-size: 13.5px;
+  font-weight: 650;
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
+  box-shadow:
+    0 6px 20px rgba(var(--accent-rgb), 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
   transition:
-    transform 0.15s ease,
-    opacity 0.15s ease;
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    opacity 0.18s ease;
 }
 
 .searchNow:hover:not(:disabled) {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow:
+    0 10px 26px rgba(var(--accent-rgb), 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.searchNow:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .searchNow:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: default;
+}
+
+.searchNowSpinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .notice {
   margin: 0;
-  padding: 10px 14px;
-  border-radius: 10px;
-  font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.8);
-  background: rgba(var(--accent-rgb), 0.14);
-  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ffffff;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.16) 0%,
+    rgba(var(--accent-rgb), 0.08) 100%
+  );
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(10px);
+}
+
+/* ── Toolbar & Navigation ─────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.searchBar {
+  position: relative;
+  max-width: 520px;
+  width: 100%;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  height: 42px;
+  padding: 0 38px 0 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  color: #ffffff;
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.searchInput:focus {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
+}
+
+.searchInput::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.searchClear {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.searchClear:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.controlsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  align-items: center;
+  gap: 8px;
 }
 
 .filter {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   padding: 7px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.65);
   font-size: 12.5px;
-  font-weight: 560;
+  font-weight: 580;
   font-family: inherit;
   cursor: pointer;
   transition:
     background 0.15s ease,
     color 0.15s ease,
-    border-color 0.15s ease;
+    border-color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .filter:hover {
-  background: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.filterDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.dotLooking {
+  background: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
+}
+
+.dotActive {
+  background: #38bdf8;
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+}
+
+.dotDone {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
+}
+
+.dotFailed {
+  background: #f87171;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
+}
+
+.dotCancelled {
+  background: #94a3b8;
 }
 
 .filterOn {
-  background: rgba(var(--accent-rgb), 0.95);
-  border-color: transparent;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.9) 0%,
+    rgba(var(--accent-rgb), 0.75) 100%
+  );
+  border-color: rgba(var(--accent-rgb), 0.3);
   color: #ffffff;
+  box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.28);
 }
 
 .filterCount {
-  font-size: 10.5px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  opacity: 0.72;
+  opacity: 0.75;
+  background: rgba(0, 0, 0, 0.22);
+  padding: 1px 6px;
+  border-radius: 999px;
 }
 
-/* ── States ─────────────────────────────────────────────────────────────── */
+.viewSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.viewBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.viewBtn:hover {
+  color: #ffffff;
+}
+
+.viewBtnActive {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+/* ── States & Empty ───────────────────────────────────────────────────────── */
 
 .skeleton {
-  height: 260px;
+  height: 320px;
   border-radius: 18px;
   background: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0.04),
-    rgba(255, 255, 255, 0.09),
-    rgba(255, 255, 255, 0.04)
+    rgba(255, 255, 255, 0.03),
+    rgba(255, 255, 255, 0.08),
+    rgba(255, 255, 255, 0.03)
   );
   background-size: 800px 100%;
   animation: abShimmer 1.4s linear infinite;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 @keyframes abShimmer {
@@ -159,67 +474,67 @@
 }
 
 .empty {
-  padding: 56px 24px;
+  padding: 64px 24px;
   text-align: center;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%);
   border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
+}
+
+.emptyIcon {
+  font-size: 44px;
+  margin-bottom: 12px;
+  opacity: 0.8;
 }
 
 .empty h3 {
   margin: 0 0 8px;
-  font-size: 18px;
-  font-weight: 650;
+  font-size: 19px;
+  font-weight: 700;
+  color: #ffffff;
 }
 
 .empty p {
-  margin: 0 auto 18px;
-  max-width: 460px;
-  letter-spacing: -0.01em;
+  margin: 0 auto 20px;
+  max-width: 480px;
   font-size: 13.5px;
   line-height: 1.6;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.52);
 }
 
 .browseLink {
   display: inline-flex;
   align-items: center;
-  height: 38px;
-  padding: 0 20px;
-  border-radius: 11px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  height: 40px;
+  padding: 0 22px;
+  border-radius: 12px;
+  background: rgba(var(--accent-rgb), 0.9);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   color: #ffffff;
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
   text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
 }
 
 .browseLink:hover {
-  background: rgba(255, 255, 255, 0.17);
+  background: rgba(var(--accent-rgb), 1);
+  transform: translateY(-1px);
 }
 
-/* ==========================================================================
-   The wishlist as a wall of covers, not a list of rows.
-   ==========================================================================
-   This was a vertical list with a 62px thumbnail on the left, which reads as a
-   spreadsheet: the artwork was decoration and the text carried everything.
-
-   The video wishlist does the opposite and is the model here — a grid of
-   posters, art dominant, title and meta underneath, the card itself almost
-   invisible until you point at it (.vwsh-movie / .vwsh-movie-art in
-   video-side.css). Same geometry, same hover, one difference: an audiobook
-   cover is SQUARE where a film poster is 2:3.
-   ========================================================================== */
+/* ── Gallery Poster Grid ─────────────────────────────────────────────────── */
 
 .grid {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  /* matches the video wishlist's movie grid */
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  gap: 26px 18px;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  gap: 28px 20px;
 }
 
 .card {
@@ -227,6 +542,26 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.card:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+}
+
+.coverContainer {
+  position: relative;
+  display: block;
 }
 
 .coverLink {
@@ -239,26 +574,84 @@
   outline-offset: 3px;
 }
 
+.quickRemove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(15, 17, 23, 0.85);
+  color: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  z-index: 5;
+  opacity: 0;
+  transition:
+    opacity 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease,
+    color 0.18s ease;
+}
+
+.card:hover .quickRemove,
+.card:focus-within .quickRemove {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .quickRemove {
+    opacity: 1;
+  }
+}
+
+.quickRemove:hover {
+  background: rgba(239, 68, 68, 0.95);
+  border-color: transparent;
+  color: #fff;
+  transform: scale(1.12);
+}
+
 .art {
   position: relative;
-  /* square: an audiobook cover is not a film poster */
   aspect-ratio: 1;
   border-radius: 12px;
   overflow: hidden;
-  background: #16161d;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: #15161e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
   transition:
-    border-color 0.18s ease,
-    transform 0.18s ease,
-    box-shadow 0.18s ease;
+    border-color 0.2s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .card:hover .art {
-  border-color: rgba(var(--accent-rgb), 0.48);
+  border-color: rgba(var(--accent-rgb), 0.55);
   transform: translateY(-3px);
   box-shadow:
-    0 14px 34px rgba(0, 0, 0, 0.34),
-    0 0 0 1px rgba(var(--accent-rgb), 0.12);
+    0 16px 36px rgba(0, 0, 0, 0.45),
+    0 0 20px rgba(var(--accent-rgb), 0.15);
+}
+
+.spineSheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.15) 0%,
+    rgba(0, 0, 0, 0.4) 3.5%,
+    transparent 9%
+  );
+  pointer-events: none;
+  z-index: 2;
 }
 
 .cover {
@@ -274,109 +667,212 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 34px;
-  opacity: 0.4;
+  font-size: 38px;
+  opacity: 0.35;
 }
 
 .scrim {
   position: absolute;
   inset: 0;
-  background: linear-gradient(0deg, rgba(0, 0, 0, 0.5), transparent 45%);
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.6) 0%, transparent 50%);
   opacity: 0;
   transition: opacity 0.2s ease;
   pointer-events: none;
+  z-index: 1;
 }
 
 .card:hover .scrim {
   opacity: 1;
 }
 
-/* the state lives ON the art, so a wall of covers is still scannable */
 .badge {
   position: absolute;
   top: 8px;
   left: 8px;
-  z-index: 2;
-  padding: 3px 8px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
   border-radius: 999px;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: rgba(255, 255, 255, 0.86);
-  background: rgba(0, 0, 0, 0.62);
-  backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(12, 14, 20, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   white-space: nowrap;
 }
 
+.badgePulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
 .badgeActive {
-  background: rgba(var(--accent-rgb), 0.9);
-  border-color: transparent;
-  color: #0b0b0b;
+  background: rgba(56, 189, 248, 0.22);
+  border-color: rgba(56, 189, 248, 0.5);
+  color: #7dd3fc;
+}
+
+.badgeActive .badgePulse {
+  background: #38bdf8;
+  box-shadow: 0 0 6px #38bdf8;
+  animation: heroPulse 1.5s infinite;
+}
+
+.badgeSearching {
+  background: rgba(251, 191, 36, 0.22);
+  border-color: rgba(251, 191, 36, 0.5);
+  color: #fde68a;
+}
+
+.badgeSearching .badgePulse {
+  background: #fbbf24;
+  box-shadow: 0 0 6px #fbbf24;
+  animation: heroPulse 1.2s infinite;
+}
+
+.badgeLooking {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #e2e8f0;
 }
 
 .badgeDone {
-  background: rgba(34, 197, 94, 0.88);
-  border-color: transparent;
-  color: #05210f;
+  background: rgba(34, 197, 94, 0.22);
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #86efac;
+}
+
+.badgeDone .badgePulse {
+  background: #22c55e;
 }
 
 .badgeFailed {
-  background: rgba(239, 68, 68, 0.85);
-  border-color: transparent;
-  color: #fff;
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #fca5a5;
+}
+
+.badgeFailed .badgePulse {
+  background: #ef4444;
 }
 
 .info {
-  padding: 10px 2px 0;
+  padding: 12px 2px 4px;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .title {
   display: block;
   letter-spacing: -0.01em;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 700;
-  color: #fff;
+  color: #ffffff;
   text-decoration: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color 0.15s ease;
 }
 
 .title:hover {
-  color: var(--accent);
+  color: rgb(var(--accent-rgb));
 }
 
-.byline,
-.series,
-.trail {
+.byline {
   display: block;
-  font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.45);
-  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 550;
+  color: rgba(255, 255, 255, 0.65);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.narratorPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  margin-top: 2px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 550;
+  max-width: fit-content;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.narratorLocked {
+  color: #a7f3d0;
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.narratorLocked:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.narratorAny {
+  color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+.narratorAny:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
 .series {
-  color: rgba(255, 255, 255, 0.36);
+  display: block;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.42);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seriesBadge {
+  color: #93c5fd;
+  font-weight: 600;
 }
 
 .trail {
-  color: rgba(255, 255, 255, 0.3);
+  display: block;
   font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
 }
 
-/* the actions do not sit on the artwork, and do not take a row of their own
-   until they are wanted — a wall of covers should read as covers */
+.trailError {
+  color: #fca5a5;
+  font-weight: 600;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
-  opacity: 0;
+  opacity: 0.88;
   transition: opacity 0.18s ease;
 }
 
@@ -385,7 +881,6 @@
   opacity: 1;
 }
 
-/* touch has no hover, so there is nothing to reveal */
 @media (hover: none) {
   .actions {
     opacity: 1;
@@ -397,34 +892,166 @@
   appearance: none;
   -webkit-appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.66);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.72);
   font-size: 11px;
   font-weight: 600;
-  padding: 4px 9px;
+  padding: 4px 10px;
   border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
   transition:
     background-color 0.15s ease,
     color 0.15s ease,
-    border-color 0.15s ease;
+    border-color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .action:hover {
-  background: rgba(255, 255, 255, 0.09);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.actionPrimary {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.28) 0%,
+    rgba(var(--accent-rgb), 0.18) 100%
+  );
+  border-color: rgba(var(--accent-rgb), 0.5);
+  color: #ffffff;
+}
+
+.actionPrimary:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.45) 0%,
+    rgba(var(--accent-rgb), 0.3) 100%
+  );
+  border-color: rgba(var(--accent-rgb), 0.7);
 }
 
 .actionDanger:hover {
-  background: rgba(239, 68, 68, 0.85);
+  background: rgba(239, 68, 68, 0.9);
   border-color: transparent;
-  color: #fff;
+  color: #ffffff;
+}
+
+/* ── Bookshelf / List View ────────────────────────────────────────────────── */
+
+.shelfList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.shelfRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.shelfRow:hover {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.shelfThumb {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #15161e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.shelfCover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.shelfInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.shelfTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelfTitle:hover {
+  color: rgb(var(--accent-rgb));
+}
+
+.shelfMeta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  flex-wrap: wrap;
+}
+
+.shelfDetails {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.shelfBadgeCol {
+  min-width: 120px;
+}
+
+.shelfActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .shelfRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .shelfDetails {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 @media (max-width: 640px) {
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 20px 14px;
+  }
+  .heroBanner {
+    padding: 16px;
   }
 }

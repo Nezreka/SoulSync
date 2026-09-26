@@ -30,6 +30,7 @@ def _read_tags(file_path: str) -> Dict[str, Any]:
         'title': '', 'artist': '', 'album_artist': '', 'album': '',
         'track_number': 0, 'disc_number': 1, 'year': '',
         'genre': '', 'duration_ms': 0, 'bitrate': 0,
+        'musicbrainz_albumid': '', 'musicbrainz_albumcomment': '',
     }
     try:
         from mutagen import File as MutagenFile
@@ -42,6 +43,11 @@ def _read_tags(file_path: str) -> Dict[str, Any]:
                 result['album_artist'] = (tags.get('albumartist', [''])[0] or '').strip()
                 result['album'] = (tags.get('album', [''])[0] or '').strip()
                 result['genre'] = (tags.get('genre', [''])[0] or '').strip()
+                for key in ('musicbrainz_albumid', 'musicbrainz_albumcomment'):
+                    try:
+                        result[key] = (tags.get(key, [''])[0] or '').strip()
+                    except Exception:  # noqa: S110 - an odd frame just means "unknown"
+                        pass
 
                 date_str = (tags.get('date', [''])[0] or tags.get('year', [''])[0] or '').strip()
                 if date_str and len(date_str) >= 4:
@@ -115,6 +121,54 @@ class SoulSyncTrack:
 
     def album(self):
         return self._album_ref
+
+
+def _register_easy_release_comment() -> None:
+    """Let easy-mode mutagen read picard's release comment (the disambiguation).
+
+    vorbis comments read it as-is. id3 and mp4 keep it in a custom frame that
+    easy mode only knows once it's registered.
+    """
+    try:
+        from mutagen.easyid3 import EasyID3
+        from mutagen.easymp4 import EasyMP4Tags
+        if 'musicbrainz_albumcomment' not in EasyID3.valid_keys:
+            EasyID3.RegisterTXXXKey('musicbrainz_albumcomment', 'MusicBrainz Album Comment')
+        if 'musicbrainz_albumcomment' not in EasyMP4Tags.Get:
+            EasyMP4Tags.RegisterFreeformKey('musicbrainz_albumcomment', 'MusicBrainz Album Comment')
+    except Exception as e:  # noqa: BLE001 - without it id3/mp4 just read as plain releases
+        logger.debug("release comment easy-key registration failed: %s", e)
+
+
+_register_easy_release_comment()
+
+
+def _split_by_release(entries: List) -> List:
+    """Split one album-name group into its releases, as ``[(key_suffix, entries)]``.
+
+    two releases can share a title and artist and differ only by musicbrainz's
+    disambiguation (#1299). when the group holds more than one release id, each
+    release whose files carry that disambiguation (the album comment tag) gets
+    its own album, keyed by its release id. everything else keeps the plain key.
+
+    a lone release never splits, comment or not. picard writes the comment too,
+    and re-keying every edition-tagged album would hand it a new album id and
+    drop whatever hangs off the old one. the catch: an incremental scan that only
+    sees the new release can't tell, so it keys it plain until the next full scan.
+    """
+    def release_id(tags):
+        return (tags.get('musicbrainz_albumid') or '').strip().casefold()
+
+    releases = {release_id(tags) for _, tags in entries} - {''}
+    distinct = {release_id(tags) for _, tags in entries
+                if release_id(tags) and (tags.get('musicbrainz_albumcomment') or '').strip()}
+    if len(releases) < 2 or not distinct:
+        return [('', entries)]
+    groups: Dict[str, List] = {}
+    for entry in entries:
+        rid = release_id(entry[1])
+        groups.setdefault(f"::{rid}" if rid in distinct else '', []).append(entry)
+    return list(groups.items())
 
 
 class SoulSyncAlbum:
@@ -353,31 +407,32 @@ class SoulSyncClient(MediaServerClient):
             canonical_artist = artist_names[a_key]
             album_objects = []
 
-            for al_key, track_entries in albums_dict.items():
-                # Get canonical album name from first track
-                canonical_album = track_entries[0][1]['album'] or al_key
-                year = None
-                for _, t in track_entries:
-                    if t['year']:
-                        try:
-                            year = int(t['year'])
-                        except ValueError:
-                            pass
-                        break
+            for al_key, name_entries in albums_dict.items():
+                for release_suffix, track_entries in _split_by_release(name_entries):
+                    # Get canonical album name from first track
+                    canonical_album = track_entries[0][1]['album'] or al_key
+                    year = None
+                    for _, t in track_entries:
+                        if t['year']:
+                            try:
+                                year = int(t['year'])
+                            except ValueError:
+                                pass
+                            break
 
-                # Build tracks
-                track_objects = []
-                for fp, tg in sorted(track_entries, key=lambda x: (x[1]['disc_number'], x[1]['track_number'])):
-                    track_objects.append(SoulSyncTrack(fp, tg))
+                    # Build tracks
+                    track_objects = []
+                    for fp, tg in sorted(track_entries, key=lambda x: (x[1]['disc_number'], x[1]['track_number'])):
+                        track_objects.append(SoulSyncTrack(fp, tg))
 
-                album_key = f"{canonical_artist}::{canonical_album}"
-                album_obj = SoulSyncAlbum(album_key, canonical_album, year, track_list=track_objects)
+                    album_key = f"{canonical_artist}::{canonical_album}{release_suffix}"
+                    album_obj = SoulSyncAlbum(album_key, canonical_album, year, track_list=track_objects)
 
-                # Link tracks back to album
-                for t in track_objects:
-                    t._album_ref = album_obj
+                    # Link tracks back to album
+                    for t in track_objects:
+                        t._album_ref = album_obj
 
-                album_objects.append(album_obj)
+                    album_objects.append(album_obj)
 
             artist_obj = SoulSyncArtist(canonical_artist, canonical_artist, album_objects)
 

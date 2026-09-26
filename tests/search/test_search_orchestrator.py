@@ -255,7 +255,7 @@ def test_short_query_skips_remote_search():
     db_artist = _Artist('a1', 'Aretha', thumb_url='http://x/a.jpg')
     deps = _build_deps(database=_DB(artists=[db_artist]))
 
-    result = orchestrator.run_enhanced_search('aa', '', deps)
+    result = orchestrator.run_enhanced_search('a', '', deps)
     assert result['db_artists'][0]['name'] == 'Aretha'
     assert result['spotify_artists'] == []
     assert result['spotify_albums'] == []
@@ -267,10 +267,19 @@ def test_short_query_skips_remote_search():
 
 def test_short_query_with_explicit_source_uses_that_source_label():
     deps = _build_deps()
-    result = orchestrator.run_enhanced_search('aa', 'deezer', deps)
+    result = orchestrator.run_enhanced_search('a', 'deezer', deps)
     assert result['primary_source'] == 'deezer'
     assert result['metadata_source'] == 'deezer'
     assert result['spotify_playlists'] == []
+
+
+def test_a_two_character_name_reaches_the_remote_search():
+    """#1291: U2 and A1 are real artists. a 3-char floor returned nothing."""
+    spot = _Client(authed=True, artists=[_Artist('s1', 'U2')])
+    deps = _build_deps(spotify_client=spot)
+    result = orchestrator.run_enhanced_search('U2', 'spotify', deps)
+
+    assert [a['name'] for a in result['spotify_artists']] == ['U2']
 
 
 def test_single_source_deezer_includes_playlists():

@@ -149,3 +149,14 @@ export const DEFAULT_FILTERS: FilterState = {
   sort: 'quality_score',
   reversed: false,
 };
+
+// ── Downloads ─────────────────────────────────────────────────────────────
+
+/** What a Download button points at. an album track keeps its album. */
+export type DownloadTarget =
+  | { kind: 'track'; track: BasicTrack }
+  | { kind: 'album'; album: BasicAlbum }
+  | { kind: 'albumTrack'; album: BasicAlbum; trackIndex: number };
+
+/** How it comes in, picked in the chooser. */
+export type DownloadMode = 'plain' | 'enriched' | 'manual';

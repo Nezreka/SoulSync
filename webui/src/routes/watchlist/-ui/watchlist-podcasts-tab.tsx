@@ -26,7 +26,8 @@ export function WatchlistPodcastsTab({ profileId, searchFilter = '' }: Watchlist
   const podcasts = podcastsQuery.data ?? [];
 
   const [activeMenuPodcastId, setActiveMenuPodcastId] = useState<number | null>(null);
-  const [selectedPodcastForSettings, setSelectedPodcastForSettings] = useState<WatchlistPodcast | null>(null);
+  const [selectedPodcastForSettings, setSelectedPodcastForSettings] =
+    useState<WatchlistPodcast | null>(null);
 
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -131,7 +132,10 @@ export function WatchlistPodcastsTab({ profileId, searchFilter = '' }: Watchlist
           </svg>
         </div>
         <h3>No podcasts in watchlist</h3>
-        <p>Browse or search podcasts, then click &quot;Add to Watchlist&quot; to follow new episodes and manage downloads.</p>
+        <p>
+          Browse or search podcasts, then click &quot;Add to Watchlist&quot; to follow new episodes
+          and manage downloads.
+        </p>
         <button
           className="btn btn--primary"
           type="button"
@@ -195,9 +199,7 @@ export function WatchlistPodcastsTab({ profileId, searchFilter = '' }: Watchlist
                       className={styles.podcastMenuBtn}
                       title="Podcast options"
                       aria-label="Podcast options"
-                      onClick={() =>
-                        setActiveMenuPodcastId(isMenuOpen ? null : podcast.id)
-                      }
+                      onClick={() => setActiveMenuPodcastId(isMenuOpen ? null : podcast.id)}
                     >
                       •••
                     </button>
@@ -240,11 +242,17 @@ export function WatchlistPodcastsTab({ profileId, searchFilter = '' }: Watchlist
                   {/* Badges */}
                   <div className={styles.podcastBadgesRow}>
                     {podcast.auto_download ? (
-                      <span className={styles.podcastBadgeSuccess} title="Automatically downloading new episodes">
+                      <span
+                        className={styles.podcastBadgeSuccess}
+                        title="Automatically downloading new episodes"
+                      >
                         ⚡ Auto-download
                       </span>
                     ) : (
-                      <span className={styles.podcastBadgeMuted} title="Monitoring for updates without auto-download">
+                      <span
+                        className={styles.podcastBadgeMuted}
+                        title="Monitoring for updates without auto-download"
+                      >
                         👁️ Monitored
                       </span>
                     )}
@@ -253,13 +261,13 @@ export function WatchlistPodcastsTab({ profileId, searchFilter = '' }: Watchlist
                       className={styles.podcastBadgeRetention}
                       title={`Episodes kept for ${podcast.retention_days === 0 ? 'indefinitely' : `${podcast.retention_days ?? 14} days`}`}
                     >
-                      {podcast.retention_days === 0 ? 'Keep forever' : `⏳ ${podcast.retention_days ?? 14}d`}
+                      {podcast.retention_days === 0
+                        ? 'Keep forever'
+                        : `⏳ ${podcast.retention_days ?? 14}d`}
                     </span>
 
                     {podcast.episode_count != null && podcast.episode_count > 0 && (
-                      <span className={styles.podcastBadgeCount}>
-                        {podcast.episode_count} eps
-                      </span>
+                      <span className={styles.podcastBadgeCount}>{podcast.episode_count} eps</span>
                     )}
                   </div>
 

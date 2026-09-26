@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildHelloStats, countBusyWorkers, greetingForHour } from './-dash.hello';
+import { countBusyWorkers, greetingForHour, greetingLine, heroNumbers } from './-dash.hello';
 
 describe('greetingForHour', () => {
   it('covers the whole clock with no gaps', () => {
@@ -21,36 +21,38 @@ describe('greetingForHour', () => {
   });
 });
 
-describe('buildHelloStats', () => {
+describe('greetingLine', () => {
+  it('puts the name after the greeting', () => {
+    expect(greetingLine('good evening', 'Boulder')).toBe('good evening, Boulder');
+  });
+
+  it('keeps the question mark at the end', () => {
+    expect(greetingLine('up late?', 'Boulder')).toBe('up late, Boulder?');
+  });
+
+  it('is just the greeting with no name', () => {
+    expect(greetingLine('up late?', '')).toBe('up late?');
+  });
+});
+
+describe('heroNumbers', () => {
   it('omits what it does not know instead of showing zeros', () => {
-    // Fresh boot: no db stats yet, nothing running, no countdown → a bare
-    // greeting, never "0 tracks".
-    expect(buildHelloStats({ tracks: null, artists: null, busyWorkers: 0 })).toEqual([]);
-    expect(buildHelloStats({ tracks: 0, artists: 0, busyWorkers: 0 })).toEqual([]);
-  });
-
-  it('formats counts and routes each chip somewhere useful', () => {
-    const chips = buildHelloStats({
-      tracks: 48212,
-      artists: 2881,
-      busyWorkers: 6,
-      scanCountdown: '2h 13m',
-    });
-    expect(chips.map((chip) => chip.label)).toEqual([
-      `${(48212).toLocaleString()} tracks`,
-      `${(2881).toLocaleString()} artists`,
-      '6 workers busy',
-      'next scan in 2h 13m',
+    // Fresh boot: no db stats yet → a bare greeting, never "0 tracks".
+    expect(heroNumbers(null)).toEqual([]);
+    expect(heroNumbers({ tracks: 0, albums: 0, artists: 0 })).toEqual([]);
+    expect(heroNumbers({ tracks: null, albums: 12 })).toEqual([
+      { id: 'albums', value: (12).toLocaleString(), label: 'Albums' },
     ]);
-    expect(chips.find((chip) => chip.id === 'tracks')?.page).toBe('library');
-    expect(chips.find((chip) => chip.id === 'scan')?.page).toBe('watchlist');
-    // Workers has no page — it opens the enrichment manager instead.
-    expect(chips.find((chip) => chip.id === 'workers')?.page).toBeUndefined();
   });
 
-  it('says "1 worker busy", not "1 workers busy"', () => {
-    const chips = buildHelloStats({ busyWorkers: 1 });
-    expect(chips).toEqual([{ id: 'workers', label: '1 worker busy' }]);
+  it('formats the library in tracks, albums, artists order', () => {
+    const numbers = heroNumbers({ tracks: 308778, albums: 70061, artists: 5550 });
+    expect(numbers.map((n) => n.id)).toEqual(['tracks', 'albums', 'artists']);
+    expect(numbers.map((n) => n.value)).toEqual([
+      (308778).toLocaleString(),
+      (70061).toLocaleString(),
+      (5550).toLocaleString(),
+    ]);
   });
 });
 

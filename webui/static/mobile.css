@@ -382,10 +382,6 @@
         min-height: 44px;
     }
 
-    #downloads-search-input {
-        width: 100%;
-    }
-
     .enhanced-search-bar-container {
         flex-direction: column;
         gap: 8px;
@@ -1342,29 +1338,6 @@
         overflow-y: auto;
     }
 
-    .matching-modal {
-        width: 100%;
-        max-width: 100%;
-        height: auto;
-        max-height: 95vh;
-        border-radius: 16px;
-    }
-
-    .matching-modal-content {
-        padding: 16px;
-    }
-
-    .matching-modal-actions {
-        flex-direction: column;
-        gap: 12px;
-        padding: 16px;
-    }
-
-    .matching-modal-actions button {
-        width: 100%;
-        min-height: 44px;
-    }
-
     .version-modal {
         width: 95vw;
     }
@@ -2111,10 +2084,6 @@
         min-width: 0;
     }
 
-    .matching-modal-actions {
-        padding: 12px;
-    }
-
     /* Tool cards tighter on small screens */
     .tool-card {
         padding: 16px 12px;
@@ -2442,20 +2411,6 @@
     .enhanced-meta-field.wide {
         grid-column: span 1;
     }
-    .enhanced-album-row {
-        padding: 10px 12px;
-        gap: 10px;
-    }
-    .enhanced-album-grid {
-        grid-template-columns: 1fr;
-    }
-    .enhanced-album-type-badge {
-        display: none;
-    }
-    .enhanced-album-track-count {
-        font-size: 11px;
-        min-width: 40px;
-    }
     .enhanced-track-table .col-path,
     .enhanced-track-table .col-bpm,
     .enhanced-track-table .col-format,
@@ -2472,7 +2427,8 @@
     .enhanced-bulk-bar {
         left: 10px;
         right: 10px;
-        padding: 8px 16px;
+        padding: 8px 12px;
+        flex-wrap: wrap;
     }
     /* above the full-width mobile player (bottom:62px, 110px tall) */
     .enhanced-bulk-bar.visible {
@@ -2507,110 +2463,122 @@
         font-size: 11px;
     }
 
-    /* Enhanced view — artist meta header */
+    /* Enhanced view — artist card */
     .enhanced-artist-meta-header {
         flex-direction: column;
-        align-items: flex-start;
-        padding: 14px 16px;
+        align-items: stretch;
+        padding: 16px;
         gap: 12px;
     }
     .enhanced-artist-meta-header-left {
         width: 100%;
-        gap: 10px;
+        gap: 12px;
+        flex-basis: auto;
     }
     .enhanced-artist-meta-image {
-        width: 48px;
-        height: 48px;
+        width: 56px;
+        height: 56px;
+    }
+    .lib-artist-initial {
+        font-size: 22px;
     }
     .enhanced-artist-meta-name {
-        font-size: 18px;
+        font-size: 20px;
+        white-space: normal;
     }
     .enhanced-artist-meta-actions {
         width: 100%;
-        flex-wrap: wrap;
+        justify-content: flex-start;
         gap: 6px;
     }
-    .enhanced-artist-meta-actions button,
-    .enhanced-meta-save-btn,
-    .enhanced-meta-cancel-btn {
-        flex: 1;
-        min-width: 80px;
-        font-size: 11px;
-        padding: 6px 10px;
-    }
-
-    /* Enhanced view — artist meta fields grid */
-    .enhanced-artist-meta-panel {
-        padding: 12px;
-    }
-    .enhanced-meta-input {
+    .enhanced-artist-meta-actions .lib-btn {
+        flex: 1 1 auto;
+        justify-content: center;
+        min-width: 0;
+        padding: 0 10px;
         font-size: 12px;
-        padding: 6px 8px;
+    }
+    .lib-artist-foot {
+        padding: 12px 16px 14px;
+        gap: 12px;
+    }
+    .lib-quality {
+        max-width: none;
+        flex-basis: 100%;
+    }
+    .enhanced-artist-meta-form {
+        padding: 0 16px 16px;
     }
 
-    /* Enhanced view — album expanded header */
+    /* Enhanced view — album rows */
+    .enhanced-album-row {
+        gap: 12px;
+        padding: 8px 12px 8px 8px;
+    }
+    .enhanced-album-art-wrap {
+        width: 48px;
+        height: 48px;
+    }
+    /* no hover on a phone: the play overlay is always there, quietly */
+    .enhanced-album-play-btn {
+        opacity: 1;
+        background: rgba(0, 0, 0, 0.35);
+    }
+    .enhanced-album-title {
+        font-size: 14px;
+    }
+    .enhanced-album-meta-line {
+        font-size: 11.5px;
+        white-space: normal;
+    }
+    .lib-album-side .enhanced-format-badge {
+        display: none;
+    }
+
+    /* Enhanced view — expanded album */
+    .enhanced-tracks-panel.visible > .enhanced-tracks-panel-inner {
+        padding: 16px 12px 12px;
+    }
     .enhanced-expanded-header {
         flex-direction: column;
-        gap: 12px;
-        padding: 14px;
+        gap: 14px;
     }
-    .enhanced-expanded-thumb {
-        width: 80px;
-        height: 80px;
+    .enhanced-expanded-art-wrap {
+        width: 120px;
+        height: 120px;
         align-self: center;
     }
     .enhanced-expanded-info {
         width: 100%;
-    }
-    .enhanced-expanded-title {
-        font-size: 16px;
+        align-items: center;
         text-align: center;
     }
-    .enhanced-expanded-actions {
-        flex-direction: column;
-        gap: 6px;
-        width: 100%;
-    }
-    .enhanced-expanded-actions button {
-        width: 100%;
-        font-size: 12px;
-        padding: 8px;
-    }
-
-    /* Enhanced view — album expanded rows */
-    .enhanced-album-row {
-        flex-wrap: wrap;
-    }
-    .enhanced-album-thumb {
-        width: 40px;
-        height: 40px;
-    }
-    .enhanced-album-title {
-        font-size: 13px;
-    }
-    .enhanced-album-meta-line {
-        font-size: 11px;
+    .enhanced-expanded-title {
+        font-size: 20px;
         white-space: normal;
+    }
+    .enhanced-expanded-genres,
+    .enhanced-expanded-info .lib-sources {
+        justify-content: center;
+    }
+    .enhanced-expanded-actions {
+        justify-content: center;
+        width: 100%;
+    }
+    .enhanced-expanded-actions .lib-btn {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+    .enhanced-expanded-actions .lib-btn.icon {
+        flex: 0 0 34px;
     }
     .enhanced-album-meta-row {
         grid-template-columns: 1fr !important;
         gap: 8px;
-        padding: 10px;
+        padding: 12px;
     }
     .enhanced-album-meta-input {
-        font-size: 11px;
-        padding: 5px 8px;
-    }
-    .enhanced-album-actions {
-        flex-wrap: wrap;
-        gap: 6px;
-        width: 100%;
-    }
-    .enhanced-album-actions button {
-        font-size: 11px;
-        padding: 5px 10px;
-        flex: 1;
-        min-width: 80px;
+        font-size: 12px;
     }
     .enhanced-album-save-btn {
         width: 100%;
@@ -2623,24 +2591,22 @@
     }
     .enhanced-track-table th,
     .enhanced-track-table td {
-        padding: 6px 3px;
-        font-size: 11px;
+        padding: 6px 4px;
+        font-size: 12px;
     }
     .enhanced-track-table .col-num {
         width: 24px;
     }
     .enhanced-track-table .col-title {
+        white-space: normal;
         word-break: break-word;
     }
     .enhanced-track-table .col-duration {
         width: 42px;
-        font-size: 10px;
+        font-size: 11px;
     }
     .enhanced-track-table .col-bitrate {
         display: none;
-    }
-    .enhanced-track-table .col-actions {
-        width: 32px;
     }
     .enhanced-track-table .col-play {
         width: 26px;
@@ -2654,10 +2620,10 @@
         display: none;
     }
 
-    /* Collapse queue/writetag/delete into single ⋯ actions column on mobile */
+    /* Collapse queue/actions/report into the single ⋯ actions column on mobile */
     .enhanced-track-table .col-queue,
-    .enhanced-track-table .col-writetag,
     .enhanced-track-table .col-delete,
+    .enhanced-track-table .col-track-actions,
     .enhanced-track-table .col-report {
         display: none;
     }
@@ -3509,10 +3475,18 @@
         padding: 0;
         border: none;
         white-space: normal;
+        /* the desktop row height would stretch each block cell to 42px and
+           float the checkbox above the title */
+        height: auto;
     }
     .enhanced-track-table .col-play {
         flex: 0 0 auto;
         width: auto;
+        line-height: 0;
+    }
+    /* no hover on a phone, so the play glyph cannot stay dim */
+    .enhanced-track-table .enhanced-play-btn:not(:disabled) {
+        color: rgba(255, 255, 255, 0.75);
     }
     .enhanced-track-table .col-title {
         flex: 1 1 auto;
@@ -3543,6 +3517,7 @@
     .enhanced-track-table .col-queue,
     .enhanced-track-table .col-writetag,
     .enhanced-track-table .col-delete,
+    .enhanced-track-table .col-track-actions,
     .enhanced-track-table .col-report,
     .enhanced-track-table tr > th:first-child {
         display: none;

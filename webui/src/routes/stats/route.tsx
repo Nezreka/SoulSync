@@ -4,6 +4,7 @@ import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import {
   lastfmListeningImportStatusQueryOptions,
+  listenbrainzListeningImportStatusQueryOptions,
   listeningStatsStatusQueryOptions,
   statsCachedQueryOptions,
 } from './-stats.api';
@@ -35,6 +36,12 @@ export const Route = createFileRoute('/stats')({
       context.queryClient
         .fetchQuery({
           ...lastfmListeningImportStatusQueryOptions(),
+          retry: false,
+        })
+        .catch(() => undefined),
+      context.queryClient
+        .fetchQuery({
+          ...listenbrainzListeningImportStatusQueryOptions(),
           retry: false,
         })
         .catch(() => undefined),

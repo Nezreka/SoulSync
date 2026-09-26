@@ -179,7 +179,7 @@ def _lifecycle_deps():
         process_failed_to_wishlist=lambda *a: None,
         process_failed_to_wishlist_with_auto_completion=lambda *a: None,
         ensure_wishlist_track_format=lambda t: t, get_track_artist_name=lambda t: 'A',
-        check_and_remove_from_wishlist=lambda *a: None, regenerate_batch_m3u=lambda *a: None,
+        check_and_remove_from_wishlist=lambda *a, **k: None, regenerate_batch_m3u=lambda *a: None,
         youtube_playlist_states={}, tidal_discovery_states={}, deezer_discovery_states={},
         spotify_public_discovery_states={},
     )

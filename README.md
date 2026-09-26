@@ -1,660 +1,498 @@
 <p align="center">
-  <img src="./assets/trans.png" alt="SoulSync Logo">
+  <img src="./assets/trans.png" alt="SoulSync" width="420">
 </p>
 
-# SoulSync - Intelligent Music & Video Automation Platform
-
-**Spotify-quality music discovery for self-hosted libraries.** Automates downloads, curates playlists, monitors artists, and organizes your collection with zero manual effort.
-
-> **IMPORTANT**: Configure file sharing in slskd to avoid Soulseek bans. Set up shared folders at `http://localhost:5030/shares`.
-
-**Community**: [Discord](https://discord.gg/wGvKqVQwmy) | **Website**: [ssync.net](https://www.ssync.net/) | **Support**: [GitHub Issues](https://github.com/Nezreka/SoulSync/issues) | **Donate**: [Ko-fi](https://ko-fi.com/boulderbadgedad)
-
----
-
-## What It Does
-
-SoulSync bridges streaming services to your music library with automated discovery:
-
-1. **Monitors artists** → Automatically detects new releases from your watchlist
-2. **Generates playlists** → Release Radar, Discovery Weekly, Seasonal, Decade/Genre mixes, Cache-powered discovery
-3. **Downloads missing tracks** → From Soulseek, Deezer, Tidal, Qobuz, HiFi, Amazon Music, YouTube, or any combination via Hybrid mode
-4. **Verifies downloads** → AcoustID fingerprinting for all download sources
-5. **Enriches metadata** → 14 enrichment workers (Spotify, MusicBrainz, iTunes, Deezer, Discogs, AudioDB, Last.fm, Genius, Tidal, Qobuz, JioSaavn, Amazon, Bandcamp, Similar Artists)
-6. **Tags consistently** → Picard-style MusicBrainz release preflight ensures all album tracks get the same release ID
-7. **Organizes files** → Custom templates for clean folder structures
-8. **Manages library** → Plex, Jellyfin, Navidrome, or SoulSync Standalone (no media server required)
-9. **Scrobbles plays** → Automatic scrobbling to Last.fm and ListenBrainz from your media server
-
-**Plus a full video side.** SoulSync also manages **Movies, TV Shows, and YouTube** — the same discovery, automation, and enrichment approach applied to video, with its own isolated database, dashboard, and pipeline. Works with Plex and Jellyfin. See **[Video Library](#video-library--movies-tv-shows--youtube)** below.
-
----
-
-## Key Features
+<h3 align="center">The self-hosted home for your music, movies, TV and YouTube.</h3>
 
 <p align="center">
-  <img src="./assets/pages.gif" alt="SoulSync Interface">
+  Find it, fetch it, verify it, tag it, file it, play it. SoulSync replaces a stack of *arr apps, taggers and scripts with one app that actually knows your library.
 </p>
 
-### Discovery Engine
-
-**Release Radar** — New tracks from watchlist artists, personalized by listening history
-
-**Discovery Weekly** — 50 tracks from similar artists with serendipity weighting
-
-**Seasonal Playlists** — Halloween, Christmas, Valentine's, Summer, Spring, Autumn (hemisphere-aware)
-
-**Personalized Playlists** (12+ types)
-- Recently Added, Top Tracks, Forgotten Favorites
-- Decade Playlists (1960s-2020s), Genre Playlists (15+ categories)
-- Because You Listen To, Daily Mixes, Hidden Gems, Popular Picks, Discovery Shuffle, Familiar Favorites
-- Custom Playlist Builder (1-5 seed artists → similar artists → random albums → shuffled tracks)
-
-**Cache-Powered Discovery** (zero API calls)
-- Undiscovered Albums — albums by your most-played artists that aren't in your library
-- New In Your Genres — recently released albums matching your top genres
-- From Your Labels — popular albums on labels already in your library
-- Deep Cuts — low-popularity tracks from artists you listen to
-- Genre Explorer — genre landscape pills with artist counts, tap for Genre Deep Dive modal
-
-**ListenBrainz** — Import recommendation and community playlists
-
-**Beatport** — Full electronic music integration with genre browser (39+ genres)
-
-**Artist Map & Artist Web** — Interactive full-screen graph explorers of your library's taste landscape: every artist as a node, clustered by genre, wired by similarity; plus a Playlist Explorer that renders any playlist as an explorable tree
-
-### Multi-Source Downloads
-
-**7 Download Sources**: Soulseek, Deezer, Tidal, Qobuz, HiFi, Amazon Music, YouTube — use any single source or Hybrid mode with drag-to-reorder priority
-
-**Deezer Downloads** — ARL token authentication, FLAC lossless / MP3 320 / MP3 128 with automatic quality fallback and Blowfish decryption
-
-**Tidal Downloads** — Device-flow OAuth, quality tiers from AAC 96kbps to FLAC 24-bit/96kHz Hi-Res
-
-**Qobuz Downloads** — Email/password auth, quality up to Hi-Res Max (FLAC 24-bit/192kHz)
-
-**HiFi Downloads** — Free lossless via public API instances, no account required
-
-**Soulseek** — FLAC priority with quality profiles, peer quality scoring, source reuse for album consistency
-
-**YouTube** — Audio extraction with cookie-based bot detection bypass
-
-**Hybrid Mode** — Enable any combination of sources, drag to set priority order, automatic fallback chain
-
-**Playlist Sources**: Spotify, Tidal, YouTube, Deezer, Qobuz, Beatport charts, ListenBrainz, Spotify/Deezer link paste (no API needed), CSV/TSV/M3U file import
-
-**Post-Download**
-- Lossy copy creation: MP3, Opus, AAC with configurable bitrate (Opus capped at 256kbps)
-- Hi-Res FLAC downsampling to 16-bit/44.1kHz CD quality
-- Blasphemy Mode — delete original FLAC after conversion
-- Synchronized lyrics (LRC) via LRClib
-- ReplayGain analysis — optional track-level loudness tagging via ffmpeg, runs before lossy copy so both files get tagged
-- Picard-style album consistency — pre-flight MusicBrainz release lookup ensures all tracks get the same release ID
-
-### Listening Stats & Scrobbling
-
-**Listening Stats Page** — Full dashboard with Chart.js visualizations
-- Overview cards: total plays, listening time, unique artists/albums/tracks
-- Timeline bar chart, genre breakdown donut with legend
-- Top artists visual bubbles, top albums and tracks with play buttons and cover art
-- Library health: format breakdown bar, enrichment coverage rings, database storage chart
-- Time range filters: 7 days, 30 days, 12 months, all time
-
-**Scrobbling** — Automatic Last.fm and ListenBrainz scrobbling from Plex, Jellyfin, or Navidrome
-
-### Audio Verification
-
-**AcoustID Fingerprinting** (optional) — Verifies downloaded files match expected tracks
-- Runs for all download sources (Soulseek, Tidal, Qobuz, HiFi, Deezer, Amazon Music, YouTube)
-- Catches wrong versions (live, remix, cover) even from streaming API sources
-- Fail-open design: verification errors never block downloads
-
-#### AcoustID API key
-
-AcoustID verification is opt-in. To enable it, request a free API key
-at <https://acoustid.org/new-application> and paste it into
-Settings → AcoustID. Without a key, downloads still complete but the
-verification step is skipped silently.
-
-If a track was previously tagged by AcoustID but the retag action in
-the AcoustID Scanner no longer changes anything, see issue #704 — the
-most common cause is that the file already carries a
-`MUSICBRAINZ_TRACKID` tag, which the retag step uses as a short-circuit
-and therefore never overwrites. Removing the cached
-`MUSICBRAINZ_TRACKID` (and the `ACOUSTID_ID` if present) from the file
-restores the retag.
-
-### Metadata & Enrichment
-
-**14 Background Enrichment Workers**: Spotify, MusicBrainz, iTunes, Deezer, Discogs, AudioDB, Last.fm, Genius, Tidal, Qobuz, JioSaavn, Amazon, Bandcamp, Similar Artists — plus SoulID generation
-- Each worker independently processes artists, albums, and tracks
-- Pause/resume controls on dashboard (animated worker orbs show live status), auto-pause during database scans
-- Error items don't auto-retry in infinite loops (fixed in v2.1)
-
-**Multi-Source Metadata**
-- Primary source selectable: Spotify, iTunes/Apple Music, Deezer, or Discogs
-- Spotify no longer auto-overrides — user chooses their preferred source in Settings
-- Spotify auth still enables playlists, followed artists, and enrichment
-- MusicBrainz enrichment with Picard-style album consistency
-
-**Hydrabase** (optional P2P metadata network) — replaces iTunes as the metadata source when connected. Federated lookup with community-matched results, falls back automatically if disconnected. Dev-mode feature, enable in Settings → Connections.
-
-**Genre Whitelist** — filter junk genre tags (artist names, radio show names, playlist names) from all enrichment sources. 272 curated default genres, fully customizable. Off by default for backward compatibility.
-
-**Post-Processing Tag Embedding**
-- Granular per-service tag toggles (18+ MusicBrainz tags, Spotify/iTunes/Deezer IDs, AudioDB mood/style, Tidal/Qobuz ISRCs, Last.fm tags, Genius URLs)
-- Multi-artist tagging options: configurable separator (comma/semicolon/slash), multi-value ARTISTS tag for Navidrome/Jellyfin multi-artist linking, optional "move featured artists to title" mode
-- Album art embedding, cover.jpg download
-- Spotify rate limit protection across all API calls
-
-#### Self-hosted MusicBrainz
-
-SoulSync can use a MusicBrainz-compatible mirror for enrichment, metadata lookups,
-search, and repair. In Settings → Connections → MusicBrainz, enter
-your server URL and request interval, then save. All clients use the saved values
-on their next request; no restart is needed. Leave the URL blank to return to
-public MusicBrainz.
-
-Alternatively, add these variables to the SoulSync service's Docker Compose
-`environment` block, then recreate the container:
-
-```yaml
-environment:
-  SOULSYNC_MUSICBRAINZ_BASE_URL: "http://musicbrainz:5000/ws/2"
-  SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL: "0.1"
-```
-
-Use your server's address as reachable **from SoulSync**. `musicbrainz` above is
-an example service name on a shared Docker network; `localhost` inside SoulSync's
-container points to SoulSync itself. For a non-Docker installation, set the same
-environment variables before starting SoulSync and restart it after changes.
-
-The interval is the minimum number of seconds between request starts across
-clients in one SoulSync process. `0.1` permits up to 10 requests/second, subject
-to server latency and sequential processing; `0` disables the pacing delay for
-a private mirror. Choose a rate your server supports. Defaults remain
-`https://musicbrainz.org/ws/2` and `1.05` seconds. Public `musicbrainz.org` hosts
-retain a minimum 1.05-second interval even if a faster rate is configured.
-Retries use the same limiter and retain their error backoff.
-
-The URL accepts HTTP or HTTPS, an optional port and reverse-proxy prefix, and
-an optional `/ws/2` suffix (added automatically). Use the final API URL: redirects
-are rejected to prevent a mirror forwarding high-rate requests to the public
-service. Embedded credentials, query strings and fragments are not supported.
-Invalid URLs or negative/nonfinite intervals produce an explicit configuration
-error; they do not silently fall back to the public server.
-
-Equivalent persisted settings are `musicbrainz.base_url` and
-`musicbrainz.request_interval`; see `config/config.example.json`. Environment
-variables take precedence. Existing installations load configuration from the
-database, so editing `config/config.json` alone is not a reliable way to change
-these settings; use the Settings UI or environment overrides above. Environment changes require a process restart or container recreation.
-
-The mirror needs both MusicBrainz lookup/browse endpoints and local search
-indexes for artist, release and recording searches. See the official
-[MusicBrainz server setup](https://musicbrainz.org/doc/MusicBrainz_Server/Setup)
-and [search architecture](https://musicbrainz.org/doc/Development/Search_Architecture).
-Cover Art Archive remains external. Changing servers preserves existing MBIDs,
-match caches and retry schedules; it does not automatically reprocess previously
-unmatched items. A mirror outage does not trigger fallback to the public API.
-
-### Advanced Matching Engine
-
-- Version-aware matching: strictly rejects remixes when you want the original (and vice versa)
-- Unicode and accent handling (KoЯn, Bjork, A$AP Rocky)
-- Fuzzy matching with weighted confidence scoring (title, artist, duration)
-- Album variation detection (Deluxe, Remastered, Taylor's Version, etc.)
-- Streaming source match validation: same confidence scoring applied to Tidal/Qobuz/HiFi/Deezer results as Soulseek
-- Short title protection: prevents "Love" from matching "Loveless"
-
-### Automation
-
-**Automation Engine** — Visual drag-and-drop builder for custom workflows
-- **Triggers**: Schedule, Daily/Weekly Time, Track Downloaded, Batch Complete, Playlist Changed, Discovery Complete, Signal Received, Library Scan Complete, Watchlist Match, Wishlist Item Added, and more
-- **Actions**: Process Wishlist, Scan Watchlist, Refresh Mirrored, Discover Playlist, Sync Playlist, Scan Library, Database Update, Quality Scan, Full Cleanup, and 10+ more
-- **Then Actions** (up to 3 per automation): Fire Signal (chain to other automations), Discord/Telegram/Pushbullet notifications, audible chimes
-- **Signal Chains** — One automation fires `signal:foo`, another listens for it. Cycle detection + chain depth limit + cooldown prevent runaway chains.
-- **Playlist Pipeline** — Single automation for full playlist lifecycle: refresh → discover → sync → download missing. No manual signal wiring.
-- **Pipelines** — Pre-built one-click deployments (New Music, Nightly Operations, Full Library Maintenance, etc.) that install a linked group of automations at once
-- **Automation Groups** — Drag-and-drop organization, bulk enable/disable, rename, right-click context menus
-
-**Watchlist** — Monitor unlimited artists with per-artist configuration
-- Release type filters: Albums, EPs, Singles
-- Content filters: Live, Remixes, Acoustic, Compilations
-- Auto-discover similar artists, periodic scanning
-
-**Wishlist** — Failed downloads automatically queued for retry with auto-processing
-
-**Mirrored Playlists** — Mirror from Spotify, Tidal, YouTube, Deezer and keep synced
-- Auto-refresh detects source changes via URL/ID tracking in playlist metadata
-- Discovery pipeline matches source tracks to user's primary metadata source (Spotify/iTunes/Deezer/Discogs)
-- Auto Wing It fallback — tracks that fail all metadata APIs get stub metadata from the raw source title and flow through the normal download pipeline anyway
-- Followed Spotify playlists that hit 403 errors fall back to public embed scraper
-- Unmatch button on found tracks with DB persistence for mirrored playlists
-
-**Local Profiles** — Multiple profiles with isolated settings, watchlists, and playlists
-- **Per-profile side access** — each profile can be music-only, video-only, or both; single-side profiles never see the side switcher
-- Per-profile page access, login passwords / quick-switch PINs, per-profile Spotify + Tidal accounts (My Accounts)
-
-### Library Management
-
-**Dashboard** — Service status, system stats, activity feed, enrichment worker controls
-- Unified glass UI design across all tool cards, service cards, and stat cards
-
-**Library Page** — Artist grid with staggered card animations, per-artist enrichment coverage rings
-- Artist Radio button — play random track with auto-queue radio mode
-- Play buttons on Last.fm top tracks sidebar
-
-**Enhanced Library Manager** — Toggle between Standard and Enhanced views
-- Inline metadata editing, per-service manual matching
-- Write Tags to File (MP3/FLAC/OGG/M4A), tag preview with diff
-- Server sync after tag writes (Plex, Jellyfin, Navidrome)
-- Bulk operations, sortable columns, multi-disc support
-- **Re-identify** — re-file an imported track under a different release (staged back through the import pipeline; the original is never deleted until the re-import succeeds)
-- **Artist photo picker** — hover the artist image, pick from every connected source; updates SoulSync, your media server, and artist.jpg on disk (what Navidrome reads) in one click
-- Enhance Quality (upgrade tracks to FLAC/higher bitrate) and Reorganize Album modals
-
-**Library Maintenance** — 10+ automated repair jobs
-- Track Number, Dead Files, Duplicates, Metadata Gaps, Album Completeness, Missing Cover Art, AcoustID Scanner, Orphan Files, Fake Lossless, Library Reorganize, Lossy Converter, MBID Mismatch, Album Tag Consistency, Live/Commentary Cleaner
-- Enrichment workers auto-pause during database scans
-- One-click Fix All with findings dashboard
-
-**Database Storage Visualization** — Donut chart showing per-table storage breakdown
-
-**Live Log Viewer** — Real-time terminal-style log viewer on Settings → Logs. Color-coded levels (DEBUG/INFO/WARNING/ERROR), live filter + search, switch between log files (app, post-processing, AcoustID, source reuse). Auto-scroll, copy, clear. Updates via WebSocket every 0.5s.
-
-**Import System** — Tag-first matching, auto-grouped album cards, staging folder workflow
-- **Exact-ID identification first** — a Spotify link in the comment tag resolves 1:1; ISRC tags resolve the album by folder consensus (fixes text-search failures on Japanese releases)
-- Auto-Import worker: recursive scan, single file support, AcoustID fingerprinting fallback
-- Confidence-gated: 90%+ auto-imports, 70-90% queued for review
-- `.lrc` lyrics sidecars travel with their tracks (imports and downloads), renamed to match
-
-**SoulSync Standalone Mode** — Use SoulSync without Plex, Jellyfin, or Navidrome
-- Downloads and imports write directly to the library database
-- Filesystem scanner for incremental and deep scan of Transfer folder
-- Pre-populated enrichment IDs from download context (Spotify, Deezer, MusicBrainz)
-- Select in Settings → Connections → Standalone
-
-**Template Organization** — `$albumartist/$album/$track - $title` and 10+ variables
-
-### Built-in Media Player
-
-- Stream tracks from your library with queue system
-- Now Playing modal with album art ambient glow and Web Audio visualizer
-- Smart Radio mode — auto-queue similar tracks by genre, mood, and style
-- Repeat modes, shuffle, keyboard shortcuts, Media Session API
-
-### Mobile Responsive
-
-- Comprehensive mobile layouts across both sides — every music page plus the full video side (dashboard through both Studios)
-- Artist hero section, enhanced library track table with bottom sheet action popover
-- Enrichment rings, filter bars, and discover cards all adapt to narrow screens
+<p align="center">
+  <a href="https://github.com/Nezreka/SoulSync/releases"><img alt="Version" src="https://img.shields.io/badge/version-3.4.5-8b5cf6?style=flat-square"></a>
+  <a href="https://hub.docker.com/r/boulderbadgedad/soulsync"><img alt="Docker" src="https://img.shields.io/badge/docker-boulderbadgedad%2Fsoulsync-2496ED?style=flat-square&logo=docker&logoColor=white"></a>
+  <a href="https://discord.gg/wGvKqVQwmy"><img alt="Discord" src="https://img.shields.io/badge/discord-join-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
+  <a href="./license.txt"><img alt="License" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
+  <a href="https://ko-fi.com/boulderbadgedad"><img alt="Ko-fi" src="https://img.shields.io/badge/support-ko--fi-ff5e5b?style=flat-square&logo=kofi&logoColor=white"></a>
+</p>
+
+<p align="center">
+  <a href="https://www.ssync.net/">Website</a> ·
+  <a href="https://discord.gg/wGvKqVQwmy">Discord</a> ·
+  <a href="#installation">Install</a> ·
+  <a href="#setup-guide">Setup guide</a> ·
+  <a href="https://github.com/Nezreka/SoulSync/issues">Issues</a>
+</p>
+
+<p align="center">
+  <img src="./assets/pages.gif" alt="SoulSync tour" width="900">
+</p>
+
+> [!IMPORTANT]
+> If you use Soulseek, **share files in slskd** (`http://localhost:5030/shares`). Leechers get banned by the network.
 
 ---
 
-## Video Library — Movies, TV Shows & YouTube
+## Contents
 
-A fully isolated video side that brings SoulSync's discovery/automation/enrichment philosophy to **movies, TV, and YouTube**. Its own database, dashboard, search, calendar, and download pipeline — sharing the automation engine but never touching the music side. Works with **Plex** and **Jellyfin** (per-server isolation).
-
-### Libraries & Scanning
-
-- **Plex + Jellyfin**, source-agnostic — Movies and TV are tracked as independent libraries
-- **Three scan modes**: incremental (a modified-since delta — only re-reads what the server touched), deep (full re-read + prune removed), full (clean reset)
-- **Smart post-download scan** — probes the server with a cheap search and skips the full crawl when it already has the newest grab
-- Weekly deep scans (TV Mondays, Movies Tuesdays) + an hourly incremental safety net for manual additions
-
-### Metadata & Enrichment
-
-**Matchers** — TMDB (movies + shows), TVDB (shows + an episode-metadata fallback for titles/overviews TMDB lacks), OMDb (IMDb / Rotten Tomatoes / Metacritic ratings)
-
-**12 background enrichment workers** — fanart.tv (logos/art), OpenSubtitles (subtitles), Return YouTube Dislike, SponsorBlock, DeArrow (better titles/thumbnails), YouTube upload dates, Trakt (ratings/votes), TVmaze, AniList (anime), Wikidata (official sites), TMDB watch providers (streaming availability), MediaStinger (after-credits scenes) — live status orbs on the dashboard, click to pause/resume, Manage Workers modal with per-service queues and manual matching
-
-- **Gap-fill by design** — enrichment only fills what the media server left blank, never clobbers server data; per-field user locking (a locked field belongs to the user, enrichment skips it forever)
-- **Rolling re-enrichment automation** — keeps ratings, overviews, art, and episode air-dates from going stale: re-pulls the stalest matched items by stored id (never re-search, so no mis-match risk), oldest first, ~monthly per item, self-healing OMDb daily-quota latch
-- **Lazy on-view refresh** + a daily airing-schedule refresh keep what you're actively watching current
-
-### Discover
-
-- **Netflix-style billboard hero** with real title-logo art and a wishlist CTA, auto-rotating over trending titles
-- A deep, **endlessly lazy-loading rail stack**: For You, Top 10 Today, personalized "Because you like…" rails, "On your streaming services", mood/studio/genre/decade/foreign rails
-- Every rail opens as a paged **See All** grid; a **browse filter bar** (kind / genre / decade / provider / language / sort) builds arbitrary grids; **Hide owned** toggle
-- Wishlist / In Library state on every card, everywhere
-
-### Detail Pages & Search
-
-- Source-agnostic **movie / show / person / studio** pages — cinematic full-bleed billboard with trailer autoplay, cast & crew, where-to-watch, similar titles, seasons & episodes
-- **Get modal + download view** — see your quality target, judge any owned copy against it, then per-source **Manual** (pick the release yourself) or **Auto** (grab the best) search — or one header **Auto** that searches every source and grabs the single best
-- **Play on Plex/Jellyfin** deep-link, four switchable season views, "Missing only" episode filter, **Wishlist Missing** (every missing aired episode across all seasons in one click)
-- **Manage panel** — inline metadata edits with per-field locks (a locked field is yours forever), plus a per-service **match editor** (TMDB / TVDB / IMDb re-match)
-- **Poster Manager** — full-screen artwork picker; writes poster.jpg, repoints the DB, pushes to the server
-- **Progressive "Netflix-feel" search** — results stream in per group (movies, TV, YouTube channels, people, studios) as they arrive instead of one blocking load
-
-### TV Calendar
-
-- A real 7-column week grid (today first) with **time-band rows** (Prime Time etc.) and a "Now" cue lighting the current band
-- A **"Next up" billboard hero** — the soonest episodes with Tonight/Today labels
-- Scope toggle: your **watchlist** (followed ∪ airing) vs the **whole library**; compact/comfortable views
-- Wishlist an aired-but-missing episode straight from the calendar modal
-
-### Watchlist → Wishlist → Download Pipeline
-
-**Follow anything** — shows, actors/directors (their whole filmography), studios, YouTube channels, YouTube playlists
-
-- **Studio watchlist** — follow Pixar, A24, Disney… with **family presets** (Disney = Pixar + Marvel + Lucasfilm) and per-member selection (follow just Pixar if you want); a settled-films vote floor keeps obscure shorts out
-- **People watchlist** — every un-owned movie a followed actor/director made, back catalog + upcoming
-- **Look-ahead horizon** — upcoming titles are wishlisted only within ~1 year of theatrical/digital release, so the wishlist never fills with distant announcements but is never out of date
-- **Sonarr-style airing** — wishlist every episode airing today for the shows you follow
-
-### Downloads
-
-- **Sources**: Soulseek (slskd), Prowlarr indexers (torrent + usenet), YouTube (yt-dlp) — reorderable hybrid chain with per-source toggles
-- **Radarr/Sonarr-class quality profiles** — quality ladder, cutoff, upgrade-until-cutoff, reject rules, preferred-words scoring
-- Fulfillment engine, download monitor, organization + sidecars + subtitle fetch, disk guard
-- Downloads page: live rows with an expandable **detail drawer** (format facts, dest path, open item), batch grouping for season packs, cancel/retry per row
-- **Permanent download-history archive** + a History modal (All / Movies / Shows / YouTube tabs)
-- **Release blocklist** (auto-added only on proven-bad-file rejects, one-click block from failed rows, blocklist manager modal) + a **recycle bin** for reversible deletes
-
-### Overlay Studio (Kometa-style overlays)
-
-- Visual **overlay-template editor**, applied via Pillow directly onto Plex/Jellyfin posters
-- Per-scope assignments (movie / show / season / episode), a logo-badge system (provider/resolution/rating badges)
-- Nightly re-apply automation that skips items whose template + art + data are unchanged
-- **Clean Up Plex Images** job reclaims the space poster re-uploads accumulate
-
-### Collection Manager (Kometa-style collections)
-
-- Build **Plex Collections / Jellyfin BoxSets** from smart filters and ranked lists
-- **Ranked list sources**: IMDb charts & lists, TMDB charts & lists, Trakt lists, MDBList — rendered in true rank order (e.g. IMDb Top 250 by rank, not year)
-- Franchise auto-backfill, a paginated gallery, and a nightly **Sync Collections** automation that pushes add/remove to the server
-
-### YouTube
-
-- **Follow channels as shows** and **playlists as shows** (yt-dlp, no API key) — long-form only, Shorts excluded
-- **Import your subscriptions** — upload or paste a ytdl-sub / Kometa `subscriptions.yml` and follow everything in one background pass
-- Paste any channel URL or `@handle` into video search to resolve + follow it
-- Per-channel **keep windows / retention** with an old-episode cleanup job
-- True downloaded-state tracking (ownership derived from download history) + ghost cleanup
-- Headless-friendly: the Settings "Paste cookies.txt" mode applies to video-side YouTube too
-
-### Library Maintenance (repair jobs)
-
-- Broken files, duplicate movies, metadata gaps, missing episodes, naming conformance, quality upgrade, watched-cleanup, wishlist audit, movie collections, YouTube ghosts
-- Rich findings dashboard with lazy detail, mirrored from the music-side Maintenance standard
-
-### Bulk Editing, Locking & Issues
-
-- **Manage panel** — inline metadata edits with per-field locking, plus **re-identify** (re-file an imported title to a different release through the staging pipeline)
-- **Bulk select bar** for mass metadata operations
-- **Issues system** — report a problem from the Manage sidebar; an Issues page + nav badge (full music-side parity)
-
-### Server Activity (Tautulli-style monitoring)
-
-- Live Plex/Jellyfin **now-playing** + watch **history** in an app-wide slide-out drawer, plus statistics & graphs
-- Gated to Plex/Jellyfin servers (hidden when the active server can't provide it)
-
-### Automations & Dashboard
-
-- A dedicated **video Automations page** — the same drag-and-drop builder, showing only video-owned rows (the music page is untouched)
-- A video **event bus** (batch-complete, scan-complete, …) drives the full watchlist → wishlist → download pipeline plus airing refresh, re-enrichment, overlays, collection sync, deep scans, cleanup, and backups
-- **Dashboard** — recently-added hero, library/upcoming/stats cards, enrichment-coverage rings, and a combined Studios (Overlay + Collection) admin card
+- [Why SoulSync](#why-soulsync)
+- [At a glance](#at-a-glance)
+- **Music**
+  - [Dashboard](#dashboard) · [Playlist sync](#playlist-sync) · [Search & downloads](#search--downloads) · [Quality, verification & tagging](#quality-verification--tagging)
+  - [Discover](#discover) · [Library & artist pages](#library--artist-pages) · [Watchlist & wishlist](#watchlist--wishlist) · [Import](#import)
+  - [Tools & library maintenance](#tools--library-maintenance) · [Listening stats & scrobbling](#listening-stats--scrobbling) · [Player & radio](#player--radio)
+  - [Podcasts & audiobooks](#podcasts--audiobooks)
+- **Video**
+  - [Movies, TV & YouTube](#video-movies-tv--youtube)
+- **Platform**
+  - [Automations](#automations) · [Profiles & access](#profiles--access) · [Chat & arcade](#chat--arcade) · [API & webhooks](#api--webhooks) · [Mobile, PWA & theming](#mobile-pwa--theming)
+- [Installation](#installation) · [Setup guide](#setup-guide) · [Architecture](#architecture) · [Contributing](#contributing) · [License](#license)
 
 ---
 
-## Installation
+## Why SoulSync
 
-### Docker (Recommended)
+Most self-hosted media setups are a relay race: one app wants things, another searches, a third downloads, a fourth tags, a fifth tells the server, and when a handoff fails nobody notices. SoulSync runs the whole race itself and keeps the receipts.
+
+- **It knows what you own.** Every search, playlist and recommendation is checked against your real library, so "missing" means missing.
+- **It checks its work.** Downloads are fingerprinted, sanity checked, quality ranked and quarantined when they don't hold up. Nothing lands in your library on faith.
+- **It explains itself.** Stuck wishlist rows show exactly which releases were refused and why. Every download has an audit trail.
+- **It's one app for the whole house.** Music, movies, TV, YouTube, podcasts and audiobooks, with profiles so everyone gets their own taste, playlists and history.
+
+## At a glance
+
+| | |
+|---|---|
+| **Download sources** | Soulseek (slskd), Tidal, Qobuz, Deezer, HiFi, Amazon Music, YouTube, SoundCloud, Lidarr, Torrent and Usenet (via Prowlarr). One source or a drag-ordered hybrid chain. |
+| **Metadata** | Spotify (with or without an account), Apple Music / iTunes, Deezer, Discogs, MusicBrainz, plus 14 background enrichment workers |
+| **Media servers** | Plex, Jellyfin, Navidrome, or **SoulSync Standalone** (no server needed) |
+| **Playlist sources** | Spotify, Tidal, Qobuz, Deezer, YouTube, YouTube Music, Apple Music links, ListenBrainz, Last.fm, Beatport, SoulSync's own mixes, and CSV / TSV / TXT / M3U files |
+| **Video** | Movies, TV and YouTube channels with TMDB / TVDB, Prowlarr, qBittorrent / Transmission / Deluge / SABnzbd / NZBGet, Plex and Jellyfin |
+| **Automation** | Visual WHEN → DO → THEN builder, 60+ triggers and actions, Discord / Telegram / Pushbullet / webhook notifications |
+| **Runs on** | Docker (amd64 + arm64), Unraid, or plain Python 3.11 |
+
+---
+
+# Music
+
+## Dashboard
+
+<p align="center"><img src="./assets/dashboard.png" alt="Dashboard" width="860"></p>
+
+The home screen is split in two: your music on the left, the machine on the right.
+
+- **Hero** with a greeting, your library size, one-click **Quick Scan** and a menu for deep scans, match verification, repair and database backups.
+- **Worker orbs**: every enrichment worker lives on its own animated stage. They drift while resting, pulse when busy, turn red on errors, and fly home into a grid of controls when you hover.
+- **Library Radio** and **Your Mixes**, **Recently Added / Fresh Releases**, and **Recently Played** (tap a song to play it again; repeats fold into one card).
+- **Playlist sync health**: one honest number for how much of your playlists you own, the playlists missing the most, sorting by missing / last synced / next run / name, and running syncs pinned to the top.
+- **Up next**: the next automations to fire, with run and pause on hover.
+- An **alerts band** that stays invisible until a connection actually breaks.
+
+## Playlist sync
+
+Bring a playlist in from anywhere, keep a mirror of it, and keep your media server's copy in step on a schedule.
+
+- **Add playlist**: paste any link and SoulSync works out the service, or pick from a connected account, or drop a CSV / TSV / TXT / M3U file and map its columns.
+- **Mirrored library**: every playlist as a card whose artwork carries its state (a coverage ring, a pulse while syncing, desaturated when something's wrong). Filter by *Needs attention / Working / Discovered / Scheduled*, search, sort, bulk delete.
+- **Discovery**: matches each source track to real metadata with live progress. Fix any match by hand (including by MusicBrainz ID), retry the failures, or let **Wing It** make best-effort guesses that you can review later in the **Wing It Pool**.
+- **Sync modes**: *Replace*, *Reconcile* (edit in place, keep the server playlist's image and description) or *Append*.
+- **Schedules**: per playlist, from hourly to weekly, or on a drag-and-drop **Auto-Sync board** with a live pipeline monitor and run history. A scheduled pipeline does refresh → discover → sync → download missing, unattended.
+- **Server playlists**: a side-by-side **compare editor** for Plex / Jellyfin / Navidrome (matched, missing, extra), swap versions, find & add, reorder to match the source, export M3U.
+- **Export** any playlist to Spotify, Deezer, ListenBrainz or a JSPF file.
+- **Beatport**: Top 100, Hype 100, top 10 lists and releases, and a full genre browser.
+- **Organize by playlist**: optionally download a playlist into its own folder.
+
+## Search & downloads
+
+One search box with three modes.
+
+- **Catalog**: search Spotify, Apple Music, Deezer, Discogs, MusicBrainz or Amazon. Results show *In library* and *In wishlist*; albums open a download-missing view, artists and labels open their pages.
+- **Videos**: official music videos from YouTube, downloaded straight into your library.
+- **Files**: search a download source directly (like classic Soulseek), filter by format and quality, then choose how it comes in:
+  - **Download as-is** — untouched, into Transfer.
+  - **Enriched download** *(recommended)* — each file is matched to a real release, tagged, given cover art and filed.
+  - **Tag it yourself** — for bootlegs, live sets and mixtapes.
+
+**Sources.** Use one, or build a **hybrid chain** in the order you prefer. If a source can't meet your quality profile, SoulSync falls through to the next.
+
+| Source | Notes |
+|---|---|
+| **Soulseek** | via slskd. Whole-album grabs from one peer, peer quality scoring, search throttling, free-disk guard |
+| **Tidal** | device-flow login, up to FLAC 24-bit Hi-Res |
+| **Qobuz** | up to Hi-Res Max (24-bit/192 kHz) |
+| **Deezer** | ARL token, FLAC → MP3 320 → MP3 128 fallback |
+| **HiFi** | free lossless via public instances, no account, automatic failover |
+| **Amazon Music** | FLAC / Opus / EAC3 |
+| **YouTube** | yt-dlp, cookies supported |
+| **SoundCloud** | anonymous |
+| **Lidarr** | hand an album to Lidarr's indexers, import only the tracks you need |
+| **Torrent** | Prowlarr search; qBittorrent, Transmission, Deluge or aria2; seeding goals; archive extraction |
+| **Usenet** | Prowlarr search; SABnzbd or NZBGet; remote path mappings |
+
+**Downloads page.** Live batches with speed and ETA, "download this next", per-track audit trails (lifecycle, embedded tags, lyrics), a **Review** queue for anything that needs a human, and a **Clients** pane that manages slskd, your torrent client and your usenet client from one place.
+
+## Quality, verification & tagging
+
+- **Quality profiles**: named profiles built from a ranked ladder of formats, bit depths, sample rates and bitrates, with a cutoff. Start from *Audiophile*, *Balanced* or *Space Saver*, then assign profiles per playlist, artist or wishlist item. **Upgrade until cutoff** keeps chasing a better copy, and a file is only ever replaced by a measured upgrade.
+- **Verification**: AcoustID fingerprinting, real-audio checks with ffmpeg (catches padded previews), silence, duration and integrity guards, and a **fake-lossless** detector.
+- **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention.
+- **Tagging**: Picard-style **MusicBrainz release preflight** pins one release per album so every track agrees. Tags are written with mutagen (ID3v2.4, FLAC, Vorbis, MP4), enriched in the order you choose.
+- **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
+- **File organization**: templates for albums, singles, compilations, playlists, music videos, podcasts and audiobooks (`$albumartist/$album/$track - $title` and friends).
+
+## Discover
+
+A personal front page shaped by your library, your listening and your watchlist.
+
+- **Start Here**: a "next best move" card plus zones for *For You*, *New & Missing*, *Your Taste Map* and *Browse & Build*.
+- **Your Mixes**: *Fresh Tape* (new from artists you follow), *The Archives* (a weekly dig through your own library), *Hidden Gems*, *Popular Picks*, *Discovery Shuffle*, *Your Listening Mix*, and decade *Time Machine* mixes. Download or sync any of them to your server.
+- **Adventurousness dial**: drag from "safe" to "deep cuts" and the recommendations re-rank live.
+- **Recommended artists**, **Because you listen to…**, **New releases for you**, **New in your genres**, **Albums you're missing**, **More from your labels**, **Deep cuts**.
+- **Stations**: endless artist radio, or a stable 40-track snapshot you can download or sync.
+- **Deezer Curated** editorial playlists (no key needed), **ListenBrainz** recommendations, and **Last.fm Radio**.
+- **Build a playlist** from 1 to 5 seed artists.
+- **Artist Map & Artist Web**: full-screen graphs of your taste. Genres, communities, influence, and the shortest path between any two artists.
+- **Playlist Explorer**: turn any playlist into a tree of its artists and albums, then wishlist the gaps.
+
+## Library & artist pages
+
+- **Library**: every artist, filterable by letter, watch state, and which metadata sources each one is (or isn't) matched to. Export as JSON / CSV / text / M3U.
+- **Artist pages**: full discography with ownership, live completion bars for albums / EPs / singles, top tracks, similar artists, a **music video player**, and **concerts** (Ticketmaster dates and Setlist.fm setlists you can play from your own library).
+  - **Gap-fill** pulls in releases your other metadata sources know about.
+  - **Enhanced view** (admins): inline tag editing, bulk BPM / mood / style edits, write tags to files with a diff preview, ReplayGain, reorganize with a path preview, move an album to another artist, re-identify a track, redownload with source picking, and delete (database only, or files too).
+  - **Fix matches**: change artwork from any source, inspect the database record, and forget wrong matches per source.
+- **Label pages**: a label's full catalog with owned / missing filters. Follow a label for new releases or its whole backlog.
+
+## Watchlist & wishlist
+
+- **Watchlist**: follow artists and labels. SoulSync scans for new releases on a schedule, with per-artist rules (albums, EPs, singles, live, remixes, compilations), lookback windows, scan source and auto-download. The **Artist Inspector** shows linked IDs per provider and recent releases, and a **Blocklist** keeps things you never want.
+- **Wishlist**: everything wanted, retried automatically with progressive backoff. Browse it as a **Nebula** (an orb per artist, albums and singles in orbit) or a dense list, find what keeps failing, or pick a source by hand.
+
+## Import
+
+An inbox for everything in your staging folder, with a Picard-style matcher.
+
+- Drag files or folders into the browser to upload them.
+- SoulSync identifies each folder by exact IDs first (Spotify links in tags, ISRCs), then tags, filenames and AcoustID.
+- A **confidence line** decides what imports on its own, what waits for review and what needs identifying.
+- The matcher lines each file up against a release's tracks, with length and quality side by side, so mismatches are obvious before anything moves. Drag to re-pair; fingerprint a folder when tags lie.
+
+## Tools & library maintenance
+
+- **Library health score** with a findings inbox that turns thousands of findings into a few decisions, and **Fix all safe** for metadata-only repairs.
+- **31 maintenance jobs**, each with its own schedule: duplicate and single/album dedup, dead and orphan files, AcoustID scanning, fake-lossless and corrupt-file detection, cover art, lyrics and ReplayGain fillers, metadata gaps, album completeness, discography backfill, quality upgrades, lossy conversion, reorganize and re-tag, MBID mismatches, album tag consistency, unknown-artist and comma-artist fixes, genre cleanup and enrichment, and more.
+- **Database updater** (incremental, full refresh or deep scan), manual library matching, **backups with restore**, a metadata cache browser, and **config export/import** (optionally with credentials).
+
+## Listening stats & scrobbling
+
+- **Listening stats**: plays, time, top artists / albums / tracks, genres, when you listen, streaks, and how much of what you own you actually play.
+- **Your Year**: a full-screen, Wrapped-style story of your year, ending in a card studio that exports shareable images using your real album art.
+- **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin or Navidrome.
+- **History import** from Last.fm, ListenBrainz and Maloja. Each profile can connect its own account and gets its own stats and recommendations.
+
+## Player & radio
+
+A full web player built into the sidebar.
+
+- Now Playing view with album-colour glow, synced lyrics, audio-reactive visualizers, crossfade, a sleep timer, and OS media controls.
+- A persistent, reorderable queue that can **auto-download** tracks you don't own yet.
+- **Radio mode**, **Artist Radio** and **Library Radio** (an endless shuffle of your own collection).
+- Tracks you don't own stream from a preview source, so you can hear before you grab.
+
+## Podcasts & audiobooks
+
+- **Podcasts**: discover via Apple Podcasts search or add any RSS feed (private and Patreon feeds included), OPML import/export, show notes and transcripts, and a watchlist that auto-downloads new episodes and cleans up old ones.
+- **Audiobooks**: browse Audible's catalogue by genre, series, author and narrator, follow authors for new books, and fetch releases from Soulseek, torrent or usenet. SoulSync looks inside each release before downloading, matches your existing books to catalogue editions, and keeps its own wishlist, blocklist and recycle bin.
+
+---
+
+# Video: movies, TV & YouTube
+
+A complete video side with its own database, pages and pipeline. Switch sides from the header; each profile can be given music, video, or both.
+
+**Library**
+- Movies, shows and YouTube channels from **Plex** or **Jellyfin**, with incremental, full and deep scans, per-title sync, and a path resolver for mismatched Docker / NAS mounts.
+- **13 enrichment workers**: TMDB, TVDB, OMDb (IMDb, Rotten Tomatoes, Metacritic, awards), fanart.tv, OpenSubtitles, Trakt, TVmaze, AniList, Wikidata, SponsorBlock, DeArrow, Return YouTube Dislike and YouTube dates.
+- **Bulk edit & field locks**: edits are written to SoulSync and pushed to your server, and locked fields are never overwritten by enrichment.
+
+**Detail pages**
+- Trailer-backed heroes with Play / Resume on your server.
+- Every rating, cast and crew, where to watch, collections and acquisition history.
+- Four episode layouts, and season tools: grab, search, wishlist, monitor.
+- Person, studio, channel and playlist pages.
+
+**Finding things**
+- **Search**:
+  - Enhanced search across movies, shows, people, studios and channels.
+  - Raw release search across slskd, Prowlarr indexers and more.
+  - A live **Fresh Releases** board.
+- **Discover**: TMDB-powered and personal.
+  - Recommended for you, and "finish your collection".
+  - Charts, streaming services, moods and world cinema.
+  - A full browse filter.
+- **TV Calendar**:
+  - Week grid with acquisition state on every episode, and cinema / home release dates for movies.
+  - An **iCal feed** for your phone.
+
+**Getting things**
+- **Watchlist → wishlist → download**:
+  - Follow shows, people, studios and YouTube channels, with back-catalog policies.
+  - The wishlist retries with backoff, and a diagnostics drawer shows why each release was refused.
+- **Requests**: Overseerr-style. Non-admins request, admins approve.
+- **Import lists**: TMDB, IMDb and Plex Watchlist.
+- **Indexers & clients**:
+  - Prowlarr (structured and text queries, TV query ladder including anime and daily shows) and **RSS sync**.
+  - qBittorrent, Transmission, Deluge, SABnzbd, NZBGet and slskd.
+  - Seeding goals, **season packs**, and stall detection.
+- **Quality profiles**:
+  - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
+  - Codec, HDR and audio preferences, size limits and minimum seeders.
+  - A separate YouTube profile.
+- **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames, NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
+
+**Making it yours**
+- **Overlay Studio**: a Kometa-style visual poster editor.
+  - Layers, dynamic fields (resolution, HDR, codecs, ratings, awards, streaming service…) and per-scope rules.
+  - Always rendered from a clean base, so overlays never stack and can be undone.
+- **Collection Studio**:
+  - Smart-filter and list collections from TMDB, IMDb, Trakt and MDBList.
+  - Presets, seasonal windows, generated artwork, and wishlisting missing members.
+- **Poster Manager** for TMDB posters, including textless ones.
+- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more. Plus backups and mass rename.
+- **Server Activity**: a Tautulli-style live view of streams, history and stats.
+- **Movie night** in chat: vote on a title and watch together.
+
+**YouTube**
+- Follow channels and playlists as TV shows, with no API key.
+- Per-channel resolution, codec, length and title filters, and retention.
+- Everything lands as a Plex "TV by date" show.
+
+---
+
+# Platform
+
+## Automations
+
+A visual **WHEN → DO → THEN** builder shared by music and video.
+
+- **Triggers**:
+  - Schedules: interval, daily, weekly and monthly times, app start.
+  - Events: downloads, quarantines, new releases, watchlist changes, playlist syncs, imports, maintenance findings.
+  - External: webhooks and signals from other automations.
+- **Actions**:
+  - Process wishlist, scan watchlist, run a full **playlist pipeline**, update the database.
+  - Import listening history, run maintenance, clean up, back up.
+  - Search & download, or run your own scripts.
+- **Then**: Discord, Telegram, Pushbullet, a webhook, a script, or a signal that chains into another automation, with per-step conditions and `{variables}`.
+- **Automation Hub**: install ready-made pipelines in one click, such as *Playlist Pipeline*, *New Music*, *Nightly Operations*, *Quality Assurance* and *Full Hands-Free*.
+
+## Profiles & access
+
+- **Profiles** with avatars, PINs, a home page, page access, music / video access, and a download permission.
+- Per-profile watchlists, wishlists, playlists, queues and listening history.
+- Non-admins get a **My Account** panel for their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
+- **Security**:
+  - An admin PIN with brute-force limits, or full **username/password login** with recovery questions.
+  - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
+  - Reverse-proxy and sub-path aware.
+- **Own library per profile** (Plex / Jellyfin): a profile can have its own folder and server library.
+
+## Chat & arcade
+
+Soulseek rooms and private messages through slskd, in a Discord-style layout.
+
+- Channels and threads, replies, reactions, mentions, pins, GIFs, link previews and file sharing.
+- `/np`, `/want`, `/poll` and friends.
+- **Room activities**:
+  - A shared YouTube **jukebox** with voting.
+  - **Movie night**, polls and trivia.
+- **Arcade**: chess, Connect 4, Battleship, Othello and Gomoku, plus a slot machine.
+  - Everyone's client computes the same game state from the room messages, so no game server is needed.
+  - Room-vs-player voting, and commit-reveal boards so nobody can cheat.
+- Browse a peer's shares and download from them.
+
+## API & webhooks
+
+- **REST API** at `/api/v1` covering library, search, wishlist, watchlist, downloads, playlists, discover, settings, profiles and video.
+  - Keys are hashed at rest and rate limited. See [Support/API.md](Support/API.md).
+- **Inbound request webhook**: `POST /api/v1/request` with a query and SoulSync searches, matches and downloads it. Good for Discord bots and shortcuts.
+
+## Mobile, PWA & theming
+
+- Fully responsive, and installable as a **PWA** (cover art cached for speed, never stale pages).
+- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce effects** / **Max performance** switches for low-power devices.
+
+---
+
+# Installation
+
+### Docker (recommended)
 
 ```bash
 curl -O https://raw.githubusercontent.com/Nezreka/SoulSync/main/docker-compose.yml
-docker-compose up -d
-# Access at http://localhost:8008
+docker compose up -d
+# open http://localhost:8008
 ```
 
-### Release Channels
+The image runs as a non-root user with `PUID` / `PGID` / `UMASK` support, and bundles ffmpeg, fpcalc (AcoustID), Deno and a current yt-dlp.
 
-SoulSync publishes two Docker image tracks so you can choose your level of stability.
-
-**Stable — `:latest`** (recommended for most users). Hand-promoted from the `dev` branch to `main` when a batch of changes is ready for release. Published to Docker Hub. Your `docker-compose.yml` pulls this by default — no changes needed.
-
-```bash
-docker pull boulderbadgedad/soulsync:latest
-```
-
-**Nightly — `:dev`**. Rebuilt every night from the `dev` branch (and on every push to dev). Published to GitHub Container Registry. Gets new features and bug fixes before they reach `:latest`, at the cost of occasional instability as changes settle. Good for early adopters, contributors validating their own merges, and anyone helping shake out bugs on Discord before a stable release.
-
-To switch, edit `docker-compose.yml`:
-
-```yaml
-image: ghcr.io/nezreka/soulsync:dev
-```
-
-Then run `docker-compose pull && docker-compose up -d`.
-
-Pinned dev builds are also published as `ghcr.io/nezreka/soulsync:dev-YYYYMMDD-<sha>` if you want to stick with an exact known-good snapshot.
-
-**Version-tagged releases** (e.g. `:2.3`, `:2.4`) are permanent tags published on both registries when a stable release is promoted:
-
-```bash
-docker pull boulderbadgedad/soulsync:2.4
-# or
-docker pull ghcr.io/nezreka/soulsync:2.4
-```
-
-| You are... | Use |
+| Port | Used for |
 |---|---|
-| A typical user who wants things to work | `:latest` |
-| Pinning to a specific version for stability | `:2.3`, `:2.4`, etc. |
-| An early adopter who wants new features early and is OK reporting bugs | `:dev` |
-| A contributor testing post-merge behavior | `:dev` or a pinned dev build |
+| `8008` | Web UI and API |
+| `8888` | Spotify OAuth callback |
+| `8889` | Tidal OAuth callback |
+
+### Release channels
+
+| Channel | Image | What it is |
+|---|---|---|
+| **Stable** | `boulderbadgedad/soulsync:latest` | Promoted from `dev` to `main` when a release is ready. Recommended. |
+| **Pinned** | `boulderbadgedad/soulsync:3.4.5` or `ghcr.io/nezreka/soulsync:3.4.5` | A permanent tag for each stable release |
+| **Dev** | `ghcr.io/nezreka/soulsync:dev` | Rebuilt on every push to `dev`. New features first, occasional rough edges |
+| **Nightly** | `ghcr.io/nezreka/soulsync:nightly` | Built at 04:00 UTC when `dev` changed that day |
+| **Snapshot** | `ghcr.io/nezreka/soulsync:dev-YYYYMMDD-<sha>` | An exact dev build to pin to |
+
+To switch, change `image:` in `docker-compose.yml`, then `docker compose pull && docker compose up -d`.
 
 ### Unraid
 
-SoulSync is available as an Unraid template. Install from Community Applications or manually add the template from:
+Install from **Community Applications**, or add the template manually:
+
 ```
 https://raw.githubusercontent.com/Nezreka/SoulSync/main/templates/soulsync.xml
 ```
 
-PUID/PGID are exposed in the template — set them to match your Unraid permissions (default: 99/100 for nobody/users).
+Set `PUID` / `PGID` to match your share permissions (default 99 / 100). For the dev channel, change the container's **Repository** to `ghcr.io/nezreka/soulsync:dev`. See [Support/UNRAID.md](Support/UNRAID.md).
 
-The template points at `boulderbadgedad/soulsync:latest` (stable) by default. To use the nightly `:dev` channel on Unraid, edit the container's **Repository** field to `ghcr.io/nezreka/soulsync:dev` after installing from the template.
-
-### Python (No Docker)
+### Python (no Docker)
 
 ```bash
 git clone https://github.com/Nezreka/SoulSync
 cd SoulSync
 python -m pip install -r requirements.txt
 
-# Build the React WebUI bundle used by the Python server.
-# Docker does this automatically; Python installs must do it manually.
-cd webui
-npm ci
-npm run build
-cd ..
+# build the web UI (Docker does this for you)
+cd webui && npm ci && npm run build && cd ..
 
 gunicorn -c gunicorn.conf.py wsgi:application
-# Open http://localhost:8008
+# open http://localhost:8008
 ```
 
-When updating a Python/no-Docker install with `git pull`, rebuild the WebUI before restarting SoulSync:
+After every `git pull`, rebuild the web UI (`cd webui && npm ci && npm run build`) before restarting. If `webui/static/dist/.vite/manifest.json` is missing or stale, pages won't load correctly.
+
+For YouTube streaming and music videos on bare metal you also need:
+- **Deno**: yt-dlp needs a JavaScript runtime (`winget install DenoLand.Deno`, or see [deno.com](https://docs.deno.com/runtime/)).
+- **yt-dlp nightly** when YouTube changes break things: `python -m pip install -U --pre "yt-dlp[default]"`.
+
+### Local development
+
+Two terminals, so the backend and Vite reload independently:
 
 ```bash
-cd webui
-npm ci
-npm run build
-cd ..
+# backend (restarts on Python changes)
+python -m pip install -r requirements-dev.txt
+gunicorn -c gunicorn.dev.conf.py wsgi:application
 ```
-
-If `webui/static/dist/.vite/manifest.json` is missing or stale, React-owned routes and route handoffs may not load correctly.
-
-**YouTube streaming / music videos** need two extra things on bare-metal installs (Docker bundles both):
-
-- **Deno** — yt-dlp now requires a JavaScript runtime to unlock YouTube formats. Without it, streams and music-video downloads fail with `Requested format is not available`. Install: `winget install DenoLand.Deno` (Windows) or see [deno.com](https://docs.deno.com/runtime/), then restart SoulSync.
-- **yt-dlp nightly** — the stable release can lag months behind YouTube changes. If YouTube breaks, update with: `python -m pip install -U --pre "yt-dlp[default]"`
-
-### Local Development
-
-This is only for contributors working on the WebUI with hot reload. Normal Python/no-Docker installs should build once with `npm run build` as shown above, then run only Gunicorn.
-
-For active frontend development, use two terminals so the backend and Vite stay independent:
-
-1. Backend
-   ```bash
-   python -m pip install -r requirements-dev.txt
-   gunicorn -c gunicorn.dev.conf.py wsgi:application
-   ```
-   The dev Gunicorn config watches backend files and restarts the Python server when they change.
-2. Frontend
-   ```bash
-   cd webui
-   npm ci
-   npm run dev
-   ```
-   Vite hot reloads the React side when you change webui files.
-
-Run tests separately when needed:
 
 ```bash
-python -m pytest
+# frontend (hot reload)
+cd webui && npm ci && npm run dev
 ```
 
-If you want a convenience launcher, `python dev.py` starts both halves together
-on any OS. `./dev.sh` remains available as a Unix shell wrapper.
+`python dev.py` starts both on any OS (`./dev.sh` on Unix). Run tests with `python -m pytest`, and see [webui/README.md](webui/README.md) for frontend notes.
 
 ---
 
-## Setup Guide
+# Setup guide
 
-### Prerequisites
+### What you need
 
-- **slskd** running and accessible ([Download](https://github.com/slskd/slskd/releases)) — required for Soulseek downloads
-- **Spotify API** credentials ([Dashboard](https://developer.spotify.com/dashboard)) — optional but recommended for discovery
-- **Media Server** (optional): Plex, Jellyfin, or Navidrome
-- **Deno** (Python/no-Docker installs only): JavaScript runtime required by yt-dlp for YouTube streaming/music videos — `winget install DenoLand.Deno` or [deno.com](https://docs.deno.com/runtime/). Docker images bundle it.
-- **Deezer ARL token** (optional): For Deezer downloads — get from browser cookies after logging into deezer.com
-- **Tidal account** (optional): For Tidal downloads — authenticate via device flow in Settings
-- **Qobuz account** (optional): For Qobuz downloads — email/password login in Settings
+- **Nothing else, to start.** SoulSync Standalone works without a media server, and HiFi, YouTube and Deezer need no extra software.
+- **slskd** ([releases](https://github.com/slskd/slskd/releases)) if you want Soulseek.
+- **Spotify API credentials** ([dashboard](https://developer.spotify.com/dashboard)): optional, but the best source for discovery. Without them SoulSync uses Spotify's public data, Apple Music and Deezer.
+- **A media server** (optional): Plex, Jellyfin or Navidrome.
+- **Prowlarr** plus a torrent or usenet client, for the torrent / usenet sources and the video side.
+- **TMDB and TVDB keys** for the video side.
 
-### Step 1: Set Up slskd
+### 1. Connect slskd (optional)
 
-SoulSync talks to slskd through its API. See the [slskd setup guide](https://github.com/slskd/slskd) for API key configuration.
+1. Add an API key in slskd's `settings.yml` under `web > authentication > api_keys`, then restart slskd.
+2. In SoulSync: **Settings → Connections → Soulseek**, paste the URL and key (or use **Auto-detect**).
+3. **Share some files in slskd.**
 
-1. Add an API key in slskd's `settings.yml` under `web > authentication > api_keys`
-2. Restart slskd
-3. Paste the key into SoulSync's Settings → Downloads → Soulseek section
+### 2. Connect Spotify (optional)
 
-**Configure file sharing in slskd to avoid Soulseek bans.** Set up shared folders at `http://localhost:5030/shares`.
+1. Create an app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard).
+2. Add the redirect URI `http://127.0.0.1:8888/callback`.
+3. Paste the Client ID and Secret into **Settings → Connections → Spotify**.
 
-### Step 2: Set Up Spotify API (Optional)
+Behind Docker or a remote host? See [Support/DOCKER-OAUTH-FIX.md](Support/DOCKER-OAUTH-FIX.md).
 
-Spotify gives you the best discovery features. Without it, SoulSync falls back to iTunes/Deezer for metadata.
+### 3. Configure SoulSync
 
-1. Create an app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
-2. Add Redirect URI: `http://127.0.0.1:8888/callback`
-3. Copy Client ID and Client Secret into SoulSync Settings
+Open `http://localhost:8008`. The setup wizard walks you through the basics; everything else lives in **Settings**:
 
-More detail in [Support/DOCKER-OAUTH-FIX.md](Support/DOCKER-OAUTH-FIX.md).
+- **Sources / Downloads**: pick a source or build your hybrid chain.
+- **Quality**: pick a preset or build a quality profile.
+- **Library**: set your folders and file-naming templates.
+- **Connections**: add your media server. Use your machine's real IP, not `localhost` (inside Docker that means the container itself).
 
-### Step 3: Configure SoulSync
+### 4. Docker paths
 
-Open SoulSync at `http://localhost:8008` and go to Settings.
+| What | Container path | Notes |
+|---|---|---|
+| Config | `/app/config` | |
+| Logs | `/app/logs` | |
+| Databases | `/app/data` | Use a **named volume** (`soulsync_database:/app/data`). Bind-mounting a host path here can hide files the app needs. |
+| Downloads | `/app/downloads` | The same folder slskd and your clients download to |
+| Library output | `/app/Transfer` | Where organized music is filed |
+| Import | `/app/Staging` | Optional, for importing music you already have |
+| Music videos | `/app/MusicVideos` | Optional |
+| Podcasts / audiobooks | `/app/podcasts`, `/app/audiobooks` | Optional |
+| Video | `/media/movies`, `/media/tv`, `/media/youtube` | Optional, for the video side |
 
-**Download Source**: Choose your preferred source (Soulseek, Deezer, Tidal, Qobuz, HiFi, Amazon Music, YouTube, or Hybrid)
-
-**Paths**:
-- **Input Folder**: Container path to slskd's download folder (e.g., `/app/downloads`)
-- **Output Folder**: Where organized music goes (e.g., `/app/Transfer`)
-- **Import Folder**: Optional folder for importing existing music (e.g., `/app/Staging`)
-
-**Media Server** (optional): Use your machine's actual IP (not `localhost` — that means inside the container)
-
-### Step 4: Docker Path Mapping
-
-| What | Container Path | Host Path |
-|------|---------------|-----------|
-| Config | `/app/config` | Your config folder |
-| Logs | `/app/logs` | Your logs folder |
-| Database | `/app/data` | Named volume (recommended) |
-| Input | `/app/downloads` | Same folder slskd downloads to |
-| Output | `/app/Transfer` | Where organized music goes |
-| Import | `/app/Staging` | Optional folder for importing music |
-
-**Important:** Use a named volume for the database (`soulsync_database:/app/data`). Direct host path mounts to `/app/data` can overwrite Python module files.
+Useful environment variables: `PUID`, `PGID`, `UMASK`, `TZ`, `SOULSYNC_URL_BASE` (serve under a sub-path, see [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md)), and `SOULSYNC_LOG_LEVEL`.
 
 ---
 
-## Comparison
+# Architecture
 
-| Feature | SoulSync | Lidarr | Headphones | Beets |
-|---------|----------|--------|------------|-------|
-| Custom Discovery Playlists (15+) | ✓ | ✗ | ✗ | ✗ |
-| Cache-Powered Discovery (zero API) | ✓ | ✗ | ✗ | ✗ |
-| Listening Stats Dashboard | ✓ | ✗ | ✗ | ✗ |
-| Last.fm/ListenBrainz Scrobbling | ✓ | ✗ | ✗ | ✗ |
-| 7 Download Sources | ✓ | ✗ | ✗ | ✗ |
-| Deezer Downloads (FLAC) | ✓ | ✗ | ✗ | ✗ |
-| Tidal Downloads (Hi-Res) | ✓ | ✗ | ✗ | ✗ |
-| Qobuz Downloads (Hi-Res Max) | ✓ | ✗ | ✗ | ✗ |
-| Soulseek Downloads | ✓ | ✗ | ✗ | ✗ |
-| Beatport Integration | ✓ | ✗ | ✗ | ✗ |
-| Audio Fingerprint Verification | ✓ | ✗ | ✗ | ✓ |
-| 9 Enrichment Workers | ✓ | ✗ | ✗ | Plugin |
-| Picard-Style Album Tagging | ✓ | ✗ | ✗ | ✗ |
-| Visual Automation Builder | ✓ | ✗ | ✗ | ✗ |
-| Enhanced Library Manager | ✓ | ✗ | ✗ | ✗ |
-| Library Maintenance Suite (10+ jobs) | ✓ | ✗ | ✗ | ✓ |
-| Multi-Profile Support | ✓ | ✗ | ✗ | ✗ |
-| Mobile Responsive | ✓ | ✓ | ✗ | ✗ |
-| Built-in Media Player + Radio | ✓ | ✗ | ✗ | ✗ |
+- **Backend**: Python 3.11, Flask + Flask-SocketIO on Gunicorn, SQLite in WAL mode (separate music and video databases). Settings live in the database, and secrets are encrypted at rest.
+- **Frontend**: a React 19 + TypeScript app (TanStack Router and Query, Vite) running alongside the original vanilla-JS shell, which is being migrated page by page. Live updates arrive over WebSockets.
+- **Core pieces**:
+  - **Matching engine**: version-aware fuzzy matching, aliases, cross-script names, and manual overrides that always win.
+  - **Download orchestrator**: 11 sources, a hybrid chain, quality-profile ranking, album bundles, retries.
+  - **Import pipeline**: verification, quarantine, MusicBrainz preflight, tagging, art, lyrics, ReplayGain, atomic publish.
+  - **Enrichment workers**: 14 music and 13 video, each yielding to user activity.
+  - **Automation engine**: event bus, signal chains, cycle guards.
+  - **SoulID**: deterministic cross-instance IDs for artists, albums and tracks.
 
 ---
 
-## Architecture
-
-**Scale**: ~400,000 lines across Python backend and JavaScript/TypeScript frontend, 1,000+ API endpoints, handles 10,000+ album libraries
-
-**Integrations**: Spotify, iTunes/Apple Music, Deezer, Tidal, Qobuz, YouTube, Soulseek (slskd), HiFi, Beatport, ListenBrainz, MusicBrainz, AcoustID, AudioDB, Last.fm, Genius, LRClib, music-map.com, Plex, Jellyfin, Navidrome
-
-**Stack**: Python 3.11, Flask, SQLite (WAL mode), vanilla JavaScript SPA, Chart.js
-
-**Core Components**:
-- **Matching Engine** — version-aware fuzzy matching with streaming source bypass
-- **Download Orchestrator** — routes between 7 sources with hybrid fallback and batch processing
-- **Discovery System** — personalized playlists, cache-powered sections, seasonal content
-- **Metadata Pipeline** — 14 enrichment workers, Picard-style album consistency, dual-source fallback
-- **Album Consistency** — pre-flight MusicBrainz release lookup before album downloads
-- **Automation Engine** — event-driven workflows with signal chains and pipeline deployment
-- **SoulID System** — deterministic cross-instance artist/album/track identifiers via track-verified API lookup
-
----
-
-## Contributing
-
-### Branch workflow
+# Contributing
 
 SoulSync uses a `dev` → `main` flow:
 
-- **`main`** — release branch. `:latest` images auto-build from this. Only receives merges from `dev`.
-- **`dev`** — integration branch. Nightly `:dev` images build from here. PRs land here first for validation before being promoted to `main`.
-- **Feature branches** — branched from `dev`. PRs target `dev`.
+- **`main`**: releases. `:latest` builds from here, and it only receives merges from `dev`.
+- **`dev`**: integration. `:dev` and nightly images build from here.
+- **Feature branches**: branch from `dev`, and open PRs against `dev`.
 
-### Opening a PR
+To open a PR:
 
-1. Fork and clone the repo
-2. Branch off `dev`: `git checkout -b fix/your-change dev`
-3. Make your changes and commit
-4. Push and open a PR against **`dev`** (not `main`)
-5. CI (`build-and-test.yml`) runs ruff lint + compile + `python -m pytest` on your branch — wait for green
-6. A maintainer reviews and merges
+1. Fork, then branch from `dev`: `git checkout -b fix/your-change dev`
+2. Make the change, with tests.
+3. Open a PR against **`dev`** (not `main`).
+4. CI runs ruff, pytest, the web UI lint and build, and vitest. Wait for green.
+5. A maintainer reviews and merges.
 
-### Running locally
+Ruff config lives in `pyproject.toml`. It's intentionally lenient: it catches real bugs, not style nits.
 
-Use the [Local Development](#local-development) section above for the full repo-wide setup and the portable dev launcher.
+**Bugs and ideas**: open a [GitHub issue](https://github.com/Nezreka/SoulSync/issues). For help, [Discord](https://discord.gg/wGvKqVQwmy) is fastest.
 
-For web UI work, see [webui/README.md](webui/README.md). It keeps the React-side notes close to the app while this file stays the single place for repo-wide dev instructions.
+---
 
-Ruff config lives in `pyproject.toml`. The ruleset is intentionally lenient — it catches real bugs (undefined names, import shadowing, closure-in-loop) without style nits.
+# License
 
-### Reporting bugs / requesting features
+MIT. See [license.txt](license.txt).
 
-Open an issue on GitHub. For user-side support, the Discord community is the fastest place to ask.
+If SoulSync saves you time, consider [supporting it on Ko-fi](https://ko-fi.com/boulderbadgedad).

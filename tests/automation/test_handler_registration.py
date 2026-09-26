@@ -45,6 +45,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'playlist_pipeline',
     'personalized_pipeline',
     'import_lastfm_listening',
+    'import_listenbrainz_listening',
     'start_database_update',
     'start_database_update_hourly',
     'deep_scan_library',
@@ -103,6 +104,7 @@ EXPECTED_GUARDED_ACTIONS = frozenset({
     'playlist_pipeline',
     'personalized_pipeline',
     'import_lastfm_listening',
+    'import_listenbrainz_listening',
     'start_database_update',
     'start_database_update_hourly',
     'deep_scan_library',
@@ -210,6 +212,7 @@ def _build_deps(engine, scan_mgr=None) -> AutomationDeps:
         record_progress_history=lambda *a, **k: None,
         build_personalized_manager=lambda: None,
         lastfm_import_worker=None,
+        listenbrainz_import_worker=None,
     )
 
 

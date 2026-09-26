@@ -1435,3 +1435,56 @@ def test_a_broken_setting_falls_back_to_the_default():
     manager.get.side_effect = RuntimeError("no config")
     with patch("core.settings.config_manager", manager):
         assert min_complete_kbps() == DEFAULT_MIN_COMPLETE_KBPS
+
+
+def test_reported_duration_severely_short_is_dropped():
+    # 837-minute book vs 35-minute music album (like Infortunio rock album)
+    book = {**BOOK, "title": "Infortunio", "author_names": ["Brandon Sanderson"], "runtime_minutes": 837}
+    release = _release("Infortunio")
+    release.duration_seconds = 35 * 60.0  # 35 minutes
+    ranked = rank_releases([release], book, 0.0, "any")
+    assert len(ranked) == 0
+
+
+def test_reported_duration_match_earns_bonus():
+    book = {**BOOK, "runtime_minutes": 600}
+    release = _release("Project Hail Mary M4B")
+    release.duration_seconds = 590 * 60.0  # ~98% match
+    ranked = rank_releases([release], book, 0.0, "any")
+    assert len(ranked) == 1
+    assert any("duration matches runtime" in r for r in ranked[0].reasons)
+
+
+def test_series_volume_mismatch_is_dropped():
+    # Wanted Book 5, candidate is Book 4 / (04)
+    book = {
+        **BOOK,
+        "title": "Harry Potter and the Order of the Phoenix, Book 5",
+        "series": [{"title": "Harry Potter", "sequence": "5"}],
+    }
+    wrong_volume = _release("Harry Potter and the Goblet of Fire (04) by J. K. Rowling M4B")
+    right_volume = _release("Harry Potter and the Order of the Phoenix (05) by J. K. Rowling M4B")
+    ranked = rank_releases([wrong_volume, right_volume], book, 0.0, "any")
+    assert len(ranked) == 1
+    assert ranked[0].title == right_volume.title
+    assert ranked[0].series_verdict == "match"
+
+
+def test_soundtrack_release_is_dropped():
+    book = {**BOOK, "title": "Fantastic Beasts and Where to Find Them", "author_names": ["J.K. Rowling"]}
+    soundtrack = _release("Fantastic Beasts and Where to Find Them (Original Motion Picture Soundtrack)")
+    reading = _release("Fantastic Beasts and Where to Find Them Unabridged")
+    ranked = rank_releases([soundtrack, reading], book, 0.0, "any")
+    assert len(ranked) == 1
+    assert ranked[0].title == reading.title
+
+
+def test_single_word_title_without_author_penalized():
+    # Single-word title with 0 author match should score < 0.50 and be dropped by min_relevance
+    book = {**BOOK, "title": "Infortunio", "author_names": ["Brandon Sanderson"]}
+    rock_album = _release("En La Niebla - Consuelo Del Infortunio FLAC")
+    real_book = _release("Brandon Sanderson - Infortunio Audiobook")
+    ranked = rank_releases([rock_album, real_book], book, 0.5, "any")
+    assert len(ranked) == 1
+    assert ranked[0].title == real_book.title
+

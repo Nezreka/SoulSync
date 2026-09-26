@@ -1190,11 +1190,18 @@ function updateTidalCardSyncProgress(playlistId, progress) {
         const processed = matched + failed;
         const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
 
+        const matchedText = progress.duplicate_tracks > 0
+            ? `${matched} (${progress.synced_tracks || (matched - progress.duplicate_tracks)} synced)`
+            : `${matched}`;
+        const matchedTitle = progress.duplicate_tracks > 0
+            ? ` title="${progress.duplicate_tracks} duplicate track${progress.duplicate_tracks === 1 ? '' : 's'} folded (already on playlist)"`
+            : '';
+
         statusCounterHTML = `
             <div class="playlist-card-sync-status">
                 <span class="sync-stat total-tracks">♪ ${total}</span>
                 <span class="sync-separator">/</span>
-                <span class="sync-stat matched-tracks">✓ ${matched}</span>
+                <span class="sync-stat matched-tracks"${matchedTitle}>✓ ${matchedText}</span>
                 <span class="sync-separator">/</span>
                 <span class="sync-stat failed-tracks">✗ ${failed}</span>
                 <span class="sync-stat percentage">(${percentage}%)</span>
@@ -1227,7 +1234,16 @@ function updateTidalModalSyncProgress(urlHash, progress) {
     const failed = progress.failed_tracks || 0;
 
     if (totalEl) totalEl.textContent = total;
-    if (matchedEl) matchedEl.textContent = matched;
+    if (matchedEl) {
+        if (progress.duplicate_tracks > 0) {
+            const synced = progress.synced_tracks || (matched - progress.duplicate_tracks);
+            matchedEl.textContent = `${matched} (${synced} synced)`;
+            matchedEl.title = `${progress.duplicate_tracks} duplicate track${progress.duplicate_tracks === 1 ? '' : 's'} folded (already on playlist)`;
+        } else {
+            matchedEl.textContent = matched;
+            matchedEl.removeAttribute('title');
+        }
+    }
     if (failedEl) failedEl.textContent = failed;
 
     // Calculate percentage like YouTube sync
@@ -1487,7 +1503,7 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
                         Begin Analysis
                     </button>
                     <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
-                        Add to Wishlist
+                        ${typeof wishlistAddLabel === 'function' ? wishlistAddLabel() : 'Add to Wishlist'}
                     </button>
                     <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
                         Cancel All
@@ -2343,11 +2359,18 @@ function updateQobuzCardSyncProgress(playlistId, progress) {
         const processed = matched + failed;
         const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
 
+        const matchedText = progress.duplicate_tracks > 0
+            ? `${matched} (${progress.synced_tracks || (matched - progress.duplicate_tracks)} synced)`
+            : `${matched}`;
+        const matchedTitle = progress.duplicate_tracks > 0
+            ? ` title="${progress.duplicate_tracks} duplicate track${progress.duplicate_tracks === 1 ? '' : 's'} folded (already on playlist)"`
+            : '';
+
         statusCounterHTML = `
             <div class="playlist-card-sync-status">
                 <span class="sync-stat total-tracks">♪ ${total}</span>
                 <span class="sync-separator">/</span>
-                <span class="sync-stat matched-tracks">✓ ${matched}</span>
+                <span class="sync-stat matched-tracks"${matchedTitle}>✓ ${matchedText}</span>
                 <span class="sync-separator">/</span>
                 <span class="sync-stat failed-tracks">✗ ${failed}</span>
                 <span class="sync-stat percentage">(${percentage}%)</span>
@@ -2374,7 +2397,16 @@ function updateQobuzModalSyncProgress(urlHash, progress) {
     const failed = progress.failed_tracks || 0;
 
     if (totalEl) totalEl.textContent = total;
-    if (matchedEl) matchedEl.textContent = matched;
+    if (matchedEl) {
+        if (progress.duplicate_tracks > 0) {
+            const synced = progress.synced_tracks || (matched - progress.duplicate_tracks);
+            matchedEl.textContent = `${matched} (${synced} synced)`;
+            matchedEl.title = `${progress.duplicate_tracks} duplicate track${progress.duplicate_tracks === 1 ? '' : 's'} folded (already on playlist)`;
+        } else {
+            matchedEl.textContent = matched;
+            matchedEl.removeAttribute('title');
+        }
+    }
     if (failedEl) failedEl.textContent = failed;
 
     if (total > 0) {
@@ -3596,11 +3628,18 @@ function updateDeezerCardSyncProgress(playlistId, progress) {
         const processed = matched + failed;
         const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
 
+        const matchedText = progress.duplicate_tracks > 0
+            ? `${matched} (${progress.synced_tracks || (matched - progress.duplicate_tracks)} synced)`
+            : `${matched}`;
+        const matchedTitle = progress.duplicate_tracks > 0
+            ? ` title="${progress.duplicate_tracks} duplicate track${progress.duplicate_tracks === 1 ? '' : 's'} folded (already on playlist)"`
+            : '';
+
         statusCounterHTML = `
             <div class="playlist-card-sync-status">
                 <span class="sync-stat total-tracks">♪ ${total}</span>
                 <span class="sync-separator">/</span>
-                <span class="sync-stat matched-tracks">✓ ${matched}</span>
+                <span class="sync-stat matched-tracks"${matchedTitle}>✓ ${matchedText}</span>
                 <span class="sync-separator">/</span>
                 <span class="sync-stat failed-tracks">✗ ${failed}</span>
                 <span class="sync-stat percentage">(${percentage}%)</span>
@@ -3627,7 +3666,16 @@ function updateDeezerModalSyncProgress(urlHash, progress) {
     const failed = progress.failed_tracks || 0;
 
     if (totalEl) totalEl.textContent = total;
-    if (matchedEl) matchedEl.textContent = matched;
+    if (matchedEl) {
+        if (progress.duplicate_tracks > 0) {
+            const synced = progress.synced_tracks || (matched - progress.duplicate_tracks);
+            matchedEl.textContent = `${matched} (${synced} synced)`;
+            matchedEl.title = `${progress.duplicate_tracks} duplicate track${progress.duplicate_tracks === 1 ? '' : 's'} folded (already on playlist)`;
+        } else {
+            matchedEl.textContent = matched;
+            matchedEl.removeAttribute('title');
+        }
+    }
     if (failedEl) failedEl.textContent = failed;
 
     if (total > 0) {

@@ -30,6 +30,7 @@ import requests as http_requests
 
 from core.settings import config_manager
 from core.amazon_client import AmazonClient, AmazonClientError
+from core.async_utils import run_blocking
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 from core.quality.model import AudioQuality
@@ -113,8 +114,11 @@ class AmazonDownloadClient(DownloadSourcePlugin):
         return True
 
     async def check_connection(self) -> bool:
+        # the t2tunes calls are blocking http with retries (up to ~90s), and
+        # these coroutines run on the app's one shared loop. off the loop, or
+        # a slow proxy freezes search, downloads and status for everyone
         try:
-            return self._client.is_authenticated()
+            return await run_blocking(self._client.is_authenticated)
         except Exception:
             return False
 
@@ -129,7 +133,7 @@ class AmazonDownloadClient(DownloadSourcePlugin):
         progress_callback: Any = None,
     ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         try:
-            items = self._client.search_raw(query, types="track,album")
+            items = await run_blocking(self._client.search_raw, query, types="track,album")
         except AmazonClientError as exc:
             logger.warning(f"Amazon search failed for {query!r}: {exc}")
             return [], []

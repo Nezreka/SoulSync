@@ -3086,6 +3086,12 @@ function initializeDocsPage() {
             try {
                 debugBtn.textContent = 'Collecting...';
                 const resp = await fetch(`/api/debug-info?lines=${logLines}&log=${logSource}`);
+                if (resp.status === 403) {
+                    // logs and config are admin-only
+                    debugBtn.textContent = 'Admin only';
+                    setTimeout(() => { debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info'; }, 2000);
+                    return;
+                }
                 const data = await resp.json();
 
                 const ck = '\u2713';

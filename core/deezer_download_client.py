@@ -122,6 +122,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         self._user_data = None
         self._authenticated = False
         self._pending_arl: Optional[str] = None
+        # a failed login keeps its arl pending and waits this long before the
+        # next try, doubling each miss (see is_authenticated)
+        self._auth_retry_at = 0.0
+        self._auth_retry_wait = 0.0
 
         # Quality preference
         self._quality = quality_tier_for_source('deezer', default='flac')
@@ -133,8 +137,11 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             if is_boot_phase():
                 self._pending_arl = arl
                 logger.debug("Deezer ARL present — authentication deferred until after boot")
-            else:
-                self._authenticate(arl)
+            elif not self._authenticate(arl):
+                # same as a failed reconnect: retry later, don't stay dead
+                self._pending_arl = arl
+                self._auth_retry_wait = self._AUTH_RETRY_FIRST
+                self._auth_retry_at = time.time() + self._AUTH_RETRY_FIRST
 
         logger.info(f"Deezer download client initialized (download path: {self.download_path})")
 
@@ -271,12 +278,28 @@ class DeezerDownloadClient(DownloadSourcePlugin):
     def is_available(self) -> bool:
         return self.is_authenticated()
 
+    # retry waits after a failed login: 30s, doubling, capped at 30 min
+    _AUTH_RETRY_FIRST = 30.0
+    _AUTH_RETRY_MAX = 1800.0
+
     def is_authenticated(self) -> bool:
         if self._pending_arl and not self._authenticated:
             from core.boot_phase import is_boot_phase
-            if not is_boot_phase():
+            now = time.time()
+            if not is_boot_phase() and now >= getattr(self, '_auth_retry_at', 0.0):
                 self._authenticate(self._pending_arl)
-                self._pending_arl = None
+                if self._authenticated:
+                    self._pending_arl = None
+                    self._auth_retry_wait = 0.0
+                else:
+                    # a dropped connection is not a bad arl. keep it and try
+                    # again later instead of staying logged out until restart.
+                    # backs off so a really bad arl doesn't hit deezer on
+                    # every status poll
+                    wait = getattr(self, '_auth_retry_wait', 0.0)
+                    wait = min(wait * 2, self._AUTH_RETRY_MAX) if wait else self._AUTH_RETRY_FIRST
+                    self._auth_retry_wait = wait
+                    self._auth_retry_at = now + wait
         return self._authenticated
 
     async def check_connection(self) -> bool:
@@ -338,7 +361,18 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         if not arl:
             return False
         self._authenticated = False
-        return self._authenticate(arl)
+        ok = self._authenticate(arl)
+        if not ok:
+            # every settings save lands here. deezer dropping the connection
+            # at that moment used to leave downloads logged out until the
+            # next save or a restart; keep the arl so is_authenticated retries
+            self._pending_arl = arl
+            self._auth_retry_wait = self._AUTH_RETRY_FIRST
+            self._auth_retry_at = time.time() + self._AUTH_RETRY_FIRST
+        else:
+            self._pending_arl = None
+            self._auth_retry_wait = 0.0
+        return ok
 
     def get_quality_label(self) -> str:
         """Get human-readable label for current quality setting."""
@@ -679,6 +713,142 @@ class DeezerDownloadClient(DownloadSourcePlugin):
 
     # ─── Search ──────────────────────────────────────────────────
 
+    def _item_to_track_result(self, item: dict) -> Optional[TrackResult]:
+        """Public-API track dict → downloadable TrackResult.
+
+        Shared by search and by-id link fetch so a pasted Deezer URL injects
+        the same candidate shape the user can already download from search.
+        """
+        if not isinstance(item, dict):
+            return None
+        track_id = str(item.get('id') or '')
+        if not track_id:
+            return None
+
+        artist_obj = item.get('artist') if isinstance(item.get('artist'), dict) else {}
+        album_obj = item.get('album') if isinstance(item.get('album'), dict) else {}
+        artist = artist_obj.get('name') or 'Unknown'
+        title = item.get('title') or 'Unknown'
+        album = album_obj.get('title') or ''
+        duration_s = item.get('duration') or 0
+        duration_ms = duration_s * 1000
+
+        requested_quality = quality_tier_for_source(
+            'deezer', default=self._quality,
+        )
+        if requested_quality == 'flac':
+            est_size = duration_s * 176400  # ~1411kbps
+            bitrate = 1411
+            quality = 'flac'
+        elif requested_quality == 'mp3_320':
+            est_size = duration_s * 40000  # ~320kbps
+            bitrate = 320
+            quality = 'mp3'
+        else:
+            est_size = duration_s * 16000  # ~128kbps
+            bitrate = 128
+            quality = 'mp3'
+
+        tr = TrackResult(
+            username='deezer_dl',
+            filename=f"{track_id}||{artist} - {title}",
+            size=est_size,
+            bitrate=bitrate,
+            duration=duration_ms,
+            quality=quality,
+            free_upload_slots=999,
+            upload_speed=999999,
+            queue_length=0,
+            artist=artist,
+            title=title,
+            album=album,
+            track_number=item.get('track_position'),
+            # the ids of the exact track the user is choosing.
+            # enrichment used to text-search deezer afterwards to
+            # work out which deezer track this was - a track we had
+            # just downloaded from deezer BY id. a remix suffix or a
+            # differently credited artist made that fuzzy match miss,
+            # and then no deezer id was embedded at all. tidal and
+            # hifi already carry theirs through this way.
+            _source_metadata={
+                'source': 'deezer',
+                'track_id': track_id,
+                'artist_id': str(artist_obj.get('id') or '') or None,
+                'album_id': str(album_obj.get('id') or '') or None,
+            },
+        )
+        # Stamp CD-quality FLAC (16/44.1) so lossless ranks correctly.
+        tr.set_quality(quality_from_deezer(requested_quality))
+        return tr
+
+    def _public_entity(self, kind: str, entity_id: str) -> Optional[dict]:
+        """GET api.deezer.com/{track|album}/{id}. None on any failure."""
+        try:
+            resp = self._api_get(
+                f'https://api.deezer.com/{kind}/{entity_id}',
+                timeout=10,
+            )
+            if not resp:
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict) or data.get('error') or not data.get('id'):
+                return None
+            return data
+        except Exception as e:
+            logger.error(f"Error getting Deezer {kind} {entity_id}: {e}")
+            return None
+
+    def get_track(self, track_id: str) -> Optional[dict]:
+        """Public-API track lookup for a pasted Deezer link."""
+        return self._public_entity('track', track_id)
+
+    def get_album(self, album_id: str) -> Optional[dict]:
+        """Public-API album lookup for a pasted Deezer album link.
+
+        Remix singles are published as one-track albums — the payload's
+        ``tracks.data`` is what the manual-search resolver picks from.
+        When the embedded page is shorter than ``nb_tracks``, fetch the
+        full track list so a title match can still land.
+        """
+        data = self._public_entity('album', album_id)
+        if not data:
+            return None
+        nested = data.get('tracks') if isinstance(data.get('tracks'), dict) else {}
+        tracks = nested.get('data') or []
+        nb = data.get('nb_tracks') or 0
+        if nb and len(tracks) < int(nb):
+            try:
+                resp = self._api_get(
+                    f'https://api.deezer.com/album/{album_id}/tracks',
+                    params={'limit': min(int(nb), 500)},
+                    timeout=10,
+                )
+                if resp:
+                    extra = (resp.json() or {}).get('data') or []
+                    if extra:
+                        data = dict(data)
+                        data['tracks'] = {'data': extra}
+            except Exception as e:
+                logger.debug("Deezer album %s track-list fill failed: %s", album_id, e)
+        return data
+
+    def get_track_result(self, track_id: str) -> Optional[TrackResult]:
+        """Fetch ONE track by ID and convert it to a downloadable TrackResult.
+
+        Used when a pasted Deezer link must inject the EXACT track: a text
+        search for an obscure remix often doesn't surface it (#932). Returns
+        None on any failure so the caller falls back to the text-search path.
+        """
+        try:
+            track = self.get_track(track_id)
+            if not track:
+                return None
+            return self._item_to_track_result(track)
+        except Exception as e:
+            logger.debug(f"get_track_result failed for Deezer {track_id}: {e}")
+            return None
+
     async def search(self, query: str, timeout: int = None,
                      progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Search Deezer for tracks matching the query."""
@@ -691,9 +861,6 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             return [], []
 
         try:
-            requested_quality = quality_tier_for_source(
-                'deezer', default=self._quality,
-            )
             resp = self._api_get(
                 'https://api.deezer.com/search',
                 params={'q': query, 'limit': 30},
@@ -707,60 +874,9 @@ class DeezerDownloadClient(DownloadSourcePlugin):
 
             results = []
             for item in data.get('data', []):
-                track_id = str(item.get('id', ''))
-                if not track_id:
-                    continue
-
-                artist = item.get('artist', {}).get('name', 'Unknown')
-                title = item.get('title', 'Unknown')
-                album = item.get('album', {}).get('title', '')
-                duration_ms = (item.get('duration', 0)) * 1000  # Deezer returns seconds
-                # Estimate size based on quality
-                duration_s = item.get('duration', 0)
-                if requested_quality == 'flac':
-                    est_size = duration_s * 176400  # ~1411kbps
-                    bitrate = 1411
-                    quality = 'flac'
-                elif requested_quality == 'mp3_320':
-                    est_size = duration_s * 40000  # ~320kbps
-                    bitrate = 320
-                    quality = 'mp3'
-                else:
-                    est_size = duration_s * 16000  # ~128kbps
-                    bitrate = 128
-                    quality = 'mp3'
-
-                tr = TrackResult(
-                    username='deezer_dl',
-                    filename=f"{track_id}||{artist} - {title}",
-                    size=est_size,
-                    bitrate=bitrate,
-                    duration=duration_ms,
-                    quality=quality,
-                    free_upload_slots=999,
-                    upload_speed=999999,
-                    queue_length=0,
-                    artist=artist,
-                    title=title,
-                    album=album,
-                    track_number=item.get('track_position'),
-                    # the ids of the exact track the user is choosing.
-                    # enrichment used to text-search deezer afterwards to
-                    # work out which deezer track this was - a track we had
-                    # just downloaded from deezer BY id. a remix suffix or a
-                    # differently credited artist made that fuzzy match miss,
-                    # and then no deezer id was embedded at all. tidal and
-                    # hifi already carry theirs through this way.
-                    _source_metadata={
-                        'source': 'deezer',
-                        'track_id': track_id,
-                        'artist_id': str(item.get('artist', {}).get('id') or '') or None,
-                        'album_id': str(item.get('album', {}).get('id') or '') or None,
-                    },
-                )
-                # Stamp CD-quality FLAC (16/44.1) so lossless ranks correctly.
-                tr.set_quality(quality_from_deezer(requested_quality))
-                results.append(tr)
+                tr = self._item_to_track_result(item)
+                if tr:
+                    results.append(tr)
 
             logger.info(f"Deezer search for '{query}' returned {len(results)} results")
             return results, []

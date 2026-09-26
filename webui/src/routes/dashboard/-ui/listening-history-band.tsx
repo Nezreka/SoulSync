@@ -29,7 +29,7 @@ import { useCallback, useState } from 'react';
 import type { RecentPlay, RecentPlayRow } from '../-dash.listening';
 
 import { openArtistFromRail } from '../-dash.content';
-import { toRecentPlays } from '../-dash.listening';
+import { playsCaption, toRecentPlays } from '../-dash.listening';
 import { useLiveRefresh } from '../-dash.live-refresh';
 import { playTrackByMetadata } from '../../../features/playback/play-track';
 import { getShellBridge } from '../../../platform/shell/bridge';
@@ -37,6 +37,8 @@ import { getShellBridge } from '../../../platform/shell/bridge';
 // 25, not 12: this is the dashboard's whole view of what you have been
 // listening to, and a dozen rows runs out inside one album.
 const LIMIT = 25;
+// repeats fold into one card, so ask for more rows than cards to fill the rail
+const FETCH_ROWS = 50;
 const REFRESH_MS = 60_000;
 
 export function ListeningHistoryBand() {
@@ -44,7 +46,7 @@ export function ListeningHistoryBand() {
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch(`/api/stats/recent?limit=${LIMIT}`);
+      const response = await fetch(`/api/stats/recent?limit=${FETCH_ROWS}`);
       const data = (await response.json()) as { success?: boolean; tracks?: RecentPlayRow[] };
       if (data.success && Array.isArray(data.tracks)) {
         setPlays(toRecentPlays(data.tracks, new Date(), LIMIT));
@@ -95,7 +97,7 @@ export function ListeningHistoryBand() {
               </div>
             </div>
             <div className="ya-card-gradient" />
-            {play.ago && <div className="dash-rail-caption">{play.ago}</div>}
+            {playsCaption(play) && <div className="dash-rail-caption">{playsCaption(play)}</div>}
             <div className="ya-card-info">
               <div className="ya-card-name">{play.title}</div>
               {play.artist ? (

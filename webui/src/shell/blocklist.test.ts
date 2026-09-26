@@ -34,9 +34,7 @@ beforeEach(() => {
     div.textContent = String(text ?? '');
     return div.innerHTML;
   };
-  server.use(
-    http.get('/api/blocklist', () => HttpResponse.json({ success: true, entries: [] })),
-  );
+  server.use(http.get('/api/blocklist', () => HttpResponse.json({ success: true, entries: [] })));
 });
 
 afterEach(() => {
@@ -54,8 +52,12 @@ describe('the modal shell', () => {
     openBlocklistModal('artist');
     const overlay = document.getElementById('blocklist-modal-overlay')!;
     expect(overlay.className).toBe('modal-overlay blocklist-modal-overlay');
-    for (const id of ['blocklist-search-input', 'blocklist-search-spinner',
-                      'blocklist-search-results', 'blocklist-current']) {
+    for (const id of [
+      'blocklist-search-input',
+      'blocklist-search-spinner',
+      'blocklist-search-results',
+      'blocklist-current',
+    ]) {
       expect(document.getElementById(id), id).not.toBeNull();
     }
     expect(document.querySelectorAll('.blocklist-tab')).toHaveLength(3);
@@ -113,7 +115,12 @@ describe('search', () => {
   it('an empty query renders nothing and fires no request', async () => {
     vi.useFakeTimers();
     const spy = vi.fn();
-    server.use(http.get('/api/blocklist/search', () => { spy(); return HttpResponse.json({ success: true, results: [] }); }));
+    server.use(
+      http.get('/api/blocklist/search', () => {
+        spy();
+        return HttpResponse.json({ success: true, results: [] });
+      }),
+    );
     openBlocklistModal('artist');
     onBlocklistSearchInput();
     await vi.advanceTimersByTimeAsync(350);
@@ -141,8 +148,7 @@ describe('unblock', () => {
 
   it('a refused delete surfaces the server error', async () => {
     server.use(
-      http.delete('/api/blocklist/:id', () =>
-        HttpResponse.json({ success: false, error: 'nope' })),
+      http.delete('/api/blocklist/:id', () => HttpResponse.json({ success: false, error: 'nope' })),
     );
     openBlocklistModal('artist');
     await settle();
@@ -180,13 +186,15 @@ describe('the window contract', () => {
       'openDownloadOriginsModal',
       'openManualLibraryMatchTool',
       'openMyAccountsModal',
+      'openPersonalSettings',
       'openServiceSwitchModal',
+      'openServiceSwitchSettings',
       'openTrackDetail',
       'openWatchlistHistoryModal',
+      'patchChatMessages',
       'playLibraryTrack',
       'saveMyAccountToken',
       'setActiveSource',
-      'setDownloadMode',
       'switchBlocklistTab',
       'switchDownloadOriginTab',
       'switchServiceSwitchTab',

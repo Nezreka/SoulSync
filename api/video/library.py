@@ -13,6 +13,40 @@ from utils.logging_config import get_logger
 logger = get_logger("video_api.library")
 
 
+def _capped_library(db, cap, server):
+    """the library page for a kids profile: same filters and sort, over-cap
+    and unrated titles left out, paged after the filter so counts and pages
+    stay honest. walks the filtered set in big pages; only restricted
+    profiles ever come through here."""
+    from .kids import filter_library_items
+    kind = request.args.get("kind", "movies")
+    try:
+        page = max(1, int(request.args.get("page", 1) or 1))
+        limit = max(1, min(500, int(request.args.get("limit", 75) or 75)))
+    except (TypeError, ValueError):
+        page, limit = 1, 75
+    kept, p = [], 1
+    while True:
+        chunk = db.query_library(
+            kind, search=request.args.get("search") or None,
+            letter=request.args.get("letter") or None,
+            sort=request.args.get("sort", "title"),
+            status=request.args.get("status", "all"),
+            genre=request.args.get("genre") or None,
+            resolution=request.args.get("resolution") or None,
+            page=p, limit=500, server_source=server, include_size=False)
+        kept.extend(filter_library_items(db, chunk.get("items") or [], cap, kind))
+        if not (chunk.get("pagination") or {}).get("has_next"):
+            break
+        p += 1
+    total = len(kept)
+    total_pages = max(1, (total + limit - 1) // limit)
+    return {"items": kept[(page - 1) * limit: page * limit],
+            "total_size_bytes": sum(int(it.get("size_bytes") or 0) for it in kept),
+            "pagination": {"page": page, "total_pages": total_pages, "total_count": total,
+                           "has_prev": page > 1, "has_next": page < total_pages}}
+
+
 def register_routes(bp):
     @bp.route("/library", methods=["GET"])
     def video_library():
@@ -29,6 +63,10 @@ def register_routes(bp):
                     page=request.args.get("page", 1),
                     limit=request.args.get("limit", 75),
                 ))
+            from .kids import video_cap
+            cap = video_cap()
+            if cap is not None:
+                return jsonify(_capped_library(get_video_db(), cap, resolve_video_server()))
             return jsonify(get_video_db().query_library(
                 request.args.get("kind", "movies"),
                 search=request.args.get("search") or None,

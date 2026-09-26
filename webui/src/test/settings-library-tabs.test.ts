@@ -39,7 +39,7 @@ describe('Library settings media tabs', () => {
       key: 'ArrowRight',
       currentTarget: music,
       preventDefault() {},
-    } as KeyboardEvent & { currentTarget: Element });
+    } as unknown as KeyboardEvent & { currentTarget: Element });
     const video = document.getElementById('organization-video-tab')!;
     expect(document.activeElement).toBe(video);
     expect(video.getAttribute('aria-selected')).toBe('true');

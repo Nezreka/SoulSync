@@ -56,18 +56,22 @@ describe('EnhancedView states', () => {
   });
 });
 
-describe('the stats bar', () => {
-  it('lists the five stats in order', () => {
+describe('the library summary on the artist card', () => {
+  it('reads the stats as one sentence, skipping empty buckets', () => {
     render(<EnhancedView isAdmin={false} onReload={vi.fn()} data={DATA} status={READY} />);
-    const labels = [...document.querySelectorAll('.enhanced-stat-label')].map((n) => n.textContent);
-    expect(labels).toEqual(['Albums', 'EPs', 'Singles', 'Tracks', 'Duration']);
+    // no singles in the fixture, so that word never appears
+    expect(document.querySelector('.lib-artist-stats')?.textContent).toBe(
+      '1 album·1 EP·3 tracks·5m',
+    );
   });
 
-  it('badges each format with its count, commonest first', () => {
+  it('badges each format with its count, commonest first, under a lossless bar', () => {
     render(<EnhancedView isAdmin={false} onReload={vi.fn()} data={DATA} status={READY} />);
     const badges = [...document.querySelectorAll('.enhanced-stats-formats .enhanced-format-badge')];
-    expect(badges.map((n) => n.textContent)).toEqual(['FLAC (2)', 'MP3 (1)']);
+    expect(badges.map((n) => n.textContent)).toEqual(['FLAC 2', 'MP3 1']);
     expect(badges[0].className).toContain('flac');
+    expect(document.querySelector('.lib-quality-headline')?.textContent).toBe('67% lossless');
+    expect((document.querySelector('.lib-quality-seg') as HTMLElement).style.width).toBe('67%');
   });
 });
 
@@ -122,15 +126,29 @@ describe('sections', () => {
 });
 
 describe('album rows', () => {
-  it('shows the title, meta line, type badge and format badge', () => {
+  it('shows the title, meta line and format badge', () => {
     render(<EnhancedView isAdmin={false} onReload={vi.fn()} data={DATA} status={READY} />);
     const row = document.getElementById('enhanced-album-row-1') as HTMLElement;
     expect(row.querySelector('.enhanced-album-title')?.textContent).toBe('SAW 85-92');
     expect(row.querySelector('.enhanced-album-meta-line')?.textContent).toBe(
       '1992 · 2 tracks · 5:00 · Apollo',
     );
-    expect(row.querySelector('.enhanced-album-type-badge')?.textContent).toBe('album');
+    // the section heading already says what type it is
+    expect(row.querySelector('.enhanced-album-type-badge')).toBeNull();
     expect(row.querySelector('.enhanced-format-badge')?.textContent).toBe('FLAC');
+    expect(row.querySelector('.lib-pill.warn')).toBeNull();
+  });
+
+  it('flags the gap when the source counts more tracks than are owned', () => {
+    render(
+      <EnhancedView
+        isAdmin={false}
+        onReload={vi.fn()}
+        data={{ albums: [{ id: 4, title: 'Short', api_track_count: 12, tracks: [{ id: 1 }] }] }}
+        status={READY}
+      />,
+    );
+    expect(document.querySelector('.lib-pill.warn')?.textContent).toBe('11 missing');
   });
 
   it('falls back to the music note when the album has no art', () => {
@@ -236,6 +254,44 @@ describe('expanding an album', () => {
     render(<EnhancedView isAdmin={false} onReload={vi.fn()} data={DATA} status={READY} />);
     fireEvent.click(document.getElementById('enhanced-album-row-1') as HTMLElement);
     expect(document.getElementById('enhanced-tracks-panel-2')?.className).not.toContain('visible');
+  });
+});
+
+describe('the album metadata row', () => {
+  // the integration the component tests could not see: who gets the row at
+  // all. gating it on the admin's "edit details" toggle silently took release
+  // date, style, mood and explicit away from everyone else.
+  const open = () => fireEvent.click(document.getElementById('enhanced-album-row-1')!);
+
+  it('is read-only and always shown for a non-admin', () => {
+    render(<EnhancedView isAdmin={false} onReload={vi.fn()} data={DATA} status={READY} />);
+    open();
+    expect(document.querySelector('.enhanced-album-meta-row')).not.toBeNull();
+    expect(document.querySelector('.enhanced-album-meta-input')).toBeNull();
+    const labels = [...document.querySelectorAll('.enhanced-album-meta-label')].map(
+      (n) => n.textContent,
+    );
+    expect(labels).toEqual([
+      'Title',
+      'Year',
+      'Release Date',
+      'Genres',
+      'Label',
+      'Style',
+      'Mood',
+      'Type',
+      'Explicit',
+    ]);
+  });
+
+  it('is hidden for an admin until Edit details, then editable', () => {
+    render(<EnhancedView isAdmin onReload={vi.fn()} data={DATA} status={READY} />);
+    open();
+    expect(document.querySelector('.enhanced-album-meta-row')).toBeNull();
+
+    fireEvent.click(document.querySelector('.lib-edit-details') as HTMLElement);
+    expect(document.querySelector('.enhanced-album-meta-row')).not.toBeNull();
+    expect(document.querySelector('.enhanced-album-meta-input')).not.toBeNull();
   });
 });
 

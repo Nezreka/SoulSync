@@ -477,13 +477,53 @@ def test_the_wishlist_reports_counts_and_worker_state(client, catalog, wishlist_
     assert "worker" in body
 
 
-def test_a_manual_pass_runs_the_same_code_as_the_timer(client, catalog, wishlist_db):
-    # The manual button and the background worker must not drift apart.
+def test_clear_wishlist_empties_the_list(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    client.post("/api/audiobooks/wishlist", json={"asin": "B1"})
+    catalog.get_book.return_value = _item(asin="B2")
+    client.post("/api/audiobooks/wishlist", json={"asin": "B2"})
+    assert wishlist_db.wishlist_counts()["total"] == 2
+
+    resp = client.delete("/api/audiobooks/wishlist")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["cleared"] == 2
+    assert wishlist_db.wishlist_counts()["total"] == 0
+
+
+def test_targeted_search_finds_book(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    client.post("/api/audiobooks/wishlist", json={"asin": "B1"})
+
+    with patch("core.audiobook_wishlist_worker.search_single_book",
+               return_value={"ok": True, "outcome": {"asin": "B1", "found": 1, "grabbed": True}}) as s:
+        resp = client.post("/api/audiobooks/wishlist/B1/search")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["success"] is True
+        assert body["outcome"]["grabbed"] is True
+        s.assert_called_once_with("B1", profile_id=1)
+
+
+def test_targeted_search_missing_book_returns_404(client, catalog, wishlist_db):
+    resp = client.post("/api/audiobooks/wishlist/NONEXISTENT/search")
+    assert resp.status_code == 404
+    assert resp.get_json()["success"] is False
+
+
+def test_manual_pass_bypasses_due_only_by_default(client, catalog, wishlist_db):
     with patch("core.audiobook_wishlist_worker.run_pass",
-               return_value={"checked": 2, "grabbed": 1}) as run:
-        body = client.post("/api/audiobooks/wishlist/search", json={}).get_json()
-    run.assert_called_once()
-    assert body["summary"]["checked"] == 2
+               return_value={"checked": 1, "grabbed": 1}) as run:
+        resp = client.post("/api/audiobooks/wishlist/search", json={})
+        assert resp.status_code == 200
+        run.assert_called_once_with(due_only=False)
+
+    with patch("core.audiobook_wishlist_worker.run_pass",
+               return_value={"checked": 0, "grabbed": 0}) as run:
+        resp = client.post("/api/audiobooks/wishlist/search", json={"force": False})
+        assert resp.status_code == 200
+        run.assert_called_once_with(due_only=True)
 
 
 def test_a_failing_pass_is_reported_not_raised(client, catalog, wishlist_db):

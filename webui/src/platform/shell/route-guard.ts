@@ -1,5 +1,6 @@
-import { appURL } from '@/platform/url-base';
 import { redirect } from '@tanstack/react-router';
+
+import { appURL } from '@/platform/url-base';
 
 import type { ShellBridge, ShellPageId } from './bridge';
 

@@ -247,7 +247,29 @@ def _ensure_watcher(app):
         logger.info("Started api/request transfer watcher (interval=%ss)", _COMPLETION_POLL_SECONDS)
 
 
-def _run_search_and_download(request_id, query, notify_url):
+def expected_track_for(query, title=None, artist=None, duration_ms=None):
+    """what the caller meant, so the streaming results get scored against it
+    instead of taking the top hit at top quality (a karaoke or live version
+    of "Artist - Track" used to win). explicit title/artist win; otherwise an
+    "Artist - Title" query is split. None when there's nothing to go on."""
+    from types import SimpleNamespace
+
+    title = (title or '').strip()
+    artist = (artist or '').strip()
+    if not title and ' - ' in (query or ''):
+        artist_part, title_part = query.split(' - ', 1)
+        artist = artist or artist_part.strip()
+        title = title_part.strip()
+    if not title:
+        return None
+    try:
+        duration = int(duration_ms or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    return SimpleNamespace(name=title, artists=[artist] if artist else [], duration_ms=max(0, duration))
+
+
+def _run_search_and_download(request_id, query, notify_url, expected=None):
     """Background worker: search, start the download, hand off, notify.
 
     Returns as soon as the download is HANDED OFF. It used to sit here polling
@@ -281,7 +303,7 @@ def _run_search_and_download(request_id, query, notify_url):
                 _notify(terminal)
             return
 
-        result = run_async(soulseek.search_and_download_best(query))
+        result = run_async(soulseek.search_and_download_best(query, expected_track=expected))
 
         terminal = None
         with _requests_lock:
@@ -327,6 +349,8 @@ def register_routes(bp):
 
         Body:
             query (str, required): Search query, e.g. "Artist - Track Name"
+            title / artist / duration_ms (optional): what the result must match;
+                an "Artist - Title" query is split into these when absent
             notify_url (str, optional): URL to POST results to on completion
             metadata (dict, optional): Passthrough data included in automation events
 
@@ -343,6 +367,10 @@ def register_routes(bp):
 
         request_id = str(uuid.uuid4())
         notify_url = (body.get("notify_url") or "").strip() or None
+        # a callback is an http post from the server: http(s) only, no file:,
+        # gopher: or whatever else requests may learn to speak
+        if notify_url and not notify_url.lower().startswith(("http://", "https://")):
+            return api_error("BAD_REQUEST", "notify_url must be an http(s) url.", 400)
         metadata = body.get("metadata") or {}
 
         with _requests_lock:
@@ -368,6 +396,10 @@ def register_routes(bp):
                 'request_id': request_id,
                 'source': 'api',
                 'metadata': metadata,
+                # this endpoint starts the download itself (below). an
+                # automation "webhook received -> search and download" used to
+                # grab the same query a second time; the handler reads this
+                'download_started_by': 'api_request',
             })
 
         # Start background search-download (Feature A: works without automations)
@@ -376,7 +408,9 @@ def register_routes(bp):
         # _resolve_downloading_requests for why it is not one per request.
         _ensure_watcher(app)
         thread = threading.Thread(
-            target=lambda: _run_with_app_context(app, request_id, query, notify_url),
+            target=lambda: _run_with_app_context(
+                app, request_id, query, notify_url,
+                expected_track_for(query, body.get("title"), body.get("artist"), body.get("duration_ms"))),
             daemon=True
         )
         thread.start()
@@ -428,7 +462,7 @@ def register_routes(bp):
         })
 
 
-def _run_with_app_context(app, request_id, query, notify_url):
+def _run_with_app_context(app, request_id, query, notify_url, expected=None):
     """Run the background worker within Flask app context."""
     with app.app_context():
-        _run_search_and_download(request_id, query, notify_url)
+        _run_search_and_download(request_id, query, notify_url, expected)

@@ -290,26 +290,43 @@ describe('ArtistMetaPanel', () => {
     return { calls, onReload, onArtistPatched };
   }
 
-  it('renders the name, id badges and the 11-service match chip row', () => {
+  it('renders the name, the stats sentence and the 11-service source row', () => {
     renderPanel();
     expect(document.querySelector('.enhanced-artist-meta-name')?.textContent).toBe('Aphex Twin');
-    const badge = document.querySelector('.enhanced-id-badge') as HTMLAnchorElement;
-    expect(badge.textContent).toBe('Spotify');
-    expect(badge.getAttribute('href')).toBe('https://open.spotify.com/artist/sp42');
+    expect(document.querySelector('.lib-artist-stats')?.textContent).toBe('1 album·2 tracks');
     // 12 services minus the JioSaavn filter; amazon included, unlike enrich.
     const chips = [...document.querySelectorAll('.enhanced-match-chip')];
     expect(chips).toHaveLength(11);
-    expect(chips[0].textContent).toBe('Spotify: matched');
-    expect(chips.at(-1)?.textContent).toBe('Amazon: pending');
+    expect(chips[0].className).toContain('matched');
+    expect(chips[0].getAttribute('data-service')).toBe('spotify');
+    expect(chips.at(-1)?.getAttribute('data-service')).toBe('amazon');
+    expect(chips.at(-1)?.className).toContain('pending');
+    expect(document.querySelector('.lib-sources-summary')?.textContent).toBe('1 of 11 matched');
   });
 
-  it('a chip opens the manual matcher seeded with the artist name', async () => {
+  it('a matched source offers its external page and a rematch', () => {
+    renderPanel();
+    fireEvent.click(document.querySelectorAll('.enhanced-match-chip')[0]);
+    const items = [...document.querySelectorAll('.lib-menu-item')].map((n) => n.textContent);
+    expect(items).toEqual(['Open on Spotify', 'Rematch on Spotify…']);
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    fireEvent.click(document.querySelectorAll('.lib-menu-item')[0]);
+    expect(open).toHaveBeenCalledWith(
+      'https://open.spotify.com/artist/sp42',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    open.mockRestore();
+  });
+
+  it('a source opens the manual matcher seeded with the artist name', async () => {
     renderPanel(true, (url) =>
       url.includes('reorganize/queue')
         ? { active: null, queued: [], recent: [] }
         : { success: true, results: [] },
     );
     fireEvent.click(document.querySelectorAll('.enhanced-match-chip')[1]);
+    fireEvent.click(screen.getByText('Find on MusicBrainz…'));
     expect(screen.getByText('Match artist on MusicBrainz')).toBeTruthy();
     await waitFor(() =>
       expect(
@@ -322,8 +339,16 @@ describe('ArtistMetaPanel', () => {
     renderPanel(false);
     expect(document.querySelector('.enhanced-meta-edit-toggle')).toBeNull();
     expect(document.querySelector('.enhanced-enrich-wrap')).toBeNull();
-    expect(screen.getByText('🔄 Sync')).toBeTruthy();
-    expect(screen.getByText('📁 Reorganize All')).toBeTruthy();
+    expect(screen.getByText('Sync')).toBeTruthy();
+    expect(screen.getByText('Reorganize all')).toBeTruthy();
+    // the source dots keep the external link for them, but never a rematch
+    fireEvent.click(document.querySelectorAll('.enhanced-match-chip')[0]);
+    expect([...document.querySelectorAll('.lib-menu-item')].map((n) => n.textContent)).toEqual([
+      'Open on Spotify',
+    ]);
+    // and an unmatched one has nothing behind it at all
+    fireEvent.click(document.querySelectorAll('.enhanced-match-chip')[1]);
+    expect(document.querySelectorAll('.lib-menu')).toHaveLength(1);
   });
 
   it('Sync toasts the summary and reloads only when something changed', async () => {
@@ -333,7 +358,7 @@ describe('ArtistMetaPanel', () => {
         ? { success: true, artist_name: 'Aphex Twin', new_albums: 1, new_tracks: 5 }
         : { active: null, queued: [], recent: [] },
     );
-    fireEvent.click(screen.getByText('🔄 Sync'));
+    fireEvent.click(screen.getByText('Sync'));
     await waitFor(() =>
       expect(window.showToast).toHaveBeenCalledWith('Aphex Twin: +1 albums, +5 tracks', 'success'),
     );
@@ -347,7 +372,7 @@ describe('ArtistMetaPanel', () => {
         ? { success: true, artist_name: 'Aphex Twin' }
         : { active: null, queued: [], recent: [] },
     );
-    fireEvent.click(screen.getByText('🔄 Sync'));
+    fireEvent.click(screen.getByText('Sync'));
     await waitFor(() =>
       expect(window.showToast).toHaveBeenCalledWith('Aphex Twin: Already in sync', 'success'),
     );
@@ -361,7 +386,7 @@ describe('ArtistMetaPanel', () => {
         ? { active: null, queued: [], recent: [] }
         : { success: true, updated_fields: ['label'] },
     );
-    fireEvent.click(screen.getByText('Edit Metadata'));
+    fireEvent.click(screen.getByText('Edit metadata'));
     const label = [...document.querySelectorAll('.enhanced-meta-field-input')].find(
       (el) => (el as HTMLElement).dataset.field === 'label',
     ) as HTMLInputElement;
@@ -378,7 +403,7 @@ describe('ArtistMetaPanel', () => {
   it('saving with no edits refuses without a request', async () => {
     window.showToast = vi.fn() as never;
     const { calls } = renderPanel();
-    fireEvent.click(screen.getByText('Edit Metadata'));
+    fireEvent.click(screen.getByText('Edit metadata'));
     fireEvent.click(screen.getByText('Save Changes'));
     await waitFor(() =>
       expect(window.showToast).toHaveBeenCalledWith('No changes to save', 'error'),
@@ -388,7 +413,7 @@ describe('ArtistMetaPanel', () => {
 
   it("Reorganize All opens the bulk modal over this artist's albums", () => {
     renderPanel();
-    fireEvent.click(screen.getByText('📁 Reorganize All'));
+    fireEvent.click(screen.getByText('Reorganize all'));
     expect(document.getElementById('reorganize-modal-title')?.textContent).toBe(
       'Reorganize All Albums — Aphex Twin',
     );

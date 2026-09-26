@@ -132,11 +132,11 @@ def _mb_service(owned_release_groups):
     s._save_to_cache = lambda *a, **k: None
     s._calculate_similarity = lambda a, b: 1.0
     s.mb_client = types.SimpleNamespace(
-        search_artist=lambda name, limit=5: [
+        search_artist=lambda name, limit=5, strict=True, raise_on_error=False: [
             {'id': 'wrong_mbid', 'name': 'Rone', 'score': 100},  # ranked first
             {'id': 'right_mbid', 'name': 'Rone', 'score': 90},
         ],
-        get_artist=lambda mbid, includes=None: owned_release_groups.get(mbid),
+        get_artist=lambda mbid, includes=None, raise_on_error=False: owned_release_groups.get(mbid),
     )
     return s
 

@@ -486,6 +486,9 @@ def embed_album_art_metadata(audio_file, metadata: dict):
         image_data = None
         mime_type = None
 
+        if metadata.get("_manual"):
+            return _embed_manual_art(audio_file, metadata, symbols)
+
         # User-preferred cover-art source. When album_art_order is a non-empty
         # list it is the SOLE authority for preferred art (put 'caa' in it to use
         # Cover Art Archive), and the legacy prefer_caa_art toggle below is
@@ -543,50 +546,66 @@ def embed_album_art_metadata(audio_file, metadata: dict):
             logger.error("Failed to download album art data.")
             return False
 
-        # A FLAC metadata block carries a 24-bit length, so nothing over
-        # 16,777,215 bytes can ever be written. mutagen only finds out at SAVE
-        # time and raises "block is too long to write", which fails the whole
-        # tag write — the track ends up with no art AND no tags, and the log
-        # says "Album art successfully embedded" right before it (Boulder,
-        # Aug 2026, a 1-09 capaz.flac from LA CIUDAD).
-        #
-        # Some CDNs serve genuinely huge originals (#806 deliberately prefers
-        # the original over the 1200px thumbnail), so this is reachable on
-        # ordinary downloads.
-        if isinstance(audio_file, symbols.FLAC) and len(image_data) > FLAC_MAX_PICTURE_BYTES:
-            shrunk = _shrink_for_flac(image_data, mime_type)
-            if shrunk is None:
-                logger.warning(
-                    "Album art is %.1f MB, over the %.1f MB a FLAC picture block can hold, "
-                    "and it could not be resized — writing tags without art rather than "
-                    "failing the whole save.",
-                    len(image_data) / 1048576, FLAC_MAX_PICTURE_BYTES / 1048576)
-                return False
-            logger.info("Album art resized to fit a FLAC picture block (%.1f MB -> %.1f MB).",
-                        len(image_data) / 1048576, len(shrunk) / 1048576)
-            image_data, mime_type = shrunk, "image/jpeg"
-
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.APIC(encoding=3, mime=mime_type, type=3, desc="Cover", data=image_data))
-        elif isinstance(audio_file, symbols.FLAC):
-            picture = symbols.Picture()
-            picture.data = image_data
-            picture.type = 3
-            picture.mime = mime_type
-            width, height = get_image_dimensions(image_data)
-            picture.width = width or 640
-            picture.height = height or 640
-            picture.depth = 24
-            audio_file.add_picture(picture)
-        elif isinstance(audio_file, symbols.MP4):
-            fmt = symbols.MP4Cover.FORMAT_JPEG if "jpeg" in mime_type else symbols.MP4Cover.FORMAT_PNG
-            audio_file["covr"] = [symbols.MP4Cover(image_data, imageformat=fmt)]
-
-        logger.info("Album art successfully embedded.")
-        return True
+        return _write_embedded_art(audio_file, image_data, mime_type, symbols)
     except Exception as exc:
         logger.error("Error embedding album art: %s", exc)
         return False
+
+
+def _write_embedded_art(audio_file, image_data: bytes, mime_type: str, symbols) -> bool:
+    """put the cover into the file's tags, fitted to what the container allows"""
+    # A FLAC metadata block carries a 24-bit length, so nothing over
+    # 16,777,215 bytes can ever be written. mutagen only finds out at SAVE
+    # time and raises "block is too long to write", which fails the whole
+    # tag write — the track ends up with no art AND no tags, and the log
+    # says "Album art successfully embedded" right before it (Boulder,
+    # Aug 2026, a 1-09 capaz.flac from LA CIUDAD).
+    #
+    # Some CDNs serve genuinely huge originals (#806 deliberately prefers
+    # the original over the 1200px thumbnail), so this is reachable on
+    # ordinary downloads.
+    if isinstance(audio_file, symbols.FLAC) and len(image_data) > FLAC_MAX_PICTURE_BYTES:
+        shrunk = _shrink_for_flac(image_data, mime_type)
+        if shrunk is None:
+            logger.warning(
+                "Album art is %.1f MB, over the %.1f MB a FLAC picture block can hold, "
+                "and it could not be resized — writing tags without art rather than "
+                "failing the whole save.",
+                len(image_data) / 1048576, FLAC_MAX_PICTURE_BYTES / 1048576)
+            return False
+        logger.info("Album art resized to fit a FLAC picture block (%.1f MB -> %.1f MB).",
+                    len(image_data) / 1048576, len(shrunk) / 1048576)
+        image_data, mime_type = shrunk, "image/jpeg"
+
+    if isinstance(audio_file.tags, symbols.ID3):
+        audio_file.tags.add(symbols.APIC(encoding=3, mime=mime_type, type=3, desc="Cover", data=image_data))
+    elif isinstance(audio_file, symbols.FLAC):
+        picture = symbols.Picture()
+        picture.data = image_data
+        picture.type = 3
+        picture.mime = mime_type
+        width, height = get_image_dimensions(image_data)
+        picture.width = width or 640
+        picture.height = height or 640
+        picture.depth = 24
+        audio_file.add_picture(picture)
+    elif isinstance(audio_file, symbols.MP4):
+        fmt = symbols.MP4Cover.FORMAT_JPEG if "jpeg" in mime_type else symbols.MP4Cover.FORMAT_PNG
+        audio_file["covr"] = [symbols.MP4Cover(image_data, imageformat=fmt)]
+
+    logger.info("Album art successfully embedded.")
+    return True
+
+
+def _embed_manual_art(audio_file, metadata: dict, symbols) -> bool:
+    """embed the user's own cover on a hand-tagged file, never a looked-up one"""
+    from core.metadata.manual import read_manual_cover
+    image_data, mime_type = read_manual_cover(metadata.get("_manual_cover_path"))
+    if not image_data and metadata.get("album_art_url"):
+        image_data, mime_type = _fetch_art_bytes(metadata.get("album_art_url"))
+    if not image_data:
+        return False
+    return _write_embedded_art(audio_file, image_data, mime_type or "image/jpeg", symbols)
 
 
 def download_cover_art(album_info: dict, target_dir: str, context: dict = None, force: bool = False):
@@ -628,6 +647,22 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None, 
             is_upgrade = False
 
         image_data = None
+
+        from core.metadata.manual import is_manual_context, manual_cover_path, read_manual_cover
+        if is_manual_context(context):
+            # a hand-tagged release: the user's cover or nothing. the lookups
+            # below match by artist + album name and would find the studio cover
+            image_data, _ = read_manual_cover(manual_cover_path(context))
+            if not image_data:
+                album_ctx = get_import_context_album(context) or {}
+                art_url = album_info.get("album_image_url") or album_ctx.get("image_url")
+                image_data = _fetch_art_bytes(art_url)[0] if art_url else None
+            if not image_data:
+                return
+            with open(cover_path, "wb") as handle:
+                handle.write(image_data)
+            logger.info("Cover art saved (hand-tagged): %s", cover_path)
+            return
 
         # User-preferred cover-art source (no-op unless album_art_order is set).
         # cover.jpg only supports the artist+album sources here (no MBID in

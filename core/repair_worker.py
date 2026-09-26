@@ -172,6 +172,15 @@ JOB_CATEGORIES = {
 }
 
 
+def _lock_genres(cursor, table: str, entity_id) -> None:
+    """mark genres a genre job just settled, so the next media server scan
+    keeps them instead of putting back what the files said (Cremonies).
+    an older db without the column just doesn't get the lock."""
+    cols = {c[1] for c in cursor.execute(f"PRAGMA table_info({table})").fetchall()}  # noqa: S608 - fixed table
+    if 'genres_locked' in cols:
+        cursor.execute(f"UPDATE {table} SET genres_locked = 1 WHERE id = ?", (entity_id,))  # noqa: S608
+
+
 def job_category(job_id: str) -> str:
     """The family a job belongs to. Unknown jobs are grouped, not hidden."""
     return JOB_CATEGORIES.get(job_id, JOB_CATEGORY_FALLBACK)
@@ -1972,6 +1981,7 @@ class RepairWorker:
             if cursor.rowcount == 0:
                 conn.commit()
                 return {'success': False, 'error': f'{entity_type} {entity_id} no longer exists'}
+            _lock_genres(cursor, table, entity_id)
             conn.commit()
             removed = details.get('removed_genres') or []
             logger.info("Genre cleanup: %s %s — removed %d off-whitelist genre(s)",
@@ -2006,6 +2016,7 @@ class RepairWorker:
                 if genre and _normalize_for_match(genre) not in seen:
                     current.append(genre); seen.add(_normalize_for_match(genre))
             cur.execute(f"UPDATE {table} SET genres = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (json.dumps(current), entity_id))
+            _lock_genres(cur, table, entity_id)
             conn.commit(); conn.close()
             return {'success': True, 'action': 'genres_applied'}
         except Exception as e:
@@ -2028,8 +2039,9 @@ class RepairWorker:
         global write_multi_artist opt-in doesn't gate it.
 
         Stale-finding guard: a file whose CURRENT artist tag no longer matches
-        the combined string (user edited it, or it's already split) is left
-        untouched. The file list comes from the finding details, which scanned
+        the combined string (user edited it) is left untouched and the finding
+        is retired. A file that already carries the split list counts as done,
+        not stale. The file list comes from the finding details, which scanned
         the actual file metadata (not the database).
         """
         parts = details.get('split_artists')
@@ -2064,23 +2076,26 @@ class RepairWorker:
         from mutagen.mp4 import MP4
         from core.library.path_resolver import resolve_library_file_path
         from core.metadata.common import save_audio_file, get_mutagen_symbols
+        from core.repair_jobs.comma_artist_splitter import file_already_split
 
         def _norm(v):
             return ' '.join(str(v or '').casefold().split())
 
-        def _single_value(raw):
-            """Current tag value IF it is a single string; None for multi-value
-            (already split) or missing."""
+        def _matches_norm(raw, target_norm):
+            """does ANY value of the current tag equal the combined string?
+            the scan reads text[0], so the fix must accept whatever the scan
+            accepted: a zero-padded id3v2.4 TPE1 reads back from mutagen as
+            ['A; B', ''] (two values) and the old exactly-one-value guard
+            called every such file stale, forever. mutagen only strips that
+            padding for v2.3 (its #276)."""
             if raw is None:
-                return None
-            if isinstance(raw, (list, tuple)):
-                if len(raw) != 1:
-                    return None
-                raw = raw[0]
-            return str(raw)
+                return False
+            if isinstance(raw, (list, tuple, set)):
+                return any(_norm(x) == target_norm for x in raw if x)
+            return _norm(raw) == target_norm
 
         combined_norm = _norm(combined)
-        fixed = stale = missing = errors = 0
+        fixed = stale = missing = errors = already_split = 0
 
         for fp in files:
             resolved = resolve_library_file_path(
@@ -2097,11 +2112,18 @@ class RepairWorker:
                 if audio.tags is None:
                     audio.add_tags()
 
+                # already carries the split list (our earlier fix, or picard):
+                # nothing to write, but the finding IS done. counted apart
+                # from stale so it resolves as a success below.
+                if file_already_split(audio, parts):
+                    already_split += 1
+                    continue
+
                 changed = False
                 if isinstance(audio.tags, ID3):
                     tpe1 = audio.tags.get('TPE1')
-                    current = _single_value(tpe1.text if tpe1 else None)
-                    if current is None or _norm(current) != combined_norm:
+                    tpe1_text = getattr(tpe1, 'text', None) if tpe1 else None
+                    if not _matches_norm(tpe1_text, combined_norm):
                         stale += 1
                         continue
                     audio.tags.delall('TPE1')
@@ -2109,28 +2131,28 @@ class RepairWorker:
                     audio.tags.delall('TXXX:Artists')
                     audio.tags.add(TXXX(encoding=3, desc='Artists', text=list(parts)))
                     tpe2 = audio.tags.get('TPE2')
-                    if tpe2 and _norm(_single_value(tpe2.text)) == combined_norm:
+                    if tpe2 and _matches_norm(getattr(tpe2, 'text', None), combined_norm):
                         audio.tags.delall('TPE2')
                         audio.tags.add(TPE2(encoding=3, text=[primary]))
                     changed = True
                 elif isinstance(audio, MP4):
-                    current = _single_value(audio.tags.get('\xa9ART'))
-                    if current is None or _norm(current) != combined_norm:
+                    art = audio.tags.get('\xa9ART') if audio.tags else None
+                    if not _matches_norm(art, combined_norm):
                         stale += 1
                         continue
                     # MP4 artist carries the list directly (#587 convention).
                     audio.tags['\xa9ART'] = list(parts)
-                    if _norm(_single_value(audio.tags.get('aART'))) == combined_norm:
+                    if _matches_norm(audio.tags.get('aART'), combined_norm):
                         audio.tags['aART'] = [primary]
                     changed = True
                 elif hasattr(audio, 'get'):  # Vorbis family (FLAC/Ogg/Opus)
-                    current = _single_value(audio.get('artist'))
-                    if current is None or _norm(current) != combined_norm:
+                    artist_val = audio.get('artist')
+                    if not _matches_norm(artist_val, combined_norm):
                         stale += 1
                         continue
                     audio['artist'] = [display]
                     audio['artists'] = list(parts)
-                    if _norm(_single_value(audio.get('albumartist'))) == combined_norm:
+                    if _matches_norm(audio.get('albumartist'), combined_norm):
                         audio['albumartist'] = [primary]
                     changed = True
                 else:
@@ -2148,6 +2170,8 @@ class RepairWorker:
         if fixed > 0:
             msg = f'Re-tagged {fixed} file(s) as "{display}"'
             extras = []
+            if already_split:
+                extras.append(f'{already_split} already split')
             if stale:
                 extras.append(f'{stale} skipped (tag changed since scan)')
             if missing:
@@ -2158,8 +2182,24 @@ class RepairWorker:
                 msg += f' ({", ".join(extras)})'
             logger.info("Comma-artist split: %s → %s — %s", combined, parts, msg)
             return {'success': True, 'action': 'artists_split', 'message': msg, 'fixed': fixed}
+
+        if already_split > 0 and not errors:
+            msg = f'All {already_split} file(s) already have split artist tags'
+            if missing or stale:
+                extras = []
+                if stale:
+                    extras.append(f'{stale} skipped (tag changed since scan)')
+                if missing:
+                    extras.append(f'{missing} not found on disk')
+                msg = f'{already_split} file(s) already split ({", ".join(extras)})'
+            logger.info("Comma-artist split: %s already split — %s", combined, msg)
+            return {'success': True, 'action': 'artists_split', 'message': msg, 'fixed': 0}
+
         if stale and not errors and not missing:
-            return {'success': False,
+            # can never succeed: the tag the finding is about is gone. 'stale'
+            # retires it (#1143 path) instead of leaving it pending to fail
+            # on every run; the next scan re-raises it if anything is left.
+            return {'success': False, 'stale': True,
                     'error': f'All {stale} file(s) no longer carry "{combined}" — '
                              f'tags changed since the scan; re-run the job'}
         if missing == len(files):
@@ -4164,6 +4204,23 @@ class RepairWorker:
                 mbid = details.get('mbid', 'unknown')
                 mb_title = details.get('mb_title', 'unknown')
                 title = details.get('title', 'unknown')
+
+                # The same bad MBID was also copied verbatim into
+                # tracks.musicbrainz_recording_id at import (core/imports/side_effects.py),
+                # and the export MBID waterfall's DB rung (core/exports/export_sources.py)
+                # reads that column directly — stripping only the file tag would leave
+                # exports still resolving the wrong recording. Clear it too, but only if it
+                # still holds this SAME bad value (guarded in the DB helper).
+                bad_mbid = details.get('mbid')
+                if bad_mbid and bad_mbid != 'unknown' and entity_type == 'track' and entity_id:
+                    try:
+                        self.db.clear_track_recording_mbid_if_matches(entity_id, bad_mbid)
+                    except Exception as e:
+                        logger.debug(
+                            "Could not clear tracks.musicbrainz_recording_id for track %s: %s",
+                            entity_id, e,
+                        )
+
                 return {
                     'success': True,
                     'action': 'removed_mbid',

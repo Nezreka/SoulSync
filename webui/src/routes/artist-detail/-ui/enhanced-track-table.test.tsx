@@ -60,6 +60,13 @@ const ARTIST = { id: 42, name: 'Aphex Twin', thumb_url: 'artist.jpg' };
 
 const rows = () => [...document.querySelectorAll('tbody tr')] as HTMLElement[];
 
+/** the admin's per-track actions sit behind the row's ⋯ menu, which portals
+    to the body: open it, then find the item by its old class hook. */
+const openMore = (row = 0) =>
+  fireEvent.click(rows()[row].querySelector('.lib-row-more') as HTMLElement);
+const menuItem = (selector: string) =>
+  document.querySelector(`.lib-menu ${selector}`) as HTMLElement;
+
 const titles = () =>
   rows().map((r) => r.querySelector('.col-title')?.textContent?.replace('Missing', '') ?? '');
 
@@ -97,13 +104,26 @@ describe('the empty state', () => {
 });
 
 describe('columns', () => {
-  it('gives an admin a select-all box, write-tag and delete columns', () => {
+  it('gives an admin a select-all box and an actions column', () => {
     renderTable();
     const headers = [...document.querySelectorAll('thead th')].map((th) => th.className);
     expect(headers[0]).toBe('');
-    expect(headers).toContain('col-writetag');
     expect(headers).toContain('col-delete');
     expect(headers).not.toContain('col-report');
+  });
+
+  it('hides the disc column until a release has more than one disc', () => {
+    renderTable();
+    expect(document.querySelector('table')?.hasAttribute('data-multidisc')).toBe(false);
+    cleanup();
+    renderTable({
+      id: 7,
+      tracks: [
+        { id: 1, track_number: 1, disc_number: 1, title: 'A' },
+        { id: 2, track_number: 1, disc_number: 2, title: 'B' },
+      ],
+    });
+    expect(document.querySelector('table')?.hasAttribute('data-multidisc')).toBe(true);
   });
 
   it('gives everyone else a report column and no select-all', () => {
@@ -288,9 +308,13 @@ describe('an owned row', () => {
     expect(cell?.getAttribute('title')).toBe('Average bitrate (VBR)');
   });
 
-  it('chips every match service, matched or not', () => {
+  it('sums the match services into one meter, with the list behind it', () => {
     renderTable();
-    const chips = [...rows()[0].querySelectorAll('.enhanced-track-match-chip')];
+    const meter = rows()[0].querySelector('.lib-meter') as HTMLElement;
+    expect(meter.textContent).toBe('1/8');
+    expect(meter.getAttribute('aria-label')).toBe('1 of 8 sources matched');
+    fireEvent.click(meter);
+    const chips = [...document.querySelectorAll('.lib-menu .enhanced-track-match-chip')];
     expect(chips).toHaveLength(8);
     expect(chips[0].className).toContain('matched');
     expect(chips[0].getAttribute('title')).toBe('spotify: sp1');
@@ -299,13 +323,15 @@ describe('an owned row', () => {
     expect(chips[1].getAttribute('title')).toBe('musicbrainz: no match');
   });
 
-  it('offers play, queue and the admin action buttons', () => {
+  it('offers play, queue and the admin action menu', () => {
     renderTable();
     const row = rows()[0];
-    expect(row.querySelector('.enhanced-play-btn')?.textContent).toBe('▶');
+    expect(row.querySelector('.enhanced-play-btn')?.getAttribute('aria-label')).toBe('Play Xtal');
     expect(row.querySelector('.enhanced-queue-btn')).not.toBeNull();
-    expect(row.querySelector('.enhanced-write-tag-btn')).not.toBeNull();
-    expect(row.querySelector('.enhanced-delete-btn')).not.toBeNull();
+    expect(row.querySelector('.lib-row-more')).not.toBeNull();
+    openMore();
+    expect(menuItem('.enhanced-write-tag-btn')).not.toBeNull();
+    expect(menuItem('.enhanced-delete-btn')).not.toBeNull();
   });
 
   it('marks the editable cells for an admin only', () => {
@@ -357,8 +383,7 @@ describe('a missing row', () => {
     renderTable();
     const row = missingRow();
     expect(row.querySelector('.enhanced-missing-manage-btn')?.textContent).toBe('Manage');
-    expect(row.querySelector('.enhanced-delete-btn')).toBeNull();
-    expect(row.querySelector('.enhanced-write-tag-btn')).toBeNull();
+    expect(row.querySelector('.lib-row-more')).toBeNull();
   });
 
   it('offers Manage to a non-admin too, in place of Report', () => {
@@ -472,7 +497,8 @@ describe('row actions', () => {
     );
     vi.stubGlobal('fetch', fetchSpy);
     renderTable();
-    click('.enhanced-write-tag-btn');
+    openMore();
+    fireEvent.click(menuItem('.enhanced-write-tag-btn'));
     expect(screen.getByText('Write Tags to File')).toBeTruthy();
     expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/track/1/tag-preview');
     vi.unstubAllGlobals();
@@ -484,7 +510,8 @@ describe('row actions', () => {
         new Response(JSON.stringify({ success: true, metadata_results: {} })),
     );
     vi.stubGlobal('fetch', redlSpy);
-    click('.enhanced-redownload-btn');
+    openMore();
+    fireEvent.click(menuItem('.enhanced-redownload-btn'));
     expect(screen.getByText('Redownload Track')).toBeTruthy();
     expect(String(redlSpy.mock.calls[0]?.[0])).toBe(
       '/api/library/track/1/redownload/search-metadata',
@@ -493,7 +520,8 @@ describe('row actions', () => {
 
     // Delete is no longer a window bridge: it opens the local two-option
     // dialog (deleteLibraryTrack's port). The full flow has its own test.
-    click('.enhanced-delete-btn');
+    openMore();
+    fireEvent.click(menuItem('.enhanced-delete-btn'));
     expect(screen.getByText('Delete Track')).toBeTruthy();
   });
 
@@ -506,7 +534,8 @@ describe('row actions', () => {
     window.showToast = vi.fn() as never;
     try {
       const { onTrackDeleted } = renderTable();
-      click('.enhanced-delete-btn');
+      openMore();
+      fireEvent.click(menuItem('.enhanced-delete-btn'));
       screen.getByText('Delete File Too').click();
       await waitFor(() => expect(onTrackDeleted).toHaveBeenCalledWith(1));
       expect(String(fetchSpy.mock.calls[0][0])).toContain('/api/library/track/1');
@@ -531,9 +560,10 @@ describe('row actions', () => {
     window.showToast = vi.fn() as never;
     try {
       renderTable();
-      const rg = rows()[0].querySelector('.enhanced-rg-btn') as HTMLElement;
-      fireEvent.click(rg);
-      expect(rg.textContent).toBe('…');
+      openMore();
+      fireEvent.click(menuItem('.enhanced-rg-btn'));
+      // the row's menu button carries the busy marker while it runs
+      expect(rows()[0].querySelector('.lib-row-more')?.className).toContain('busy');
       await waitFor(() =>
         expect(window.showToast).toHaveBeenCalledWith(
           'ReplayGain written: -1.20 dB (-9.5 LUFS)',
@@ -541,10 +571,12 @@ describe('row actions', () => {
         ),
       );
       expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/track/1/analyze-replaygain');
-      await waitFor(() => expect(rg.textContent).toBe('RG'));
+      await waitFor(() =>
+        expect(rows()[0].querySelector('.lib-row-more')?.className).not.toContain('busy'),
+      );
 
-      const info = rows()[0].querySelector('.enhanced-source-info-btn') as HTMLElement;
-      fireEvent.click(info);
+      openMore();
+      fireEvent.click(menuItem('.enhanced-source-info-btn'));
       expect(document.querySelector('#source-info-popover')).toBeTruthy();
     } finally {
       vi.unstubAllGlobals();
@@ -562,7 +594,8 @@ describe('row actions', () => {
     vi.stubGlobal('fetch', fetchSpy);
     try {
       renderTable({ ...ALBUM, title: 'SAW 85-92', thumb_url: 'cover.jpg' });
-      click('.enhanced-reidentify-btn');
+      openMore();
+      fireEvent.click(menuItem('.enhanced-reidentify-btn'));
       expect(document.getElementById('reid-hero-title')?.textContent).toBe('Xtal');
       expect(document.getElementById('reid-hero-sub')?.textContent).toBe(
         'Aphex Twin · currently in “SAW 85-92”',
@@ -623,7 +656,9 @@ describe('row actions', () => {
         />
       </div>,
     );
-    fireEvent.click(document.querySelector('.enhanced-delete-btn') as HTMLElement);
+    openMore();
+    fireEvent.click(menuItem('.enhanced-delete-btn'));
+    fireEvent.click(document.querySelector('.enhanced-queue-btn') as HTMLElement);
     expect(onPanelClick).not.toHaveBeenCalled();
   });
 });
@@ -641,7 +676,8 @@ describe('re-matching a track', () => {
       ),
     );
     renderTable(album);
-    const chips = rows()[0].querySelectorAll('.enhanced-track-match-chip');
+    fireEvent.click(rows()[0].querySelector('.lib-meter') as HTMLElement);
+    const chips = document.querySelectorAll('.lib-menu .enhanced-track-match-chip');
     fireEvent.click(chips[chipIndex === 'last' ? chips.length - 1 : chipIndex]);
     return document.querySelector('.enhanced-match-search-input') as HTMLInputElement;
   }
@@ -671,7 +707,8 @@ describe('re-matching a track', () => {
 
   it('is inert for a non-admin', () => {
     renderTable(ALBUM, false);
-    fireEvent.click(rows()[0].querySelectorAll('.enhanced-track-match-chip')[1]);
+    fireEvent.click(rows()[0].querySelector('.lib-meter') as HTMLElement);
+    expect(document.querySelector('.lib-menu')).toBeNull();
     expect(document.querySelector('.enhanced-match-search-input')).toBeNull();
   });
 });

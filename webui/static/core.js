@@ -767,6 +767,100 @@ let socketConnected = false;
 // script-scoped `let` no module can read). Kept in lockstep at every write.
 window._socketConnected = false;
 
+// server-sent notes for this profile ('profile:notify'). the server already
+// journaled it, so the toast skips the journal. anything else that cares
+// (badges, open pages) listens for soulsync:profile-notify.
+function handleProfileNotify(data) {
+    if (!data || !data.message) return;
+    const type = ['success', 'error', 'info', 'warning'].includes(data.type) ? data.type : 'info';
+    if (typeof showToast === 'function') showToast(data.message, type, null, { journal: false });
+    if (data.link === 'requests') refreshMusicRequestsBadge();
+    try {
+        window.dispatchEvent(new CustomEvent('soulsync:profile-notify', { detail: data }));
+    } catch (e) { /* a listener never breaks the toast */ }
+}
+
+// music Requests nav badge. admins see what's waiting, members see news
+// about their own asks (cleared when they open the page).
+function refreshMusicRequestsBadge() {
+    const badge = document.getElementById('requests-nav-badge');
+    if (!badge) return;
+    // hidden nav = this profile neither asks nor answers, nothing to count
+    const nav = badge.closest('.nav-button');
+    if (nav && nav.style.display === 'none') return;
+    fetch('/api/requests/music/counts', { headers: { 'Accept': 'application/json' } })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => {
+            if (!d || !d.success) return;
+            const admin = !!(typeof currentProfile !== 'undefined' && currentProfile
+                && (currentProfile.is_admin || currentProfile.id === 1));
+            const n = admin ? (d.pending || 0) : (d.updates || 0);
+            badge.textContent = n > 99 ? '99+' : String(n);
+            badge.classList.toggle('hidden', !n);
+        })
+        .catch(() => { /* badge is best-effort */ });
+}
+window.refreshMusicRequestsBadge = refreshMusicRequestsBadge;
+(function () {
+    const start = () => {
+        setTimeout(refreshMusicRequestsBadge, 3000);
+        setInterval(refreshMusicRequestsBadge, 60000);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+    window.addEventListener('ss:webui-profile-context-changed', refreshMusicRequestsBadge);
+})();
+
+// after a wishlist add: a profile without download rights just sent a
+// request, so say who it went to instead of "added to wishlist". returns
+// true when it spoke, so the caller skips its own toast. admin name comes
+// from /api/profiles once.
+let _requestAdminName = null;
+function announceWishlistRequest() {
+    if (typeof canDownload !== 'function' || canDownload()) return false;
+    const say = (name) => {
+        if (typeof showToast === 'function') showToast(`Sent to ${name || 'your admin'} as a request`, 'info');
+        refreshMusicRequestsBadge();
+    };
+    if (_requestAdminName) { say(_requestAdminName); return true; }
+    fetch('/api/profiles', { headers: { 'Accept': 'application/json' } })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => {
+            const profiles = (d && d.profiles) || [];
+            const admin = profiles.find(p => p.id === 1) || profiles.find(p => p.is_admin);
+            _requestAdminName = (admin && admin.name) || null;
+            say(_requestAdminName);
+        })
+        .catch(() => say(null));
+    return true;
+}
+window.announceWishlistRequest = announceWishlistRequest;
+
+// before a wishlist add from a profile that asks first: when their request
+// limit is used up the server quietly drops the add, so say it here instead.
+// resolves true when the add should go ahead (and on any doubt).
+function _requestLimitMessage(quota) {
+    const days = Number(quota.days) || 7;
+    const noun = Number(quota.limit) === 1 ? 'request' : 'requests';
+    const span = days === 1 ? 'for today' : days === 7 ? 'for this week' : days === 30 ? 'for this month' : `for the last ${days} days`;
+    return `You've used your ${quota.limit} ${noun} ${span}`;
+}
+async function checkMusicRequestQuota() {
+    if (typeof canDownload !== 'function' || canDownload()) return true;
+    try {
+        const res = await fetch('/api/requests/music/quota', { headers: { 'Accept': 'application/json' } });
+        if (!res.ok) return true;
+        const data = await res.json();
+        const quota = data && data.quota;
+        if (!quota || Number(quota.remaining) > 0) return true;
+        if (typeof showToast === 'function') showToast(_requestLimitMessage(quota), 'warning');
+        return false;
+    } catch (e) {
+        return true;
+    }
+}
+window.checkMusicRequestQuota = checkMusicRequestQuota;
+
 function initializeWebSocket() {
     if (typeof io === 'undefined') {
         console.warn('Socket.IO client not loaded — falling back to HTTP polling');
@@ -844,6 +938,8 @@ function initializeWebSocket() {
     socket.on('status:update', handleServiceStatusUpdate);
     socket.on('watchlist:count', handleWatchlistCountUpdate);
     socket.on('downloads:batch_update', handleDownloadBatchUpdate);
+    // a note the server sent this profile (request approved, title arrived...)
+    socket.on('profile:notify', handleProfileNotify);
 
     // Soulseek chat push (badges + PM toasts live in chat.js; guard: the
     // module owns all chat state, core.js only routes the events)
@@ -973,6 +1069,10 @@ function initializeWebSocket() {
     socket.on('lastfm:import-progress', (data) => {
         window.dispatchEvent(new CustomEvent('ss:lastfm-import-progress', { detail: data }));
         if (typeof updateLastfmListeningImportTask === 'function') updateLastfmListeningImportTask(data);
+    });
+    socket.on('listenbrainz:import-progress', (data) => {
+        window.dispatchEvent(new CustomEvent('ss:listenbrainz-import-progress', { detail: data }));
+        if (typeof updateListenbrainzListeningImportTask === 'function') updateListenbrainzListeningImportTask(data);
     });
     // Phase 6: Automation progress
     socket.on('automation:progress', (data) => {

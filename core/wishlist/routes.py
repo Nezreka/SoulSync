@@ -631,14 +631,17 @@ def add_album_track_to_wishlist(
         try:
             from core.settings import config_manager as _cfg
             if not _cfg.get('wishlist.allow_duplicate_tracks', True):
+                # #1289: via find_owned_match, so a library row that still
+                # points into atomic-publish staging does not count as owning
+                # the track. Refusing the add on one would leave the user with
+                # no wishlist entry and a file no media server can see.
+                from core.wishlist.library_match import find_owned_match
                 _db = runtime.get_music_database()
-                _existing, _conf = _db.check_track_exists(
-                    track.get('name', ''), artist.get('name', ''),
-                    confidence_threshold=0.7,
-                    server_source=runtime.active_server,
-                    album=album.get('name', ''),
-                )
-                if _existing and _conf >= 0.7:
+                _match = find_owned_match(
+                    _db, track.get('name', ''), [artist], album.get('name', ''),
+                    runtime.active_server,
+                    log=runtime.logger, log_prefix='[Wishlist Add]')
+                if _match:
                     runtime.logger.info(
                         "[Wishlist Add] skipping '%s' by '%s' — already in library "
                         "(allow_duplicate_tracks is off)",

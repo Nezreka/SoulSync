@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { profileAsksFirst } from '@/platform/shell/download-rights';
+
 import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography, DiscographyBucket } from '../-artist-detail.types';
 
+import {
+  deleteArtistMessage,
+  deleteArtistRequest,
+  deleteArtistToast,
+} from '../-artist-detail.delete-artist';
 import { buildHeroBadges } from '../-artist-detail.hero';
 import {
   artistFormatTags,
@@ -21,6 +28,7 @@ import {
 } from '../-artist-detail.hero-stats';
 import { bucketCounts } from '../-artist-detail.use-completion';
 import { checkWatchlistRequest, toggleWatchlistRequest } from '../-artist-detail.watchlist-button';
+import { ReportIssueButton } from '../../issues/-ui/report-issue-button';
 import { ArtPicker } from './art-picker';
 import { ArtistDbRecord } from './artist-db-record';
 import { ArtistFixMatch } from './artist-matches-modal';
@@ -43,6 +51,9 @@ interface Props {
   watchlist?: { id: unknown; name: string } | null;
   /** Admin on a library artist: shows the "Wrong match?" button beside DB Record. */
   canFixMatches?: boolean;
+  /** Admin on a library artist: shows Delete Artist. Never for a source artist —
+      there is nothing in the library to remove. */
+  canDelete?: boolean;
   /** A source match changed; the page re-reads the artist. */
   onMatchesChanged?: () => void;
 }
@@ -139,8 +150,41 @@ export function ArtistHero({
   enrichment,
   watchlist = null,
   canFixMatches = false,
+  canDelete = false,
   onMatchesChanged,
 }: Props) {
+  const [deleting, setDeleting] = useState(false);
+  /**
+   * Remove the artist from the library (database only).
+   *
+   * Sends the user back to the library afterwards rather than leaving them on
+   * a detail page for a record that no longer exists — every panel on it would
+   * refetch into an error.
+   */
+  const removeArtist = async () => {
+    if (deleting) return;
+    const name = String(artist.name || 'this artist');
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'Delete Artist',
+      message: deleteArtistMessage(name),
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      const result = await deleteArtistRequest(artist.id);
+      window.showToast?.(deleteArtistToast(name, result), 'success');
+      window.updateWatchlistCount?.();
+      window.navigateToPage?.('library');
+    } catch (error) {
+      window.showToast?.(`Delete failed: ${(error as Error).message}`, 'error');
+      setDeleting(false);
+    }
+  };
+
   const image = heroImage(artist, discography);
   const badges = buildHeroBadges(artist);
   const chips = buildGenreChips(artist);
@@ -169,6 +213,7 @@ export function ArtistHero({
   const [watching, setWatching] = useState<boolean | null>(null);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [downloadingDiscog, setDownloadingDiscog] = useState(false);
+  const asksFirst = profileAsksFirst();
   /** A freshly applied photo shows immediately, as the vanilla swapped the
       hero img src in place (openArtistArtPicker apply, library.js:1966-1971). */
   const [appliedPhoto, setAppliedPhoto] = useState<string | null>(null);
@@ -384,10 +429,15 @@ export function ArtistHero({
                 type="button"
                 className="discog-download-btn discog-btn-compact"
                 id="discog-download-btn"
+                // a profile that can't download requests it instead: the
+                // attribute keeps the downloads-disabled rule from hiding it
+                data-request-action={asksFirst ? '' : undefined}
                 onClick={() => setDownloadingDiscog(true)}
               >
                 <span className="discog-btn-icon">⬇</span>
-                <span className="discog-btn-text">Download Discography</span>
+                <span className="discog-btn-text">
+                  {asksFirst ? 'Request Discography' : 'Download Discography'}
+                </span>
                 <span className="discog-btn-shimmer" />
               </button>
             </div>
@@ -400,6 +450,30 @@ export function ArtistHero({
               <span className="enhance-icon">⚡</span>
               <span className="enhance-text">Enhance Quality</span>
             </button>
+            {canDelete ? (
+              <button
+                type="button"
+                className="library-artist-delete-btn"
+                id="library-artist-delete-btn"
+                title="Remove this artist from the library — database only, no files are deleted"
+                disabled={deleting}
+                onClick={() => void removeArtist()}
+              >
+                <span className="delete-icon" aria-hidden="true">
+                  ✕
+                </span>
+                <span className="delete-text">{deleting ? 'Removing…' : 'Delete Artist'}</span>
+              </button>
+            ) : null}
+            {/* library artists only: a source artist has no row to report on */}
+            {isSourceArtist ? null : (
+              <ReportIssueButton
+                id="library-artist-report-btn"
+                entityType="artist"
+                entityId={artist.id}
+                entityName={String(artist.name || '')}
+              />
+            )}
           </div>
 
           <div className="artist-genres-container" id="artist-genres">

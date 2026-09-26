@@ -1,0 +1,591 @@
+/* basic search: raw download sources, file results.
+   one search field with the source inside it, quiet rows, one download button
+   per row. the choice of HOW a file comes in lives in the chooser modal, not
+   on the row. colours come from the app accent (--accent-rgb), everything else
+   is a small set of greys defined here. */
+
+.panel {
+  --bs-surface: #13141a;
+  --bs-raised: #1a1c23;
+  --bs-raised-2: #22242d;
+  --bs-line: rgba(255, 255, 255, 0.07);
+  --bs-line-strong: rgba(255, 255, 255, 0.12);
+  --bs-text: #f3f4f8;
+  --bs-muted: #9b9dad;
+  --bs-faint: #6b6d7c;
+  --bs-ok: #4ade80;
+  --bs-mono: 'SF Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+  /* no display here. style.css hides .search-section and shows it as a flex
+     column only when .active, a display on this class overrides that and the
+     panel shows on every search tab */
+  gap: 16px;
+  color: var(--bs-text);
+  min-width: 0;
+}
+
+/* zero specificity, so each control's own size and weight still win */
+:where(.panel) button,
+:where(.panel) input,
+:where(.panel) select {
+  font: inherit;
+  color: inherit;
+}
+
+.panel :focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.8);
+  outline-offset: 2px;
+}
+
+/* ── search field ─────────────────────────────────────────────────────── */
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bs-surface);
+  border: 1px solid var(--bs-line-strong);
+  border-radius: 14px;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.searchBox:focus-within {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.1);
+}
+
+/* the source pill. a real <select> sits invisibly on top so the keyboard and
+   screen readers get a native picker, the pill is only what you see */
+.source {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--bs-raised);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.source select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.sourceDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bs-ok);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.15);
+}
+
+.caret {
+  width: 11px;
+  height: 11px;
+  color: var(--bs-faint);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  padding: 8px 10px;
+  font-size: 15px;
+}
+
+.input::placeholder {
+  color: var(--bs-faint);
+}
+
+.input:disabled {
+  opacity: 0.7;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-right: 4px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: rgb(var(--accent-rgb));
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.goButton {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  background: var(--bs-text);
+  color: #0c0d11 !important;
+  cursor: pointer;
+}
+
+.goButton:hover {
+  background: #fff;
+}
+
+.cancelButton {
+  flex-shrink: 0;
+  border: 1px solid var(--bs-line-strong);
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  background: var(--bs-raised);
+  cursor: pointer;
+}
+
+.status {
+  color: var(--bs-muted);
+  font-size: 13px;
+  padding-inline: 4px;
+}
+
+/* ── toolbar ──────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.count {
+  margin-right: auto;
+  color: var(--bs-muted);
+  font-size: 13px;
+}
+
+.count b {
+  color: var(--bs-text);
+  font-weight: 600;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--bs-line);
+  border-radius: 10px;
+  background: var(--bs-surface);
+}
+
+.segmented button {
+  border: none;
+  background: none;
+  border-radius: 7px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--bs-muted);
+  cursor: pointer;
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--bs-raised-2);
+  color: var(--bs-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--bs-line);
+  border-radius: 10px;
+  background: var(--bs-surface);
+  font-size: 12.5px;
+  color: var(--bs-muted);
+}
+
+.menu b {
+  color: var(--bs-text);
+  font-weight: 500;
+}
+
+.menu select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.menu:focus-within {
+  border-color: var(--bs-line-strong);
+}
+
+.orderButton {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--bs-line);
+  border-radius: 10px;
+  background: var(--bs-surface);
+  color: var(--bs-muted);
+  cursor: pointer;
+}
+
+.orderButton svg {
+  width: 13px;
+  height: 13px;
+  transition: transform 0.2s ease;
+}
+
+.orderButton[data-reversed='true'] svg {
+  transform: rotate(180deg);
+}
+
+/* ── results ──────────────────────────────────────────────────────────── */
+
+.list {
+  border: 1px solid var(--bs-line);
+  border-radius: 16px;
+  background: var(--bs-surface);
+  overflow: hidden;
+}
+
+.empty {
+  padding: 56px 24px;
+  text-align: center;
+  color: var(--bs-muted);
+  font-size: 14px;
+}
+
+/* one result: its row, plus the album's track list when open */
+.item {
+  display: block;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--bs-line);
+  transition: background 0.12s ease;
+}
+
+.list > .item:first-child > .row {
+  border-top: none;
+}
+
+.row:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.art {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.artAlbum {
+  border-radius: 6px;
+}
+
+.meta {
+  min-width: 0;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.titleText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.expand {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-left: -6px;
+  padding: 2px 4px 2px 2px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font-size: 14.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.expand:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--bs-faint);
+  transition: transform 0.2s ease;
+}
+
+.expand[aria-expanded='true'] .chevron {
+  transform: rotate(90deg);
+}
+
+.sub {
+  color: var(--bs-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sep {
+  color: var(--bs-faint);
+  padding-inline: 5px;
+}
+
+.facts {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--bs-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dim {
+  color: var(--bs-faint);
+}
+
+.badge {
+  padding: 3px 7px;
+  border: 1px solid var(--bs-line-strong);
+  border-radius: 6px;
+  font-family: var(--bs-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--bs-text);
+  white-space: nowrap;
+}
+
+.badgeLossless {
+  border-color: rgba(var(--accent-rgb), 0.35);
+  color: rgb(var(--accent-rgb));
+}
+
+/* the uploader keeps chat.js's chat-user-link hook, this only restyles it */
+.uploader {
+  max-width: 140px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--bs-faint) !important;
+  font-size: 12px;
+  text-decoration: none !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.uploader:hover {
+  color: var(--bs-text) !important;
+  text-decoration: underline;
+}
+
+.download {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border: 1px solid var(--bs-line-strong);
+  border-radius: 999px;
+  background: var(--bs-raised);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.download svg {
+  width: 14px;
+  height: 14px;
+}
+
+.row:hover .download,
+.download:hover,
+.download:focus-visible {
+  background: rgb(var(--accent-rgb));
+  border-color: transparent;
+  color: #0c0d11 !important;
+}
+
+/* ── album tracks ─────────────────────────────────────────────────────── */
+
+.tracks {
+  padding: 4px 16px 10px 80px;
+  border-top: 1px solid var(--bs-line);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.disc {
+  padding: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bs-faint);
+}
+
+.track {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--bs-line);
+  font-size: 13px;
+  color: var(--bs-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tracks > .track:first-child,
+.disc + .track {
+  border-top: none;
+}
+
+.trackNumber {
+  font-family: var(--bs-mono);
+  font-size: 11.5px;
+  color: var(--bs-faint);
+}
+
+.trackTitle {
+  min-width: 0;
+  color: var(--bs-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trackArtist {
+  color: var(--bs-muted);
+}
+
+.trackDownload {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--bs-faint) !important;
+  cursor: pointer;
+}
+
+.track:hover .trackDownload,
+.trackDownload:focus-visible {
+  color: rgb(var(--accent-rgb)) !important;
+}
+
+@media (max-width: 520px) {
+  /* the field needs the room more than the label does, the dot stays */
+  .sourceName {
+    display: none;
+  }
+
+  .source {
+    padding: 8px 10px;
+  }
+
+  .goButton {
+    padding: 9px 14px;
+  }
+}
+
+@media (max-width: 760px) {
+  .row {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+
+  .art {
+    width: 44px;
+    height: 44px;
+  }
+
+  .facts {
+    grid-column: 2 / 3;
+    grid-row: 2;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .download {
+    grid-column: 3;
+    grid-row: 1 / 3;
+    padding: 9px;
+  }
+
+  .downloadLabel {
+    display: none;
+  }
+
+  .tracks {
+    padding-left: 16px;
+  }
+
+  .track {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+  }
+
+  .trackMeta {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+}

@@ -17,6 +17,7 @@ export function MobileTrackActions({
   onSourceInfo,
   onRedownload,
   onDelete,
+  onMissingManage,
   onClose,
 }: {
   track: EnhancedTrack;
@@ -27,6 +28,8 @@ export function MobileTrackActions({
   onSourceInfo: () => void;
   onRedownload: () => void;
   onDelete: () => void;
+  /** a missing row's only action; the desktop Manage column is hidden on a phone. */
+  onMissingManage?: () => void;
   onClose: () => void;
 }) {
   const run = (action: () => void) => () => {
@@ -34,6 +37,8 @@ export function MobileTrackActions({
     action();
   };
   const hasFile = Boolean(track.file_path);
+  const missing = Boolean((track as { _missingExpected?: boolean })._missingExpected);
+  const actionable = Boolean((track as { _hasActionableContext?: boolean })._hasActionableContext);
 
   // Body-level, as the vanilla appended it: the sheet is position:fixed and
   // must not depend on the table's stacking context.
@@ -42,6 +47,16 @@ export function MobileTrackActions({
       <div className="mobile-popover-overlay" onClick={onClose} />
       <div className="enhanced-mobile-actions-popover">
         <div className="popover-title">{String(track.title || 'Track')}</div>
+        {missing && onMissingManage ? (
+          <button type="button" onClick={run(onMissingManage)}>
+            <span className="popover-icon">＋</span>Manage missing track
+          </button>
+        ) : null}
+        {missing && actionable ? (
+          <button type="button" onClick={run(onQueue)}>
+            <span className="popover-icon">+</span>Queue and download
+          </button>
+        ) : null}
         {hasFile ? (
           <>
             <button type="button" onClick={run(onPlay)}>
@@ -57,7 +72,7 @@ export function MobileTrackActions({
             <span className="popover-icon">✎</span>Write Tags
           </button>
         ) : null}
-        {isAdmin ? (
+        {isAdmin && !missing ? (
           <>
             <button type="button" onClick={run(onSourceInfo)}>
               <span className="popover-icon">ℹ</span>Source Info

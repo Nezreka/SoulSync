@@ -235,13 +235,20 @@ class WishlistService:
         self,
         limit: Optional[int] = None,
         profile_id: int = 1,
+        approved_only: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get wishlist tracks formatted for the download modal.
         Returns tracks in a format similar to playlist tracks for compatibility.
+        ``approved_only``: just the rows an admin approved (a profile without
+        download rights, see core/requests/music.py).
         """
         try:
-            wishlist_tracks = self.database.get_wishlist_tracks(limit=limit, profile_id=profile_id)
+            if approved_only:
+                wishlist_tracks = self.database.get_wishlist_tracks(limit=limit, profile_id=profile_id,
+                                                                    approved_only=True)
+            else:
+                wishlist_tracks = self.database.get_wishlist_tracks(limit=limit, profile_id=profile_id)
             formatted_tracks = []
 
             for wishlist_track in wishlist_tracks:
@@ -326,6 +333,9 @@ class WishlistService:
         success: bool,
         error_message: str = None,
         profile_id: int = 1,
+        *,
+        profile_ids=None,
+        audit=None,
     ) -> bool:
         """
         Mark the result of a download attempt for a wishlist track.
@@ -335,15 +345,25 @@ class WishlistService:
             success: Whether the download was successful
             error_message: Error message if failed
             profile_id: Profile to scope the operation to
+            profile_ids: On success, the exact profiles whose library now holds
+                the file — those rows and no others are removed. None keeps the
+                historical all-profiles sweep for callers that cannot tell.
+            audit: Optional ``{reason, final_path, batch_id, source}`` recorded
+                alongside the removal so "why did this track vanish?" is a query
+                rather than a log-correlation exercise (#1289).
         """
-        return self.database.update_wishlist_retry(spotify_track_id, success, error_message, profile_id=profile_id)
+        return self.database.update_wishlist_retry(
+            spotify_track_id, success, error_message, profile_id=profile_id,
+            profile_ids=profile_ids, audit=audit)
 
     def remove_track_from_wishlist(self, spotify_track_id: str, profile_id: int = 1) -> bool:
         """Remove a track from the wishlist (typically after successful download)"""
         return self.database.remove_from_wishlist(spotify_track_id, profile_id=profile_id)
 
-    def get_wishlist_count(self, profile_id: int = 1) -> int:
+    def get_wishlist_count(self, profile_id: int = 1, approved_only: bool = False) -> int:
         """Get the total number of tracks in the wishlist"""
+        if approved_only:
+            return self.database.get_wishlist_count(profile_id=profile_id, approved_only=True)
         return self.database.get_wishlist_count(profile_id=profile_id)
 
     def clear_wishlist(self, profile_id: int = 1) -> bool:

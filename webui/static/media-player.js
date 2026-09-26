@@ -1984,6 +1984,12 @@ function syncExpandedPlayerUI() {
     updateNpPrevNextButtons();
 }
 
+// a library track: played from the library, with its db ids. streams and
+// queued downloads have nothing an issue could point at.
+function npIsReportableTrack(track) {
+    return !!(track && track.is_library && track.id != null && track.id !== '' && track.artist_id != null);
+}
+
 function updateNpTrackInfo() {
     const titleEl = document.getElementById('np-track-title');
     const artistEl = document.getElementById('np-artist-name');
@@ -2074,6 +2080,20 @@ function updateNpTrackInfo() {
         if (actionBtns) {
             const hasArtist = currentTrack.artist_id;
             actionBtns.classList.toggle('hidden', !hasArtist);
+        }
+        // reporting needs a library row to point at
+        const reportBtn = document.getElementById('np-report-issue');
+        if (reportBtn) {
+            reportBtn.classList.toggle('hidden', !npIsReportableTrack(currentTrack));
+            if (!reportBtn._npReportAttached) {
+                reportBtn.addEventListener('click', () => {
+                    const t = currentTrack;
+                    if (!npIsReportableTrack(t) || typeof window.showReportIssueModal !== 'function') return;
+                    try { closeNowPlayingModal(); } catch (e) { /* the report opens either way */ }
+                    window.showReportIssueModal('track', t.id, t.title || 'Track', t.artist || '', t.album || '');
+                });
+                reportBtn._npReportAttached = true;
+            }
         }
 
         // Track recently played for radio mode

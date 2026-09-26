@@ -691,3 +691,238 @@
     justify-content: space-between;
   }
 }
+
+.issuesRefine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.issuesRefine > :first-child {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.issuesScope {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.issuesScopeButton {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+}
+
+.issuesScopeButton[aria-pressed='true'] {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.issueCardUnread {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: rgb(var(--accent-rgb, 29, 185, 84));
+  background: rgba(var(--accent-rgb, 29, 185, 84), 0.14);
+}
+
+.issuesMore {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.issuesMoreCount {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.issuesMoreButton {
+  padding: 8px 18px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.issuesMoreButton:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.issuesMoreButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 640px) {
+  .issuesRefine > * {
+    flex: 1 1 100%;
+  }
+}
+
+/* ── admin bulk select ── */
+
+.issueRow {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.issueRow > a {
+  flex: 1;
+  min-width: 0;
+}
+
+/* the tick sits on the corner of the artwork: shown on hover, on focus, and
+   on every row once anything is ticked */
+.issueRowCheck {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: rgb(var(--accent-rgb));
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.issueRow:hover .issueRowCheck,
+.issueRowCheck:focus-visible,
+.issuesListSelecting .issueRowCheck {
+  opacity: 1;
+}
+
+.issueRowPicked > a {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
+.bulkBar {
+  position: sticky;
+  bottom: 16px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 8px 8px 8px 16px;
+  border-radius: 14px;
+  background: rgba(22, 22, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+}
+
+.bulkCount {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.bulkSpacer {
+  flex: 1;
+}
+
+.bulkButton,
+.bulkQuiet,
+.bulkClose,
+.bulkMenuItem {
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+}
+
+.bulkButton:hover:not(:disabled),
+.bulkClose:hover,
+.bulkMenuItem:hover,
+.bulkMenuItem:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  outline: none;
+}
+
+.bulkButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.bulkQuiet {
+  font-weight: 500;
+  color: rgb(var(--accent-light-rgb, var(--accent-rgb)));
+}
+
+.bulkDanger {
+  color: #ff8a80;
+}
+
+.bulkClose {
+  padding: 4px 10px;
+  font-size: 18px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.bulkMenuRoot {
+  position: relative;
+}
+
+.bulkMenu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 140px;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(24, 24, 26, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+
+.bulkMenuItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+@media (max-width: 640px) {
+  .bulkBar {
+    flex-wrap: wrap;
+  }
+}
+
+/* no hover on touch: the tick is always there */
+@media (hover: none) {
+  .issueRowCheck {
+    opacity: 1;
+  }
+}

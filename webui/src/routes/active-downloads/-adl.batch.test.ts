@@ -44,6 +44,18 @@ describe('phase display', () => {
     });
   });
 
+  it('counts a music video batch in videos, and says it is matching', () => {
+    const video = (over: Parameters<typeof batch>[0]) =>
+      batch({ batch_type: 'music_video', ...over });
+    expect(phaseDisplay(video({ phase: 'analysis' })).text).toBe('Matching...');
+    expect(phaseDisplay(video({ phase: 'downloading', completed: 0, total: 1 })).text).toBe(
+      '0/1 video',
+    );
+    expect(phaseDisplay(video({ phase: 'complete', completed: 1, total: 1 })).text).toBe(
+      'Done — 1 video',
+    );
+  });
+
   it('covers the remaining phases', () => {
     expect(phaseDisplay(batch({ phase: 'analysis' }))).toEqual({
       text: 'Analyzing...',
@@ -59,6 +71,23 @@ describe('phase display', () => {
     });
     expect(phaseDisplay(batch({ phase: 'cancelled' })).text).toBe('Cancelled');
     expect(phaseDisplay(batch({ phase: 'error' })).text).toBe('Error');
+  });
+
+  it('renders books unit for audiobook batches', () => {
+    expect(
+      phaseDisplay(
+        batch({ playlist_id: 'audiobooks', phase: 'downloading', completed: 0, total: 3 }),
+      ),
+    ).toEqual({
+      text: '0/3 books',
+      icon: 'spinner',
+    });
+    expect(
+      phaseDisplay(batch({ playlist_id: 'audiobooks', phase: 'complete', completed: 1, total: 1 })),
+    ).toEqual({
+      text: 'Done — 1 book',
+      icon: 'check',
+    });
   });
 
   it('drops the spinner when a downloading batch has nothing in flight', () => {

@@ -1,10 +1,9 @@
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { SearchControllerState } from '../-search.use-controller';
 
-import { emptySourceResults } from '../-search.helpers';
-import { SourceRow } from './source-row';
+import { catalogSources, ModeTabs, modeOf, SourcePicker } from './source-row';
 
 function stateOf(over: Partial<SearchControllerState> = {}): SearchControllerState {
   return {
@@ -20,142 +19,169 @@ function stateOf(over: Partial<SearchControllerState> = {}): SearchControllerSta
   };
 }
 
-function renderRow(
-  over: Partial<SearchControllerState> = {},
-  handlers: { onSelect?: () => void; onOpenSettings?: () => void } = {},
-) {
-  const onSelect = handlers.onSelect ?? vi.fn();
-  const onOpenSettings = handlers.onOpenSettings ?? vi.fn();
-  render(<SourceRow state={stateOf(over)} onSelect={onSelect} onOpenSettings={onOpenSettings} />);
+function renderTabs(over: Partial<SearchControllerState> = {}, catalogSource = 'spotify') {
+  const onSelect = vi.fn();
+  render(<ModeTabs state={stateOf(over)} catalogSource={catalogSource} onSelect={onSelect} />);
+  return { onSelect };
+}
+
+function renderPicker(over: Partial<SearchControllerState> = {}) {
+  const onSelect = vi.fn();
+  const onOpenSettings = vi.fn();
+  render(
+    <SourcePicker state={stateOf(over)} onSelect={onSelect} onOpenSettings={onOpenSettings} />,
+  );
   return { onSelect, onOpenSettings };
 }
 
-const icon = (source: string) =>
-  document.querySelector(`[data-source="${source}"]`) as HTMLButtonElement;
+const tab = (source: string) =>
+  document.querySelector(`#enh-source-row [data-source="${source}"]`) as HTMLButtonElement;
+const item = (source: string) =>
+  document.querySelector(`[role="menuitemradio"][data-source="${source}"]`) as HTMLButtonElement;
+const openMenu = () => fireEvent.click(screen.getByRole('button', { name: /Search with/ }));
 
 afterEach(cleanup);
 
-describe('SourceRow', () => {
+describe('modeOf and catalogSources', () => {
+  it('splits videos and files off from the metadata sources', () => {
+    expect(modeOf('youtube_videos')).toBe('videos');
+    expect(modeOf('soulseek')).toBe('files');
+    expect(modeOf('deezer')).toBe('catalog');
+    const catalog = catalogSources(stateOf());
+    expect(catalog).toContain('spotify');
+    expect(catalog).not.toContain('soulseek');
+    expect(catalog).not.toContain('youtube_videos');
+  });
+
   it('hides experimental sources until they are enabled', () => {
-    renderRow();
-    expect(icon('jiosaavn')).toBeNull();
-    expect(icon('bandcamp')).toBeNull();
-    // A non-experimental source is always in the row.
-    expect(icon('deezer')).not.toBeNull();
+    expect(catalogSources(stateOf())).not.toContain('bandcamp');
+    const enabled = catalogSources(stateOf({ enabledExperimental: new Set(['bandcamp']) }));
+    expect(enabled).toContain('bandcamp');
+    // Enabling one does not reveal the other.
+    expect(enabled).not.toContain('jiosaavn');
+  });
+});
+
+describe('ModeTabs', () => {
+  it('keeps the hooks the global widget clicks', () => {
+    // downloads.js and api-monitor.js click #enh-source-row [data-source="soulseek"]
+    // to hand a query to basic search. that selector is the contract.
+    renderTabs();
+    expect(document.getElementById('enh-source-row')?.getAttribute('role')).toBe('tablist');
+    expect(tab('soulseek')).not.toBeNull();
+    expect(tab('youtube_videos')).not.toBeNull();
+    expect(tab('soulseek').getAttribute('role')).toBe('tab');
+  });
+
+  it('marks the mode of the active source', () => {
+    renderTabs({ activeSource: 'deezer' }, 'deezer');
+    expect(screen.getByRole('tab', { name: 'Catalog' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'false');
 
     cleanup();
-    renderRow({ enabledExperimental: new Set(['bandcamp']) });
-    expect(icon('bandcamp')).not.toBeNull();
-    // Enabling one does not reveal the other.
-    expect(icon('jiosaavn')).toBeNull();
+    renderTabs({ activeSource: 'soulseek' });
+    expect(screen.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('marks the active source, and only it', () => {
-    renderRow({ activeSource: 'deezer' });
-    expect(icon('deezer').className).toContain('active');
-    expect(icon('deezer').getAttribute('aria-selected')).toBe('true');
-    expect(icon('spotify').className).not.toContain('active');
-    expect(icon('spotify').getAttribute('aria-selected')).toBe('false');
-  });
-
-  it('keeps the tablist semantics the vanilla had', () => {
-    // The vanilla row was role=tablist with role=tab children; losing that turns
-    // a keyboard-navigable picker into a pile of unlabelled buttons.
-    renderRow();
-    expect(document.getElementById('enh-source-row')?.getAttribute('role')).toBe('tablist');
-    expect(icon('spotify').getAttribute('role')).toBe('tab');
-  });
-
-  it('marks a cached source, a loading one, and a fallen-back one', () => {
-    renderRow({
-      sources: { deezer: emptySourceResults() },
-      loadingSources: new Set(['itunes']),
-      fallbacks: { discogs: 'deezer' },
-    });
-    expect(icon('deezer').className).toContain('cached');
-    expect(icon('itunes').className).toContain('loading');
-    expect(icon('discogs').className).toContain('fallback-warning');
-    // Untouched sources wear none of the three.
-    expect(icon('musicbrainz').className).toBe('enh-source-icon');
-  });
-
-  it('names both sources in a fallback tooltip', () => {
-    // "served from" on the icon; the banner over the results says "showing".
-    // Two different strings in the vanilla, and both are user-visible.
-    renderRow({ fallbacks: { discogs: 'deezer' } });
-    expect(icon('discogs').getAttribute('title')).toBe('Discogs unavailable — served from Deezer');
-  });
-
-  it('swaps a loading source’s logo for an hourglass', () => {
-    // The `loading` class animates the button, but the glyph swap is what makes
-    // an in-flight source unmistakable (shared-helpers.js:325-330).
-    renderRow({ loadingSources: new Set(['spotify']) });
-    expect(icon('spotify').querySelector('img')).toBeNull();
-    expect(icon('spotify').querySelector('.enh-source-icon-glyph')?.textContent).toBe('⏳');
-    // Its neighbour keeps its logo.
-    expect(icon('deezer').querySelector('img')).not.toBeNull();
-  });
-
-  it('lazy-loads the brand logos', () => {
-    renderRow();
-    expect(icon('spotify').querySelector('img')?.getAttribute('loading')).toBe('lazy');
-  });
-
-  it('selects a configured source', () => {
-    const { onSelect, onOpenSettings } = renderRow();
-    fireEvent.click(icon('deezer'));
+  it('sends Catalog back to the source the user was on', () => {
+    const { onSelect } = renderTabs({ activeSource: 'soulseek' }, 'deezer');
+    fireEvent.click(screen.getByRole('tab', { name: 'Catalog' }));
     expect(onSelect).toHaveBeenCalledWith('deezer');
-    expect(onOpenSettings).not.toHaveBeenCalled();
-  });
-
-  it('sends an unconfigured source to Settings instead of making it active', () => {
-    // The important state: activating it would show an empty result set and
-    // leave the user blaming the provider.
-    const { onSelect, onOpenSettings } = renderRow({ configuredSources: { deezer: false } });
-    const button = icon('deezer');
-    expect(button.className).toContain('unconfigured');
-    expect(button.getAttribute('title')).toBe('Deezer — set up in Settings');
-
-    fireEvent.click(button);
-    expect(onOpenSettings).toHaveBeenCalledWith('deezer');
-    expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  it('treats an unknown source as configured rather than dimming it', () => {
-    // configuredSources is filled in asynchronously; a missing key means "not
-    // answered yet", and dimming on that flashes the whole row on every load.
-    renderRow({ configuredSources: {} });
-    expect(icon('deezer').className).not.toContain('unconfigured');
+    fireEvent.click(screen.getByRole('tab', { name: 'Videos' }));
+    expect(onSelect).toHaveBeenCalledWith('youtube_videos');
   });
 
   it('stops the click from reaching the document', () => {
-    // The page closes its dropdown on any document click; without this the row
-    // would dismiss the very results it just asked for.
+    // the page re-renders on select and detaches the node; a document listener
+    // would then see a click from nowhere
     const onDocumentClick = vi.fn();
     document.addEventListener('click', onDocumentClick);
     try {
-      renderRow();
-      fireEvent.click(icon('deezer'));
+      renderTabs();
+      fireEvent.click(tab('soulseek'));
       expect(onDocumentClick).not.toHaveBeenCalled();
     } finally {
       document.removeEventListener('click', onDocumentClick);
     }
   });
+});
+
+describe('SourcePicker', () => {
+  it('names the active source and opens a menu of catalog sources', () => {
+    renderPicker({ activeSource: 'deezer' });
+    const pill = screen.getByRole('button', { name: 'Search with Deezer' });
+    expect(pill).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('menu')).toBeNull();
+
+    openMenu();
+    expect(pill).toHaveAttribute('aria-expanded', 'true');
+    expect(item('deezer')).toHaveAttribute('aria-checked', 'true');
+    expect(item('spotify')).toHaveAttribute('aria-checked', 'false');
+    // not metadata sources: they are tabs
+    expect(item('soulseek')).toBeNull();
+    expect(item('youtube_videos')).toBeNull();
+  });
+
+  it('selects a configured source and closes', () => {
+    const { onSelect, onOpenSettings } = renderPicker();
+    openMenu();
+    fireEvent.click(item('deezer'));
+    expect(onSelect).toHaveBeenCalledWith('deezer');
+    expect(onOpenSettings).not.toHaveBeenCalled();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('sends an unconfigured source to Settings instead of making it active', () => {
+    // activating it would show an empty result set and leave the user blaming
+    // the provider
+    const { onSelect, onOpenSettings } = renderPicker({ configuredSources: { deezer: false } });
+    openMenu();
+    expect(item('deezer')).toHaveAttribute('data-unconfigured');
+    expect(item('deezer').textContent).toContain('Not set up');
+    fireEvent.click(item('deezer'));
+    expect(onOpenSettings).toHaveBeenCalledWith('deezer');
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('treats an unknown source as configured rather than dimming it', () => {
+    // configuredSources lands asynchronously; a missing key means "not answered yet"
+    renderPicker({ configuredSources: {} });
+    openMenu();
+    expect(item('deezer')).not.toHaveAttribute('data-unconfigured');
+  });
+
+  it('says when a source was served by another, and which one is searching', () => {
+    renderPicker({ fallbacks: { discogs: 'deezer' }, loadingSources: new Set(['itunes']) });
+    openMenu();
+    expect(item('discogs').textContent).toContain('Showing Deezer');
+    expect(item('itunes').textContent).toContain('Searching…');
+  });
+
+  it('closes on Escape and on a click outside', () => {
+    renderPicker();
+    openMenu();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+
+    openMenu();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('is a plain YouTube label in videos mode, with no menu', () => {
+    renderPicker({ activeSource: 'youtube_videos' });
+    expect(screen.queryByRole('button', { name: /Search with/ })).toBeNull();
+    expect(screen.getByText('YouTube')).toBeInTheDocument();
+  });
 
   it('renders a brand logo where there is one and a glyph where there is not', () => {
-    renderRow();
-    expect(icon('spotify').querySelector('img')?.getAttribute('src')).toBe(
+    renderPicker();
+    openMenu();
+    expect(item('spotify').querySelector('img')?.getAttribute('src')).toBe(
       '/static/img/brands/spotify.png',
     );
     // Amazon has no logo file; the emoji is the fallback, not an empty span.
-    expect(icon('amazon').querySelector('img')).toBeNull();
-    expect(icon('amazon').querySelector('.enh-source-icon-glyph')?.textContent).toBe('🛒');
-  });
-
-  it('calls Soulseek "Basic Search", as the UI always has', () => {
-    renderRow();
-    expect(icon('soulseek').querySelector('.enh-source-icon-label')?.textContent).toBe(
-      'Basic Search',
-    );
+    expect(item('amazon').querySelector('img')).toBeNull();
+    expect(item('amazon').textContent).toContain('🛒');
   });
 });

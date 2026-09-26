@@ -1,5 +1,6 @@
-import { appURL } from '@/platform/url-base';
 import type { AnyRouter } from '@tanstack/react-router';
+
+import { appURL } from '@/platform/url-base';
 
 import type { ShellStatusPayload } from './status';
 
@@ -15,6 +16,9 @@ import {
 export interface ShellProfileContext {
   profileId: number;
   isAdmin: boolean;
+  name?: string;
+  avatarColor?: string;
+  avatarUrl?: string;
 }
 
 export interface ShellContext {

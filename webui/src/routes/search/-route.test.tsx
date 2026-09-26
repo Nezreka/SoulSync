@@ -25,7 +25,7 @@ function renderRoute(path: string) {
  * panel's submit button both read "Search", so matching on it is ambiguous.
  */
 const settled = () =>
-  screen.findByText('Find artists, albums, and tracks from any metadata source');
+  screen.findByText('Find any artist, album or track, then download it tagged and filed');
 
 beforeEach(() => {
   resetPersistedSearch();
@@ -75,7 +75,7 @@ describe('the search route', () => {
 
   it('shows the header and an idle page with no dropdown', async () => {
     await renderRoute('/search');
-    await screen.findByText('Find artists, albums, and tracks from any metadata source');
+    await settled();
 
     expect(document.getElementById('enhanced-dropdown')?.className).toContain('hidden');
     expect(document.getElementById('enhanced-search-input')).not.toBeNull();
@@ -87,8 +87,8 @@ describe('the search route', () => {
 
     const explore = document.getElementById('enh-explore-section');
     expect(explore).not.toBeNull();
-    expect(screen.getByText('Explore & browse')).toBeInTheDocument();
-    expect(screen.getByText('Top Trending')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Browse' })).toBeInTheDocument();
+    expect(screen.getByText('Top trending')).toBeInTheDocument();
   });
 
   it('renders #enhanced-main-results-area, where download bubbles land', async () => {
@@ -145,17 +145,6 @@ describe('the search route', () => {
 
     unmount();
     expect(document.getElementById('basic-search-section')).toBeNull();
-  });
-
-  it('exposes _basicDownloadUnmatched for the vanilla matched-download modal', async () => {
-    // skipMatching() in wishlist-tools.js calls this; that modal has no way to
-    // run a download itself.
-    const { unmount } = renderRoute('/search');
-    await settled();
-    expect(typeof window._basicDownloadUnmatched).toBe('function');
-
-    unmount();
-    await waitFor(() => expect(window._basicDownloadUnmatched).toBeUndefined());
   });
 
   it('exposes _searchPageSetQuery for the global widget handoff', async () => {
@@ -218,7 +207,10 @@ describe('the dropdown state machine', () => {
    * while results are on screen.
    */
   function visibleBody(): string {
-    const shown = (id: string) => !document.getElementById(id)?.className.includes('hidden');
+    const shown = (id: string) => {
+      const el = document.getElementById(id);
+      return el !== null && !el.className.includes('hidden');
+    };
     if (shown('enhanced-loading')) return 'loading';
     if (shown('enhanced-empty')) return 'empty';
     if (shown('enhanced-results-container')) return 'results';
@@ -242,7 +234,7 @@ describe('the dropdown state machine', () => {
 
     // The text names the ACTIVE source rather than a hardcoded "Spotify", and
     // the loading body is the one on screen.
-    await screen.findByText('Searching Spotify and your library...', undefined, { timeout: 3000 });
+    await screen.findByText('Searching Spotify…', undefined, { timeout: 3000 });
     await waitFor(() => expect(visibleBody()).toBe('loading'));
     act(() => settle?.());
   });
@@ -278,7 +270,9 @@ describe('the dropdown state machine', () => {
     await waitFor(() => expect(visibleBody()).toBe('empty'), { timeout: 3000 });
   });
 
-  it('closes on an outside click and reopens on the next search', async () => {
+  it('keeps results through an outside click, and drops them when the box is cleared', async () => {
+    // results are the page now, not a dropdown: a stray click must not throw
+    // them away. the clear button is how you put them down.
     server.use(
       http.post('/api/enhanced-search', () =>
         HttpResponse.json({ spotify_albums: [{ id: 'a1', name: 'Drukqs' }] }),
@@ -295,9 +289,41 @@ describe('the dropdown state machine', () => {
     act(() => {
       document.body.click();
     });
+    expect(document.getElementById('enhanced-dropdown')?.className ?? '').not.toContain('hidden');
+
+    act(() => (document.getElementById('enhanced-cancel-btn') as HTMLButtonElement).click());
     await waitFor(() =>
       expect(document.getElementById('enhanced-dropdown')?.className).toContain('hidden'),
     );
+  });
+
+  it('sends a pasted link to the id lookup, not the text search', async () => {
+    const searched: string[] = [];
+    const looked: string[] = [];
+    server.use(
+      http.post('/api/enhanced-search', async ({ request }) => {
+        searched.push(((await request.json()) as { query: string }).query);
+        return HttpResponse.json({});
+      }),
+      http.post('/api/enhanced-search/by-id', async ({ request }) => {
+        looked.push(((await request.json()) as { query: string }).query);
+        return HttpResponse.json({ available: false, message: 'nope' });
+      }),
+    );
+    window.showToast = vi.fn();
+
+    renderRoute('/search');
+    await settled();
+    type('https://open.spotify.com/album/4LH4d3cOWNNsVw41Gqt2kv');
+
+    await waitFor(
+      () => expect(looked).toEqual(['https://open.spotify.com/album/4LH4d3cOWNNsVw41Gqt2kv']),
+      {
+        timeout: 3000,
+      },
+    );
+    expect(searched).toEqual([]);
+    expect(window.showToast).toHaveBeenCalledWith('nope', 'warning');
   });
 });
 
@@ -368,6 +394,27 @@ describe('the global widget handoff', () => {
     expect(basicInput.value).toBe('from the widget');
   });
 
+  it('hands the query over when the sync and the click land in the same tick (#1294)', async () => {
+    // the wishlist's "search manually" and the widget call the sync and click
+    // the icon back to back, no render in between. the click read the query
+    // from before the sync, so the basic box came up empty.
+    const queries = watchBasicSearches();
+
+    renderRoute('/search');
+    await settled();
+
+    await act(async () => {
+      window._searchPageSetQuery?.('a perfect circle the noose');
+      (
+        document.querySelector('#enh-source-row [data-source="soulseek"]') as HTMLButtonElement
+      ).click();
+    });
+
+    await waitFor(() => expect(queries).toEqual(['a perfect circle the noose']));
+    const basicInput = document.getElementById('downloads-search-input') as HTMLInputElement;
+    expect(basicInput.value).toBe('a perfect circle the noose');
+  });
+
   it('switches to the basic panel without searching when there is no query', async () => {
     // Clicking Soulseek on a page nobody has typed into should show the panel,
     // not scold the user for an empty search.
@@ -419,11 +466,15 @@ describe('where a result card points', () => {
     await settled();
     type('aphex twin');
 
-    // Twice on screen — the spotlight and the card — both linking home.
-    const owned = await screen.findAllByText('Owned Artist', undefined, { timeout: 3000 });
-    for (const el of owned) {
-      expect(el.closest('a')?.getAttribute('href')).toBe('/artist-detail/library/7');
-    }
+    // the face and the top result's button both link home
+    await screen.findAllByText('Owned Artist', undefined, { timeout: 3000 });
+    const faces = document.querySelectorAll('#enh-spotify-artists-section a');
+    expect(faces[0].textContent).toContain('Owned Artist');
+    expect(faces[0].getAttribute('href')).toBe('/artist-detail/library/7');
+    expect(screen.getByRole('link', { name: 'Open artist' })).toHaveAttribute(
+      'href',
+      '/artist-detail/library/7',
+    );
 
     const found = screen.getByText('Found Artist');
     expect(found.closest('a')?.getAttribute('href')).toBe(
@@ -448,5 +499,40 @@ describe('where a result card points', () => {
 
     const label = await screen.findByText('Warp', undefined, { timeout: 3000 });
     expect(label.closest('a')?.getAttribute('href')).toBe('/label-detail/l1?name=Warp');
+  });
+
+  it('names the files source it is searching, not always soulseek (#1313)', async () => {
+    // the wishlist's "search manually" lands on files mode. with deezer as the
+    // download source the header still said "Raw files from Soulseek".
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'deezer_dl',
+          sources: [{ name: 'deezer_dl', display_name: 'Deezer' }],
+        }),
+      ),
+    );
+    renderRoute('/search');
+    await settled();
+
+    const icon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+    act(() => (icon as HTMLButtonElement).click());
+
+    expect(
+      await screen.findByText('Files straight from Deezer, grabbed as they come'),
+    ).toBeTruthy();
+    expect(screen.queryByText('Raw files from Soulseek, grabbed exactly as shared')).toBeNull();
+  });
+
+  it('keeps the soulseek wording when soulseek is the files source', async () => {
+    renderRoute('/search');
+    await settled();
+
+    const icon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+    act(() => (icon as HTMLButtonElement).click());
+
+    expect(
+      await screen.findByText('Raw files from Soulseek, grabbed exactly as shared'),
+    ).toBeTruthy();
   });
 });

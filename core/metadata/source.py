@@ -115,6 +115,7 @@ SOURCE_TAG_CONFIG = {
     "MUSICBRAINZ_RECORDING_ID": "musicbrainz.tags.recording_id",
     "MUSICBRAINZ_ARTIST_ID": "musicbrainz.tags.artist_id",
     "MUSICBRAINZ_RELEASE_ID": "musicbrainz.tags.release_id",
+    "MUSICBRAINZ_ALBUMCOMMENT": "musicbrainz.tags.release_comment",
     "MUSICBRAINZ_RELEASEGROUPID": "musicbrainz.tags.release_group_id",
     "MUSICBRAINZ_ALBUMARTISTID": "musicbrainz.tags.album_artist_id",
     "MUSICBRAINZ_RELEASETRACKID": "musicbrainz.tags.release_track_id",
@@ -155,6 +156,7 @@ ID3_TAG_MAP = {
     "MUSICBRAINZ_RECORDING_ID": ("UFID", "http://musicbrainz.org"),
     "MUSICBRAINZ_ARTIST_ID": ("TXXX", "MusicBrainz Artist Id"),
     "MUSICBRAINZ_RELEASE_ID": ("TXXX", "MusicBrainz Album Id"),
+    "MUSICBRAINZ_ALBUMCOMMENT": ("TXXX", "MusicBrainz Album Comment"),
     "MUSICBRAINZ_RELEASEGROUPID": ("TXXX", "MusicBrainz Release Group Id"),
     "MUSICBRAINZ_ALBUMARTISTID": ("TXXX", "MusicBrainz Album Artist Id"),
     "MUSICBRAINZ_RELEASETRACKID": ("TXXX", "MusicBrainz Release Track Id"),
@@ -180,6 +182,7 @@ MP4_TAG_MAP = {
     "MUSICBRAINZ_RECORDING_ID": "MusicBrainz Track Id",
     "MUSICBRAINZ_ARTIST_ID": "MusicBrainz Artist Id",
     "MUSICBRAINZ_RELEASE_ID": "MusicBrainz Album Id",
+    "MUSICBRAINZ_ALBUMCOMMENT": "MusicBrainz Album Comment",
     "MUSICBRAINZ_RELEASEGROUPID": "MusicBrainz Release Group Id",
     "MUSICBRAINZ_ALBUMARTISTID": "MusicBrainz Album Artist Id",
     "MUSICBRAINZ_RELEASETRACKID": "MusicBrainz Release Track Id",
@@ -199,10 +202,10 @@ def _tag_enabled(cfg, path: str) -> bool:
 def _names_match(a: str, b: str, threshold: float = 0.75) -> bool:
     if not a or not b:
         return False
-    from difflib import SequenceMatcher
-
-    norm = lambda s: re.sub(r"[^a-z0-9 ]", "", re.sub(r"\(.*?\)", "", s).lower()).strip()
-    return SequenceMatcher(None, norm(a), norm(b)).ratio() >= threshold
+    # any script, and two names that fold to nothing never match (#1306:
+    # two japanese titles both emptied to "" and read as a 1.0 match)
+    from core.text.fold import title_similarity
+    return title_similarity(a, b) >= threshold
 
 
 def _normalize_release_date_tag(value: Any) -> str:
@@ -921,12 +924,14 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
                     break
             if merged:
                 genre_string = ", ".join(merged)
+                from core.metadata.multi_value import genre_values
+                genres_out = genre_values(merged, bool(cfg.get("metadata_enhancement.tags.write_multi_artist", False)))
                 if isinstance(audio_file.tags, symbols.ID3):
-                    audio_file.tags.add(symbols.TCON(encoding=3, text=[genre_string]))
+                    audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
                 elif is_vorbis_like(audio_file, symbols):
-                    audio_file["GENRE"] = [genre_string]
+                    audio_file["GENRE"] = genres_out
                 elif isinstance(audio_file, symbols.MP4):
-                    audio_file["\xa9gen"] = [genre_string]
+                    audio_file["\xa9gen"] = genres_out
                 logger.info("Genres merged: %s", genre_string)
 
     isrc_candidates = []
@@ -970,12 +975,15 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         label_candidates.append(("Bandcamp", pp["bandcamp_label"]))
     if label_candidates and "LABEL" not in filtered_tags:
         label_source, final_label = label_candidates[0]
+        # "a;b;c" from a provider is three labels, written as three values (#1305)
+        from core.metadata.multi_value import split_values
+        label_values = split_values(final_label) or [final_label]
         if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TPUB(encoding=3, text=[final_label]))
+            audio_file.tags.add(symbols.TPUB(encoding=3, text=label_values))
         elif is_vorbis_like(audio_file, symbols):
-            audio_file["LABEL"] = [final_label]
+            audio_file["LABEL"] = label_values
         elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(final_label.encode("utf-8"))]
+            audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(v.encode("utf-8")) for v in label_values]
         logger.info("Label (%s): %s", label_source, final_label)
 
     if _tag_enabled(cfg, "lastfm.tags.url") and pp["lastfm_url"]:
@@ -1037,6 +1045,18 @@ def _update_album_year_in_database(db, metadata: dict, release_year) -> None:
                 conn.close()
     except Exception as exc:
         logger.error("Could not update album year in DB: %s", exc)
+
+
+def _album_artist_names(artists) -> list:
+    """names off an album context's artist list, [] unless there are two or
+    more real ones."""
+    names = []
+    for a in artists or []:
+        name = a.get("name", "") if isinstance(a, dict) else (a if isinstance(a, str) else "")
+        name = (name or "").strip()
+        if name and name != "Unknown Artist" and name not in names:
+            names.append(name)
+    return names if len(names) > 1 else []
 
 
 def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> dict:
@@ -1212,6 +1232,10 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                 except Exception as e:
                     logger.debug("itunes primary artist resolve failed: %s", e)
     metadata["album_artist"] = raw_album_artist
+    # every album artist, for the multi-value ALBUMARTISTS tag. only from an
+    # album context that names more than one. track artists aren't album
+    # artists, a feature doesn't make it a collab album
+    metadata["_album_artists_list"] = _album_artist_names(album_artists_for_collab)
 
     if album_info.get("is_album"):
         metadata["album"] = album_info.get("album_name", "Unknown Album")

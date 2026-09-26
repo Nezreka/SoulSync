@@ -1,35 +1,45 @@
 /**
- * The download / stream / matched-download actions for basic search results.
+ * As-is downloads from basic search: POST /api/download, the file keeps its
+ * own name and tags. the server makes it a batch, so it shows on the
+ * Downloads page.
  *
- * Ported from downloads.js, with one correction of record: three of those
- * handlers — matchedDownloadTrack, matchedDownloadAlbum and
- * matchedDownloadAlbumTrack — are declared TWICE, once in downloads.js
- * (4607/4618/4629) and once in wishlist-tools.js (2639/2651/2664), with
- * genuinely different behaviour. Both are top-level declarations in classic
- * scripts and wishlist-tools.js loads second (index.html:10869 vs 10872), so
- * its versions win and the downloads.js copies have never run. The live ones
- * are what is ported here.
+ * enriched downloads are their own flow in their own modal
+ * (-ui/enriched-modal.tsx). stream is gone from the page on purpose.
  */
 
-import type { BasicAlbum, BasicResult, BasicTrack } from './-basic.types';
+import type { DownloadResponse } from './-basic.api';
+import type { BasicAlbum, BasicResult, BasicTrack, DownloadTarget } from './-basic.types';
 
 import { postDownload } from './-basic.api';
 
 /**
- * Sources whose "filename" is an opaque id rather than a path.
- *
- * They stream through the server, so the browser-codec check does not apply —
- * running it would reject every one of them for having no extension.
+ * A blocklisted artist answers with {blocked}. Ask, and on yes send the same
+ * download again with ignore_blocklist. Returns the final answer, or null when
+ * the user said no.
  */
-const STREAMING_SOURCES = new Set(['youtube', 'tidal', 'qobuz', 'hifi']);
-
-function isStreamingSource(username: string | null | undefined): boolean {
-  return STREAMING_SOURCES.has(String(username ?? ''));
+async function postWithBlocklistCheck(
+  payload: BasicResult | (Record<string, unknown> & { result_type: string }),
+): Promise<DownloadResponse | null> {
+  const data = await postDownload(payload);
+  if (!data.blocked) return data;
+  const name = data.blocked_name || 'this artist';
+  const ok = await window.showConfirmDialog?.({
+    title: 'On your blocklist',
+    message: `${name} is on your blocklist. Download this anyway?`,
+    confirmText: 'Download anyway',
+    cancelText: 'Skip',
+  });
+  if (!ok) {
+    window.showToast?.(`Skipped, ${name} is blocklisted`, 'info');
+    return null;
+  }
+  return postDownload({ ...payload, ignore_blocklist: true });
 }
 
 export async function downloadTrack(track: BasicTrack): Promise<void> {
   try {
-    const data = await postDownload(track);
+    const data = await postWithBlocklistCheck(track);
+    if (!data) return;
     if (data.success) window.showToast?.(`Download started: ${track.title ?? ''}`, 'success');
     else window.showToast?.(`Download failed: ${data.error}`, 'error');
   } catch (error) {
@@ -54,21 +64,16 @@ export async function downloadAlbum(album: BasicAlbum): Promise<void> {
 /**
  * One track out of an album.
  *
- * `result_type` is overridden to 'track': the row came out of an album, and
- * without this the server would take the album branch and look for a `tracks`
- * array the track does not have.
- *
- * In practice the override is redundant — `TrackResult.__post_init__` sets
- * `result_type = "track"` server-side, so every serialised album track already
- * carries it, and a mutant that drops the override survives. Kept because this
- * function's correctness would then depend on a detail of a Python dataclass
- * three layers away, which is not a dependency worth having.
+ * `result_type` is forced to 'track': without it the server would take the
+ * album branch and look for a `tracks` array this row doesn't have. the
+ * server's TrackResult already stamps it, this just doesn't lean on that.
  */
 export async function downloadAlbumTrack(album: BasicAlbum, trackIndex: number): Promise<void> {
   const track = album.tracks?.[trackIndex];
   if (!track) return;
   try {
-    const data = await postDownload({ ...track, result_type: 'track' });
+    const data = await postWithBlocklistCheck({ ...track, result_type: 'track' });
+    if (!data) return;
     if (data.success) window.showToast?.(`Download started: ${track.title ?? ''}`, 'success');
     else window.showToast?.(`Track download failed: ${data.error}`, 'error');
   } catch (error) {
@@ -77,128 +82,9 @@ export async function downloadAlbumTrack(album: BasicAlbum, trackIndex: number):
   }
 }
 
-export function matchedDownloadTrack(track: BasicTrack): void {
-  window.openMatchingModal?.(track, false, null);
-}
-
-/**
- * An album's matched download.
- *
- * The FIRST TRACK is handed to the modal as the thing to identify, with the
- * album as context — a folder has no artist/title metadata of its own worth
- * matching on, so the modal searches with a real track's tags and then applies
- * the answer to the whole album (wishlist-tools.js:2651).
- */
-export function matchedDownloadAlbum(album: BasicAlbum): void {
-  const reference = album.tracks?.[0] ?? album;
-  window.openMatchingModal?.(reference, true, album);
-}
-
-export function matchedDownloadAlbumTrack(album: BasicAlbum, trackIndex: number): void {
-  const track = album.tracks?.[trackIndex];
-  if (!track) return;
-  // `false` even though an album is passed: this is ONE track, and the modal
-  // would otherwise ask the user to pick an album for a file they already
-  // located inside one.
-  window.openMatchingModal?.(track, false, album);
-}
-
-export async function streamTrack(track: BasicTrack): Promise<void> {
-  try {
-    if (!isStreamingSource(track.username) && track.filename) {
-      if (!window.isAudioFormatSupported?.(track.filename)) {
-        const format = window.getFileExtension?.(track.filename) ?? '';
-        window.showToast?.(
-          `Sorry, ${format.toUpperCase()} format is not supported in your browser. Try downloading instead.`,
-          'error',
-        );
-        return;
-      }
-    }
-    await window.startStream?.(track);
-  } catch (error) {
-    console.error('Track streaming error:', error);
-    window.showToast?.('Failed to start track stream', 'error');
-  }
-}
-
-/**
- * Stream one track of an album.
- *
- * The first branch is not a special case for tidiness: results from the
- * streaming sources arrive FLAT — the "album" is the track itself, with no
- * `tracks` array — so the row the user clicked is the album object, and its
- * title doubles as the album name the player displays.
- */
-export async function streamAlbumTrack(album: BasicAlbum, trackIndex: number): Promise<void> {
-  try {
-    if (isStreamingSource(album.username)) {
-      const flat = album as unknown as BasicTrack;
-      await window.startStream?.({ ...flat, album: flat.title });
-      return;
-    }
-
-    const track = album.tracks?.[trackIndex];
-    if (!track) {
-      window.showToast?.('Track not found in album', 'error');
-      return;
-    }
-
-    // Album tracks can arrive without the fields the player needs; the album
-    // is the fallback for each of them.
-    const payload = {
-      ...track,
-      username: track.username || album.username,
-      filename: track.filename,
-      artist: track.artist || album.artist,
-      album: track.album || album.album_title,
-    };
-
-    if (!isStreamingSource(payload.username) && payload.filename) {
-      if (!window.isAudioFormatSupported?.(payload.filename)) {
-        const format = window.getFileExtension?.(payload.filename) ?? '';
-        window.showToast?.(
-          `Sorry, ${format.toUpperCase()} format is not supported in web browsers. Try downloading instead.`,
-          'error',
-        );
-        return;
-      }
-    }
-
-    await window.startStream?.(payload);
-  } catch (error) {
-    console.error('Album track streaming error:', error);
-    window.showToast?.('Failed to start track stream', 'error');
-  }
-}
-
-/**
- * Download a result the user chose NOT to match, from the matched-download
- * modal's "Skip Matching" button.
- *
- * Published on window because that modal is still vanilla
- * (wishlist-tools.js:skipMatching). It replaces a call chain that could not
- * work, for two independent reasons:
- *
- *   1. it went `startDownload(window.currentSearchResults.indexOf(result))`,
- *      and `startDownload` (search.js:1329) indexed `searchResults` — a
- *      DIFFERENT array, the core.js global, only ever written by
- *      `performSearch()`, which nothing calls and whose `#search-input`
- *      element does not exist in index.html. So it was permanently `[]`, the
- *      lookup returned undefined, and the function returned silently;
- *   2. `startDownload` POSTs `/api/downloads/start`, which is not a route.
- *
- * The result object is passed straight through instead of being round-tripped
- * through an index, which is what made a cross-array lookup possible at all.
- */
-export async function downloadUnmatched(result: BasicResult): Promise<void> {
-  if (!result) return;
-  if (result.result_type === 'album') {
-    // The vanilla's album branch toasted "Starting album download (unmatched)"
-    // over a comment reading "This would need to be implemented" — it reported
-    // a download it never started.
-    await downloadAlbum(result);
-    return;
-  }
-  await downloadTrack(result);
+/** the chooser's as-is answer, sent where it goes */
+export function startDownload(target: DownloadTarget): void {
+  if (target.kind === 'track') void downloadTrack(target.track);
+  else if (target.kind === 'album') void downloadAlbum(target.album);
+  else void downloadAlbumTrack(target.album, target.trackIndex);
 }

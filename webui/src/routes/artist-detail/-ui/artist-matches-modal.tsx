@@ -437,7 +437,9 @@ function MatchSearch({
           placeholder={
             row.svc === 'musicbrainz'
               ? `Search ${row.label}, or paste a MusicBrainz id or url`
-              : `Search ${row.label}…`
+              : row.svc === 'deezer'
+                ? `Search ${row.label}… or paste a Deezer URL`
+                : `Search ${row.label}…`
           }
           value={query}
           autoFocus

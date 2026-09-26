@@ -1,11 +1,7 @@
 /**
- * The header's live status strip — the words that replaced "Music Dashboard".
- *
- * The old title/subtitle told the user what page they were on; this tells
- * them what their system is doing, from data the page already holds: db
- * stats the library card publishes, the enrichment pills' run state, and the
- * watchlist countdown the quick-nav already receives. No fetch of its own —
- * /api/database/stats is not free on a big library and must stay single.
+ * The hero's words: a greeting and the library's size, from data the page
+ * already holds (the db stats the library card publishes). No fetch of its
+ * own, /api/database/stats is not free on a big library and must stay single.
  */
 
 export function greetingForHour(hour: number): string {
@@ -16,41 +12,32 @@ export function greetingForHour(hour: number): string {
   return 'up late?';
 }
 
-export interface HelloStat {
-  id: 'tracks' | 'artists' | 'workers' | 'scan';
-  label: string;
-  /** navigateToPage target; absent = opens the enrichment manager instead. */
-  page?: string;
+/** the greeting with the name worked in. a question keeps its mark at the
+ * end: "up late, Boulder?" not "up late?, Boulder". */
+export function greetingLine(greeting: string, name: string): string {
+  if (!name) return greeting;
+  if (greeting.endsWith('?')) return `${greeting.slice(0, -1)}, ${name}?`;
+  return `${greeting}, ${name}`;
 }
 
-/** Assemble the visible stat chips. Anything unknown is OMITTED, not zeroed —
+export interface HeroNumber {
+  id: 'tracks' | 'albums' | 'artists';
+  value: string;
+  label: string;
+}
+
+/** The hero's three big numbers. Anything unknown is OMITTED, not zeroed —
  *  a fresh boot shows a bare greeting rather than "0 tracks". */
-export function buildHelloStats(input: {
-  tracks?: number | null;
-  artists?: number | null;
-  busyWorkers: number;
-  scanCountdown?: string | null;
-}): HelloStat[] {
-  const out: HelloStat[] = [];
-  if (typeof input.tracks === 'number' && input.tracks > 0) {
-    out.push({ id: 'tracks', label: `${input.tracks.toLocaleString()} tracks`, page: 'library' });
-  }
-  if (typeof input.artists === 'number' && input.artists > 0) {
-    out.push({
-      id: 'artists',
-      label: `${input.artists.toLocaleString()} artists`,
-      page: 'library',
-    });
-  }
-  if (input.busyWorkers > 0) {
-    out.push({
-      id: 'workers',
-      label: input.busyWorkers === 1 ? '1 worker busy' : `${input.busyWorkers} workers busy`,
-    });
-  }
-  if (input.scanCountdown) {
-    out.push({ id: 'scan', label: `next scan in ${input.scanCountdown}`, page: 'watchlist' });
-  }
+export function heroNumbers(
+  stats: { tracks?: number | null; albums?: number | null; artists?: number | null } | null,
+): HeroNumber[] {
+  const out: HeroNumber[] = [];
+  const add = (id: HeroNumber['id'], n: number | null | undefined, label: string) => {
+    if (typeof n === 'number' && n > 0) out.push({ id, value: n.toLocaleString(), label });
+  };
+  add('tracks', stats?.tracks, 'Tracks');
+  add('albums', stats?.albums, 'Albums');
+  add('artists', stats?.artists, 'Artists');
   return out;
 }
 

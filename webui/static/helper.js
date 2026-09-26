@@ -857,43 +857,35 @@ const HELPER_CONTENT = {
     // ─── SEARCH / DOWNLOADS PAGE ────────────────────────────────────
 
     // Header & Mode Toggle
-    '.downloads-header': {
-        title: 'Music Downloads',
-        description: 'Search for music across your configured metadata sources and download from Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer.',
+    '#search-head': {
+        title: 'Search',
+        description: 'Find music across your metadata sources and download it tagged and filed. Catalog searches a metadata source, Videos searches YouTube music videos, Files searches Soulseek directly.',
         docsId: 'search'
     },
     '#enh-source-row': {
-        title: 'Search Source Icons',
-        description: 'Each icon is a metadata source. The highlighted one is what your next search will target — defaults to your configured primary source on page load. Click a different icon to search or switch to that source; a small dot on the icon marks sources that already have cached results for the current query.',
+        title: 'What to Search',
+        description: 'Catalog searches the metadata source picked in the search field. Videos finds music videos on YouTube. Files is the raw Soulseek search, for grabbing exactly what someone shares.',
         tips: [
-            'Typing searches only the highlighted source — no more silent fan-out across every provider',
-            'Switching to an already-cached source is instant, no re-fetch',
-            'The Soulseek icon routes to the raw-file search (same as the old Basic Search)',
-            'Music Videos queries YouTube for downloadable music video files',
-            'An amber border on a source means the backend fell back to a different provider for you (usually because Spotify is rate-limited)'
+            'Catalog returns to the source you were last on',
+            'Files downloads can still be tagged: as-is, enriched from one provider, or by hand'
         ],
         docsId: 'search-enhanced'
     },
 
     // Enhanced Search
-    '.enhanced-search-input-wrapper': {
-        title: 'Search Bar',
-        description: 'Type an artist, album, or track name. Results appear in categorized sections: Library Artists, Artists, Albums, Singles & EPs, and Tracks. Only the source highlighted in the icon row above is queried — click another icon to switch.',
+    '#enhanced-search-bar': {
+        title: 'Search Field',
+        description: 'Type an artist, album, or track. The pill on the left picks the metadata source; only that source is searched. Paste a Spotify, Apple Music, Deezer or MusicBrainz link (or a MusicBrainz ID) to jump straight to that release.',
         tips: [
-            'Click an album to open the download modal',
-            'Click a track to search your download source',
-            'Play button previews tracks from your download source',
-            'Switch sources via the icon row above — results are cached per query'
+            'Results are cached per source, so switching back is instant',
+            'A source that is not set up opens Settings instead',
+            'If a source is unavailable the menu says which one answered instead'
         ],
         docsId: 'search-enhanced'
     },
-    '#enh-db-artists-section': {
-        title: 'Library Artists',
-        description: 'Artists from your local music library that match the search. Click to view their collection on the Library page.',
-    },
     '#enh-spotify-artists-section': {
         title: 'Artists',
-        description: 'Artists from your metadata source matching the search. Click one to open their discography.',
+        description: 'Artists matching the search. The ones already in your library come first and are marked. Click one to open their page.',
     },
     '#enh-albums-section': {
         title: 'Albums',
@@ -920,37 +912,38 @@ const HELPER_CONTENT = {
     // nothing. document.querySelector just returns null and the step is skipped.
     '#bs-source-row': {
         title: 'Search Source',
-        description: 'Which download source the search is sent to. With one source configured this is a label; with several, pick the one to search.',
+        description: 'Which download source the search goes to. With one source configured this is a label; with several, click it to pick another.',
         docsId: 'search-basic'
     },
     '.bs-search-bar': {
         title: 'Basic Search',
-        description: 'Direct search query sent to your download source. Enter artist name, song title, or any keywords. Results show raw P2P file listings.',
+        description: 'Searches the download source directly. Enter artist name, song title, or any keywords. Results are raw file listings.',
         docsId: 'search-basic'
     },
     '#filters-container': {
-        title: 'Search Filters',
-        description: 'Filter and sort the results. Type filters hide non-matching results. Format filters show only specific audio formats. Sort reorders by relevance, quality, size, name, uploader, bitrate or duration.',
+        title: 'Filter and sort',
+        description: 'How many results came back, then filter by type and format and change the sort.',
         tips: [
-            'Type: All, Albums (grouped results), or Tracks (individual files)',
-            'Format: FLAC for lossless, MP3 for compressed, or specific formats',
-            'Sort: Relevance uses the matching engine score; Quality uses bitrate density',
-            'The arrow flips the order — down is best-first, up reverses it'
+            'Type: All, Albums (whole folders), or Tracks (single files)',
+            'Format: FLAC for lossless, MP3 for compressed, or another format',
+            'Sort: Quality weighs format, bitrate and how fast the uploader is',
+            'The arrow flips the order: down is best first, up reverses it'
         ],
         docsId: 'search-basic'
     },
     '.bs-status-bar': {
         title: 'Search Status',
-        description: 'Shows the current search state — ready, searching, or results count. The spinner animates while the source is being queried.',
+        description: 'Before a search, a hint. While one runs, what it is searching for. After, what happened if nothing came back.',
     },
     '#search-results-area': {
         title: 'Search Results',
-        description: 'Raw Soulseek results grouped by album or listed individually. Each result shows filename, format, bitrate, quality score, file size, uploader name, upload speed, and availability.',
+        description: 'One row per file or album: quality badge, size, length and who shares it. Each row has one Download button, which asks how the file should come in.',
         tips: [
-            'Click a result to start downloading',
-            'Album results group files from the same folder',
-            'Quality score combines format, bitrate, peer speed, and availability',
-            'Green = high quality, Yellow = medium, Red = low'
+            'Download as-is keeps the file exactly as shared',
+            'Enriched download matches it to a release, then tags it and files it into your library',
+            'Tag it yourself is for recordings no service knows: you type the details, and SoulSync keeps them',
+            'Albums expand to show their tracks, each downloadable on its own',
+            'Click an uploader to message them on Soulseek'
         ],
         docsId: 'search-basic'
     },
@@ -2092,11 +2085,11 @@ const HELPER_CONTENT = {
         description: 'Albums you\'ve saved or liked across connected services (Spotify, Tidal, Deezer). Shows which are already in your library and lets you download missing ones.',
     },
 
-    // ─── PERSONAL SETTINGS ─────────────────────────────────────────
+    // ─── MY ACCOUNT ────────────────────────────────────────────────
 
-    '#personal-settings-btn': {
-        title: 'My Settings',
-        description: 'Personal settings for your profile — accent color, home page preference, notification preferences, and other per-user customizations.',
+    '#my-accounts-btn': {
+        title: 'My Account',
+        description: 'Everything that\'s yours: who you are on the media server, plus your own Spotify, Tidal, ListenBrainz and Last.fm. Connect ListenBrainz or Last.fm and your stats and recommendations use your own listening.',
     },
 };
 
@@ -2322,7 +2315,7 @@ const HELPER_TOURS = {
 
             // The shell around every page
             { page: 'dashboard', selector: '.side-toggle', title: 'Music / Video Toggle', description: 'SoulSync has two whole sides. This switch flips between the MUSIC app and the VIDEO app (movies + TV) — each has its own pages, library, and settings.' },
-            { page: 'dashboard', selector: '#profile-indicator', title: 'Your Profile', description: 'Who\'s signed in. Click to switch profiles; the small icons open My Accounts (per-profile streaming logins) and My Settings.' },
+            { page: 'dashboard', selector: '#profile-indicator', title: 'Your Profile', description: 'Who\'s signed in. Click to switch profiles; the person icon opens My Account (your media server login and your own music services).' },
             { page: 'dashboard', selector: '.nav-section-label[data-section="find"]', title: 'Find', description: 'Discovery lives here — Search, Discover, and the Artist Map. Section headers collapse if you like a tidy sidebar.' },
             { page: 'dashboard', selector: '.nav-section-label[data-section="music"]', title: 'Music', description: 'Your collection: Library, Playlists & Sync, Downloads, and Import for files you already have.' },
             { page: 'dashboard', selector: '.nav-section-label[data-section="system"]', title: 'System', description: 'The machinery: Automations, Tools, Stats, Issues, and Settings.' },
@@ -2334,11 +2327,11 @@ const HELPER_TOURS = {
         description: 'Step-by-step guide to downloading your first album.',
         icon: '⬇️',
         steps: [
-            { page: 'search', selector: '#enh-source-row', title: 'Pick a Search Source', description: 'Each icon is a metadata source. The highlighted one is where your next search goes — defaults to your configured primary source. Click a different icon to switch to Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, Music Videos, or Soulseek (raw P2P files). A small dot marks sources you\'ve already searched for the current query.' },
-            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
-            { page: 'search', selector: '#enhanced-results-container', title: 'Search Results', description: 'After searching, results appear organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
-            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
-            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'That\'s It!', description: 'Search, click, download. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. Active downloads live on the dedicated Downloads page.' },
+            { page: 'search', selector: '#enh-source-row', title: 'Pick What to Search', description: 'Catalog searches a metadata source like Spotify, Deezer or MusicBrainz. Videos finds music videos on YouTube. Files is the raw Soulseek search.' },
+            { page: 'search', selector: '#enhanced-search-bar', title: 'Search for Music', description: 'Type an artist or album name. The pill on the left picks which source to search. You can also paste a link to a release and it opens that exact one. Try searching for your favorite artist now!' },
+            { page: 'search', selector: '#enhanced-results-container', title: 'Search Results', description: 'The top result sits next to the first few tracks, then artists, albums, singles and EPs. The pills along the top narrow it to one kind. "In library" marks things you already own.' },
+            { page: 'search', selector: '#enhanced-search-bar', title: 'Downloading an Album', description: 'Click any album to open the download modal with its tracklist and quality options, or use the download button on the cover. Tracks have a play button to preview before downloading.' },
+            { page: 'search', selector: '#enhanced-search-bar', title: 'That\'s It!', description: 'Search, click, download. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. Active downloads live on the dedicated Downloads page.' },
         ]
     },
     'sync-playlist': {
@@ -3467,19 +3460,23 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.4.4': [
-        { date: 'September 2026 · 3.4.4' },
-        { title: 'A library of your own', desc: 'Each profile can use its own music folder and server library (#1199). Downloads, scans, watchlists and ownership checks stay with that profile; the admin stays on the shared library.', page: 'settings' },
-        { title: 'Folders checked before saving', desc: 'Personal-library folders are prefilled and validated. Overlaps with the shared library or another profile are refused, and Docker Compose includes a default mount path.', page: 'settings' },
-        { title: 'Playlists on your server account', desc: 'Choose a Plex Home user or personal Navidrome login. Jellyfin uses a separate user view, and simultaneous syncs keep their own profile.', page: 'sync' },
-        { title: 'Personal settings and Jellyfin connections', desc: 'Settings shows the active server, the Jellyfin user picker loads correctly and caches parallel library lookups, failed connections can be retried, and additional admins have music-side admin access.', page: 'settings' },
-        { title: 'Safer deep scans', desc: 'A timeout no longer makes an album look deleted. Unverified listings keep their records, cancelled scans skip stale cleanup, and large Jellyfin artists and albums load every page.', page: 'library' },
-        { title: 'Sync explains folded tracks', desc: 'When several playlist entries match one library file, the finished card reports the folded count and the log names the entries. Review data keeps the library artist and album.', page: 'sync' },
-        { title: 'Download history finishes', desc: 'Cancellation and batch healing close sync history. Slow tagging, playlist-folder rebuilds and repair work no longer hold the task lock while other batches and status polls wait.', page: 'active-downloads' },
-        { title: 'Optional weekly cleanup', desc: 'Clear quarantine and the recycle bin on a schedule, disabled by default. Retention applies; enabling cleanup with Keep forever selected empties the bin.', page: 'automations' },
-        { title: 'Automations recover after restart', desc: 'Missed interval jobs catch up soon after restart, and the Last.fm listens notification closes when the job finishes.', page: 'automations' },
-        { title: 'Chat stays in the right room', desc: 'Messages from #bugs stay there, multiline plain-text messages arrive correctly, and dismissed closed polls stay dismissed after refresh.', page: 'chat' },
-        { title: 'Earlier versions', desc: '3.4.3 introduced the import inbox, Picard-style matcher and browser uploads, repaired the public API, and improved artist pages, downloads, podcasts and audiobooks.' },
+    '3.4.7': [
+        { date: 'September 2026 · 3.4.7' },
+        { title: 'Profiles rebuilt', desc: 'A "who\'s here?" picker, a pin pad with a lockout countdown, a quick-switch menu on your avatar, and add or edit with adult, teen, kids and guest presets. A browser with no profile picked no longer gets admin rights.' },
+        { title: 'Kids limits', desc: 'Hide explicit music and cap movie and TV ratings per profile. Anything over the cap or unrated is left out of lists and refused on play.' },
+        { title: 'Invites, devices and audit log', desc: 'One-use invite links with an access preset, turn a profile off without deleting it, sign one browser out from the devices list, sign out everywhere on a new password, and an admin audit log.' },
+        { title: 'Music requests', desc: 'Profiles that ask first send requests instead of downloading. Admins approve or decline on the new Requests page, and only approved rows download.' },
+        { title: 'Video requests', desc: 'Grouped by title, pick seasons for shows, progress like "3 of 10 episodes", a quality profile per request, and request quotas.' },
+        { title: 'Issues rebuilt', desc: 'A thread per issue, followers instead of duplicates, the fix action as the main button, bulk triage for admins, and "report a problem" from the player.', page: 'issues' },
+        { title: 'Help & Docs rebuilt', desc: 'Rewritten against the current app with search (/ or Ctrl+K), a table of contents, deep links and a mobile layout (#1310).', page: 'help' },
+        { title: 'Appears on', desc: 'Featured artists and collab albums now show on every credited artist\'s page, not just the first one.', page: 'library' },
+        { title: 'Collab album tags', desc: 'Collab albums are tagged with every album artist where Navidrome reads it, and fresh installs write the multi-value artists tag by default.', page: 'settings' },
+        { title: 'Labels and genres as multi-values', desc: 'A label list like "Columbia;BMG" is written as separate values, and genres follow the write multi-value setting (#1305).', page: 'settings' },
+        { title: 'Non-latin titles match correctly', desc: 'Japanese, Hebrew and Cyrillic titles no longer fold to nothing and match each other at 100%, so track number repair stops renumbering them (#1306).', page: 'tools' },
+        { title: 'Watchlist fixes', desc: 'Watched artists read as watched on their page (#1308), and scans re-check recent days so late-listed releases are not missed (#1309).' },
+        { title: 'ListenBrainz catches up', desc: 'History imported into ListenBrainz after your first sync is picked up now (#1311).', page: 'stats' },
+        { title: 'Search and download fixes', desc: 'Files results scroll instead of clipping (#1313), Deezer retries a failed login, and video imports survive permission errors on network shares.', page: 'search' },
+        { title: 'Earlier versions', desc: '3.4.6 rebuilt search, added per-profile listening history, a redesigned dashboard and a safer wishlist. 3.4.5 added the login-gate security fix and stricter MusicBrainz matching.' },
     ],
 };
 
@@ -3509,32 +3506,30 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.4.4: personal libraries, safer scans and clearer sync',
-        description: 'Separate music libraries and server accounts per profile, with scan protection and fixes for downloads, automations and chat.',
+        title: '3.4.7: profiles, requests and a new help page',
+        description: 'Profiles, requests and issues rebuilt with kids limits and invites, a new Help & Docs page, every credited artist on their own page, and tagging and matching fixes.',
         features: [
-            'A library of your own (#1199): each profile can use its own music folder and server library. Downloads, scans, watchlists, ownership checks and playlist folders follow the profile. The admin stays on the shared library.',
-            'Personal-library folders are prefilled, checked on save and refused if they overlap another library. Docker Compose includes a default mount path. Background workers preserve ownership, and indexed library searches stay fast.',
-            'Playlists on your account: select a Plex Home user or personal Navidrome login. Jellyfin uses a profile-specific client view, so simultaneous syncs cannot change each other\'s user.',
-            'Personal settings shows the active media server, the Jellyfin user picker loads correctly with cached parallel library lookups, failed connections can be retried, and additional admins have music-side admin access.',
-            'Safer deep scans: a timeout no longer looks like an empty album or artist. Unverified listings keep their rows and report the failure; cancelling skips stale-row removal. Jellyfin pages through large artists and albums, and partial bulk listings fall back to individual fetches.',
-            'Sync explains folded entries: when multiple source entries map to one library file, the log names them and the finished card reports the count. Review data keeps the library artist and album, and Deezer loading progress explains its two passes.',
-            'Download history finishes on cancellation, batch healing and normal completion. Slow tag writes, playlist-folder rebuilds and repair work run outside the task lock so status updates and other batches can continue.',
-            'Optional weekly cleanup clears quarantine and the recycle bin, with separate controls and the schedule disabled by default. Retention applies; enabling cleanup with Keep forever selected empties the bin.',
-            'Missed interval automations catch up soon after restart. The Last.fm listens notification closes when the work finishes.',
-            'Chat messages stay in the selected room, multiline plain-text messages reach it, and dismissed closed polls stay dismissed after refresh.',
+            'Profiles: a browser with no profile picked no longer gets admin rights, pins have a real brute-force limit, and a new picker, pin pad and quick-switch menu. Presets for adult, teen, kids and guest.',
+            'Kids limits hide explicit music and cap movie and TV ratings per profile. Invite links, turn a profile off, per-device sign out, sign out everywhere and an admin audit log.',
+            'Music requests: profiles that ask first send requests, admins approve on the new Requests page. Video requests pick seasons, show progress and respect quotas.',
+            'Issues: threads, followers, bulk triage and one fix button per category, shared by music and video.',
+            'Help & Docs rebuilt against the current app, with search, a table of contents, deep links and a mobile layout (#1310).',
+            'Featured artists and collab albums show under Appears on for every credited artist, and collab albums are tagged with every album artist.',
+            'Labels and genres are written as real multi-values (#1305). Non-latin titles no longer match each other at 100% (#1306).',
+            'Fixes: watchlist state on artist pages and late-listed releases (#1308, #1309), ListenBrainz history imported later (#1311), files search scrolling (#1313), Deezer login retry, and video imports on network shares.',
         ],
-        usage_note: 'Configure personal libraries and media-server accounts in profile settings. Enable Weekly cleanup only if you want its scheduled deletions.',
+        usage_note: 'Set up profiles, kids limits and invites from Manage Profiles on the sidebar avatar.',
     },
     {
-        title: 'Earlier in 3.4.3',
-        description: 'An import inbox with a Picard-style matcher and browser uploads, a repaired public API and a video API, plus artist-page, download, podcast and audiobook fixes.',
+        title: 'Earlier in 3.4.6',
+        description: 'Search rebuilt, per-profile listening history from ListenBrainz or Last.fm, a redesigned dashboard and Your Library tab, and a wishlist that keeps staged tracks.',
         features: [],
     },
 ];
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.4.4';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.4.7';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns
@@ -3563,7 +3558,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '3.4.4';
+    return versions[0] || '3.4.6';
 }
 
 function openWhatsNew() {

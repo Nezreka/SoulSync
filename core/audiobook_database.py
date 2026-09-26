@@ -427,6 +427,19 @@ class AudiobookDatabase:
             logger.warning("Could not remove %s from the audiobook wishlist: %s", asin, exc)
             return False
 
+    def clear_wishlist(self, profile_id: int = 1) -> int:
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM audiobook_wishlist WHERE profile_id = ?",
+                (int(profile_id),),
+            )
+            conn.commit()
+            return cursor.rowcount
+        except sqlite3.Error as exc:
+            logger.warning("Could not clear audiobook wishlist for profile %s: %s", profile_id, exc)
+            return 0
+
     def is_wishlisted(self, asin: str, profile_id: int = 1) -> bool:
         conn = self._connect()
         row = conn.execute(
@@ -434,6 +447,14 @@ class AudiobookDatabase:
             (str(asin or "").strip(), int(profile_id)),
         ).fetchone()
         return row is not None
+
+    def get_wishlist_entry(self, asin: str, profile_id: int = 1) -> Optional[Dict[str, Any]]:
+        conn = self._connect()
+        sql = """SELECT *, (SELECT d.status FROM audiobook_downloads d
+                 WHERE d.asin = audiobook_wishlist.asin ORDER BY d.created_at DESC, d.rowid DESC LIMIT 1) AS download_status
+                 FROM audiobook_wishlist WHERE asin = ? AND profile_id = ?"""
+        row = conn.execute(sql, (str(asin or "").strip(), int(profile_id))).fetchone()
+        return self._wishlist_row(row) if row else None
 
     def get_wishlist(self, profile_id: int = 1, status: Optional[str] = None) -> List[Dict[str, Any]]:
         conn = self._connect()
@@ -452,23 +473,35 @@ class AudiobookDatabase:
         profile_id: int = 1,
         retry_after_seconds: float = 6 * 3600,
         limit: int = 20,
+        due_only: bool = True,
     ) -> List[Dict[str, Any]]:
         """Rows the next search pass should try.
 
         Anything wanted or previously failed, whose last attempt is older than
-        the backoff. Rows already grabbed or done are never retried, and rows
-        marked searching are skipped so two passes cannot both claim one.
+        the backoff (when due_only=True). When due_only=False, skips the backoff check
+        so manual search sweeps inspect all wanted/failed books. Rows already grabbed
+        or done are never retried, and rows marked searching are skipped so two
+        passes cannot both claim one.
         """
         conn = self._connect()
-        cutoff = _now() - max(0.0, float(retry_after_seconds))
-        rows = conn.execute("""
-            SELECT * FROM audiobook_wishlist
-            WHERE profile_id = ?
-              AND status IN (?, ?)
-              AND last_attempt_at <= ?
-            ORDER BY last_attempt_at ASC, added_at ASC
-            LIMIT ?
-        """, (int(profile_id), STATUS_WANTED, STATUS_FAILED, cutoff, max(1, int(limit))))
+        if due_only:
+            cutoff = _now() - max(0.0, float(retry_after_seconds))
+            rows = conn.execute("""
+                SELECT * FROM audiobook_wishlist
+                WHERE profile_id = ?
+                  AND status IN (?, ?)
+                  AND last_attempt_at <= ?
+                ORDER BY last_attempt_at ASC, added_at ASC
+                LIMIT ?
+            """, (int(profile_id), STATUS_WANTED, STATUS_FAILED, cutoff, max(1, int(limit))))
+        else:
+            rows = conn.execute("""
+                SELECT * FROM audiobook_wishlist
+                WHERE profile_id = ?
+                  AND status IN (?, ?)
+                ORDER BY last_attempt_at ASC, added_at ASC
+                LIMIT ?
+            """, (int(profile_id), STATUS_WANTED, STATUS_FAILED, max(1, int(limit))))
         return [self._wishlist_row(row) for row in rows]
 
     def reset_stale_searching(self, older_than_seconds: float = 3600.0,

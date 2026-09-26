@@ -136,7 +136,10 @@ class TestMessageUserHooks:
         results = (_ROOT / "webui" / "src" / "routes" / "search" / "-ui"
                    / "basic-results.tsx").read_text(encoding="utf-8", errors="replace")
         assert "data-chat-msg-user={username}" in results
-        assert results.count("<Uploader username=") == 2   # album card + track card
+        # the uploader lives in the shared facts line, and both the album row
+        # and the track row render that line
+        assert results.count("<Uploader username=") == 1
+        assert results.count("<Facts result=") == 2
 
 
 class TestChatModalStandard:

@@ -124,3 +124,58 @@ def test_same_target_prefers_earlier_hybrid_source():
     )
 
     assert [c.name for c in ordered] == ['yt', 'slsk']
+
+
+def test_soulseek_band_prefers_available_peer_over_tiny_confidence_gap():
+    slow = _NamedCand('slow', FLAC_CD, 0.94, 'slow-peer', upload_speed=800,
+                      free_upload_slots=0, queue_length=8)
+    fast = _NamedCand('fast', FLAC_CD, 0.89, 'fast-peer', upload_speed=5000,
+                      free_upload_slots=1, queue_length=0)
+    assert [r.name for r in order_candidates([slow, fast])] == ['fast', 'slow']
+
+
+def test_soulseek_band_does_not_cross_correctness_boundary():
+    correct = _NamedCand('correct', FLAC_CD, 0.94, 'slow-peer', upload_speed=800)
+    distant = _NamedCand('distant', FLAC_CD, 0.85, 'fast-peer', upload_speed=5000,
+                         free_upload_slots=1)
+    assert [r.name for r in order_candidates([distant, correct])] == ['correct', 'distant']
+
+
+def test_soulseek_band_interleaves_peer_candidates():
+    rows = [
+        _NamedCand('a1', FLAC_CD, 0.92, 'a', upload_speed=5000, free_upload_slots=1),
+        _NamedCand('a2', FLAC_CD, 0.91, 'a', upload_speed=5000, free_upload_slots=1),
+        _NamedCand('b1', FLAC_CD, 0.90, 'b', upload_speed=4000, free_upload_slots=1),
+    ]
+    assert [r.name for r in order_candidates(rows)] == ['a1', 'b1', 'a2']
+
+
+def test_soulseek_band_preserves_input_order_when_all_signals_tie():
+    rows = [
+        _NamedCand('first', FLAC_CD, 0.90, 'same-peer'),
+        _NamedCand('second', FLAC_CD, 0.90, 'same-peer'),
+    ]
+    assert [r.name for r in order_candidates(rows)] == ['first', 'second']
+
+
+def test_observed_peer_speed_and_batch_occupancy_are_separate_ordering_signals():
+    a = _NamedCand('a', FLAC_CD, 0.90, 'a', upload_speed=5_000_000,
+                   free_upload_slots=1)
+    b = _NamedCand('b', FLAC_CD, 0.90, 'b', upload_speed=1_000_000,
+                   free_upload_slots=1)
+    assert [r.name for r in order_candidates(
+        [a, b], peer_speeds={'a': 20_000, 'b': 1_000_000},
+    )] == ['b', 'a']
+    assert [r.name for r in order_candidates(
+        [a, b], peer_occupancy={'a': 3, 'b': 0},
+    )] == ['b', 'a']
+
+
+def test_quality_first_uses_peer_signal_only_within_same_target_tier():
+    high = _NamedCand('high', FLAC_HI, 0.90, 'high', upload_speed=10_000)
+    slow = _NamedCand('slow', FLAC_CD, 0.92, 'slow', upload_speed=10_000)
+    fast = _NamedCand('fast', FLAC_CD, 0.89, 'fast', upload_speed=2_000_000,
+                      free_upload_slots=1)
+    assert [r.name for r in order_candidates(
+        [slow, high, fast], quality_first=True, targets=TARGETS,
+    )] == ['high', 'fast', 'slow']

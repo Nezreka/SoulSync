@@ -10,7 +10,15 @@ from core.library.duplicate_rules import (
     lossy_companion_exts,
 )
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import (
+    JobContext,
+    JobResult,
+    RepairJob,
+    hand_tagged_path_keys,
+    is_hand_tagged_path,
+    not_locked_sql,
+)
+from database.music_database import split_credit_names
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.duplicates")
@@ -67,15 +75,22 @@ class DuplicateDetectorJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
+            # artist_id is the ALBUM artist, so a compilation copy read as
+            # 'Various Artists' and never matched the same song on the
+            # artist's own album (#1263). the per-track credit wins when set
+            # hand-tagged: a live take the user typed would pair with its
+            # studio twin and one of them gets offered for deletion
+            locked_filter = not_locked_sql(cursor, 'tracks', 't')
             cursor.execute("""
-                SELECT t.id, t.title, ar.name, al.title, t.file_path,
+                SELECT t.id, t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name),
+                       al.title, t.file_path,
                        t.bitrate, t.duration, al.thumb_url, ar.thumb_url, ar.id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.title IS NOT NULL AND t.title != ''
                   AND t.file_path IS NOT NULL AND t.file_path != ''
-            """)
+            """ + locked_filter)
             tracks = cursor.fetchall()
         except Exception as e:
             logger.error("Error fetching tracks from DB: %s", e, exc_info=True)
@@ -95,8 +110,12 @@ class DuplicateDetectorJob(RepairJob):
         # Group tracks by normalized key for fast comparison
         # Bucket by first 4 chars of normalized title for efficiency
         buckets = defaultdict(list)
+        hand_tagged = hand_tagged_path_keys(context.db)
         for row in tracks:
             track_id, title, artist_name, album_title, file_path, bitrate, duration, album_thumb, artist_thumb, artist_id = row
+            # same reason, for a hand-tagged file whose row isn't locked yet
+            if is_hand_tagged_path(file_path, hand_tagged):
+                continue
             norm_title = _normalize(title)
             bucket_key = norm_title[:4] if len(norm_title) >= 4 else norm_title
             buckets[bucket_key].append({
@@ -105,6 +124,7 @@ class DuplicateDetectorJob(RepairJob):
                 'norm_title': norm_title,
                 'artist': artist_name or '',
                 'norm_artist': _normalize(artist_name or ''),
+                'artist_names': _credit_names(artist_name),
                 'album': album_title,
                 'file_path': file_path,
                 'bitrate': bitrate,
@@ -249,7 +269,7 @@ class DuplicateDetectorJob(RepairJob):
                     title_sim = SequenceMatcher(None, t1['norm_title'], t2['norm_title']).ratio()
                     if title_sim < title_threshold:
                         continue
-                    artist_sim = SequenceMatcher(None, t1['norm_artist'], t2['norm_artist']).ratio()
+                    artist_sim = _artist_similarity(t1, t2)
                     if artist_sim < artist_threshold:
                         continue
                 else:
@@ -266,7 +286,7 @@ class DuplicateDetectorJob(RepairJob):
                         if abs(t1['duration'] - t2['duration']) > 3.0:
                             continue
                     elif t1['norm_artist'] and t2['norm_artist']:
-                        artist_sim = SequenceMatcher(None, t1['norm_artist'], t2['norm_artist']).ratio()
+                        artist_sim = _artist_similarity(t1, t2)
                         if artist_sim < 0.6:
                             continue
                     # else: both durations missing AND at least one artist
@@ -398,6 +418,22 @@ def _normalize(text: str) -> str:
         return ""
     t = text.lower()
     return ''.join(c for c in t if c.isalnum() or c in '() ').strip()
+
+
+def _credit_names(artist: str) -> list:
+    """every credited name in an artist string, normalized, whole string
+    first. split BEFORE normalizing, _normalize eats the ';' and '&'."""
+    names = [_normalize(n) for n in split_credit_names(artist or '')]
+    return [n for n in names if n]
+
+
+def _artist_similarity(t1: dict, t2: dict) -> float:
+    """best match between any credited name on each side. jellyfin keeps a
+    feat as 'A; B', so a copy with the feat and a copy without it scored
+    ~0.5 as whole strings once the per-track credit was used (#1263)."""
+    names1 = t1.get('artist_names') or [t1['norm_artist']]
+    names2 = t2.get('artist_names') or [t2['norm_artist']]
+    return max(SequenceMatcher(None, a, b).ratio() for a in names1 for b in names2)
 
 
 def _is_same_physical_file(p1, p2, dur1, dur2) -> bool:

@@ -19,29 +19,7 @@ import {
   switchBlocklistTab,
   unblockEntry,
 } from './blocklist';
-import {
-  connectMyAccount,
-  closeMyAccountsModal,
-  disconnectMyAccount,
-  openMyAccountsModal,
-  saveMyAccountToken,
-} from './my-accounts';
-import {
-  closeDownloadOriginsModal,
-  deleteSelectedOriginEntries,
-  openDownloadOriginsModal,
-  switchDownloadOriginTab,
-  toggleAllOriginEntries,
-  toggleOriginEntry,
-  toggleOriginGroup,
-} from './origin-history';
-import {
-  closeServiceSwitchModal,
-  openServiceSwitchModal,
-  setActiveSource,
-  setDownloadMode,
-  switchServiceSwitchTab,
-} from './service-switch';
+import { patchChatMessages } from './chat-morph';
 import {
   _handoffLibrarySearchToEnhancedSearch,
   _updateSidebarLibraryBreadcrumb,
@@ -59,11 +37,32 @@ import {
   _mlmSourceDebounce,
   openManualLibraryMatchTool,
 } from './manual-library-match';
+import {
+  connectMyAccount,
+  closeMyAccountsModal,
+  disconnectMyAccount,
+  openMyAccountsModal,
+  openPersonalSettings,
+  saveMyAccountToken,
+} from './my-accounts';
+import {
+  closeDownloadOriginsModal,
+  deleteSelectedOriginEntries,
+  openDownloadOriginsModal,
+  switchDownloadOriginTab,
+  toggleAllOriginEntries,
+  toggleOriginEntry,
+  toggleOriginGroup,
+} from './origin-history';
 import './server-activity';
 import {
-  closeTrackDetail,
-  openTrackDetail,
-} from './track-detail';
+  closeServiceSwitchModal,
+  openServiceSwitchModal,
+  openServiceSwitchSettings,
+  setActiveSource,
+  switchServiceSwitchTab,
+} from './service-switch';
+import { closeTrackDetail, openTrackDetail } from './track-detail';
 import {
   closeWatchlistHistoryModal,
   openWatchlistHistoryModal,
@@ -97,12 +96,14 @@ export const SHELL_WINDOW_EXPORTS = {
   connectMyAccount,
   saveMyAccountToken,
   disconnectMyAccount,
+  // the old My Settings entry point, now the same modal
+  openPersonalSettings,
   // service-switch.js (ported aug 26)
   openServiceSwitchModal,
   closeServiceSwitchModal,
   switchServiceSwitchTab,
   setActiveSource,
-  setDownloadMode,
+  openServiceSwitchSettings,
   // library-globals.js (ported aug 26; the state objects self-assign inside)
   navigateToArtistDetail,
   playLibraryTrack,
@@ -122,6 +123,8 @@ export const SHELL_WINDOW_EXPORTS = {
   _mlmSaveMatch,
   _mlmDeleteMatch,
   // server-activity.js (ported aug 26): self-assigns window.ServerActivity
+  // chat.js renderMessages patches the list instead of rebuilding it (sept 24)
+  patchChatMessages,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);

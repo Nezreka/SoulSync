@@ -61,6 +61,9 @@ export interface RawDiscoveryResult {
   spotify_id?: string;
   /** Backend confidence metadata (nulled/zeroed by unmatch, 684-685). */
   matched_data?: unknown;
+  /** Same payload under the name the source-playlist endpoints emit
+   *  (api/source_playlists.py), so a fix/unmatch has to write both. */
+  match_data?: unknown;
   confidence?: number;
   spotify_track?: string;
   spotify_artist?: string;

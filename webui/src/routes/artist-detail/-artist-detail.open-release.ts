@@ -4,8 +4,12 @@ import type { ArtistDetailResponse, DiscographyRelease } from './-artist-detail.
  * Opening a release card, ported from the click handler inside
  * createReleaseCard (library.js:1803-1878).
  *
- * The modal itself (openAddToWishlistModal) and the ownership backfill
- * (lazyLoadTrackOwnership) stay vanilla — they are invoked, not reimplemented.
+ * The download modal itself (openDownloadMissingModalForArtistAlbum) stays
+ * vanilla. it is invoked, not reimplemented.
+ *
+ * #1297 a card used to open the add-to-wishlist modal: every track, no picking.
+ * it opens the download modal now, same as an album in search, with track
+ * checkboxes and its own add-to-wishlist button.
  */
 
 export interface OpenReleaseArtist {
@@ -16,7 +20,7 @@ export interface OpenReleaseArtist {
 }
 
 /**
- * The artist payload the wishlist modal expects.
+ * The artist payload the download modal expects.
  *
  * Built from the CURRENT page state rather than the response, because the
  * library-upgrade branch in loadArtistDetailData can rewrite the id after the
@@ -39,7 +43,7 @@ export function openReleaseArtist(
 }
 
 /**
- * The album shape the wishlist modal expects.
+ * The album shape the download modal expects.
  *
  * `total_tracks` prefers the object form of track_completion, falls back to
  * track_count, and finally to 1 — never 0, because the modal treats a
@@ -58,7 +62,8 @@ export function releaseToAlbumData(release: DiscographyRelease) {
     image_url: release.image_url,
     // The modal wants a full date; the year is all we have on a release card.
     release_date: release.year ? `${release.year}-01-01` : '',
-    album_type: release.album_type || release.type || 'album',
+    album_type:
+      release.album_type || (typeof release.type === 'string' ? release.type : '') || 'album',
     total_tracks: totalTracks,
   };
 }
@@ -94,4 +99,23 @@ export function isReleaseClickable(_release: DiscographyRelease): boolean {
 
 export function stillCheckingMessage(release: DiscographyRelease): string {
   return `Still checking ownership for ${release.title ?? ''}...`;
+}
+
+/**
+ * the download modal's key for a release. the same key the wishlist modal's
+ * Download Now built, so an album already downloading reopens its modal
+ * instead of starting a second one.
+ */
+export function releaseVirtualPlaylistId(
+  artist: OpenReleaseArtist,
+  album: { id: DiscographyRelease['id'] },
+): string {
+  return `artist_album_${artist.id}_${album.id}`;
+}
+
+export function releasePlaylistName(
+  artist: OpenReleaseArtist,
+  album: { name: DiscographyRelease['title'] },
+): string {
+  return `[${artist.name}] ${album.name}`;
 }

@@ -153,6 +153,25 @@ describe('liveDetailLines', () => {
     );
     expect(lines[0]).toEqual(['Source', 'YouTube']);
   });
+
+  it('narrates a held audiobook import with release and completeness reason', () => {
+    const lines = liveDetailLines(
+      row({
+        status: 'importing',
+        live_detail: {
+          source: 'Audiobook (soulseek)',
+          username: 'scottthompson',
+          release_title: 'Fantastic Beasts And Where To Find Them',
+          held_reason: 'Only 98 of 114 minutes present — about 15 minutes short',
+        },
+      }),
+    );
+    expect(lines).toEqual([
+      ['Source', 'Soulseek · peer scottthompson'],
+      ['Release', 'Fantastic Beasts And Where To Find Them'],
+      ['Held', 'Only 98 of 114 minutes present — about 15 minutes short'],
+    ]);
+  });
 });
 
 // ── the row expansion ───────────────────────────────────────────────────────

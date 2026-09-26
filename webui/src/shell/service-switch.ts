@@ -3,9 +3,11 @@
  * Ported from webui/static/service-switch.js.
  *
  * Opens from the sidebar Service Status panel; styled after the Manage
- * Workers hub (topbar + rail + panel, brand-logo cards). Admin writes the
- * GLOBAL active source/server/download (same as Settings); non-admins see it
- * read-only.
+ * Workers hub (topbar + rail + panel, brand-logo cards). The metadata source
+ * switches here (admin, global, same as Settings). The media server and the
+ * download chain are shown, not switched (#1301): a server flip means a fresh
+ * library scan, and the chain has its own editor in Settings that a second
+ * copy here kept drifting from. Each gets one way into the right Settings spot.
  *
  * SOURCE_LABELS (shared-helpers.js) and HYBRID_SOURCES (settings.js) are
  * top-level consts in still-classic scripts - global LEXICAL bindings, not
@@ -20,7 +22,16 @@ declare global {
   // eslint-disable-next-line no-var
   var SOURCE_LABELS: Record<string, { text?: string; icon?: string; logo?: string }> | undefined;
   // eslint-disable-next-line no-var
-  var HYBRID_SOURCES: Array<{ id: string; name: string; icon?: string; emoji?: string }> | undefined;
+  var HYBRID_SOURCES:
+    | Array<{ id: string; name: string; icon?: string | null; emoji?: string }>
+    | undefined;
+  // the last /status frame (core.js), kept fresh by the poller and the socket
+  // eslint-disable-next-line no-var
+  var _lastStatusPayload: SsStatusPayload | null | undefined;
+}
+
+interface SsStatusPayload {
+  media_server?: { connected?: boolean; response_time?: number; type?: string | null };
 }
 
 const _SS_TABS = [
@@ -44,11 +55,28 @@ const _SS_META_FALLBACK: Record<string, { text: string; icon: string; logo?: str
 };
 // Brand colors drive each card's logo ring + active glow (the Manage-Workers feel).
 const _SS_BRAND: Record<string, string> = {
-  spotify: '#1db954', spotify_free: '#1db954', itunes: '#fc5c7d', deezer: '#a238ff',
-  discogs: '#ff5500', musicbrainz: '#ba478f', amazon: '#ff9900', jiosaavn: '#2bc5b4',
-  plex: '#e5a00d', jellyfin: '#aa5cc3', navidrome: '#3b6cf6', soulsync: '#7c5cff',
-  soulseek: '#22a7f0', youtube: '#ff0000', tidal: '#00cfe8', qobuz: '#0a6e9e',
-  hifi: '#16c79a', torrent: '#8a2be2', usenet: '#e67e22',
+  spotify: '#1db954',
+  spotify_free: '#1db954',
+  itunes: '#fc5c7d',
+  deezer: '#a238ff',
+  discogs: '#ff5500',
+  musicbrainz: '#ba478f',
+  amazon: '#ff9900',
+  jiosaavn: '#2bc5b4',
+  plex: '#e5a00d',
+  jellyfin: '#aa5cc3',
+  navidrome: '#3b6cf6',
+  soulsync: '#7c5cff',
+  soulseek: '#22a7f0',
+  youtube: '#ff0000',
+  tidal: '#00cfe8',
+  qobuz: '#0a6e9e',
+  hifi: '#16c79a',
+  torrent: '#8a2be2',
+  usenet: '#e67e22',
+  deezer_dl: '#a238ff',
+  lidarr: '#3fbf6e',
+  soundcloud: '#ff5500',
 };
 function _ssBrand(id: string): string {
   return _SS_BRAND[id] || 'var(--accent-light-rgb-hex, #7c5cff)';
@@ -57,25 +85,54 @@ function _ssBrand(id: string): string {
 interface SsActiveSources {
   success?: boolean;
   editable?: boolean;
-  metadata: { active: string; effective?: string; options: Array<{ id: string; available?: boolean }> };
+  metadata: {
+    active: string;
+    effective?: string;
+    options: Array<{ id: string; available?: boolean }>;
+  };
   server: { active: string; options: Array<{ id: string; available?: boolean }> };
-  download: { mode: string; hybrid_order?: string[]; options: Array<{ id: string }> };
+  download: {
+    mode: string;
+    hybrid_order?: string[];
+    chain?: Array<{ id: string; ready?: boolean | null }>;
+  };
 }
 
 const _ssState: { tab: string; data: SsActiveSources | null } = { tab: 'metadata', data: null };
 
 function _ssMetaInfo(id: string): { text?: string; icon?: string; logo?: string } {
-  if (typeof SOURCE_LABELS !== 'undefined' && SOURCE_LABELS && SOURCE_LABELS[id]) return SOURCE_LABELS[id];
+  if (typeof SOURCE_LABELS !== 'undefined' && SOURCE_LABELS && SOURCE_LABELS[id])
+    return SOURCE_LABELS[id];
   if (_SS_META_FALLBACK[id]) return _SS_META_FALLBACK[id];
   return { text: id, icon: '🎵' };
 }
 
+// names for when settings.js (HYBRID_SOURCES) isn't loaded yet
+const _SS_DL_FALLBACK: Record<string, string> = {
+  soulseek: 'Soulseek',
+  youtube: 'YouTube',
+  tidal: 'Tidal',
+  qobuz: 'Qobuz',
+  hifi: 'HiFi',
+  deezer_dl: 'Deezer',
+  amazon: 'Amazon Music',
+  lidarr: 'Lidarr',
+  soundcloud: 'SoundCloud',
+  torrent: 'Torrent',
+  usenet: 'Usenet',
+};
+
 function _ssDownloadInfo(id: string): { name: string; logo?: string; emoji?: string } {
   if (typeof HYBRID_SOURCES !== 'undefined' && HYBRID_SOURCES) {
     const h = HYBRID_SOURCES.find((s) => s.id === id);
-    if (h) return { name: h.name, logo: h.icon, emoji: h.emoji };
+    if (h) return { name: h.name, logo: h.icon || undefined, emoji: h.emoji };
   }
-  return { name: id, emoji: '⬇️' };
+  return { name: _SS_DL_FALLBACK[id] || id, emoji: '⬇️' };
+}
+
+function _ssServerStatus(): SsStatusPayload['media_server'] | null {
+  if (typeof _lastStatusPayload === 'undefined' || !_lastStatusPayload) return null;
+  return _lastStatusPayload.media_server || null;
 }
 
 export function openServiceSwitchModal(tab?: string): void {
@@ -125,6 +182,7 @@ export function openServiceSwitchModal(tab?: string): void {
     modal.classList.add('ss-in');
   }
   document.addEventListener('keydown', _ssOnKeydown);
+  window.addEventListener('ss:service-status', _ssOnStatus);
   void _ssLoad();
 }
 
@@ -132,6 +190,12 @@ export function closeServiceSwitchModal(): void {
   const o = document.getElementById('service-switch-overlay');
   if (o) o.classList.add('hidden');
   document.removeEventListener('keydown', _ssOnKeydown);
+  window.removeEventListener('ss:service-status', _ssOnStatus);
+}
+
+// a fresh /status frame while the server tab is up repaints its live pill
+function _ssOnStatus(): void {
+  if (_ssState.tab === 'server' && _ssState.data) _ssRenderPanel();
 }
 
 function _ssOnKeydown(e: KeyboardEvent): void {
@@ -175,7 +239,8 @@ function _ssRailCurrent(tabId: string): SsRailChip | null {
     return { logo: info.logo, emoji: '🖥️', label: info.name, brand: _ssBrand(id), dark: info.dark };
   }
   const id = d.download.mode;
-  if (id === 'hybrid') return { emoji: '🔀', label: 'Hybrid', brand: 'var(--accent-light-rgb-hex,#7c5cff)' };
+  if (id === 'hybrid')
+    return { emoji: '🔀', label: 'Hybrid', brand: 'var(--accent-light-rgb-hex,#7c5cff)' };
   const info = _ssDownloadInfo(id);
   return { logo: info.logo, emoji: info.emoji, label: info.name, brand: _ssBrand(id) };
 }
@@ -183,14 +248,15 @@ function _ssRailCurrent(tabId: string): SsRailChip | null {
 function _ssRenderRail(): void {
   const rail = document.getElementById('ss-rail');
   if (!rail) return;
-  rail.innerHTML = _SS_TABS.map((t) => {
-    const cur = _ssRailCurrent(t.id);
-    const media = cur
-      ? (cur.logo
-        ? `<img class="ss-tab-logo" src="${cur.logo}" onerror="this.outerHTML='<span class=\\'ss-tab-emoji\\'>${cur.emoji}</span>'">`
-        : `<span class="ss-tab-emoji">${cur.emoji}</span>`)
-      : `<span class="ss-tab-emoji">${t.emoji}</span>`;
-    return `
+  rail.innerHTML = _SS_TABS
+    .map((t) => {
+      const cur = _ssRailCurrent(t.id);
+      const media = cur
+        ? cur.logo
+          ? `<img class="ss-tab-logo" src="${cur.logo}" onerror="this.outerHTML='<span class=\\'ss-tab-emoji\\'>${cur.emoji}</span>'">`
+          : `<span class="ss-tab-emoji">${cur.emoji}</span>`
+        : `<span class="ss-tab-emoji">${t.emoji}</span>`;
+      return `
             <button class="ss-tab${t.id === _ssState.tab ? ' active' : ''}" style="--ss-brand:${cur ? cur.brand : '#7c5cff'}"
                     onclick="switchServiceSwitchTab('${t.id}')">
                 <span class="ss-tab-disc${cur && cur.dark ? ' ss-disc--dark' : ''}">${media}</span>
@@ -199,7 +265,8 @@ function _ssRenderRail(): void {
                     <span class="ss-tab-cur">${cur ? escapeHtml(cur.label) : '…'}</span>
                 </span>
             </button>`;
-  }).join('');
+    })
+    .join('');
 }
 
 export function switchServiceSwitchTab(tab: string): void {
@@ -220,7 +287,17 @@ interface SsCardArgs {
   dark?: boolean;
 }
 
-function _ssCard({ logo, emoji, label, active, available, onclick, badge, brand, dark }: SsCardArgs): string {
+function _ssCard({
+  logo,
+  emoji,
+  label,
+  active,
+  available,
+  onclick,
+  badge,
+  brand,
+  dark,
+}: SsCardArgs): string {
   const dim = available === false ? ' ss-card--locked' : '';
   const act = active ? ' active' : '';
   const media = logo
@@ -238,26 +315,35 @@ function _ssCard({ logo, emoji, label, active, available, onclick, badge, brand,
 const _SS_TAB_BLURB: Record<string, string> = {
   metadata: 'Where artist, album & track details come from.',
   server: 'The library backend SoulSync reads and writes.',
-  download: 'Where SoulSync grabs tracks you don\'t have yet.',
+  download: "Where SoulSync grabs tracks you don't have yet.",
 };
 
-function _ssHero(kind: string): string {
+interface SsPill {
+  label: string;
+  tone?: 'ok' | 'bad' | 'wait';
+}
+
+function _ssHero(kind: string, pill: SsPill = { label: 'Active' }, sub?: string): string {
   const cur = _ssRailCurrent(kind);
   if (!cur) return '';
   const media = cur.logo
     ? `<img class="ss-hero-logo" src="${cur.logo}" onerror="this.outerHTML='<span class=\\'ss-hero-emoji\\'>${cur.emoji}</span>'">`
     : `<span class="ss-hero-emoji">${cur.emoji}</span>`;
-  const eyebrow = kind === 'metadata' ? 'Active metadata source'
-    : kind === 'server' ? 'Active media server' : 'Active download source';
+  const eyebrow =
+    kind === 'metadata'
+      ? 'Active metadata source'
+      : kind === 'server'
+        ? 'Active media server'
+        : 'Active download source';
   return `
         <div class="ss-hero" style="--ss-brand:${cur.brand}">
             <div class="ss-hero-disc${cur.dark ? ' ss-disc--dark' : ''}">${media}</div>
             <div class="ss-hero-info">
                 <div class="ss-hero-eyebrow">${eyebrow}</div>
                 <div class="ss-hero-name">${escapeHtml(cur.label)}</div>
-                <div class="ss-hero-sub">${_SS_TAB_BLURB[kind] || ''}</div>
+                <div class="ss-hero-sub">${escapeHtml(sub ?? _SS_TAB_BLURB[kind] ?? '')}</div>
             </div>
-            <span class="ss-hero-pill">Active</span>
+            <span class="ss-hero-pill${pill.tone ? ` ss-hero-pill--${pill.tone}` : ''}">${pill.tone ? '<span class="ss-pulse"></span>' : ''}${escapeHtml(pill.label)}</span>
         </div>`;
 }
 
@@ -270,137 +356,188 @@ function _ssRenderPanel(): void {
     return;
   }
   const editable = !!d.editable;
-  panel.style.setProperty('--ss-brand', (_ssRailCurrent(_ssState.tab) || { brand: '#7c5cff' }).brand);
+  panel.style.setProperty(
+    '--ss-brand',
+    (_ssRailCurrent(_ssState.tab) || { brand: '#7c5cff' }).brand,
+  );
   const sub = document.getElementById('ss-topbar-sub');
-  if (sub) sub.textContent = editable
-    ? 'What this profile uses for metadata, library, and downloads'
-    : 'Set by the admin — view only for now';
+  if (sub)
+    sub.textContent = editable
+      ? 'What this profile uses for metadata, library, and downloads'
+      : 'Set by the admin — view only for now';
 
   if (_ssState.tab === 'metadata') {
-    const cards = d.metadata.options.map((o) => {
-      const info = _ssMetaInfo(o.id);
-      return _ssCard({
-        logo: info.logo, emoji: info.icon, label: info.text || o.id, brand: _ssBrand(o.id),
-        active: d.metadata.active === o.id, available: o.available,
-        onclick: (editable && o.available) ? `setActiveSource('metadata','${o.id}')` : null,
-      });
-    }).join('');
+    const cards = d.metadata.options
+      .map((o) => {
+        const info = _ssMetaInfo(o.id);
+        return _ssCard({
+          logo: info.logo,
+          emoji: info.icon,
+          label: info.text || o.id,
+          brand: _ssBrand(o.id),
+          active: d.metadata.active === o.id,
+          available: o.available,
+          onclick: editable && o.available ? `setActiveSource('metadata','${o.id}')` : null,
+        });
+      })
+      .join('');
     // Surface the EFFECTIVE source when it differs from the configured one
     // (e.g. configured Spotify but not authenticated → running on a fallback).
     const eff = d.metadata.effective;
-    const note = (eff && eff !== d.metadata.active)
-      ? `<div class="ss-effective-note">Configured source isn't connected — actually using <b>${escapeHtml((_ssMetaInfo(eff).text) || eff)}</b> right now.</div>`
-      : '';
+    const note =
+      eff && eff !== d.metadata.active
+        ? `<div class="ss-effective-note">Configured source isn't connected — actually using <b>${escapeHtml(_ssMetaInfo(eff).text || eff)}</b> right now.</div>`
+        : '';
     panel.innerHTML = `${_ssHero('metadata')}<div class="ss-section-title">Choose source</div>${note}<div class="ss-grid">${cards}</div>`;
   } else if (_ssState.tab === 'server') {
-    const cards = d.server.options.map((o) => {
-      const info = _SS_SERVER_INFO[o.id] || { name: o.id };
-      return _ssCard({
-        logo: info.logo, emoji: '🖥️', label: info.name, brand: _ssBrand(o.id), dark: info.dark,
-        active: d.server.active === o.id, available: o.available,
-        onclick: (editable && o.available) ? `setActiveSource('server','${o.id}')` : null,
-      });
-    }).join('');
-    panel.innerHTML = `${_ssHero('server')}<div class="ss-section-title">Choose server</div><div class="ss-grid">${cards}</div>`;
+    panel.innerHTML = _ssServerPanel(d, editable);
   } else {
-    _ssRenderDownloadPanel(panel, d, editable);
+    panel.innerHTML = _ssDownloadPanel(d, editable);
   }
 }
 
-function _ssRenderDownloadPanel(panel: HTMLElement, d: SsActiveSources, editable: boolean): void {
-  const isHybrid = d.download.mode === 'hybrid';
-  const toggle = `
-        <div class="ss-seg">
-            <button class="ss-seg-btn${!isHybrid ? ' active' : ''}" ${editable ? `onclick="setDownloadMode('single')"` : 'disabled'}>Single source</button>
-            <button class="ss-seg-btn${isHybrid ? ' active' : ''}" ${editable ? `onclick="setDownloadMode('hybrid')"` : 'disabled'}>Hybrid</button>
+function _ssFoot(kind: 'server' | 'download', note: string, editable: boolean): string {
+  const label = kind === 'server' ? 'Change in Settings' : 'Edit in Settings';
+  return `
+        <div class="ss-foot">
+            <p class="ss-foot-note">${note}</p>
+            ${editable ? `<button class="ss-cta" onclick="openServiceSwitchSettings('${kind}')">${label}<span class="ss-cta-arrow" aria-hidden="true">&rarr;</span></button>` : ''}
         </div>`;
+}
 
-  let body: string;
-  if (isHybrid) {
-    const order = (d.download.hybrid_order && d.download.hybrid_order.length)
-      ? d.download.hybrid_order
-      : d.download.options.map((o) => o.id);
-    body = `<div class="ss-hint">Drag to set priority — SoulSync tries each in order.</div>
-            <div class="ss-hybrid-list" id="ss-hybrid-list">` +
-      order.map((id, i) => {
-        const info = _ssDownloadInfo(id);
-        return `<div class="ss-hybrid-item" draggable="${editable}" data-src="${id}">
-                    <span class="ss-hybrid-rank">${i + 1}</span>
-                    ${info.logo ? `<img class="ss-hybrid-logo" src="${info.logo}" onerror="this.outerHTML='<span class=\\'ss-card-emoji\\'>${info.emoji}</span>'">` : `<span class="ss-card-emoji">${info.emoji}</span>`}
-                    <span class="ss-hybrid-name">${escapeHtml(info.name)}</span>
-                </div>`;
-      }).join('') + `</div>`;
-  } else {
-    const cards = d.download.options.map((o) => {
-      const info = _ssDownloadInfo(o.id);
-      return _ssCard({
-        logo: info.logo, emoji: info.emoji, label: info.name, brand: _ssBrand(o.id),
-        active: d.download.mode === o.id, available: true,
-        onclick: editable ? `setActiveSource('download','${o.id}')` : null,
-      });
-    }).join('');
-    body = `<div class="ss-grid">${cards}</div>`;
+function _ssServerPanel(d: SsActiveSources, editable: boolean): string {
+  const status = _ssServerStatus();
+  // only trust a status frame about THIS server; a stale one from before a
+  // switch would claim the old server's health
+  const known = !!status && (!status.type || status.type === d.server.active);
+  let pill: SsPill = { label: 'Checking', tone: 'wait' };
+  let health = 'Waiting for the next status check';
+  if (known && status!.connected) {
+    const ms = Math.round(status!.response_time || 0);
+    pill = { label: 'Online', tone: 'ok' };
+    health = ms > 0 ? `Connected, answered in ${ms} ms` : 'Connected';
+  } else if (known) {
+    pill = { label: 'Offline', tone: 'bad' };
+    health = "Not answering. Check it's running and reachable";
   }
-  panel.innerHTML = `${_ssHero('download')}<div class="ss-section-title">Choose source</div>${toggle}${body}`;
-  if (isHybrid && editable) _ssWireHybridDrag();
+  const others = d.server.options
+    .filter((o) => o.id !== d.server.active && o.available)
+    .map((o) => (_SS_SERVER_INFO[o.id] || { name: o.id }).name);
+  const facts = `
+        <div class="ss-facts">
+            <div class="ss-fact">
+                <span class="ss-fact-k">Status</span>
+                <span class="ss-fact-v"><span class="ss-dot ss-dot--${pill.tone}"></span>${escapeHtml(health)}</span>
+            </div>
+            <div class="ss-fact">
+                <span class="ss-fact-k">Also set up</span>
+                <span class="ss-fact-v${others.length ? '' : ' ss-fact-v--quiet'}">${others.length ? escapeHtml(others.join(', ')) : 'No other servers'}</span>
+            </div>
+        </div>`;
+  return (
+    _ssHero('server', pill) +
+    facts +
+    _ssFoot(
+      'server',
+      'Switching servers starts your library over with a fresh scan, so it lives in Settings.',
+      editable,
+    )
+  );
 }
 
-function _ssWireHybridDrag(): void {
-  const list = document.getElementById('ss-hybrid-list');
-  if (!list) return;
-  list.querySelectorAll<HTMLElement>('.ss-hybrid-item').forEach((item) => {
-    item.addEventListener('dragstart', (e) => {
-      e.dataTransfer!.effectAllowed = 'move';
-      e.dataTransfer!.setData('text/plain', item.dataset.src!);
-      item.classList.add('dragging');
-    });
-    item.addEventListener('dragend', () => item.classList.remove('dragging'));
-    item.addEventListener('dragover', (e) => {
-      e.preventDefault();
-    });
-    item.addEventListener('drop', (e) => {
-      e.preventDefault();
-      const dragged = e.dataTransfer!.getData('text/plain');
-      if (dragged && dragged !== item.dataset.src) _ssReorderHybrid(dragged, item.dataset.src!);
-    });
-  });
+function _ssDownloadPanel(d: SsActiveSources, editable: boolean): string {
+  const chain = d.download.chain || [];
+  const hybrid = chain.length > 1;
+  const pill: SsPill = { label: hybrid ? `${chain.length} sources` : 'Single source' };
+  const sub = hybrid
+    ? 'Tried top to bottom until one has the file.'
+    : chain.length
+      ? 'Every download comes from here.'
+      : 'No download source set yet.';
+  const steps = chain
+    .map((c, i) => {
+      const info = _ssDownloadInfo(c.id);
+      const media = info.logo
+        ? `<img class="ss-chain-logo" src="${info.logo}" alt="" onerror="this.outerHTML='<span class=\'ss-card-emoji\'>${info.emoji || '⬇️'}</span>'">`
+        : `<span class="ss-card-emoji">${info.emoji || '⬇️'}</span>`;
+      const chip =
+        c.ready === true
+          ? '<span class="ss-chip ss-chip--ok">Ready</span>'
+          : c.ready === false
+            ? '<span class="ss-chip ss-chip--warn">Needs setup</span>'
+            : '';
+      return `
+            <li class="ss-chain-step" style="--ss-brand:${_ssBrand(c.id)}">
+                <span class="ss-chain-rank">${i + 1}</span>
+                <span class="ss-chain-disc">${media}</span>
+                <span class="ss-chain-name">${escapeHtml(info.name)}</span>
+                ${chip}
+            </li>`;
+    })
+    .join('');
+  const list = chain.length
+    ? `<div class="ss-section-title">${hybrid ? 'Download chain' : 'Download source'}</div><ol class="ss-chain">${steps}</ol>`
+    : '';
+  const note = hybrid
+    ? 'Add, remove or reorder sources in Settings. Down to one and it goes back to single source.'
+    : 'Add a second source in Settings and downloads go hybrid, trying each in turn.';
+  return _ssHero('download', pill, sub) + list + _ssFoot('download', note, editable);
 }
 
-function _ssReorderHybrid(draggedId: string, targetId: string): void {
-  const d = _ssState.data!;
-  const order = (d.download.hybrid_order && d.download.hybrid_order.length)
-    ? d.download.hybrid_order.slice()
-    : d.download.options.map((o) => o.id);
-  const from = order.indexOf(draggedId);
-  if (from < 0) return;
-  order.splice(from, 1);
-  const to = order.indexOf(targetId);
-  order.splice(to < 0 ? order.length : to, 0, draggedId);
-  void _ssSave({ hybrid_order: order });
+// where each "in Settings" button lands: the tab, the music side of it, and
+// the section to bring into view
+const _SS_SETTINGS_TARGET: Record<
+  string,
+  { tab: string; side: () => void; selector: string; group: boolean }
+> = {
+  server: {
+    tab: 'connections',
+    side: () => window.switchServiceKind?.('music'),
+    selector: '#plex-toggle',
+    group: true,
+  },
+  download: {
+    tab: 'downloads',
+    side: () => window.switchDownloadChain?.('music'),
+    selector: '#download-chain-widget',
+    group: false,
+  },
+};
+
+export function openServiceSwitchSettings(kind: string): void {
+  const target = _SS_SETTINGS_TARGET[kind];
+  if (!target) return;
+  closeServiceSwitchModal();
+  window.navigateToPage?.('settings');
+  window.setTimeout(() => {
+    try {
+      window.switchSettingsTab?.(target.tab);
+      target.side();
+    } catch {
+      /* best effort: the page is still open on settings */
+    }
+    window.setTimeout(() => {
+      const el = document.querySelector(target.selector);
+      const spot = (target.group ? el?.closest('.settings-group') : el) || el;
+      if (!spot) return;
+      spot.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      spot.classList.add('ss-landed');
+      window.setTimeout(() => spot.classList.remove('ss-landed'), 2200);
+    }, 140);
+  }, 80);
 }
 
 export async function setActiveSource(kind: string, id: string): Promise<void> {
-  const key = kind === 'metadata' ? 'metadata_source' : kind === 'server' ? 'media_server' : 'download_mode';
-  await _ssSave({ [key]: id });
-}
-
-export async function setDownloadMode(which: string): Promise<void> {
-  if (which === 'hybrid') {
-    await _ssSave({ download_mode: 'hybrid' });
-  } else {
-    // Switch to a single source — keep the current single choice if it was
-    // already single, else default to the first option.
-    const d = _ssState.data!;
-    const cur = d.download.mode;
-    const single = (cur && cur !== 'hybrid') ? cur : (d.download.options[0] && d.download.options[0].id) || 'soulseek';
-    await _ssSave({ download_mode: single });
-  }
+  // only the metadata source switches here; server + downloads live in Settings
+  if (kind !== 'metadata') return;
+  await _ssSave({ metadata_source: id });
 }
 
 async function _ssSave(patch: Record<string, unknown>): Promise<void> {
   try {
     const res = await fetch('/api/profiles/active-sources', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
     const data = (await res.json()) as { success?: boolean; error?: string };

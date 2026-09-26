@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { getShellBridge } from '@/platform/shell/bridge';
+import { profileAsksFirst } from '@/platform/shell/download-rights';
 
 import type { ArtistDetailTrack } from '../-artist-detail.types';
 
@@ -45,6 +46,8 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
   }, [artistId, artistName]);
 
   if (state.tracks.length === 0) return null;
+  // a profile that can't download: the same adds, sent as requests
+  const asksFirst = profileAsksFirst();
 
   const play = (track: ArtistDetailTrack) => {
     // Read at click time, not render time: the vanilla shell attaches the
@@ -59,6 +62,8 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
   };
 
   const wishlist = async (track: ArtistDetailTrack) => {
+    // request limit used up: core.js says so instead of an add the server drops
+    if (window.checkMusicRequestQuota && !(await window.checkMusicRequestQuota())) return;
     try {
       const response = await fetch('/api/add-album-to-wishlist', {
         method: 'POST',
@@ -67,7 +72,10 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
       });
       const data = await response.json();
       if (data?.success) {
-        window.showToast?.(`Added "${track.name}" to wishlist`, 'success');
+        // a profile that asks first hears who it went to instead
+        if (!window.announceWishlistRequest?.()) {
+          window.showToast?.(`Added "${track.name}" to wishlist`, 'success');
+        }
       } else {
         window.showToast?.(
           `Failed to wishlist "${track.name}": ${data?.error || 'unknown'}`,
@@ -127,7 +135,7 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
                 type="button"
                 className="hero-top-track-download"
                 data-index={index}
-                title="Add to wishlist"
+                title={asksFirst ? 'Request' : 'Add to wishlist'}
                 onClick={(e) => {
                   e.stopPropagation();
                   void wishlist(track);
@@ -152,7 +160,7 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
             downloadAll();
           }}
         >
-          Download All
+          {asksFirst ? 'Request All' : 'Download All'}
         </button>
       ) : null}
     </div>

@@ -9,6 +9,8 @@ from urllib3.util import Retry
 from utils.logging_config import get_logger
 from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
+from core.matching.artist_aliases import split_artist_credit
+from core.worker_utils import artist_name_matches
 
 logger = get_logger("deezer_client")
 
@@ -194,6 +196,7 @@ class Track:
     disc_number: Optional[int] = None
     album_type: Optional[str] = None
     total_tracks: Optional[int] = None
+    explicit: Optional[bool] = None
 
     @classmethod
     def from_deezer_track(cls, track_data: Dict[str, Any]) -> 'Track':
@@ -257,6 +260,8 @@ class Track:
             disc_number=track_data.get('disk_number', 1),
             album_type=album_type,
             total_tracks=nb_tracks,
+            explicit=(bool(track_data['explicit_lyrics'])
+                      if track_data.get('explicit_lyrics') is not None else None),
         )
 
 
@@ -595,6 +600,12 @@ class DeezerClient:
 
             q=track:"X" artist:"Y" album:"Z"
 
+        but the artist:"Y" filter is broken on deezer's side (#1295): with
+        it in, even their own docs example comes back empty. track: and
+        album: still work, so the artist goes in as plain words, which
+        still ranks the right artist up. callers check the artist on the
+        way out.
+
         Quotes around each value preserve multi-word phrases. Empty
         fields are skipped. Embedded double-quotes get stripped (no
         escape mechanism in Deezer's syntax) — rare in practice, but
@@ -602,10 +613,10 @@ class DeezerClient:
         query.
         """
         parts = []
+        if artist:
+            parts.append(artist.replace(chr(34), ""))
         if track:
             parts.append(f'track:"{track.replace(chr(34), "")}"')
-        if artist:
-            parts.append(f'artist:"{artist.replace(chr(34), "")}"')
         if album:
             parts.append(f'album:"{album.replace(chr(34), "")}"')
         return ' '.join(parts)
@@ -1408,10 +1419,15 @@ class DeezerClient:
             logger.error(f"Error searching for album '{artist_name} - {album_title}': {e}")
             return None
 
-    @rate_limited
     def search_track(self, artist_name: str, track_title: str) -> Optional[Dict[str, Any]]:
         """
         Search for a track by artist name and track title (enrichment interface).
+
+        deezer's artist:"X" filter came back empty for every query (#1295), so
+        the artist rides as plain words next to track:"Y" and we check the
+        artist ourselves. a plain artist term only ranks, it doesn't filter, and
+        karaoke / piano covers rank above the real song, so results[0] isn't
+        safe. we take the first result by the artist we asked for, or nothing.
 
         Args:
             artist_name: Name of the artist
@@ -1421,22 +1437,17 @@ class DeezerClient:
             Track dict from Deezer or None if not found
         """
         try:
-            query = f'artist:"{artist_name}" track:"{track_title}"'
-            response = self.session.get(
-                f"{self.BASE_URL}/search",
-                params={'q': query},
-                timeout=10
-            )
-            response.raise_for_status()
+            query = self._build_advanced_query(track=track_title, artist=artist_name)
+            result = self._pick_track_by_artist(self._search_track_raw(query), artist_name)
 
-            data = response.json()
-            if 'error' in data:
-                logger.error(f"Deezer API error searching track '{query}': {data['error']}")
-                return None
+            # the exact-title phrase can miss a title deezer spells a bit
+            # differently, so one plain search before calling it not found
+            if result is None:
+                fallback = ' '.join(p for p in (artist_name, track_title) if p)
+                if fallback and fallback != query:
+                    result = self._pick_track_by_artist(self._search_track_raw(fallback), artist_name)
 
-            results = data.get('data', [])
-            if results and len(results) > 0:
-                result = results[0]
+            if result is not None:
                 # Cache the track entity
                 try:
                     cache = get_metadata_cache()
@@ -1452,6 +1463,41 @@ class DeezerClient:
         except Exception as e:
             logger.error(f"Error searching for track '{artist_name} - {track_title}': {e}")
             return None
+
+    @rate_limited
+    def _search_track_raw(self, query: str) -> List[Dict[str, Any]]:
+        """one /search call, raw result dicts. its own rate slot so the
+        fallback in search_track pays for its request too"""
+        if not query:
+            return []
+        response = self.session.get(
+            f"{self.BASE_URL}/search",
+            params={'q': query},
+            timeout=10
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        if 'error' in data:
+            logger.error(f"Deezer API error searching track '{query}': {data['error']}")
+            return []
+        return data.get('data') or []
+
+    @staticmethod
+    def _pick_track_by_artist(results: List[Dict[str, Any]], artist_name: str) -> Optional[Dict[str, Any]]:
+        """first result by the artist we asked for. deezer only gives the
+        primary artist, so a collab credit ("daft punk & pharrell") matches on
+        any of its names. no artist asked for means the top result, like before"""
+        if not results:
+            return None
+        if not artist_name:
+            return results[0]
+        wanted = [artist_name] + split_artist_credit(artist_name)
+        for result in results:
+            got = (result.get('artist') or {}).get('name') or ''
+            if any(artist_name_matches(name, got) for name in wanted):
+                return result
+        return None
 
     @rate_limited
     def get_album_raw(self, album_id: int) -> Optional[Dict[str, Any]]:

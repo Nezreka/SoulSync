@@ -207,3 +207,66 @@ export function detectDiscBreaks(tracks: BasicTrack[]): Set<number> {
   });
   return breaks;
 }
+
+// ── Row display (the redesigned list) ─────────────────────────────────────
+
+const LOSSLESS_FORMATS = new Set(['flac', 'alac', 'wav', 'aiff', 'aif', 'ape', 'wv', 'dsf', 'dff']);
+
+/** Lossless by container. The badge lights up for these. */
+export function isLossless(result: BasicResult): boolean {
+  return LOSSLESS_FORMATS.has(resultFormat(result).toLowerCase());
+}
+
+/** 44100 -> '44.1', 96000 -> '96'. slskd reports Hz. */
+function khz(sampleRate: number): string {
+  const value = sampleRate >= 1000 ? sampleRate / 1000 : sampleRate;
+  return String(Math.round(value * 10) / 10);
+}
+
+/**
+ * The quality badge: `FLAC 24/96` when the file says its depth and rate,
+ * `MP3 320` for lossy with a bitrate, else just the format.
+ *
+ * An album has no depth or rate of its own, so it borrows the first track
+ * that reports one. A lossless file never shows its kbps, 1411 tells a
+ * listener nothing a 16/44.1 doesn't.
+ */
+export function qualityLabel(result: BasicResult): string {
+  const format = resultFormat(result).toUpperCase();
+  if (!format) return '';
+  const source = isAlbum(result)
+    ? result.tracks.find((track) => track.bit_depth && track.sample_rate)
+    : result;
+  if (isLossless(result)) {
+    if (source?.bit_depth && source.sample_rate) {
+      return `${format} ${source.bit_depth}/${khz(source.sample_rate)}`;
+    }
+    return format;
+  }
+  const bitrate = resultBitrate(result);
+  return bitrate ? `${format} ${bitrate}` : format;
+}
+
+/** `4:21`, `1:02:09`, or '' when unknown. Milliseconds in. */
+export function formatDuration(ms: number | null | undefined): string {
+  if (!ms || ms < 0) return '';
+  const total = Math.round(ms / 1000);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = String(total % 60).padStart(2, '0');
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`
+    : `${minutes}:${seconds}`;
+}
+
+/**
+ * Two colours for a result's art tile. raw download results carry no cover,
+ * so each release gets a stable colour field from its name instead of a
+ * generic icon. same name, same colour, every time.
+ */
+export function artColors(seed: string): [string, string] {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  const hue = Math.abs(hash) % 360;
+  return [`hsl(${hue} 55% 58%)`, `hsl(${(hue + 25) % 360} 35% 20%)`];
+}

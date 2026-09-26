@@ -1,0 +1,250 @@
+/* the download chooser: which way a file comes in. sits on the shared
+   DialogFrame (focus trap, escape, scroll lock), this only shapes it. */
+
+.popup {
+  --dc-raised: #1a1c23;
+  --dc-raised-2: #22242d;
+  --dc-line: rgba(255, 255, 255, 0.07);
+  --dc-line-strong: rgba(255, 255, 255, 0.12);
+  --dc-text: #f3f4f8;
+  --dc-muted: #9b9dad;
+  --dc-faint: #6b6d7c;
+
+  width: min(560px, 100%) !important;
+  border-radius: 20px !important;
+  background: #15161c !important;
+  border-color: var(--dc-line-strong) !important;
+  color: var(--dc-text);
+}
+
+/* zero specificity, so each button's own size and weight still win */
+:where(.popup) button {
+  font: inherit;
+  color: inherit;
+}
+
+.popup :focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.8);
+  outline-offset: 2px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--dc-line);
+}
+
+.art {
+  position: relative;
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sub {
+  color: var(--dc-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sep {
+  color: var(--dc-faint);
+  padding-inline: 5px;
+}
+
+.close {
+  align-self: flex-start;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: var(--dc-raised);
+  color: var(--dc-muted) !important;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.close:hover {
+  color: var(--dc-text) !important;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+
+.option {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--dc-line);
+  border-radius: 14px;
+  background: var(--dc-raised);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.option:hover {
+  border-color: var(--dc-line-strong);
+  background: var(--dc-raised-2);
+}
+
+.option[aria-checked='true'] {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  background: linear-gradient(rgba(var(--accent-rgb), 0.07), rgba(var(--accent-rgb), 0.02));
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: var(--dc-raised-2);
+  color: var(--dc-muted);
+}
+
+.icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.option[aria-checked='true'] .icon {
+  background: rgba(var(--accent-rgb), 0.12);
+  color: rgb(var(--accent-rgb));
+}
+
+.optionTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.optionText {
+  display: block;
+  margin-top: 2px;
+  color: var(--dc-muted);
+  font-size: 13px;
+}
+
+.tag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: rgb(var(--accent-rgb));
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.radio {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--dc-line-strong);
+  border-radius: 50%;
+}
+
+.option[aria-checked='true'] .radio {
+  border-color: rgb(var(--accent-rgb));
+}
+
+.option[aria-checked='true'] .radio::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--dc-line);
+}
+
+.note {
+  margin-right: auto;
+  color: var(--dc-faint);
+  font-size: 12.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.button {
+  flex-shrink: 0;
+  padding: 9px 18px;
+  border: 1px solid var(--dc-line-strong);
+  border-radius: 999px;
+  background: var(--dc-raised);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary {
+  border-color: transparent;
+  background: var(--dc-text);
+  color: #0c0d11 !important;
+}
+
+.primary:hover {
+  background: #fff;
+}
+
+@media (max-width: 520px) {
+  .foot {
+    flex-wrap: wrap;
+  }
+
+  .note {
+    flex-basis: 100%;
+  }
+}

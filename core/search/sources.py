@@ -45,6 +45,8 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                     "source": source_name or "",
                     "image_url": artist.image_url,
                     "external_urls": artist.external_urls or {},
+                    # the search page tells same-named artists apart by it
+                    "followers": getattr(artist, "followers", None) or None,
                 })
         except Exception as e:
             logger.debug(f"Artist search failed for {source_label}: {e}")
@@ -72,6 +74,8 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                     "disambiguation": getattr(album, "disambiguation", None),
                     "release_group_id": getattr(album, "release_group_id", None),
                     "external_urls": album.external_urls or {},
+                    # kids profiles filter on it; None = the source didn't say
+                    "explicit": getattr(album, "explicit", None),
                 })
         except Exception as e:
             logger.warning(f"Album search failed for {source_label}: {e}", exc_info=True)
@@ -107,6 +111,7 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                     "image_url": track.image_url,
                     "release_date": track.release_date,
                     "external_urls": track.external_urls or {},
+                    "explicit": getattr(track, "explicit", None),
                 })
         except Exception as e:
             logger.warning(f"Track search failed for {source_label}: {e}", exc_info=True)

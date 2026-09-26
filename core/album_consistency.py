@@ -23,6 +23,7 @@ logger = get_logger("album_consistency")
 # Tags written to EVERY file (album-level, same value)
 _ALBUM_LEVEL_TAGS = [
     'MUSICBRAINZ_RELEASE_ID',
+    'MUSICBRAINZ_ALBUMCOMMENT',
     'MUSICBRAINZ_RELEASEGROUPID',
     'MUSICBRAINZ_ALBUMARTISTID',
     'RELEASETYPE',
@@ -41,6 +42,7 @@ _ALBUM_LEVEL_TAGS = [
 # ID3 TXXX desc mapping
 _ID3_TXXX_MAP = {
     'MUSICBRAINZ_RELEASE_ID': 'MusicBrainz Album Id',
+    'MUSICBRAINZ_ALBUMCOMMENT': 'MusicBrainz Album Comment',
     'MUSICBRAINZ_RELEASEGROUPID': 'MusicBrainz Release Group Id',
     'MUSICBRAINZ_ALBUMARTISTID': 'MusicBrainz Album Artist Id',
     'MUSICBRAINZ_RELEASETRACKID': 'MusicBrainz Release Track Id',

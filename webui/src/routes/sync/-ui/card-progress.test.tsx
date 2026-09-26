@@ -41,6 +41,25 @@ describe('syncCardCounts (updateTidalCardSyncProgress 1172-1177)', () => {
     expect(syncCardCounts({})).toBeNull();
     expect(syncCardCounts({ total_tracks: 0, matched_tracks: 5 })).toBeNull();
   });
+
+  it('extracts synced and folded counts when duplicates exist', () => {
+    expect(
+      syncCardCounts({
+        total_tracks: 1582,
+        matched_tracks: 1581,
+        failed_tracks: 1,
+        duplicate_tracks: 299,
+        synced_tracks: 1282,
+      }),
+    ).toEqual({
+      total: 1582,
+      matched: 1581,
+      failed: 1,
+      percentage: 100,
+      synced: 1282,
+      folded: 299,
+    });
+  });
 });
 
 describe('cardProgressLine', () => {
@@ -172,5 +191,21 @@ describe('CardCoverage — the shared renderer', () => {
     expect(bar.getAttribute('aria-valuenow')).toBe('50');
     expect(bar.getAttribute('aria-valuemin')).toBe('0');
     expect(bar.getAttribute('aria-valuemax')).toBe('100');
+  });
+
+  it('renders synced count and fold tooltip when duplicate tracks were folded', () => {
+    render(
+      <CardCoverage
+        total={1582}
+        matched={1581}
+        failed={1}
+        percentage={100}
+        synced={1282}
+        folded={299}
+      />,
+    );
+    const count = screen.getByText('1581 (1282 synced) / 1582');
+    expect(count).toBeInTheDocument();
+    expect(count.getAttribute('title')).toBe('299 duplicate tracks folded (already on playlist)');
   });
 });

@@ -282,8 +282,8 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
     from core.discovery.listening_recommendations import build_recency_weighted_seeds
 
     today = today or date.today()
-    top = database.get_top_artists('all', 200) or []
-    recent = database.get_top_artists('30d', 200) or []
+    top = database.get_top_artists('all', 200, profile_id=profile_id) or []
+    recent = database.get_top_artists('30d', 200, profile_id=profile_id) or []
     seeds = build_recency_weighted_seeds(
         top, {a['name']: a.get('play_count', 0) for a in recent})
     seeds = sorted(seeds, key=lambda s: -s['weight'])[:MAX_SEEDS]

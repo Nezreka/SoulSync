@@ -69,6 +69,32 @@ def _invalidate_discover_shelf_cache():
         logger.debug("discover shelf cache invalidation skipped: %s", e)
 
 
+# #1309: each scan looked only at releases dated AFTER the previous scan. a
+# release lands in a provider's catalogue days late (and a day-precision date
+# reads as midnight utc, earlier than a scan that ran that morning), so once
+# the scan had passed its date it was never seen again, though the artist
+# page listed it. re-check this much before the last scan every time; owned,
+# wishlisted and ignore-listed albums are skipped downstream, so the overlap
+# only ever catches what was missed.
+INCREMENTAL_OVERLAP_DAYS = 14
+
+
+def incremental_cutoff(last_scan, lookback_period=None):
+    """the release-date cutoff for an incremental scan: the last scan minus
+    the overlap, never further back than a numeric lookback setting."""
+    if last_scan is None:
+        return None
+    ts = last_scan if last_scan.tzinfo else last_scan.replace(tzinfo=timezone.utc)
+    overlap = INCREMENTAL_OVERLAP_DAYS
+    try:
+        days = int(lookback_period)
+        if 0 < days < overlap:
+            overlap = days
+    except (TypeError, ValueError):
+        pass
+    return ts - timedelta(days=overlap)
+
+
 def watchlist_source_identity(artist):
     """(id, provider) for a watchlist artist - never the id alone.
 
@@ -1754,7 +1780,7 @@ class WatchlistScanner:
                 cutoff_timestamp = None
                 needs_full_discog = True
             elif last_scan_timestamp is not None:
-                cutoff_timestamp = last_scan_timestamp
+                cutoff_timestamp = incremental_cutoff(last_scan_timestamp, lookback_period)
 
                 # Check if a lookback period change requires a one-time wider window
                 rescan_cutoff = self._get_rescan_cutoff()
@@ -2479,9 +2505,21 @@ class WatchlistScanner:
                 for query_title in unique_title_variations:
                     # When allow_duplicates is on, skip album hint so we get title+artist matches only
                     search_album = None if allow_duplicates else album_name
+                    from core.downloads.atomic_album_publish import contains_staging_segment
                     db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=search_album)
 
                     if db_track and confidence >= 0.7:
+                        # #1289: a row whose file is still in atomic-publish
+                        # staging is not ownership — the file is quarantined and
+                        # may never publish, so the watchlist must keep asking.
+                        # The rule rather than find_owned_match: this loop walks
+                        # title variations and has its own allow-duplicates album
+                        # logic that the shared helper does not model.
+                        if contains_staging_segment(getattr(db_track, 'file_path', '') or ''):
+                            logger.info(
+                                f"[Watchlist] Ignoring staged library row for '{original_title}' "
+                                f"— not published yet, keeping the request")
+                            continue
                         # When allow_duplicates is on, only skip if we believe
                         # the library copy is on the same album the watchlist
                         # is asking about. Album name drift between Spotify
@@ -3818,18 +3856,18 @@ class WatchlistScanner:
         Falls back to empty/default values if no listening data exists.
         """
         try:
-            stats = self.database.get_listening_stats('30d')
+            stats = self.database.get_listening_stats('30d', profile_id=profile_id)
             if not stats or stats.get('total_plays', 0) == 0:
                 return {'has_data': False, 'top_artist_names': set(), 'top_genres': set(),
                         'genre_weights': {}, 'artist_play_counts': {}, 'avg_daily_plays': 0, 'listening_diversity': 0}
 
-            top_artists = self.database.get_top_artists('30d', 20)
+            top_artists = self.database.get_top_artists('30d', 20, profile_id=profile_id)
             top_artist_names = {a['name'].lower() for a in top_artists}
 
             # Build play count lookup for artist penalty scoring
             artist_play_counts = {a['name'].lower(): a['play_count'] for a in top_artists}
 
-            genre_breakdown = self.database.get_genre_breakdown('30d')
+            genre_breakdown = self.database.get_genre_breakdown('30d', profile_id=profile_id)
             top_genres = {g['genre'].lower() for g in genre_breakdown[:5]} if genre_breakdown else set()
             genre_weights = {g['genre'].lower(): g['percentage'] for g in genre_breakdown} if genre_breakdown else {}
 
@@ -4260,8 +4298,7 @@ class WatchlistScanner:
             logger.info("Building 'Because You Listen To' generation %s...", generation_id[:8])
 
             # seeds: recent listening first, lifetime when nothing is recent.
-            # profile_id is passed even though today's history is shared - the
-            # payload reports which scope it actually got.
+            # profile_id picks the pile, the payload reports which one it got.
             top_played = self.database.get_top_artists('30d', MAX_SHELVES, profile_id=profile_id)
             if not top_played:
                 top_played = self.database.get_top_artists('all', MAX_SHELVES, profile_id=profile_id)
@@ -4395,10 +4432,11 @@ class WatchlistScanner:
             )
 
             # Recency-weighted seeds: lifetime top artists, boosted by recent (30d) plays.
-            lifetime = [s for s in (self.database.get_top_artists('all', 30) or []) if s.get('name')]
+            lifetime = [s for s in (self.database.get_top_artists('all', 30, profile_id=profile_id) or [])
+                        if s.get('name')]
             if not lifetime:
                 return
-            recent_rows = self.database.get_top_artists('30d', 50) or []
+            recent_rows = self.database.get_top_artists('30d', 50, profile_id=profile_id) or []
             recent_counts = {r['name'].lower(): r.get('play_count', 0)
                              for r in recent_rows if r.get('name')}
             seeds = build_recency_weighted_seeds(lifetime, recent_counts)

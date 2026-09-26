@@ -18,9 +18,14 @@ import {
 import { Show } from '@/components/primitives';
 import { useProfile } from '@/platform/shell/route-controllers';
 
-import type { IssueReportPayload } from '../-issues.types';
+import type { IssueCounts, IssueReportPayload } from '../-issues.types';
 
-import { createIssue, issueCountsQueryOptions, invalidateIssuesQueries } from '../-issues.api';
+import {
+  createIssue,
+  createIssueToast,
+  issueCountsQueryOptions,
+  invalidateIssuesQueries,
+} from '../-issues.api';
 import {
   createDefaultIssueTitle,
   getIssueCategoriesForEntity,
@@ -29,24 +34,46 @@ import {
 import { ISSUE_CATEGORY_VALUES, ISSUE_PRIORITY_VALUES } from '../-issues.types';
 import styles from './issue-detail-modal.module.css';
 
+/** the badge poll. window focus refetch is off app-wide, so this is what keeps it honest. */
+export const ISSUE_BADGE_REFRESH_MS = 60_000;
+
+/**
+ * fired by the shell when the server pushes a 'profile:notify' socket event
+ * to this profile. core.js owns the socket, so it only has to re-dispatch.
+ */
+export const PROFILE_NOTIFY_EVENT = 'soulsync:profile-notify';
+
 export function IssueDomainHost() {
   const queryClient = useQueryClient();
   const profile = useProfile();
   const [reportPayload, setReportPayload] = useState<IssueReportPayload | null>(null);
   const profileId = profile.profileId;
+  const isAdmin = profile.isAdmin;
   const refreshIssues = useCallback(() => {
     void invalidateIssuesQueries(queryClient);
   }, [queryClient]);
 
   const countsQuery = useQuery({
     ...issueCountsQueryOptions(profileId),
+    refetchInterval: ISSUE_BADGE_REFRESH_MS,
   });
 
   useEffect(() => {
     if (countsQuery.data) {
-      updateBadge(countsQuery.data.open || 0);
+      updateBadge(issueBadgeCount(countsQuery.data, isAdmin));
     }
-  }, [countsQuery.data]);
+  }, [countsQuery.data, isAdmin]);
+
+  // a change on one of our issues lands as a push: refresh the badge, the
+  // list and any open thread straight away instead of waiting for the poll
+  useEffect(() => {
+    const onNotify = (event: Event) => {
+      const link = (event as CustomEvent<{ link?: string }>).detail?.link;
+      if (!link || link === 'issues') refreshIssues();
+    };
+    window.addEventListener(PROFILE_NOTIFY_EVENT, onNotify);
+    return () => window.removeEventListener(PROFILE_NOTIFY_EVENT, onNotify);
+  }, [refreshIssues]);
 
   useEffect(() => {
     window.SoulSyncIssueDomain = {
@@ -73,6 +100,7 @@ export function IssueDomainHost() {
           key={`${payload.entityType}:${payload.entityId}`}
           payload={payload}
           profileId={profileId}
+          isAdmin={isAdmin}
           onClose={() => setReportPayload(null)}
           onSubmitted={() => {
             setReportPayload(null);
@@ -85,11 +113,13 @@ export function IssueDomainHost() {
 }
 
 function ReportIssueModal({
+  isAdmin,
   onClose,
   onSubmitted,
   payload,
   profileId,
 }: {
+  isAdmin: boolean;
   onClose: () => void;
   onSubmitted: () => void;
   payload: IssueReportPayload;
@@ -101,18 +131,19 @@ function ReportIssueModal({
   );
 
   const createMutation = useMutation({
-    mutationFn: async (values: ReportIssueFormValues) => {
-      await createIssue(profileId, {
+    mutationFn: async (values: ReportIssueFormValues) =>
+      createIssue({
         entity_type: payload.entityType,
         entity_id: String(payload.entityId),
         category: values.category,
         title: values.title,
         description: values.description,
-        priority: values.priority,
-      });
-    },
-    onSuccess: () => {
-      notify('Issue reported successfully', 'success');
+        // members don't pick priority, the admin does when triaging
+        priority: isAdmin ? values.priority : undefined,
+      }),
+    onSuccess: (result) => {
+      const toast = createIssueToast(result);
+      notify(toast.message, toast.type);
       onSubmitted();
     },
   });
@@ -151,7 +182,7 @@ function ReportIssueModal({
       className={styles.reportIssueDialog}
     >
       <DialogHeader
-        title={`Report Issue - ${getEntityLabel(payload.entityType)}`}
+        title={`Report a problem with this ${getEntityLabel(payload.entityType).toLowerCase()}`}
         closeLabel="Close report issue modal"
       />
       <DialogBody>
@@ -255,27 +286,29 @@ function ReportIssueModal({
                     )}
                   </form.Field>
 
-                  <form.Field name="priority">
-                    {(field) => (
-                      <FormField
-                        helperText="Set the urgency if this needs faster attention."
-                        label="Priority"
-                      >
-                        <OptionButtonGroup>
-                          {ISSUE_PRIORITY_VALUES.map((priority) => (
-                            <OptionButton
-                              key={priority}
-                              onClick={() => field.handleChange(priority)}
-                              selected={field.state.value === priority}
-                            >
-                              {priority[0].toUpperCase()}
-                              {priority.slice(1)}
-                            </OptionButton>
-                          ))}
-                        </OptionButtonGroup>
-                      </FormField>
-                    )}
-                  </form.Field>
+                  <Show when={isAdmin}>
+                    <form.Field name="priority">
+                      {(field) => (
+                        <FormField
+                          helperText="Set the urgency if this needs faster attention."
+                          label="Priority"
+                        >
+                          <OptionButtonGroup>
+                            {ISSUE_PRIORITY_VALUES.map((priority) => (
+                              <OptionButton
+                                key={priority}
+                                onClick={() => field.handleChange(priority)}
+                                selected={field.state.value === priority}
+                              >
+                                {priority[0].toUpperCase()}
+                                {priority.slice(1)}
+                              </OptionButton>
+                            ))}
+                          </OptionButtonGroup>
+                        </FormField>
+                      )}
+                    </form.Field>
+                  </Show>
                 </>
               </Show>
             )}
@@ -343,11 +376,16 @@ function notify(message: string, type: 'success' | 'error' | 'warning' | 'info' 
   window.showToast?.(message, type);
 }
 
-function updateBadge(openCount: number) {
+/** admins see what's open; members see their own reports with news */
+export function issueBadgeCount(counts: IssueCounts, isAdmin: boolean): number {
+  return isAdmin ? counts.open || 0 : counts.updates || 0;
+}
+
+function updateBadge(count: number) {
   const badge = document.getElementById('issues-nav-badge');
   if (!badge) return;
-  badge.textContent = String(openCount || 0);
-  badge.classList.toggle('hidden', !openCount);
+  badge.textContent = String(count || 0);
+  badge.classList.toggle('hidden', !count);
 }
 
 function normalizeReportIssueFormValues(

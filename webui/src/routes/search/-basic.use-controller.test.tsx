@@ -31,7 +31,6 @@ beforeEach(() => {
 
 afterEach(() => {
   delete window.showToast;
-  delete window.currentSearchResults;
 });
 
 function hybridSources() {
@@ -570,31 +569,5 @@ describe('surviving navigation', () => {
     const second = await mounted();
 
     expect(second.result.current.state.activeSource).toBe('soulseek');
-  });
-});
-
-describe('window.currentSearchResults', () => {
-  // The vanilla matched-download modal reads this by index, and skipMatching
-  // reads it by indexOf on the object — so it has to be the rendered array,
-  // with the rendered order and the same object references.
-  it('publishes what is on screen, by identity', async () => {
-    stubSearch([albumRow(), trackRow()]);
-    const { result } = await mounted();
-
-    await act(async () => result.current.search('aphex'));
-
-    expect(window.currentSearchResults).toBe(result.current.visible);
-    expect(window.currentSearchResults?.[0]).toBe(result.current.visible[0]);
-  });
-
-  it('follows a filter change, so indices keep matching the rendered rows', async () => {
-    stubSearch([albumRow(), trackRow()]);
-    const { result } = await mounted();
-    await act(async () => result.current.search('aphex'));
-
-    act(() => result.current.setFilters({ type: 'track' }));
-
-    expect(window.currentSearchResults).toHaveLength(1);
-    expect(window.currentSearchResults?.[0]).toBe(result.current.visible[0]);
   });
 });

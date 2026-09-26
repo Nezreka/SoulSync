@@ -26,15 +26,24 @@ function fn(name: string, deps = '') {
   return new Function(`${deps}${extractFunction(name, JS)}; return ${name};`)();
 }
 
-type St = { view: string; ssOnly: boolean };
+type St = {
+  view: string;
+  ssOnly: boolean;
+  channel?: string;
+  thread?: string | null;
+  room?: string;
+  homeRoom?: string;
+};
 const plainOn = fn('_plainOn', 'var state;\n') as unknown as () => boolean;
 
 function withState(st: St): boolean {
-  // _plainOn closes over `state`; rebuild it with the state we want
+  // _plainOn closes over `state` and leans on _chanRoom + the default channel
+  // (#bugs only exists inside the envelope); rebuild them with the state we want
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   return new Function(
     'st',
-    `var state = st; ${extractFunction('_plainOn', JS)}; return _plainOn();`,
+    `var state = st; var CHAT_DEFAULT_CHANNEL = 'general';
+     ${extractFunction('_chanRoom', JS)}; ${extractFunction('_plainOn', JS)}; return _plainOn();`,
   )(st);
 }
 
@@ -47,6 +56,14 @@ describe('the filter decides the send format', () => {
     expect(withState({ view: 'room', ssOnly: true })).toBe(false);
   });
 
+  it('a channel other than #general keeps the envelope, it only exists in there', () => {
+    expect(withState({ view: 'room', ssOnly: false, channel: 'general' })).toBe(true);
+    expect(withState({ view: 'room', ssOnly: false, channel: 'bugs' })).toBe(false);
+    expect(withState({ view: 'room', ssOnly: false, channel: 'general', thread: 't1' })).toBe(
+      false,
+    );
+  });
+
   it('a PM is never plain-moded, it is already plaintext', () => {
     // offering the choice in a PM would imply PMs are enveloped, which they
     // are not — they must stay readable, and the ProveIt bots need literal text
@@ -56,12 +73,9 @@ describe('the filter decides the send format', () => {
 });
 
 describe('there is no second switch', () => {
-  it.each(['plainSend', '_toggleSendMode', 'chat-mode-btn'])(
-    'no leftover %s',
-    (dead) => {
-      expect(JS.includes(dead), `${dead} should be gone`).toBe(false);
-    },
-  );
+  it.each(['plainSend', '_toggleSendMode', 'chat-mode-btn'])('no leftover %s', (dead) => {
+    expect(JS.includes(dead), `${dead} should be gone`).toBe(false);
+  });
 
   it('and no orphan button in the markup', () => {
     expect(HTML).not.toContain('data-chat-mode-btn');
@@ -69,7 +83,10 @@ describe('there is no second switch', () => {
 });
 
 describe('what a plain send puts on the wire', () => {
-  const TAG = JS.slice(JS.indexOf('function _tagRoomPayload'), JS.indexOf('function _tagRoomPayload') + 900);
+  const TAG = JS.slice(
+    JS.indexOf('function _tagRoomPayload'),
+    JS.indexOf('function _tagRoomPayload') + 900,
+  );
 
   it('asks the server for plain and stops there', () => {
     // an avatar, a channel tag and a thread id all live INSIDE the envelope.
@@ -81,12 +98,18 @@ describe('what a plain send puts on the wire', () => {
   });
 
   it('suppresses typing indicators in plain mode to avoid base64 noise lines', () => {
-    const typingFn = JS.slice(JS.indexOf('function _maybeSendTyping'), JS.indexOf('function renderTyping'));
+    const typingFn = JS.slice(
+      JS.indexOf('function _maybeSendTyping'),
+      JS.indexOf('function renderTyping'),
+    );
     expect(typingFn).toContain('_plainOn()');
   });
 
   it('suppresses join beacons in plain mode and when user has no avatar', () => {
-    const beaconFn = JS.slice(JS.indexOf('function _sendJoinBeacon'), JS.indexOf('function onRoomProtocol'));
+    const beaconFn = JS.slice(
+      JS.indexOf('function _sendJoinBeacon'),
+      JS.indexOf('function onRoomProtocol'),
+    );
     expect(beaconFn).toContain('_plainOn()');
     expect(beaconFn).toContain('!_myAvatar()');
   });
@@ -117,7 +140,14 @@ describe('the hint explains the exception', () => {
 
   it('hides the controls that cannot work without an envelope', () => {
     const sync = extractFunction('_syncModeBtn', JS);
-    for (const sel of ['chat-gif-btn', 'chat-poll-btn', 'chat-attach-btn', 'chat-toolbar', 'chat-np-btn', 'chat-want-btn']) {
+    for (const sel of [
+      'chat-gif-btn',
+      'chat-poll-btn',
+      'chat-attach-btn',
+      'chat-toolbar',
+      'chat-np-btn',
+      'chat-want-btn',
+    ]) {
       expect(sync, `${sel} must be hidden in plain mode`).toContain(sel);
     }
   });

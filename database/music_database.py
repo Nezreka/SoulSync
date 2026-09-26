@@ -429,6 +429,10 @@ class MusicDatabase:
                 # writer waits politely instead of failing
                 connection.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
                 connection.execute("PRAGMA foreign_keys = ON")
+                # synchronous is per-connection, unlike journal_mode.
+                journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
+                if journal_mode and str(journal_mode[0]).lower() == "wal":
+                    connection.execute("PRAGMA synchronous = NORMAL")
                 # NOT `PRAGMA journal_mode = WAL` here. wal mode is persistent in
                 # the file and is set once per process in _ensure_wal_mode; the
                 # pragma takes a lock, and on an install with enrichment
@@ -601,6 +605,31 @@ class MusicDatabase:
                     source_info TEXT  -- JSON of source context (playlist name, album info, etc.)
                 )
             """)
+
+            # Wishlist removal audit (#1289). A wishlist row is deleted, not
+            # tombstoned, so when a user asks "where did this track go?" there
+            # was nothing to look at: the only trace was a log line carrying an
+            # id and no reason, no path and no batch. Tracking down the atomic-
+            # publish dropout meant correlating timestamps across three loggers
+            # by hand. This is small, append-only and trimmed, and turns that
+            # into one query.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS wishlist_removals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    spotify_track_id TEXT NOT NULL,
+                    profile_ids TEXT,          -- JSON list, or NULL for an all-profile sweep
+                    rows_removed INTEGER DEFAULT 0,
+                    reason TEXT,               -- download_complete / atomic_published / already_owned / ...
+                    final_path TEXT,
+                    batch_id TEXT,
+                    source TEXT,
+                    removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_removals_track "
+                           "ON wishlist_removals (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_removals_at "
+                           "ON wishlist_removals (removed_at)")
 
             # Purge any podcast items that erroneously leaked into wishlist_tracks
             try:
@@ -1075,7 +1104,9 @@ class MusicDatabase:
             self._add_profile_recovery_support(cursor)
             self._add_profile_service_credentials(cursor)
             self._add_profile_navidrome_login(cursor)
+            self._add_profile_lastfm_username(cursor)
             self._add_profile_plex_home_user(cursor)
+            self._add_profile_controls(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
             self._add_service_credential_sets(cursor)
@@ -1656,6 +1687,15 @@ class MusicDatabase:
 
             self._ensure_core_media_schema_columns(cursor)
             self._ensure_art_lock_columns(cursor)
+            self._ensure_genres_lock_columns(cursor)
+            self._ensure_manual_metadata_schema(cursor)
+            # every artist credited on a track, from the enrichment workers.
+            # after the provider id columns above, the triggers watch them
+            try:
+                from core.library.artist_credits import ensure_schema as _ensure_artist_credits
+                _ensure_artist_credits(cursor)
+            except Exception as e:
+                logger.error(f"track_artist_credits schema init failed: {e}")
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -1751,6 +1791,7 @@ class MusicDatabase:
         'deezer_cache_v2':          ('table', '_deezer_cache_v2_migrated'),
         'cache_junk_artist_purged': ('table', '_cache_junk_artist_purged'),
         'genius_search_fix':        ('table', '_genius_search_fix_applied'),
+        'tidal_search_fix':         ('table', '_tidal_search_fix_applied'),
         'quality_profiles_schema':  ('table', 'quality_profiles'),
     }
 
@@ -1942,6 +1983,172 @@ class MusicDatabase:
             try:
                 cursor.execute(f"PRAGMA table_info({table})")
                 cache[table] = any(row[1] == 'art_locked' for row in cursor.fetchall())
+            except Exception:
+                cache[table] = False
+        return cache[table]
+
+    def _ensure_manual_metadata_schema(self, cursor):
+        """Hand-tagged ("tag it yourself") albums: the files, and a lock flag.
+
+        the user typed the metadata for a release no service knows. the lock
+        keeps enrichment and the maintenance jobs from "correcting" it into the
+        studio release. its OWN method with its OWN try, like art_locked: no
+        sync upsert references these columns in its main statement, so a
+        missing column degrades to "not locked", never to a lost scan."""
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS manual_metadata_files (
+                    path_key TEXT PRIMARY KEY,
+                    file_path TEXT,
+                    album_title TEXT,
+                    album_artist TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        except Exception as e:
+            logger.error("Could not ensure manual_metadata_files: %s", e)
+        for table in ('albums', 'tracks'):
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cols = {c[1] for c in cursor.fetchall()}
+                if cols and 'metadata_locked' not in cols:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN metadata_locked INTEGER DEFAULT 0")
+                    logger.info("Added metadata_locked column to %s table (hand-tagged)", table)
+            except Exception as e:
+                logger.error("Could not ensure %s.metadata_locked: %s", table, e)
+
+    @staticmethod
+    def manual_path_key(file_path) -> str:
+        """artist/album/file, lowercased. a media server mounts the library
+        somewhere else than SoulSync does, the tail is what both agree on"""
+        parts = [p for p in str(file_path or '').replace('\\', '/').split('/') if p]
+        return '/'.join(parts[-3:]).lower()
+
+    def record_manual_metadata_file(self, file_path, album_title: str = '', album_artist: str = '') -> int:
+        """remember a hand-tagged file and lock whatever rows already point at
+        it. returns how many track rows got locked right now (a media-server
+        library locks its rows later, when the scan brings them in)"""
+        key = self.manual_path_key(file_path)
+        if not key:
+            return 0
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO manual_metadata_files (path_key, file_path, album_title, album_artist) "
+                "VALUES (?, ?, ?, ?)", (key, str(file_path), album_title or '', album_artist or ''))
+            name = key.rsplit('/', 1)[-1]
+            like = '%' + name.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            cursor.execute("SELECT id, album_id, file_path FROM tracks WHERE file_path LIKE ? ESCAPE '\\'", (like,))
+            hits = [(tid, aid) for tid, aid, fp in cursor.fetchall() if self.manual_path_key(fp) == key]
+            for track_id, album_id in hits:
+                self._lock_manual_rows(cursor, track_id, album_id)
+            conn.commit()
+            return len(hits)
+        finally:
+            conn.close()
+
+    def manual_path_keys(self) -> set:
+        """every hand-tagged file's path key, for jobs that walk the disk: one
+        query up front, then a set lookup per file"""
+        try:
+            conn = self._get_connection()
+            try:
+                return {row[0] for row in conn.execute("SELECT path_key FROM manual_metadata_files")}
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001 - old schema: nothing is hand-tagged
+            logger.debug("manual_path_keys unavailable: %s", e)
+            return set()
+
+    def clear_manual_lock(self, album_id) -> bool:
+        """the user unlocked a hand-tagged album: enrichment and the jobs may
+        look at it again. 'manual' statuses go back to NULL so every worker
+        picks the rows up fresh, and its files stop re-locking on rescans.
+        False when the album doesn't exist."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM albums WHERE id = ?", (album_id,))
+            if not cursor.fetchone():
+                return False
+            cursor.execute("SELECT id, file_path FROM tracks WHERE album_id = ?", (album_id,))
+            tracks = cursor.fetchall()
+            keys = [self.manual_path_key(fp) for _tid, fp in tracks if fp]
+            if keys:
+                try:
+                    cursor.executemany("DELETE FROM manual_metadata_files WHERE path_key = ?", [(k,) for k in keys])
+                except Exception as e:  # noqa: BLE001 - old schema, nothing to forget
+                    logger.debug("clear_manual_lock: %s", e)
+            for table, ids in (('tracks', [t[0] for t in tracks]), ('albums', [album_id])):
+                cols = self._match_status_columns(cursor, table)
+                sets = ', '.join([f"{c} = CASE WHEN {c} = 'manual' THEN NULL ELSE {c} END" for c in cols]
+                                 + ['metadata_locked = 0'])
+                cursor.executemany(f"UPDATE {table} SET {sets} WHERE id = ?", [(i,) for i in ids])
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def _match_status_columns(self, cursor, table: str) -> List[str]:
+        cursor.execute(f"PRAGMA table_info({table})")
+        return [c[1] for c in cursor.fetchall() if c[1].endswith('_match_status')]
+
+    def _lock_manual_rows(self, cursor, track_id, album_id) -> None:
+        """every per-source match status to 'manual' (every enrichment worker
+        only picks NULL / not_found / error, so this stands all of them down)
+        plus metadata_locked for the maintenance jobs"""
+        for table, row_id in (('tracks', track_id), ('albums', album_id)):
+            if row_id is None:
+                continue
+            cols = self._match_status_columns(cursor, table)
+            sets = ', '.join([f"{c} = 'manual'" for c in cols] + ['metadata_locked = 1'])
+            cursor.execute(f"UPDATE {table} SET {sets} WHERE id = ?", (row_id,))
+
+    def _apply_manual_lock_for_track(self, cursor, track_id, album_id, file_path) -> bool:
+        """a scan wrote this track row. if its file is one the user hand-tagged,
+        lock it and its album. cheap when nothing is hand-tagged: one indexed
+        lookup that misses"""
+        key = self.manual_path_key(file_path)
+        if not key:
+            return False
+        cursor.execute("SELECT 1 FROM manual_metadata_files WHERE path_key = ?", (key,))
+        if not cursor.fetchone():
+            return False
+        self._lock_manual_rows(cursor, track_id, album_id)
+        return True
+
+    def _ensure_genres_lock_columns(self, cursor):
+        """genres soulsync's own genre jobs settled (Cremonies, discord).
+
+        genre enrichment and the whitelist cleanup write the db. the next media
+        server scan used to put back whatever the server read from the files,
+        so the cleanup quietly undid itself. a locked row keeps its genres
+        through scans until the files catch up (write tags). 0 = follow the
+        server, today's behaviour for every existing row. its own method and
+        try, same reason as art_locked: the scan upserts reference it."""
+        for table in ('albums', 'artists'):
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cols = {c[1] for c in cursor.fetchall()}
+                if cols and 'genres_locked' not in cols:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN genres_locked INTEGER DEFAULT 0")
+                    logger.info("Added genres_locked column to %s table", table)
+            except Exception as e:
+                logger.error("Could not ensure %s.genres_locked: %s", table, e)
+
+    def _genres_lock_supported(self, cursor, table: str) -> bool:
+        """does this db have ``<table>.genres_locked`` yet. no column means the
+        scan behaves exactly like before, never a lost upsert. same reasoning
+        and memo as _art_lock_supported."""
+        cache = getattr(self, '_genres_lock_cols', None)
+        if cache is None:
+            cache = {}
+            self._genres_lock_cols = cache
+        if table not in cache:
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cache[table] = any(row[1] == 'genres_locked' for row in cursor.fetchall())
             except Exception:
                 cache[table] = False
         return cache[table]
@@ -4808,6 +5015,22 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_status ON tracks (qobuz_match_status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_isrc ON tracks (isrc)")
 
+            # one-time requeue (#1290): tidal retired /searchResults/{query},
+            # so every search 400'd and got recorded as not_found. those rows
+            # would sit out the 30-day retry. only not_found goes back, a real
+            # match is left alone.
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_tidal_search_fix_applied'")
+            if not cursor.fetchone():
+                requeued = 0
+                for table in ('artists', 'albums', 'tracks'):
+                    cursor.execute(f"""
+                        UPDATE {table} SET tidal_match_status = NULL, tidal_last_attempted = NULL
+                        WHERE tidal_match_status = 'not_found'
+                    """)
+                    requeued += max(cursor.rowcount, 0)
+                cursor.execute("CREATE TABLE _tidal_search_fix_applied (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                logger.info(f"Tidal search fix applied: requeued {requeued} not_found rows for enrichment")
+
         except Exception as e:
             logger.error(f"Error adding Tidal/Qobuz enrichment columns: {e}")
             # Don't raise - this is a migration, database can still function
@@ -5387,6 +5610,87 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error in profile support v4 migration: {e}")
 
+    # columns this migration owns, with their defaults
+    _PROFILE_CONTROL_COLUMNS = (
+        ("request_limit", "INTEGER DEFAULT 0"),        # asks per window, 0 = no limit
+        ("request_limit_days", "INTEGER DEFAULT 7"),
+        ("hide_explicit", "INTEGER DEFAULT 0"),        # kids: explicit music stays out of sight
+        ("max_rating", "TEXT DEFAULT NULL"),           # kids: highest movie/tv rating, NULL = any
+        ("session_epoch", "INTEGER DEFAULT 0"),        # bump = every signed-in browser signs out
+        ("disabled", "INTEGER DEFAULT 0"),             # turned off: kept, but nobody can open it
+    )
+
+    def _add_profile_controls(self, cursor):
+        """request quotas, kids content limits and the session epoch
+        (sept 25 2026), plus the admin audit log and invite links. idempotent
+        on columns, so a half-applied run finishes next boot."""
+        try:
+            cursor.execute("PRAGMA table_info(profiles)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if not cols:
+                return
+            for col, decl in self._PROFILE_CONTROL_COLUMNS:
+                if col not in cols:
+                    cursor.execute(f"ALTER TABLE profiles ADD COLUMN {col} {decl}")
+            # actor_id / target_id, never profile_id: the delete sweep removes
+            # every profile_id row, and the log is about deletions too
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS profile_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    actor_id INTEGER,
+                    actor_name TEXT,
+                    action TEXT NOT NULL,
+                    target_id INTEGER,
+                    target_name TEXT,
+                    detail TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profile_audit_created ON profile_audit (created_at)")
+            # one row per signed-in browser. owner_id, never profile_id (the
+            # delete sweep); delete_profile clears them itself
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS profile_devices (
+                    id TEXT PRIMARY KEY,
+                    owner_id INTEGER NOT NULL,
+                    label TEXT,
+                    ip TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    revoked_at TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_profile_devices_by_profile ON profile_devices (owner_id)")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS profile_invites (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_by INTEGER,
+                    preset TEXT NOT NULL DEFAULT '{}',
+                    note TEXT,
+                    expires_at TIMESTAMP NOT NULL,
+                    used_at TIMESTAMP,
+                    used_by INTEGER,
+                    revoked_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        except Exception as e:
+            logger.error(f"Error in profile controls migration: {e}")
+
+    @staticmethod
+    def _profile_controls(row, columns) -> Dict[str, Any]:
+        def val(col, default):
+            return row[col] if col in columns and row[col] is not None else default
+        return {
+            'request_limit': int(val('request_limit', 0) or 0),
+            'request_limit_days': int(val('request_limit_days', 7) or 7),
+            'hide_explicit': bool(val('hide_explicit', 0)),
+            'max_rating': val('max_rating', None),
+            'session_epoch': int(val('session_epoch', 0) or 0),
+            'disabled': bool(val('disabled', 0)),
+        }
+
     def _add_profile_sides(self, cursor):
         """Add the allowed_sides column ('music'|'video'|'both') to profiles.
 
@@ -5577,6 +5881,38 @@ class MusicDatabase:
             logger.error(f"Error clearing ListenBrainz credentials for profile {profile_id}: {e}")
             return False
 
+    def reset_listening_pile(self, profile_id: int, source: str = 'listenbrainz') -> int:
+        """drop one source's plays from a profile's own pile, plus its caches and
+        that source's import state. for when it switches listenbrainz or last.fm
+        accounts: the old account's history isn't this person's anymore (#1293).
+
+        plays from anywhere else (the web player) stay, they're still theirs.
+        never touches the shared pile. returns rows removed."""
+        from core.listening_scope import SHARED_OWNER, owner_key, pile_cache_keys
+        try:
+            pid = int(profile_id)
+        except (TypeError, ValueError):
+            return 0
+        if pid == SHARED_OWNER:
+            return 0
+        # the other service's resume state is still good, only this one's goes
+        keys = pile_cache_keys(pid) + [owner_key(f'{source}_listening_import_state', pid)]
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM listening_import_events WHERE profile_id = ? AND source = ?",
+                               (pid, source))
+                cursor.execute("DELETE FROM listening_history WHERE profile_id = ? AND server_source = ?",
+                               (pid, source))
+                removed = cursor.rowcount
+                for key in keys:
+                    cursor.execute("DELETE FROM metadata WHERE key = ?", (key,))
+                conn.commit()
+                return removed
+        except Exception as e:
+            logger.error(f"Error resetting listening pile for profile {pid}: {e}")
+            return 0
+
     def get_profiles_with_listenbrainz(self) -> List[Dict[str, Any]]:
         """Get all profiles that have ListenBrainz tokens configured"""
         try:
@@ -5657,6 +5993,42 @@ class MusicDatabase:
                 cursor.execute(sql)
             except sqlite3.OperationalError:
                 pass  # Column already exists
+
+    def _add_profile_lastfm_username(self, cursor):
+        """a last.fm username per profile (#1293). reading someone's scrobbles
+        only takes the app's api key and their name, so there's no token."""
+        try:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN lastfm_username TEXT DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+    def set_profile_lastfm(self, profile_id: int, username: Optional[str]) -> bool:
+        """save (or with an empty name clear) a profile's own last.fm username."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET lastfm_username = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    ((username or '').strip() or None, profile_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting Last.fm username for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_lastfm(self, profile_id: int) -> Dict[str, Any]:
+        """{'username': ...} for a profile's own last.fm, '' when it has none."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute("SELECT lastfm_username FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+                return {'username': (row[0] or '') if row else ''}
+        except Exception as e:
+            logger.error(f"Error getting Last.fm username for profile {profile_id}: {e}")
+            return {'username': ''}
+
+    def clear_profile_lastfm(self, profile_id: int) -> bool:
+        return self.set_profile_lastfm(profile_id, None)
 
     def set_profile_navidrome_login(self, profile_id: int, username: Optional[str], password: Optional[str]) -> bool:
         """save (or with empty values clear) a profile's own navidrome login."""
@@ -6228,7 +6600,7 @@ class MusicDatabase:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_artist ON listening_history (artist)")
-            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup ON listening_history (track_id, played_at, server_source)")
+            self._add_listening_history_owner(cursor)
 
             # Add play_count and last_played to tracks table
             cursor.execute("PRAGMA table_info(tracks)")
@@ -6253,43 +6625,46 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error creating listening_history table: {e}")
 
+    def _add_listening_history_owner(self, cursor):
+        """#1293: whose pile each play is in. every existing row is the shared
+        pile (1), because that's the only pile there was.
+
+        the dedup key gets the owner too, or two profiles on the same
+        listenbrainz collide and the second one's play never lands."""
+        cursor.execute("PRAGMA table_info(listening_history)")
+        if 'profile_id' not in [c[1] for c in cursor.fetchall()]:
+            cursor.execute("ALTER TABLE listening_history ADD COLUMN profile_id INTEGER NOT NULL DEFAULT 1")
+            logger.info("Added profile_id column to listening_history")
+        cursor.execute("DROP INDEX IF EXISTS idx_listening_dedup")
+        # the same index under its first name, only ever on dev installs
+        cursor.execute("DROP INDEX IF EXISTS idx_listening_dedup_owner")
+        # owner LAST: this index is for the insert's exact lookup, it must never
+        # look like an owner index to the planner
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup_pile "
+            "ON listening_history (track_id, played_at, server_source, profile_id)"
+        )
+        from core.listening_import.dedup import ensure_import_events_table
+        ensure_import_events_table(cursor.connection)
+
     def insert_listening_events(self, events):
-        """Bulk insert listening events, skipping duplicates."""
-        if not events:
-            return 0
-        conn = None
+        """Insert server/player events through the same matcher as history imports.
+
+        an event's profile_id is its pile, none means the shared one."""
+        from core.listening_import.dedup import insert_import_events
+        from core.listening_scope import SHARED_OWNER
+
+        grouped = {}
+        for event in events or []:
+            owner = event.get('profile_id') or SHARED_OWNER
+            grouped.setdefault((event.get('server_source') or '', owner), []).append(event)
         inserted = 0
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            for event in events:
-                try:
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO listening_history
-                            (track_id, title, artist, album, played_at, duration_ms, server_source, db_track_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        event.get('track_id'),
-                        event.get('title', ''),
-                        event.get('artist', ''),
-                        event.get('album', ''),
-                        event.get('played_at'),
-                        event.get('duration_ms', 0),
-                        event.get('server_source', ''),
-                        event.get('db_track_id'),
-                    ))
-                    if cursor.rowcount > 0:
-                        inserted += 1
-                except Exception as e:
-                    logger.debug("Failed to insert listening event: %s", e)
-            conn.commit()
-            return inserted
-        except Exception as e:
-            logger.error(f"Error inserting listening events: {e}")
-            return 0
-        finally:
-            if conn:
-                conn.close()
+        for (source, owner), batch in grouped.items():
+            try:
+                inserted += insert_import_events(self, batch, source, profile_id=owner)
+            except Exception as e:
+                logger.error(f"Error inserting listening events: {e}")
+        return inserted
 
     def record_web_player_play(self, event):
         """Record a single SoulSync web-player play: insert the listening_history
@@ -6345,16 +6720,18 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_listening_stats(self, time_range='all'):
+    def get_listening_stats(self, time_range='all', profile_id=None):
         """Get aggregate listening stats for a time range.
 
         Args:
             time_range: '7d', '30d', '12m', or 'all'
+            profile_id: whose plays, see core/listening_scope.py
 
         Returns:
             Dict with total_plays, total_time_ms, unique_artists, unique_albums, unique_tracks
         """
-        return self._listening_overview(self._listening_time_filter(time_range))
+        return self._listening_overview(
+            self._listening_time_filter(time_range, owner=self._listening_owner(profile_id)))
 
     _EMPTY_OVERVIEW = {'total_plays': 0, 'total_time_ms': 0, 'unique_artists': 0,
                        'unique_albums': 0, 'unique_tracks': 0}
@@ -6409,14 +6786,14 @@ class MusicDatabase:
     # offset. Pre-existing, affects every range-scoped stat, and deliberately
     # not changed here — see STATS_PAGE_PLAN.md.)
 
-    def get_listening_clock(self, time_range='all'):
+    def get_listening_clock(self, time_range='all', profile_id=None):
         """Plays by weekday x hour — the shape of a listening week.
 
         Returns a dict with a dense 7x24 ``grid`` (weekday 0=Sunday, matching
         strftime %w) plus the peak cell. Dense on purpose: a heatmap needs a
         value for every cell, and making the UI fill gaps is how an empty hour
         becomes an undefined square."""
-        where = self._listening_time_filter(time_range)
+        where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
         grid = [[0] * 24 for _ in range(7)]
         conn = None
         try:
@@ -6451,13 +6828,13 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_listening_rhythm(self, time_range='all'):
+    def get_listening_rhythm(self, time_range='all', profile_id=None):
         """Streaks and the biggest day — listening as a habit, not a total.
 
         ``current_streak`` counts back from today, and tolerates today having
         no plays yet: a streak should not read as broken at 9am just because
         you have not put anything on."""
-        where = self._listening_time_filter(time_range)
+        where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
         empty = {'current_streak': 0, 'longest_streak': 0,
                  'busiest_day': {'date': None, 'plays': 0}, 'active_days': 0}
         conn = None
@@ -6523,69 +6900,50 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_listening_stats_previous(self, time_range='all'):
+    def get_listening_stats_previous(self, time_range='all', profile_id=None):
         """The overview for the period immediately BEFORE ``time_range``.
 
         Returns None when there is no previous window ('all'), so the UI omits
         the comparison instead of rendering a delta against nothing."""
-        where = self._listening_previous_filter(time_range)
+        where = self._listening_previous_filter(time_range, owner=self._listening_owner(profile_id))
         if not where:
             return None
         return self._listening_overview(where)
 
-    def listening_history_scope(self) -> str:
-        """'profile' or 'shared' - who the listening history belongs to.
+    def listening_history_scope(self, profile_id=None) -> str:
+        """'profile' or 'shared' - whose listening history this profile reads.
 
-        listening_history carries no profile column, so on every install today
-        the answer is 'shared': every profile's plays land in one table and any
-        feature built on it is personal to the INSTALL, not to the profile.
-        the recommendation payloads carry this string so the product can say so
-        instead of implying a personal history it does not have. the moment the
-        column exists the filter below engages and this reads 'profile'.
+        'profile' when it has its own listenbrainz and reads only its own plays.
+        'shared' for the admin and every profile without one: they all read the
+        one install-wide pile. the recommendation payloads carry this string so
+        the product can say so instead of implying a personal history it does
+        not have.
         """
-        conn = None
+        from core.listening_scope import SHARED_OWNER
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(listening_history)")
-            return 'profile' if any(r[1] == 'profile_id' for r in cursor.fetchall()) else 'shared'
-        except Exception as e:
-            logger.debug(f"listening history scope probe failed: {e}")
+            pid = int(profile_id) if profile_id is not None else SHARED_OWNER
+        except (TypeError, ValueError):
             return 'shared'
-        finally:
-            if conn:
-                conn.close()
+        if pid == SHARED_OWNER:
+            return 'shared'
+        return 'profile' if self._listening_owner(pid) == pid else 'shared'
 
     def get_top_artists(self, time_range='all', limit=10, profile_id=None):
-        """Get top artists by play count.
-
-        profile_id scopes the read WHEN the history can be attributed (see
-        listening_history_scope). passing one on a shared history is not an
-        error and does not silently pretend to filter - the caller reports the
-        scope it actually got.
-        """
+        """Get top artists by play count, from the pile profile_id reads."""
         conn = None
         try:
+            where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range)
-            params = []
-            scope_clause = ''
-            if profile_id is not None:
-                cursor.execute("PRAGMA table_info(listening_history)")
-                if any(r[1] == 'profile_id' for r in cursor.fetchall()):
-                    scope_clause = ' AND profile_id = ?'
-                    params.append(profile_id)
-
             cursor.execute(f"""
                 SELECT artist, COUNT(*) as play_count
                 FROM listening_history
                 {where}
-                AND artist IS NOT NULL AND artist != ''{scope_clause}
+                AND artist IS NOT NULL AND artist != ''
                 GROUP BY LOWER(artist)
                 ORDER BY play_count DESC
                 LIMIT ?
-            """, (*params, limit))
+            """, (limit,))
             return [{'name': row[0], 'play_count': row[1]} for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error getting top artists: {e}")
@@ -6594,13 +6952,13 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_top_albums(self, time_range='all', limit=10):
+    def get_top_albums(self, time_range='all', limit=10, profile_id=None):
         """Get top albums by play count."""
         conn = None
         try:
+            where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range)
 
             cursor.execute(f"""
                 SELECT album, artist, COUNT(*) as play_count
@@ -6619,13 +6977,13 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_top_tracks(self, time_range='all', limit=10):
+    def get_top_tracks(self, time_range='all', limit=10, profile_id=None):
         """Get top tracks by play count."""
         conn = None
         try:
+            where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range)
 
             cursor.execute(f"""
                 SELECT title, artist, album, COUNT(*) as play_count
@@ -6644,13 +7002,13 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_listening_timeline(self, time_range='30d', granularity='day'):
+    def get_listening_timeline(self, time_range='30d', granularity='day', profile_id=None):
         """Get play count per time period for chart rendering."""
         conn = None
         try:
+            where = self._listening_time_filter(time_range, owner=self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range)
 
             if granularity == 'month':
                 date_fmt = '%Y-%m'
@@ -6674,13 +7032,13 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def get_genre_breakdown(self, time_range='all'):
+    def get_genre_breakdown(self, time_range='all', profile_id=None):
         """Get genre distribution by play count (joins listening_history to tracks/artists)."""
         conn = None
         try:
+            where = self._listening_time_filter(time_range, alias='lh', owner=self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range, alias='lh')
 
             cursor.execute(f"""
                 SELECT a.genres, COUNT(*) as play_count
@@ -6756,7 +7114,7 @@ class MusicDatabase:
             if name:
                 genre_counts[name] = genre_counts.get(name, 0) + weight
 
-    def get_genre_own_vs_play(self, time_range='all', limit=12):
+    def get_genre_own_vs_play(self, time_range='all', limit=12, profile_id=None):
         """What share of the library each genre is, against what share of plays.
 
         Both sides are percentages of the GENRE-KNOWN population (tracks whose
@@ -6768,6 +7126,7 @@ class MusicDatabase:
         biggest genre, which you already know."""
         conn = None
         try:
+            owner = self._listening_owner(profile_id)
             conn = self._get_connection()
             cursor = conn.cursor()
 
@@ -6783,7 +7142,7 @@ class MusicDatabase:
                 self._accumulate_genres(owned, genres_str, count)
 
             played = {}
-            where = self._listening_time_filter(time_range, alias='lh')
+            where = self._listening_time_filter(time_range, alias='lh', owner=owner)
             cursor.execute(f"""
                 SELECT a.genres, COUNT(*) AS plays
                 FROM listening_history lh
@@ -6931,7 +7290,7 @@ class MusicDatabase:
                 leaders[month] = (artist, plays)
         return {month: name for month, (name, _) in leaders.items()}
 
-    def get_year_in_listening(self, now=None, months=12):
+    def get_year_in_listening(self, now=None, months=12, profile_id=None):
         """The whole Year in Listening story in one payload.
 
         ``now`` is injectable so the story is reproducible in tests — every
@@ -6966,9 +7325,11 @@ class MusicDatabase:
 
         conn = None
         try:
+            from core.listening_scope import owner_clause
+            scope = owner_clause(self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            window = "WHERE date(played_at) >= ? AND date(played_at) <= ?"
+            window = f"WHERE date(played_at) >= ? AND date(played_at) <= ? AND {scope}"
             span = (start_date, end_date)
 
             cursor.execute(f"""
@@ -7073,13 +7434,13 @@ class MusicDatabase:
             # window — an artist you first played in 2019 and came back to this
             # year is a rediscovery, not a discovery, and calling it one would
             # be the single most obviously wrong number on the page.
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT artist, first_play, plays FROM (
                     SELECT artist,
                            MIN(date(played_at)) AS first_play,
                            COUNT(*) AS plays
                     FROM listening_history
-                    WHERE artist IS NOT NULL AND artist != ''
+                    WHERE artist IS NOT NULL AND artist != '' AND {scope}
                     GROUP BY LOWER(artist)
                 )
                 WHERE first_play >= ? AND first_play <= ?
@@ -7326,18 +7687,28 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    def _listening_owner(self, profile_id=None):
+        """the pile a profile reads, see core/listening_scope.py."""
+        from core.listening_scope import listening_owner
+        return listening_owner(self, profile_id)
+
     @staticmethod
-    def _listening_time_filter(time_range, alias=''):
-        """Build a WHERE clause for time-range filtering."""
+    def _listening_time_filter(time_range, alias='', owner=None):
+        """Build a WHERE clause for time-range filtering.
+
+        always scoped to one pile. no owner means the shared one, so a caller
+        that forgets can never read a profile's private plays."""
+        from core.listening_scope import owner_clause
         prefix = f"{alias}." if alias else ""
+        scope = owner_clause(owner, alias)
         if time_range == '7d':
-            return f"WHERE {prefix}played_at >= datetime('now', '-7 days')"
+            return f"WHERE {prefix}played_at >= datetime('now', '-7 days') AND {scope}"
         elif time_range == '30d':
-            return f"WHERE {prefix}played_at >= datetime('now', '-30 days')"
+            return f"WHERE {prefix}played_at >= datetime('now', '-30 days') AND {scope}"
         elif time_range == '12m':
-            return f"WHERE {prefix}played_at >= datetime('now', '-12 months')"
+            return f"WHERE {prefix}played_at >= datetime('now', '-12 months') AND {scope}"
         else:
-            return "WHERE 1=1"
+            return f"WHERE {scope}"
 
     # The window of the SAME length immediately before the current one, so a
     # stat can say "vs last month" instead of standing alone. A total with no
@@ -7352,19 +7723,21 @@ class MusicDatabase:
     }
 
     @staticmethod
-    def _listening_previous_filter(time_range, alias=''):
+    def _listening_previous_filter(time_range, alias='', owner=None):
         """WHERE clause for the period immediately BEFORE ``time_range``.
 
         Returns None for 'all' (and anything unrecognised) — there is no
         "before everything", and a caller that gets None must omit the
         comparison rather than compare against nothing."""
+        from core.listening_scope import owner_clause
         window = MusicDatabase._PREVIOUS_WINDOW.get(time_range)
         if not window:
             return None
         start, end = window
         prefix = f"{alias}." if alias else ""
         return (f"WHERE {prefix}played_at >= datetime('now', '{start}') "
-                f"AND {prefix}played_at < datetime('now', '{end}')")
+                f"AND {prefix}played_at < datetime('now', '{end}') "
+                f"AND {owner_clause(owner, alias)}")
 
     def set_profile_spotify(self, profile_id: int, client_id: str, client_secret: str,
                             redirect_uri: str = '') -> bool:
@@ -8006,6 +8379,7 @@ class MusicDatabase:
                         'library_root': row['library_root'] if 'library_root' in columns else None,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
+                        **self._profile_controls(row, columns),
                     })
                 return results
         except Exception as e:
@@ -8042,6 +8416,7 @@ class MusicDatabase:
                         'library_root': row['library_root'] if 'library_root' in columns else None,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
+                        **self._profile_controls(row, columns),
                     }
                 return None
         except Exception as e:
@@ -8075,7 +8450,8 @@ class MusicDatabase:
 
     def update_profile(self, profile_id: int, **kwargs) -> bool:
         """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin, home_page, allowed_pages, can_download."""
-        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download', 'allowed_sides'}
+        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download', 'allowed_sides',
+                   'request_limit', 'request_limit_days', 'hide_explicit', 'max_rating', 'disabled'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         # Serialize allowed_pages list to JSON string for storage
         if 'allowed_pages' in updates:
@@ -8106,6 +8482,194 @@ class MusicDatabase:
             logger.error(f"Error updating profile {profile_id}: {e}")
             return False
 
+    def bump_profile_session_epoch(self, profile_id: int) -> Optional[int]:
+        """sign this profile out everywhere: every session carries the epoch it
+        was signed in under, and one that no longer matches has no profile."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._add_profile_controls(cursor)
+                cursor.execute("UPDATE profiles SET session_epoch = COALESCE(session_epoch, 0) + 1 WHERE id = ?",
+                               (int(profile_id),))
+                conn.commit()
+                cursor.execute("SELECT session_epoch FROM profiles WHERE id = ?", (int(profile_id),))
+                row = cursor.fetchone()
+                return int(row[0]) if row else None
+        except Exception as e:
+            logger.error(f"Error bumping session epoch for {profile_id}: {e}")
+            return None
+
+    # ── signed-in devices ────────────────────────────────────────────────
+    def add_profile_device(self, device_id: str, owner_id: int, label: str, ip: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._add_profile_controls(cursor)
+                cursor.execute("INSERT OR REPLACE INTO profile_devices (id, owner_id, label, ip) VALUES (?, ?, ?, ?)",
+                               (device_id, int(owner_id), (label or '')[:200], (ip or '')[:64]))
+                # a browser that signs in again as someone else leaves no ghosts:
+                # keep the newest 50 per profile
+                cursor.execute("DELETE FROM profile_devices WHERE owner_id = ? AND id NOT IN "
+                               "(SELECT id FROM profile_devices WHERE owner_id = ? ORDER BY last_seen DESC LIMIT 50)",
+                               (int(owner_id), int(owner_id)))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.debug("add_profile_device failed: %s", e)
+            return False
+
+    def get_profile_device(self, device_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM profile_devices WHERE id = ?", (device_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.debug("get_profile_device failed: %s", e)
+            return None
+
+    def touch_profile_device(self, device_id: str) -> None:
+        try:
+            with self._get_connection() as conn:
+                conn.execute("UPDATE profile_devices SET last_seen = CURRENT_TIMESTAMP WHERE id = ?", (device_id,))
+                conn.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("touch_profile_device failed: %s", e)
+
+    def list_profile_devices(self, owner_id: int) -> List[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._add_profile_controls(cursor)
+                cursor.execute("SELECT id, label, ip, created_at, last_seen FROM profile_devices "
+                               "WHERE owner_id = ? AND revoked_at IS NULL ORDER BY last_seen DESC", (int(owner_id),))
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug("list_profile_devices failed: %s", e)
+            return []
+
+    def revoke_profile_device(self, owner_id: int, device_id: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE profile_devices SET revoked_at = CURRENT_TIMESTAMP "
+                               "WHERE id = ? AND owner_id = ? AND revoked_at IS NULL", (device_id, int(owner_id)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug("revoke_profile_device failed: %s", e)
+            return False
+
+    # ── admin audit log ──────────────────────────────────────────────────
+    _AUDIT_KEEP = 5000
+
+    def add_profile_audit(self, *, actor_id, actor_name, action: str, target_id=None,
+                          target_name=None, detail: Optional[str] = None) -> None:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO profile_audit (actor_id, actor_name, action, target_id, target_name, detail) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (actor_id, actor_name, action, target_id, target_name, (detail or None) and str(detail)[:500]))
+                cursor.execute("DELETE FROM profile_audit WHERE id <= (SELECT MAX(id) - ? FROM profile_audit)",
+                               (self._AUDIT_KEEP,))
+                conn.commit()
+        except Exception as e:  # noqa: BLE001 - the log never fails the action it records
+            logger.debug("profile audit write failed: %s", e)
+
+    def list_profile_audit(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM profile_audit ORDER BY id DESC LIMIT ? OFFSET ?",
+                               (max(1, min(500, int(limit))), max(0, int(offset))))
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug("profile audit read failed: %s", e)
+            return []
+
+    # ── invite links ─────────────────────────────────────────────────────
+    def create_profile_invite(self, *, token_hash: str, created_by: int, preset: Dict[str, Any],
+                              note: Optional[str], expires_at: str) -> Optional[int]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO profile_invites (token_hash, created_by, preset, note, expires_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (token_hash, int(created_by), json.dumps(preset or {}), note, expires_at))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error creating invite: {e}")
+            return None
+
+    def get_profile_invite_by_hash(self, token_hash: str) -> Optional[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM profile_invites WHERE token_hash = ?", (token_hash,))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                d = dict(row)
+                try:
+                    d['preset'] = json.loads(d.get('preset') or '{}')
+                except (ValueError, TypeError):
+                    d['preset'] = {}
+                return d
+        except Exception as e:
+            logger.error(f"Error reading invite: {e}")
+            return None
+
+    def list_profile_invites(self) -> List[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, created_by, preset, note, expires_at, used_at, used_by, revoked_at, "
+                               "created_at FROM profile_invites ORDER BY id DESC LIMIT 100")
+                out = []
+                for r in cursor.fetchall():
+                    d = dict(r)
+                    try:
+                        d['preset'] = json.loads(d.get('preset') or '{}')
+                    except (ValueError, TypeError):
+                        d['preset'] = {}
+                    out.append(d)
+                return out
+        except Exception as e:
+            logger.error(f"Error listing invites: {e}")
+            return []
+
+    def claim_profile_invite(self, invite_id: int, used_by: int) -> bool:
+        """one use: only an unused, unrevoked, unexpired invite flips."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profile_invites SET used_at = CURRENT_TIMESTAMP, used_by = ? "
+                    "WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP",
+                    (int(used_by), int(invite_id)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error claiming invite: {e}")
+            return False
+
+    def revoke_profile_invite(self, invite_id: int) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE profile_invites SET revoked_at = CURRENT_TIMESTAMP "
+                               "WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL", (int(invite_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error revoking invite: {e}")
+            return False
+
     def delete_profile(self, profile_id: int) -> bool:
         """Delete a profile and ALL its per-profile data.
 
@@ -8121,6 +8685,16 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                # open issues are problems with the library, not with the
+                # person: they stay in the admin's queue (closed ones go)
+                try:
+                    row = cursor.execute("SELECT name FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+                    kept = self.issue_threads.hand_open_issues_to_admin(
+                        conn, profile_id, row['name'] if row else '')
+                    if kept:
+                        logger.info("delete_profile: kept %d open issue(s) for the admin", kept)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("keeping open issues on profile delete failed: %s", e)
                 tables = [r[0] for r in cursor.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' "
                     "AND name NOT LIKE 'sqlite_%'").fetchall()]
@@ -8139,8 +8713,19 @@ class MusicDatabase:
                                             cursor.rowcount, table)
                     except Exception as e:
                         logger.debug("Failed to delete from %s for profile: %s", table, e)
+                # its signed-in devices (owner_id, so the sweep above skips them)
+                try:
+                    cursor.execute("DELETE FROM profile_devices WHERE owner_id = ?", (profile_id,))
+                except Exception as e:  # noqa: BLE001 - table may predate this install
+                    logger.debug("device cleanup on delete: %s", e)
                 # its own library's rows go with it (#1199)
                 self._delete_own_library_rows(cursor, profile_id)
+                # and its listening pile's caches (#1293). the rows went with
+                # the profile_id sweep, these are metadata keys, and a reused
+                # id must never open on the last person's stats
+                from core.listening_scope import pile_keys
+                for key in pile_keys(profile_id):
+                    cursor.execute("DELETE FROM metadata WHERE key = ?", (key,))
                 cursor.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
                 conn.commit()
                 return cursor.rowcount > 0
@@ -9087,11 +9672,17 @@ class MusicDatabase:
                         "CASE WHEN COALESCE(art_locked, 0) = 1 THEN thumb_url ELSE ? END"
                         if self._art_lock_supported(cursor, 'artists') else "?"
                     )
+                    # genres_locked = soulsync's genre jobs settled these, the
+                    # server's copy is what the files said before the cleanup
+                    genres_expr = (
+                        "CASE WHEN COALESCE(genres_locked, 0) = 1 THEN genres ELSE ? END"
+                        if self._genres_lock_supported(cursor, 'artists') else "?"
+                    )
                     cursor.execute(f"""
                         UPDATE artists
                         SET name = ?,
                             thumb_url = {thumb_expr},
-                            genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
+                            genres = {genres_expr}, summary = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ? AND server_source = ?
                     """, (name, thumb_url, genres_json, summary, artist_id, server_source))
                     logger.debug(f"Updated existing {server_source} artist: {name} (ID: {artist_id})")
@@ -9121,6 +9712,8 @@ class MusicDatabase:
                             # See the album rekey path: without this, rebuilding the
                             # row under a new id silently unlocks a hand-picked photo.
                             'art_locked',
+                            # and settled genres, same reason
+                            'genres_locked',
                         ]
 
                         # Read enrichment data from old artist
@@ -9132,13 +9725,16 @@ class MusicDatabase:
                         preserved_thumb_url = thumb_url
                         if _row_value(old_row, 'art_locked'):
                             preserved_thumb_url = _row_value(old_row, 'thumb_url') or thumb_url
+                        preserved_genres = genres_json
+                        if _row_value(old_row, 'genres_locked'):
+                            preserved_genres = _row_value(old_row, 'genres')
 
                         # Insert new artist with fresh server metadata + preserved created_at
                         old_created = old_row['created_at'] if old_row else None
                         cursor.execute("""
                             INSERT INTO artists (id, name, thumb_url, genres, summary, server_source, owner_profile_id, created_at, updated_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        """, (artist_id, name, preserved_thumb_url, genres_json, summary, server_source, owner_profile_id, old_created))
+                        """, (artist_id, name, preserved_thumb_url, preserved_genres, summary, server_source, owner_profile_id, old_created))
 
                         # Copy enrichment data from old record to new record
                         if old_row:
@@ -9291,11 +9887,15 @@ class MusicDatabase:
                     if self._art_lock_supported(cursor, 'albums')
                     else "COALESCE(NULLIF(?, ''), thumb_url)"
                 )
+                genres_expr = (
+                    "CASE WHEN COALESCE(genres_locked, 0) = 1 THEN genres ELSE ? END"
+                    if self._genres_lock_supported(cursor, 'albums') else "?"
+                )
                 cursor.execute(f"""
                     UPDATE albums
                     SET artist_id = ?, title = ?, year = ?,
                         thumb_url = {thumb_expr},
-                        genres = ?,
+                        genres = {genres_expr},
                         track_count = ?, duration = ?, server_source = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source, album_id))
@@ -9330,6 +9930,8 @@ class MusicDatabase:
                         # the row is rebuilt under a new id, art_locked defaults
                         # back to 0, and the next sync overwrites the pick.
                         'art_locked',
+                        # settled genres, same reason
+                        'genres_locked',
                     ]
 
                     # Read enrichment data from old album
@@ -9342,6 +9944,9 @@ class MusicDatabase:
                         preserved_thumb_url = old_thumb_url or thumb_url
                     else:
                         preserved_thumb_url = thumb_url or old_thumb_url
+                    preserved_genres = genres_json
+                    if _row_value(old_row, 'genres_locked'):
+                        preserved_genres = _row_value(old_row, 'genres')
 
                     # Insert new album with fresh server metadata + preserved created_at
                     old_created = old_row['created_at'] if old_row else None
@@ -9349,7 +9954,7 @@ class MusicDatabase:
                         INSERT INTO albums (id, artist_id, title, year, thumb_url, genres,
                                             track_count, duration, server_source, owner_profile_id, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (album_id, artist_id, title, year, preserved_thumb_url, genres_json,
+                    """, (album_id, artist_id, title, year, preserved_thumb_url, preserved_genres,
                           track_count, duration, server_source, owner_profile_id, old_created))
 
                     # Copy enrichment data from old record to new record
@@ -9614,17 +10219,22 @@ class MusicDatabase:
                             or jf_track_artist != jf_album_artist
                         ):
                             track_artist = jf_track_artist
-                # Navidrome/Subsonic: artist attribute is per-track
-                if not track_artist and hasattr(track_obj, 'artist') and isinstance(getattr(track_obj, 'artist', None), str):
-                    nav_artist = getattr(track_obj, 'artist', '').strip()
-                    # Compare against album artist name to only store when different
-                    try:
-                        artist_row = cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,)).fetchone()
-                        album_artist_name = artist_row[0] if artist_row else ''
-                        if nav_artist and nav_artist.lower() != album_artist_name.lower():
-                            track_artist = nav_artist
-                    except Exception as e:
-                        logger.debug("Failed to load album artist for track_artist comparison: %s", e)
+                if not track_artist:
+                    raw_artist = ''
+                    for _payload_attr in ('_data', '_tags'):
+                        _payload = getattr(track_obj, _payload_attr, None)
+                        if isinstance(_payload, dict):
+                            raw_artist = (_payload.get('artist') or '').strip()
+                            if raw_artist:
+                                break
+                    if raw_artist:
+                        try:
+                            artist_row = cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,)).fetchone()
+                            album_artist_name = (artist_row[0] or '') if artist_row else ''
+                            if raw_artist.lower() != album_artist_name.lower():
+                                track_artist = raw_artist
+                        except Exception as e:
+                            logger.debug("Failed to load album artist for track_artist comparison: %s", e)
 
                 # Extract MusicBrainz recording ID from server if available (Navidrome provides this)
                 mbid = getattr(track_obj, 'musicBrainzId', None) or None
@@ -9691,6 +10301,15 @@ class MusicDatabase:
                     self.backfill_track_external_ids_from_provenance(track_id, file_path)
                 except Exception as backfill_err:
                     logger.debug(f"Provenance ID backfill skipped for track {track_id}: {backfill_err}")
+
+                # a hand-tagged file keeps its lock across every rescan, even
+                # when the server makes a fresh row for it. own try: a missing
+                # table on an old schema must never cost the scan this track
+                try:
+                    if self._apply_manual_lock_for_track(cursor, track_id, album_id, file_path):
+                        conn.commit()
+                except Exception as lock_err:
+                    logger.debug(f"Manual lock check skipped for track {track_id}: {lock_err}")
 
                 # Log new imports to library history
                 if is_new_track:
@@ -13387,6 +14006,17 @@ class MusicDatabase:
                     )
                     return self._wishlist_outcome("satisfied", track_id, reason="manual library match")
 
+                # a profile that asks first and has a request quota: a NEW ask
+                # past the quota is refused (more tracks of an album already
+                # asked for this window are part of that ask, not new ones)
+                try:
+                    if self._music_request_quota_blocks(cursor, profile_id, spotify_track_data,
+                                                        source_type, track_id):
+                        logger.info("Skipping wishlist add — profile %s is at its request limit", profile_id)
+                        return self._wishlist_outcome("rejected", track_id, reason="request_limit")
+                except Exception as _quota_exc:  # noqa: BLE001 - a broken quota check never blocks an add
+                    logger.debug("request quota check skipped: %s", _quota_exc)
+
                 track_name = spotify_track_data.get('name', 'Unknown Track')
                 artists = spotify_track_data.get('artists', [])
                 if artists:
@@ -14347,7 +14977,8 @@ class MusicDatabase:
             return None
 
     def get_wishlist_tracks(self, limit: Optional[int] = None, profile_id: int = 1,
-                            offset: int = 0, category: Optional[str] = None) -> List[Dict[str, Any]]:
+                            offset: int = 0, category: Optional[str] = None,
+                            approved_only: bool = False) -> List[Dict[str, Any]]:
         """Get tracks in the wishlist for the given profile, ordered by date added
         (oldest first for retry priority).
 
@@ -14367,6 +14998,11 @@ class MusicDatabase:
                 """
 
                 params: List[Any] = [profile_id]
+
+                # a profile without download rights: only what an admin approved
+                if approved_only:
+                    self._ensure_music_request_schema(cursor)
+                    query += " AND request_status = 'approved'"
 
                 if category == "albums":
                     query += " AND json_extract(spotify_data, '$.album.album_type') = 'album'"
@@ -14416,15 +15052,89 @@ class MusicDatabase:
             logger.error(f"Error getting wishlist tracks: {e}")
             return []
 
-    def update_wishlist_retry(self, spotify_track_id: str, success: bool, error_message: str = None, profile_id: int = 1) -> bool:
-        """Update retry count and status for a wishlist track"""
+    _WISHLIST_REMOVAL_KEEP = 5000
+
+    def _record_wishlist_removal(self, cursor, spotify_track_id, profile_ids, audit, rows_removed) -> None:
+        """Append one row to the removal audit. Best-effort by construction:
+        losing the audit must never fail the removal it describes."""
+        try:
+            audit = audit or {}
+            cursor.execute(
+                """INSERT INTO wishlist_removals
+                   (spotify_track_id, profile_ids, rows_removed, reason, final_path, batch_id, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (str(spotify_track_id),
+                 json.dumps(list(profile_ids)) if profile_ids else None,
+                 int(rows_removed or 0),
+                 str(audit.get('reason') or '') or None,
+                 str(audit.get('final_path') or '') or None,
+                 str(audit.get('batch_id') or '') or None,
+                 str(audit.get('source') or '') or None))
+            # Keep the table from growing without bound on a big library; the
+            # recent history is the part anyone ever reads.
+            cursor.execute(
+                "DELETE FROM wishlist_removals WHERE id <= "
+                "(SELECT MAX(id) - ? FROM wishlist_removals)",
+                (self._WISHLIST_REMOVAL_KEEP,))
+        except Exception as e:  # noqa: BLE001
+            logger.debug("wishlist removal audit skipped: %s", e)
+
+    def get_wishlist_removals(self, spotify_track_id: str = None, limit: int = 100):
+        """Recent wishlist removals, newest first — the answer to "why did this
+        track disappear?"."""
+        try:
+            with self._get_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                if spotify_track_id:
+                    cursor.execute(
+                        "SELECT * FROM wishlist_removals WHERE spotify_track_id = ? "
+                        "ORDER BY id DESC LIMIT ?", (str(spotify_track_id), int(limit)))
+                else:
+                    cursor.execute(
+                        "SELECT * FROM wishlist_removals ORDER BY id DESC LIMIT ?", (int(limit),))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.debug("wishlist removal history unavailable: %s", e)
+            return []
+
+    def update_wishlist_retry(self, spotify_track_id: str, success: bool, error_message: str = None,
+                              profile_id: int = 1, *, profile_ids=None, audit=None) -> bool:
+        """Update retry count and status for a wishlist track.
+
+        ``profile_ids`` scopes the success DELETE to the profiles whose library
+        actually holds the published file. The unscoped sweep below is kept as
+        the default because it is right for the ordinary single-root install and
+        because leaving a stale row behind causes a duplicate download, but it
+        is wrong for an own-library profile (#1199) whose request would be
+        cleared by a download into a folder it cannot see — so callers that CAN
+        tell should always pass the owners (#1289).
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 if success:
-                    # Remove from ALL profiles' wishlists — track is now in shared library
-                    cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ?", (spotify_track_id,))
+                    scoped = [p for p in (profile_ids or []) if p is not None]
+                    if scoped:
+                        placeholders = ",".join("?" for _ in scoped)
+                        cursor.execute(
+                            f"DELETE FROM wishlist_tracks WHERE spotify_track_id = ? "
+                            f"AND profile_id IN ({placeholders})",
+                            (spotify_track_id, *scoped))
+                    else:
+                        # Remove from ALL profiles' wishlists — track is now in shared library
+                        cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ?", (spotify_track_id,))
+                    # Capture BEFORE the audit insert: rowcount reflects the
+                    # last statement this cursor ran, so reading it afterwards
+                    # would report the audit's own trim and tell every caller
+                    # the track was never on the wishlist.
+                    deleted = cursor.rowcount
+                    if deleted > 0:
+                        self._record_wishlist_removal(
+                            cursor, spotify_track_id, scoped or None, audit, deleted)
+                    conn.commit()
+                    return deleted > 0
                 else:
                     # Increment retry count and update failure reason
                     cursor.execute("""
@@ -14505,7 +15215,8 @@ class MusicDatabase:
             logger.error(f"Error resetting wishlist retry backoff: {e}")
             return 0
 
-    def get_wishlist_count(self, profile_id: int = 1, category: Optional[str] = None) -> int:
+    def get_wishlist_count(self, profile_id: int = 1, category: Optional[str] = None,
+                           approved_only: bool = False) -> int:
         """Get the total number of tracks in the wishlist for the given profile,
         optionally filtered by category ('singles' or 'albums')."""
         try:
@@ -14513,6 +15224,9 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 query = "SELECT COUNT(*) FROM wishlist_tracks WHERE profile_id = ?"
                 params: List[Any] = [profile_id]
+                if approved_only:
+                    self._ensure_music_request_schema(cursor)
+                    query += " AND request_status = 'approved'"
                 if category == "albums":
                     query += " AND json_extract(spotify_data, '$.album.album_type') = 'album'"
                 elif category == "singles":
@@ -14639,11 +15353,20 @@ class MusicDatabase:
         the current global profile for a new row. An explicitly UNKNOWN Quality
         Profile is rejected instead of quietly becoming the default (P2-04).
         """
+        from core.context_sentinels import is_context_sentinel
         from core.watchlist_sources import (
             ARTIST_ID_COLUMNS, artist_id_match_sql, infer_source,
             normalize_source, source_column,
         )
         try:
+            # a download-context placeholder is not an id. one reached this table
+            # once and the scanner keyed 25 similar artists by it (#1284).
+            if is_context_sentinel(artist_id):
+                logger.error(
+                    "Refusing to watchlist '%s': %r is a context placeholder, not an artist id",
+                    artist_name, artist_id)
+                return False
+
             if quality_profile_id is not None and not self.quality_profile_exists(quality_profile_id):
                 logger.error(
                     "Cannot add artist '%s' to watchlist: unknown quality_profile_id %r",
@@ -14810,12 +15533,24 @@ class MusicDatabase:
                 result = cursor.fetchone()
                 artist_name = result['artist_name'] if result else "Unknown"
 
-                from core.watchlist_sources import ARTIST_ID_COLUMNS, artist_id_match_sql
+                from core.watchlist_sources import (ARTIST_ID_COLUMNS, artist_id_match_sql,
+                                                    library_artist_provider_ids)
                 cursor.execute(
                     "DELETE FROM watchlist_artists WHERE "
                     + artist_id_match_sql() + " AND profile_id = ?",
                     [artist_id] * len(ARTIST_ID_COLUMNS) + [profile_id],
                 )
+                if cursor.rowcount == 0:
+                    # a library artist row id: remove by the provider ids it
+                    # carries, the ones add stored (#1308)
+                    for provider_id in library_artist_provider_ids(cursor, artist_id):
+                        cursor.execute(
+                            "DELETE FROM watchlist_artists WHERE "
+                            + artist_id_match_sql() + " AND profile_id = ?",
+                            [provider_id] * len(ARTIST_ID_COLUMNS) + [profile_id],
+                        )
+                        if cursor.rowcount > 0:
+                            break
 
                 if cursor.rowcount > 0:
                     conn.commit()
@@ -14852,8 +15587,21 @@ class MusicDatabase:
                         id_params + [profile_id],
                     )
                 result = cursor.fetchone()
+                if result is not None:
+                    return True
 
-                return result is not None
+                # a library artist row id: check the provider ids it carries,
+                # the ones add actually stored (#1308)
+                from core.watchlist_sources import library_artist_provider_ids
+                for provider_id in library_artist_provider_ids(cursor, artist_id):
+                    cursor.execute(
+                        "SELECT 1 FROM watchlist_artists WHERE "
+                        + artist_id_match_sql() + " AND profile_id = ? LIMIT 1",
+                        [provider_id] * len(ARTIST_ID_COLUMNS) + [profile_id],
+                    )
+                    if cursor.fetchone() is not None:
+                        return True
+                return False
 
         except Exception as e:
             logger.error(f"Error checking if artist is in watchlist (ID: {artist_id}): {e}")
@@ -16044,6 +16792,14 @@ class MusicDatabase:
         'watchlist_row'). readers match the PAIR, so a deezer id can never
         resolve as an itunes one. omitting it leaves the row unprovable and
         the recommendation readers will not use it."""
+        from core.context_sentinels import is_context_sentinel
+        # the second line of defence for #1284: whatever put the placeholder in
+        # front of us, an edge keyed by one can never be traced back to an artist.
+        if is_context_sentinel(source_artist_id):
+            logger.warning(
+                "Refusing similar artists for %r: a context placeholder is not an artist id",
+                source_artist_id)
+            return False
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -16356,30 +17112,23 @@ class MusicDatabase:
         return out
 
     def get_play_counts_by_name(self, names, profile_id: int = 1):
-        """Map lowercased artist name -> play count from ``listening_history`` for the given profile.
+        """Map lowercased artist name -> play count from the pile ``profile_id`` reads.
         Feeds the Discover novelty signal (demote recs you've already heard). Fail-soft -> {}."""
+        from core.listening_scope import owner_clause
         out = {}
         clean = [str(n).strip().lower() for n in (names or []) if str(n or '').strip()]
         if not clean:
             return out
         placeholders = ','.join('?' for _ in clean)
         try:
+            scope = owner_clause(self._listening_owner(profile_id))
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                # profile_id is migration-added — fall back to an unscoped count if the column isn't
-                # there yet (a fresh / pre-migration DB), so novelty still works everywhere.
-                try:
-                    cursor.execute(
-                        f"SELECT LOWER(artist) AS n, COUNT(*) AS plays FROM listening_history "
-                        f"WHERE profile_id = ? AND LOWER(artist) IN ({placeholders}) GROUP BY LOWER(artist)",
-                        [profile_id] + clean,
-                    )
-                except Exception:
-                    cursor.execute(
-                        f"SELECT LOWER(artist) AS n, COUNT(*) AS plays FROM listening_history "
-                        f"WHERE LOWER(artist) IN ({placeholders}) GROUP BY LOWER(artist)",
-                        clean,
-                    )
+                cursor.execute(
+                    f"SELECT LOWER(artist) AS n, COUNT(*) AS plays FROM listening_history "
+                    f"WHERE {scope} AND LOWER(artist) IN ({placeholders}) GROUP BY LOWER(artist)",
+                    clean,
+                )
                 for row in cursor.fetchall():
                     out[row['n']] = row['plays']
         except Exception as e:
@@ -16449,6 +17198,90 @@ class MusicDatabase:
             logger.debug(f"update_similar_artist_popularity failed: {e}")
             return 0
 
+    @staticmethod
+    def _temp_key_set(cursor, table: str, values) -> None:
+        """Materialise a small python set as a temp table the query can test against.
+
+        connections are per-operation (see _get_connection), so a TEMP table lives and
+        dies with this one call — no cleanup, no collision between threads."""
+        cursor.execute(f"CREATE TEMP TABLE {table} (v TEXT PRIMARY KEY)")  # noqa: S608 - table name is a literal
+        if values:
+            cursor.executemany(
+                f"INSERT OR IGNORE INTO {table} VALUES (?)",  # noqa: S608 - table name is a literal
+                [(v,) for v in values],
+            )
+
+    @staticmethod
+    def _watchlist_exclusion_keys(cursor, profile_id: int = 1) -> Dict[str, set]:
+        """The ids + names of this profile's watchlist artists, for exclusion.
+
+        a recommendation you already watch is not a recommendation. only truthy
+        values go in: an empty id column must never match another empty one."""
+        keys = {'spotify': set(), 'itunes': set(), 'deezer': set(), 'names': set()}
+        cursor.execute("""
+            SELECT artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id
+            FROM watchlist_artists WHERE profile_id = ?
+        """, (profile_id,))
+        for row in cursor.fetchall():
+            if row['spotify_artist_id']:
+                keys['spotify'].add(str(row['spotify_artist_id']))
+            if row['itunes_artist_id']:
+                keys['itunes'].add(str(row['itunes_artist_id']))
+            if row['deezer_artist_id']:
+                keys['deezer'].add(str(row['deezer_artist_id']))
+            if row['artist_name']:
+                keys['names'].add(str(row['artist_name']).lower())
+        return keys
+
+    def _deliberate_artist_source_ids(self, cursor, profile_id: int = 1) -> set:
+        """Every source_artist_id that stands for an artist this profile CHOSE.
+
+        that is: an artist in their library (owner NULL = the shared scope, or their
+        own rows) or on their watchlist. the watchlist scanner keys a row by the
+        watchlist row id when the artist has no provider id at all, so that key
+        counts too — the artist map's own query already coalesces to it."""
+        owned = set()
+        cursor.execute("""
+            SELECT spotify_artist_id, itunes_artist_id, deezer_id, musicbrainz_id
+            FROM artists WHERE +owner_profile_id IS NULL OR +owner_profile_id = ?
+        """, (profile_id,))
+        for row in cursor.fetchall():
+            owned.update(str(v) for v in tuple(row) if v)
+        cursor.execute("""
+            SELECT id, spotify_artist_id, itunes_artist_id, deezer_artist_id, musicbrainz_artist_id
+            FROM watchlist_artists WHERE profile_id = ?
+        """, (profile_id,))
+        for row in cursor.fetchall():
+            owned.update(str(v) for v in tuple(row) if v)
+        return owned
+
+    def _stray_similar_artist_sources(self, cursor, profile_id: int = 1) -> set:
+        """The source ids in similar_artists that trace back to nothing you chose.
+
+        the artist map caches a browse into this table under the browsed artist's id
+        (core/artists/map.py), and the download path has been seen writing under the
+        'from_sync_modal' placeholder. neither is a preference, so neither may seed
+        discovery. returned as the set to EXCLUDE because it is small — a few dozen
+        against the tens of thousands of ids a real library owns."""
+        cursor.execute(
+            "SELECT DISTINCT source_artist_id FROM similar_artists WHERE profile_id = ?",
+            (profile_id,))
+        present = {str(row[0]) for row in cursor.fetchall() if row[0] is not None}
+        if not present:
+            return set()
+        stray = present - self._deliberate_artist_source_ids(cursor, profile_id)
+        if stray and len(stray) == len(present):
+            # every stored edge is unattributable — discovery is about to go quiet, and
+            # a quiet feature gets reported as boring, never as broken. say so out loud.
+            logger.info(
+                "similar_artists: all %d source artists for profile %s resolve to no "
+                "library or watchlist artist — recommendations will be empty until one does",
+                len(present), profile_id)
+        elif stray:
+            logger.debug("similar_artists: ignoring %d of %d source artists (not library or watchlist)",
+                         len(stray), len(present))
+        return stray
+
     def get_top_similar_artists(
         self,
         limit: int = 50,
@@ -16458,6 +17291,12 @@ class MusicDatabase:
         adventurousness: float = None,
     ) -> List[SimilarArtist]:
         """Get top similar artists excluding watchlist artists, with cycling support.
+
+        Only edges whose SOURCE artist is one you chose count — an artist in your
+        library or on your watchlist. Opening the artist map caches rows here for
+        whoever you looked up, and a look-up is not a preference; see
+        _stray_similar_artist_sources.
+
         require_source: if set, only returns artists with that source ID.
         exclude_library_server: if set, also excludes artists already present in that media server.
         adventurousness: 0..1 dial. When given, the CANDIDATE SELECTION itself shifts with it — the
@@ -16533,6 +17372,25 @@ class MusicDatabase:
                         AVG(sa.similarity_rank) ASC"""
                     order_params = (_dial, _dial)
 
+                # only the artists you actually chose may seed a recommendation.
+                # browsing the artist map caches rows here too (core/artists/map.py),
+                # keyed by whoever you just looked up — curiosity, not intent. we drop
+                # the rows whose source artist is neither in your library nor on your
+                # watchlist. done by EXCLUSION: the strays are a handful, the owned ids
+                # are tens of thousands.
+                stray_sources = self._stray_similar_artist_sources(cursor, profile_id)
+                excl = self._watchlist_exclusion_keys(cursor, profile_id)
+
+                # the watchlist exclusion was a LEFT JOIN with four OR'd predicates and
+                # no index to serve any of them — every row of similar_artists scanned
+                # the whole watchlist (3.3s on a 101k-row table). the watchlist is tiny,
+                # so resolve it once in python and hand the query a set to test against.
+                self._temp_key_set(cursor, 'sa_stray_sources', stray_sources)
+                self._temp_key_set(cursor, 'sa_excl_names', excl['names'])
+                self._temp_key_set(cursor, 'sa_excl_spotify', excl['spotify'])
+                self._temp_key_set(cursor, 'sa_excl_itunes', excl['itunes'])
+                self._temp_key_set(cursor, 'sa_excl_deezer', excl['deezer'])
+
                 cursor.execute(f"""
                     SELECT
                         MAX(sa.id) as id,
@@ -16549,17 +17407,20 @@ class MusicDatabase:
                         MAX(sa.genres) as genres,
                         MAX(sa.popularity) as popularity
                     FROM similar_artists sa
-                    LEFT JOIN watchlist_artists wa ON (
-                        (sa.similar_artist_spotify_id IS NOT NULL AND sa.similar_artist_spotify_id = wa.spotify_artist_id)
-                        OR (sa.similar_artist_itunes_id IS NOT NULL AND sa.similar_artist_itunes_id = wa.itunes_artist_id)
-                        OR (sa.similar_artist_deezer_id IS NOT NULL AND sa.similar_artist_deezer_id = wa.deezer_artist_id)
-                        OR LOWER(sa.similar_artist_name) = LOWER(wa.artist_name)
-                    ) AND wa.profile_id = ?
-                    WHERE wa.id IS NULL AND sa.profile_id = ? {source_filter}
+                    WHERE sa.profile_id = ?
+                      AND sa.source_artist_id NOT IN (SELECT v FROM sa_stray_sources)
+                      AND LOWER(sa.similar_artist_name) NOT IN (SELECT v FROM sa_excl_names)
+                      AND (sa.similar_artist_spotify_id IS NULL
+                           OR sa.similar_artist_spotify_id NOT IN (SELECT v FROM sa_excl_spotify))
+                      AND (sa.similar_artist_itunes_id IS NULL
+                           OR sa.similar_artist_itunes_id NOT IN (SELECT v FROM sa_excl_itunes))
+                      AND (sa.similar_artist_deezer_id IS NULL
+                           OR sa.similar_artist_deezer_id NOT IN (SELECT v FROM sa_excl_deezer))
+                      {source_filter}
                     GROUP BY sa.similar_artist_name
                     {order_clause}
                     LIMIT ?
-                """, (profile_id, profile_id, *order_params, sql_limit))
+                """, (profile_id, *order_params, sql_limit))
 
                 rows = cursor.fetchall()
                 results = []
@@ -18184,6 +19045,42 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error batch updating tracks: {e}")
             return {'success': False, 'error': str(e)}
+
+    def clear_track_recording_mbid_if_matches(self, track_id, expected_mbid: str) -> bool:
+        """Null out ``tracks.musicbrainz_recording_id`` for ``track_id``, but ONLY when its
+        current value equals ``expected_mbid``.
+
+        Used by the mbid_mismatch repair fix (``RepairWorker._fix_mbid_mismatch``) right
+        after it strips that same bad MBID from the audio file's tag. The column is
+        populated verbatim from file tags at import (``core/imports/side_effects.py``),
+        and the export MBID waterfall's DB rung (``core/exports/export_sources.py``) reads
+        it directly — so clearing only the file tag would leave exports still resolving
+        the wrong recording out of the DB. The equality guard means a value something else
+        already corrected in the meantime (no longer the bad one) is left alone. Not part
+        of ``TRACK_EDITABLE_FIELDS``/``update_track_fields`` on purpose — this is a narrow,
+        repair-specific mutation, not a user-editable field.
+
+        Compares case-insensitively: ``side_effects.py`` lowercases the MBID before storing
+        it on import (``.strip().lower()``), but a repair finding's ``details['mbid']``
+        carries whatever case the file tag itself was written in — a plain ``=`` comparison
+        would silently match 0 rows for any tag that wasn't already lowercase.
+        """
+        if not expected_mbid or track_id is None:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE tracks SET musicbrainz_recording_id = NULL, "
+                    "updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND LOWER(musicbrainz_recording_id) = LOWER(?)",
+                    (track_id, expected_mbid),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error clearing musicbrainz_recording_id for track {track_id}: {e}")
+            return False
 
     # ==================== Discovery Match Cache Methods ====================
 
@@ -23000,6 +23897,17 @@ class MusicDatabase:
 
     # ── Library Issues CRUD ──
 
+    @property
+    def issue_threads(self):
+        """comments, followers and the reporter's unread flag (core/issues)."""
+        store = getattr(self, '_issue_threads', None)
+        if store is None:
+            from core.issues.thread_store import IssueThreadStore
+            store = IssueThreadStore(self._get_connection, 'library_issues',
+                                     'library_issue_comments', 'library_issue_followers')
+            self._issue_threads = store
+        return store
+
     def create_issue(self, profile_id: int, entity_type: str, entity_id: str,
                      category: str, title: str, description: str = '',
                      snapshot_data: Dict = None, priority: str = 'normal') -> Dict[str, Any]:
@@ -23026,14 +23934,25 @@ class MusicDatabase:
                    is_admin: bool = False) -> Dict[str, Any]:
         """Get issues with optional filters. Non-admin only sees own issues."""
         try:
+            self.issue_threads._run(lambda _c: None)   # reporter_label exists
+        except Exception as e:  # noqa: BLE001
+            logger.debug("issue thread schema check failed: %s", e)
+        try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 conditions = []
                 params = []
 
                 if not is_admin and profile_id:
-                    conditions.append("i.profile_id = ?")
-                    params.append(profile_id)
+                    # their own reports, and the ones they said they hit too
+                    followed = self.issue_threads.followed_issue_ids(profile_id)
+                    if followed:
+                        conditions.append("(i.profile_id = ? OR i.id IN (%s))" % ','.join('?' * len(followed)))
+                        params.append(profile_id)
+                        params.extend(followed)
+                    else:
+                        conditions.append("i.profile_id = ?")
+                        params.append(profile_id)
                 if status:
                     conditions.append("i.status = ?")
                     params.append(status)
@@ -23052,7 +23971,8 @@ class MusicDatabase:
 
                 # Fetch issues with reporter profile info
                 cursor.execute(f"""
-                    SELECT i.*, p.name as reporter_name, p.avatar_color as reporter_color,
+                    SELECT i.*, COALESCE(i.reporter_label, p.name) as reporter_name,
+                           p.avatar_color as reporter_color,
                            p.avatar_url as reporter_avatar
                     FROM library_issues i
                     LEFT JOIN profiles p ON i.profile_id = p.id
@@ -23081,10 +24001,15 @@ class MusicDatabase:
     def get_issue(self, issue_id: int) -> Optional[Dict[str, Any]]:
         """Get a single issue by ID with reporter info."""
         try:
+            self.issue_threads._run(lambda _c: None)   # reporter_label exists
+        except Exception as e:  # noqa: BLE001
+            logger.debug("issue thread schema check failed: %s", e)
+        try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT i.*, p.name as reporter_name, p.avatar_color as reporter_color,
+                    SELECT i.*, COALESCE(i.reporter_label, p.name) as reporter_name,
+                           p.avatar_color as reporter_color,
                            p.avatar_url as reporter_avatar
                     FROM library_issues i
                     LEFT JOIN profiles p ON i.profile_id = p.id
@@ -23130,6 +24055,10 @@ class MusicDatabase:
     def delete_issue(self, issue_id: int) -> Dict[str, Any]:
         """Delete an issue (admin only)."""
         try:
+            self.issue_threads.delete_thread(issue_id)
+        except Exception as e:  # noqa: BLE001 - the issue row is the thing asked for
+            logger.debug("issue thread cleanup failed: %s", e)
+        try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM library_issues WHERE id = ?", (issue_id,))
@@ -23165,6 +24094,236 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting issue counts: {e}")
             return {'open': 0, 'in_progress': 0, 'resolved': 0, 'dismissed': 0, 'total': 0}
+
+    # ===================== Music requests =====================
+    # a profile without download rights keeps a wishlist the scheduled run
+    # won't download. each row is a request until an admin approves it
+    # (request_status = 'approved', downloaded like any other row) or declines
+    # it (row removed). music_requests is the history both leave behind, and
+    # how an approved request learns it arrived. see core/requests/music.py.
+
+    def _ensure_music_request_schema(self, cursor) -> None:
+        """idempotent, cheap: two columns and a table. run defensively before
+        use because the old wishlist rebuild migration recreates the table
+        from a fixed column list."""
+        cursor.execute("PRAGMA table_info(wishlist_tracks)")
+        cols = {c[1] for c in cursor.fetchall()}
+        if cols and 'request_status' not in cols:
+            cursor.execute("ALTER TABLE wishlist_tracks ADD COLUMN request_status TEXT DEFAULT NULL")
+        if cols and 'request_resolved_at' not in cols:
+            cursor.execute("ALTER TABLE wishlist_tracks ADD COLUMN request_resolved_at TIMESTAMP DEFAULT NULL")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS music_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                requester_name TEXT,
+                group_key TEXT NOT NULL,
+                kind TEXT NOT NULL,                 -- album | track
+                title TEXT NOT NULL,
+                artist TEXT,
+                image_url TEXT,
+                tracks TEXT NOT NULL DEFAULT '[]',  -- [{id, title, artist}]
+                status TEXT NOT NULL,               -- approved | available | declined | removed
+                admin_response TEXT,
+                resolved_by INTEGER,
+                resolved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                available_at TIMESTAMP,
+                seen_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_requests_profile ON music_requests (profile_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_requests_status ON music_requests (status)")
+
+    def music_request_asks_since(self, cursor, profile_id: int, days: int) -> set:
+        """the asks (album or single-track group keys) a profile made in the
+        last ``days`` days: what's on its wishlist from that window plus what
+        was approved/declined in it."""
+        from core.requests.music import group_key
+        self._ensure_music_request_schema(cursor)
+        window = f"-{int(days)} days"
+        keys = set()
+        cursor.execute("SELECT spotify_track_id, spotify_data, source_type FROM wishlist_tracks "
+                       "WHERE profile_id = ? AND date_added >= datetime('now', ?)", (int(profile_id), window))
+        for row in cursor.fetchall():
+            try:
+                data = json.loads(row['spotify_data'])
+            except (ValueError, TypeError):
+                data = {}
+            keys.add(group_key({'spotify_track_id': row['spotify_track_id'], 'spotify_data': data,
+                                'source_type': row['source_type']}))
+        cursor.execute("SELECT group_key FROM music_requests WHERE profile_id = ? "
+                       "AND created_at >= datetime('now', ?)", (int(profile_id), window))
+        keys.update(r[0] for r in cursor.fetchall())
+        return keys
+
+    def _music_request_quota_blocks(self, cursor, profile_id, track_data, source_type, track_id) -> bool:
+        from core.permissions import profile_can_download
+        from core.requests.music import group_key
+        from core.requests.quota import quota_for
+        profile = self.get_profile(profile_id)
+        quota = quota_for(profile)
+        if not quota or profile_can_download(profile):
+            return False
+        cursor.execute("SELECT 1 FROM wishlist_tracks WHERE profile_id = ? AND spotify_track_id = ? LIMIT 1",
+                       (int(profile_id), str(track_id)))
+        if cursor.fetchone():
+            return False      # a refresh of a row already asked for
+        key = group_key({'spotify_track_id': track_id, 'spotify_data': track_data, 'source_type': source_type})
+        asks = self.music_request_asks_since(cursor, profile_id, quota['days'])
+        if key in asks:
+            return False
+        return len(asks) >= quota['limit']
+
+    def get_pending_request_rows(self, profile_id: int) -> List[Dict[str, Any]]:
+        """the not-yet-approved wishlist rows of one profile."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(
+                    "SELECT spotify_track_id, spotify_data, source_type, date_added "
+                    "FROM wishlist_tracks WHERE profile_id = ? AND request_status IS NULL "
+                    "ORDER BY date_added DESC", (int(profile_id),))
+                out = []
+                for row in cursor.fetchall():
+                    try:
+                        data = json.loads(row['spotify_data'])
+                    except (ValueError, TypeError):
+                        data = {}
+                    out.append({'spotify_track_id': row['spotify_track_id'], 'spotify_data': data,
+                                'source_type': row['source_type'], 'date_added': row['date_added']})
+                return out
+        except Exception as e:
+            logger.error("Error reading pending music requests: %s", e)
+            return []
+
+    def approve_request_rows(self, profile_id: int, track_ids: List[str]) -> int:
+        """flip pending rows to approved; the scheduled run picks them up.
+        only rows still pending change, so a second approve is a no-op."""
+        ids = [str(t) for t in track_ids or [] if t]
+        if not ids:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                ph = ','.join('?' * len(ids))
+                cursor.execute(
+                    f"UPDATE wishlist_tracks SET request_status = 'approved', "
+                    f"request_resolved_at = CURRENT_TIMESTAMP "
+                    f"WHERE profile_id = ? AND request_status IS NULL AND spotify_track_id IN ({ph})",
+                    [int(profile_id)] + ids)
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error("Error approving music request rows: %s", e)
+            return 0
+
+    def wishlist_has_track(self, profile_id: int, track_id: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM wishlist_tracks WHERE profile_id = ? AND spotify_track_id = ? LIMIT 1",
+                               (int(profile_id), str(track_id)))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.debug("wishlist_has_track failed: %s", e)
+            return True   # unknown reads as still on its way, never a false "arrived"
+
+    def add_music_request(self, *, profile_id: int, requester_name: str, group_key: str, kind: str,
+                          title: str, artist: str, image_url: str, tracks: List[Dict[str, Any]],
+                          status: str, resolved_by: int, admin_response: Optional[str] = None) -> Optional[int]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(
+                    "INSERT INTO music_requests (profile_id, requester_name, group_key, kind, title, artist, "
+                    "image_url, tracks, status, admin_response, resolved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (int(profile_id), requester_name, group_key, kind, title, artist, image_url,
+                     json.dumps(tracks or []), status, admin_response, int(resolved_by)))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error("Error recording music request: %s", e)
+            return None
+
+    def list_music_requests(self, profile_id: Optional[int] = None, status: Optional[str] = None,
+                            limit: int = 200) -> List[Dict[str, Any]]:
+        """request history, newest first. profile_id None = everyone's."""
+        where, args = [], []
+        if profile_id is not None:
+            where.append("profile_id = ?")
+            args.append(int(profile_id))
+        if status:
+            where.append("status = ?")
+            args.append(status)
+        sql = ("SELECT * FROM music_requests" + (" WHERE " + " AND ".join(where) if where else "") +
+               " ORDER BY resolved_at DESC, id DESC LIMIT ?")
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(sql, args + [max(1, int(limit))])
+                rows = []
+                for row in cursor.fetchall():
+                    d = dict(row)
+                    try:
+                        d['tracks'] = json.loads(d.get('tracks') or '[]')
+                    except (ValueError, TypeError):
+                        d['tracks'] = []
+                    rows.append(d)
+                return rows
+        except Exception as e:
+            logger.error("Error listing music requests: %s", e)
+            return []
+
+    def set_music_request_status(self, request_id: int, status: str) -> bool:
+        """approved -> available | removed, stamping available_at and clearing
+        seen_at so the requester's badge lights up."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(
+                    "UPDATE music_requests SET status = ?, seen_at = NULL, "
+                    "available_at = CASE WHEN ? = 'available' THEN CURRENT_TIMESTAMP ELSE available_at END "
+                    "WHERE id = ? AND status = 'approved'", (status, status, int(request_id)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error updating music request %s: %s", request_id, e)
+            return False
+
+    def mark_music_requests_seen(self, profile_id: int) -> int:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute("UPDATE music_requests SET seen_at = CURRENT_TIMESTAMP "
+                               "WHERE profile_id = ? AND seen_at IS NULL", (int(profile_id),))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.debug("mark_music_requests_seen failed: %s", e)
+            return 0
+
+    def delete_music_request(self, request_id: int, profile_id: Optional[int] = None) -> bool:
+        where, args = "id = ?", [int(request_id)]
+        if profile_id is not None:
+            where += " AND profile_id = ?"
+            args.append(int(profile_id))
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(f"DELETE FROM music_requests WHERE {where}", args)
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error deleting music request %s: %s", request_id, e)
+            return False
 
     # ===================== HiFi Instances =====================
 
