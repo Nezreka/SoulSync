@@ -21421,9 +21421,15 @@ class MusicDatabase:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM library_history WHERE event_type IN ('download', 'podcast')")
             removed = cursor.rowcount
-            # The "why this file" records belong to the same history.
-            cursor.execute("DELETE FROM download_decisions")
             conn.commit()
+            # The "why this file" records belong to the same history. Best
+            # effort, after the commit: a missing table must never cost the
+            # clear the user asked for.
+            try:
+                cursor.execute("DELETE FROM download_decisions")
+                conn.commit()
+            except Exception as dec_err:
+                logger.debug("Could not clear download decisions: %s", dec_err)
             return removed
         except Exception as e:
             logger.error("Error clearing completed download history: %s", e)
