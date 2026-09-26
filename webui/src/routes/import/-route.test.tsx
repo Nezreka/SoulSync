@@ -655,22 +655,27 @@ describe('import route', () => {
     });
 
     it('uploads a picked file in pieces and re-reads the inbox', async () => {
+      // The upload posts via raw XHR. MSW intercepts it, but request.formData()
+      // throws in this environment: undici's multipart parser rejects the jsdom
+      // Blob parts XHR produces, so read the fields from the raw multipart text.
       const chunks: { index: string; total: string; path: string; id: string }[] = [];
+      const field = (text: string, name: string): string => {
+        const match = text.match(new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r\\n]*)`));
+        return match ? match[1] : '';
+      };
       server.use(
         http.post('/api/import/upload/chunk', async ({ request }) => {
-          const form = await request.formData();
-          chunks.push({
-            index: String(form.get('index')),
-            total: String(form.get('total')),
-            path: String(form.get('path')),
-            id: String(form.get('upload_id')),
-          });
-          const last = form.get('index') === String(Number(form.get('total')) - 1);
+          const text = await request.text();
+          const index = field(text, 'index');
+          const total = field(text, 'total');
+          const path = field(text, 'path');
+          chunks.push({ index, total, path, id: field(text, 'upload_id') });
+          const last = index === String(Number(total) - 1);
           return HttpResponse.json({
             success: true,
-            received: Number(form.get('index')) + 1,
-            total: Number(form.get('total')),
-            ...(last ? { saved: { file: String(form.get('path')), size: 3 } } : {}),
+            received: Number(index) + 1,
+            total: Number(total),
+            ...(last ? { saved: { file: path, size: 3 } } : {}),
           });
         }),
       );
