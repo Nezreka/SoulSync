@@ -65,6 +65,44 @@ from flask import Flask, jsonify
 from flask_socketio import SocketIO, join_room, leave_room
 
 
+def _shared_profile_ids():
+    """Profile ids in the shared app database, or None when no test has
+    loaded the app yet (nothing could have written one then)."""
+    import sys
+    if 'web_server' not in sys.modules:
+        return None
+    try:
+        from database.music_database import get_database
+        return {p['id'] for p in get_database().get_all_profiles()}
+    except Exception:  # noqa: BLE001 - a missing table means no profiles to leak
+        return None
+
+
+@pytest.fixture(autouse=True, scope='module')
+def _no_profile_outlives_its_module():
+    """A profile a test module adds to the shared app database goes with it.
+
+    Several endpoint tests create profiles there to act as a non-admin and
+    never remove them. The next module in the same xdist worker then sees two
+    profiles, so every request without a session answers profile_required,
+    and unrelated tests fail depending on which worker they land in (the
+    tidal auth instructions, the bylt shelf clock). Cleaning up here, per
+    module, stops the leak without touching each of those files."""
+    before = _shared_profile_ids()
+    yield
+    after = _shared_profile_ids()
+    if not after:
+        return
+    keep = (before if before is not None else set()) | {1}
+    from database.music_database import get_database
+    db = get_database()
+    for pid in sorted(after - keep):
+        try:
+            db.delete_profile(pid)
+        except Exception:  # noqa: BLE001, S110 - best effort; the next module tries again
+            pass
+
+
 def symlinks_supported() -> bool:
     """True when the host can create symlinks (often false on Windows without Developer Mode)."""
     try:
