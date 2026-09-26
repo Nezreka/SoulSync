@@ -500,4 +500,39 @@ describe('where a result card points', () => {
     const label = await screen.findByText('Warp', undefined, { timeout: 3000 });
     expect(label.closest('a')?.getAttribute('href')).toBe('/label-detail/l1?name=Warp');
   });
+
+  it('names the files source it is searching, not always soulseek (#1313)', async () => {
+    // the wishlist's "search manually" lands on files mode. with deezer as the
+    // download source the header still said "Raw files from Soulseek".
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'deezer_dl',
+          sources: [{ name: 'deezer_dl', display_name: 'Deezer' }],
+        }),
+      ),
+    );
+    renderRoute('/search');
+    await settled();
+
+    const icon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+    act(() => (icon as HTMLButtonElement).click());
+
+    expect(
+      await screen.findByText('Files straight from Deezer, grabbed as they come'),
+    ).toBeTruthy();
+    expect(screen.queryByText('Raw files from Soulseek, grabbed exactly as shared')).toBeNull();
+  });
+
+  it('keeps the soulseek wording when soulseek is the files source', async () => {
+    renderRoute('/search');
+    await settled();
+
+    const icon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+    act(() => (icon as HTMLButtonElement).click());
+
+    expect(
+      await screen.findByText('Raw files from Soulseek, grabbed exactly as shared'),
+    ).toBeTruthy();
+  });
 });

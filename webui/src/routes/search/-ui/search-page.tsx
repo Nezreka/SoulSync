@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { BasicSource } from '../-basic.types';
 import type {
   SearchAlbum,
   SearchArtist,
@@ -11,6 +12,7 @@ import type { LibraryCheckTrack } from '../-search.types';
 import type { ResultFilter } from './search-results';
 
 import { startDownload } from '../-basic.actions';
+import { sourceLabel as basicSourceLabel } from '../-basic.api';
 import { useBasicSearchController } from '../-basic.use-controller';
 import {
   openSearchAlbum,
@@ -301,6 +303,10 @@ export function SearchPage() {
     activeSource: state.activeSource,
   });
   const videosMode = state.activeSource === 'youtube_videos';
+  // files mode searches whatever download source is picked, not only soulseek
+  const filesSource = basic.state.singleSource
+    ? basic.state.sources[0]
+    : basic.state.sources.find((source) => source.name === basic.state.activeSource);
   const idle = !open && !soulseekActive && !query.trim();
 
   return (
@@ -311,7 +317,7 @@ export function SearchPage() {
             <h1 className={styles.title}>Search</h1>
             <p className={styles.subtitle}>
               {soulseekActive
-                ? 'Raw files from Soulseek, grabbed exactly as shared'
+                ? filesSubtitle(filesSource)
                 : videosMode
                   ? 'Music videos from YouTube, straight to your library'
                   : 'Find any artist, album or track, then download it tagged and filed'}
@@ -540,4 +546,12 @@ export function SearchPage() {
 /** Jump to the Settings card for a source that has no credentials. */
 function openSettings(source: string) {
   window.openSettingsForSource?.(source);
+}
+
+function filesSubtitle(source: BasicSource | undefined): string {
+  // before the source list loads there's nothing to name, and guessing
+  // soulseek is what put "from Soulseek" over deezer results (#1313)
+  if (!source) return 'Raw files from your download sources, grabbed as they come';
+  if (source.name === 'soulseek') return 'Raw files from Soulseek, grabbed exactly as shared';
+  return `Files straight from ${basicSourceLabel(source)}, grabbed as they come`;
 }
