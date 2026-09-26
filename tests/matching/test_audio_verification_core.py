@@ -81,3 +81,37 @@ def test_empty_expected_artist_does_not_fail():
     out = evaluate("Some Track", "", [_rec("Some Track", "Whoever")],
                    fingerprint_score=0.95)
     assert out.decision == Decision.PASS
+
+
+def test_cluster_duration_disambiguation_picks_correct_mix():
+    """When AcoustID cluster has multiple recordings (e.g. Radio Version [216s] and 3 AM Mix [416s]),
+    duration awareness must pick the 3 AM mix that matches the file length (417s) instead of
+    failing on the radio version."""
+    recordings = [
+        _rec("Behind the Cow (radio version)", "Scooter", duration=216),
+        _rec("Behind the Cow (3 AM mix)", "Scooter", duration=416),
+    ]
+    out = evaluate(
+        "Behind The Cow (3 AM Mix)", "Scooter",
+        recordings,
+        fingerprint_score=0.99,
+        expected_duration_s=417.44,
+    )
+    assert out.decision == Decision.PASS
+    assert out.matched_title == "Behind the Cow (3 AM mix)"
+
+
+def test_verbatim_title_tie_breaker_prefers_matching_mix_name():
+    """When durations are not available, verbatim title similarity breaks ties
+    between candidate recordings sharing the same normalized base title."""
+    recordings = [
+        _rec("Song (Radio Edit)", "Artist"),
+        _rec("Song (Club Mix)", "Artist"),
+    ]
+    out = evaluate(
+        "Song (Club Mix)", "Artist",
+        recordings,
+        fingerprint_score=0.95,
+    )
+    assert out.decision == Decision.PASS
+    assert out.matched_title == "Song (Club Mix)"
