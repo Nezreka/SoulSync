@@ -1,7 +1,7 @@
-import type { CandidateDecision } from '../../features/downloads/decisions';
+import type { InspectorCandidate } from '../../features/downloads/inspector';
 import type { EnhancedAlbum } from './-artist-detail.enhanced';
 
-import { decisionPill } from '../../features/downloads/decisions';
+import { streamInspection } from '../../features/downloads/inspector';
 import { getAlbumCanonicalSource } from './-artist-detail.enhanced-album';
 
 /**
@@ -42,48 +42,6 @@ export const METADATA_SOURCE_LABELS: Record<string, string> = {
   hydrabase: 'Hydrabase',
 };
 
-export const DOWNLOAD_SERVICE_ICONS: Record<string, string> = {
-  soulseek: '🔍',
-  youtube: '▶️',
-  tidal: '🌊',
-  qobuz: '🎵',
-  hifi: '🎧',
-  deezer_dl: '💜',
-  hybrid: '⚡',
-  lidarr: '📦',
-  amazon: '🛒',
-  soundcloud: '☁️',
-  torrent: '🧲',
-  usenet: '📰',
-};
-
-export const DOWNLOAD_SERVICE_LABELS: Record<string, string> = {
-  soulseek: 'Soulseek',
-  youtube: 'YouTube',
-  tidal: 'Tidal',
-  qobuz: 'Qobuz',
-  hifi: 'HiFi',
-  deezer_dl: 'Deezer',
-  hybrid: 'Auto',
-  lidarr: 'Lidarr',
-  amazon: 'Amazon Music',
-  soundcloud: 'SoundCloud',
-  torrent: 'Torrent',
-  usenet: 'Usenet',
-};
-
-/** 90/70 score banding shared by both steps (3446, 3640). */
-export function scoreClass(pct: number): 'high' | 'medium' | 'low' {
-  return pct >= 90 ? 'high' : pct >= 70 ? 'medium' : 'low';
-}
-
-/** m:ss from milliseconds, empty when unknown (3447, 3643). */
-export function msClock(ms: unknown): string {
-  const value = Number(ms);
-  if (!value) return '';
-  return `${Math.floor(value / 60000)}:${String(Math.floor((value % 60000) / 1000)).padStart(2, '0')}`;
-}
-
 export interface RedownloadMetadataResult {
   name?: string;
   artist?: string;
@@ -112,178 +70,25 @@ export async function searchRedownloadMetadata(
   return data;
 }
 
-export interface RedownloadCandidate {
-  display_name?: string;
-  filename?: string;
-  username?: string;
-  source_service?: string;
-  quality?: string;
-  quality_label?: string;
-  bitrate?: number;
-  bit_depth?: number | null;
-  sample_rate?: number | null;
-  size_display?: string;
-  duration?: number;
-  artist?: string;
-  title?: string;
-  confidence?: number;
-  blacklisted?: boolean;
-  free_upload_slots?: number | null;
-  decision?: CandidateDecision;
-  _globalIdx: number;
-}
-
-/** The rejected half of one source's line. Never selectable by radio. */
-export interface RejectedSummary {
-  rows: RedownloadCandidate[];
-  total: number;
-  counts: Record<string, number>;
-}
-
-/**
- * Overrides that would download a file the import pipeline refuses anyway.
- * A manual pick skips AcoustID (and, for quality, the quality guard) but never
- * the integrity check, and the download worker skips blacklisted sources.
- */
-export function overrideBlockedReason(row: RedownloadCandidate): string | null {
-  switch (row.decision?.code) {
-    case 'preview':
-      return 'The file check after download rejects preview clips.';
-    case 'duration_mismatch':
-      return 'The file check after download rejects a file this far off the expected length.';
-    case 'blacklisted':
-      return 'You blacklisted this file. Remove it from the blacklist to use it.';
-    default:
-      return null;
-  }
-}
-
-const IDENTITY_OVERRIDE_STAGES = new Set(['identity', 'version']);
-
-export function overrideConfirm(
-  row: RedownloadCandidate,
-  expected: { name?: string; artist?: string },
-  expectedMs?: number,
-): { title: string; message: string; confirmText: string; destructive: boolean } {
-  const d = row.decision;
-  const reason = `${decisionPill(row, expectedMs)}${d?.detail ? `: ${d.detail}` : ''}`;
-  const scope = 'This only affects this download. Your settings stay as they are.';
-  if (d && IDENTITY_OVERRIDE_STAGES.has(d.stage)) {
-    const song = [expected.name ? `"${expected.name}"` : 'the song', expected.artist]
-      .filter(Boolean)
-      .join(' by ');
-    return {
-      title: 'Download what may be the wrong song?',
-      message:
-        `SoulSync passed over this file (${reason}). It may not be ${song}. ` +
-        `Files you pick yourself skip the AcoustID check, so nothing will catch a wrong match. ${scope}`,
-      confirmText: 'Download anyway',
-      destructive: true,
-    };
-  }
-  if (d?.code === 'quarantined') {
-    return {
-      title: 'Download a file that failed before?',
-      message: `This exact file was quarantined after an earlier download. ${scope}`,
-      confirmText: 'Download anyway',
-      destructive: true,
-    };
-  }
-  if (d?.stage === 'quality') {
-    return {
-      title: 'Download below your quality profile?',
-      message: `${reason}. The quality check after download is skipped for this one file. ${scope}`,
-      confirmText: 'Download anyway',
-      destructive: false,
-    };
-  }
-  return {
-    title: 'Download this file anyway?',
-    message: `SoulSync passed over it (${reason}). ${scope}`,
-    confirmText: 'Download anyway',
-    destructive: false,
-  };
-}
-
-/** The best pick auto-follows the stream: highest non-blacklisted confidence (3626-3630). */
-export function bestCandidateIndex(candidates: RedownloadCandidate[]): number {
-  let best = -1;
-  let bestConf = 0;
-  candidates.forEach((c, i) => {
-    if (!c.blacklisted && (c.confidence || 0) > bestConf) {
-      bestConf = c.confidence || 0;
-      best = i;
-    }
-  });
-  return best;
-}
-
-/**
- * Stream download-source results (NDJSON, one line per source). Each line's
- * accepted candidates get global indices and are handed to onSource as they
- * land; rejected rows come separately and never join the selectable list.
- * Malformed lines are skipped, matching the vanilla reader.
- */
-export async function streamRedownloadSources(
+/** The redownload modal's source stream (see streamInspection). */
+export function streamRedownloadSources(
   trackId: unknown,
   metadata: RedownloadMetadataResult,
-  onSource: (
-    source: string,
-    candidates: RedownloadCandidate[],
-    all: RedownloadCandidate[],
-    rejected: RejectedSummary,
-  ) => void,
-): Promise<RedownloadCandidate[]> {
-  const all: RedownloadCandidate[] = [];
-  const response = await fetch(`/api/library/track/${trackId}/redownload/search-sources`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ metadata }),
-  });
-  if (!response.body) return all;
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const data = JSON.parse(line);
-        if (data.done) continue;
-        const candidates = (data.candidates || []) as RedownloadCandidate[];
-        const startIdx = all.length;
-        candidates.forEach((c, i) => {
-          c._globalIdx = startIdx + i;
-        });
-        all.push(...candidates);
-        const rejectedRows = ((data.rejected || []) as RedownloadCandidate[]).map((c) => ({
-          ...c,
-          _globalIdx: -1,
-        }));
-        onSource(String(data.source), candidates, all, {
-          rows: rejectedRows,
-          total: Number(data.rejected_total) || rejectedRows.length,
-          counts: (data.rejected_counts || {}) as Record<string, number>,
-        });
-      } catch {
-        /* skip malformed lines */
-      }
-    }
-  }
-  return all;
+  onSource: Parameters<typeof streamInspection>[2],
+): Promise<InspectorCandidate[]> {
+  return streamInspection(
+    `/api/library/track/${trackId}/redownload/search-sources`,
+    {
+      metadata,
+    },
+    onSource,
+  );
 }
 
 export async function startRedownloadRequest(
   trackId: unknown,
   metadata: RedownloadMetadataResult,
-  candidate: RedownloadCandidate,
+  candidate: InspectorCandidate,
   deleteOldFile: boolean,
 ): Promise<string> {
   // A rejected row the user chose anyway: say which rule they overrode, for

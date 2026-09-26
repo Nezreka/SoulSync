@@ -87,6 +87,18 @@ def _as_score(value) -> Optional[float]:
         return None
 
 
+def is_quality_override(override) -> bool:
+    """True when a "grab anyway" overrode a quality-stage rejection.
+
+    Only quality overrides turn anything off downstream (the import quality
+    guard, for that one file). Identity overrides need nothing extra: a manual
+    pick already skips AcoustID. Anything else is ignored.
+    """
+    if not isinstance(override, dict):
+        return False
+    return REASON_CODES.get(str(override.get('code') or '')) == 'quality'
+
+
 def rejection_counts(decisions: Iterable[Decision]) -> dict:
     """{code: n} over rejected decisions, most common first."""
     counts = Counter(d.code for d in decisions if not d.accepted)

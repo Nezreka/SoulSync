@@ -5,11 +5,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ParsedWishlistTrack, WishlistArtistGroup } from '../-wishlist.types';
 
+import { openWishlistInspector } from '../../../features/downloads/inspector-modal';
 import { WishlistList } from './wishlist-list';
+
+vi.mock('../../../features/downloads/inspector-modal', () => ({
+  openWishlistInspector: vi.fn(),
+}));
 
 afterEach(() => {
   cleanup();
-  delete window._searchWishlistTrackManually;
+  vi.mocked(openWishlistInspector).mockClear();
   delete window._navigateToArtistFromWishlist;
 });
 
@@ -89,12 +94,10 @@ describe('WishlistList', () => {
     expect(names).toEqual(['Calm Artist', 'Stuck Artist']);
   });
 
-  it('routes every action through the EXISTING seams', () => {
+  it('routes every action through its seam', () => {
     const onRemoveAlbum = vi.fn();
     const onRemoveTrack = vi.fn();
-    const search = vi.fn();
     const nav = vi.fn();
-    window._searchWishlistTrackManually = search;
     window._navigateToArtistFromWishlist = nav;
 
     render(
@@ -113,8 +116,14 @@ describe('WishlistList', () => {
     fireEvent.click(screen.getAllByTitle('Expand')[0]);
     fireEvent.click(screen.getAllByTitle('Expand')[0]);
 
+    // "Search manually" opens the candidate inspector on that exact track.
     fireEvent.click(screen.getAllByTitle('Search manually')[0]);
-    expect(search).toHaveBeenCalledWith('Aphex Twin', 'Ghost');
+    expect(openWishlistInspector).toHaveBeenCalledWith({
+      id: 'f1',
+      name: 'Ghost',
+      artist: 'Aphex Twin',
+      album: 'SAW 85-92',
+    });
 
     // The album remove lives on the row's album cell now (flat table).
     fireEvent.click(screen.getByTitle('Remove all tracks from "SAW 85-92"'));

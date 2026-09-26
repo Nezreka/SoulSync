@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { InspectorCandidate } from '../../features/downloads/inspector';
 import type { EnhancedAlbum } from './-artist-detail.enhanced';
-import type { RedownloadCandidate } from './-artist-detail.redownload';
 
 import { decisionPill, rejectionSummary } from '../../features/downloads/decisions';
 import {
@@ -9,10 +9,12 @@ import {
   msClock,
   overrideBlockedReason,
   overrideConfirm,
+  scoreClass,
+} from '../../features/downloads/inspector';
+import {
   startRedownloadRequest,
   pollRedownloadProgress,
   redownloadAlbumFlow,
-  scoreClass,
   stopRedownloadProgress,
   streamRedownloadSources,
   trackFormatBadge,
@@ -54,7 +56,7 @@ describe('pure helpers', () => {
       { confidence: 0.99, blacklisted: true, _globalIdx: 0 },
       { confidence: 0.7, _globalIdx: 1 },
       { confidence: 0.9, _globalIdx: 2 },
-    ] as RedownloadCandidate[];
+    ] as InspectorCandidate[];
     expect(bestCandidateIndex(candidates)).toBe(2);
     expect(bestCandidateIndex([])).toBe(-1);
   });
@@ -234,17 +236,12 @@ describe('redownloadAlbumFlow (#911)', () => {
 });
 
 describe('rejected candidates', () => {
-  const rej = (
-    code: string,
-    stage: string,
-    detail = '',
-    extra: Partial<RedownloadCandidate> = {},
-  ) =>
+  const rej = (code: string, stage: string, detail = '', extra: Partial<InspectorCandidate> = {}) =>
     ({
       _globalIdx: -1,
       decision: { accepted: false, code, stage, detail, score: 0.4 },
       ...extra,
-    }) as RedownloadCandidate;
+    }) as InspectorCandidate;
 
   it('keeps rejected rows out of the selectable list', async () => {
     vi.stubGlobal(
@@ -264,7 +261,7 @@ describe('rejected candidates', () => {
     );
     let summary: {
       total: number;
-      rows: RedownloadCandidate[];
+      rows: InspectorCandidate[];
       counts: Record<string, number>;
     } | null = null;
     const all = await streamRedownloadSources(1, {}, (_source, _fresh, _all, rejected) => {

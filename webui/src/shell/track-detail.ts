@@ -399,6 +399,18 @@ function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): 
       if (taskId) showCandidatesModal(taskId);
     });
   } else if (kind === 'failed' || kind === 'not_found') {
+    // The candidate inspector: every source searched for this track, with why
+    // each hit would or wouldn't be taken. Lives in the React app.
+    if (window.openDownloadTaskInspector) {
+      add('🧭 See what every source has', 'td-action-secondary', () => {
+        closeTrackDetail();
+        window.openDownloadTaskInspector?.(taskId, {
+          name: d.title,
+          artist: d.artist,
+          album: d.album,
+        });
+      });
+    }
     add('🔍 Search for a different result', 'td-action-secondary', () => {
       closeTrackDetail();
       if (taskId) showCandidatesModal(taskId);

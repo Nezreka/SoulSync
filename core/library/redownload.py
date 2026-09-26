@@ -16,6 +16,7 @@ from core.runtime_state import (
     download_tasks,
     tasks_lock,
 )
+from core.downloads.decisions import is_quality_override
 from core.metadata.album_tracks import get_album_for_source
 from core.metadata.registry import (
     get_deezer_client,
@@ -91,19 +92,6 @@ def init(resolve_library_file_path_fn, attempt_download_with_candidates_fn, exec
     download_monitor = monitor
 
 
-def _is_quality_override(override) -> bool:
-    """True when the inspector's "grab anyway" overrode a quality rejection.
-
-    Only the quality stage turns anything off downstream (the import quality
-    guard, for this one file). Identity overrides need nothing extra: a manual
-    pick already skips AcoustID. Anything else is ignored.
-    """
-    if not isinstance(override, dict):
-        return False
-    from core.downloads.decisions import REASON_CODES
-    return REASON_CODES.get(str(override.get('code') or '')) == 'quality'
-
-
 def redownload_start(track_id):
     """Start downloading a specific track from a selected source to replace the current file."""
     try:
@@ -111,7 +99,7 @@ def redownload_start(track_id):
         metadata = data.get('metadata', {})
         candidate = data.get('candidate', {})
         delete_old = data.get('delete_old_file', True)
-        override_quality = _is_quality_override(data.get('override'))
+        override_quality = is_quality_override(data.get('override'))
 
         if not candidate.get('username') or not candidate.get('filename'):
             return jsonify({"success": False, "error": "candidate with username and filename required"}), 400

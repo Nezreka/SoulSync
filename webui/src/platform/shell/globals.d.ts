@@ -42,13 +42,16 @@ declare global {
      */
     openDownloadOriginsModal?: (tab: string) => void;
     /**
-     * Wishlist -> search-page handoffs. These drive the VANILLA search page's
-     * DOM (polling for the Soulseek source icon, filling #enhanced-search-input),
-     * so they stay where they are rather than being reimplemented in React —
-     * the same call they made from the vanilla wishlist page.
+     * Wishlist -> search-page handoff. Drives the VANILLA search page's DOM
+     * (filling #enhanced-search-input), so it stays where it is rather than
+     * being reimplemented in React.
      */
-    _searchWishlistTrackManually?: (artistName: string, trackName: string) => void;
     _navigateToArtistFromWishlist?: (artistName: string) => void;
+    /** The candidate inspector for a download task (features/downloads/inspector-modal). */
+    openDownloadTaskInspector?: (
+      taskId: string,
+      track: { name?: string; artist?: string; album?: string },
+    ) => void;
     /**
      * The wishlist download flow. Cannot move to React: it reads
      * `activeDownloadProcesses` and `WishlistModalState`, both module-scoped in
