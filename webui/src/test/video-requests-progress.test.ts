@@ -206,7 +206,7 @@ describe('the request flow', () => {
         let body: unknown = { success: true };
         if (url.startsWith('/api/video/downloads/quality/profiles')) body = { profiles };
         else if (url === '/api/video/requests' && init?.method === 'POST') {
-          posts.push(JSON.parse(String(init.body)));
+          posts.push(JSON.parse(typeof init.body === 'string' ? init.body : '{}'));
           body = { success: true, id: 1 };
         } else if (url.startsWith('/api/video/requests')) {
           body = { success: true, requests, quota, pending: 0 };

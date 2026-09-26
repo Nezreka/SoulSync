@@ -55,7 +55,7 @@ function stubFetch(detail: Record<string, unknown> = {}) {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const request = input instanceof Request ? input : null;
-      const url = request ? request.url : String(input);
+      const url = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
       const method = request ? request.method : 'GET';
       let body: unknown = null;
       if (request && method !== 'GET') {
@@ -203,7 +203,7 @@ describe('owner edit (member)', () => {
     fireEvent.click(within(form).getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      const put = seen.find((s) => s.method === 'PUT' && /\/api\/issues\/1$/.test(s.url));
+      const put = seen.find((s) => s.method === 'PUT' && s.url.endsWith('/api/issues/1'));
       expect(put?.body).toEqual({ title: 'Wrong year', description: 'says 1999' });
     });
     await waitFor(() => expect(screen.queryByRole('form')).toBeNull());

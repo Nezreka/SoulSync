@@ -77,7 +77,8 @@ describe('requests route', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const req = input instanceof Request ? input : null;
-        const url = req ? req.url : String(input);
+        const url =
+          input instanceof Request ? input.url : input instanceof URL ? input.href : input;
         const method = (req?.method || init?.method || 'GET').toUpperCase();
         const body = req && method !== 'GET' ? await req.clone().text() : undefined;
         calls.push({ url, method, body });
