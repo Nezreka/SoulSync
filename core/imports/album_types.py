@@ -152,9 +152,31 @@ def release_types(album_ctx: Optional[Mapping[str, Any]]) -> set:
     return types
 
 
+def secondary_release_types(album_ctx: Optional[Mapping[str, Any]]) -> set:
+    """Only the SECONDARY type strings, lowercased.
+
+    Split out from :func:`release_types` so a caller that has resolved the
+    primary itself can supply that instead, without the source's raw primary
+    also surviving in the set and producing two labels for one release.
+    """
+    if not isinstance(album_ctx, Mapping):
+        return set()
+    types = set()
+    for key in ("secondary_types", "secondary_type"):
+        secondary = album_ctx.get(key)
+        if isinstance(secondary, str):
+            secondary = [secondary]
+        if isinstance(secondary, (list, tuple, set)):
+            for entry in secondary:
+                if str(entry or "").strip():
+                    types.add(str(entry).strip().lower())
+    return types
+
+
 def format_album_types(album_ctx: Optional[Mapping[str, Any]],
                        config: Optional[Mapping[str, Any]] = None,
-                       *, is_various_artists: bool = False) -> str:
+                       *, is_various_artists: bool = False,
+                       primary_override: Optional[str] = None) -> str:
     """The ``$atypes`` value for a release — possibly, and usually, empty.
 
     Empty is the common case and the point of the variable: a plain album
@@ -166,7 +188,15 @@ def format_album_types(album_ctx: Optional[Mapping[str, Any]],
     if not pairs:
         return ""
 
-    present = release_types(album_ctx)
+    # primary_override lets the caller substitute a primary it has already
+    # resolved — Spotify types every EP "single", and the path builder works
+    # the real answer out from the track count for $albumtype. Without this
+    # $atypes labelled a five-track EP [Single] while $albumtype beside it
+    # said EP.
+    if primary_override:
+        present = secondary_release_types(album_ctx) | {primary_override.strip().lower()}
+    else:
+        present = release_types(album_ctx)
     if not present:
         return ""
 
@@ -201,4 +231,5 @@ __all__ = [
     "format_album_types",
     "normalize_types",
     "release_types",
+    "secondary_release_types",
 ]

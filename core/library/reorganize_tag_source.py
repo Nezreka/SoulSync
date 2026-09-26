@@ -45,6 +45,12 @@ _VALID_ALBUM_TYPES = frozenset({'album', 'single', 'ep', 'compilation'})
 _YEAR_RE = re.compile(r'(\d{4})')
 
 
+# Every separator a release-type value arrives packed with: "," from
+# read_embedded_tags joining a list, NUL from ID3 multi-value frames, and
+# ";"/"/" from taggers that pack several values into one string.
+_SEPARATORS = re.compile(r"[,;/\x00]")
+
+
 # Separators we split a single artist field on to recover a list.
 # Mirrors the same separator set ``core/metadata/artist_resolution.py``
 # uses when normalizing soulseek matched-download artist strings.
@@ -137,12 +143,18 @@ def _release_type_tokens(value: Any) -> List[str]:
     values = value if isinstance(value, (list, tuple, set)) else [value]
     out: List[str] = []
     for entry in values:
-        # ID3 packs a multi-value frame into ONE string separated by NUL, so an
-        # mp3 tagged [album, remix, soundtrack] arrives as
-        # "album\x00remix\x00soundtrack" where the FLAC equivalent arrives as a
-        # list. Splitting only on the human separators would leave that blob as
-        # a single unrecognised token and drop every label the file carries.
-        for part in str(entry or "").replace("\x00", "/").replace(";", "/").split("/"):
+        # The same release reaches this function spelled three different ways
+        # and every one of them has to tokenise identically:
+        #
+        #   mutagen on a FLAC   -> ["album", "compilation", "live"]
+        #   mutagen on an mp3   -> "album\x00compilation\x00live"   (ID3 NUL-packs)
+        #   read_embedded_tags  -> "album, compilation, live"      (it joins lists)
+        #
+        # That last one is the reorganize path: the tag reader flattens every
+        # multi-value tag with ", " before this ever sees it. Missing any one
+        # separator leaves the whole value as a single unrecognised token and
+        # silently drops every label the file carries.
+        for part in _SEPARATORS.split(str(entry or "")):
             token = part.strip().lower()
             if token and token not in out:
                 out.append(token)

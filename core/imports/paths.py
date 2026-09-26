@@ -925,10 +925,26 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
     # organised by beets before SoulSync keeps one layout instead of two.
     # Computed here so the album and single contexts below cannot disagree.
     try:
+        # Only single<->ep is resolved from the track count, and only when the
+        # source actually said one of them. get_album_type_display infers a
+        # type from the count alone when the source is silent, which is right
+        # for $albumtype — it must always produce a word — and wrong here: a
+        # release tagged only [live] would start claiming [EP] off a five-track
+        # count that nobody called an EP. $atypes says nothing when the source
+        # says nothing; that is the whole point of it.
+        _raw_primary = str(
+            (album_context or {}).get("album_type")
+            or (album_context or {}).get("record_type")
+            or ""
+        ).strip().lower()
+        _atypes_primary = (
+            album_type_display.strip().lower() if _raw_primary in ("single", "ep") else None
+        )
         atypes_value = format_album_types(
             album_context,
             album_types_config(_get_config_manager()),
             is_various_artists=is_various_artists_credit(album_context),
+            primary_override=_atypes_primary,
         )
     except Exception as _at_err:  # noqa: BLE001 - a label must never fail an import
         logger.debug("[atypes] could not build release-type labels: %s", _at_err)

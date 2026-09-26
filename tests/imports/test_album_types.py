@@ -586,3 +586,130 @@ def test_an_unmapped_qualifier_is_simply_not_labelled():
     assert format_album_types(
         {"album_type": primary, "secondary_types": _secondary_album_types(tag, primary)},
         BEETS_CONFIG) == "[EP]"
+
+
+# --- through the real tag reader -----------------------------------------
+
+def _minimal_flac(path):
+    """A FLAC header mutagen will open and write Vorbis comments to."""
+    path.write_bytes(
+        b'fLaC' + b'\x80\x00\x00\x22' + b'\x00\x10\x00\x10'
+        + b'\x00\x00\x00\x00\x00\x00' + b'\x0a\xc4\x42\xf0\x00\x00\x00\x00' + b'\x00' * 16
+    )
+    return str(path)
+
+
+def test_atypes_survives_the_real_tag_reader(tmp_path):
+    """The reorganize path reads tags through read_embedded_tags, which joins
+    every multi-value tag with ", " before the tokeniser sees it. Tests that
+    hand a list straight to the tokeniser skip that join and stay green while
+    the real path renames "[2007][Live][Anthology] Salival" to "[2007] Salival".
+
+    So this one writes a real file, reads it back through the real reader, and
+    asserts the label — no fake reader anywhere in the chain.
+    """
+    from mutagen.flac import FLAC
+    from core.library.file_tags import read_embedded_tags
+    from core.library.reorganize_tag_source import read_album_track_from_file
+
+    p = _minimal_flac(tmp_path / "01 - Third Eye.flac")
+    f = FLAC(p)
+    f["album"], f["artist"], f["albumartist"] = ["Salival"], ["Tool"], ["Tool"]
+    f["title"], f["tracknumber"] = ["Third Eye"], ["1"]
+    f["releasetype"] = ["album", "compilation", "live"]
+    f.save()
+
+    # the reader really does flatten it — if this stops being true the
+    # tokeniser's comma handling is no longer load-bearing and should be revisited
+    raw = (read_embedded_tags(p).get("tags") or {}).get("releasetype")
+    assert raw == "album, compilation, live", raw
+
+    album_meta, _track, err = read_album_track_from_file(p)
+    assert err is None, err
+    assert album_meta["album_type"] == "album"
+    assert album_meta["secondary_types"] == ["compilation", "live"]
+    assert format_album_types(album_meta, BEETS_CONFIG) == "[Live][Anthology]"
+
+
+def test_every_spelling_of_one_release_tokenises_the_same(tmp_path):
+    """FLAC gives a list, ID3 NUL-packs, read_embedded_tags comma-joins."""
+    from core.library.reorganize_tag_source import _release_type_tokens
+
+    expected = ["album", "compilation", "live"]
+    assert _release_type_tokens(["album", "compilation", "live"]) == expected
+    assert _release_type_tokens("album\x00compilation\x00live") == expected
+    assert _release_type_tokens("album, compilation, live") == expected
+    assert _release_type_tokens("album; compilation; live") == expected
+
+
+# --- spotify types every EP "single" --------------------------------------
+
+def test_a_spotify_ep_is_labelled_ep_not_single():
+    """Spotify has no EP type, so a five-track EP arrives as album_type
+    "single". $albumtype already recovers the real answer from the track
+    count; $atypes has to agree with it or one folder name contradicts the
+    other."""
+    from core.imports.paths import get_album_type_display
+
+    ctx = {"album_type": "single", "total_tracks": 5}
+    display = get_album_type_display("single", 5)
+    assert display == "EP"
+    assert format_album_types(ctx, BEETS_CONFIG) == "[Single]", "the raw source value"
+    assert format_album_types(ctx, BEETS_CONFIG, primary_override=display.lower()) == "[EP]"
+
+
+def test_a_long_spotify_single_is_an_album_and_gets_no_label():
+    from core.imports.paths import get_album_type_display
+
+    ctx = {"album_type": "single", "total_tracks": 10}
+    assert get_album_type_display("single", 10) == "Album"
+    assert format_album_types(ctx, BEETS_CONFIG, primary_override="album") == ""
+
+
+def test_a_real_single_is_still_a_single():
+    from core.imports.paths import get_album_type_display
+
+    ctx = {"album_type": "single", "total_tracks": 2}
+    assert format_album_types(
+        ctx, BEETS_CONFIG, primary_override=get_album_type_display("single", 2).lower()
+    ) == "[Single]"
+
+
+def test_a_silent_primary_is_not_invented_from_the_track_count():
+    """get_album_type_display infers a type from the count alone when the
+    source says nothing — correct for $albumtype, which must always produce a
+    word, and wrong here. A release tagged only [live] must not start claiming
+    [EP] because it happens to have five tracks."""
+    ctx = {"album_type": "", "secondary_types": ["live"], "total_tracks": 5}
+    assert format_album_types(ctx, BEETS_CONFIG) == "[Live]"
+
+
+def test_the_override_does_not_duplicate_a_matching_secondary():
+    """A release whose secondary list repeats the primary must still render
+    one label, not two."""
+    ctx = {"album_type": "ep", "secondary_types": ["ep", "live"], "total_tracks": 5}
+    assert format_album_types(ctx, BEETS_CONFIG, primary_override="ep") == "[EP][Live]"
+
+
+def test_the_path_builder_labels_a_spotify_ep_correctly(tmp_path, monkeypatch):
+    """Through the real builder, not just format_album_types: the resolved
+    primary has to actually reach it, or a five-track Spotify EP lands in a
+    folder saying [Single] while $albumtype in the same template says EP."""
+    from core.library_reorganize import _build_album_info, _build_post_process_context
+
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"album_path": "$albumartist/$atypes $album/$track - $title"},
+        "file_organization.album_types": dict(BEETS_CONFIG),
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    ctx = _build_post_process_context(
+        {"id": "AL1", "name": "Tokyo", "release_date": "2019-01-01",
+         "total_tracks": 5, "images": [{"url": ""}]},
+        {"name": "Tokyo", "track_number": 1, "disc_number": 1,
+         "artists": [{"name": "Julien Baker"}]},
+        "Julien Baker", "Tokyo", 1, record_type="single")
+    path, _ = paths.build_final_path_for_track(
+        ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac", create_dirs=False)
+    folder = os.path.basename(os.path.dirname(path))
+    assert folder == "[EP] Tokyo", folder

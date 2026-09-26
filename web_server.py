@@ -13838,6 +13838,42 @@ def _first_m3u_entry(m3u_content):
     return None
 
 
+def _existing_album_folder_ignoring_brackets(candidate):
+    """A sibling of ``candidate`` that differs only in its bracketed parts.
+
+    The template is rendered here with artist/album/year alone, so every
+    variable needing richer metadata comes out empty and the name is a
+    near-miss: "[2017] Audiotree Live" where the audio is really in
+    "[2017][EP][Live] Audiotree Live". Creating that near-miss leaves an empty
+    directory a media server indexes as a second album, so before falling back
+    to it, look for the folder it was trying to name.
+
+    Only an unambiguous single match counts — two siblings that both reduce to
+    the same stem mean the brackets are what tells them apart, and guessing
+    between them would be worse than not guessing.
+    """
+    try:
+        if os.path.isdir(candidate):
+            return candidate
+        parent = os.path.dirname(candidate)
+        if not os.path.isdir(parent):
+            return None
+
+        def stem(name):
+            return re.sub(r"\s+", " ", re.sub(r"\[[^\]]*\]", "", name)).strip().lower()
+
+        target = stem(os.path.basename(candidate))
+        if not target:
+            return None
+        hits = [d for d in os.listdir(parent)
+                if os.path.isdir(os.path.join(parent, d)) and stem(d) == target]
+        if len(hits) == 1:
+            return os.path.join(parent, hits[0])
+    except OSError as exc:
+        logger.debug("[M3U] could not look for an existing album folder: %s", exc)
+    return None
+
+
 def _album_folder_from_track_path(track_path):
     """The directory holding a track, or None when it can't be established.
 
@@ -13904,7 +13940,8 @@ def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='
         }
         folder_path, _ = _get_file_path_from_template(template_context, 'album_path')
         if folder_path:
-            return os.path.join(transfer_dir, folder_path)
+            templated = os.path.join(transfer_dir, folder_path)
+            return _existing_album_folder_ignoring_brackets(templated) or templated
         # Fallback
         artist_sanitized = _sanitize_filename(artist_name)
         album_sanitized = _sanitize_filename(album_name)
