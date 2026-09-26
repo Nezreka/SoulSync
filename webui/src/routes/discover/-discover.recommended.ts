@@ -15,6 +15,8 @@
  * the layout — the user should see both react.
  */
 
+import type { FeedbackEntity } from './-discover.api';
+
 import { type Explanation, explanationLine, explanationTitle } from './-discover.explanation';
 import { whyIcon } from './-discover.helpers';
 
@@ -109,6 +111,23 @@ export interface RecommendedCard {
   reason: string;
   reasonTitle: string;
   showChips: boolean;
+  /** What the ⋯ menu answers about, and the explanation it was shown with. */
+  feedbackEntity: FeedbackEntity;
+  explanation?: Explanation;
+}
+
+/** Every provider id the card carries, for the feedback and block records. */
+export function recommendedIds(artist: RecommendedArtist): Record<string, string> {
+  const ids: Record<string, string> = {};
+  for (const [source, key] of [
+    ['spotify', 'spotify_artist_id'],
+    ['deezer', 'deezer_artist_id'],
+    ['itunes', 'itunes_artist_id'],
+  ] as const) {
+    const value = artist[key];
+    if (typeof value === 'string' && value) ids[source] = value;
+  }
+  return ids;
 }
 
 /**
@@ -148,6 +167,12 @@ export function recommendedCard(artist: RecommendedArtist, sectionSource: string
     chips,
     reason: explanationLine(artist.explanation),
     reasonTitle: explanationTitle(artist.explanation),
+    feedbackEntity: {
+      type: 'artist',
+      name: artist.artist_name ?? '',
+      ids: recommendedIds(artist),
+    },
+    explanation: artist.explanation,
     showChips: chips.length > 0,
   };
 }

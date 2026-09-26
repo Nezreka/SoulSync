@@ -293,6 +293,7 @@ NOT_A_SURFACE = {
     '/api/discover/resolve-cache-album',     # one id lookup for a clicked card
     '/api/discover/diagnose',
     '/api/discover/artist-blacklist',        # the block list itself
+    '/api/discover/feedback',                # what you answered, listed back to you
     '/api/discover/your-artists/sources',
     '/api/discover/your-albums/sources',
     '/api/discover/your-artists/info/<artist_id>',  # details for an artist already on screen

@@ -15,7 +15,9 @@ import {
   HERO_LOADING_TITLE,
   HERO_WATCHLIST_ICON,
   watchAllState,
+  heroIds,
 } from '../-discover.hero';
+import { FeedbackMenu } from './feedback-menu';
 
 /**
  * The discover page's hero billboard.
@@ -224,6 +226,15 @@ export function DiscoverHero({
                 <span className="watchlist-icon">{HERO_WATCHLIST_ICON}</span>
                 <span className="watchlist-text">{watchLabel}</span>
               </button>
+              {artist?.artist_name ? (
+                <FeedbackMenu
+                  entity={{ type: 'artist', name: artist.artist_name, ids: heroIds(artist) }}
+                  explanation={artist.explanation}
+                  // the refetch drops it; move on now rather than keep showing it
+                  onHidden={() => onNavigate(1)}
+                  className="discover-hero-feedback-btn"
+                />
+              ) : null}
             </div>
           )}
         </div>

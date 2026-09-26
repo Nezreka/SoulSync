@@ -1657,3 +1657,102 @@
         padding: 14px 16px !important;
     }
 }
+
+/* ── Discovery feedback ⋯ (more / less like this, not now, block) ──────────
+   The same chip as the watchlist eye, in the opposite corner: hidden until the
+   card is hovered or focused, always shown where there is no hover. */
+.discover-feedback-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: opacity 180ms ease, background 180ms ease, color 180ms ease;
+}
+
+.discover-feedback-trigger:hover:not(:disabled),
+.discover-feedback-trigger[aria-expanded="true"] {
+    background: rgba(var(--accent-rgb), 0.85);
+    color: #fff;
+}
+
+.discover-feedback-trigger:focus-visible {
+    outline: 2px solid rgb(var(--accent-rgb));
+    outline-offset: 2px;
+}
+
+.discover-feedback-trigger:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.ya-card-feedback-btn,
+.recommended-card-feedback-btn,
+.discover-station-feedback-btn {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 4;
+    opacity: 0;
+}
+
+.ya-card:hover .ya-card-feedback-btn,
+.ya-card:focus-within .ya-card-feedback-btn,
+.recommended-artist-card:hover .recommended-card-feedback-btn,
+.recommended-artist-card:focus-within .recommended-card-feedback-btn,
+.discover-station-card:hover .discover-station-feedback-btn,
+.discover-station-card:focus-within .discover-station-feedback-btn,
+.discover-feedback-trigger[aria-expanded="true"] {
+    opacity: 1;
+}
+
+.bylt-track-feedback-btn {
+    width: 30px;
+    height: 30px;
+    background: transparent;
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.discover-feedback-menu {
+    min-width: 190px;
+}
+
+@media (hover: none) {
+    .ya-card-feedback-btn,
+    .recommended-card-feedback-btn,
+    .discover-station-feedback-btn {
+        opacity: 1;
+    }
+}
+
+/* reset taste, beside Close in the blocked artists modal: left, quiet until armed */
+.discover-reset-taste-btn {
+    margin-right: auto;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.discover-reset-taste-btn.armed {
+    border-color: rgba(255, 107, 107, 0.6);
+    color: #ff9a9a;
+}
+
+/* the hero's ⋯ sits in its action row, sized to the pills beside it */
+.discover-hero-feedback-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    font-size: 20px;
+    align-self: center;
+}

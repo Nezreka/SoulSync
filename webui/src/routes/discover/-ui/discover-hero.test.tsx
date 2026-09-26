@@ -73,8 +73,9 @@ describe('the hero', () => {
       <DiscoverHero {...heroProps({ artist: artist({ is_watchlist: true }) })} />,
     );
     expect(container.querySelector('#discover-hero-subtitle')!.textContent).toBe(
-      HERO_WATCHLIST_SUBTITLE,
+      'On your watchlist',
     );
+    expect(HERO_WATCHLIST_SUBTITLE).toBe('On your watchlist');
   });
 
   it('subtitles with the per-artist REASON, carrying the full list as a title', () => {

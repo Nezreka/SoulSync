@@ -67,13 +67,29 @@ attempt was reverted, so nothing below is inherited from it.)
   (`-discover.explanation.ts`), wording pinned to the old copy by the
   vanilla differential. stations write it but don't show it (the line would
   repeat the station's name); it's there for 5c's seed context.
-- [ ] phase 5c
+- [x] phase 5c: feedback. `discovery_feedback` (one row per profile + entity
+  + kind; more and less replace each other; not_now expires) and
+  `core/discovery/feedback.py`. correction to the plan: `core/discovery/
+  scoring.py` is playlist track matching, not rec scoring, so feedback plugs
+  into the actual rankers: the similar-artist and listening-rec re-rank at
+  request time (their shelf cache keys on the profile's feedback, so an
+  answer re-ranks that profile only), and the listening-recs scan, bylt
+  generation (seed order + related weights), daily mixes (seeds, flavor, a
+  rebuild when feedback changes) and stations at build time. not_now rides
+  the blocked-artist filter (an artist, or one track/album by (artist,
+  title)). block writes the blocklist; reset taste clears only the table.
+  ui: a ⋯ on recommended cards (both shelves + view all), the hero, stations
+  and bylt rows (the library's ActionMenu); reset taste lives in the blocked
+  artists modal and says blocks stay.
 - [ ] phase 6
 - [ ] phase 7
 - [ ] phase 0 checklists
 
 open question 4 (keep decisions forever?): answered. pruned with download
 history ("Clear Completed" clears them) plus a 5000-row cap.
+
+open question 2 (`not_now` 30 days?): 30, fixed (`NOT_NOW_DAYS`). nobody asked
+for a setting, and "not now" that you have to configure is a worse block.
 
 ---
 

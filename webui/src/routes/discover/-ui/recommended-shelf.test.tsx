@@ -1,5 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { server } from '@/test/msw';
 
 import type { RecommendedArtist } from '../-discover.recommended';
 import type { RecommendedShelfProps } from './recommended-shelf';
@@ -255,5 +258,47 @@ describe('the card', () => {
     const btn = container.querySelector('.recommended-card-watchlist-btn')!;
     expect(btn).toHaveAttribute('data-artist-id', 'sp1');
     expect(btn).toHaveAttribute('data-artist-name', 'Aphex Twin');
+  });
+});
+
+// ── the ⋯ feedback menu (plan 5c) ─────────────────────────────────────────
+
+function captureFeedback(): Record<string, unknown>[] {
+  const posted: Record<string, unknown>[] = [];
+  window.showToast = vi.fn() as never;
+  server.use(
+    http.post('*/api/discover/feedback', async ({ request }) => {
+      posted.push((await request.json()) as Record<string, unknown>);
+      return HttpResponse.json({ success: true, id: 1 });
+    }),
+  );
+  return posted;
+}
+
+describe('the ⋯ on a card', () => {
+  it('answers about the artist with its ids and explanation, and not now drops the card', async () => {
+    const posted = captureFeedback();
+    const explanation = { kind: 'similar_to', seeds: [{ name: 'Autechre' }] };
+    render(
+      <RecommendedShelf
+        {...props({
+          artists: [
+            artist({ artist_name: 'Plaid', deezer_artist_id: 'dz-plaid', explanation }),
+            artist({ artist_name: 'Boards of Canada', artist_id: 'boc' }),
+          ],
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Tell discovery about Plaid'));
+    fireEvent.click(screen.getByText('Not now'));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toEqual({
+      action: 'not_now',
+      entity: { type: 'artist', name: 'Plaid', ids: { deezer: 'dz-plaid' } },
+      explanation,
+    });
+    await waitFor(() => expect(screen.queryByText('Plaid')).toBeNull());
+    expect(screen.getByText('Boards of Canada')).toBeTruthy();
+    server.resetHandlers();
   });
 });

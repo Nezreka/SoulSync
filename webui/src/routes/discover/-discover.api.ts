@@ -338,6 +338,29 @@ export function unblacklistArtist(blacklistId: number): Promise<DiscoverResult> 
   return readJson(apiClient.delete(`discover/artist-blacklist/${blacklistId}`));
 }
 
+// ── Feedback (more / less like this, not now, block) ──────────────────────
+
+export type FeedbackAction = 'more' | 'less' | 'not_now' | 'block';
+
+export interface FeedbackEntity {
+  type: 'artist' | 'album' | 'track';
+  name: string;
+  artist_name?: string;
+  ids?: Record<string, string>;
+}
+
+export function postDiscoverFeedback(body: {
+  action: FeedbackAction;
+  entity: FeedbackEntity;
+  explanation?: unknown;
+}): Promise<DiscoverResult & { id?: number }> {
+  return readJson(apiClient.post('discover/feedback', { json: body }));
+}
+
+export function resetDiscoverTaste(): Promise<DiscoverResult & { cleared?: number }> {
+  return readJson(apiClient.delete('discover/feedback'));
+}
+
 // ── Build-a-playlist ──────────────────────────────────────────────────────
 
 export function searchBuildPlaylistArtists(

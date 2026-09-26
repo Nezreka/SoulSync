@@ -3525,6 +3525,29 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_name ON blocklist (name COLLATE NOCASE)")
             self._migrate_discovery_blacklist_into_blocklist(cursor)
 
+            # What a profile told discovery about a recommendation: more /
+            # less like this, or not now (expires). Blocks are NOT here, they
+            # live in the blocklist, so resetting taste never clears them.
+            # One row per (profile, entity, kind); more and less replace each
+            # other. core/discovery/feedback.py reads it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    entity_type TEXT NOT NULL,        -- artist | album | track
+                    entity_key TEXT NOT NULL,         -- normalised artist[, title]
+                    name TEXT NOT NULL,
+                    artist_name TEXT,
+                    ids_json TEXT,                    -- {source: id}
+                    kind TEXT NOT NULL,               -- more | less | not_now
+                    seed_context_json TEXT,           -- the explanation it was shown with
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP              -- not_now only
+                )
+            """)
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_discovery_feedback_entity "
+                           "ON discovery_feedback (profile_id, entity_type, entity_key, kind)")
+
             # Liked artists pool — aggregated followed/liked artists from connected services
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS liked_artists_pool (
@@ -19527,6 +19550,78 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error removing blocklist entry: {e}")
             return False
+
+    # ==================== Discovery feedback ====================
+
+    def set_discovery_feedback(self, profile_id: int, entity_type: str, entity_key: str,
+                               name: str, kind: str, artist_name: str = None,
+                               ids_json: str = None, seed_context_json: str = None,
+                               expires_at: str = None) -> Optional[int]:
+        """Record one piece of feedback, replacing the same kind for the same
+        entity. ``more`` and ``less`` are opposites: setting one drops the
+        other. Returns the row id."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            opposite = {'more': 'less', 'less': 'more'}.get(kind)
+            if opposite:
+                cursor.execute(
+                    "DELETE FROM discovery_feedback WHERE profile_id = ? AND entity_type = ? "
+                    "AND entity_key = ? AND kind = ?", (profile_id, entity_type, entity_key, opposite))
+            cursor.execute(
+                "DELETE FROM discovery_feedback WHERE profile_id = ? AND entity_type = ? "
+                "AND entity_key = ? AND kind = ?", (profile_id, entity_type, entity_key, kind))
+            cursor.execute(
+                "INSERT INTO discovery_feedback (profile_id, entity_type, entity_key, name, "
+                "artist_name, ids_json, kind, seed_context_json, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (profile_id, entity_type, entity_key, name, artist_name, ids_json, kind,
+                 seed_context_json, expires_at))
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error recording discovery feedback: {e}")
+            return None
+
+    def get_discovery_feedback(self, profile_id: int) -> list:
+        """This profile's feedback still in force (an expired not-now is not)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, entity_type, entity_key, name, artist_name, ids_json, kind, "
+                "seed_context_json, created_at, expires_at FROM discovery_feedback "
+                "WHERE profile_id = ? AND (expires_at IS NULL OR expires_at > datetime('now')) "
+                "ORDER BY created_at DESC, id DESC", (profile_id,))
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f"discovery feedback read failed: {e}")
+            return []
+
+    def remove_discovery_feedback(self, profile_id: int, feedback_id: int) -> bool:
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_feedback WHERE id = ? AND profile_id = ?",
+                           (int(feedback_id), profile_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing discovery feedback: {e}")
+            return False
+
+    def clear_discovery_feedback(self, profile_id: int) -> int:
+        """Reset taste: every more / less / not-now for the profile. Blocks
+        are in the blocklist and stay."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_feedback WHERE profile_id = ?", (profile_id,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error clearing discovery feedback: {e}")
+            return 0
 
     def get_blocklist(self, profile_id: int, entity_type: str = None) -> list:
         """List blocklist entries for a profile, newest first."""

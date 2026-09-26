@@ -62,6 +62,9 @@ def build_stations(database, profile_id: int = 1,
     recent = database.get_top_artists('30d', 120, profile_id=profile_id) or []
     seeds = build_recency_weighted_seeds(
         top, {a['name']: a.get('play_count', 0) for a in recent})
+    # more / less like this reorders which of your artists become stations
+    from core.discovery.feedback import Taste
+    seeds = Taste.load(database, profile_id).adjust_seeds(seeds)
     seeds = sorted(seeds, key=lambda s: -s['weight'])
 
     stations: List[Dict[str, Any]] = []

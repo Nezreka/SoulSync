@@ -220,3 +220,12 @@ export function heroWatchlistButtonState(
 export function heroWatchlistCheckBody(artistId: string): { artist_id: string } {
   return { artist_id: artistId };
 }
+
+/** Every provider id a hero artist carries, for the feedback and block records. */
+export function heroIds(artist: DiscoverHeroArtist): Record<string, string> {
+  const ids: Record<string, string> = {};
+  if (artist.spotify_artist_id) ids.spotify = artist.spotify_artist_id;
+  if (artist.itunes_artist_id) ids.itunes = artist.itunes_artist_id;
+  if (artist.musicbrainz_artist_id) ids.musicbrainz = artist.musicbrainz_artist_id;
+  return ids;
+}

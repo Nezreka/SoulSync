@@ -37,6 +37,7 @@ _ARTIST_ID_KEYS = {
 }
 _ARTIST_NAME_KEYS = ('artist_name', 'similar_artist_name', 'name')
 _WORK_ARTIST_KEYS = ('artist_name', 'artist', 'album_artist', 'primary_artist')
+_WORK_TITLE_KEYS = ('name', 'title', 'track_name', 'album_name', 'album')
 
 
 def _norm(text: Any) -> str:
@@ -45,12 +46,16 @@ def _norm(text: Any) -> str:
 
 @dataclass
 class BlockedArtists:
+    """What discovery must not show this profile: blocked artists, and what
+    it said "not now" to (core/discovery/feedback.py) until that expires.
+    ``works`` holds not-now tracks and albums as (artist, title)."""
     names: frozenset = frozenset()
     ids: Dict[str, frozenset] = field(default_factory=dict)
+    works: frozenset = frozenset()
 
     @property
     def is_empty(self) -> bool:
-        return not self.names and not any(self.ids.values())
+        return not self.names and not any(self.ids.values()) and not self.works
 
     @classmethod
     def load(cls, database, profile_id) -> 'BlockedArtists':
@@ -65,14 +70,21 @@ class BlockedArtists:
                         ids[source].add(str(row[col]))
         except Exception as exc:  # noqa: BLE001 - never take a page down
             logger.debug("blocklist read failed: %s", exc)
-        return cls(frozenset(names), {k: frozenset(v) for k, v in ids.items()})
+        from core.discovery.feedback import Taste
+        taste = Taste.load(database, profile_id)
+        names |= taste.snoozed_artists
+        for source, snoozed in taste.snoozed_artist_ids.items():
+            ids.setdefault(source, set()).update(snoozed)
+        return cls(frozenset(names), {k: frozenset(v) for k, v in ids.items()},
+                   taste.snoozed_works)
 
     def fingerprint(self) -> str:
         """Changes whenever the blocks do: a stored generation keyed on it
         rebuilds after a block instead of showing the artist until its TTL."""
         import hashlib
         parts = sorted(self.names) + sorted(
-            f"{source}:{i}" for source, ids in self.ids.items() for i in ids)
+            f"{source}:{i}" for source, ids in self.ids.items() for i in ids) + sorted(
+            f"w:{a}>{t}" for a, t in self.works)
         return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
     def blocks_name(self, name: Any) -> bool:
@@ -95,12 +107,27 @@ class BlockedArtists:
         return any(self.blocks_name(item.get(k)) for k in _ARTIST_NAME_KEYS)
 
     def blocks_work(self, item: Any) -> bool:
-        """A track or album, judged by every artist it carries."""
+        """A track or album, judged by every artist it carries, or itself
+        when it was set aside (a not-now album also hides its tracks)."""
         if not isinstance(item, dict):
             return False
-        for artist in _work_artists(item):
+        artists = list(_work_artists(item))
+        for artist in artists:
             if self.blocks_artist(artist):
                 return True
+        if self.works:
+            titles = {_norm(item.get(k)) for k in _WORK_TITLE_KEYS if isinstance(item.get(k), str)}
+            album = item.get('album')
+            if isinstance(album, dict) and isinstance(album.get('name'), str):
+                titles.add(_norm(album['name']))
+            titles.discard('')
+            for artist in artists:
+                if isinstance(artist, dict):
+                    name = artist.get('artist_name') or artist.get('name')
+                else:
+                    name = artist
+                if isinstance(name, str) and any((_norm(name), t) in self.works for t in titles):
+                    return True
         return False
 
 

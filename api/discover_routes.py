@@ -127,6 +127,14 @@ def _discover_dial_key():
         return '0.3'
 
 
+def _discover_rank_key():
+    """The two re-ranked artist shelves: the dial, and this profile's more /
+    less feedback, so an answer re-ranks that profile's shelf and no other."""
+    from core.discovery.feedback import Taste
+    return (_discover_dial_key(),
+            Taste.load(get_database(), get_current_profile_id()).fingerprint())
+
+
 # injected by configure()
 get_database = None
 config_manager = None
@@ -382,7 +390,7 @@ def _discover_primary_genre(item):
 
 @bp.route('/api/discover/similar-artists', methods=['GET'])
 @_hide_blocked({'artists': ARTISTS, 'artists[].explanation.seeds': NAMES})
-@_discover_shelf_cache(key_extra=_discover_dial_key)
+@_discover_shelf_cache(key_extra=_discover_rank_key)
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
     try:
@@ -465,7 +473,9 @@ def get_discover_similar_artists():
         _taste = _discover_genre_taste(database, _pid)
         _plays = database.get_play_counts_by_name(
             [a.get('artist_name') for a in result_artists], _pid) if result_artists else {}
-        if result_artists and (_adv_level > 0 or _taste or _plays):
+        from core.discovery.feedback import Taste
+        _taste_fb = Taste.load(database, _pid)
+        if result_artists and (_adv_level > 0 or _taste or _plays or not _taste_fb.is_empty):
             try:
                 from core.discovery.listening_recommendations import (
                     apply_adventurous_blend, genre_affinity, novelty_score)
@@ -473,6 +483,9 @@ def get_discover_similar_artists():
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
                     a['_base'] = _oc + (10.0 - _rank) * 0.1              # consensus base
+                    # more / less like this, through the artists of yours that point here
+                    a['_base'] *= _taste_fb.rec_factor(
+                        a.get('artist_name'), sources_by_name.get(a.get('artist_name')) or [])
                     _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
                     a['_aff'] = a['_why_genre'] = _aff                    # _why_genre feeds the "why" chips
                     a['_nov'] = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
@@ -644,7 +657,7 @@ def _autostart_popularity_backfill():
 
 @bp.route('/api/discover/listening-recommendations', methods=['GET'])
 @_hide_blocked({'artists': ARTISTS, 'artists[].explanation.seeds': NAMES})
-@_discover_shelf_cache(key_extra=_discover_dial_key)
+@_discover_shelf_cache(key_extra=_discover_rank_key)
 def get_discover_listening_recommendations():
     """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
 
@@ -683,7 +696,13 @@ def get_discover_listening_recommendations():
             _names = [a.get('name') for a in stored]
             plays = database.get_play_counts_by_name(_names, _pid) if stored else {}
             pops = database.get_similar_artist_popularities(_names) if stored else {}  # for the "why" chips + dial
+            # what you told discovery (more / less like this) scales the score
+            from core.discovery.feedback import Taste
+            _taste_fb = Taste.load(database, _pid)
             for a in stored:
+                if not _taste_fb.is_empty:
+                    a['score'] = float(a.get('score') or 0) * _taste_fb.rec_factor(
+                        a.get('name'), a.get('seeds') or [])
                 if a.get('popularity') is None:
                     a['popularity'] = pops.get((a.get('name') or '').strip().lower())
                 aff = genre_affinity(a.get('genres') or [], taste) if taste else 0.0
@@ -2075,6 +2094,77 @@ def add_blocklist():
         return jsonify({"success": True, "id": new_id})
     except Exception as e:
         logger.error(f"Error adding blocklist entry: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── discovery feedback (plan 5c): more / less / not now / block ──
+
+_FEEDBACK_ACTIONS = ('more', 'less', 'not_now', 'block')
+
+
+@bp.route('/api/discover/feedback', methods=['POST'])
+def post_discovery_feedback():
+    """One answer from a recommendation's ⋯ menu. ``entity`` is {type, name,
+    artist_name?, ids?: {source: id}}; ``explanation`` is the one it was shown
+    with. Block writes the blocklist (the artist, for a track or album)."""
+    try:
+        from core.discovery import feedback as _feedback
+        data = request.get_json() or {}
+        action = str(data.get('action') or '')
+        entity = data.get('entity') if isinstance(data.get('entity'), dict) else {}
+        if action not in _FEEDBACK_ACTIONS:
+            return jsonify({"success": False, "error": "unknown action"}), 400
+        if action == 'block':
+            is_artist = entity.get('type') == 'artist'
+            name = (entity.get('name') if is_artist else entity.get('artist_name')) or ''
+            if not str(name).strip():
+                return jsonify({"success": False, "error": "nothing to block"}), 400
+            ids = {}
+            if is_artist:
+                ids = {f'{src}_id': v for src, v in (entity.get('ids') or {}).items()
+                       if src in ('spotify', 'itunes', 'deezer', 'musicbrainz') and v}
+            new_id = _add_to_blocklist('artist', str(name).strip(), ids)
+        else:
+            new_id = _feedback.record(get_database(), get_current_profile_id(), action,
+                                      entity, data.get('explanation'))
+        if not new_id:
+            return jsonify({"success": False, "error": "that can't be recorded"}), 400
+        # nothing to invalidate: hiding runs outside the shelf cache, and the
+        # re-ranked shelves key on this profile's feedback
+        return jsonify({"success": True, "id": new_id, "action": action})
+    except Exception as e:
+        logger.error(f"Error recording discovery feedback: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/feedback', methods=['GET'])
+def list_discovery_feedback():
+    """This profile's feedback still in force, newest first."""
+    try:
+        rows = get_database().get_discovery_feedback(get_current_profile_id())
+        return jsonify({"success": True, "feedback": [
+            {k: r.get(k) for k in ('id', 'entity_type', 'name', 'artist_name', 'kind',
+                                   'created_at', 'expires_at')} for r in rows]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/feedback/<int:feedback_id>', methods=['DELETE'])
+def undo_discovery_feedback(feedback_id):
+    try:
+        ok = get_database().remove_discovery_feedback(get_current_profile_id(), feedback_id)
+        return jsonify({"success": ok})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/feedback', methods=['DELETE'])
+def reset_discovery_taste():
+    """Forget every more / less / not now. Blocks stay: they're the blocklist."""
+    try:
+        cleared = get_database().clear_discovery_feedback(get_current_profile_id())
+        return jsonify({"success": True, "cleared": cleared})
+    except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 

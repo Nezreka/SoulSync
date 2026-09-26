@@ -300,3 +300,34 @@ def test_an_unsupported_source_hydrates_nothing_rather_than_guessing(tmp_path):
     d = MusicDatabase(str(tmp_path / "unsup.db"))
     assert d.get_discovery_pool_tracks_by_ids(["x"], "discogs", profile_id=1) == {}
     assert d.get_discovery_pool_tracks_by_ids([], "deezer", profile_id=1) == {}
+
+
+# ── feedback (plan 5c) ────────────────────────────────────────────────────────
+
+def test_more_like_this_moves_its_seeds_shelf_first(db):
+    from core.discovery.explain import explanation
+    from core.discovery.feedback import record
+
+    record(db, 1, 'more', {'type': 'artist', 'name': 'Neon Bloom'},
+           explanation('listened', ['Ariana Grande']))
+    _scanner(db)._build_because_you_listen_to(1, ["deezer"], _genres())
+    gen = bylt_store.read_generation(db, 1)
+    assert [s["seed_name"] for s in gen["sections"]] == ["Ariana Grande", "Katy Perry"]
+
+
+def test_less_like_this_sinks_the_artist_on_the_shelf_that_brought_it(db):
+    from core.discovery.explain import explanation
+    from core.discovery.feedback import record
+
+    def katy_artists():
+        _scanner(db)._build_because_you_listen_to(1, ["deezer"], _genres())
+        gen = bylt_store.read_generation(db, 1)
+        katy = next(s for s in gen["sections"] if s["seed_name"] == "Katy Perry")
+        return [t["artist_name"] for t in katy["tracks"]]
+
+    assert katy_artists()[0] == "Halogen"      # the closest match leads
+    record(db, 1, 'less', {'type': 'artist', 'name': 'Halogen'},
+           explanation('listened', ['Katy Perry']))
+    after = katy_artists()
+    assert after[0] != "Halogen"
+    assert "Halogen" not in after or after.index("Halogen") > after.index("Drama")

@@ -5,6 +5,8 @@ import { server } from '@/test/msw';
 
 import {
   blacklistArtist,
+  postDiscoverFeedback,
+  resetDiscoverTaste,
   enrichSimilarArtists,
   fetchAdventurousness,
   fetchArtistInfo,
@@ -246,5 +248,31 @@ describe('endpoint contracts that fail quietly', () => {
     const seen = capture('get', '/api/discover/listenbrainz/playlist/:mbid');
     await fetchLbPlaylist('a b/c');
     expect(seen[0].url.pathname).toBe('/api/discover/listenbrainz/playlist/a%20b%2Fc');
+  });
+});
+
+describe('discovery feedback', () => {
+  it('posts one answer and resets them all', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.post('*/api/discover/feedback', async ({ request }) => {
+        seen.push(`POST ${JSON.stringify(await request.json())}`);
+        return HttpResponse.json({ success: true, id: 4 });
+      }),
+      http.delete('*/api/discover/feedback', () => {
+        seen.push('DELETE');
+        return HttpResponse.json({ success: true, cleared: 2 });
+      }),
+    );
+    const res = await postDiscoverFeedback({
+      action: 'more',
+      entity: { type: 'artist', name: 'Soen' },
+    });
+    expect(res.id).toBe(4);
+    expect((await resetDiscoverTaste()).cleared).toBe(2);
+    expect(seen).toEqual([
+      'POST {"action":"more","entity":{"type":"artist","name":"Soen"}}',
+      'DELETE',
+    ]);
   });
 });

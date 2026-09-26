@@ -14,6 +14,7 @@ import {
   BYLT_CONTAINER_ID,
   BYLT_SUBTITLE,
 } from '../-discover.bylt';
+import { FeedbackMenu } from './feedback-menu';
 
 /**
  * Because You Listen To.
@@ -231,10 +232,12 @@ function ByltTrackRow({
   onOpenAlbum?: (track: ByltTrack, section: ByltSection) => void;
 }) {
   const [broken, setBroken] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const row = byltRow(track, index);
   const showImage = Boolean(row.cover) && !broken;
   const label = row.artist ? `${row.title} by ${row.artist}` : row.title;
 
+  if (hidden) return null;
   return (
     <li className="bylt-track" data-row-key={rowKey}>
       <div className="bylt-track-art">
@@ -309,6 +312,14 @@ function ByltTrackRow({
           >
             Album
           </button>
+        ) : null}
+        {row.title && row.artist ? (
+          <FeedbackMenu
+            entity={{ type: 'track', name: row.title, artist_name: row.artist }}
+            explanation={section.explanation}
+            onHidden={() => setHidden(true)}
+            className="bylt-track-feedback-btn"
+          />
         ) : null}
       </div>
 
