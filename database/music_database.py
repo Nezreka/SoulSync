@@ -3548,6 +3548,30 @@ class MusicDatabase:
             cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_discovery_feedback_entity "
                            "ON discovery_feedback (profile_id, entity_type, entity_key, kind)")
 
+            # The discovery inbox: releases, upcoming releases, saved recs and
+            # concerts worth coming back to, per profile. A refresh adds items
+            # as unread and never resets a state someone chose.
+            # core/discovery/inbox.py owns it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_inbox (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    kind TEXT NOT NULL,               -- new_release | upcoming | saved_rec | concert
+                    entity_key TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist_name TEXT,
+                    image_url TEXT,
+                    item_date TEXT,                   -- release or event date, YYYY-MM-DD
+                    payload_json TEXT,
+                    state TEXT NOT NULL DEFAULT 'unread',  -- unread | saved | dismissed | added
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (profile_id, kind, entity_key)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_inbox_state "
+                           "ON discovery_inbox (profile_id, state)")
+
             # Liked artists pool — aggregated followed/liked artists from connected services
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS liked_artists_pool (

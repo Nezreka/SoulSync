@@ -31,6 +31,7 @@ import {
 import { CACHE_SECTIONS } from '../-discover.cache-sections';
 import { decadeClassicsName, decadeTrackToSpotify } from '../-discover.decade-shelf';
 import { normalizeTrack } from '../-discover.helpers';
+import { inboxArtistRef } from '../-discover.inbox';
 import { discoverLimiter } from '../-discover.limiter';
 import {
   lbStatusBase,
@@ -85,6 +86,7 @@ import { ByltSections } from './bylt-sections';
 import { CacheShelf, GenreExplorerSection } from './cache-shelves';
 import { DeezerEditorialShelf } from './deezer-editorial-shelf';
 import { DiscoverHero } from './discover-hero';
+import { DiscoveryInbox } from './discovery-inbox';
 import { DownloadBar } from './download-bar';
 import { GenreDiveModal } from './genre-dive-modal';
 import { MixModal } from './mix-modal';
@@ -1471,6 +1473,13 @@ export function DiscoverPage() {
               onOpenRecommended={() => setRecModalOpen(true)}
             />
           </div>
+          <DiscoveryInbox
+            onOpenRelease={(album) => void albumOpen.openRecentAlbum(album)}
+            buildArtistPath={(item) => {
+              const ref = inboxArtistRef(item);
+              return ref ? detailPath(ref.id, ref.source, item.artist_name) : '';
+            }}
+          />
           <DiscoveryZone
             id="discover-zone-for-you"
             title="For You"

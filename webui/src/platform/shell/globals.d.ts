@@ -35,6 +35,8 @@ declare global {
     updateWatchlistButtonCount?: () => void;
     /** Wishlist twin of updateWatchlistButtonCount — nav badge + hero count. */
     updateWishlistCount?: () => void;
+    /** Discover inbox nav badge (src/shell/discover-inbox-badge.ts). */
+    refreshDiscoverInboxBadge?: () => void;
     /**
      * Shared modals owned by other vanilla files and used from several pages
      * (origin-history.js, watchlist-history.js, blocklist.js). Declared as

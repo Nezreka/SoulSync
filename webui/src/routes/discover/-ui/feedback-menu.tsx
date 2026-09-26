@@ -7,7 +7,8 @@ import { type FeedbackAction, type FeedbackEntity, postDiscoverFeedback } from '
 import { ActionMenu, type ActionMenuItem } from '../../artist-detail/-ui/action-menu';
 
 /**
- * The ⋯ on a recommendation: more like this, less like this, not now, block.
+ * The ⋯ on a recommendation: save for later, more like this, less like this,
+ * not now, block.
  *
  * The answer is stored with the explanation the item was shown with, which is
  * how "less like this" knows which seed brought it. More and less re-rank the
@@ -21,6 +22,8 @@ export const NOT_NOW_DAYS = 30;
 export function feedbackToast(action: FeedbackAction, entity: FeedbackEntity): string {
   const artist = entity.type === 'artist' ? entity.name : entity.artist_name || entity.name;
   switch (action) {
+    case 'save':
+      return 'Saved to your inbox';
     case 'more':
       return `You'll see more like ${entity.name}`;
     case 'less':
@@ -38,6 +41,13 @@ export function feedbackItems(
 ): ActionMenuItem[] {
   const artist = entity.type === 'artist' ? entity.name : entity.artist_name || entity.name;
   return [
+    {
+      key: 'save',
+      label: 'Save for later',
+      title: 'Keep it in your inbox',
+      className: 'discover-feedback-save',
+      onSelect: () => answer('save'),
+    },
     {
       key: 'more',
       label: 'More like this',
@@ -92,7 +102,8 @@ export function FeedbackMenu({
         if (res.success === false) throw new Error(res.error || 'not saved');
         window.showToast?.(feedbackToast(action, entity), 'success');
         if (action === 'not_now' || action === 'block') onHidden?.();
-        // hiding can touch any shelf; more and less re-rank the artist ones
+        // hiding can touch any shelf; more and less re-rank the artist ones;
+        // a save lands in the inbox
         void queryClient?.invalidateQueries({ queryKey: ['discover'] });
       })
       .catch(() => {

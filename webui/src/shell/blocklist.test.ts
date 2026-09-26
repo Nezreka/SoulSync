@@ -193,6 +193,7 @@ describe('the window contract', () => {
       'openWatchlistHistoryModal',
       'patchChatMessages',
       'playLibraryTrack',
+      'refreshDiscoverInboxBadge',
       'saveMyAccountToken',
       'setActiveSource',
       'switchBlocklistTab',

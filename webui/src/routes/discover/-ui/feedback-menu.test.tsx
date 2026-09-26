@@ -40,20 +40,22 @@ function open(onHidden = vi.fn()) {
 }
 
 describe('the menu', () => {
-  it('offers the four answers, block last and set apart', () => {
+  it('offers save and the four answers, block last and set apart', () => {
     const items = feedbackItems(ENTITY, vi.fn());
     expect(items.map((i) => i.label)).toEqual([
+      'Save for later',
       'More like this',
       'Less like this',
       'Not now',
       'Block Soen',
     ]);
-    expect(items.map((i) => Boolean(i.danger))).toEqual([false, false, false, true]);
+    expect(items.map((i) => Boolean(i.danger))).toEqual([false, false, false, false, true]);
+    expect(feedbackToast('save', ENTITY)).toBe('Saved to your inbox');
   });
 
   it('blocks the ARTIST of a track, and says so', () => {
     const track = { type: 'track' as const, name: 'Lotus', artist_name: 'Soen' };
-    expect(feedbackItems(track, vi.fn())[3].label).toBe('Block Soen');
+    expect(feedbackItems(track, vi.fn())[4].label).toBe('Block Soen');
     expect(feedbackToast('block', track)).toBe('Blocked Soen');
     expect(feedbackToast('not_now', track)).toBe('Hidden for 30 days');
     expect(NOT_NOW_DAYS).toBe(30);

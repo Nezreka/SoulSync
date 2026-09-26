@@ -294,6 +294,7 @@ NOT_A_SURFACE = {
     '/api/discover/diagnose',
     '/api/discover/artist-blacklist',        # the block list itself
     '/api/discover/feedback',                # what you answered, listed back to you
+    '/api/discover/inbox/counts',            # one number, for the nav badge
     '/api/discover/your-artists/sources',
     '/api/discover/your-albums/sources',
     '/api/discover/your-artists/info/<artist_id>',  # details for an artist already on screen

@@ -19,6 +19,7 @@
 
 import { apiClient, readJson } from '@/app/api-client';
 
+import type { InboxPayload, InboxView } from './-discover.inbox';
 import type { SectionOutcome } from './-discover.section-state';
 import type {
   DiscoverAlbum,
@@ -340,7 +341,7 @@ export function unblacklistArtist(blacklistId: number): Promise<DiscoverResult> 
 
 // ── Feedback (more / less like this, not now, block) ──────────────────────
 
-export type FeedbackAction = 'more' | 'less' | 'not_now' | 'block';
+export type FeedbackAction = 'more' | 'less' | 'not_now' | 'block' | 'save';
 
 export interface FeedbackEntity {
   type: 'artist' | 'album' | 'track';
@@ -359,6 +360,23 @@ export function postDiscoverFeedback(body: {
 
 export function resetDiscoverTaste(): Promise<DiscoverResult & { cleared?: number }> {
   return readJson(apiClient.delete('discover/feedback'));
+}
+
+// ── The inbox ──────────────────────────────────────────────────────────────
+
+export function fetchInbox(view: InboxView): Promise<InboxPayload> {
+  return readJson(apiClient.get('discover/inbox', { searchParams: { view } }));
+}
+
+export function setInboxState(
+  itemId: number,
+  state: 'unread' | 'saved' | 'dismissed',
+): Promise<DiscoverResult> {
+  return readJson(apiClient.post(`discover/inbox/${itemId}/state`, { json: { state } }));
+}
+
+export function dismissAllInbox(): Promise<DiscoverResult & { dismissed?: number }> {
+  return readJson(apiClient.post('discover/inbox/dismiss-all'));
 }
 
 // ── Build-a-playlist ──────────────────────────────────────────────────────

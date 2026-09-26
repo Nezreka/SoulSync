@@ -81,12 +81,31 @@ attempt was reverted, so nothing below is inherited from it.)
   ui: a ⋯ on recommended cards (both shelves + view all), the hero, stations
   and bylt rows (the library's ActionMenu); reset taste lives in the blocked
   artists modal and says blocks stay.
-- [ ] phase 6
+- [x] phase 6: discovery inbox. `discovery_inbox` + `core/discovery/inbox.py`,
+  an Inbox panel at the top of Discover (New / Saved), a badge on the
+  Discover nav. corrections to the plan: `recent_releases` is never written,
+  so watchlist releases come from `discovery_recent_albums` (what the scan
+  caches per profile), and "upcoming" needed no new capture: that cache
+  already holds future-dated albums, the radar just skips them. sources:
+  watchlist new releases (30 days), upcoming, recs saved from the ⋯ menu
+  ("Save for later"), concerts for watchlist artists when Ticketmaster is
+  set up. refresh runs in the background when the inbox or its badge count
+  is asked for and it's over 6h old; a source that fails is reported ("
+  Ticketmaster didn't answer, showing the rest") and the rest still land.
+  a refresh never resets a chosen state. "added" is observed (the release is
+  in the library by exact artist + title, the saved artist is watched), not
+  clicked. blocked and not-now artists never show.
+- [ ] phase 6 follow-ups: fuzzy ownership for "added" (the recent-releases
+  shelf's matcher), and whether the inbox should also hold similar-artist
+  releases or stay watchlist-only.
 - [ ] phase 7
 - [ ] phase 0 checklists
 
 open question 4 (keep decisions forever?): answered. pruned with download
 history ("Clear Completed" clears them) plus a 5000-row cap.
+
+open question 3 (inbox inside discover or its own nav item?): inside
+Discover, top of the page, with the badge on the Discover nav item.
 
 open question 2 (`not_now` 30 days?): 30, fixed (`NOT_NOW_DAYS`). nobody asked
 for a setting, and "not now" that you have to configure is a worse block.

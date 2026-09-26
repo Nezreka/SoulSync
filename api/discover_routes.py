@@ -2099,14 +2099,15 @@ def add_blocklist():
 
 # ── discovery feedback (plan 5c): more / less / not now / block ──
 
-_FEEDBACK_ACTIONS = ('more', 'less', 'not_now', 'block')
+_FEEDBACK_ACTIONS = ('more', 'less', 'not_now', 'block', 'save')
 
 
 @bp.route('/api/discover/feedback', methods=['POST'])
 def post_discovery_feedback():
     """One answer from a recommendation's ⋯ menu. ``entity`` is {type, name,
     artist_name?, ids?: {source: id}}; ``explanation`` is the one it was shown
-    with. Block writes the blocklist (the artist, for a track or album)."""
+    with. Block writes the blocklist (the artist, for a track or album); save
+    puts it in the inbox's saved list."""
     try:
         from core.discovery import feedback as _feedback
         data = request.get_json() or {}
@@ -2114,7 +2115,12 @@ def post_discovery_feedback():
         entity = data.get('entity') if isinstance(data.get('entity'), dict) else {}
         if action not in _FEEDBACK_ACTIONS:
             return jsonify({"success": False, "error": "unknown action"}), 400
-        if action == 'block':
+        if action == 'save':
+            # keep it for later: the inbox's saved list, not a taste signal
+            from core.discovery import inbox as _inbox
+            new_id = _inbox.save_rec(get_database(), get_current_profile_id(), entity,
+                                     data.get('explanation'), str(data.get('image_url') or ''))
+        elif action == 'block':
             is_artist = entity.get('type') == 'artist'
             name = (entity.get('name') if is_artist else entity.get('artist_name')) or ''
             if not str(name).strip():
@@ -2164,6 +2170,87 @@ def reset_discovery_taste():
     try:
         cleared = get_database().clear_discovery_feedback(get_current_profile_id())
         return jsonify({"success": True, "cleared": cleared})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── the discovery inbox (plan 6) ──
+
+_INBOX_USER_STATES = ('unread', 'saved', 'dismissed')
+
+
+@bp.route('/api/discover/inbox', methods=['GET'])
+@_hide_blocked({'items': WORKS})
+def get_discovery_inbox():
+    """What's worth coming back to. ``view`` is new (unread) or saved. A
+    stale inbox starts a background refresh and answers with what it has;
+    the sources line says which ones didn't answer last time."""
+    try:
+        from core.discovery import inbox as _inbox
+        database, pid = get_database(), get_current_profile_id()
+        view = 'saved' if request.args.get('view') == 'saved' else 'new'
+        if _inbox.is_stale(database, pid):
+            _inbox.refresh_in_background(database, pid)
+        status = _inbox.status(database, pid)
+        return jsonify({
+            "success": True, "view": view,
+            "items": _inbox.list_items(database, pid, view),
+            "counts": {"unread": _inbox.unread_count(database, pid)},
+            "sources": status.get('sources') or {},
+            "unanswered": _inbox.unanswered(status),
+            "refreshed_at": status.get('refreshed_at'),
+            "refreshing": _inbox.is_refreshing(pid),
+        })
+    except Exception as e:
+        logger.error(f"Error reading the discovery inbox: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/inbox/counts', methods=['GET'])
+def get_discovery_inbox_counts():
+    """The nav badge: how many are new. Asking also lets a stale inbox
+    refresh in the background, so the badge can grow without anyone opening
+    Discover first."""
+    try:
+        from core.discovery import inbox as _inbox
+        database, pid = get_database(), get_current_profile_id()
+        if _inbox.is_stale(database, pid):
+            _inbox.refresh_in_background(database, pid)
+        return jsonify({"success": True, "unread": _inbox.unread_count(database, pid)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/inbox/<int:item_id>/state', methods=['POST'])
+def set_discovery_inbox_state(item_id):
+    """Save, dismiss, or put back as new. Added is observed, not set."""
+    try:
+        from core.discovery import inbox as _inbox
+        state = str((request.get_json() or {}).get('state') or '')
+        if state not in _INBOX_USER_STATES:
+            return jsonify({"success": False, "error": "unknown state"}), 400
+        ok = _inbox.set_state(get_database(), get_current_profile_id(), item_id, state)
+        return jsonify({"success": ok})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/inbox/dismiss-all', methods=['POST'])
+def dismiss_discovery_inbox():
+    try:
+        from core.discovery import inbox as _inbox
+        n = _inbox.dismiss_all_unread(get_database(), get_current_profile_id())
+        return jsonify({"success": True, "dismissed": n})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/inbox/refresh', methods=['POST'])
+def refresh_discovery_inbox():
+    try:
+        from core.discovery import inbox as _inbox
+        started = _inbox.refresh_in_background(get_database(), get_current_profile_id())
+        return jsonify({"success": True, "started": started})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
