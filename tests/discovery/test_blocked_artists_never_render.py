@@ -337,6 +337,9 @@ NOT_A_SURFACE = {
     '/api/discover/your-artists/refresh',  # "refresh started" ack for a background refresh
     '/api/discover/your-albums/refresh',  # "refresh started" ack for a background refresh
     '/api/discover_downloads/snapshot',  # persists the caller's download bubbles; save ack only
+    '/api/discovery-pool/fix',  # links a mirrored track to caller-supplied match; write ack only
+    '/api/discovery-pool/rematch',  # replaces/clears a discovery cache entry; write ack only
+    '/api/discover/listenbrainz/refresh',  # playlist refresh summary counts, no rows
 }
 
 
