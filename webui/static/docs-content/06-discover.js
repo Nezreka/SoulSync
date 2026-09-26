@@ -23,27 +23,28 @@ The hero slider showcases **recommended artists** based on your watchlist. Each 
             title: 'Discovery Playlists',
             lede: 'Auto-generated playlists from your discovery pool and your own listening data.',
             body: `
-SoulSync generates playlists from two sources: your **discovery pool** (50 similar artists refreshed during watchlist scans) and your **library listening data**:
+SoulSync auto-generates playlists from your **discovery pool** (similar artists found during watchlist scans) and your **listening data**:
 
-| Playlist | Source | Description |
-|----------|--------|-------------|
-| **Popular Picks** | Discovery Pool | Top tracks from discovery pool artists |
-| **Hidden Gems** | Discovery Pool | Rare and deeper cuts from pool artists |
-| **Discovery Shuffle** | Discovery Pool | Randomized mix across all pool artists |
-| **Recently Added** | Library | Tracks most recently added to your collection |
-| **Top Tracks** | Library | Your most-played or highest-rated tracks |
-| **Forgotten Favorites** | Library | Tracks you haven't listened to in a while |
-| **Decade Mixes** | Library | Tracks grouped by release decade (70s, 80s, 90s, etc.) |
-| **Daily Mixes** | Library | Auto-generated daily playlists based on your taste profile |
-| **Familiar Favorites** | Library | Well-known tracks from artists you follow |
+| Playlist | Description |
+|----------|-------------|
+| **The Archives** | Your Discover Weekly — curated discovery picks |
+| **Daily Mix** | One personalized mix per top library genre |
+| **Discovery Shuffle** | Pure random shuffle from the discovery pool — different every refresh |
+| **Fresh Tape** | Release Radar — new releases from artists you follow |
+| **Genre — X** | Discovery picks within one genre |
+| **Hidden Gems** | Low-popularity underground / indie discovery picks |
+| **Your Listening Mix** | Tracks from artists matched to what you actually listen to |
+| **Popular Picks** | High-popularity tracks from the discovery pool |
+| **Seasonal — X** | Holiday / season-themed picks |
+| **Time Machine — X** | Tracks from a specific decade |
 
 ![Discovery playlist cards](disc-playlists.jpg)
 
 Each playlist can be played in the media player, downloaded, or synced to your media server.
 
-## Genre Browser
+## Genre Explorer
 
-Filter discovery pool content by specific genres. Browse available genres and view top tracks within each genre category.
+A row of genre pills at the top of the Discover page. Each pill shows an artist count and whether the genre has been explored — click one to open a **Genre Deep Dive** of that genre's artists.
 
 ![Genre browser](disc-genre-browser.jpg)
 
@@ -66,9 +67,9 @@ If ListenBrainz is configured, the Discover page also shows personalized playlis
         {
             id: 'disc-build',
             title: 'Build Custom Playlist',
-            lede: 'Pick 1–5 artists and generate a custom playlist from their catalogs.',
+            lede: 'Pick 1–5 seed artists and generate a 50-track playlist from albums by similar artists.',
             body: `
-Search for 1–5 artists, select them, and click **Generate** to create a custom playlist from their catalogs. You can then download the generated playlist or sync it to your media server.
+Search for 1–5 seed artists, select them, and click **Generate**. SoulSync finds similar artists, pulls their albums, and assembles a 50-track playlist mixing your picks with new discoveries. You can then download the generated playlist or sync it to your media server.
 
 ![Build custom playlist](disc-build-playlist.jpg)
 
@@ -109,11 +110,11 @@ Browse discovery pool content by **decade** — tabs from the 1950s through the 
             body: `
 Three interactive canvas-based visualization modes for exploring artist relationships, accessed from the Discover page:
 
-- **Watchlist Constellation** — your watched artists as large nodes with similar artists orbiting around them. Reveals connections you might not have noticed
+- **Watchlist Map** — your watched artists as large nodes with similar artists orbiting around them. Reveals connections you might not have noticed
 - **Genre Map** — browse all artists by genre with a sidebar picker. Ring-packed clusters, no artist cap. Great for exploring genres you don't normally listen to
 - **Artist Explorer** — deep-dive any artist. Ring 1 shows direct similar artists, Ring 2 shows the extended network. Exploring an unknown artist fetches similar artists in real-time and caches them
 
-**Controls:** mouse wheel to zoom, click to explore, hover for tooltips with genre tags. Keyboard shortcuts: \`?\` for help, \`F\` to fit view, \`S\` to search.
+**Controls:** mouse wheel to zoom, click to explore, hover for tooltips with genre tags. Keyboard shortcuts: **F** / **0** to fit the view, **S** to focus search, **D** to toggle the perf overlay, **H** to toggle similar artists, **+** / **-** to zoom, **Esc** to close.
 `
         },
         {
@@ -121,13 +122,17 @@ Three interactive canvas-based visualization modes for exploring artist relation
             title: 'Listening Stats',
             lede: 'Analytics about your library and listening activity.',
             body: `
-The Stats page shows analytics about your music library and listening activity. Requires ListenBrainz or Last.fm scrobbling to be enabled for listening data.
+The Stats page shows analytics about your music library and listening activity, split into two tabs: **Listening** and **Library**.
 
-- **Library overview** — total artists, albums, tracks, total file size, format distribution
-- **Top artists, albums, and tracks** — ranked by play count or library presence
-- **Genre distribution** — visual breakdown of genres across your library
-- **Recent additions** — latest tracks and albums added to your library
-- **Listening timeline** — activity over time when scrobbling is configured
+Listening data requires **Listening Stats** to be enabled in Settings → Library ("Enable listening stats collection from media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
+
+- **Overview** — total plays, listening time, and unique artists, albums, and tracks
+- **Top artists, albums, and tracks** — ranked by play count
+- **Genre breakdown** — visual distribution of genres across your listening
+- **Recently played** — your latest plays
+- **Listening timeline** — activity over time
+
+The **Library** tab shows operational facts instead: Library Health, Library Disk Usage, and Database Storage.
 `
         },
     ]

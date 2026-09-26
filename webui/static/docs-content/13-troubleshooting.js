@@ -28,7 +28,7 @@ The Settings → Logs tab streams live logs with real-time operational diagnosti
             title: 'Debug Info',
             lede: 'One click collects everything needed to diagnose a problem.',
             body: `
-The **Copy Debug Info** button (in Settings) collects a comprehensive diagnostic snapshot:
+The **Copy Debug Info** button — in the **Help & Docs sidebar header**, just under the search box — collects a comprehensive diagnostic snapshot. Pick how many log lines to include and which log file to sample (app, post-processing, acoustid, or source reuse), then click:
 
 - System info: version, OS, Python version, Docker status, ffmpeg version, uptime
 - Service status: media server, Soulseek, Spotify, and metadata services
@@ -58,7 +58,7 @@ Paste it into a GitHub issue or the Discord when asking for help — it answers 
 
 ## Import folder not detected
 
-- Confirm the import path in Settings uses the **container path** (e.g. \`/import\`), not the host path.
+- Confirm the import path (Settings \u2192 Library \u2192 Folders \u2192 **Import Folder**) uses the **container path** (e.g. \`/app/Staging\` in Docker), not the host path.
 - Check the folder's ownership matches the container's PUID/PGID — the import page tells you when it can't read the folder.
 - Verify the volume is actually mounted in your compose file.
 
@@ -66,7 +66,7 @@ Paste it into a GitHub issue or the Discord when asking for help — it answers 
 
 1. Confirm exactly one media server is set **active** in Settings.
 2. Use **Test Connection** to verify host, port, and credentials.
-3. Trigger a manual **Scan Library** from Settings.
+3. Trigger a manual **Scan Library** from the **Tools page → Media Server Scan** card (Plex only).
 4. For Navidrome, changes are auto-detected — no scan needed.
 
 ## Metadata looks wrong
@@ -77,7 +77,7 @@ Paste it into a GitHub issue or the Discord when asking for help — it answers 
 ## Automation didn't fire
 
 1. Check the automation card: last run time, last result, and next-run countdown.
-2. Open the Dashboard activity feed for the execution history.
+2. Click **Runs: N** on the automation card to open its run-history modal.
 3. For signal chains, check that the upstream automation actually fired its signal — and remember the 10-second cooldown and 5-level depth limit.
 4. Look in \`app.log\` for the automation name around the expected fire time.
 `

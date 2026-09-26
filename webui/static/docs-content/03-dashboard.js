@@ -12,7 +12,7 @@ registerDocsSection({
 
 The dashboard is organized into bands that appear when they have something to show:
 
-- **Header** — library stats (artists, albums, tracks), **worker orbs** showing enrichment status per service, and the version button.
+- **Header** — library stats (artists, albums, tracks) and **worker orbs** showing enrichment status per service. **Quick navigation tiles** jump straight to Watchlist and Wishlist, with live badges and the next watchlist scan countdown.
 - **Alerts band** — the exception surface. It renders *nothing* while every core connection is healthy, and shouts only when a human is needed (a service disconnected, a scan failed, etc.).
 - **Active downloads** — appears full-width while anything is downloading, with live progress.
 - **Listen band** — **Library Radio** (an endless shuffle of your own collection) and **Your Mixes** (the doorway to Discover's daily mixes).
@@ -26,7 +26,7 @@ Stats update in real time over WebSocket — no page refresh needed.
 ![Dashboard overview](dash-overview.jpg)
 
 > [!TIP]
-> Click the **version number** in the header to open the **What's New** modal with release notes. It glows when an update is available: green for routine, yellow for major, red for critical.
+> Click the **version number** in the sidebar footer to open the **What's New** modal with release notes. It glows when an update is available: green for routine, yellow for major, red for critical.
 `
         },
         {
@@ -75,27 +75,43 @@ The floating **"Search everything…"** bar that used to sit above the media pla
             body: `
 ## Worker orbs
 
-The dashboard header shows a **worker orb** for each metadata service. Hover any orb to see its current status, what item it's processing, and progress counts (e.g. "142/500 matched"). Workers run automatically in the background, enriching your library with:
+The dashboard header shows a **worker orb** for each of 17 background workers. Hover any orb to see its current status, what item it's processing, and progress counts (e.g. "142/500 matched"). Enrichment workers run automatically in the background, enriching your library with:
 
 ::: cards
 ### 🟣 MusicBrainz
 MBIDs for artists, albums, and tracks — enables accurate cross-referencing.
-### 🟢 Spotify
-Artist genres, follower counts, images, album release dates, track previews.
-### 🟣 Deezer
-Deezer IDs, genres, album metadata.
 ### 🔵 AudioDB
 Artist descriptions, artist art, album info.
+### 🟣 Deezer
+Deezer IDs, genres, album metadata.
+### 🎵 JioSaavn
+Track, album, and artist metadata — strong for Indian and Bollywood catalogs (experimental, enable under Settings → Advanced).
+### 🟢 Spotify
+Artist genres, follower counts, images, album release dates, track previews.
 ### 🌸 iTunes
 Apple Music IDs and preview links.
 ### 🔴 Last.fm
 Listener and play counts, bios, tags, similar artists.
 ### 🟡 Genius
 Lyrics, descriptions, alternate names, song artwork.
+### 🌊 Bandcamp
+Album and track metadata from Bandcamp.
 ### 🩵 Tidal
 Tidal IDs, artist images, album labels, explicit flags, ISRCs.
 ### 🔵 Qobuz
 Qobuz IDs, artist images, album labels, genres, explicit flags.
+### ⚫ Discogs
+Genres, styles, labels, catalog numbers, community ratings.
+### 🟠 Amazon
+Amazon Music metadata for artists, albums, and tracks.
+### 🟪 Similar Artists
+Similar-artist recommendations from MusicMap.
+### 🌐 Hydrabase
+P2P mirror status.
+### 🔧 Repair
+Background library repair jobs — findings land on the Tools page.
+### 🟢 SoulID
+Deterministic SoulIDs generated for artists, albums, and tracks.
 :::
 
 ![Enrichment workers status](dash-workers.jpg)
@@ -110,18 +126,18 @@ Workers include smart rate limiting for all APIs. If Spotify returns a rate limi
         },
         {
             id: 'dash-tools',
-            title: 'Quick Actions',
-            lede: 'Three control rooms: Auto-Sync, Tools, and Automations.',
+            title: 'Dashboard Sidebar',
+            lede: 'Live control cards for sync pipelines, automations, and quick navigation.',
             body: `
-## The Quick Actions card
+## Sidebar cards
 
-The dashboard's **Quick Actions** card holds three tiles — "three control rooms inside SoulSync":
+The dashboard sidebar holds three live cards, top to bottom:
 
-- **Auto-Sync** (Playlist pipeline) — refresh, discover, sync, and wishlist processing running on a schedule you set. Click **Manage Schedule** to configure it.
-- **Tools** (Maintenance) — database, scanning, repair, and backups. Opens the Tools page maintenance surface (sidebar → Tools).
-- **Automations** (Trigger → action) — events, schedules, signals, and then-actions. Opens the [Automations page](#auto-overview).
+- **Playlist sync** — your sync pipelines with a health bar (percent of playlist tracks in your library), per-pipeline run controls, and a **Manage** link that opens the sync board.
+- **Up next** — a compact Automations card showing your next scheduled automations with run-now and toggle controls. The **Automations** link opens the full [Automations page](#auto-overview).
+- **Quick navigation tiles** — two tiles that jump straight to **Watchlist** (live watched-artist count plus a countdown to the next scan) and **Wishlist** (live queue count).
 
-Each tile pulses while its system is actively working, so you can see at a glance what's running.
+The dashboard footer holds quick settings toggles.
 
 ![Dashboard tool cards](dash-tools.jpg)
 
@@ -190,17 +206,17 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Dead File Cleaner | Removes database entries pointing to files that no longer exist |
 | Duplicate Detector | Identifies duplicate tracks by fingerprint or metadata match |
 | AcoustID Scanner | Batch audio fingerprint verification across your library |
-| Missing Cover Art | Detects albums/tracks without embedded artwork and fetches it |
+| Cover Art Filler | Detects albums/tracks without embedded artwork and fetches it |
 | Metadata Gap Filler | Completes missing fields (genre, year, …) from connected services |
 | Album Completeness | Flags incomplete albums and finds the missing tracks |
 | Fake Lossless Detector | Identifies FLAC files without real high-frequency content |
 | Library Reorganize | Restructures folders to match your path templates |
 | MBID Mismatch Detector | Verifies MusicBrainz IDs are still accurate |
 | Album Tag Consistency | Standardizes tags across all tracks in an album |
-| Cache Evictor | Cleans expired metadata cache entries |
+| Cache Maintenance | Cleans expired metadata cache entries |
 
 > [!WARNING]
-> **Mass orphan safety:** if the orphan detector flags more than 50% of files as orphans, a **"Witness Me"** confirmation requires you to type the phrase before any deletions proceed — preventing accidental mass deletion from path mismatches.
+> **Mass orphan safety:** if the orphan detector flags more than 20 findings with the mass-orphan flag set, a **"Witness Me"** confirmation requires you to type the phrase before any deletions proceed — preventing accidental mass deletion from path mismatches.
 `
         },
         {

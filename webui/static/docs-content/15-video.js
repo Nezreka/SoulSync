@@ -60,7 +60,7 @@ A **quality profile** is an ordered ladder of allowed qualities — for example,
 Quality isn't one-size-fits-all: individual movies and shows can carry their own quality profile and series-type setting from their detail page, overriding the global default.
 
 > [!WARNING]
-> Quality profiles, custom formats, and download-client credentials are **admin-only** for both reads and writes — the reads can expose tokens. The download modal's read-only metadata lookups stay open so any allowed profile can queue a grab.
+> Quality profile and custom format reads are open to any video-enabled profile (the download modal needs them to queue a grab); only **writes** are admin-only. Download-client credentials are admin-only for both reads and writes — those reads can expose tokens.
 
 YouTube grabs use their own separate quality selector rather than the movie/TV ladder.
 `
@@ -68,23 +68,29 @@ YouTube grabs use their own separate quality selector rather than the movie/TV l
         {
             id: 'vdl-lists',
             title: 'Import Lists',
-            lede: 'Turn lists you curate elsewhere — Trakt, IMDb, Plex Watchlist — into titles SoulSync goes and gets.',
+            lede: 'Turn lists you curate elsewhere — TMDB, IMDb, Plex Watchlist — into titles SoulSync goes and gets.',
             body: `
-**Import lists** sync an external list into your video wishlist on a schedule. Maintain a list on Trakt, IMDb, or your Plex Watchlist, and SoulSync periodically pulls it in — every title becomes something the pipeline will search for and download.
+**Import lists** sync an external list into your video wishlist. SoulSync periodically pulls each list in — every title becomes something the pipeline will search for and download.
+
+## Supported sources
+
+- **tmdb_list** — a public TMDB list id
+- **tmdb_chart** — a living chart (trending_movies, top_shows, …)
+- **imdb_list** — an IMDb list id
+- **plex_watchlist** — your Plex account's watchlist
 
 ## Setting one up
 
 ::: steps
-1. Open **Video → Downloads → Import Lists** (admin).
-2. Add a list: choose the provider and paste the list URL or identifier.
-3. Pick a sync schedule and the quality profile new titles should use.
-4. Save — the next sync imports any titles you don't already have as wishlist items.
+1. Open **Video → Settings → Downloads** (admin) and add a list: choose the source and paste the list URL or identifier.
+2. Pick the quality profile new titles should use.
+3. Save — the next sync imports any titles you don't already have as wishlist items.
 :::
 
 > [!TIP]
-> Import lists are a great way to share curation duties: let a partner maintain a Trakt list and your library fills itself in.
+> Import lists are a great way to share curation duties: let a partner maintain an IMDb list and your library fills itself in.
 
-Import-list configuration is admin-only.
+There's no per-list schedule — syncing runs through the **Sync Import Lists** automation block, so you decide the cadence with an automation on a schedule. Import-list configuration is admin-only.
 `
         },
         {
@@ -149,15 +155,15 @@ registerDocsSection({
             title: 'Request → Approve → Wishlist',
             lede: 'Let non-admin members ask for movies and shows; admins approve with one click.',
             body: `
-The **Requests** system gives every member a voice in what gets added. A member searches for a movie or show and submits a request; an admin reviews the queue and either **approves** it — which drops the title straight onto the wishlist for the pipeline to fulfill — or **denies** it.
+The **Requests** system gives every member a voice in what gets added. A member searches for a movie or show and submits a request; an admin reviews the queue and either **approves** it — movies drop straight onto the wishlist, shows go to the watchlist — or **denies** it.
 
 ## How it works
 
 ::: steps
 1. **Member requests** — any video-enabled profile can submit a request for a title.
 2. **Admin reviews** — the queue shows pending requests with a counts badge so admins never miss one.
-3. **Approve or deny** — approving adds the title to the wishlist immediately; denying closes the request.
-4. **Clean up** — resolved requests can be cleared from the queue.
+3. **Approve or deny** — approving adds the title to acquisition immediately (movie → wishlist, show → watchlist with the monitor policy expanded); denying closes the request.
+4. **Clean up** — resolved requests can be cleared from the queue; a member can withdraw their own request at any time.
 :::
 
 > [!NOTE]
@@ -181,7 +187,7 @@ registerDocsSection({
             body: `
 The **Calendar** lays out upcoming episodes on a week grid — the same shape as the Sonarr/Radarr calendars. Each day shows what's airing with air times; clicking a day opens an agenda, and clicking an episode opens its details.
 
-You can scope the calendar to your **watchlist**, your **library**, or everything, and switch between compact and full views. Everything is scoped per media server, so you only see what's relevant to your setup.
+You can scope the calendar to your **watchlist** or everything (\`watchlist\` / \`all\`), and switch between compact and agenda views. Everything is scoped per media server, so you only see what's relevant to your setup.
 
 > [!TIP]
 > The calendar is driven by your monitored shows — follow a show on the [video watchlist](#vwatch-follow) and its airings appear automatically.
@@ -192,7 +198,7 @@ You can scope the calendar to your **watchlist**, your **library**, or everythin
             title: 'Movie Lane',
             lede: 'Upcoming film releases — theatrical, digital, and physical windows — in one lane.',
             body: `
-Alongside the TV grid, a dedicated **movie lane** tracks upcoming film releases across their windows: theatrical premieres, digital releases, and physical media dates. Movies and shows live in one view, so you can see the whole week of what's coming at a glance.
+Alongside the TV grid, a dedicated **movie lane** tracks upcoming releases for your **wishlisted movies**: the **cinema** (theatrical premiere) date and the **available** (home-release) date, filterable by type. Movies and shows live in one view, so you can see the whole week of what's coming at a glance.
 `
         },
         {
@@ -206,7 +212,7 @@ Take the calendar with you: SoulSync serves an **iCal feed** you can subscribe t
 /api/video/calendar.ics?scope=watchlist
 \`\`\`
 
-The feed respects the same scope parameter as the page (\`watchlist\`, \`library\`, or \`all\`), so your phone calendar only shows what you care about.
+The feed respects the same scope parameter as the page (\`watchlist\` or \`all\`), so your phone calendar only shows what you care about.
 
 > [!NOTE]
 > The iCal feed uses your session context — subscribe from a browser where you're logged in, or check with your admin about feed authentication for your setup.
@@ -240,16 +246,18 @@ If you already know the [music automations](#auto-overview), the video side work
         {
             id: 'vauto-events',
             title: 'Event Triggers',
-            lede: 'Chain workflows off video events: a grab completes, a scan finishes, a title is added.',
+            lede: 'Chain workflows off video events: a grab starts, a scan finishes, a download completes.',
             body: `
 A generic **event bus** exposes video events as automation triggers, so you can chain workflows together. Video events include things like:
 
-- A grab completes
-- A library scan finishes
-- A title is added to the library
-- A wishlist item is fulfilled
+- A release is grabbed (Release Grabbed)
+- A video download completes (Video Downloaded)
+- A library scan finishes (Video Library Scan Done)
+- A wishlist item is added (Video Wishlist Item Added)
+- A request is approved (Request Approved)
+- A maintenance finding is raised (Maintenance Finding Raised)
 
-Example chain: *"after a scan finishes → run enrichment → refresh artwork."* Build it once in the automation builder and it runs itself forever.
+Example chain: *"after a scan finishes → refresh stale metadata → apply overlays."* Build it once in the automation builder and it runs itself forever.
 
 See [Automations](#auto-overview) for the full builder reference.
 `
@@ -273,11 +281,13 @@ It's visual-first: channels get artwork and a proper detail page showing their v
 
 ## Per-channel settings
 
-Each followed channel has its own settings:
+Each followed channel (or playlist) has its own settings:
 
-- **How many recent videos** to pull when you first follow
-- **How far back** to reach into the archive
-- **Quality** selection for channel downloads
+- **Custom name** — a display-name override
+- **Quality** — a per-channel quality override (blank uses the global default)
+- **Title include / exclude** filters and a **minimum minutes** length (channels only)
+- **Retention** — blank or "all" means keep everything
+- **Retry policy** and **archive recheck days** — how failed pulls are retried and how often archived videos are rechecked
 
 > [!NOTE]
 > Starting a download from a channel requires the profile's **download permission**; following and browsing are open to any video-enabled profile.
@@ -292,12 +302,12 @@ Already subscribed to dozens of channels on YouTube? Don't re-follow them one by
 
 ::: steps
 1. Open the YouTube section and choose **Import Subscriptions**.
-2. Provide your subscription list — SoulSync shows a **preview** of every channel it found.
-3. Tick the channels you want to follow and hit **Import**.
-4. Watch live progress as each channel is added with your default per-channel settings.
+2. Paste (or upload) your **ytdl-sub / Kometa subscription file** — SoulSync shows a **preview** of every channel it found.
+3. Hit **Import** — everything in the file is followed at once (there's nothing to pick and choose; already-followed channels are skipped untouched).
+4. Watch live progress as the background job adds each channel and wishes its recent videos.
 :::
 
-You can adjust per-channel pull settings after import from each channel's page.
+You can adjust per-channel settings after import from each channel's page.
 `
         },
         {
@@ -356,14 +366,18 @@ The manager shows you what's *missing* from a collection — and lets you **wish
             title: 'Library Maintenance',
             lede: 'Repair jobs that find library problems and fix them — individually or in bulk.',
             body: `
-**Library Maintenance** runs repair jobs that scan the video library for problems:
+**Library Maintenance** runs ten repair jobs that scan the video library for problems:
 
-- Missing artwork
-- Ghost / orphan database rows
-- Un-monitored gaps
-- YouTube ghosts (entries with no backing channel)
-- Stale watched state
-- And more
+- **Broken files** — files that fail integrity checks
+- **Duplicate copies** — duplicate movies taking up space
+- **Metadata gaps** — titles missing key metadata
+- **Missing episodes** — episodes that should exist but don't
+- **Complete the collection** — gaps in movie collections you own
+- **Naming conformance** — files that don't match your naming scheme
+- **Quality upgrades** — titles below their quality-profile cutoff
+- **Watched cleanup** — stale watched state
+- **Wishlist audit** — wishlist entries that no longer make sense
+- **YouTube ghost files** — entries with no backing channel
 
 Each job produces rich, lazy-loaded **findings** you can fix individually, fix in bulk, resolve, or dismiss — with a full run history and live progress while jobs execute.
 
@@ -403,7 +417,7 @@ A **Server Activity** drawer shows live Plex streams and recent watch history ap
 Take **on-demand or scheduled backups** of the video database, then restore or download them when needed.
 
 > [!DANGER]
-> A restore **replaces the entire database**. Backup endpoints are admin-only, and you should verify a backup's integrity before restoring over a live system.
+> A restore **replaces the entire database** — and it's **staged, not instant**: the swap happens on the next restart, with the current database set aside (kept, not deleted). Backup endpoints are admin-only, and you should verify a backup's integrity before restoring over a live system.
 `
         },
     ]
@@ -424,10 +438,10 @@ When a completed download can't be automatically placed into the library — amb
 - **Place** it manually into the correct title, or
 - **Dismiss** it if it doesn't belong in your library.
 
-This is the video equivalent of the music side's manual import step.
-
 > [!NOTE]
-> Manual import placement mutates the library on disk, so it's **admin-only**.
+> The Import page is hidden from the sidebar nav — you reach it through the **Manual Import** button on failed items in [Downloads](#video-downloads). Manual import placement mutates the library on disk, so it's **admin-only**.
+
+This is the video equivalent of the music side's manual import step.
 `
         },
     ]
@@ -505,7 +519,7 @@ A single blueprint-level gate enforces these rules on every request:
 | **Download permission** | Actions that trigger a download (grab, retry, YouTube download, wishlist/watchlist add) require the profile's \`can_download\` flag. |
 
 > [!NOTE]
-> The tables below are a route reference. Because these run against your live library and some are destructive, there's no in-page "try it" runner for the video API (unlike the public REST API).
+> The tables below are a route reference for the session-authenticated internal \`/api/video\` surface — these act on your logged-in browser session, not an API key, so there's no in-page "try it" runner for them. The key-authenticated video v1 surface (\`/api/v1/video/*\`, documented under [Video](#api-video)) **is** covered by the Try It runner in the API explorer at the bottom of the API Reference pages.
 `
         },
         {
@@ -526,7 +540,7 @@ Base path: \`/api/video\`. Read-only content endpoints, open to any video-enable
 | GET | \`/search\`, \`/search/studios\`, \`/trending\` | Search movies/shows/people/studios; trending feed |
 | GET | \`/studio/{id}\`, \`/studio/{id}/movies\`, \`/studio/presets\` | Studio detail, paged filmography, preset studios |
 | GET | \`/discover/hero\`, \`/discover/foryou\`, \`/discover/taste\`, \`/discover/morelike\`, \`/discover/gaps\`, \`/discover/genres\`, \`/discover/list\`, \`/discover/trailer\` | Discover feed surfaces |
-| GET/POST | \`/discover/ignore\`, \`/discover/languages\`, \`/discover/providers-pref\` | Per-profile discover preferences |
+| GET/POST | \`/discover/ignore\`, \`/discover/languages\`, \`/discover/providers-pref\` | Global discover preferences |
 | GET | \`/calendar\`, \`/calendar.ics\` | Upcoming airings/releases (JSON + iCal feed) |
 | GET | \`/poster/{kind}/{id}\`, \`/backdrop/...\`, \`/img\` | Poster/backdrop/art proxy |
 `
@@ -549,14 +563,17 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
 | GET/POST/DELETE | \`/downloads/blocklist\` | Release blocklist | admin |
 | GET/POST | \`/downloads/slskd\` | Soulseek credentials/config | admin |
 | GET | \`/wishlist\`, \`/wishlist/counts\` | Wanted & cutoff-unmet | video |
-| POST | \`/wishlist/search\`, \`/wishlist/search-all\` | Search Now for wishlist items | video |
+| POST | \`/wishlist/search\`, \`/wishlist/search-all\` | Search Now for wishlist items | can_download |
 | POST | \`/wishlist/add\` | Add to wishlist | can_download |
-| POST | \`/wishlist/remove\`, \`/wishlist/clear\`, \`/wishlist/backfill-art\` | Manage wishlist | video |
+| POST | \`/wishlist/remove\`, \`/wishlist/clear\` | Remove / clear wishlist | can_download |
+| POST | \`/wishlist/backfill-art\` | Backfill missing wishlist art | video |
 | GET | \`/watchlist\`, \`/watchlist/counts\` | Followed people/studios | video |
 | POST | \`/watchlist/add\` | Follow a person/studio | can_download |
-| POST | \`/watchlist/remove\`, \`/watchlist/person/{id}/settings\`, \`/watchlist/studio/{id}/settings\` | Manage follows | video |
+| POST | \`/watchlist/remove\` | Unfollow a person/studio | can_download |
+| POST | \`/watchlist/person/{id}/settings\`, \`/watchlist/studio/{id}/settings\` | Per-follow settings | video |
 | POST | \`/requests\` | Submit a member request | video |
-| POST | \`/requests/{id}/approve\`, \`/requests/{id}/deny\`, DELETE \`/requests/{id}\` | Resolve requests | admin |
+| POST | \`/requests/{id}/approve\`, \`/requests/{id}/deny\` | Approve / deny a request | admin |
+| DELETE | \`/requests/{id}\` | Withdraw your own request (admins: any) | video |
 | POST | \`/scan/request\`, \`/scan/server\`, \`/scan/stop\` | Trigger / stop a library scan | video |
 | POST | \`/monitor\`, \`/bulk/start\` | Monitor toggle & bulk jobs | admin |
 | PUT/POST | \`/detail/{kind}/{id}/metadata\`, \`/lock\`, \`/quality-profile\`, \`/series-type\`, \`/watched\` | Edit / lock / configure a title (watched is open) | admin (watched: video) |
@@ -581,7 +598,11 @@ Base path: \`/api/video\`. **Admin-only** for every method.
 | GET/POST/PUT | \`/repair/jobs...\`, \`/repair/status\`, \`/repair/toggle\`, \`/repair/pause\`, \`/repair/resume\` | Library Maintenance jobs & scheduler |
 | GET/POST | \`/repair/findings...\` | Findings: fix, bulk-fix, resolve, dismiss, clear |
 | GET/POST | \`/import/failed\`, \`/import/{id}/place\`, \`/import/{id}/dismiss\` | Manual import of failed downloads |
-| GET/POST/DELETE | \`/backups...\` | Create, restore, download, delete backups |
+| GET | \`/backups\` | List backups | admin |
+| POST | \`/backups\` | Create a backup | admin |
+| POST | \`/backups/restore\` | Stage a restore (applies on next restart) | admin |
+| DELETE | \`/backups/restore\` | Cancel a staged restore | admin |
+| GET | \`/backups/<name>/download\` | Download a backup file | admin |
 `
         },
         {

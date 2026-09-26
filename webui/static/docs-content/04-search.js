@@ -8,7 +8,7 @@ registerDocsSection({
             title: 'Enhanced Search',
             lede: 'The default way to find music — type an artist, album, or track and browse categorized results from your metadata sources.',
             body: `
-Type an artist, album, or track name and results appear in a categorized dropdown as you type. Results come from your primary metadata source (Spotify by default).
+Type an artist, album, or track name and results appear in a categorized dropdown as you type. Results come from your primary metadata source (Deezer by default).
 
 ## Result categories
 
@@ -22,9 +22,9 @@ Type an artist, album, or track name and results appear in a categorized dropdow
 
 - Click an **artist** to open their full discography, with download buttons on every release
 - Click an **album** to open the download modal with per-track selection
-- Click a **track** to search your download sources for that specific song
+- Click a **track** to open the download modal for that specific song
 - **Preview tracks** — the play button on track results streams a short preview from your download source before you commit to a download
-- **Multi-source tabs** — switch between metadata sources (Spotify, iTunes, Deezer) using the tabs above the results. Each source has its own catalog, so a track missing on one may appear on another
+- **Multi-source tabs** — switch between metadata sources using the tabs above the results (Spotify, iTunes, Deezer, and more). Each source has its own catalog, so a track missing on one may appear on another
 
 ![Enhanced search results](dl-enhanced-search.jpg)
 
@@ -35,19 +35,19 @@ Type an artist, album, or track name and results appear in a categorized dropdow
         {
             id: 'search-basic',
             title: 'Basic Search',
-            lede: 'Query Soulseek directly and see exactly what files are available — format, bitrate, uploader, and speed.',
+            lede: 'Query your download sources directly and see exactly what files are available — format, bitrate, uploader, and availability.',
             body: `
-Toggle to **Basic Search** mode for direct Soulseek queries. Instead of metadata-first results, you see the raw files available on the network with full detail: format, bitrate, quality score, file size, uploader name, upload speed, and availability.
+Toggle to **Basic Search** mode to query your configured download source directly. Instead of metadata-first results, you see the raw files available with full detail: format, bitrate, quality score, file size, uploader name, upload speed, and availability. A source chip row above the results lets you pick which configured source to search; with nothing picked, the search uses the orchestrator's default — your single source, or the first source in your hybrid chain.
 
 ## Filters
 
 Narrow results by:
 
-- **Type** — Albums or Singles
+- **Type** — All, Albums, or Tracks
 - **Format** — FLAC, MP3, OGG, AAC, WMA
-- **Sort** — relevance, quality, size, bitrate, duration, or uploader speed
+- **Sort** — Relevance, Quality, Size, Name, Uploader, Bitrate, or Duration
 
-![Basic Soulseek search](dl-basic-search.jpg)
+![Basic search results](dl-basic-search.jpg)
 
 > [!NOTE]
 > Basic Search is ideal when you care about the *file* rather than the *release* — for example, hunting a specific lossless rip or checking what's actually shared for an obscure album.
@@ -56,22 +56,26 @@ Narrow results by:
         {
             id: 'search-sources',
             title: 'Download Sources',
-            lede: 'Six download sources plus Hybrid mode — configure them in Settings and let SoulSync pick the best one.',
+            lede: 'Ten download sources plus Hybrid mode — configure them in Settings and let SoulSync pick the best one.',
             body: `
-SoulSync downloads from multiple sources, configured in **Settings → Download Settings**. Each has different strengths:
+SoulSync downloads from multiple sources, configured in **Settings → Sources**. Each has different strengths:
 
 | Source | Description | Best for |
 |--------|-------------|----------|
 | **Soulseek** | P2P network via slskd — the largest selection of lossless and rare music | FLAC, rare tracks, DJ sets |
-| **YouTube** | Audio extraction via yt-dlp | Live performances, remixes, tracks not on Soulseek |
+| **YouTube** | Audio extraction from YouTube videos | Live performances, remixes, tracks not on Soulseek |
 | **Tidal** | Streaming rip (requires auth) | Guaranteed quality, official releases |
 | **Qobuz** | Hi-Res streaming rip (requires auth) | Audiophile quality, up to 24-bit/192kHz |
 | **HiFi** | Free lossless via community-run API instances | No account needed, good FLAC availability |
 | **Deezer** | Streaming rip via ARL token | Large catalog, easy setup, FLAC with HiFi subscription |
+| **Lidarr** | Your Lidarr instance as a download backend | Hands-off automated library management |
+| **SoundCloud** | Public SoundCloud streams, no account needed | Free, easy setup |
+| **Torrent** | Full releases via your torrent client and Prowlarr indexers | Complete discographies and packs |
+| **Usenet** | Full releases via your Usenet client and Prowlarr indexers | Fast, complete releases |
 | **Hybrid** | Tries your primary source first, then falls back through alternates automatically | Best overall success rate |
 
 > [!TIP]
-> **Hybrid mode** is recommended for most users. It tries your primary source first, then falls back through your configured priority order. All six sources can be ordered via drag-and-drop in Settings.
+> **Hybrid mode** is recommended for most users. It tries your primary source first, then falls back through your configured priority order. All sources can be ordered via drag-and-drop in Settings → Sources.
 
 ## YouTube settings
 
@@ -83,12 +87,9 @@ YouTube has its own options in Settings:
 
 On Docker, use **Paste cookies.txt**: Netscape/Mozilla format only (tab-separated rows). Paste the whole file from a "Get cookies.txt LOCALLY" browser extension — the header line alone is not enough.
 
-## Per-source quality
+## Streaming source quality
 
-Tidal, Qobuz, HiFi, and Deezer each have their own quality dropdown in Settings. By default, if your preferred quality isn't available for a track, the source falls back to the next lower tier (e.g. FLAC → AAC 320).
-
-> [!WARNING]
-> Disable **Allow quality fallback** next to a quality dropdown to enforce strict quality — the source will skip tracks it can't deliver at your chosen quality, and the orchestrator will try the next source in your priority list instead.
+Tidal, Qobuz, HiFi, and Deezer have no per-source quality setting in SoulSync — they all follow your global **Quality Profile** (Settings → Quality). The profile's ranked targets decide which tier each source requests for a track.
 `
         },
         {
@@ -142,20 +143,20 @@ After a file finishes downloading, it moves through an automatic pipeline before
             title: 'Quality Profiles',
             lede: 'Tell SoulSync what "good enough" means — from strict audiophile to space-saving.',
             body: `
-Configure your quality preferences in **Settings → Quality Profile**. Quick presets:
+Configure your quality preferences in **Settings → Quality → Music Quality**. Quick presets:
 
 | Preset | Priority |
 |--------|----------|
-| **Audiophile** | FLAC first, then MP3 320 |
-| **Balanced** | MP3 320 first, then FLAC, then MP3 256 |
-| **Space Saver** | MP3 256 first, then MP3 192 |
+| **Audiophile** | FLAC 24-bit only — no fallback |
+| **Balanced** | FLAC hi-res → 16-bit → MP3 320 / 256 / 192 |
+| **Space Saver** | MP3 320 → 256 → 192 |
 
-Each format has configurable bitrate ranges and a priority order. Enable **Fallback** to accept any quality when your preferred formats aren't available.
+Each format has configurable bitrate ranges and a priority order. Enable **Fallback** ("Accept off-list quality when nothing in the list is available") to accept a quality outside your ranked targets when nothing in the list is available.
 
 ![Quality profile settings](dl-quality-profiles.jpg)
 
 > [!TIP]
-> **Streaming source quality**: Tidal, Qobuz, HiFi, and Deezer each have their own quality dropdown in Settings. By default, if your preferred quality isn't available for a track, the source falls back to the next lower tier (e.g. FLAC → AAC 320). Disable **Allow quality fallback** to enforce strict quality — the orchestrator will then try the next source in your priority list instead of accepting a lower tier.
+> **Streaming source quality**: Tidal, Qobuz, HiFi, and Deezer follow this same profile — there are no separate per-source quality settings. Pick **Audiophile** when you never want a lossy file.
 `
         },
         {
@@ -163,9 +164,9 @@ Each format has configurable bitrate ranges and a priority order. Enable **Fallb
             title: 'Download Manager',
             lede: 'Every active and completed download in one place, with live progress and per-track status.',
             body: `
-Toggle the download manager panel (right sidebar) to see all active and completed downloads. Each download shows real-time progress: track name, format, speed, ETA, and a cancel button.
+Open the **Active Downloads** page to see all active and completed downloads. Each download shows real-time progress: track name, format, speed, ETA, and a cancel button.
 
-Use **Clear Completed** to clean up finished items and keep the list tidy.
+Use **Clear Completed** on the Active Downloads page to clean up finished items and keep the list tidy.
 
 ## Statuses you'll see
 

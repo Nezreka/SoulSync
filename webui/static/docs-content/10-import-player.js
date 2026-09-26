@@ -8,7 +8,7 @@ registerDocsSection({
             title: 'Import Folder',
             lede: 'Drop audio files in a folder — or upload from your browser — and SoulSync identifies and files them.',
             body: `
-Set your **import folder path** in Settings → Download Settings. Drop audio files you want to import into it. Album folders (e.g. \`Artist - Album/\`), loose files that share an album tag, and single files each become one item in the inbox.
+Set your **import folder path** in Settings → Library → Folders. Drop audio files you want to import into it. Album folders (e.g. \`Artist - Album/\`), loose files that share an album tag, and single files each become one item in the inbox.
 
 You can also **upload from the browser**: drop files or a folder anywhere on the list, or use **Add files** / **Add a folder**. A dropped folder keeps its name, so an album lands as one item.
 
@@ -83,15 +83,14 @@ A single file gets the same matcher with track candidates instead of releases. P
         {
             id: 'imp-textfile',
             title: 'Import from Text File',
-            lede: 'Turn a CSV, TXT, or M3U playlist into wishlist downloads.',
+            lede: 'Turn a CSV, TSV, TXT, or M3U playlist into a mirrored playlist on the sync page.',
             body: `
-Import track lists from **CSV**, **TSV**, **TXT**, or **M3U/M3U8** files. Upload a file with columns for artist, album, and track title (M3U playlists are read automatically):
+The sync page's **Import Playlist from File** tab takes a **CSV**, **TSV**, **TXT**, or **M3U/M3U8** file and mirrors it as a playlist (source \`file\`):
 
 ::: steps
-1. Click **Import from File** and select your text file.
-2. Choose the **separator** (comma, tab, or pipe).
-3. Map columns to the correct fields (Artist, Album, Track).
-4. SoulSync searches for each track on Spotify/iTunes and adds matches to your wishlist for downloading.
+1. Drop the file on the tab or browse to select it. It's parsed entirely in the browser — nothing is uploaded.
+2. Tune the reading: for **TXT** files pick the line format (**Artist - Title** or **Title - Artist**) and the separator — \` - \` , \` — \`, \`|\`, or \`/\`. For **CSV/TSV**, the column delimiter (tab, semicolon, or comma) is sniffed automatically, then map columns to **Track**, **Artist**, **Album**, **Duration**, or **Skip**.
+3. Preview every parsed row, give the playlist a name (M3U files pre-fill it), and import — the playlist lands in your **mirrored playlists** on the sync page, ready to match and download.
 :::
 
 ![Text file import](imp-textfile.jpg)
@@ -122,11 +121,11 @@ Click the sidebar player to open the **Now Playing modal** — a full-screen exp
         {
             id: 'player-streaming',
             title: 'Streaming & Sources',
-            lede: 'Audio streams directly from your media server — no local file access needed.',
+            lede: 'Audio streams the file on SoulSync disk — with a Navidrome fallback when it is not there.',
             body: `
-- **Plex** — streams via the Plex transcoding API with your Plex token
-- **Jellyfin** — streams via the Jellyfin audio API
-- **Navidrome** — streams via the Subsonic-compatible API
+Playback serves the **local file on SoulSync's disk**: the browser asks \`/api/library/play\` for a track and the audio streams from \`/stream/audio\`.
+
+- **Navidrome fallback** — when the file isn't on SoulSync's disk (e.g. the library isn't mounted into the container) and Navidrome is the active media server, playback falls back to streaming via Navidrome's own Subsonic-compatible stream API — no disk mount needed. Plex and Jellyfin have no such fallback, so their files must be reachable on SoulSync's disk.
 
 The browser auto-detects which audio formats it can play. Album art, track metadata, and ambient colors are all pulled from your server in real time.
 `
@@ -153,8 +152,10 @@ Add tracks to the queue from the Enhanced Library Manager or download results. M
 | Key | Action |
 |-----|--------|
 | \`Space\` | Play / Pause |
-| \`→\` | Seek forward / Next track |
-| \`←\` | Seek backward / Previous track |
+| \`→\` | Seek forward 5s |
+| \`←\` | Seek backward 5s |
+| \`N\` | Next track in queue |
+| \`P\` | Previous track in queue |
 | \`↑\` | Volume up |
 | \`↓\` | Volume down |
 | \`M\` | Mute / Unmute |

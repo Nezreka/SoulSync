@@ -11,7 +11,7 @@ registerDocsSection({
             body: `
 SoulSync's **Video** side is a self-hosted movies & TV manager that lives inside the same app as the music side but runs as an **isolated application** — its own database, its own pages, its own API. Think of it as a Sonarr + Radarr + overlay/collection manager built into SoulSync.
 
-It connects to **Plex** or **Jellyfin/Emby** to read your movie and TV libraries, enriches every title from **TMDB**, **TVDB**, **OMDb**, **fanart.tv**, **Trakt**, **TVMaze** and **OpenSubtitles**, and can search, grab, organize, and upgrade downloads to fill the gaps in your collection.
+It connects to **Plex** or **Jellyfin** to read your movie and TV libraries, enriches every title from **TMDB**, **TVDB**, **OMDb**, **fanart.tv**, **Trakt**, **TVMaze** and **OpenSubtitles**, and can search, grab, organize, and upgrade downloads to fill the gaps in your collection.
 
 ::: cards
 ### 🎬 Movies & TV
@@ -23,7 +23,7 @@ Follow people and studios, auto-add their upcoming titles, and track everything 
 ### 🖼️ Overlay & Collection Studios
 A Kometa-style overlay template editor and a collection builder that write badges and collections straight back to Plex/Jellyfin.
 ### 🔧 Library Maintenance
-Repair jobs that scan for problems — missing art, ghosts, orphans, un-monitored gaps — and fix them, with rich findings.
+Ten repair jobs that scan for problems — broken files, duplicates, metadata gaps, missing episodes, YouTube ghost files, and more — and fix them, with rich findings.
 ### 📺 YouTube Channels
 Follow YouTube channels and playlists like shows and pull new uploads into the video download pipeline.
 :::
@@ -37,27 +37,27 @@ Follow YouTube channels and playlists like shows and pull new uploads into the v
             title: 'Switching Sides',
             lede: 'Flip between the Music and Video apps with the side switcher — each side is its own world.',
             body: `
-Use the **side switcher** in the sidebar (the Audio ↔ Video toggle) to flip between the Music and Video apps. Each side has its own navigation, its own pages, and its own settings.
+Use the **side switcher** in the app header (the Audio ↔ Video toggle) to flip between the Music and Video apps. Each side has its own navigation, its own pages, and its own settings.
 
-A handful of pages are **shared** across both sides — **Chat**, **Issues**, and this **Help & Docs** page — so you land on the same page no matter which side you were on. Everything else is side-specific: the video sidebar shows Dashboard, Search, Discover, Library, Watchlist, Wishlist, Downloads, Requests, Calendar, Automations, Tools, Import, and Settings for the video side.
+A handful of pages are **shared** across both sides — **Chat**, **Issues**, and this **Help & Docs** page — so you land on the same page no matter which side you were on. Everything else is side-specific: the video sidebar shows Dashboard, Search, Discover, Library, Watchlist, Wishlist, Downloads, Requests, Calendar, Automations, Tools, and Settings for the video side.
 
 > [!TIP]
-> Your last-used side is remembered per profile, so you'll land right back where you left off next time you open SoulSync.
+> Your last-used side is remembered in this browser (localStorage), so you'll land right back where you left off next time you open SoulSync on this device — it's not tied to your profile.
 `
         },
         {
             id: 'vid-server',
             title: 'Connecting a Media Server',
-            lede: 'Point the video side at Plex or Jellyfin/Emby, pick your libraries, and scan them in.',
+            lede: 'Point the video side at Plex or Jellyfin, pick your libraries, and scan them in.',
             body: `
-The video side reads your libraries from **Plex** or **Jellyfin/Emby**. Configure the connection under **Video → Settings**, pick which libraries to include, then run a scan to import them.
+The video side reads your libraries from **Plex** or **Jellyfin**. Configure the connection under **Video → Settings**, pick which libraries to include, then run a scan to import them.
 
 SoulSync stores a lightweight copy of every movie/show/episode row and enriches it in the background — it never modifies your server's files during a scan.
 
 | Server | What SoulSync reads | Auth |
 |--------|--------------------|------|
-| **Plex** | Movie & TV libraries, watch state, collections, incremental delta via \`updatedAt\` | URL + Token |
-| **Jellyfin / Emby** | Movie & TV libraries, watch state, BoxSets, incremental delta via \`MinDateLastSaved\` | URL + API Key (+ user for watch state) |
+| **Plex** | Movie & TV libraries, watch state, collections, incremental delta via \`addedAt\` | URL + Token |
+| **Jellyfin** | Movie & TV libraries, watch state, BoxSets, incremental delta via \`MinDateLastSaved\` | URL + API Key (+ user for watch state) |
 
 ## Scan types
 
@@ -128,9 +128,11 @@ The Video **Dashboard** is your at-a-glance home for the video side:
 - **Library counts** — movies, shows, and episodes tracked in \`video_library.db\`
 - **Download activity** — what's grabbing, importing, or upgrading right now
 - **Enrichment coverage** — how much of your library has full metadata and art
-- **Health strip** — whether your media server, indexers, and download clients are reachable
+- **Attention** — open issues and pending maintenance findings that need you
+- **System stats** — live memory and uptime
 
-If something in your stack goes down — Prowlarr stops responding, a download client drops off, the media server is unreachable — the health strip flags it here first, before you go hunting through settings.
+> [!NOTE]
+> There is no health strip here. Server, indexer, and download-client reachability surfaces through the scan flows that actually use them. \`/api/video/health\` checks local state only — library roots, disk space, the recycle folder, maintenance errors, monitor liveness — and the notification panel header surfaces it (fetched by the downloads page, which is the only page that queries it).
 `
         },
         {
@@ -140,19 +142,19 @@ If something in your stack goes down — Prowlarr stops responding, a download c
             body: `
 A **Continue Watching** rail surfaces partially-watched movies and the next unwatched episode of shows in progress, drawn from the watch state SoulSync ingests from your server.
 
-Each card jumps straight to the title's detail page with a **Next Up** call-to-action, so resuming a series is one click. Watch state syncs from Plex or Jellyfin/Emby during library scans — mark something watched in your server app and SoulSync picks it up on the next pass.
+Each card jumps straight to the title's detail page with a **Next Up** call-to-action, so resuming a series is one click. Watch state syncs from Plex or Jellyfin during library scans — mark something watched in your server app and SoulSync picks it up on the next pass.
 
 See [Watch State & History](#vdet-watch) for how watch state works per title.
 `
         },
         {
             id: 'vdash-activity',
-            title: 'Recent & Activity',
-            lede: 'Recently added titles and a running feed of what the video side has been doing.',
+            title: 'Recently Added & Attention',
+            lede: 'What just landed in your library, plus open issues and maintenance findings that need you.',
             body: `
-**Recently added** titles show what's landed in your library, and a running **activity feed** (scans, grabs, imports, upgrades) keeps you current on what the video side has been doing — without opening every page.
+**Recently added** titles show what's landed in your library. The dashboard's **attention** area surfaces open issues and pending maintenance findings — the things that actually need your input.
 
-Use it as a quick sanity check: if an automation grabbed something overnight, you'll see it here first.
+Use it as a quick sanity check after an overnight run: if an automation grabbed something, you'll see it in recently-added; if it found a problem, it's in attention. There is no running activity feed.
 `
         },
     ]
@@ -252,7 +254,7 @@ Genre browsing respects your [preferences](#vdisc-prefs) — ignored titles stay
         {
             id: 'vdisc-prefs',
             title: 'Preferences',
-            lede: 'Tune Discover to your region, services, and taste — these persist per profile.',
+            lede: 'Tune Discover to your region and services — these preferences are global.',
             body: `
 Tune Discover to your region and services:
 
@@ -260,7 +262,7 @@ Tune Discover to your region and services:
 - **Providers** — restrict recommendations to the streaming services you actually use
 - **Ignored titles** — titles you never want to see again, anywhere in Discover
 
-These preferences persist **per profile**, so everyone in the household gets their own tuned experience.
+These preferences are **global**, not per profile — one shared set for the whole household, stored in the video database.
 `
         },
     ]
@@ -305,16 +307,17 @@ Locked fields are respected by every future enrichment pass — your corrections
         {
             id: 'vlib-bulk',
             title: 'Bulk Operations',
-            lede: 'Act on many titles at once — monitor, assign profiles, edit metadata, mark watched.',
+            lede: 'Act on many titles at once — monitor, mark watched, edit ratings and genres, refresh art.',
             body: `
 Select multiple titles to act on them at once:
 
 - Bulk **monitor / unmonitor**
-- Bulk **quality-profile** assignment
-- Bulk **metadata** edits
-- Mass **mark-watched**
+- Bulk **mark watched / unwatched**
+- Bulk **content rating** changes
+- Bulk **genre add / remove**
+- Bulk **artwork refresh**
 
-Large bulk jobs run in the background so the UI stays responsive — kick off a thousand-title re-profile and keep browsing.
+Large bulk jobs run in the background so the UI stays responsive — kick off a thousand-title job and keep browsing.
 
 > [!WARNING]
 > Library edits, deletes, re-matches, and bulk jobs are **admin-only**. Non-admin profiles can browse everything, but mutating the library requires an admin profile.
@@ -341,7 +344,7 @@ Every title has a rich **detail page**:
 - Format badges (HDR, Dolby Vision, Atmos, channel layout)
 - For shows: a full **season / episode** breakdown
 
-Movies and shows can come from either Plex or Jellyfin/Emby and render the same way. From a detail page you can manage metadata, change quality profiles, toggle watch state, and kick off downloads.
+Movies and shows can come from either Plex or Jellyfin and render the same way. From a detail page you can manage metadata, change quality profiles, toggle watch state, and kick off downloads.
 `
         },
         {
@@ -419,11 +422,14 @@ Follow from anywhere a follow button appears: [detail pages](#vdet-people), [stu
         {
             id: 'vwatch-settings',
             title: 'Per-Follow Settings',
-            lede: 'Fine-tune each follow: movies, TV, or both — and how far back to reach.',
+            lede: 'Fine-tune each follow: how far back to reach into their catalog.',
             body: `
-Each follow has its own settings — decide whether to auto-add **movies**, **TV**, or **both**, and how far back to reach into their catalog.
+Each follow has one setting: the **back-catalog window** (\`lookback_years\`) — how far back to reach into their catalog. \`0\` is forward-only (upcoming and new releases), \`N\` reaches N years back, and \`-1\` is everything.
 
-This keeps a prolific studio from flooding your wishlist while still catching the titles you care about. Following A24 for movies-only, for example, won't bury you in their television output.
+This keeps a prolific studio from flooding your wishlist while still catching the titles you care about.
+
+> [!NOTE]
+> Person scans are **movies only** — shows are followed through the watchlist's own show automations, not through person follows. There is no movies/TV/both choice per follow.
 `
         },
         {

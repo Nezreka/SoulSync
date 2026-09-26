@@ -61,13 +61,21 @@ Every response uses the same shape, success or failure:
 }
 \`\`\`
 
-Errors look like \`{"success": false, "data": null, "error": {"code": "INVALID_KEY", "message": "..."}, "pagination": null}\`. List endpoints accept \`page\` and \`limit\` query parameters and populate \`pagination\`.
+Errors look like \`{"success": false, "data": null, "error": {"code": "INVALID_KEY", "message": "..."}, "pagination": null}\`. \`pagination\` is only populated on endpoints that are paginated (each section below says which ones are) — everywhere else it is \`null\`. Paginated endpoints accept \`page\` and \`limit\` query parameters.
+
+## Field selection & profile scoping
+
+Two cross-cutting parameters work on many endpoints:
+
+- \`?fields=id,name,thumb_url\` trims returned objects to just the comma-separated fields you name.
+- **Profile scoping:** send an \`X-Profile-Id\` header (or \`?profile_id=\` query parameter) to scope per-profile endpoints (watchlist, wishlist, …) to that profile. It defaults to profile 1 when omitted.
 
 ## Limits & errors
 
 | Behavior | Detail |
 |----------|--------|
 | Rate limit | 60 requests/minute per IP across the API |
+| Rate limited | \`429\` with code \`RATE_LIMITED\` |
 | Missing key | \`401\` with code \`AUTH_REQUIRED\` |
 | Wrong key | \`403\` with code \`INVALID_KEY\` |
 `
@@ -79,11 +87,11 @@ Errors look like \`{"success": false, "data": null, "error": {"code": "INVALID_K
             body: `
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | \`/system/status\` | Health check: is the server up and what version is it |
+| GET | \`/system/status\` | Health check: server uptime and service connectivity |
 | GET | \`/system/stats\` | Library and worker statistics |
 | GET | \`/system/activity\` | Recent activity feed entries |
 
-\`/system/status\` is the one to point your uptime monitor at — it is cheap and answers whether the web server is healthy. \`/system/stats\` backs the dashboard numbers, and \`/system/activity\` returns the same feed you see in the UI, newest first.
+\`/system/status\` is the one to point your uptime monitor at — it is cheap and answers whether the web server is healthy, with uptime and service connectivity flags. \`/system/stats\` backs the dashboard numbers, and \`/system/activity\` returns the same feed you see in the UI, newest first.
 `
         },
         {
@@ -99,14 +107,14 @@ Errors look like \`{"success": false, "data": null, "error": {"code": "INVALID_K
 | GET | \`/library/albums\` | List albums (paginated) |
 | GET | \`/library/albums/{album_id}\` | One album |
 | GET | \`/library/albums/{album_id}/tracks\` | Tracks on an album |
-| GET | \`/library/tracks\` | List tracks (paginated) |
+| GET | \`/library/tracks\` | Search tracks — needs \`title\` or \`artist\` (not paginated) |
 | GET | \`/library/tracks/{track_id}\` | One track |
 | GET | \`/library/genres\` | Genre list with counts |
 | GET | \`/library/recently-added\` | Newest additions first |
 | GET | \`/library/lookup\` | Resolve an artist/album/track by external ID |
 | GET | \`/library/stats\` | Library totals |
 
-All list endpoints are paginated with \`page\` and \`limit\` query parameters and return the standard \`pagination\` object. Use \`/library/lookup\` when you have a MusicBrainz or provider ID from somewhere else and need the matching SoulSync record.
+Only some list endpoints are paginated: \`/library/artists\`, \`/library/artists/{artist_id}/albums\`, and \`/library/albums\` accept \`page\` and \`limit\` and return the standard \`pagination\` object. \`/library/tracks\` is a **search**, not a list — it requires a \`title\` or \`artist\` query parameter (both together narrow the match) and answers \`400\` without one; it takes \`limit\` (default 50, max 200) but is not paginated. \`/library/recently-added\` and \`/library/genres\` take an optional \`limit\` and are not paginated either. Use \`/library/lookup\` when you have a MusicBrainz or provider ID from somewhere else and need the matching SoulSync record.
 `
         },
         {
@@ -148,7 +156,7 @@ Send a JSON body with your query, for example \`{"query": "kind of blue", "limit
 | GET | \`/playlists/{playlist_id}\` | One playlist with its tracks |
 | POST | \`/playlists/{playlist_id}/sync\` | Trigger a sync now |
 
-Syncing a playlist re-resolves its tracks against the current library and provider state — the same operation as the Sync button in the UI.
+Syncing a playlist re-resolves its tracks against the current library and provider state — the same operation as the Sync button in the UI. The list endpoint reads your playlists live from the connected provider (\`?source=spotify|tidal\`, default \`spotify\`) and is not paginated.
 `
         },
         {
@@ -158,13 +166,13 @@ Syncing a playlist re-resolves its tracks against the current library and provid
             body: `
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | \`/watchlist\` | Watched artists (paginated) |
+| GET | \`/watchlist\` | Watched artists for the current profile |
 | POST | \`/watchlist\` | Add an artist to the watchlist |
 | PATCH | \`/watchlist/{artist_id}\` | Update watch settings for an artist |
 | DELETE | \`/watchlist/{artist_id}\` | Remove an artist from the watchlist |
 | POST | \`/watchlist/scan\` | Trigger a watchlist scan now |
 
-Adding to the watchlist takes the artist identifier in the JSON body. The scan endpoint starts the same background scan the scheduler runs — useful after bulk changes or from an external trigger.
+Adding to the watchlist takes \`artist_id\` **and** \`artist_name\` in the JSON body — both are required (missing either is a \`400\`). Optional: \`source\` to name the provider explicitly, and \`quality_profile_id\` to set the acquisition quality intent. The scan endpoint starts the same background scan the scheduler runs — useful after bulk changes or from an external trigger.
 `
         },
         {
@@ -179,7 +187,7 @@ Adding to the watchlist takes the artist identifier in the JSON body. The scan e
 | DELETE | \`/wishlist/{track_id}\` | Remove a track from the wishlist |
 | POST | \`/wishlist/process\` | Process the wishlist now |
 
-Processing walks the wishlist and attempts to acquire entries that have become available — the same job the automation scheduler runs. Pair it with the \`wishlist:stats\` real-time event to watch counts change live.
+\`POST /wishlist\` takes the track wrapped in a \`track_data\` object: \`{"track_data": {...}}\`. \`track_data\` is required (missing it is a \`400\`); \`quality_profile_id\` is optional and sets the acquisition quality intent for the item. Processing walks the wishlist and attempts to acquire entries that have become available — the same job the automation scheduler runs. Pair it with the \`wishlist:stats\` real-time event to watch counts change live.
 `
         },
         {
@@ -192,7 +200,7 @@ Processing walks the wishlist and attempts to acquire entries that have become a
 | POST | \`/request\` | Submit a new request |
 | GET | \`/request/{request_id}\` | Check a request's status |
 
-\`POST /request\` takes the track/album/artist identifier in the JSON body and returns a \`request_id\`. Poll \`GET /request/{request_id}\` (or watch download events) to follow it from submitted to fulfilled.
+\`POST /request\` takes a free-text \`query\` in the JSON body — for example \`{"query": "Kind of Blue"}\` — and immediately returns \`202\` with a \`request_id\`. Request state is kept **in memory**: it tracks \`queued → searching → downloading → completed / not_found / failed\`, and entries expire over time, so don't treat \`request_id\` as durable. Poll \`GET /request/{request_id}\` (or watch download events) to follow it from submitted to fulfilled.
 `
         },
         {
@@ -222,11 +230,14 @@ These power the Discover pages in the UI. The pool endpoints accept filtering pa
 | GET | \`/profiles\` | List profiles |
 | POST | \`/profiles\` | Create a profile |
 | GET | \`/profiles/{profile_id}\` | One profile |
-| PATCH | \`/profiles/{profile_id}\` | Update a profile |
+| PUT | \`/profiles/{profile_id}\` | Update a profile |
 | DELETE | \`/profiles/{profile_id}\` | Delete a profile |
 
 > [!WARNING]
-> Profile management is destructive surface area. Deleting a profile removes its settings, watchlist scope, and history — there is no undo. Double-check \`profile_id\` before sending \`DELETE\`.
+> Profile management is destructive surface area. Deleting a profile removes its settings, watchlist scope, and history — there is no undo. Double-check \`profile_id\` before sending \`DELETE\`. Profile 1 (the default admin profile) cannot be deleted: \`DELETE\` answers \`403\`.
+
+> [!NOTE]
+> \`/profiles\` is not paginated — it returns the full list.
 `
         },
         {
@@ -238,7 +249,7 @@ These power the Discover pages in the UI. The pool endpoints accept filtering pa
 |--------|----------|---------|
 | GET | \`/settings\` | Current settings (sensitive values redacted) |
 | PATCH | \`/settings\` | Update settings |
-| GET | \`/api-keys\` | List API keys (hashes and prefixes, never raw keys) |
+| GET | \`/api-keys\` | List API keys (prefixes and labels — never raw keys or hashes) |
 | POST | \`/api-keys\` | Mint a new key (raw key returned once) |
 | DELETE | \`/api-keys/{key_id}\` | Revoke a key |
 | POST | \`/api-keys/bootstrap\` | First-key bootstrap (no auth, only when no keys exist) |
@@ -257,12 +268,12 @@ These power the Discover pages in the UI. The pool endpoints accept filtering pa
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | GET | \`/retag/groups\` | List retag groups |
-| GET | \`/retag/groups/{group_id}\` | One retag group |
-| POST | \`/retag/groups\` | Create a retag group |
-| PATCH | \`/retag/groups/{group_id}\` | Update a retag group |
+| GET | \`/retag/groups/{group_id}\` | One retag group, with its tracks |
+| DELETE | \`/retag/groups/{group_id}\` | Delete one retag group |
+| DELETE | \`/retag/groups\` | Delete all retag groups |
 | GET | \`/retag/stats\` | Retag statistics |
 
-Retag groups collect files that need their metadata rewritten. Create a group, review what it caught, then let the retag worker apply the fixes.
+Retag groups collect files that need their metadata rewritten. List the groups, review what one caught, then delete it when its fixes are done — or clear everything at once. The API does not create or edit groups; they are produced by the retag worker in the app itself.
 `
         },
         {
@@ -291,6 +302,55 @@ These are primarily diagnostic: check hit rates when metadata feels slow, or con
 | GET | \`/listenbrainz/playlists/{playlist_id}\` | One playlist with tracks |
 
 Use these to feed ListenBrainz-derived playlists into external players or dashboards without going through the UI.
+`
+        },
+        {
+            id: 'api-metasync',
+            title: 'MetaSync Export',
+            lede: 'A read-only, cursor-paged walk of the library\u2019s resolved metadata, built for the MetaSync sidecar.',
+            body: `
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | \`/metasync/export\` | Export resolved metadata for artists, albums, or tracks |
+
+\`entity\` is required and must be one of \`artist\`, \`album\`, or \`track\`. Page through with \`cursor\` (an opaque base64 token), limit with \`limit\`, and pass \`since\` (an ISO-8601 timestamp) to export only what changed after a point in time:
+
+\`\`\`bash
+curl -H "Authorization: Bearer sk_..." \\
+  "http://localhost:8008/api/v1/metasync/export?entity=track&limit=500"
+\`\`\`
+`
+        },
+        {
+            id: 'api-video',
+            title: 'Video',
+            lede: 'The full video v1 surface: library, search, wishlist, watchlist, scans, downloads, calendar, and requests.',
+            body: `
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | \`/video/library\` | What's in the video library (\`?kind=movies|shows&search=&letter=&sort=&status=&genre=&page=&limit=\`) |
+| GET | \`/video/library/genres\` | Video library genres |
+| GET | \`/video/search\` | TMDB multi-search — \`?q=\` is required |
+| GET | \`/video/trending\` | Trending titles |
+| GET | \`/video/wishlist\` | Wishlist items — \`?kind=movie|show&search=&sort=&page=&limit=\` for a page; no \`kind\` for counts only |
+| GET | \`/video/wishlist/counts\` | Wishlist counts |
+| POST | \`/video/wishlist\` | Add — \`{"movie": {tmdb_id, title, year?, poster_url?}}\` or \`{"show": {…}, "episodes": [{season_number, episode_number, …}]}\` |
+| DELETE | \`/video/wishlist\` | Remove — \`{scope: movie|show|season|episode, tmdb_id, season_number?, episode_number?}\` |
+| GET | \`/video/watchlist\` | Watched shows, people, and studios |
+| POST | \`/video/watchlist\` | Follow — \`{kind: show|person|studio, tmdb_id, title, poster_url?}\` |
+| DELETE | \`/video/watchlist\` | Unfollow — \`{kind, tmdb_id}\` |
+| POST | \`/video/scan\` | Request a library scan — \`{mode?: incremental|deep|full}\`; \`409\` if a scan is already running |
+| GET | \`/video/scan/status\` | Scan status |
+| GET | \`/video/downloads\` | Active video downloads |
+| GET | \`/video/downloads/status\` | Video download status |
+| GET | \`/video/downloads/history\` | Video download history |
+| GET | \`/video/calendar\` | Upcoming and recent episodes/releases — \`?start=&end=\` as ISO dates |
+| GET | \`/video/requests\` | List video requests |
+| POST | \`/video/requests\` | Create — \`{kind: movie|show, tmdb_id, title, year?, poster_url?, note?, monitor?}\` |
+| POST | \`/video/requests/{request_id}/approve\` | Approve a video request |
+| POST | \`/video/requests/{request_id}/deny\` | Deny a video request |
+
+These all use the same API-key authentication as the music endpoints and relay to the video backend.
 `
         },
         {

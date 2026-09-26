@@ -39,7 +39,7 @@ Toggle **Enhanced** on any library artist's detail page to access the profession
 - **Artist meta panel** — editable name, genres, label, style, mood, and summary
 - **Sortable columns** — sort by title, duration, format, bitrate, BPM, disc, or track number
 - **Play tracks** — queue button adds tracks to the media player
-- **Delete** — remove tracks or albums from the database (files on disk are never touched)
+- **Delete** — opens the Smart Delete dialog with two choices: **Remove from Library** (database entry only, files on disk untouched) or **Delete File Too** (also deletes the audio file from disk — irreversible)
 `
         },
         {
@@ -47,7 +47,7 @@ Toggle **Enhanced** on any library artist's detail page to access the profession
             title: 'Service Matching',
             lede: 'Link your artists, albums, and tracks to external services for richer metadata.',
             body: `
-In the Enhanced view, each artist, album, and track shows **match status chips** for all 10 services (Spotify, MusicBrainz, Deezer, Discogs, AudioDB, iTunes, Last.fm, Genius, Tidal, Qobuz).
+In the Enhanced view, each artist, album, and track shows **match status chips** — the service set differs by level: 12 on artists (adding Tidal, Qobuz and Amazon), 10 on albums, and 9 on tracks (Spotify, MusicBrainz, Deezer, JioSaavn, AudioDB, iTunes, Last.fm, Genius, Bandcamp — no Discogs, Tidal or Qobuz chip at track level).
 
 - Click any chip to **manually search and link** the correct external ID when automatic matching gets it wrong
 - Run per-service **enrichment** from the Enrich dropdown to pull in metadata from a specific source
@@ -62,7 +62,7 @@ Good matches are the foundation of everything downstream — discovery, similar 
             lede: 'Sync your database metadata into the actual audio file tags.',
             body: `
 ::: steps
-1. Click the **pencil icon** on any track — or **Write All Tags** for a whole album, or select tracks and use the bulk bar's **Write Tags**.
+1. Open a track's **⋯** menu and choose **Write tags to file** — or an album's **⋯** menu and choose **Write all tags to files** — or select tracks and use the bulk bar's **Write tags**.
 2. A **tag preview modal** shows a diff table: current file tags vs. database values.
 3. Optionally enable **Embed cover art** and **Sync to server**.
 4. Click **Write Tags** to apply the changes to the file.
@@ -100,13 +100,14 @@ From any album card showing missing tracks, click **Download Missing** to open a
         {
             id: 'lib-smart-delete',
             title: 'Smart Delete',
-            lede: 'Remove tracks from the database, from disk, or both — with blacklist control.',
+            lede: 'Remove tracks from the database only, or from disk as well — with a deliberate choice each time.',
             body: `
-Right-click or use the delete action on any track to open the Smart Delete dialog:
+Right-click or use the delete action on any track to open the Smart Delete dialog — it offers exactly two options:
 
 - **Remove from Library** — removes the track from SoulSync's database only. The audio file on disk is untouched. Use this to clean up the database without losing files.
 - **Delete File Too** — removes the database entry AND deletes the audio file from disk. Irreversible.
-- **Delete & Blacklist** — removes the entry, deletes the file, and adds it to the **download blacklist** so the wishlist and automation system won't re-download it.
+
+There is no blacklist option here — blacklisting lives in **Source Info**, where the real download-source data is.
 `
         },
         {
@@ -126,21 +127,14 @@ A 3-step wizard guides you through redownloading a specific track:
         {
             id: 'lib-issues',
             title: 'Library Issues',
-            lede: 'Problems the repair worker finds in your library, all in one place.',
+            lede: 'Problems people reported by hand — the manual issue tracker.',
             body: `
-The Issues page tracks problems detected in your library by the repair worker, categorized by type and severity:
+The Issues page is the **manual issue tracker**: nothing here is ever written by a scan — every row is a problem reported by a person (profiles can file them from library pages and the player). Automated scan findings live in **Library Maintenance** on the Tools page, a deliberately separate surface.
 
-- **Orphan files** — audio files in your output folder not tracked in the database
-- **Dead references** — database entries pointing to files that no longer exist on disk
-- **Duplicate tracks** — multiple copies of the same track detected by fingerprint or metadata
-- **Missing cover art** — albums or tracks without embedded artwork
-- **Metadata gaps** — tracks with incomplete metadata (missing genre, year, etc.)
-- **Fake lossless** — files labeled FLAC whose audio doesn't actually contain high-frequency content
+Issues are grouped by category — wrong track, wrong metadata, wrong cover, wrong artist, wrong album, duplicate tracks, missing tracks, audio quality, incomplete album, other — each with a status (**open**, **in progress**, **resolved**, **dismissed**) and a priority (**low**, **normal**, **high**). Filter by status and category to work through them, and update issues individually or in bulk.
 
-Each issue can be fixed individually or in bulk. Orphan files can be moved to staging (safe, reversible) or deleted.
-
-> [!WARNING]
-> Mass deletions (50+ files) require typing **"witness me"** to confirm — a deliberate speed bump before anything irreversible.
+> [!NOTE]
+> The **"witness me"** type-the-phrase confirmation doesn't live here — it gates orphan fixes in **Library Maintenance**: when a bulk orphan fix targets more than 20 findings *and* the backend flags a mass-orphan situation (over half the scanned files look like orphans, which usually means a path mismatch rather than real orphans), you must type **witness me** before any files are deleted.
 `
         },
     ]

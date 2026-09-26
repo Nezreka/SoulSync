@@ -6,9 +6,9 @@ registerDocsSection({
         {
             id: 'sync-overview',
             title: 'Overview',
-            lede: 'Import playlists from Spotify, YouTube, Tidal, Deezer, and Beatport — then mirror, refresh, and download them on a schedule.',
+            lede: 'Import playlists from Spotify, YouTube, Tidal, Qobuz, Deezer, Beatport, YouTube Music, iTunes, and your media server — then mirror, refresh, and download them on a schedule.',
             body: `
-The Sync page imports playlists from **Spotify**, **YouTube**, **Tidal**, **Deezer**, and **Beatport**. Once imported, playlists are **mirrored** — they persist in your SoulSync instance and can be refreshed, discovered, and synced to your wishlist for downloading.
+The Sync page imports playlists from **Spotify**, **YouTube**, **YouTube Music**, **Tidal**, **Qobuz**, **Deezer**, **Beatport**, **iTunes** links, **ListenBrainz**, and **Last.fm** — as well as **Server Playlists** from your connected media server and track lists from files. Once imported, playlists are **mirrored** — they persist in your SoulSync instance and can be refreshed, discovered, and synced to your wishlist for downloading.
 
 ![Playlist sync page](sync-overview.jpg)
 
@@ -78,13 +78,10 @@ Paste a YouTube playlist URL into the input field and click **Parse Playlist**. 
             body: `
 Requires Tidal authentication in Settings. Once connected, refresh to load your Tidal playlists.
 
-You can also select your Tidal download quality:
-
-- **HQ** — 320 kbps
-- **HiFi** — FLAC 16-bit
-- **HiFi Plus** — up to 24-bit
-
 Like YouTube playlists, Tidal playlists go through the [discovery pipeline](#sync-discovery) to match tracks to official metadata before syncing.
+
+> [!NOTE]
+> There is no quality selector on the sync page — download quality comes from your global quality profile in Settings → Quality.
 `
         },
         {
@@ -162,7 +159,7 @@ Top 100 and Hype charts with full track listings. Each track can be manually mat
 ![Beatport genre browser](sync-beatport.jpg)
 
 > [!NOTE]
-> Beatport data is cached with a configurable TTL. The system automation **Refresh Beatport Cache** runs every 24 hours to keep content fresh.
+> Beatport data is cached for 24 hours (not configurable). The system automation **Refresh Beatport Cache** runs every 24 hours to keep content fresh.
 `
         },
         {
@@ -219,12 +216,15 @@ The **Sync History** button in the page header opens a modal showing every playl
             title: 'M3U Export',
             lede: 'Export any mirrored playlist as an M3U file for external players and media servers.',
             body: `
-Export any mirrored playlist as an **M3U file** for use in external media players or media servers. Enable M3U export in **Settings** and use the export button on any playlist card.
+Export any mirrored playlist as an **M3U file** for use in external media players or media servers. Open **Download Missing** on a playlist and use the **📋 Export as M3U** button in the download-missing modal.
 
 M3U files reference the actual file paths in your library, so they work with any M3U-compatible player.
 
-- **Auto-Save** — when enabled in Settings, M3U files regenerate automatically every time a playlist is synced or updated
-- **Manual Export** — the export button on any playlist modal creates an M3U file on demand, even when auto-save is disabled
+- **Auto-Save** — enable **Auto-save M3U file when downloading playlists** in Settings → Library → Playlists ("M3U export & server playlist sync") and M3U files regenerate automatically when downloading playlists
+- **Manual Export** — the export button in the download-missing modal creates an M3U file on demand, even when auto-save is disabled
+
+> [!NOTE]
+> Albums are skipped — they're already grouped by your media server.
 `
         },
         {

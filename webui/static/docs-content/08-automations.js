@@ -37,7 +37,7 @@ Click **+ New Automation** to open the builder. Blocks from the sidebar drop int
 ::: steps
 1. **WHEN** (trigger) — the event or schedule that starts the automation.
 2. **DO** (action) — the task to perform. You can add a delay (in minutes) before it executes.
-3. **THEN** (follow-ups) — up to 3 post-actions that run after DO completes, typically notifications or signals.
+3. **THEN** (follow-ups) — up to 5 post-actions that run after DO completes, typically notifications or signals.
 :::
 
 ![Automation builder](auto-builder.jpg)
@@ -213,7 +213,7 @@ Automations can be organized into named **groups** (e.g. "Nightly Operations", "
             title: 'Then-Actions & Signals',
             lede: 'What happens after the action: notifications, webhooks, and signal chaining.',
             body: `
-After the DO action completes, up to **3 THEN actions** run:
+After the DO action completes, up to **5 THEN actions** run:
 
 - **Discord Webhook** — post a message to a Discord channel
 - **Pushbullet** — push notification to phone or desktop
@@ -246,10 +246,10 @@ Each automation card shows its **last run time**, **run count**, and last result
 
 - **Run Now** executes any automation immediately, regardless of schedule. The result updates on the card in real time, and running automations display a glow effect.
 - **Stall detection**: if an action runs for more than 2 hours without completing, it's automatically flagged as stalled and terminated to prevent resource leaks.
-- The **Dashboard activity feed** logs every automation execution with timestamps, so you can review the full history of what ran and when.
+- **Run history** — click **Runs: N** on any automation card to open its **Run History** modal: the last 50 runs, newest first, each with a status badge (completed, failed, running, …), how long ago it started, its duration, a result summary, and expandable log lines. When there are more than 50 runs, the footer shows "Showing X of Y runs".
 
 > [!TIP]
-> Debugging a misbehaving automation? Check the Dashboard activity feed first for its recent runs and results, then look at the app logs for the full story.
+> Debugging a misbehaving automation? Click **Runs: N** on its card and expand the failed run's log lines — then look at the app logs for the full story.
 `
         },
         {

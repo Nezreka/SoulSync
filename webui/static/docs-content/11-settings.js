@@ -12,25 +12,25 @@ SoulSync needs credentials for the services it queries for metadata and enrichme
 
 ## Service list
 
-- **Spotify** — Client ID and Client Secret (from the Spotify Developer Dashboard). Powers the primary metadata source, discovery, and playlists.
-- **slskd** — URL, API key, username, and password. Powers Soulseek downloading.
-- **Tidal** — Region, quality preference, country code. Login happens in the browser with test playback to confirm.
-- **Last.fm** — API key and shared secret. Powers scrobbling, similar artists, and listening-history import.
-- **Genius** — Access token for lyrics.
-- **Qobuz** — Email and password with quality preference.
-- **HiFi** — App ID and secret.
-- **Deezer** — API integration for metadata.
+- **Spotify** — Client ID, Client Secret, and Redirect URI (from the Spotify Developer Dashboard). Powers metadata, discovery, and playlist sync.
+- **slskd** — slskd URL and API key, entered on the Soulseek source panel (Downloads / Sources tabs). Powers Soulseek downloading.
+- **Tidal** — Client ID, Client Secret, and Redirect URI. Log in with the Authenticate button — it finishes in the browser with a test playback to confirm.
+- **Last.fm** — API key, API secret, and your username. Powers scrobbling, similar artists, and listening-history import.
+- **Genius** — Client access token for lyrics.
+- **Qobuz** — Email and password, or a pasted auth token when login hits a CAPTCHA. Powers metadata enrichment and Qobuz downloads.
+- **HiFi** — no credentials at all. Free lossless downloads from community-run hifi-api instances, which you add and health-check on the Sources tab.
+- **Deezer** — App ID, App Secret, and Redirect URI (OAuth), or an ARL token for playlist access and downloads. Powers favorites, playlists, and Deezer downloads.
 - **Discogs** — Personal access token for release metadata.
-- **AcoustID** — API key for audio fingerprinting.
-- **ListenBrainz** — User token for listening-history import.
+- **AcoustID** — API key for audio fingerprinting and download verification.
+- **ListenBrainz** — User token (username optional) for listening-history import and scrobbling.
 
-Service status indicators in the settings show green (connected), yellow (connecting), red (error), or gray (not configured) for every credential.
+Each service card shows **configured** or **missing** in its header — the colored dot next to the service name is branding, not a live health light.
 `
         },
         {
             id: 'set-media',
             title: 'Media Servers',
-            lede: 'Connect Plex, Jellyfin/Emby, or Navidrome for library scans and streaming.',
+            lede: 'Connect Plex, Jellyfin, or Navidrome — or run standalone — for library scans and streaming.',
             body: `
 Connect your media server to enable library scans, metadata syncing, and in-app playback.
 
@@ -38,18 +38,22 @@ Connect your media server to enable library scans, metadata syncing, and in-app 
 
 ## Plex
 
-Host, port, and token. The **Test Connection** button verifies the connection and the **Scan Library** button triggers an immediate scan.
+One **Plex Server URL** field — no separate port. Paste a token, or use **Link to Plex (OAuth)** and enter the PIN at plex.tv/link. After linking, pick which music library to read from the dropdown.
 
-## Jellyfin / Emby
+## Jellyfin
 
-Host, port, API key, and user ID. Optional device ID for better session tracking.
+One **Jellyfin Server URL** field and an **API Key**. After connecting, pick the user and the music library from dropdowns — there is no device ID to enter.
 
 ## Navidrome
 
-Host, username, and password. Navidrome auto-detects changes so scans are usually unnecessary — but the connection is required for in-app playback and track scrobbling.
+**Navidrome Server URL**, username, and password. Navidrome auto-detects changes, so manual scans are rarely needed — the connection is still required for in-app playback and track scrobbling.
+
+## Standalone
+
+No media server at all: SoulSync itself is the player and library manager. Import your existing files into the Import Folder and let SoulSync organize them into your Music Library Folder.
 
 > [!NOTE]
-> Exactly one media server can be **active** at a time. Switching active servers re-points scans, playback, and sync — pick the one your household actually watches from.
+> Exactly one server can be **active** at a time — switching re-points scans, playback, and sync. The scans themselves run from the **Tools** page: *Library Scan* pulls the server's library into SoulSync, *Server Scan* tells the server to rescan its own folders.
 `
         },
         {
@@ -62,23 +66,27 @@ Host, username, and password. Navidrome auto-detects changes so scans are usuall
 | Mode | Behavior |
 |------|----------|
 | **Soulseek** | Search Soulseek for each track via slskd |
-| **YouTube** | Download from YouTube as MP3 |
+| **YouTube** | Download from YouTube — codec (MP3 / Opus / AAC) and bitrate are configurable, default MP3 320 |
 | **Tidal** | Download from Tidal at your chosen quality |
 | **Qobuz** | Download from Qobuz at your chosen quality |
-| **HiFi** | Download from HiFi |
-| **Deezer** | Download from Deezer |
-| **Hybrid** | Try sources in your custom priority order |
+| **HiFi** | Free lossless downloads via community-run hifi-api instances — no account needed |
+| **Deezer** | Download from Deezer (ARL token) |
+| **Lidarr** | Hand off to your Lidarr server |
+| **SoundCloud** | Download from SoundCloud — nothing to set up |
+| **Torrent** | Search via Prowlarr indexers through your torrent client |
+| **Usenet** | Search via Prowlarr indexers through your usenet client |
+| **Hybrid** | Drag sources into a priority chain — SoulSync works down the list and uses the first source that returns a match |
 
-Hybrid mode lets you drag sources into a preferred order — SoulSync works down the list and uses the first source that returns a match.
+The chain editor lives on the Downloads tab: drag sources from **Available** into your **Download chain**. One source in the chain means "that source only"; two or more means hybrid. Any source can be configured on the Sources tab first — it doesn't need to be in the chain yet.
 
 ## Paths
 
-- **Input path** — where downloads land first (staging)
-- **Output path** — your finished, organized library
-- **Import path** — the folder the import watcher scans
+- **Download Folder (input)** — where new downloads land before processing. Match this to your slskd download folder.
+- **Music Library Folder (output)** — your finished, organized library, filed into Artist/Album folders.
+- **Import Folder** — the folder the import watcher scans for files to bring in.
 
 > [!WARNING]
-> In Docker, all three must be **container paths** (e.g. \`/downloads\`, \`/music\`, \`/import\`) — not host paths like \`/mnt/user/music\`. Map them as volumes in your compose file.
+> In Docker, all three must be **container paths** — the compose defaults are \`/app/downloads\`, \`/app/Transfer\`, and \`/app/Staging\`. Map your host folders to those in the compose file.
 
 ## Behavior
 
@@ -99,15 +107,12 @@ Hybrid mode lets you drag sources into a preferred order — SoulSync works down
 ## Verification & enhancement
 
 - **AcoustID verification** — fingerprints each download and quarantines files that don't match the expected track
-- **Metadata enhancement** — fills gaps from matched services (genres, labels, moods)
-- **Embedded art** — writes cover art into file tags
-- **Audio fingerprinting** — identifies unknown files by their audio content
 
 ## Organization
 
-- **Path templates** — customize how artists, albums, and tracks are named and nested (e.g. \`{artist}/{album}/{disc}-{track} {title}\`)
-- **Multi-disc labels** — how multi-disc releases are foldered (\`Disc N/\` subfolders)
-- **Move behavior** — copy vs. move downloads into the library
+- **Path templates** — customize how artists, albums, and tracks are named and nested (e.g. \`$albumartist/$album/$track - $title\`). Variables use \`$name\` syntax: \`$albumartist\`, \`$artist\`, \`$album\`, \`$track\`, \`$title\`, \`$year\`, \`$discnum\`, and more
+- **Multi-disc labels** — the **Multi-Disc Folder Label** setting controls the subfolder added automatically on multi-disc albums; put a disc variable in your template instead to take over
+- **Detect multi-artist compilations** — file soundtracks and compilations under Various Artists instead of whichever contributor happened to be first
 
 ## Performance
 
@@ -125,11 +130,11 @@ Quality profiles define the acceptable formats and bitrates for downloads, plus 
 - **Preferred formats** — e.g. FLAC first, then MP3 320
 - **Minimum quality** — reject anything below this
 - **Upgrade behavior** — replace lower-quality files when better copies are found
-- **Per-artist overrides** — stricter or looser rules for specific artists
+- **Per-artist overrides** — marked "planned" in settings itself; not available yet
 
 ![Quality profiles](dl-quality-profiles.jpg)
 
-Quality profiles are checked during auto-import, and the **quality scan** in the Library finds files that fall below your standards.
+Quality profiles are checked during downloads and auto-import, and by the **Quality Upgrade Finder** repair job, which finds files that fall below your standards and proposes replacements.
 `
         },
         {
@@ -143,20 +148,22 @@ Accent color, theme, visualizer effects, and interface controls. Changes apply i
 
 ## REST API keys
 
-Generate API keys for external integrations. Keys can be scoped and revoked individually. See the API docs for endpoint details.
+Generate API keys for external integrations. Keys are **not** scoped — every key carries full admin rights, so guard them like passwords and revoke any you no longer use. Keys are shown once at creation. See the API docs for endpoint details.
 
 ## Log level
 
 Controls verbosity: Error, Warning, Info, or Debug. Raise to Debug when troubleshooting; drop back to Info afterward to keep log files small.
 
-## Additional music libraries
+## Additional Music Libraries
 
-Beyond the main output path, register extra library folders (e.g. a separate audiobook or podcast collection) that SoulSync should index.
+Your **Music Library Folder** above is already covered — you don't need to repeat it here. Register only *extra* **music** folders SoulSync should also read and index: a second collection, an archive drive, or a folder your media server sees at a different path than SoulSync can. They're used for tag writing, streaming, and file detection. Podcasts and audiobooks have their own folder fields — don't point an additional library at those.
+
+> [!TIP]
+> Docker users: mount the extra folder(s) into the container with read-write access, then add the container-side path here (e.g. \`/music2\`).
 
 ## Other toggles
 
-- **Replace lower quality on import** — when importing a file SoulSync already has, keep the better copy automatically
-- **HiFi health check** — periodic check that the HiFi integration is working
+- **Replace lower quality files on import** (Quality tab) — when importing a file SoulSync already has, keep the better copy automatically
 `
         },
         {
@@ -166,18 +173,18 @@ Beyond the main output path, register extra library folders (e.g. a separate aud
             body: `
 ## Backups
 
-The **Auto-Backup Database** system automation creates a timestamped backup every 3 days. You can also trigger a manual backup here, and restore from any previous backup.
+Backups don't live in Settings — they're on the **Tools** page, in the **Backup Manager** card: create a backup now, download copies for off-site storage, and restore from any previous backup. Scheduled backups run through the Backup Database system automation.
 
 ## VACUUM
 
-Over time the database accumulates unused space from deleted rows. **VACUUM** rebuilds the database file to reclaim that space. **Incremental vacuum** does the same work in smaller chunks without locking the database for as long.
+Over time the database accumulates unused space from deleted rows. **Compact Database (VACUUM)** rewrites the database file to reclaim that space — it locks the database briefly, so it can take a minute on large libraries. **Incremental Vacuum** is a mode you switch on (**Enable Incremental Vacuum**): after a one-time full compact, freed pages are reclaimed in small batches automatically.
 
 ## Cache management
 
-Clear cached API responses, cover art, or search results when they grow too large or go stale. SoulSync rebuilds caches on demand.
+The **Metadata Cache Browser** on the Tools page shows the cached API responses from metadata searches. Clear them when they grow too large or go stale — SoulSync rebuilds caches on demand.
 
 > [!TIP]
-> Most of this runs itself via the [system automations](#auto-system) — backup every 3 days, search-history cleanup hourly, full cleanup every 12 hours. Come here when you want to run something now or change the cadence.
+> Most of this runs itself via the [system automations](#auto-system) — backups, search-history cleanup, and full cleanup on a schedule. Come here when you want to run something now or change the cadence.
 `
         },
     ]

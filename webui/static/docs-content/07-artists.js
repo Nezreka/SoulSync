@@ -90,7 +90,7 @@ Use the **Process Wishlist** automation action to trigger processing on demand, 
 The **Cleanup Wishlist** action removes duplicates (the same track added multiple times) and items you already own in your library.
 
 > [!NOTE]
-> Each wishlist item tracks its source (watchlist scan, playlist sync, manual), retry attempts, last error message, and status (pending, downloading, failed, complete).
+> Each wishlist item tracks its source (watchlist scan, playlist sync, manual), retry attempts, and the last error message. There is no status column — a wishlist row is deleted once its download completes.
 
 ![Wishlist queue](art-wishlist.jpg)
 `

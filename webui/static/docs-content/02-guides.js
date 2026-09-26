@@ -6,7 +6,7 @@ registerDocsSection({
         {
             id: 'wf-first',
             title: 'What Should I Do First?',
-            lede: 'Six essential workflows that cover 90% of what most users need. Start with whichever matches your goal.',
+            lede: 'Five essential workflows that cover 90% of what most users need. Start with whichever matches your goal.',
             body: `
 ## Pick your workflow
 
@@ -97,13 +97,13 @@ Once your services are connected, do these five things to get the most out of So
 ::: steps
 1. **Place files in your import folder** — put album folders (e.g. \`Artist - Album/\`) in the Import Path configured in Settings.
 2. **Go to the Import page** — SoulSync detects the files and suggests album matches (the Inbox).
-3. **Confirm or correct the match** — if the suggestion is wrong, search Spotify/iTunes for the right album.
-4. **Match tracks** — drag-and-drop files onto the correct track slots, or click Auto-Match.
-5. **Click Confirm** — files are tagged with official metadata, organized, and moved to your library.
+3. **Confirm or correct the match** — if the suggestion is wrong, search for the right album by artist and album (or identify files by AcoustID fingerprint).
+4. **Match tracks** — drag each file onto the correct track slot, or tap a file then tap a track.
+5. **Click "Import N tracks"** — files are tagged with official metadata, organized, and moved to your library.
 :::
 
 > [!TIP]
-> For loose singles that aren't in album folders, use the **Singles** tab on the Import page. You can also import from a text file list — see [Import from Text File](#imp-textfile).
+> For loose singles, select them in the Inbox and click **Import N from tags** — they import as-is, tagged from what they carry. There is no separate Singles tab anymore; everything lives in the Inbox. You can also import from a text file list — see [Import from Text File](#imp-textfile).
 `
         },
         {
