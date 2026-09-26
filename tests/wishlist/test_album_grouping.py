@@ -212,3 +212,31 @@ def test_nested_track_data_payloads_normalized():
     res = group_wishlist_tracks_by_album(tracks, min_tracks_per_album=1)
     assert len(res.album_groups) == 1
     assert res.album_groups[0].album_key == 'a'
+
+
+def test_poisoned_row_album_artist_corrected_by_unanimous_tracks():
+    """#1316: a wishlist row whose stored album.artists[0] is wrong must not
+    stamp the whole batch — when every track names the same (different)
+    artist, the group context follows the tracks."""
+    tracks = [
+        _wt('Snoopafella', 'Snoop Dogg', 'alb1', 'Tha Doggfather',
+            artists=[{'name': 'Alanis Morissette'}]),
+        _wt('Doggfather', 'Snoop Dogg', 'alb1', 'Tha Doggfather',
+            artists=[{'name': 'Alanis Morissette'}]),
+    ]
+    group = group_wishlist_tracks_by_album(tracks).album_groups[0]
+    assert group.artist_context['id'] == 'wishlist'
+    assert group.artist_context['name'] == 'Snoop Dogg'
+
+
+def test_agreeing_row_album_artist_is_kept():
+    """#1316 companion: when the row's album artist agrees with the tracks,
+    the group context is untouched."""
+    tracks = [
+        _wt('Snoopafella', 'Snoop Dogg', 'alb1', 'Tha Doggfather',
+            artists=[{'name': 'Snoop Dogg'}]),
+        _wt('Doggfather', 'Snoop Dogg', 'alb1', 'Tha Doggfather',
+            artists=[{'name': 'Snoop Dogg'}]),
+    ]
+    group = group_wishlist_tracks_by_album(tracks).album_groups[0]
+    assert group.artist_context['name'] == 'Snoop Dogg'
