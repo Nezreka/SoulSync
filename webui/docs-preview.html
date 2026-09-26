@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SoulSync Docs — Preview</title>
+<style>
+  /* Minimal app-shell theme stand-ins so docs.css has what it needs */
+  :root {
+    --accent-rgb: 99, 102, 241;
+    --accent-light-rgb: 129, 140, 248;
+    --bg: #0b0e17;
+    --surface: #11151f;
+    --text: #e8eaf0;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #help-page { height: 100vh; }
+</style>
+<link rel="stylesheet" href="/static/docs.css">
+</head>
+<body>
+  <div class="page" id="help-page">
+    <div class="docs-layout">
+      <nav class="docs-sidebar" id="docs-sidebar">
+        <div class="docs-sidebar-header">
+          <h3>Documentation</h3>
+        </div>
+        <div class="docs-nav" id="docs-nav"></div>
+      </nav>
+      <main class="docs-content" id="docs-content"></main>
+    </div>
+  </div>
+<script src="/static/docs.js"></script>
+<script src="/static/docs-content/01-getting-started.js"></script>
+<script src="/static/docs-content/02-guides.js"></script>
+<script src="/static/docs-content/03-dashboard.js"></script>
+<script src="/static/docs-content/04-search.js"></script>
+<script src="/static/docs-content/05-sync.js"></script>
+<script src="/static/docs-content/06-discover.js"></script>
+<script src="/static/docs-content/07-artists.js"></script>
+<script src="/static/docs-content/08-automations.js"></script>
+<script src="/static/docs-content/09-library.js"></script>
+<script src="/static/docs-content/10-import-player.js"></script>
+<script src="/static/docs-content/11-settings.js"></script>
+<script src="/static/docs-content/12-profiles.js"></script>
+<script src="/static/docs-content/13-troubleshooting.js"></script>
+<script src="/static/docs-content/14-video.js"></script>
+<script src="/static/docs-content/16-api.js"></script>
+<script src="/static/docs-content/17-podcasts-audiobooks.js"></script>
+<script>
+  window.addEventListener('DOMContentLoaded', () => {
+    try {
+      window.initializeDocsPage();
+      window.__docsReady = true;
+    } catch (e) {
+      window.__docsError = String(e && e.stack || e);
+    }
+  });
+</script>
+</body>
+</html>
