@@ -3099,6 +3099,21 @@ export function AlbumOverflowMenu({
           >
             History
           </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            onClick={() => {
+              window.showReportIssueModal?.(
+                'album',
+                album.id,
+                album.title,
+                String(album.artist_name || ''),
+              );
+              setOpen(false);
+            }}
+          >
+            Report a Problem…
+          </button>
           <div
             className={styles.submenuContainer}
             onMouseEnter={() => {
@@ -5710,6 +5725,14 @@ function ArtistToolsMenu({
           <div className={styles.toolMenuHeading}>Maintenance</div>
           {item('Library Health & Repair', 'settings', onMaintenance)}
           {item('Export Artists…', 'download', () => setShowExport(true), false)}
+          {/* anyone may report (upstream's library-artist Report button); the
+              issue names this Library v2 row, which api/issues snapshots */}
+          {item(
+            'Report a Problem…',
+            'info',
+            () => window.showReportIssueModal?.('artist', artistId, artistName, ''),
+            false,
+          )}
           <div className={styles.toolMenuDivider} />
           {item('Delete Artist…', 'delete', onDelete, true, true)}
         </div>
@@ -11146,6 +11169,23 @@ function TrackDetailModal({
             {TRACK_DETAIL_TAB_LABELS[t]}
           </button>
         ))}
+        {/* the issue names this Library v2 track, which api/issues snapshots */}
+        <button
+          type="button"
+          className={styles.detailTab}
+          onClick={() => {
+            onClose();
+            window.showReportIssueModal?.(
+              'track',
+              trackId,
+              track.title ?? '',
+              track.artists.map((a) => a.name).join(', '),
+              albumTitle,
+            );
+          }}
+        >
+          Report a Problem…
+        </button>
       </div>
       <div className={styles.tabBody}>
         {tab === 'quality' ? (
