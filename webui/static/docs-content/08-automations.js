@@ -231,8 +231,33 @@ All notification messages support **variable substitution**: \`{name}\`, \`{stat
 
 **Fire Signal** + **Signal Received** lets you build multi-step workflows: the first automation finishes its action, fires a signal like \`overlays_done\`, and a second automation listening for that signal picks up where it left off.
 
+**Fire Signal** takes one config field: **Signal Name** (a text input with signal-name validation). When it fires, the automation's action result rides along as the event data — so the listening automation's notification templates can use the original trigger's variables.
+
 > [!NOTE]
 > Chains are safe by design: cycle detection (DFS) prevents infinite loops, chains cap at **5 levels** deep, and there's a **10-second cooldown** between signal fires.
+
+## Run Script
+
+**Run Script** executes a shell or Python script from your **scripts folder** (path set by the \`scripts.path\` config, default \`./scripts\`) after the action completes. The builder shows a dropdown of the scripts actually present in that folder.
+
+::: steps
+1. Drop scripts (any executable, \`.py\`, or \`.sh\`) into the scripts folder.
+2. Add **Run Script** as a THEN step and pick the script from the dropdown.
+3. The script runs with a configurable timeout (default 60 seconds, hard-capped at 300).
+:::
+
+Scripts receive SoulSync context as environment variables:
+
+| Variable | Contents |
+|----------|----------|
+| \`SOULSYNC_EVENT\` | The triggering event type (when fired by an event) |
+| \`SOULSYNC_AUTOMATION\` | The automation's name |
+| \`SOULSYNC_SCRIPTS_DIR\` | Absolute path to the scripts directory |
+
+\`.py\` files run with \`python\`, \`.sh\` with \`bash\`, anything else executes directly — with the scripts folder as the working directory. Stdout (first 2000 chars) and stderr (first 1000) are captured into the run log; exit code 0 marks the step completed, anything else marks it failed.
+
+> [!IMPORTANT]
+> Scripts run as the SoulSync process user with no sandbox — only put scripts there you wrote or trust. A path-traversal guard blocks \`..\` and symlink escapes: the resolved script must live under the scripts directory or it refuses to run.
 `
         },
         {

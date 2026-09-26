@@ -179,3 +179,96 @@ Use **Clear Completed** on the Active Downloads page to clean up finished items 
         },
     ]
 });
+
+registerDocsSection({
+    id: 'hydrabase',
+    title: 'Hydrabase',
+    icon: '🌐',
+    pages: [
+        {
+            id: 'hydra-overview',
+            title: 'What Hydrabase Is',
+            lede: 'A P2P metadata network: search metadata over a shared WebSocket instead of Spotify/iTunes.',
+            body: `
+Hydrabase is a **P2P metadata client**. It sends search requests over a shared WebSocket connection and returns results normalized to the same Track / Artist / Album types the Spotify and iTunes clients use — so the rest of the app can't tell the difference.
+
+When enabled and connected, it **replaces Spotify/iTunes as the primary metadata source for searches** (the app calls it "Hydrabase (P2P mirror)" in places).
+
+Two halves:
+
+- **The client** — queries the Hydrabase P2P network for tracks, artists, albums, discographies, and album tracks, with nonce-correlated requests and an 8-second timeout.
+- **The mirror worker** — a background worker that intercepts your search queries and mirrors them to the Hydrabase P2P network. Fire-and-forget: responses are received (the protocol requires it) but discarded.
+
+> [!NOTE]
+> **Metadata only — no downloads.** Hydrabase never touches files. Soulseek downloading is a completely separate path; there is zero overlap in the code.
+
+The dedicated Hydrabase page is **dev-mode only** — its nav item is hidden until dev mode is activated. Everyday use (as a metadata source) needs no dev mode: just the connection in Settings.
+`
+        },
+        {
+            id: 'hydra-page',
+            title: 'The Hydrabase Page',
+            lede: 'Dev-mode console: connect, fire raw API calls, and compare sources side by side.',
+            body: `
+## Connecting
+
+The header shows a status span (**Disconnected** in gray by default) and a **Connect** button. Below it, the **Connection Config** card holds **WebSocket URL** (default \`ws://localhost:4545\`) and **API Key** ("Your Hydrabase API key"). Connecting requires both — otherwise you get a **"URL and API key required"** toast.
+
+| Status | Meaning |
+|--------|---------|
+| **Disconnected** (gray) | Idle, no connection |
+| **Connecting...** (orange) | Connection attempt in flight |
+| **Connected** (accent) | Live WebSocket; button flips to **Disconnect** |
+| **Failed** (red) | Connect or send failed |
+
+On connect the API key travels as the \`x-api-key\` WebSocket header; the URL, key, and auto-connect flag are saved. **Disconnecting** from the page tears everything down: status back to Disconnected, dev mode disabled ("Disconnected — dev mode disabled"), the Hydrabase nav item hidden again, and you're sent back to Settings.
+
+## Raw API calls
+
+The left **API Calls** panel has five cards — **Tracks**, **Albums**, **Artists**, **Discography**, **Album Tracks** — each with an editable JSON payload textarea and a **Send** button. Default payload shape: \`{ "request": { "type": "track", "query": "" }, "nonce": 0 }\` (type varies per card). Sending validates the JSON, auto-fills \`nonce\` with the current timestamp when it's unset or zero, shows **"Sending..."**, then pretty-prints the parsed response in the right-hand **Response** panel ("API responses will appear here" until the first call).
+
+## Network and comparisons
+
+- **Network** card — aggregate peer count (**"Peers: --"** until connected, then **"Peers: N"**). There is no per-peer list UI.
+- **Source Comparisons** card — **Refresh** button plus the explainer: "When Hydrabase is the active metadata source, searches are compared against Spotify and iTunes in the background." Each comparison renders one timestamped 3-column grid — **Hydrabase** / **Spotify** / Deezer-or-iTunes — with per-source counts as \`{tracks}T / {artists}A / {albums}Al\`. Empty state: "No comparisons yet. Search with Hydrabase active to generate comparisons." The last 50 comparisons are kept, newest first.
+
+> [!TIP]
+> The page pre-fills your saved URL and API key on every visit and loads comparisons automatically — you don't need to hit Refresh unless you want a fresh pull.
+`
+        },
+        {
+            id: 'hydra-network',
+            title: 'Network & Mirroring',
+            lede: 'How Hydrabase plugs into search, what the mirror worker does, and the Settings behind it all.',
+            body: `
+## As the active metadata source
+
+Hydrabase becomes the primary source when the WebSocket is connected **and** dev mode is enabled. Then searches query Hydrabase first, and every search also triggers a background comparison against Spotify and your fallback source (iTunes or Deezer) — that's what feeds the Source Comparisons card.
+
+## The mirror worker
+
+When Hydrabase is **not** the primary source, the search orchestrator still enqueues every search query into the Hydrabase worker as track / album / artist lookups — mirroring your searches to the P2P network. The worker is deliberately dumb:
+
+- Fire-and-forget: responses are received but discarded
+- Queue capped at 1000 (oldest dropped when full)
+- 0.5s rate limit between sends
+- Items silently dropped while disconnected
+- Keeps stats: sent, dropped, errors
+
+Worker controls (\`GET /api/hydrabase-worker/status\`, \`POST /api/hydrabase-worker/pause\`, \`POST /api/hydrabase-worker/resume\`) surface on the dashboard's worker orb — not on the Hydrabase page itself.
+
+## Settings → Connections → Hydrabase
+
+- **WebSocket URL** and **API Key** inputs (saved with the rest of Settings)
+- **Auto-connect on startup** checkbox — on server start, SoulSync opens the WebSocket (with reconnect backoff 30s → 60s → 120s → max 300s). Explicitly does **not** auto-enable dev mode — that stays a manual choice; the connection alone still serves fallback and search-tab use.
+- **Connect** button — saves settings first, then toggles the connection. Connecting adds a **"Hydrabase (P2P)"** option to the **Primary metadata source** dropdown; disconnecting removes it (resetting the dropdown to iTunes if it was selected).
+- Status line: **"URL and API Key required"**, **Disconnected**, **Connected** (green), or the error text.
+
+The connection test reports **"Hydrabase connected"** or **"Hydrabase not connected. Configure URL + API key and click Connect."**, and debug info includes a \`hydrabase_connected\` flag.
+
+> [!NOTE]
+> There are no bandwidth caps, sharing toggles, or privacy switches anywhere in the Hydrabase UI or settings — the only knobs are connect/disconnect, auto-connect, the raw API sender, and worker pause/resume.
+`
+        },
+    ]
+});

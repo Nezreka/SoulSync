@@ -206,6 +206,42 @@ Search for a production company (studio) and open its **Studio detail** page to 
 Studios are also a discovery vector: if you love everything A24 puts out, following the studio means you never miss their next release.
 `
         },
+        {
+            id: 'vsearch-fresh',
+            title: 'Fresh Releases Board',
+            lede: 'A live torrent board from EXT.to — cached, matched, and instant to open.',
+            body: `
+The **Fresh Releases** tab on the Search page is a live torrent board sourced from **EXT.to** — the Movies and TV torrent sections for Day, Week, and Month, parsed from the EXT.to homepage into rows carrying size, file count, age, seeders, and leechers.
+
+## How the board stays warm
+
+Building the board on the render path used to mean sitting through a Cloudflare challenge every time you opened the tab — and matching each release against its own detail page (where the poster, IMDb id, rating, genres, and runtime live) would have made it far worse: every row is a separate challenge, and a bad minute on ext.to can cost 40 seconds a page.
+
+So the work moved **off the render path entirely**:
+
+::: steps
+1. **Pull** — the board scraper fetches the EXT.to homepage through FlareSolverr and parses the Movies/TV tables for Day, Week, and Month.
+2. **Match** — every release is matched against its own detail page (poster, IMDb id + rating, genres, runtime). Release titles are parsed for year, resolution, source, codec, audio, HDR, group, and season/episode info (packs detected).
+3. **Cache** — matched details are keyed by detail URL and kept in the video database; the rendered snapshot is stored as a setting. A returning release costs nothing — each run only pays for what's genuinely new.
+4. **Serve** — opening the tab reads the **last snapshot** via \`GET /api/video/downloads/fresh-releases\`, so it's instant.
+:::
+
+Two things run this same refresh (identical work, identical state):
+
+- The **Refresh Fresh Releases** automation (hourly by default) — the \`Refresh Fresh Releases\` button on the [Automations](#vauto-shared) page
+- The **Refresh** button on the tab itself — \`POST /api/video/downloads/fresh-releases/refresh\`
+
+> [!NOTE]
+> The board turns over slowly: most of one hour's pull was there the hour before, so steady-state runs are cheap. A first run on a cold cache is the expensive one. A per-run time budget (10 minutes) and a new-detail backstop keep a bad Cloudflare minute from overlapping the next tick — whatever a run defers is logged and picked up by the next one.
+
+## Grabbing from the board
+
+The board is **browse-only**. Grabbing goes through the **identify modal** — click a release, tell SoulSync what the title actually is (movie or episode, which one), and the exact release is handed to the normal download pipeline with the release-parser hints the row already carries (magnet URI, parsed quality, season/episode).
+
+> [!IMPORTANT]
+> The board requires **FlareSolverr** (\`flaresolverr.url\` on Settings). Without it the tab tells you so and shows nothing — the scraper can't get past EXT.to's Cloudflare challenge on its own.
+`
+        },
     ]
 });
 
@@ -719,14 +755,80 @@ registerDocsSection({
             title: 'Shared System Automations',
             lede: 'The same automation engine as the music side — scheduled tasks and event workflows for video.',
             body: `
-The video side surfaces the same **system automation engine** the music side uses: scheduled tasks and event-driven workflows, minus the music-only kinds (Beatport, user, playlist triggers).
+The video side surfaces the same **system automation engine** the music side uses: scheduled tasks and event-driven workflows, minus the music-only kinds (Beatport, user, playlist triggers). SoulSync seeds **28 system automations** for video — all enabled, all editable or deletable.
 
-Use it to schedule the recurring work a video library needs:
+## Seeded video system automations
 
-- **Library refreshes** on a schedule
-- **Wishlist scans** for wanted titles
-- **Watchlist checks** for new releases
-- **Enrichment passes** to backfill metadata
+| Name | Schedule | What it does |
+|------|----------|--------------|
+| **Auto-Scan Video After Downloads** | On *Video Download Batch Done* | Scans the server for new downloads, waits for it to finish, then fires *Video Library Scan Done* |
+| **Auto-Update Video Database After Scan** | On *Video Library Scan Done* | Reads newly-indexed media from the server into SoulSync |
+| **Auto-Update Video Database (Hourly)** | Every hour | Incremental server read so manual additions appear within the hour |
+| **Refresh Airing TV Schedules** | Daily 23:00 | Re-pulls TMDB episode schedules (air dates, stills) for still-airing watchlisted shows |
+| **Auto-Wishlist Episodes Airing Today** | Daily 01:00 | Wishes every episode airing today for followed shows; prunes ended/canceled shows |
+| **Refresh Stale Metadata** | Every 6 hours | Re-pulls the stalest matched movies & shows (up to 500/run, skipping anything refreshed in the last 30 days) |
+| **Auto-Update Overlays** | Daily 04:00 | Renders + pushes enabled overlay templates onto server artwork |
+| **Sync Collections** | Daily 04:30 | Resolves + pushes every enabled collection to the server |
+| **Clean Up Plex Images** | Every 7 days | Clears Plex's stale cached artwork so replaced posters/overlays actually show |
+| **Clean Search History** | Every hour | Removes old Soulseek searches |
+| **Clean Completed Downloads** | Every 5 minutes | Clears completed downloads and empties directories |
+| **Full Cleanup** | Every 12 hours | Clears quarantine, download queue, import folder, and search history in one sweep |
+| **Auto-Backup Database** | Every 3 days | Timestamped backup of the video library database |
+| **Auto-Deep Scan TV Library** | Weekly, Mon 02:00 | Full reconcile of the TV library — re-reads every show, drops what the server no longer has |
+| **Auto-Deep Scan Movie Library** | Weekly, Tue 02:00 | Full reconcile of the movie library |
+| **Auto-Scan Watchlist People** | Daily 03:00 | Wishes every movie a followed person acted in or directed that you don't own |
+| **Auto-Scan Watchlist Studios** | Daily 03:30 | Wishes every movie a followed studio produced that you don't own |
+| **Auto-Scan Watchlist Channels** | Every 6 hours | Wishes new long-form uploads from followed YouTube channels (Shorts excluded) |
+| **Auto-Scan Watchlist Playlists** | Every 6 hours | Wishes newly-added videos from followed YouTube playlists |
+| **Auto-Process Movie Wishlist** | Every hour | Grabs wished, released movies from Soulseek per your quality profile |
+| **Auto-Process Episode Wishlist** | Every hour | Grabs wished episodes from Soulseek per your quality profile |
+| **Auto-Process YouTube Wishlist** | Every hour | Downloads wished YouTube videos via yt-dlp |
+| **RSS Sync (Instant Grabs)** | Every 15 minutes | Pulls indexer RSS via Prowlarr and instantly grabs wishlist matches — no waiting for the hourly drain |
+| **Seeding Sweep** | Every 30 minutes | Removes completed torrents that hit your seed ratio/time goal (library copy untouched) |
+| **Refresh Fresh Releases** | Every hour | Warms the [Fresh Releases board](#vsearch-fresh) — pulls the EXT.to board and matches new releases to their detail pages |
+| **Sync Import Lists** | Every 6 hours | Imports TMDB/IMDb charts and lists + your Plex watchlist into acquisition |
+| **Auto-Clean Old YouTube Episodes** | Daily 04:00 | Deletes downloaded channel episodes outside each channel's keep window |
+| **Empty Recycle Bin** | Daily 04:30 | Permanently deletes recycled files older than the keep window |
+
+> [!TIP]
+> Stagger-heavy schedules (watchlist scans, wishlist drains, seeding sweep) already have startup delays baked in so a restart doesn't fire everything at once.
+
+## The 30 video action blocks
+
+Every action below is a DO block you can drop into your own automations. Config shown as *field (default)*.
+
+| Action | What it does | Key config |
+|--------|--------------|------------|
+| **Scan Video Library** | Tell the media server to rescan your movie/TV sections, then read what it found into SoulSync | Mode (Full), Library (Movies + TV) |
+| **Scan Video Server** | Get the server to index new downloads (skips if it already has them), wait, then fire *Video Library Scan Done* | Library (all), Skip if present (on), Grace 2 min, Max wait 60 min, Fallback wait 120 sec |
+| **Update Video Database** | Read newly-indexed media from the server into SoulSync | Mode (Incremental), Library (all) |
+| **Update Video Database (Hourly)** | Same incremental read for an hourly schedule — pair with a 1-hour Schedule trigger | — |
+| **Deep Scan TV Library** | Full reconcile of TV: re-read every show, drop what the server no longer has (never touches movies) | — |
+| **Deep Scan Movie Library** | Full reconcile of the movie library (never touches TV) | — |
+| **Refresh Airing TV Schedules** | Re-pull TMDB episode schedules for still-airing watchlisted shows — run a couple hours before the airing run | — |
+| **Refresh Stale Metadata** | Rolling freshness pass over the stalest matched titles (ratings, overviews, art, air dates); never clobbers your locked data | Items per run (500), Skip movies/shows refreshed within 30 days |
+| **Clean Old YouTube Episodes** | Delete downloaded channel episodes outside each channel's keep window (history kept so they're never re-downloaded) | — |
+| **Empty Recycle Bin** | Permanently delete recycled files older than the keep window in Settings → Library Organization | — |
+| **Wishlist Today's Airings** | Add every episode airing today (followed shows) to the wishlist; optionally prune ended/canceled shows | Prune ended shows (on) |
+| **Scan Watchlist People** | Wishlist every movie a followed person acted in or directed that you don't own | — |
+| **Scan Watchlist Studios** | Wishlist every movie a followed studio produced that you don't own | — |
+| **Scan Watchlist Channels** | Wishlist new long-form uploads from followed YouTube channels | — |
+| **Scan Watchlist Playlists** | Wishlist newly-added videos from followed YouTube playlists (each becomes its own show) | — |
+| **Process Movie Wishlist** | Auto-grab wished, released movies from Soulseek per your quality profile | Max simultaneous searches (3) |
+| **Process Episode Wishlist** | Auto-grab wished episodes from Soulseek per your quality profile | Max simultaneous searches (3) |
+| **RSS Sync (Instant Grabs)** | Instantly grab wishlist matches from indexer RSS (needs torrent/Usenet + Prowlarr) | — |
+| **Refresh Fresh Releases** | Keep Search → Fresh Releases warm: pull the EXT.to board, match releases to detail pages (poster, IMDb, rating) | Max new releases to match per run (40) |
+| **Sync Import Lists** | TMDB lists/charts, IMDb lists, and your Plex watchlist enter acquisition automatically | — |
+| **Seeding Sweep** | Remove completed torrents at your seed ratio/time goal — the client's copy only, library copy never touched | — |
+| **Process YouTube Wishlist** | Download wished YouTube videos via yt-dlp into channel/year/date shows | Max simultaneous downloads (3) |
+| **Clean Search History** | Remove old Soulseek searches | — |
+| **Clean Completed Downloads** | Clear completed downloads and empty directories | — |
+| **Full Cleanup** | Quarantine + download queue + import folder + search history in one sweep | — |
+| **Backup Database** | Timestamped backup of the video library database | — |
+| **Apply Overlays** | Render + push enabled overlay templates onto server artwork | — |
+| **Sync Collections** | Resolve + push every enabled collection to the server | — |
+| **Clean Up Plex Images** | Clear Plex's stale cached artwork so replaced posters/overlays actually show | — |
+| **Run Maintenance Job** | Force-run one [Library Maintenance](#vtool-repair) job (or all enabled due jobs) | Job (All enabled jobs) |
 
 If you already know the [music automations](#auto-overview), the video side works identically — same builder, same signals, same history view.
 `
@@ -736,16 +838,41 @@ If you already know the [music automations](#auto-overview), the video side work
             title: 'Event Triggers',
             lede: 'Chain workflows off video events: a grab starts, a scan finishes, a download completes.',
             body: `
-A generic **event bus** exposes video events as automation triggers, so you can chain workflows together. Video events include things like:
+The video builder exposes **19 video-only event triggers**, plus the shared ones (Schedule, Daily Time, Weekly Schedule, Monthly Schedule, App Started, Signal Received, Issue Reported, Issue Status Changed, Issue Reply, Webhook Received — the same blocks the music side uses).
 
-- A release is grabbed (Release Grabbed)
-- A video download completes (Video Downloaded)
-- A library scan finishes (Video Library Scan Done)
-- A wishlist item is added (Video Wishlist Item Added)
-- A request is approved (Request Approved)
-- A maintenance finding is raised (Maintenance Finding Raised)
+Triggers with conditions let you filter (e.g. only fire when \`kind\` is \`movie\`, or when a finding's severity is \`critical\`). Every trigger also exposes its variables — \`{title}\`, \`{quality}\`, \`{season}\`, … — for use in notification message templates.
 
-Example chain: *"after a scan finishes → refresh stale metadata → apply overlays."* Build it once in the automation builder and it runs itself forever.
+| Trigger | Fires when | Key config (conditions) |
+|---------|-----------|-------------------------|
+| **Release Grabbed** | A release is handed to a download client (Soulseek / torrent / Usenet) — fires at grab time with the release name, long before anything lands in the library | title, kind (movie / show / youtube), quality, source |
+| **Video Download Batch Done** | A batch of video downloads finishes | — |
+| **Video Library Scan Done** | The media server finishes rescanning your video sections | — |
+| **Request Filed** | A user files a request on the Requests page | title, kind, requester |
+| **Request Approved** | An admin approves a request and the title enters acquisition | title, kind, requester |
+| **Request Declined** | An admin declines a request | title, kind, requester |
+| **Request Arrived** | A title somebody requested shows up in the library | title, kind, requester |
+| **Video Downloaded** | One movie, episode, or YouTube video finishes downloading and lands in the library | title, kind, channel, quality |
+| **Video Download Failed** | A download gives up for good (after retries) — the item goes back on the wishlist | title, kind, error |
+| **Video Import Failed** | A file downloads fine but can't be placed (sample, wrong episode, not an upgrade) and needs manual import | title, kind, error |
+| **Quality Upgrade Landed** | A download **replaced** an existing library copy with a better one | title, kind |
+| **Maintenance Finding Raised** | A Library Maintenance job raises a **new** finding — condition on severity \`critical\` for outage alerts | job_id, finding_type, severity, title |
+| **Maintenance Scan Done** | A Library Maintenance job finishes a scan | job_id, status |
+| **Video Wishlist Item Added** | Something is added to the video wishlist (a movie, one or more episodes, or YouTube videos) | title, kind |
+| **Video Watchlist Follow** | A show, person, channel, or playlist is followed on the watchlist | title, kind |
+| **Video Watchlist Unfollow** | A show, person, channel, or playlist is unfollowed | title, kind |
+| **Collections Synced** | A collections sync pass finishes (manual or the nightly automation) | — |
+| **Overlays Applied** | An overlay apply pass finishes | — |
+| **Video Database Updated** | SoulSync finishes reading the server's library into its database | — |
+
+::: steps
+1. Pick a trigger — e.g. **Video Downloaded** to react to every finished download.
+2. Add conditions — e.g. only when \`kind\` is \`episode\` and \`quality\` is below your target.
+3. Add a DO action — e.g. **Refresh Stale Metadata**, or **Fire Signal** to hand off to a second automation.
+4. Add THEN steps — notify yourself on Discord, run a script, fire a signal.
+:::
+
+> [!TIP]
+> The classic post-download chain is already seeded for you: **Auto-Scan Video After Downloads** (Video Download Batch Done → Scan Video Server) and **Auto-Update Video Database After Scan** (Video Library Scan Done → Update Video Database). Chain your own steps after them — e.g. *Video Database Updated → Apply Overlays → Discord*.
 
 See [Automations](#auto-overview) for the full builder reference.
 `
@@ -854,20 +981,20 @@ The manager shows you what's *missing* from a collection — and lets you **wish
             title: 'Library Maintenance',
             lede: 'Repair jobs that find library problems and fix them — individually or in bulk.',
             body: `
-**Library Maintenance** runs ten repair jobs that scan the video library for problems:
+**Library Maintenance** runs ten repair jobs that scan the video library for problems. Each job produces rich, lazy-loaded **findings** you can fix individually, fix in bulk, resolve, or dismiss — with a full run history and live progress while jobs execute. Run jobs on demand, on the Tools page's interval, or from an automation via the **Run Maintenance Job** action (chain it with the *Maintenance Finding Raised* trigger for alerts).
 
-- **Broken files** — files that fail integrity checks
-- **Duplicate copies** — duplicate movies taking up space
-- **Metadata gaps** — titles missing key metadata
-- **Missing episodes** — episodes that should exist but don't
-- **Complete the collection** — gaps in movie collections you own
-- **Naming conformance** — files that don't match your naming scheme
-- **Quality upgrades** — titles below their quality-profile cutoff
-- **Watched cleanup** — stale watched state
-- **Wishlist audit** — wishlist entries that no longer make sense
-- **YouTube ghost files** — entries with no backing channel
-
-Each job produces rich, lazy-loaded **findings** you can fix individually, fix in bulk, resolve, or dismiss — with a full run history and live progress while jobs execute.
+| Job | What it scans | What approving a finding does |
+|-----|---------------|------------------------------|
+| **Missing Episodes** | Every library show, one finding per show listing its aired, monitored, un-owned episodes (specials opt-in; ended shows included for back-catalog gaps). The finding is keyed to the missing set, so a changed set raises a fresh finding and retires the stale one. | Sends the episodes to the video wishlist (poster + per-episode stills/overviews from a cached TMDB fetch); the wishlist drain downloads them. |
+| **Complete the Collection** | Owned movies grouped by TMDB collection; one finding per franchise with the gap ("The Matrix Collection — you have 2 of 4"). Unreleased members don't count as missing. | Missing films go to the movie wishlist (poster + year); the wishlist drain downloads them. |
+| **Quality Upgrade** | Each owned movie/episode's **best** file judged against your quality profile with the same seam the Download modal uses. Stays quiet when you chase-the-best (no cutoff configured). | A real upgrade grab — the drain's own search/pick/enqueue seams run for that one title (the drain itself refuses owned titles, so upgrades can't ride it). |
+| **Broken Files** | A cheap corruption heuristic, no ffmpeg: probed runtime vs the movie's known runtime (a 138-minute film whose file runs 61 minutes is truncated); anything under 5 MB is a stub. Warning severity — these *look* owned but won't play through. | A replacement grab through the same seams as Quality Upgrades; the import pipeline swaps the file in. |
+| **Metadata Gaps** | Owned movies that are unmatched (TMDB never identified them) or missing overview / genres / poster / backdrop. Fields you deliberately blanked and **locked** are respected. One finding per movie listing exactly what's missing. | Re-queues the TMDB match when unmatched, then runs the detail page's art/credits refresh — gap-fill only, never clobbers. |
+| **Duplicate Copies** | Three signals: the same \`tmdb_id\` owned as two library rows, one movie carrying 2+ version files, and one episode carrying 2+ files. Every finding names the **drive** each copy sits on. | Varies by finding — review the drives and keep the copy you want. |
+| **Wishlist Audit** | Wishlist rows the pipeline will never act on: the target is already owned **and done** (owned copy meets the cutoff, or its quality is unreadable so the upgrader can't judge it). Owned-but-below-cutoff rows are deliberately left alone so upgrade-until can chase them. | Removes the row. The owned copy is untouched. |
+| **YouTube Ghost Files** | The download-ledger rows whose file is gone from disk (deleted on the server side). Without this, badges lie and retention counts overcount. Two fix modes: **prune** (stamp \`pruned_at\` — remembered, never re-downloaded) or **forget** (delete the row — becomes eligible again). Files are never touched; DB-only. Safety: unreachable YouTube root (down SMB mount) hard-errors instead of flagging everything; mass-missing (over half of 5+ checked files gone at once) asks rather than assuming. | Prune or forget the ghost row. |
+| **Watched Cleanup** | Movies watched at least once whose last watch is older than your \`watched_days\` (optionally also never-watched movies sitting \`unwatched_days\`, off by default). Watch-state changes ride the incremental scan, so candidates appear without a deep scan. Movies with no watch date are skipped, not guessed. | Moves the file to the **recycle bin** (never a hard delete) and marks the row file-less. |
+| **Naming Conformance** | Renders the **current** organization template for every owned movie/episode file and flags paths that differ — the Sonarr/Radarr "preview rename" gap, since templates only ever applied to new imports. The findings list *is* the preview (current → new); bulk select = mass rename. Safety: unlocatable files are skipped, occupied destinations are per-finding errors (never overwritten), and DB paths aren't rewritten here — the next scan reconciles them after the server notices. | Renames the file (plus same-stem sidecars and subtitles) into place. |
 
 > [!TIP]
 > Run maintenance after big imports or server migrations. It's the fastest way to reconcile the database with what's actually on disk.
@@ -1116,6 +1243,106 @@ Channel/playlist following and downloads under \`/api/video/youtube\`.
 | POST | \`/youtube/subscriptions/preview\`, \`/youtube/subscriptions/import\` | Bulk-import subscriptions | video |
 | POST | \`/youtube/download\`, \`/youtube/wishlist/add\` | Download a video / add to wishlist | can_download |
 | GET/POST | \`/youtube/channel/{id}/settings\` | Per-channel pull settings | video |
+`
+        },
+        {
+            id: 'vapi-bulk',
+            title: 'Bulk Ops, Rename, Recycle, Watch & Issues',
+            lede: 'The rest of the video API: bulk metadata, mass rename, recycle bin, Fresh Releases, watch party, overlay assets, and issues.',
+            body: `
+Base path: \`/api/video\`. Session-authenticated like the rest of this surface (see [Auth Model](#vapi-auth)).
+
+## Bulk metadata operations
+
+The library grid's multi-select action bar. Items go through the same edit-and-lock engine as the Manage sidebar, so bulk edits push to the server and survive scans.
+
+| Method | Path | Purpose | Auth |
+|--------|------|---------|------|
+| POST | \`/bulk/start\` | Start a bulk job: \`{kind, ids[], action, params}\`. Only one bulk op runs at a time — \`409\` if busy | admin |
+| GET | \`/bulk/status\` | Job state (polling fallback for the bell) | video |
+
+Bulk actions: \`content_rating\`, \`genre_add\`, \`genre_remove\`, \`monitored\`, \`watched\`, \`refresh_art\`. The \`collection_add\` action runs **inline** (one write, no job) and needs \`kind\` \`movie\`/\`show\` plus \`params.collection_id\`.
+
+## Mass rename
+
+Preview and apply the current organization templates to existing files (the API behind [Naming Conformance](#vtool-repair) and the mass-rename UI). Scanning a big library resolves every stored path against the filesystem, so the preview runs on a background worker and the UI polls.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | \`/organization/rename/preview\` | Kick off (or report) the preview → \`{success, ready, done, total, entries?, unresolved?, error?}\` |
+| GET | \`/organization/rename/preview/status\` | Poll the in-flight preview without starting a new one |
+| POST | \`/organization/rename/apply\` | Apply renames from a fresh preview: \`{keys?: [...]}\` — omitted keys means everything the preview found. \`409\` if a run is already in progress |
+
+**Admin-only, any method** — renaming the library is management.
+
+## Recycle bin
+
+Every video delete lands here first (upgrade replaces, YouTube retention, watched cleanup). Browse, restore, or purge.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | \`/downloads/recycle\` | List entries → \`{items, total_size, keep_days, recycle_enabled}\` (keep window defaults to 7 days) |
+| POST | \`/downloads/recycle/restore\` | Restore one entry \`{trash_dir, name}\`, or everything with \`{all: true}\` |
+| POST | \`/downloads/recycle/purge\` | Permanently delete one entry, or empty the bin with \`{all: true}\` |
+
+## Fresh Releases, release detail, quality evaluate
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | \`/downloads/fresh-releases\` | The stored [Fresh Releases board](#vsearch-fresh): reads the **last snapshot**, never the network, so the tab opens instantly → \`{source: "EXT.to", sections, total, fetched_at}\`. Errors when FlareSolverr isn't configured or no board exists yet |
+| POST | \`/downloads/fresh-releases/refresh\` | Refresh the board **now** (the tab's Refresh button) — identical work to the hourly automation; reports \`{running: true}\` if one is already in flight |
+| GET | \`/downloads/detail?url=\` | The facts behind one EXT.to release (poster, IMDb id, rating, genres, runtime). Cache-first; add \`fetch=1\` for a live lookup on a miss |
+| POST | \`/downloads/evaluate\` | Judge an owned file against your quality profile: \`{file: {resolution, video_codec, …}}\` → \`{meets, resolution_label, reasons[]}\`. Powers the Download modal's *"In your library · … (below your target)"* line |
+
+## SponsorBlock segments
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | \`/youtube/video/{video_id}/segments\` | Crowd segments stored for a video (sponsor / intro / outro / …) so the player can offer skips. \`[]\` until the SponsorBlock enrichment worker processes it |
+
+## Watch party (watch together)
+
+Movie night runs on what someone can actually play. The chat page's ballot is a deterministic fold over the room's protocol bus — every client sees the same nominations, but **ownership is personal**: each SoulSync checks its own library and renders Play or Grab. "Owned" means a real playable file, not mere library presence.
+
+| Method | Path | Purpose | Auth |
+|--------|------|---------|------|
+| GET | \`/watch/library?q=\` | Nominate picker: owned titles matching the query (2+ chars). Rows carry \`art\` (local poster proxy) and \`po\` (bus-safe TMDB CDN URL or null — a tokened server URL never rides the public bus) | video |
+| POST | \`/watch/owned\` | \`{items: [{kd: "m"/"t", id, s?, e?}]}\` → \`{owned: {"m:603": true, "t:1399:1x1": false, …}}\` | video |
+| GET | \`/watch/playable?kd=&id=&s=&e=\` | Whether **this box** can stream the party's pick to a browser (direct-play verdict) — asked before playback so the room gets an honest answer | video |
+| GET | \`/watch/stream?kd=&id=&s=&e=\` | Byte-serves the party's file with Range/206 support (seeking is how a latecomer joins mid-showing). Local file, or proxied from the media server — the upstream URL carries the server token and is **never exposed to the browser** | video |
+| POST | \`/watch/grab\` | \`{kd, id, s?, e?, ti?, y?, po?}\` → hydrated wishlist add + immediate manual search (envelopes stay lean; hydration happens here) | can_download |
+
+> [!NOTE]
+> The client names a **title** (kind + TMDB id + season/episode), never a path — the path comes from the library row and is re-rooted through the path resolver, so no request shape can point these endpoints at an arbitrary file. Kids profiles get \`403\` on over-cap titles.
+
+## Overlay assets
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | \`/overlays/logo/{field}/{value}\` | The drop-in-pack logo for a field value, so the editor previews the real mark. \`404\` when no pack/match — the editor falls back to text |
+| GET | \`/overlays/logopack\` | What logo art is installed (powers the palette gate) + install job state |
+| POST | \`/overlays/logopack/install\` | Copy Kometa's public logo set into the local drop-in folders (opt-in, user-initiated). Returns immediately — poll \`/overlays/logopack\` |
+| GET | \`/overlays/preview/random?kind=\` | A random owned item for the editor's preview ("surprise me"); \`kind=poster/season/episode\` |
+| GET | \`/overlays/preview/search?kind=&q=\` | Search seasons/episodes to preview a Season/Episode template on a real one |
+
+All \`/overlays/*\` endpoints are **admin, any method**.
+
+## Issues
+
+Problem reports from the people using the library (filed against a movie, show, or episode). They feed the **Issue Reported / Issue Status Changed / Issue Reply** automation triggers.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | \`/issues?status=&category=&entity_type=&limit=&offset=\` | List issues (reporter identity is admin-only) |
+| POST | \`/issues\` | File an issue: \`{entity_type: "movie"/"show"/"episode", entity_id, category, …}\` |
+| GET | \`/issues/{id}\` | Issue detail |
+| PUT | \`/issues/{id}\` | Update — owners may edit their own title/description; admins can move status |
+| DELETE | \`/issues/{id}\` | Delete (admin) |
+| POST | \`/issues/bulk\` | Admin bulk: \`{ids, status?/priority?}\` or \`{ids, delete: true}\` |
+| POST | \`/issues/{id}/comments\` | Reply on an issue |
+| GET | \`/issues/counts\`, \`/issues/categories\` | Counts and the category list |
+
+Categories: \`wrong_match\`, \`wrong_metadata\`, \`wrong_poster\`, \`bad_quality\`, \`audio_issue\`, \`subtitle_issue\`, \`playback_issue\`, \`missing_content\`, \`duplicate\`, \`other\`.
 `
         },
     ]

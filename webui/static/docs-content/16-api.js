@@ -328,29 +328,150 @@ curl -H "Authorization: Bearer sk_..." \\
             body: `
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | \`/video/library\` | What's in the video library (\`?kind=movies|shows&search=&letter=&sort=&status=&genre=&page=&limit=\`) |
+| GET | \`/video/library\` | What's in the video library (\`?kind=\` — \`movies\` or \`shows\` — plus \`search\`, \`letter\`, \`sort\`, \`status\`, \`genre\`, \`page\`, \`limit\`) |
 | GET | \`/video/library/genres\` | Video library genres |
 | GET | \`/video/search\` | TMDB multi-search — \`?q=\` is required |
 | GET | \`/video/trending\` | Trending titles |
-| GET | \`/video/wishlist\` | Wishlist items — \`?kind=movie|show&search=&sort=&page=&limit=\` for a page; no \`kind\` for counts only |
+| GET | \`/video/wishlist\` | Wishlist items — \`?kind=\` (\`movie\` or \`show\`) plus \`search\`, \`sort\`, \`page\`, \`limit\` for a page; no \`kind\` for counts only |
 | GET | \`/video/wishlist/counts\` | Wishlist counts |
 | POST | \`/video/wishlist\` | Add — \`{"movie": {tmdb_id, title, year?, poster_url?}}\` or \`{"show": {…}, "episodes": [{season_number, episode_number, …}]}\` |
-| DELETE | \`/video/wishlist\` | Remove — \`{scope: movie|show|season|episode, tmdb_id, season_number?, episode_number?}\` |
+| DELETE | \`/video/wishlist\` | Remove — \`{scope, tmdb_id, season_number?, episode_number?}\` (\`scope\`: \`movie\`, \`show\`, \`season\`, or \`episode\`) |
 | GET | \`/video/watchlist\` | Watched shows, people, and studios |
-| POST | \`/video/watchlist\` | Follow — \`{kind: show|person|studio, tmdb_id, title, poster_url?}\` |
+| POST | \`/video/watchlist\` | Follow — \`{kind, tmdb_id, title, poster_url?}\` (\`kind\`: \`show\`, \`person\`, or \`studio\`) |
 | DELETE | \`/video/watchlist\` | Unfollow — \`{kind, tmdb_id}\` |
-| POST | \`/video/scan\` | Request a library scan — \`{mode?: incremental|deep|full}\` (default \`full\`); returns 200 \`{"status":"in_progress"}\` if a scan is already running |
+| POST | \`/video/scan\` | Request a library scan — \`{mode?}\` (\`incremental\`, \`deep\`, or \`full\`; default \`full\`); returns 200 \`{"status":"in_progress"}\` if a scan is already running |
 | GET | \`/video/scan/status\` | Scan status |
 | GET | \`/video/downloads\` | Active video downloads |
 | GET | \`/video/downloads/status\` | Video download status |
 | GET | \`/video/downloads/history\` | Video download history |
 | GET | \`/video/calendar\` | Upcoming and recent episodes/releases — \`?start=\` (ISO date, default today), \`?days=\` (1–31, default 7), \`?scope=\` (\`watchlist\` or \`all\`) |
 | GET | \`/video/requests\` | List video requests |
-| POST | \`/video/requests\` | Create — \`{kind: movie|show, tmdb_id, title, year?, poster_url?, note?, monitor?}\` |
+| POST | \`/video/requests\` | Create — \`{kind, tmdb_id, title, year?, poster_url?, note?, monitor?}\` (\`kind\`: \`movie\` or \`show\`) |
 | POST | \`/video/requests/{request_id}/approve\` | Approve a video request |
 | POST | \`/video/requests/{request_id}/deny\` | Deny a video request |
 
 These all use the same API-key authentication as the music endpoints and relay to the video backend.
+`
+        },
+        {
+            id: 'api-automations',
+            title: 'Automations',
+            lede: 'Drive the automation engine over HTTP: CRUD, run-now, progress, history, and the block catalog.',
+            body: `
+> [!NOTE]
+> These endpoints live **outside** \`/api/v1\` — they are the web UI's own session-authenticated surface and do **not** accept API keys. Call them from an authenticated browser session (export your login cookies and pass \`curl -b cookies.txt\`).
+
+| Method | Path | Purpose | Auth |
+|--------|------|---------|------|
+| GET | \`/api/automations\` | List automations for the current profile | session (profile-scoped) |
+| POST | \`/api/automations\` | Create an automation | session (profile-scoped) |
+| GET | \`/api/automations/master\` | Master pause state — \`{"music": bool, "video": bool}\` | session |
+| POST | \`/api/automations/master\` | Flip the master pause switch | admin |
+| GET | \`/api/automations/{automation_id}\` | One automation | session |
+| PUT | \`/api/automations/{automation_id}\` | Update an automation | session |
+| PUT | \`/api/automations/group\` | Move automations into a group | session |
+| POST | \`/api/automations/bulk-toggle\` | Enable/disable many automations at once | session |
+| DELETE | \`/api/automations/{automation_id}\` | Delete an automation | session |
+| POST | \`/api/automations/{automation_id}/duplicate\` | Duplicate an automation into your profile | session (profile-scoped) |
+| POST | \`/api/automations/{automation_id}/toggle\` | Enable/disable one automation | session |
+| POST | \`/api/automations/{automation_id}/run\` | Run an automation right now | session (profile-scoped) |
+| GET | \`/api/automations/progress\` | Live progress of running automations | session |
+| GET | \`/api/automations/{automation_id}/history\` | Run history — \`?limit=50&offset=0\` | session |
+| GET | \`/api/scripts\` | Scripts available to the run-script action | session |
+| GET | \`/api/automations/blocks\` | Trigger/action/notification block catalog | session |
+| POST | \`/api/automations/test-notify\` | Fire a test notification | session |
+
+## Creating and updating
+
+\`POST /api/automations\` takes the full automation definition as JSON — \`name\` is required:
+
+\`\`\`bash
+curl -b cookies.txt -X POST http://localhost:8008/api/automations \\
+  -H "Content-Type: application/json" \\
+  -d '{"name": "Nightly wishlist", "trigger_type": "schedule", "trigger_config": {"interval": 6, "unit": "hours"}, "action_type": "process_wishlist", "action_config": {}}'
+\`\`\`
+
+Accepted fields: \`name\`, \`trigger_type\`, \`trigger_config\`, \`action_type\`, \`action_config\`, \`then_actions\`, \`notify_type\`, \`notify_config\`, \`group_name\`, \`owned_by\`. Success answers \`{"success": true, "id": <new_id>}\`; a trigger loop is rejected with \`400\` ("Signal cycle detected"). \`PUT /api/automations/{automation_id}\` accepts the same fields (anything outside the whitelist is ignored) and answers \`{"success": true}\`.
+
+## Grouping and bulk toggles
+
+\`\`\`bash
+curl -b cookies.txt -X PUT http://localhost:8008/api/automations/group \\
+  -H "Content-Type: application/json" \\
+  -d '{"automation_ids": [3, 7], "group_name": "Nightly"}'
+
+curl -b cookies.txt -X POST http://localhost:8008/api/automations/bulk-toggle \\
+  -H "Content-Type: application/json" \\
+  -d '{"automation_ids": [3, 7], "enabled": false}'
+\`\`\`
+
+Both answer \`{"success": true, "updated": <n>}\`.
+
+## Master pause
+
+\`POST /api/automations/master\` takes \`{"side": "music", "enabled": false}\` and pauses **every** automation on that side at once (admin only). \`GET\` returns the current state, e.g. \`{"music": true, "video": true}\`.
+
+## Notifications, scripts, blocks
+
+- \`POST /api/automations/test-notify\` sends a real test message through a notification channel: \`{"type": "discord_webhook", "config": {...}}\`. \`type\` must be one of \`discord_webhook\`, \`pushbullet\`, \`telegram\`, \`webhook\`; \`config\` carries that channel's settings and the test goes out with sample run variables filled in.
+- \`GET /api/scripts\` lists the configured scripts directory as \`{name, extension, size}\` entries — the options the run-script action block offers. Recognized: \`.sh\` \`.py\` \`.bat\` \`.ps1\` \`.rb\` \`.pl\` \`.js\`, plus any executable file.
+- \`GET /api/automations/blocks\` returns the music-scope builder catalog — \`{triggers, actions, notifications, category_order}\` plus \`known_signals\`, every signal name the engine can trigger on. The automation builder renders its palette from this endpoint.
+
+## Notes
+
+- System automations cannot be deleted or duplicated — both answer \`403\`.
+- Live run progress also streams over the \`automation:progress\` real-time event (see [Real-time Events](#api-websocket)); \`GET /api/automations/progress\` is the pollable equivalent, keyed by automation id.
+`
+        },
+        {
+            id: 'api-legacy',
+            title: 'Requests & Profile Admin',
+            lede: 'Member download requests, invites, devices, and avatars — the session-authenticated endpoints behind household management.',
+            body: `
+> [!NOTE]
+> Like the automation endpoints, these live **outside** \`/api/v1\` and use your logged-in browser session, not API keys. The basic profile CRUD is documented under [Profiles](#api-profiles); this page covers everything around it.
+
+## Music requests
+
+Members submit download requests; admins approve or decline them.
+
+| Method | Path | Purpose | Auth |
+|--------|------|---------|------|
+| GET | \`/api/requests/music\` | List requests — \`?status=\` is one of \`pending\`, \`approved\`, \`available\`, \`declined\`, \`all\` | session |
+| GET | \`/api/requests/music/quota\` | Your request quota (\`quota: null\` = unlimited) | session |
+| GET | \`/api/requests/music/counts\` | Pending count plus unseen updates | session |
+| POST | \`/api/requests/music/seen\` | Mark request updates as seen | session |
+| POST | \`/api/requests/music/approve\` | Approve one request | admin |
+| POST | \`/api/requests/music/approve-all\` | Approve all pending (optionally one profile's) | admin |
+| POST | \`/api/requests/music/decline\` | Decline one request | admin |
+| POST | \`/api/requests/music/withdraw\` | Withdraw your own request | session |
+| DELETE | \`/api/requests/music/{request_id}\` | Delete a request from history | session (own) / admin |
+
+\`POST /api/requests/music/approve\` takes \`{"profile_id": 2, "key": "<request-key>"}\` with an optional \`response\` note (truncated to 500 characters) and answers \`{"success": true, "approved": <n>}\`. \`approve-all\` takes an optional \`profile_id\` — omit it to approve everything pending. \`decline\` takes the same body shape as \`approve\`. \`withdraw\` takes \`{"key": "<request-key>"}\`.
+
+## Profile admin
+
+| Method | Path | Purpose | Auth |
+|--------|------|---------|------|
+| GET | \`/api/profiles/audit\` | Audit log — \`?limit=100&offset=0\` | admin |
+| POST | \`/api/profiles/{profile_id}/sign-out-everywhere\` | Revoke every session for a profile | session (owner or admin) |
+| GET | \`/api/profiles/{profile_id}/devices\` | Logged-in devices, each with a \`current\` flag | session (owner or admin) |
+| DELETE | \`/api/profiles/{profile_id}/devices/{device_id}\` | Sign out one device | session (owner or admin) |
+| GET | \`/api/profiles/invites\` | Invites with \`state\` (\`open\`/\`used\`/\`revoked\`/\`expired\`) | admin |
+| POST | \`/api/profiles/invites\` | Create an invite — answers \`201\`, token shown **once** | admin |
+| DELETE | \`/api/profiles/invites/{invite_id}\` | Revoke an invite | admin |
+| GET | \`/api/invite/{token}\` | Inspect an invite (rate-limited) | open |
+| POST | \`/api/invite/{token}/accept\` | Claim an invite, creating a profile | open |
+| POST | \`/api/profiles/{profile_id}/avatar\` | Upload an avatar (multipart \`file\`, ≤3 MB, stored as 512px webp) | session (owner or admin) |
+| GET | \`/api/profiles/{profile_id}/avatar\` | The avatar image itself (\`image/webp\`, not JSON) | open |
+| DELETE | \`/api/profiles/{profile_id}/avatar\` | Remove the avatar | session (owner or admin) |
+
+Creating an invite takes an optional \`preset\` — the new profile's starting permissions (\`allowed_sides\`, \`can_download\`, \`allowed_pages\`, \`hide_explicit\`, \`max_rating\`, \`request_limit\`, \`request_limit_days\`) — plus an optional \`note\` (≤200 chars) and \`expires_hours\` (default 72, clamped 1–720). The response includes the invite \`token\` **exactly once** (only a hash is stored), alongside the shareable \`path\` and \`expires_hours\`.
+
+Accepting an invite takes \`{"name": "..."}\` (required, ≤40 chars) with optional \`avatar_color\`, \`pin\` (4–20 digits), and \`password\` (required when login is enabled, ≥6 chars), and answers \`201\` with \`{"success": true, "profile_id": <id>}\`.
+
+> [!WARNING]
+> Treat invite tokens like passwords: anyone with the link can create a profile on your server until it expires or is revoked. Keep \`expires_hours\` short for links you share anywhere public.
 `
         },
         {
@@ -368,26 +489,57 @@ socket.on("downloads:batch_update", (payload) => console.log(payload));
 
 ## Events
 
-| Event | When it fires |
-|-------|---------------|
-| \`downloads:batch_update\` | Download queue progress changed |
-| \`scan:media\` | Library scan progress |
-| \`scan:watchlist\` | Watchlist scan progress |
-| \`discovery:progress\` | Discovery run progress |
-| \`sync:progress\` / \`sync:active\` | Sync job progress / active syncs |
-| \`repair:progress\` | Library Maintenance job progress |
-| \`dashboard:stats\` / \`dashboard:db_stats\` | Dashboard numbers refreshed |
-| \`dashboard:activity\` | New activity feed entry |
-| \`dashboard:toast\` | Toast notification shown in UI |
-| \`dashboard:wishlist_count\` | Wishlist count changed |
-| \`wishlist:stats\` | Wishlist statistics changed |
-| \`watchlist:count\` | Watchlist count changed |
-| \`status:update\` | System status changed |
-| \`activity:update\` | Activity feed updated |
-| \`enrichment:youtube\` | YouTube enrichment finished |
-| \`tool:logs\` / \`tool:metadata\` | Tool output streamed |
-| \`logs:live\` | Live log lines |
-| \`chat:room_message\` / \`chat:room_protocol\` / \`chat:unread\` | Chat updates |
+Every emit below is server → client, pushed from a background thread — none fire from HTTP request handlers. Some are broadcast; some go to rooms you must join first (see "Client → server" below).
+
+| Event | Direction | Payload | When it fires |
+|-------|-----------|---------|---------------|
+| \`downloads:batch_update\` | S→C | \`{batch_id, data}\` | Download queue progress — every 2s per batch. Join \`batch:{id}\` rooms with \`downloads:subscribe\`. |
+| \`scan:media\` | S→C | \`{success, status}\` | Library scan progress. |
+| \`scan:watchlist\` | S→C | \`{success, …state}\` | Watchlist scan progress. |
+| \`discovery:progress\` | S→C | \`{platform, id, phase, status, progress, …}\` | Discovery run progress, one emit per active platform scan. Join \`discovery:{id}\` rooms with \`discovery:subscribe\`. |
+| \`sync:progress\` | S→C | \`{playlist_id, …state}\` | Playlist sync progress. Join \`sync:{id}\` rooms with \`sync:subscribe\`. |
+| \`sync:active\` | S→C | \`{active, syncs}\` | The currently active syncs — broadcast while any sync runs (deliberately unscoped). |
+| \`repair:progress\` | S→C | \`{job_id: state}\` | Library Maintenance job progress; state carries \`status\`, \`progress\`, \`processed\`, \`total\`, \`log\`, \`finished_at\`. |
+| \`automation:progress\` | S→C | \`{automation_id: state}\` | Automation run progress (also pollable via \`GET /api/automations/progress\`). |
+| \`dashboard:stats\` | S→C | system stats | Dashboard numbers refreshed (every 10s): active/finished downloads, download speed, active syncs, uptime, memory. |
+| \`dashboard:db_stats\` | S→C | database info | Database statistics refreshed (every 10s). |
+| \`dashboard:activity\` | S→C | \`{activities}\` | New activity feed entry (last 10, every 2s). |
+| \`dashboard:toast\` | S→C | \`{icon, title, subtitle}\` | Toast notification shown in the UI. |
+| \`dashboard:wishlist_count\` | S→C | \`{count}\` | Wishlist count changed (per profile). |
+| \`wishlist:stats\` | S→C | \`{is_auto_processing, active_batches, next_run_in_seconds}\` | Wishlist statistics changed. |
+| \`watchlist:count\` | S→C | \`{success, count, next_run_in_seconds}\` | Watchlist count changed (per profile). |
+| \`status:update\` | S→C | service connectivity flags | System status changed (every 5s): metadata source, Spotify, media server, Soulseek, enrichment, active downloads. |
+| \`activity:update\` | S→C | activity snapshot | Server activity updated — join the \`activity:live\` room with \`activity:subscribe\`. |
+| \`enrichment:{worker}\` | S→C | worker stats | Enrichment worker progress — one event per worker (e.g. \`enrichment:youtube\`). |
+| \`tool:logs\` | S→C | \`{logs}\` | Tool output streamed (last 50 activity entries, formatted). |
+| \`tool:metadata\` | S→C | \`{success, status}\` | Metadata tool progress. |
+| \`tool:db-update\` | S→C | db-update state | Database update tool progress. |
+| \`tool:duplicate-cleaner\` | S→C | cleaner state + \`space_freed_mb\` | Duplicate cleaner progress. |
+| \`logs:live\` | S→C | \`{lines, source}\` | Live log lines — admin only, subscribe with \`logs:subscribe\` first. |
+| \`lastfm:import-progress\` | S→C | import state | Last.fm history import progress (per profile). |
+| \`listenbrainz:import-progress\` | S→C | import state | ListenBrainz import progress (per profile). |
+| \`rate-monitor:update\` | S→C | per-service rate limits | API rate-monitor tick. |
+| \`chat:room_message\` | S→C | \`{room, messages}\` | New Soulseek chat messages (last 20 decoded). |
+| \`chat:room_protocol\` | S→C | \`{room, events}\` | Soulseek chat protocol events (last 40). |
+| \`chat:unread\` | S→C | \`{pms, users, grew}\` | PM unread count changed. |
+| \`overlay:progress\` | S→C | overlay job state | Video overlay render progress. |
+| \`video:bulk\` | S→C | bulk-op state | Video bulk operation progress. |
+| \`video:repair:progress\` | S→C | repair snapshot | Video repair worker progress. |
+| \`collections:sync\` | S→C | sync job state | Video collection sync progress. |
+| \`collections:cleanup\` | S→C | cleanup state | Video collection server-cleanup progress. |
+| \`collections:artwork\` | S→C | poster-gen state | Collection artwork generation progress. |
+
+## Client → server
+
+| Event | Direction | Payload | What it does |
+|-------|-----------|---------|--------------|
+| \`connect\` / \`disconnect\` | C→S | — | Connection lifecycle. \`connect\` runs the launch-PIN/login gate — unverified handshakes are rejected. |
+| \`activity:subscribe\` / \`activity:unsubscribe\` | C→S | — | Join/leave the \`activity:live\` room to receive \`activity:update\`. |
+| \`downloads:subscribe\` / \`downloads:unsubscribe\` | C→S | \`{batch_ids}\` | Join/leave \`batch:{id}\` rooms to receive \`downloads:batch_update\`. |
+| \`profile:join\` | C→S | \`{profile_id?, old_profile_id?}\` | Join your profile room for per-profile pushes (\`watchlist:count\`, \`dashboard:wishlist_count\`, import progress). The room is derived from your session, not trusted from the payload. |
+| \`logs:subscribe\` / \`logs:unsubscribe\` | C→S | \`{source?}\` (default \`app\`) | Live log tail for \`logs:live\` — admin only. |
+| \`sync:subscribe\` / \`sync:unsubscribe\` | C→S | \`{playlist_ids}\` | Join/leave \`sync:{id}\` rooms for \`sync:progress\`. |
+| \`discovery:subscribe\` / \`discovery:unsubscribe\` | C→S | \`{ids}\` | Join/leave \`discovery:{id}\` rooms for \`discovery:progress\`. |
 
 > [!NOTE]
 > Event names are namespaced (\`downloads:batch_update\`, not \`download_progress\`). If you are migrating from an older integration, update your listeners — the flat names from earlier versions no longer fire.
