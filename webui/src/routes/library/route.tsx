@@ -17,12 +17,12 @@ export const Route = createFileRoute('/library')({
   beforeLoad: ({ context, search }) => {
     guardPageAccess(context.shell.bridge, 'library');
     // An artist the catalogue does not hold opens on the artist-detail page.
-    // `discover=<source>:<id>` on its own is what that used to be here, and it
-    // still arrives from bookmarks, history and the album view's back link.
-    // Split on the FIRST colon: provider ids can contain one.
+    // `discover=<source>:<id>` is what that used to be here, and it still
+    // arrives from bookmarks and history. Split on the FIRST colon: provider
+    // ids can contain one.
     const discover = search.discover ?? '';
     const split = discover.indexOf(':');
-    if (split > 0 && !search.discoverAlbum && !search.artist && !search.album) {
+    if (split > 0 && !search.artist && !search.album) {
       throw redirect({
         to: '/artist-detail/$source/$id',
         params: { source: discover.slice(0, split), id: discover.slice(split + 1) },
@@ -39,7 +39,6 @@ export const Route = createFileRoute('/library')({
     album: search.album,
     artist: search.artist,
     discover: search.discover,
-    discoverAlbum: search.discoverAlbum,
     section: search.section,
     wantedKind: search.wantedKind,
   }),
@@ -57,7 +56,7 @@ export const Route = createFileRoute('/library')({
       void context.queryClient.prefetchQuery(libraryV2AlbumQueryOptions(deps.album));
     } else if (deps.artist) {
       void context.queryClient.prefetchQuery(libraryV2ArtistQueryOptions(deps.artist));
-    } else if (!deps.discover && !deps.discoverAlbum) {
+    } else if (!deps.discover) {
       void context.queryClient.prefetchQuery(libraryV2ArtistsQueryOptions(deps));
     }
   },

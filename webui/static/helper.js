@@ -625,12 +625,12 @@ const HELPER_CONTENT = {
     },
 
     '[id^="add-to-wishlist-btn"]': {
-        title: 'Add to Wishlist',
-        description: 'Adds all missing tracks from this batch to your Wishlist for later download. Useful when you want to queue tracks but not download them right now.',
+        title: 'Monitor',
+        description: 'Marks the selected tracks as wanted in your library and starts downloading them right away. A track that is not found stays wanted and is searched again on the next wishlist run.',
         tips: [
-            'Only missing tracks are added (already-owned tracks are skipped)',
-            'Tracks appear in the Wishlist modal under the appropriate category',
-            'The Wishlist auto-processes on a schedule via the Automations system'
+            'The Library Status column shows what you already have as soon as the dialog opens',
+            'Monitored tracks appear in the Wishlist and under Wanted in the Library',
+            'Begin Analysis downloads once without monitoring, with Force Download and Skip AcoustID'
         ]
     },
     '.download-control-btn.primary': {

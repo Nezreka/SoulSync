@@ -26,12 +26,8 @@ import {
   fetchArtistHeroStats,
   fetchArtistTopTracks,
   fetchLibraryV2DiscoveryTrackStatus,
-  fetchProviderAlbumDetail,
   monitorLibraryV2DiscoveryTrack,
-  monitorLibraryV2DiscoveryAlbum,
   type ArtistTopTrack,
-  type ProviderAlbumDetail,
-  type ProviderAlbumTrack,
   type ProviderRelease,
   bulkMonitorLibraryV2Releases,
   clearLibraryV2EntityMatch,
@@ -4388,27 +4384,6 @@ export function LibraryV2Page() {
     );
   }
 
-  // ldp-01: `<source>:<provider id>` — an artist that may not be in the
-  // catalogue at all. Split on the FIRST colon only; provider ids can contain
-  // one (MusicBrainz URLs, Bandcamp slugs).
-  const discoverSplit = search.discover ? search.discover.indexOf(':') : -1;
-  const discover =
-    search.discover && discoverSplit > 0
-      ? {
-          source: search.discover.slice(0, discoverSplit),
-          providerId: search.discover.slice(discoverSplit + 1),
-          name: search.discoverName ?? '',
-        }
-      : null;
-  const discoverAlbumSplit = search.discoverAlbum ? search.discoverAlbum.indexOf(':') : -1;
-  const discoverAlbum =
-    search.discoverAlbum && discoverAlbumSplit > 0
-      ? {
-          source: search.discoverAlbum.slice(0, discoverAlbumSplit),
-          providerId: search.discoverAlbum.slice(discoverAlbumSplit + 1),
-        }
-      : null;
-
   const canWrite = enabledQuery.data?.canWrite === true;
   const canWish = enabledQuery.data?.canWish === true;
 
@@ -4425,18 +4400,6 @@ export function LibraryV2Page() {
         ) : null}
         {search.album ? (
           <AlbumDetailView albumId={search.album} />
-        ) : discoverAlbum && discover ? (
-          <DiscoveryAlbumView
-            source={discoverAlbum.source}
-            providerId={discoverAlbum.providerId}
-            name={search.discoverAlbumName ?? ''}
-            albumType={search.discoverAlbumType ?? 'album'}
-            imageUrl={search.discoverAlbumImage ?? ''}
-            releaseDate={search.discoverAlbumDate ?? ''}
-            artistSource={discover.source}
-            artistProviderId={discover.providerId}
-            artistName={discover.name}
-          />
         ) : search.artist ? (
           <ArtistDetailView artistId={search.artist} />
         ) : search.section === 'wanted' ? (
@@ -6483,237 +6446,6 @@ function useOtherSources(input: {
 function useDiscographyFilters() {
   const [filters, setFilters] = useState<DiscographyFilterState>(DEFAULT_DISCOGRAPHY_FILTERS);
   return { filters, setFilters };
-}
-
-const providerTrackTitle = (track: ProviderAlbumTrack) => track.name || track.title || '';
-const providerTrackKey = (track: ProviderAlbumTrack, index: number) =>
-  String(track.id || `${track.disc_number || 1}:${track.track_number || index + 1}`);
-
-/** Provider release detail that remains read-only until Monitor is pressed. */
-function DiscoveryAlbumView({
-  source,
-  providerId,
-  name,
-  albumType,
-  imageUrl,
-  releaseDate,
-  artistSource,
-  artistProviderId,
-  artistName,
-}: {
-  source: string;
-  providerId: string;
-  name: string;
-  albumType: string;
-  imageUrl: string;
-  releaseDate: string;
-  artistSource: string;
-  artistProviderId: string;
-  artistName: string;
-}) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  // bookmarking a release is wishing (E-13)
-  const canWrite = useLibraryV2CanWish();
-  const [monitoring, setMonitoring] = useState(false);
-  const [monitored, setMonitored] = useState(false);
-  const [monitoringTrack, setMonitoringTrack] = useState<string | null>(null);
-  const [monitoredTracks, setMonitoredTracks] = useState<Set<string>>(() => new Set());
-  const [error, setError] = useState<string | null>(null);
-  const detail = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'provider-album', source, providerId, name, artistName],
-    queryFn: () => fetchProviderAlbumDetail({ source, providerId, name, artistName }),
-    staleTime: 5 * 60_000,
-  });
-  const album: ProviderAlbumDetail | undefined = detail.data;
-  const tracks = album?.tracks ?? [];
-  const title = album?.name || album?.title || name;
-  const cover = album?.images?.[0]?.url || imageUrl;
-  const trackTitles = tracks.map(providerTrackTitle).filter(Boolean);
-  const trackStatus = useQuery({
-    queryKey: [
-      ...LIBRARY_V2_QUERY_KEY,
-      'provider-album-track-status',
-      artistSource,
-      artistProviderId,
-      artistName,
-      trackTitles,
-    ],
-    queryFn: () =>
-      fetchLibraryV2DiscoveryTrackStatus({
-        source: artistSource,
-        artistName,
-        artistProviderId,
-        titles: trackTitles,
-      }),
-    enabled: trackTitles.length > 0,
-  });
-
-  const goBack = () =>
-    navigate({
-      search: (p) => ({
-        ...p,
-        discoverAlbum: undefined,
-        discoverAlbumName: undefined,
-        discoverAlbumType: undefined,
-        discoverAlbumImage: undefined,
-        discoverAlbumDate: undefined,
-      }),
-    });
-
-  async function monitor() {
-    if (monitoring || monitored) return;
-    setMonitoring(true);
-    setError(null);
-    try {
-      await monitorLibraryV2DiscoveryAlbum({
-        source,
-        artistSource,
-        artistProviderId,
-        artistName,
-        albumProviderId: providerId,
-        albumName: title,
-        albumType: album?.album_type || albumType,
-        releaseDate: album?.release_date || releaseDate,
-        imageUrl: cover,
-        trackCount: album?.total_tracks ?? tracks.length,
-      });
-      setMonitored(true);
-      setMonitoredTracks(new Set(tracks.map(providerTrackKey)));
-    } catch (e) {
-      setError(mutationErrorMessage(e, 'Could not monitor this release'));
-    } finally {
-      setMonitoring(false);
-    }
-  }
-
-  async function monitorTrack(track: ProviderAlbumTrack, index: number) {
-    const trackTitle = providerTrackTitle(track);
-    const key = providerTrackKey(track, index);
-    if (!trackTitle || monitoringTrack || monitoredTracks.has(key)) return;
-    setMonitoringTrack(key);
-    setError(null);
-    try {
-      await monitorLibraryV2DiscoveryTrack({
-        source,
-        artistSource,
-        artistName,
-        artistProviderId,
-        albumTitle: title,
-        albumProviderId: providerId,
-        albumType: album?.album_type || albumType,
-        trackTitle,
-        trackProviderId: track.id,
-        trackNumber: track.track_number,
-        discNumber: track.disc_number,
-      });
-      setMonitoredTracks((current) => new Set(current).add(key));
-      void invalidateLibraryV2(queryClient);
-    } catch (e) {
-      setError(mutationErrorMessage(e, 'Could not monitor this track'));
-    } finally {
-      setMonitoringTrack(null);
-    }
-  }
-
-  return (
-    <div className={styles.page}>
-      <BackLink onClick={() => void goBack()}>← {artistName || 'Artist'}</BackLink>
-      {error ? <div className={`${styles.grabBanner} ${styles.grab_err}`}>{error}</div> : null}
-      {detail.isError ? (
-        <div className={styles.emptyState}>
-          {mutationErrorMessage(detail.error, 'Could not load this release')}
-        </div>
-      ) : detail.isLoading || !album ? (
-        <div className={styles.loading}>Loading…</div>
-      ) : (
-        <>
-          <header className={styles.detailHeader}>
-            <Artwork src={cover} alt={title} className={styles.detailThumb} />
-            <div className={styles.detailMeta}>
-              <div className={styles.detailTitleRow}>
-                <ActionButton
-                  icon="monitor"
-                  label={monitored ? 'Monitored' : monitoring ? 'Adding…' : 'Monitor'}
-                  title="Monitor this release"
-                  requiresWish
-                  busy={monitoring}
-                  disabled={monitored}
-                  onClick={() => void monitor()}
-                />
-                <h1 className={styles.title}>{title}</h1>
-              </div>
-              <p className={styles.subtitle}>
-                {[artistName, album.album_type || albumType, album.release_date || releaseDate]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
-            </div>
-          </header>
-          <div className={styles.libraryTableResponsive}>
-            <table className={styles.trackTable}>
-              <thead>
-                <tr>
-                  <th className={styles.colMonitor} aria-label="Monitoring" />
-                  <th className={styles.colNum}>#</th>
-                  <th>Title</th>
-                  <th>Artist</th>
-                  <th>Duration</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tracks.map((track, index) => {
-                  const trackTitle = providerTrackTitle(track);
-                  const key = providerTrackKey(track, index);
-                  const trackMonitored =
-                    monitored ||
-                    monitoredTracks.has(key) ||
-                    trackStatus.data?.[trackTitle]?.monitored === true;
-                  return (
-                    <tr key={key}>
-                      <td className={styles.colMonitor}>
-                        {trackTitle ? (
-                          <button
-                            type="button"
-                            className={`${styles.monitorBtn} ${trackMonitored ? styles.monitorOn : ''}`}
-                            aria-label={
-                              trackMonitored
-                                ? `${trackTitle} is monitored`
-                                : `Monitor ${trackTitle}`
-                            }
-                            aria-pressed={trackMonitored}
-                            title={trackMonitored ? 'Monitored' : 'Monitor this track'}
-                            disabled={!canWrite || Boolean(monitoringTrack) || trackMonitored}
-                            onClick={() => void monitorTrack(track, index)}
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path d={BOOKMARK_PATH} strokeLinejoin="round" />
-                            </svg>
-                          </button>
-                        ) : null}
-                      </td>
-                      <td className={styles.colNum}>{track.track_number ?? index + 1}</td>
-                      <td>{trackTitle || 'Unknown track'}</td>
-                      <td>
-                        {track.artists
-                          ?.map((entry) => entry.name)
-                          .filter(Boolean)
-                          .join(', ') || artistName}
-                      </td>
-                      <td>{formatDuration(track.duration_ms)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {tracks.length === 0 ? (
-              <div className={styles.emptyState}>No tracks available.</div>
-            ) : null}
-          </div>
-        </>
-      )}
-    </div>
-  );
 }
 
 type GroupLabel = 'Albums' | 'EPs' | 'Singles';

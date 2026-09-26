@@ -541,50 +541,6 @@ export interface ProviderRelease {
   } | null;
 }
 
-export interface ProviderAlbumTrack {
-  id?: string;
-  name?: string;
-  title?: string;
-  track_number?: number;
-  disc_number?: number;
-  duration_ms?: number;
-  artists?: Array<{ id?: string; name?: string }>;
-}
-
-export interface ProviderAlbumDetail {
-  id?: string;
-  name?: string;
-  title?: string;
-  album_type?: string;
-  release_date?: string | null;
-  total_tracks?: number;
-  images?: Array<{ url?: string }>;
-  artists?: Array<{ id?: string; name?: string }>;
-  tracks?: ProviderAlbumTrack[];
-}
-
-/** Provider-only release detail. Merely opening it must remain side-effect free. */
-export async function fetchProviderAlbumDetail(input: {
-  source: string;
-  providerId: string;
-  name: string;
-  artistName: string;
-}): Promise<ProviderAlbumDetail> {
-  const params = new URLSearchParams({ name: input.name, artist: input.artistName });
-  if (input.source !== 'spotify') params.set('source', input.source);
-  if (input.source === 'bandcamp' && /^https?:\/\//.test(input.providerId)) {
-    params.set('bandcamp_url', input.providerId);
-  }
-  const payload = await readJson<ProviderAlbumDetail & { success?: boolean; error?: string }>(
-    apiClient.get(`spotify/album/${encodeURIComponent(input.providerId)}`, {
-      searchParams: params,
-      timeout: 60_000,
-    }),
-  );
-  if (payload.success === false) throw new Error(payload.error || 'Could not load this release');
-  return payload;
-}
-
 /** Read-only: the catalogue id for a provider artist, or `null` when there is
  *  none yet. Opening a search result must not create anything (§28.6 q1). */
 export async function resolveLibraryV2DiscoveryArtist(input: {

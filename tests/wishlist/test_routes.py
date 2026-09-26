@@ -598,7 +598,10 @@ def test_add_album_track_to_wishlist_builds_spotify_payload_and_merges_context()
     )
 
     assert status == 200
-    assert payload == {"success": True, "message": "Added 'Song One' to wishlist"}
+    # wishlist_id is the row key, so the dialog's "Monitor" can download
+    # exactly this row: one per release while duplicates are allowed.
+    assert payload == {"success": True, "message": "Added 'Song One' to wishlist",
+                       "wishlist_id": "track-1::album-1"}
     assert len(service.add_calls) == 1
     add_call = service.add_calls[0]
     assert add_call["failure_reason"] == "Added from library (incomplete album)"

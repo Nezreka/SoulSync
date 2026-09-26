@@ -43,18 +43,13 @@ export const libraryV2SearchSchema = z.object({
   /** Show owned releases or the full provider discography. */
   releases: z.enum(['library', 'all']).default('library').catch('library'),
   wantedKind: z.enum(LIBRARY_V2_WANTED_KINDS).default('missing').catch('missing'),
-  /** ldp-01/ldp-02 discovery mode: `<source>:<provider id>` of an artist that has no catalogue row
-   *  (yet). Set by every search/provider entry point so nobody lands on the legacy artist page. */
+  /** `<source>:<provider id>` of an artist without a catalogue row: what the
+   *  old discovery links carried. Only read to send them on to the artist
+   *  page (route.tsx), which shows such an artist now. */
   discover: coercedString.optional().catch(undefined),
   /** The artist's display name — some sources (Bandcamp) have no id lookup at
    *  all, so the name has to travel in the URL. */
   discoverName: coercedString.optional().catch(undefined),
-  /** Read-only provider release opened from a discovery artist. */
-  discoverAlbum: coercedString.optional().catch(undefined),
-  discoverAlbumName: coercedString.optional().catch(undefined),
-  discoverAlbumType: coercedString.optional().catch(undefined),
-  discoverAlbumImage: coercedString.optional().catch(undefined),
-  discoverAlbumDate: coercedString.optional().catch(undefined),
   /** ldp-03: `All Releases` renders as the V2 table or as the legacy card grid. */
   releaseView: z.enum(['table', 'cards']).default('table').catch('table'),
   /** ldp-05: compact V2 artist header vs. the rich legacy hero. */

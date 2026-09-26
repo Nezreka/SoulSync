@@ -54,6 +54,7 @@ import {
   toggleOriginEntry,
   toggleOriginGroup,
 } from './origin-history';
+import './download-modal-library';
 import './library-switch';
 import './server-activity';
 import {

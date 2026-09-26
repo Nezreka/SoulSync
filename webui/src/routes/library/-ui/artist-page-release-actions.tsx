@@ -1,5 +1,4 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
 import { createContext, type ReactNode, useContext, useMemo, useState } from 'react';
 
 import type { DiscographyRelease } from '../../artist-detail/-artist-detail.types';
@@ -17,14 +16,14 @@ import styles from './library-v2-page.module.css';
  *
  * That page is upstream's, unchanged, and shows only artists the catalogue
  * does not hold: the route sends every other one to Library v2, and wraps the
- * page in the provider below. Its release cards read the provider through two
- * lines in `release-card.tsx` and get a bookmark that monitors the release,
- * and a click that opens the release's track list in Library v2, where single
- * tracks can be monitored, instead of upstream's download dialog. Nothing is
- * written until the user asks.
+ * page in the provider below. Its release cards get a bookmark from here,
+ * through one line in `release-card.tsx`, that monitors the whole release.
+ * A click on the card still opens upstream's download dialog, which picks
+ * single tracks (see shell/download-modal-library.ts). Nothing is written
+ * until the user asks.
  *
  * Outside the provider (upstream's own tests, any other page that renders a
- * release card) the card behaves exactly as upstream wrote it.
+ * release card) the card is exactly upstream's.
  */
 
 const BOOKMARK_PATH = 'M5 3.5A1.5 1.5 0 0 1 6.5 2h11A1.5 1.5 0 0 1 19 3.5V22l-7-4.2L5 22V3.5z';
@@ -36,7 +35,6 @@ interface ArtistPageLibrary {
   artistName: string;
   /** The source that produced the discography, which owns the release ids. */
   discographySource: string;
-  openRelease: (release: DiscographyRelease) => void;
 }
 
 interface ArtistPageRelease {
@@ -52,7 +50,7 @@ interface ArtistPageRelease {
 const ArtistPageLibraryContext = createContext<ArtistPageLibrary | null>(null);
 
 /** `null` unless the card sits on the artist page under the provider. */
-export function useArtistPageLibrary(): ArtistPageLibrary | null {
+function useArtistPageLibrary(): ArtistPageLibrary | null {
   return useContext(ArtistPageLibraryContext);
 }
 
@@ -86,7 +84,6 @@ export function ArtistPageLibraryProvider({
   name: string;
   children: ReactNode;
 }) {
-  const navigate = useNavigate();
   // The page's own query under the same key, so this reads its cache.
   const detail = useQuery(artistDetailQueryOptions(source, id, name));
   const artistName = detail.data?.artist?.name || name;
@@ -94,29 +91,8 @@ export function ArtistPageLibraryProvider({
   const discographySource = detail.data?.discography?.source || normalizedSource;
 
   const value = useMemo<ArtistPageLibrary>(
-    () => ({
-      source: normalizedSource,
-      id,
-      artistName,
-      discographySource,
-      openRelease: (release) => {
-        const target = describeRelease(release, discographySource);
-        if (!target) return;
-        void navigate({
-          to: '/library',
-          search: {
-            discover: `${normalizedSource}:${id}`,
-            discoverName: artistName || undefined,
-            discoverAlbum: `${target.source}:${target.providerId}`,
-            discoverAlbumName: target.title,
-            discoverAlbumType: target.albumType,
-            discoverAlbumImage: target.imageUrl || undefined,
-            discoverAlbumDate: target.releaseDate || undefined,
-          },
-        });
-      },
-    }),
-    [normalizedSource, id, artistName, discographySource, navigate],
+    () => ({ source: normalizedSource, id, artistName, discographySource }),
+    [normalizedSource, id, artistName, discographySource],
   );
 
   return (

@@ -12,10 +12,7 @@ import {
 } from '../-artist-detail.card';
 import { releaseFlags } from '../-artist-detail.filters';
 import { gapSourceLabel } from '../-artist-detail.gap-fill';
-import {
-  ReleaseMonitorButton,
-  useArtistPageLibrary,
-} from '../../library/-ui/artist-page-release-actions';
+import { ReleaseMonitorButton } from '../../library/-ui/artist-page-release-actions';
 
 interface Props {
   release: DiscographyRelease;
@@ -38,7 +35,6 @@ interface Props {
  */
 export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen, onPlay }: Props) {
   const [playPending, setPlayPending] = useState(false);
-  const library = useArtistPageLibrary();
   const flags = releaseFlags(release, isMusicBrainz);
   const overlay = completionOverlay(release, isSourceArtist);
   const year = releaseYearText(release);
@@ -59,7 +55,7 @@ export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen, on
       data-is-live={String(flags.isLive)}
       data-is-compilation={String(flags.isCompilation)}
       data-is-featured={String(flags.isFeatured)}
-      onClick={() => (library ? library.openRelease(release) : onOpen(release))}
+      onClick={() => onOpen(release)}
     >
       {/* data-bg-src, not a style: an IntersectionObserver swaps it in, so a
           75-card grid does not fetch 75 images up front. */}

@@ -1024,7 +1024,13 @@ def add_album_track_to_wishlist(
                 "disc_number": track.get("disc_number"),
             }, profile_id=runtime.profile_id,
                actor_profile_id=runtime.profile_id)
-            return {"success": True, "message": f"Added '{track.get('name')}' to wishlist"}, 200
+            # The key the row went in under (`<track>::<album>` when releases
+            # are kept apart), so a caller can hand exactly this row to
+            # /api/wishlist/download_missing -- the dialog's "Monitor" does.
+            from core.wishlist.identity import wishlist_key_from_payload
+            return {"success": True,
+                    "message": f"Added '{track.get('name')}' to wishlist",
+                    "wishlist_id": wishlist_key_from_payload(track_data) or None}, 200
 
         runtime.logger.error("Failed to add track '%s' to wishlist", track.get("name"))
         return {"success": False, "error": "Failed to add track to wishlist"}, 200

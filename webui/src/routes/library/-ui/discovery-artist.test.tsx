@@ -9,7 +9,8 @@ import { createShellBridge } from '@/test/shell-bridge';
 
 /** ldp-01/ldp-02: an artist the catalogue has never heard of opens on
  *  upstream's artist page, from provider data alone, without writing anything.
- *  Library v2 adds the release bookmark and its own track list for a release. */
+ *  Library v2 adds the release bookmark; a click on a release opens the shared
+ *  download dialog, as it does in search. */
 function renderAt(entry: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
@@ -27,7 +28,6 @@ describe('an artist the catalogue does not hold', () => {
   let resolveResponse: number | null;
   let materializeCalls: unknown[];
   let monitoredAlbums: unknown[];
-  let monitoredTracks: unknown[];
 
   beforeEach(() => {
     window.SoulSyncWebShellBridge = createShellBridge();
@@ -39,7 +39,6 @@ describe('an artist the catalogue does not hold', () => {
     resolveResponse = null;
     materializeCalls = [];
     monitoredAlbums = [];
-    monitoredTracks = [];
     server.use(
       http.get('/api/library/v2/enabled', () =>
         HttpResponse.json({ success: true, enabled: true, can_write: true }),
@@ -58,13 +57,6 @@ describe('an artist the catalogue does not hold', () => {
         monitoredAlbums.push(await request.json());
         return HttpResponse.json({ success: true, artist_id: 55, album_id: 77 });
       }),
-      http.post('/api/library/v2/discovery/track', async ({ request }) => {
-        monitoredTracks.push(await request.json());
-        return HttpResponse.json({ success: true, artist_id: 55, album_id: 77, track_id: 88 });
-      }),
-      http.get('/api/library/v2/discovery/track-status', () =>
-        HttpResponse.json({ success: true, statuses: {} }),
-      ),
       http.get('/api/artist-detail/:id', () =>
         HttpResponse.json({
           success: true,
@@ -85,14 +77,9 @@ describe('an artist the catalogue does not hold', () => {
           },
         }),
       ),
-      http.get('/api/spotify/album/:id', () =>
+      http.get('/api/album/:id/tracks', () =>
         HttpResponse.json({
-          id: 'a1',
-          name: 'Music Has the Right to Children',
-          album_type: 'album',
-          release_date: '1998-04-20',
-          total_tracks: 1,
-          images: [{ url: 'https://cdn.test/album.jpg' }],
+          success: true,
           tracks: [{ id: 't1', name: 'Roygbiv', track_number: 1, duration_ms: 148000 }],
         }),
       ),
@@ -153,49 +140,18 @@ describe('an artist the catalogue does not hold', () => {
     expect(materializeCalls).toHaveLength(0);
   });
 
-  it('opens a release as a Library v2 track list, not the download dialog', async () => {
-    const { router } = renderAt(ARTIST_URL);
+  it('opens a release in the shared download dialog, with its tracks', async () => {
+    renderAt(ARTIST_URL);
 
     fireEvent.click(await screen.findByText('Music Has the Right to Children'));
 
-    await waitFor(() =>
-      expect(router.state.location.search).toMatchObject({
-        discover: 'spotify:sp-1',
-        discoverName: 'Boards of Canada',
-        discoverAlbum: 'spotify:a1',
-        discoverAlbumName: 'Music Has the Right to Children',
-      }),
-    );
-    expect(
-      await screen.findByRole('heading', { name: 'Music Has the Right to Children' }),
-    ).toBeInTheDocument();
-    expect(window.openDownloadMissingModalForArtistAlbum).not.toHaveBeenCalled();
+    await waitFor(() => expect(window.openDownloadMissingModalForArtistAlbum).toHaveBeenCalled());
+    const call = vi.mocked(window.openDownloadMissingModalForArtistAlbum!).mock.calls[0]!;
+    expect(call[2]).toEqual([expect.objectContaining({ id: 't1', name: 'Roygbiv' })]);
+    expect(call[3]).toMatchObject({ id: 'a1', name: 'Music Has the Right to Children' });
+    expect(call[4]).toMatchObject({ name: 'Boards of Canada' });
+    // Opening is not monitoring.
     expect(monitoredAlbums).toHaveLength(0);
-  });
-
-  it('monitors one track from that track list, then goes back to the artist page', async () => {
-    const { router } = renderAt(ARTIST_URL);
-    fireEvent.click(await screen.findByText('Music Has the Right to Children'));
-    await screen.findByRole('heading', { name: 'Music Has the Right to Children' });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Monitor Roygbiv' }));
-
-    await waitFor(() => expect(monitoredTracks).toHaveLength(1));
-    expect(monitoredTracks[0]).toMatchObject({
-      source: 'spotify',
-      artist_source: 'spotify',
-      artist_provider_id: 'sp-1',
-      album_provider_id: 'a1',
-      track_provider_id: 't1',
-      track_title: 'Roygbiv',
-      track_number: 1,
-      monitored: true,
-    });
-    expect(await screen.findByRole('button', { name: 'Roygbiv is monitored' })).toBeDisabled();
-
-    fireEvent.click(screen.getByRole('button', { name: /Boards of Canada/ }));
-
-    await waitFor(() => expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1'));
     expect(materializeCalls).toHaveLength(0);
   });
 
@@ -214,9 +170,10 @@ describe('an artist the catalogue does not hold', () => {
     expect(router.state.location.pathname).toBe('/library');
   });
 
-  it('still answers the old Library v2 discovery link', async () => {
+  it('still answers the old Library v2 discovery links, album ones included', async () => {
     const { router } = renderAt(
-      '/library?discover=%22spotify%3Asp-1%22&discoverName=%22Boards%20of%20Canada%22',
+      '/library?discover=%22spotify%3Asp-1%22&discoverName=%22Boards%20of%20Canada%22' +
+        '&discoverAlbum=%22spotify%3Aa1%22',
     );
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1'));
