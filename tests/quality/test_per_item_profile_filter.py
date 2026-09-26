@@ -219,7 +219,7 @@ def test_the_worker_reads_the_id_off_the_wishlist_row():
     assert "_profile_id = track_data.get('quality_profile_id')" in source
     # primary + hybrid fallback go through _judge, which forwards the id to
     # whichever judge it uses; the ytsearch fallback calls get_valid directly
-    assert source.count('_judge(deps, ') == 2
+    assert source.count('= _judge(deps, ') == 2
     assert source.count(', _profile_id, decision_pool)') == 2
     assert 'evaluate(results, track, query, profile_id)' in source
     assert 'deps.get_valid_candidates(results, track, query, profile_id)' in source
