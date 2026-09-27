@@ -427,3 +427,80 @@ def test_zero_length_with_no_expected_duration_is_unchanged(tmp_path, monkeypatc
 
     res = file_integrity.check_audio_integrity(str(f))
     assert res.ok is True and called["n"] == 0    # never even decoded
+
+
+# --- tier 2: FLAC decode test (opt-in) -----------------------------------------
+
+def _tier1_passes(monkeypatch):
+    monkeypatch.setattr(file_integrity, "_check_audio_integrity_tier1",
+                        lambda *a, **k: file_integrity.IntegrityResult(ok=True, checks={"size_bytes": 1}))
+
+
+def test_the_flac_decode_is_off_by_default(monkeypatch):
+    _tier1_passes(monkeypatch)
+    called = []
+    monkeypatch.setattr(file_integrity, "flac_decode_test", lambda p: called.append(p) or (False, "bad"))
+    assert file_integrity.check_audio_integrity("/music/a.flac").ok is True
+    assert called == []
+
+
+def test_a_flac_with_damaged_frames_is_rejected_when_enabled(monkeypatch):
+    _tier1_passes(monkeypatch)
+    monkeypatch.setattr(file_integrity, "flac_decode_test",
+                        lambda p: (False, "FLAC__STREAM_DECODER_ERROR_STATUS_LOST_SYNC"))
+    result = file_integrity.check_audio_integrity("/music/a.flac", verify_flac_decode=True)
+    assert result.ok is False
+    assert "FLAC decode test failed" in result.reason
+    assert result.checks["flac_decode"] == "failed"
+
+
+def test_a_clean_flac_passes_the_decode(monkeypatch):
+    _tier1_passes(monkeypatch)
+    monkeypatch.setattr(file_integrity, "flac_decode_test", lambda p: (True, ""))
+    result = file_integrity.check_audio_integrity("/music/a.flac", verify_flac_decode=True)
+    assert result.ok is True and result.checks["flac_decode"] == "passed"
+
+
+def test_only_flac_files_are_decoded(monkeypatch):
+    _tier1_passes(monkeypatch)
+    called = []
+    monkeypatch.setattr(file_integrity, "flac_decode_test", lambda p: called.append(p) or (True, ""))
+    file_integrity.check_audio_integrity("/music/a.mp3", verify_flac_decode=True)
+    assert called == []
+
+
+def test_a_tier1_failure_is_not_decoded(monkeypatch):
+    monkeypatch.setattr(file_integrity, "_check_audio_integrity_tier1",
+                        lambda *a, **k: file_integrity.IntegrityResult(ok=False, reason="too small"))
+    called = []
+    monkeypatch.setattr(file_integrity, "flac_decode_test", lambda p: called.append(p) or (True, ""))
+    result = file_integrity.check_audio_integrity("/music/a.flac", verify_flac_decode=True)
+    assert result.reason == "too small" and called == []
+
+
+def test_without_the_flac_binary_the_decode_fails_open(monkeypatch):
+    monkeypatch.setattr(file_integrity.shutil, "which", lambda name: None)
+    assert file_integrity.flac_decode_test("/music/a.flac") == (True, "")
+
+
+def test_the_pipeline_passes_the_setting_through():
+    source = (Path(__file__).resolve().parents[2] / "core/imports/pipeline.py").read_text()
+    assert "post_processing.verify_flac_decode" in source
+    assert "verify_flac_decode=" in source
+
+
+@pytest.mark.skipif(not (__import__("shutil").which("flac") and __import__("shutil").which("ffmpeg")),
+                    reason="needs the flac and ffmpeg binaries")
+def test_a_real_damaged_flac_fails_the_decode_and_a_real_clean_one_passes(tmp_path):
+    import subprocess
+    good = tmp_path / "good.flac"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=20",
+                    "-ac", "2", str(good)], check=True)
+    bad = tmp_path / "bad.flac"
+    data = bytearray(good.read_bytes())
+    data[len(data) // 2:len(data) // 2 + 64] = b"\x00" * 64    # damage frames, keep the header
+    bad.write_bytes(bytes(data))
+
+    assert file_integrity.flac_decode_test(str(good)) == (True, "")
+    ok, reason = file_integrity.flac_decode_test(str(bad))
+    assert ok is False and reason

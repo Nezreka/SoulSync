@@ -322,7 +322,7 @@ export interface AdlDeletedEntry {
   size: number;
   /** null for files quarantined before the manifest existed. */
   deleted_at: string | null;
-  /** 'repair' | 'duplicate-cleaner' | 'album_bundle_orphan' | null when unknown. */
+  /** 'repair' | 'duplicate-cleaner' | 'album_bundle_orphan' | 'corrupt_audio' | null when unknown. */
   source: string | null;
   original_path: string;
 }

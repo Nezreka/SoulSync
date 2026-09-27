@@ -316,6 +316,50 @@ def _delete_file_if_present(file_path, transfer_folder, config_manager=None, dow
     return False, 'file was already gone'
 
 
+def _quarantine_file_if_present(file_path, transfer_folder, source,
+                                config_manager=None, download_folder=None):
+    """Move a library file into the deleted-files quarantine instead of deleting it.
+
+    Returns ``(moved, note, dest)``. The file keeps its path relative to the
+    transfer folder (or its name, for files outside it) and is recorded in the
+    quarantine manifest, so the deleted-files manager can restore it and the
+    library.deleted_keep_days retention ages it out like any other removal.
+    """
+    if not file_path:
+        return False, None, None
+    resolved = _resolve_file_path(
+        file_path, transfer_folder,
+        download_folder=download_folder,
+        config_manager=config_manager)
+    if resolved is None:
+        return False, f'file could not be located ({_path_mapping_hint(config_manager)})', None
+    if not os.path.exists(resolved):
+        return False, 'file was already gone', None
+    from core.repair_jobs.base import deleted_quarantine_root
+    from core.library.deleted_quarantine import record_deleted_entry
+    deleted_root = deleted_quarantine_root(transfer_folder)
+    try:
+        rel = os.path.relpath(resolved, transfer_folder)
+    except ValueError:
+        rel = os.path.basename(resolved)
+    if rel.startswith('..') or os.path.isabs(rel):
+        rel = os.path.basename(resolved)
+    dest = os.path.join(deleted_root, rel)
+    base, ext = os.path.splitext(dest)
+    n = 1
+    while os.path.exists(dest):
+        dest = f"{base}_{n}{ext}"
+        n += 1
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.move(resolved, dest)
+    except OSError as e:
+        logger.warning("Could not move %s to the deleted folder: %s", resolved, e)
+        return False, str(e), None
+    record_deleted_entry(deleted_root, dest, resolved, source)
+    return True, None, dest
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -2732,10 +2776,15 @@ class RepairWorker:
                 conn.close()
 
     def _fix_corrupt_audio(self, entity_type, entity_id, file_path, details):
-        """Approve a corrupt-file finding: delete the damaged file, drop its DB row, and
-        re-add the track to the wishlist (full payload) so the real version downloads.
-        Frame-corrupt audio can't be repaired by re-tagging — the data is gone — so a
-        fresh download is the only cure. Mirrors the preview-clip redownload path (#1000).
+        """Approve a corrupt-file finding: move the damaged file to the deleted-files
+        quarantine, drop its DB row, and re-add the track to the wishlist (full
+        payload) so the real version downloads. Frame-corrupt audio can't be
+        repaired by re-tagging — the data is gone — so a fresh download is the only
+        cure (#1000).
+
+        Quarantined rather than deleted: until a replacement has actually arrived,
+        the damaged copy is still the only one, and it can be restored from the
+        deleted-files manager if the re-download never succeeds.
         """
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
@@ -2812,14 +2861,14 @@ class RepairWorker:
             if not added:
                 return {'success': False, 'error': 'Failed to add to wishlist (may already exist or be blocklisted)'}
 
-            # Delete the corrupt file (path resolved like the other delete tools).
+            # Quarantine the corrupt file (path resolved like the other delete tools).
             target_path = file_path or details.get('original_path')
-            deleted_file = False
-            delete_note = None
+            moved = False
+            move_note = None
             if target_path:
                 download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-                deleted_file, delete_note = _delete_file_if_present(
-                    target_path, self.transfer_folder,
+                moved, move_note, _dest = _quarantine_file_if_present(
+                    target_path, self.transfer_folder, 'corrupt_audio',
                     config_manager=self._config_manager,
                     download_folder=download_folder)
 
@@ -2828,9 +2877,10 @@ class RepairWorker:
             conn.commit()
 
             return {'success': True, 'action': 'added_to_wishlist',
-                    'message': (f'Deleted corrupt file and re-wishlisted "{track_name}" for download'
-                                if deleted_file else
-                                f'Re-wishlisted "{track_name}" (corrupt file not deleted: {delete_note or "already gone"})')}
+                    'message': (f'Moved the corrupt file to the deleted folder and re-wishlisted '
+                                f'"{track_name}" for download'
+                                if moved else
+                                f'Re-wishlisted "{track_name}" (corrupt file not moved: {move_note or "already gone"})')}
         except Exception as e:
             logger.error("Corrupt-file fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}

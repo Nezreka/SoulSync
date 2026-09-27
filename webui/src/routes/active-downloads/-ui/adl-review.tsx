@@ -656,7 +656,10 @@ export function AdlDeletedRow({
           // them here now, so they need to say what they are.
           entry.source === 'album_bundle_orphan'
           ? 'Stalled album download'
-          : null;
+          : // Corrupt File Detector: kept until the re-download replaces it.
+            entry.source === 'corrupt_audio'
+            ? 'Corrupt file (re-downloading)'
+            : null;
   const ago = entry.deleted_at ? timeAgo(entry.deleted_at) || entry.deleted_at : 'age unknown';
   return (
     <div className="adl-row adl-row-completed verif-quar-row" data-deleted-id={entry.id}>
