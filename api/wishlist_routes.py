@@ -28,8 +28,10 @@ from core.wishlist.processing import (
     start_manual_wishlist_download_batch as _start_manual_wishlist_download_batch,
 )
 from core.wishlist.routes import (
+    BULK_WISHLIST_ACTIONS as _BULK_WISHLIST_ACTIONS,
     WishlistRouteRuntime as _WishlistRouteRuntime,
     add_album_track_to_wishlist as _wishlist_add_album_track_to_wishlist,
+    bulk_wishlist_action as _bulk_wishlist_action,
     clear_wishlist as _wishlist_clear_wishlist,
     get_wishlist_count as _wishlist_get_wishlist_count,
     get_wishlist_cycle as _wishlist_get_wishlist_cycle,
@@ -358,23 +360,7 @@ def start_wishlist_missing_downloads():
             }), 409
 
         data = request.get_json() or {}
-        from database.music_database import MusicDatabase
-
-        db = MusicDatabase()
-        manual_profile_id = get_current_profile_id()
-        manual_runtime = _WishlistManualDownloadRuntime(
-            get_music_database=lambda: db,
-            download_batches=download_batches,
-            tasks_lock=tasks_lock,
-            missing_download_executor=missing_download_executor,
-            album_bundle_executor=album_bundle_executor,
-            run_full_missing_tracks_process=_run_full_missing_tracks_process,
-            get_batch_max_concurrent=_get_batch_max_concurrent,
-            add_activity_item=add_activity_item,
-            active_server=config_manager.get_active_media_server(),
-            profile_id=manual_profile_id,
-        )
-
+        manual_runtime = _build_wishlist_manual_runtime()
         payload, status_code = _start_manual_wishlist_download_batch(
             manual_runtime,
             track_ids=data.get('track_ids'),
@@ -385,6 +371,63 @@ def start_wishlist_missing_downloads():
 
     except Exception as e:
         logger.error(f"Error starting wishlist download process: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _build_wishlist_manual_runtime():
+    """The manual-download runtime the bulk grab shares with /download_missing."""
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase()
+    return _WishlistManualDownloadRuntime(
+        get_music_database=lambda: db,
+        download_batches=download_batches,
+        tasks_lock=tasks_lock,
+        missing_download_executor=missing_download_executor,
+        album_bundle_executor=album_bundle_executor,
+        run_full_missing_tracks_process=_run_full_missing_tracks_process,
+        get_batch_max_concurrent=_get_batch_max_concurrent,
+        add_activity_item=add_activity_item,
+        active_server=config_manager.get_active_media_server(),
+        profile_id=get_current_profile_id(),
+    )
+
+
+@bp.route('/api/wishlist/bulk', methods=['POST'])
+def bulk_wishlist_action():
+    """Apply a bulk action to selected wishlist tracks.
+
+    Body: {"action": "grab"|"skip"|"retry", "track_ids": [...]}.
+    ``grab`` submits the normal manual download batch for just the selected
+    ids — same 409 guard and download-permission check as /download_missing.
+    Partial per-item failures come back as HTTP 207 with per-item results.
+    """
+    data = request.get_json() or {}
+    action = (data.get('action') or '').strip().lower()
+    if action not in _BULK_WISHLIST_ACTIONS:
+        return jsonify({"success": False, "error": f"Unknown bulk action '{action}'"}), 400
+
+    start_batch = None
+    if action == 'grab':
+        dl_err = check_download_permission()
+        if dl_err:
+            return dl_err
+        if is_wishlist_actually_processing():
+            return jsonify({
+                "error": "Wishlist auto-processing is currently running. Please wait for it to complete.",
+                "retry_after": 30
+            }), 409
+        manual_runtime = _build_wishlist_manual_runtime()
+        start_batch = lambda ids: _start_manual_wishlist_download_batch(
+            manual_runtime, track_ids=ids)
+
+    try:
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _bulk_wishlist_action(
+            runtime, action, data.get('track_ids'), start_batch=start_batch)
+        return jsonify(payload), status_code
+    except Exception as e:
+        logger.error(f"Error running bulk wishlist action '{action}': {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/wishlist/clear', methods=['POST'])

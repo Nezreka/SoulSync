@@ -98,3 +98,24 @@ export interface WishlistArtistGroup {
   /** Tracks at or past the failing threshold; drives the warning dot + filter. */
   failingCount: number;
 }
+
+/** The three bulk queue actions POST /api/wishlist/bulk supports. */
+export type WishlistBulkAction = 'grab' | 'skip' | 'retry';
+
+/** One per-item outcome from a bulk action. */
+export interface WishlistBulkResult {
+  id: string;
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Bulk action payload. 207 Multi-Status carries the same shape with
+ * `success: false` — the per-item `results` are the contract, not the code.
+ */
+export interface WishlistBulkResponse {
+  success?: boolean;
+  batch_id?: string;
+  results?: WishlistBulkResult[];
+  error?: string;
+}

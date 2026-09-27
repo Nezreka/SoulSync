@@ -3,6 +3,8 @@ import { queryOptions } from '@tanstack/react-query';
 import { apiClient, readJson } from '@/app/api-client';
 
 import type {
+  WishlistBulkAction,
+  WishlistBulkResponse,
   WishlistCycleResponse,
   WishlistStatsResponse,
   WishlistTracksResponse,
@@ -83,4 +85,18 @@ export async function removeWishlistTrack(trackId: string): Promise<void> {
     apiClient.post('wishlist/remove-track', { json: { spotify_track_id: trackId } }),
   );
   assertSuccess(payload, 'Failed');
+}
+
+/**
+ * Bulk queue action on selected wishlist tracks. 207 Multi-Status is NOT an
+ * error here — it carries the per-item results — so only transport errors
+ * (ky rejections on 4xx/5xx) throw. Callers read `results` either way.
+ */
+export async function bulkWishlistAction(
+  action: WishlistBulkAction,
+  trackIds: string[],
+): Promise<WishlistBulkResponse> {
+  return readJson<WishlistBulkResponse>(
+    apiClient.post('wishlist/bulk', { json: { action, track_ids: trackIds } }),
+  );
 }

@@ -2,8 +2,10 @@ import json
 
 import core.wishlist.routes as routes_module
 from core.wishlist.routes import (
+    BULK_WISHLIST_MAX_IDS,
     WishlistRouteRuntime,
     add_album_track_to_wishlist,
+    bulk_wishlist_action,
     clear_wishlist,
     get_wishlist_count,
     get_wishlist_cycle,
@@ -107,6 +109,9 @@ class _FakeMusicDatabase:
         self.commits = 0
         self.cursor_obj = _FakeCursor(self)
         self.duplicate_cleanup_profiles = []
+        self.ignore_writes = []
+        self.retry_resets = []
+        self.wishlist_rows = {}
 
     def _get_connection(self):
         return _FakeConnection(self)
@@ -114,6 +119,27 @@ class _FakeMusicDatabase:
     def remove_wishlist_duplicates(self, profile_id=1):
         self.duplicate_cleanup_profiles.append(profile_id)
         return self.duplicate_removals
+
+    def add_to_wishlist_ignore(self, track_id, track_name="", artist_name="",
+                               reason="", profile_id=1):
+        self.ignore_writes.append({
+            "track_id": track_id, "track_name": track_name,
+            "artist_name": artist_name, "reason": reason,
+            "profile_id": profile_id,
+        })
+        return True
+
+    def get_wishlist_spotify_data(self, track_id, profile_id=1):
+        return {"name": track_id, "artists": [{"name": "Fake Artist"}]}
+
+    def get_wishlist_track(self, track_id, profile_id=1):
+        return self.wishlist_rows.get(track_id)
+
+    def reset_wishlist_retry_backoff(self, spotify_track_ids=None, profile_id=None):
+        ids = [str(t) for t in (spotify_track_ids or [])]
+        self.retry_resets.append((ids, profile_id))
+        return sum(1 for tid in ids
+                   if (self.wishlist_rows.get(tid, {}).get("retry_count") or 0) > 0)
 
 
 class _FakeWishlistService:
@@ -123,6 +149,7 @@ class _FakeWishlistService:
         self.clear_result = clear_result
         self.removed = []
         self.add_calls = []
+        self.remove_fail_ids = set()
 
     def get_wishlist_count(self, profile_id=1):
         return self.count
@@ -134,6 +161,8 @@ class _FakeWishlistService:
         return self.clear_result
 
     def remove_track_from_wishlist(self, spotify_track_id, profile_id=1):
+        if spotify_track_id in self.remove_fail_ids:
+            return False
         self.removed.append((spotify_track_id, profile_id))
         return True
 
@@ -163,6 +192,7 @@ def _build_runtime(
     service = _FakeWishlistService(tracks=tracks, count=count, clear_result=clear_result)
     routes_module.get_wishlist_service = lambda: service
     db = _FakeMusicDatabase(cycle_value=cycle_value, duplicate_removals=duplicate_removals)
+    service.database = db
     logger = _FakeLogger()
     activity_calls = []
     runtime = WishlistRouteRuntime(
@@ -659,3 +689,91 @@ def test_remove_artist_unknown_404_and_missing_400():
     assert status == 404 and service.removed == []
     payload, status = remove_artist_from_wishlist(runtime, artist_name="   ")
     assert status == 400
+
+
+# ── bulk actions (grab / skip / retry) ───────────────────────────────────────
+
+def test_bulk_action_rejects_unknown_action_and_bad_ids():
+    runtime, _service, _db, _logger, _a = _build_runtime()
+    payload, status = bulk_wishlist_action(runtime, "nuke", ["t1"])
+    assert status == 400 and payload["success"] is False
+    payload, status = bulk_wishlist_action(runtime, "grab", [])
+    assert status == 400 and payload["success"] is False
+    payload, status = bulk_wishlist_action(
+        runtime, "skip", [f"t{i}" for i in range(BULK_WISHLIST_MAX_IDS + 1)])
+    assert status == 400
+    assert "max 200" in payload["error"]
+
+
+def test_bulk_skip_removes_and_records_skipped_ignore():
+    runtime, service, db, _logger, _a = _build_runtime()
+    service.remove_fail_ids = {"gone"}
+
+    payload, status = bulk_wishlist_action(runtime, "skip", ["t1", "gone", "t2"])
+
+    assert status == 207                                  # one item failed alone
+    assert payload["success"] is False
+    assert [t for t, _p in service.removed] == ["t1", "t2"]
+    assert [w["reason"] for w in db.ignore_writes] == ["skipped", "skipped"]
+    by_id = {r["id"]: (r["ok"], r["message"]) for r in payload["results"]}
+    assert by_id["t1"] == (True, "Skipped")
+    assert by_id["t2"] == (True, "Skipped")
+    assert by_id["gone"] == (False, "Not in wishlist")
+
+
+def test_bulk_retry_clears_backoff_only_on_failing_tracks():
+    runtime, _service, db, _logger, _a = _build_runtime()
+    db.wishlist_rows = {
+        "t1": {"retry_count": 3, "last_attempted": "2026-09-26 10:00:00"},
+        "t2": {"retry_count": 0, "last_attempted": None},
+    }
+
+    payload, status = bulk_wishlist_action(runtime, "retry", ["t1", "t2", "missing"])
+
+    assert status == 207
+    assert db.retry_resets == [(["t1"], 1)]               # only the failing row
+    by_id = {r["id"]: (r["ok"], r["message"]) for r in payload["results"]}
+    assert by_id["t1"] == (True, "Retry clock cleared")
+    assert by_id["t2"] == (False, "No failed attempts to clear")
+    assert by_id["missing"] == (False, "Not in wishlist")
+
+
+def test_bulk_retry_all_clean_reports_noop():
+    runtime, _service, db, _logger, _a = _build_runtime()
+    db.wishlist_rows = {"t2": {"retry_count": 0, "last_attempted": None}}
+
+    payload, status = bulk_wishlist_action(runtime, "retry", ["t2"])
+
+    assert status == 207
+    assert db.retry_resets == []                          # DB helper never called
+    assert payload["results"] == [
+        {"id": "t2", "ok": False, "message": "No failed attempts to clear"}]
+
+
+def test_bulk_grab_queues_batch_for_selected_ids():
+    runtime, _service, _db, _logger, _a = _build_runtime()
+    calls = []
+
+    def fake_start(ids):
+        calls.append(list(ids))
+        return {"success": True, "batch_id": "batch-9"}, 200
+
+    payload, status = bulk_wishlist_action(
+        runtime, "grab", ["t2", "t1", "t2"], start_batch=fake_start)
+
+    assert status == 200
+    assert calls == [["t2", "t1"]]                        # deduped, order kept
+    assert payload["batch_id"] == "batch-9"
+    assert payload["results"] == [
+        {"id": "t2", "ok": True, "message": "Queued for download"},
+        {"id": "t1", "ok": True, "message": "Queued for download"},
+    ]
+
+
+def test_bulk_grab_without_runner_is_500():
+    runtime, _service, _db, _logger, _a = _build_runtime()
+
+    payload, status = bulk_wishlist_action(runtime, "grab", ["t1"])
+
+    assert status == 500
+    assert payload["success"] is False

@@ -5,9 +5,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 import { clearAudiobookWishlist } from '@/routes/audiobooks/-audiobooks.api';
 
-import type { ParsedWishlistTrack } from '../-wishlist.types';
+import type { ParsedWishlistTrack, WishlistBulkAction } from '../-wishlist.types';
 
 import {
+  bulkWishlistAction,
   removeWishlistAlbum,
   removeWishlistTrack,
   WISHLIST_QUERY_KEY,
@@ -129,6 +130,23 @@ export function WishlistPage() {
     onSuccess: async () => {
       window.showToast?.('Removed', 'success');
       await refresh();
+      window.updateWishlistCount?.();
+    },
+    onError: (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error'),
+  });
+
+  const bulkAction = useMutation({
+    mutationFn: ({ action, ids }: { action: WishlistBulkAction; ids: string[] }) =>
+      bulkWishlistAction(action, ids),
+    onSuccess: (response, { action, ids }) => {
+      const results = response.results ?? [];
+      const okCount = results.filter((r) => r.ok).length;
+      const allOk = results.length > 0 && okCount === results.length;
+      window.showToast?.(
+        `${action[0].toUpperCase()}${action.slice(1)}: ${okCount}/${ids.length} succeeded`,
+        allOk ? 'success' : 'warning',
+      );
+      void refresh();
       window.updateWishlistCount?.();
     },
     onError: (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error'),
@@ -363,6 +381,8 @@ export function WishlistPage() {
                 filterActive={Boolean(search.q?.trim()) || search.failing}
                 onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
                 onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
+                onBulkAction={(action, ids) => bulkAction.mutateAsync({ action, ids })}
+                bulkBusy={bulkAction.isPending}
               />
             ) : (
               <div className={`wl-nebula-field${processing ? ' nebula-processing' : ''}`}>
