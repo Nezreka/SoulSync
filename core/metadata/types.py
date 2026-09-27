@@ -58,8 +58,9 @@ def _int(value: Any, default: int = 0) -> int:
 
 
 def _infer_type_from_count(track_count: int) -> str:
-    """1-3 → single, 4-6 → ep, else album — for sources that carry no
-    album-type signal (SpotipyFree, #1064). Unknown count → album."""
+    """1-3 → single, 4-6 → ep, else album — for sources whose album-type
+    signal is missing or a bare 'album' filler (SpotipyFree hardcodes
+    'album' on every release, #1064). Unknown count → album."""
     if 0 < track_count <= 3:
         return 'single'
     if 3 < track_count <= 6:
@@ -152,17 +153,27 @@ class Album:
         if sp_url:
             external_urls['spotify'] = _str(sp_url)
 
+        # A bare 'album' is not a signal: SpotipyFree's formatAlbum()
+        # hardcodes album["album_type"] = "album" on EVERY album, so it
+        # is indistinguishable from "the source didn't say". Only a
+        # distinguishing type ('single'/'ep'/'compilation') is trusted
+        # outright; 'album'/missing is verified against the track count
+        # like the iTunes converter — a genuine 7+ track album still
+        # resolves to 'album'.
+        _raw_album_type = _str(raw.get('album_type')).lower()
+        _album_type = (
+            _raw_album_type
+            if _raw_album_type in ('single', 'ep', 'compilation')
+            else _infer_type_from_count(_int(raw.get('total_tracks')))
+        )
+
         return cls(
             id=_str(raw.get('id')),
             name=_str(raw.get('name')),
             artists=artist_names or ['Unknown Artist'],
             release_date=_str(raw.get('release_date')),
             total_tracks=_int(raw.get('total_tracks')),
-            # Official Spotify always sends album_type; SpotipyFree (the
-            # no-auth fallback) NEVER does (#1064) — infer from the track
-            # count like the iTunes converter rather than fabricating 'album'.
-            album_type=_str(raw.get('album_type'))
-                or _infer_type_from_count(_int(raw.get('total_tracks'))),
+            album_type=_album_type,
             image_url=image_url,
             artist_id=primary_artist_id or None,
             genres=list(raw.get('genres') or []),
@@ -245,8 +256,16 @@ class Album:
             or None
         )
 
-        record_type = _str(raw.get('record_type'), default='album').lower()
-        album_type = {'single': 'single', 'ep': 'ep'}.get(record_type, 'album')
+        record_type = _str(raw.get('record_type'), default='').lower()
+        # 'compile' is Deezer's raw value for compilations (the enrichment
+        # worker persists it unmapped — web_server's display helper already
+        # expects it). A bare 'album'/missing type is verified against the
+        # track count like the Spotify converter; the filler problem isn't
+        # Spotify-specific.
+        _type_map = {'single': 'single', 'ep': 'ep',
+                     'compile': 'compilation', 'compilation': 'compilation'}
+        album_type = _type_map.get(
+            record_type, _infer_type_from_count(_int(raw.get('nb_tracks'))))
 
         external_ids = {}
         if raw.get('id'):
