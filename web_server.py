@@ -464,6 +464,10 @@ def _init_flask_secret_key():
         return _secrets.token_hex(32)
 
 app.secret_key = _init_flask_secret_key()
+# Flask's default cookie name is "session". Browsers don't scope cookies by port,
+# so another app on the same host using "session" overwrote this one, dropping the
+# selected profile and falling back to profile 1 (admin).
+app.config["SESSION_COOKIE_NAME"] = "soulsync_session"
 
 # --- Reverse-proxy mode (opt-in, default OFF) ---
 # OFF by default → a strict no-op, so direct/LAN installs are unchanged. Only when
