@@ -86,6 +86,33 @@ class TestBadgeCodec:
         assert badge_of({"bg": innocent}) == innocent
 
     @pytest.mark.parametrize(
+        "profane",
+        [
+            "fuck",
+            "SHIT",
+            "bitch",
+            "bullshit",
+            "motherfucker",
+            "f.u.c.k",  # punctuation-obfuscated
+            "shit-head",  # hyphen-split word
+            "you cunt",  # profane word inside a longer badge
+            "nigger",
+        ],
+    )
+    def test_profane_badges_refused(self, profane):
+        assert badge_of({"bg": profane}) is None
+
+    @pytest.mark.parametrize(
+        "innocent",
+        [
+            "scunthorpe",  # substring only, must pass
+            "bass player",
+        ],
+    )
+    def test_profane_substrings_pass(self, innocent):
+        assert badge_of({"bg": innocent}) == innocent
+
+    @pytest.mark.parametrize(
         "bad",
         [
             "<img src=x>",

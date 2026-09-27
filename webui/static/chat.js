@@ -8207,26 +8207,33 @@
     var _BADGE_RESERVED = ['admin', 'administrator', 'mod', 'moderator',
         'dev', 'developer', 'lead dev', 'leaddev',
         'soulsync', 'system', 'owner', 'staff', 'support', 'official'];
-    // Mirrors core/chat_codec._badge_reserved_hit — keep in sync. Strips
-    // punctuation first so 'LEAD DEV!', 'd.e.v', '(admin)', 'SoulSync Admin'
-    // all match; 'device' / 'devon' (substring only) do not.
-    function _badgeReservedHit(b) {
+    var _BADGE_PROFANE = ['fuck', 'fucker', 'fucking', 'motherfucker',
+        'shit', 'shite', 'bullshit', 'dipshit', 'horseshit',
+        'bitch', 'cunt', 'dick', 'dickhead', 'cock', 'pussy',
+        'whore', 'slut', 'bastard', 'asshole', 'arsehole',
+        'twat', 'wanker', 'prick', 'faggot', 'nigger', 'nigga',
+        'chink', 'spic', 'kike', 'retard'];
+    // Mirrors core/chat_codec._badge_blocked_hit — keep in sync. Strips
+    // punctuation first so 'LEAD DEV!', 'f.u.c.k', '(admin)', 'SoulSync
+    // Admin' all match; 'device' / 'devon' (substring only) do not.
+    function _badgeBlockedHit(b, blocked) {
         var norm = b.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
         if (!norm) return false;
         var compact = norm.replace(/ /g, '');
-        for (var i = 0; i < _BADGE_RESERVED.length; i++) {
-            if (_BADGE_RESERVED[i].replace(/ /g, '') === compact) return true;
+        for (var i = 0; i < blocked.length; i++) {
+            if (blocked[i].replace(/ /g, '') === compact) return true;
         }
         var words = norm.split(' ');
         for (var j = 0; j < words.length; j++) {
-            if (_BADGE_RESERVED.indexOf(words[j]) > -1) return true;
+            if (blocked.indexOf(words[j]) > -1) return true;
         }
         return false;
     }
     function _cleanBadge(s) {
         var b = String(s || '').replace(/\s+/g, ' ').trim().slice(0, 24);
         if (!b || /[<>&"']/.test(b)) return '';
-        if (_badgeReservedHit(b)) return '';
+        if (_badgeBlockedHit(b, _BADGE_RESERVED)) return '';
+        if (_badgeBlockedHit(b, _BADGE_PROFANE)) return '';
         return b;
     }
     function _myBadge() {

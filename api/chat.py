@@ -809,7 +809,7 @@ def create_blueprint() -> Blueprint:
             _raw = str(body.get("badge") or "")
             _clean = _cc.badge_of({"bg": _raw}) or ""
             if _raw.strip() and not _clean:
-                return jsonify({"error": 'That badge can\'t be used — keep it short, plain text, and nothing staff-like ("admin", "dev", "moderator"…).'}), 400
+                return jsonify({"error": 'That badge can\'t be used — keep it short, plain text, and nothing staff-like ("admin", "dev"…) or profane.'}), 400
             _config_set("soulseek.chat_badge", _clean)
         if "history_retention_days" in body:
             try:
@@ -2064,7 +2064,7 @@ def create_blueprint() -> Blueprint:
         if _badge_raw:
             _bd = chat_codec.badge_of({"bg": _badge_raw})
             if _bd is None:
-                return jsonify({"error": 'That badge can\'t be used — keep it short, plain text, and nothing staff-like ("admin", "dev", "moderator"…).'}), 400
+                return jsonify({"error": 'That badge can\'t be used — keep it short, plain text, and nothing staff-like ("admin", "dev"…) or profane.'}), 400
             extra = dict(extra or {})
             extra["bg"] = _bd
         # Thread membership (parent message key + carried display name).
