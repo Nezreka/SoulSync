@@ -1073,11 +1073,24 @@ def create_blueprint() -> Blueprint:
                                   al.thumb_url
                            FROM albums al
                            LEFT JOIN artists ar ON ar.id = al.artist_id
-                           WHERE al.title LIKE ? AND (ar.name LIKE ? OR ? = '%')
+                           WHERE al.title LIKE ? AND (ar.name LIKE ? OR ? LIKE ('%' || ar.name || '%') OR ? = '%')
                            ORDER BY CASE WHEN LOWER(al.title) = LOWER(?) THEN 0 ELSE 1 END,
                                     al.id LIMIT 1""",
-                        (like_alb, like_art, like_art, alb_query)
+                        (like_alb, like_art, artist if artist else "%", like_art, alb_query)
                     ).fetchone()
+
+                    # Fall back to album title if artist naming has slight discrepancy
+                    if not album_row and artist:
+                        album_row = conn.execute(
+                            """SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
+                                      al.thumb_url
+                               FROM albums al
+                               LEFT JOIN artists ar ON ar.id = al.artist_id
+                               WHERE al.title LIKE ?
+                               ORDER BY CASE WHEN LOWER(al.title) = LOWER(?) THEN 0 ELSE 1 END,
+                                        al.id LIMIT 1""",
+                            (like_alb, alb_query)
+                        ).fetchone()
 
                 if album_row:
                     tracks_rows = conn.execute(
@@ -1106,13 +1119,29 @@ def create_blueprint() -> Blueprint:
                        FROM tracks t
                        LEFT JOIN artists ar ON ar.id = t.artist_id
                        LEFT JOIN albums al ON al.id = t.album_id
-                       WHERE t.title LIKE ? AND (ar.name LIKE ? OR t.track_artist LIKE ? OR ? = '%')
+                       WHERE t.title LIKE ? AND (ar.name LIKE ? OR t.track_artist LIKE ? OR ? LIKE ('%' || ar.name || '%') OR ? = '%')
                          AND t.file_path IS NOT NULL AND t.file_path != ''
                        ORDER BY CASE WHEN LOWER(t.title) = LOWER(?) THEN 0 ELSE 1 END,
                                 t.id LIMIT ?""",
-                    (like_trk, like_art, like_art, like_art, track_query,
+                    (like_trk, like_art, like_art, artist if artist else "%", like_art, track_query,
                      1 if req_type == "track" else 50)
                 ).fetchall()
+
+                # Fallback to track title alone if artist string differs
+                if not tracks_rows and track_query and artist:
+                    tracks_rows = conn.execute(
+                        """SELECT t.id, t.title, t.track_number, t.duration, t.file_path,
+                                  t.file_size, t.bitrate,
+                                  COALESCE(t.track_artist, ar.name, '') as artist,
+                                  COALESCE(al.title, '') as album
+                           FROM tracks t
+                           LEFT JOIN artists ar ON ar.id = t.artist_id
+                           LEFT JOIN albums al ON al.id = t.album_id
+                           WHERE t.title LIKE ? AND t.file_path IS NOT NULL AND t.file_path != ''
+                           ORDER BY CASE WHEN LOWER(t.title) = LOWER(?) THEN 0 ELSE 1 END,
+                                    t.id LIMIT ?""",
+                        (like_trk, track_query, 1 if req_type == "track" else 50)
+                    ).fetchall()
 
             if not tracks_rows:
                 return jsonify({"ok": True, "found": False, "message": "No matching local files found"})
@@ -1121,6 +1150,8 @@ def create_blueprint() -> Blueprint:
             def _to_share_path(fp: str) -> str:
                 norm_fp = fp.replace("\\", "/")
                 for sd in share_dirs:
+                    if not sd:
+                        continue
                     norm_sd = sd.rstrip("/") + "/"
                     if norm_fp.lower().startswith(norm_sd.lower()):
                         rel = norm_fp[len(norm_sd):]

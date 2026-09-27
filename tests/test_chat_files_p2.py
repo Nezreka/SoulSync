@@ -208,6 +208,40 @@ def test_wanted_resolve_share_gated_by_send_permission(files_app):
     assert r.status_code == 403
 
 
+def test_wanted_resolve_share_bidirectional_and_fallback(files_app):
+    http, state, client, uploads = files_app
+    # 1. Bidirectional: DB has "Muse", query has "Muse (Special Edition)"
+    r1 = http.post("/api/chat/wanted/resolve-share",
+                   json={"title": "The Resistance", "artist": "Muse (Special Edition)"})
+    assert r1.status_code == 200
+    b1 = r1.get_json()
+    assert b1["ok"] is True and b1["found"] is True
+    assert b1["title"] == "The Resistance"
+
+    # 2. Fallback: query artist is "Different Artist" but album is "The Resistance"
+    r2 = http.post("/api/chat/wanted/resolve-share",
+                   json={"title": "The Resistance", "artist": "Completely Wrong Artist"})
+    assert r2.status_code == 200
+    b2 = r2.get_json()
+    assert b2["ok"] is True and b2["found"] is True
+    assert b2["title"] == "The Resistance"
+
+
+def test_wanted_resolve_share_relative_paths(files_app):
+    http, state, client, uploads = files_app
+    r = http.post("/api/chat/wanted/resolve-share",
+                  json={"title": "The Resistance", "artist": "Muse"})
+    assert r.status_code == 200
+    b = r.get_json()
+    assert b["ok"] is True
+    # Verify tracks have relative filenames with backslashes and titles
+    for tr in b["tracks"]:
+        assert "\\" in tr["filename"] or "/" in tr["filename"]
+        assert tr["title"] in ("Uprising", "Ghost Track")
+        assert tr["size"] >= 0
+
+
+
 def test_room_send_dresses_the_file_card(files_app):
     http, state, client, uploads = files_app
     r = http.post("/api/chat/room/message",

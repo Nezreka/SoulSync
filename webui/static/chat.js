@@ -1637,6 +1637,20 @@
                 '💬 I Have This! (Send PM)</button>';
         }
 
+        var pBadge = '';
+        var normT = (w.t || '').toLowerCase().trim();
+        (state.protocolLog || []).forEach(function (ev) {
+            if (!ev || !ev.p) return;
+            var pt = (ev.p.t || '').toLowerCase().trim();
+            if (pt && (pt === normT || pt.indexOf(normT) !== -1 || normT.indexOf(pt) !== -1)) {
+                if (ev.p.k === 'want.accept') {
+                    pBadge = '<span class="chat-wanted-badge chat-wanted-badge--fulfilled" title="Fulfilled by @' + attr(ev.p.to || ev.username) + '">✓ Fulfilled by @' + esc(ev.p.to || ev.username) + '</span>';
+                } else if (ev.p.k === 'want.share' && !pBadge) {
+                    pBadge = '<span class="chat-wanted-badge chat-wanted-badge--shared" title="Offered by @' + attr(ev.username) + '">⚡ Offered by @' + esc(ev.username) + '</span>';
+                }
+            }
+        });
+
         return '<div class="chat-wanted-card" ' +
             'data-wanted-title="' + attr(w.t) + '" ' +
             'data-wanted-artist="' + attr(w.a) + '" ' +
@@ -1653,6 +1667,7 @@
                 '<span class="chat-wanted-type-pill">' + ty + '</span>' +
                 (src ? '<span class="chat-wanted-src-pill">' + src.toUpperCase() + '</span>' : '') +
                 statusChip +
+                pBadge +
             '</div>' +
             '<div class="chat-wanted-body">' +
                 img +
@@ -2193,6 +2208,10 @@
             if (typeof showToast === 'function') showToast('This is your own wanted card!', 'info');
             return;
         }
+        if (state.view !== 'room' || !state.room) {
+            if (typeof showToast === 'function') showToast('⚡ Direct sharing is only available in SoulSync rooms.', 'warning');
+            return;
+        }
         if (!state.canSend) {
             if (typeof showToast === 'function') showToast('Sending is disabled for this profile', 'warning');
             return;
@@ -2450,6 +2469,7 @@
 
     function _handleWantedShareEvents(fresh) {
         if (!fresh || !fresh.length) return;
+        var isLive = state.pingArmed && !state.loadingOlder;
         fresh.forEach(function (ev) {
             if (!ev || !ev.p) return;
             var p = ev.p;
@@ -2458,10 +2478,10 @@
                 // Update badges on matching wanted cards in the DOM
                 _markWantedCardStatus(p.t, p.a, '⚡ Offered by @' + ev.username, 'chat-wanted-badge--shared');
 
-                if (isForMe && ev.username !== state.selfName) {
-                    var offerKey = ev.username + '|' + (ev.timestamp || '') + '|' + (p.t || '');
-                    if (!_handledShareOffers[offerKey]) {
-                        _handledShareOffers[offerKey] = true;
+                var offerKey = ev.username + '|' + (ev.timestamp || '') + '|' + (p.t || '');
+                if (!_handledShareOffers[offerKey]) {
+                    _handledShareOffers[offerKey] = true;
+                    if (isLive && isForMe && ev.username !== state.selfName) {
                         _chatPing();
                         var autoShare = false;
                         try { autoShare = localStorage.getItem('chat_autoshare') === '1'; } catch (e) { /* ignore */ }
@@ -2477,7 +2497,7 @@
                 }
             } else if (p.k === 'want.accept') {
                 var isForMeSharer = p.to && (p.to.toLowerCase() === (state.selfName || '').toLowerCase());
-                if (isForMeSharer && ev.username !== state.selfName) {
+                if (isLive && isForMeSharer && ev.username !== state.selfName) {
                     if (typeof showToast === 'function') {
                         showToast('🎉 @' + ev.username + ' accepted your share of "' + (p.t || 'wanted release') + '"!', 'success');
                     }

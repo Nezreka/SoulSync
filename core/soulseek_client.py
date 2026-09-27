@@ -2692,7 +2692,12 @@ class SoulseekClient(DownloadSourcePlugin):
                 if isinstance(shares, dict):
                     dirs = shares.get('directories') or shares.get('Directories') or []
                     if isinstance(dirs, list):
-                        return [str(d).replace('\\', '/').rstrip('/') for d in dirs if d]
+                        out = []
+                        for d in dirs:
+                            p = d.get('path') or d.get('Path') or '' if isinstance(d, dict) else (str(d) if d else '')
+                            if p:
+                                out.append(str(p).replace('\\', '/').rstrip('/'))
+                        return out
         except Exception as e:
             logger.debug("Failed to get slskd share directories: %s", e)
         return []
