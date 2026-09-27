@@ -150,6 +150,9 @@ ENV DATABASE_PATH=/app/data/music_library.db
 # recreate wiped video_library.db (watchlists, collections, overlays, issues,
 # the YouTube ownership ledger).
 ENV VIDEO_DATABASE_PATH=/app/data/video_library.db
+# Same for audiobooks: without it database/audiobooks.db lived in the image
+# layer and every recreate wiped the audiobook wishlist and download history.
+ENV AUDIOBOOK_DATABASE_PATH=/app/data/audiobooks.db
 ENV PUID=1000
 ENV PGID=1000
 ENV UMASK=022

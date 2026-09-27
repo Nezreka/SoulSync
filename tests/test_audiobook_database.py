@@ -493,3 +493,36 @@ def test_existing_library_migrates_without_losing_books(tmp_path):
         assert migrated.get_library_scan_state()['checked'] == 1
     finally:
         migrated.close()
+
+
+def test_the_default_path_follows_the_env_override(tmp_path, monkeypatch):
+    # Docker keeps database/ inside the image; without the override every
+    # container recreate wiped the audiobook wishlist.
+    from core.audiobook_database import AudiobookDatabase, subsystem_in_use
+
+    target = tmp_path / "data" / "audiobooks.db"
+    monkeypatch.setenv("AUDIOBOOK_DATABASE_PATH", str(target))
+    assert subsystem_in_use() is False
+
+    db = AudiobookDatabase()
+    assert db.db_path == str(target)
+    assert target.exists()
+    assert subsystem_in_use() is True
+    db.close()
+
+
+def test_an_explicit_path_wins_over_the_env_override(tmp_path, monkeypatch):
+    from core.audiobook_database import AudiobookDatabase
+
+    monkeypatch.setenv("AUDIOBOOK_DATABASE_PATH", str(tmp_path / "env.db"))
+    db = AudiobookDatabase(str(tmp_path / "explicit.db"))
+    assert db.db_path == str(tmp_path / "explicit.db")
+    assert not (tmp_path / "env.db").exists()
+    db.close()
+
+
+def test_without_the_override_the_default_is_unchanged(monkeypatch):
+    from core.audiobook_database import DEFAULT_DB_PATH, resolve_db_path
+
+    monkeypatch.delenv("AUDIOBOOK_DATABASE_PATH", raising=False)
+    assert resolve_db_path() == DEFAULT_DB_PATH

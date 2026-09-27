@@ -33,6 +33,18 @@ logger = get_logger("audiobook_database")
 
 DEFAULT_DB_PATH = os.path.join("database", "audiobooks.db")
 
+
+def resolve_db_path(db_path: Optional[str] = None) -> str:
+    """The file to open: an explicit path, else AUDIOBOOK_DATABASE_PATH.
+
+    Same rule as video_library.db. In Docker, database/ is inside the image,
+    so without the env override every container recreate wiped the wishlist,
+    download history and watchlist. The Dockerfile points it at /app/data.
+    """
+    if db_path is None or db_path == DEFAULT_DB_PATH:
+        return os.environ.get("AUDIOBOOK_DATABASE_PATH") or DEFAULT_DB_PATH
+    return db_path
+
 # Wishlist row states.
 STATUS_WANTED = "wanted"        # waiting for the next search pass
 STATUS_SEARCHING = "searching"  # a search is running right now
@@ -150,7 +162,7 @@ class AudiobookDatabase:
     """
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH) -> None:
-        self.db_path = db_path
+        self.db_path = resolve_db_path(db_path)
         self._local = threading.local()
         self._init_lock = threading.Lock()
         self._initialized = False
@@ -1333,7 +1345,7 @@ def subsystem_in_use(db_path: str = DEFAULT_DB_PATH) -> bool:
     touches the feature completely unchanged by it — no file, no threads, no
     polling.
     """
-    return os.path.exists(db_path)
+    return os.path.exists(resolve_db_path(db_path))
 
 
 def get_audiobook_db() -> AudiobookDatabase:
