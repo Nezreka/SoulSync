@@ -3410,10 +3410,26 @@ class MusicDatabase:
                     outcome TEXT NOT NULL,
                     chosen_json TEXT,
                     alternatives_json TEXT,
+                    search_mode TEXT,
+                    searched_at TEXT,
+                    policy_run_id TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dd_task_key ON download_decisions (task_key)")
+
+            # Provenance: which search produced the decision, when (UTC), and the
+            # 12-char policy run id. One provenance per automatic worker run and
+            # one per interactive inspection (core/downloads/provenance.py).
+            # MUST come before the index below: an old table has no
+            # search_mode/searched_at/policy_run_id columns, and indexing a
+            # missing column aborts DB init.
+            cursor.execute("PRAGMA table_info(download_decisions)")
+            dd_cols = {c[1] for c in cursor.fetchall()}
+            for _col in ['search_mode', 'searched_at', 'policy_run_id']:
+                if _col not in dd_cols:
+                    cursor.execute(f"ALTER TABLE download_decisions ADD COLUMN {_col} TEXT")
+                    logger.info(f"Added {_col} column to download_decisions")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dd_track_download ON download_decisions (track_download_id)")
 
             # Durable record of completed TORRENT grabs so the seeding sweep
@@ -21452,12 +21468,17 @@ class MusicDatabase:
 
     def record_download_decision(self, task_key: str, *, outcome: str, summary: dict,
                                  track_title: str = '', track_artist: str = '',
-                                 quality_profile_id=None) -> Optional[int]:
+                                 quality_profile_id=None, provenance: Optional[dict] = None) -> Optional[int]:
         """Store (or replace) the decision behind one download task.
 
         ``summary`` is ``core.downloads.candidate_pool.summarize_pool`` output.
         A task that retries replaces its row, so each task has one answer. The
         table keeps the newest DOWNLOAD_DECISIONS_KEPT rows.
+
+        ``provenance`` is ``core.downloads.provenance.new_provenance`` output
+        (``search_mode``/``searched_at``/``policy_run_id``). When a retry record
+        omits it, the task's previous provenance is preserved instead of being
+        blanked.
         """
         if not task_key:
             return None
@@ -21467,14 +21488,25 @@ class MusicDatabase:
             rest = {k: v for k, v in summary.items() if k != 'chosen'}
             conn = self._get_connection()
             cursor = conn.cursor()
+            provenance = provenance or {}
+            old = cursor.execute(
+                "SELECT search_mode, searched_at, policy_run_id FROM download_decisions"
+                " WHERE task_key = ? ORDER BY id DESC LIMIT 1",
+                (str(task_key),),
+            ).fetchone()
+            old_mode, old_at, old_run = (old or (None, None, None))
+            search_mode = provenance.get('search_mode') or old_mode or 'automatic'
+            searched_at = provenance.get('searched_at') or old_at
+            policy_run_id = provenance.get('policy_run_id') or old_run
             cursor.execute("DELETE FROM download_decisions WHERE task_key = ?", (str(task_key),))
             cursor.execute(
                 """INSERT INTO download_decisions
                    (task_key, track_title, track_artist, quality_profile_id, outcome,
-                    chosen_json, alternatives_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    chosen_json, alternatives_json, search_mode, searched_at, policy_run_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (str(task_key), track_title or '', track_artist or '', quality_profile_id,
-                 outcome, json.dumps(chosen) if chosen else None, json.dumps(rest)),
+                 outcome, json.dumps(chosen) if chosen else None, json.dumps(rest),
+                 search_mode, searched_at, policy_run_id),
             )
             new_id = cursor.lastrowid
             cursor.execute(
@@ -21498,7 +21530,8 @@ class MusicDatabase:
             conn = self._get_connection()
             row = conn.execute(
                 """SELECT id, track_download_id, task_key, track_title, track_artist,
-                          quality_profile_id, outcome, chosen_json, alternatives_json, created_at
+                          quality_profile_id, outcome, chosen_json, alternatives_json,
+                          search_mode, searched_at, policy_run_id, created_at
                    FROM download_decisions WHERE task_key = ? ORDER BY id DESC LIMIT 1""",
                 (str(task_key),),
             ).fetchone()
@@ -21516,7 +21549,8 @@ class MusicDatabase:
             conn = self._get_connection()
             row = conn.execute(
                 """SELECT id, track_download_id, task_key, track_title, track_artist,
-                          quality_profile_id, outcome, chosen_json, alternatives_json, created_at
+                          quality_profile_id, outcome, chosen_json, alternatives_json,
+                          search_mode, searched_at, policy_run_id, created_at
                    FROM download_decisions WHERE track_download_id = ? ORDER BY id DESC LIMIT 1""",
                 (int(track_download_id),),
             ).fetchone()
@@ -21678,6 +21712,10 @@ class MusicDatabase:
             'accepted_total': rest.get('accepted_total', 0),
             'rejected_total': rest.get('rejected_total', 0),
             'rejected_counts': rest.get('rejected_counts', {}),
+            'policy': rest.get('policy'),
+            'search_mode': row['search_mode'] or 'automatic',
+            'searched_at': row['searched_at'] or '',
+            'policy_run_id': row['policy_run_id'] or '',
             'created_at': row['created_at'],
         }
 

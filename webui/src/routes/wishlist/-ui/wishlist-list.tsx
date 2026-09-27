@@ -116,7 +116,7 @@ function TrackRow({
         <button
           type="button"
           className="wl-list-btn"
-          title="Search manually"
+          title="Interactive Search"
           onClick={() =>
             openWishlistInspector({
               id: track.id,

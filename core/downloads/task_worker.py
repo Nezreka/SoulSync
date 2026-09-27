@@ -259,12 +259,14 @@ def _judge(deps, results, track, query, profile_id, pool):
     return [row for row, decision in pairs if decision.accepted]
 
 
-def _record_decision(deps, task_id, pool, outcome, track, profile_id, merge=False):
+def _record_decision(deps, task_id, pool, outcome, track, profile_id, merge=False,
+                   provenance=None):
     if getattr(deps, 'evaluate_candidates', None) is None:
         return
     from core.downloads import decision_log
     decision_log.record(task_id, pool, outcome=outcome, track=track,
-                        quality_profile_id=profile_id, merge=merge)
+                        quality_profile_id=profile_id, merge=merge,
+                        provenance=provenance)
 
 
 def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorkerDeps) -> None:
@@ -326,6 +328,11 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
             return
 
         track_data = task['track_info']
+
+        # One provenance per automatic worker run: every decision this run
+        # records carries the same search_mode/searched_at/policy_run_id.
+        from core.downloads.provenance import new_provenance
+        _provenance = new_provenance('automatic')
         track_name = track_data.get('name', 'Unknown Track')
 
         logger.info(f"[Modal Worker] Task {task_id} starting search for track: '{track_name}'")
@@ -737,7 +744,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             quality_first=_best_quality, quality_targets=_quality_targets,
                         )
                         if success:
-                            _record_decision(deps, task_id, decision_pool, 'chosen', track, _profile_id, cached_first)
+                            _record_decision(deps, task_id, decision_pool, 'chosen', track, _profile_id, cached_first, provenance=_provenance)
                             # Download initiated successfully - let the download monitoring system handle completion
                             if batch_id:
                                 logger.info(f"[Modal Worker] Download initiated successfully for task {task_id} - monitoring will handle completion")
@@ -836,7 +843,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                                         download_tasks[task_id]['cached_candidates'] = fb_candidates
                                 success = deps.attempt_download_with_candidates(task_id, fb_candidates, track, batch_id)
                                 if success:
-                                    _record_decision(deps, task_id, decision_pool, 'chosen', track, _profile_id, cached_first)
+                                    _record_decision(deps, task_id, decision_pool, 'chosen', track, _profile_id, cached_first, provenance=_provenance)
                                     return
                         except Exception as e:
                             logger.error(f"[Hybrid Fallback] {fallback_source} search failed: {e}")
@@ -861,7 +868,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         _record_decision(
             deps, task_id, decision_pool,
             'download_failed' if any(d.accepted for _, d in decision_pool) else 'nothing_passed',
-            track, _profile_id, cached_first,
+            track, _profile_id, cached_first, provenance=_provenance,
         )
         with tasks_lock:
             if task_id in download_tasks:

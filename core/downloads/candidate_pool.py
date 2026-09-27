@@ -72,6 +72,9 @@ def build_source_rows(
     is_blacklisted: Callable[[str, str], bool],
     is_failed_blocked: Optional[Callable[[Any], bool]] = None,
     reject_cap: int = REJECTED_ROW_CAP,
+    provenance: Optional[dict] = None,
+    policy: Optional[dict] = None,
+    policy_profile: Optional[dict] = None,
 ) -> dict:
     """Turn ``[(query, [(candidate, Decision), ...]), ...]`` into the payload.
 
@@ -81,6 +84,13 @@ def build_source_rows(
     download worker skips it anyway. A failed-blocklisted file (terminal
     import give-up, core/downloads/failed_blocklist.py) is rejected the same
     way, through the existing 'blacklisted' code.
+
+    ``provenance``/``policy`` (core/downloads/provenance.py) ride along when
+    given, so the UI can say which search produced these rows and under what
+    ladder. ``policy_profile`` (a quality-profile dict) additionally stamps
+    every row with its own candidate policy facet — the rung that candidate
+    reached on the ladder — while the run-level ``policy`` keeps describing
+    the ladder in effect.
     """
     picked: dict = {}
     order = []
@@ -108,12 +118,25 @@ def build_source_rows(
     rejected.sort(key=lambda t: float('inf') if t[1].score is None else -t[1].score)
     counts = rejection_counts(d for _, d, _ in rejected)
     shown = rejected[:max(0, reject_cap)]
-    return {
-        'candidates': [candidate_row(c, d, source_name=source_name, query=q) for c, d, q in accepted],
-        'rejected': [candidate_row(c, d, source_name=source_name, query=q) for c, d, q in shown],
+
+    def _row(c, d, q):
+        row = candidate_row(c, d, source_name=source_name, query=q)
+        if policy_profile is not None:
+            from core.downloads.provenance import build_policy_facet
+            row['policy'] = build_policy_facet(policy_profile, c)
+        return row
+
+    out = {
+        'candidates': [_row(c, d, q) for c, d, q in accepted],
+        'rejected': [_row(c, d, q) for c, d, q in shown],
         'rejected_total': len(rejected),
         'rejected_counts': counts,
     }
+    if provenance is not None:
+        out['provenance'] = provenance
+    if policy is not None:
+        out['policy'] = policy
+    return out
 
 
 def _safe_blacklisted(is_blacklisted, username, filename) -> bool:
@@ -177,8 +200,13 @@ def summarize_pool(pairs: Iterable[tuple], chosen_key: Optional[tuple] = None,
     }
 
 
-def empty_source_rows(error: Optional[str] = None) -> dict:
+def empty_source_rows(error: Optional[str] = None, provenance: Optional[dict] = None,
+                      policy: Optional[dict] = None) -> dict:
     out = {'candidates': [], 'rejected': [], 'rejected_total': 0, 'rejected_counts': {}}
     if error:
         out['error'] = error
+    if provenance is not None:
+        out['provenance'] = provenance
+    if policy is not None:
+        out['policy'] = policy
     return out

@@ -199,8 +199,8 @@ export function WishlistOrb({
                 <button
                   type="button"
                   className="wl-moon-search-btn"
-                  title="Search manually — pick a source yourself"
-                  aria-label={`Search manually for ${single.track}`}
+                  title="Interactive Search — pick a source yourself"
+                  aria-label={`Interactive Search for ${single.track}`}
                   onClick={(event) => {
                     event.stopPropagation();
                     openWishlistInspector({
@@ -246,8 +246,8 @@ function TileTrack({ track, onRemove }: { track: ParsedWishlistTrack; onRemove: 
       <button
         type="button"
         className="wl-tile-track-search"
-        title="Search manually — pick a source yourself"
-        aria-label={`Search manually for ${track.track}`}
+        title="Interactive Search — pick a source yourself"
+        aria-label={`Interactive Search for ${track.track}`}
         onClick={(event) => {
           event.stopPropagation();
           openWishlistInspector({

@@ -11239,7 +11239,21 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
     logger.info(f"[{log_tag}] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
 
     from core.downloads.candidate_pool import build_source_rows, empty_source_rows
+    from core.downloads.provenance import build_policy_facet, new_provenance
     from core.quality.source_map import quality_profile_context
+
+    # One provenance per interactive inspection: every streamed source payload
+    # carries the same search_mode/searched_at/policy_run_id. The run-level
+    # policy describes the ladder in effect; each candidate row gets its own
+    # facet (the rung it reached) via policy_profile.
+    _inspection_provenance = new_provenance('interactive')
+    _inspection_profile = None
+    try:
+        from core.quality.selection import load_profile_by_id
+        _inspection_profile = load_profile_by_id(quality_profile_id)
+        _inspection_policy = build_policy_facet(_inspection_profile)
+    except Exception:  # noqa: BLE001 - the search matters more than its facet
+        _inspection_policy = build_policy_facet(None)
 
     def _is_failed_blocklisted(candidate, source_name):
         """Files that terminally failed import skip the inspector too —
@@ -11276,6 +11290,8 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
         return build_source_rows(
             evaluated, source_name=source_name, is_blacklisted=database.is_blacklisted,
             is_failed_blocked=lambda c: _is_failed_blocklisted(c, source_name),
+            provenance=_inspection_provenance, policy=_inspection_policy,
+            policy_profile=_inspection_profile,
         )
 
     def generate_stream():
@@ -11286,7 +11302,9 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
                 try:
                     yield json.dumps({'source': source_name, **future.result()}) + '\n'
                 except Exception as e:
-                    yield json.dumps({'source': source_name, **empty_source_rows(str(e))}) + '\n'
+                    yield json.dumps({'source': source_name, **empty_source_rows(
+                        str(e), provenance=_inspection_provenance,
+                        policy=_inspection_policy)}) + '\n'
         yield json.dumps({'done': True}) + '\n'
 
     return app.response_class(generate_stream(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})

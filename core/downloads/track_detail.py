@@ -56,7 +56,8 @@ def _album_name(track_info: Dict[str, Any]) -> str:
 
 def _decision_payload(decision: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """The why-this-file block, in one shape whether it came from the live
-    task or the download_decisions table."""
+    task or the download_decisions table. Carries the search provenance and
+    the ladder policy facet so the UI can name the search that produced it."""
     if not isinstance(decision, dict) or not decision.get('outcome'):
         return None
     return {
@@ -66,6 +67,10 @@ def _decision_payload(decision: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
         'accepted_total': int(decision.get('accepted_total') or 0),
         'rejected_total': int(decision.get('rejected_total') or 0),
         'rejected_counts': dict(decision.get('rejected_counts') or {}),
+        'policy': decision.get('policy'),
+        'search_mode': decision.get('search_mode') or 'automatic',
+        'searched_at': decision.get('searched_at') or '',
+        'policy_run_id': decision.get('policy_run_id') or '',
     }
 
 

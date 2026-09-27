@@ -49185,6 +49185,8 @@ div.artist-hero-badge {
 }
 .td-decision-title { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: rgba(255, 255, 255, 0.5); }
 .td-decision-subtitle { font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.4); margin-top: 2px; }
+.td-decision-provenance { margin: 4px 0 0; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45); }
+.td-decision-policy { margin: 2px 0 0; font-size: 11.5px; color: rgba(255, 255, 255, 0.55); }
 .td-decision-win { display: flex; flex-direction: column; gap: 2px; }
 .td-decision-win .td-decision-name { font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, 0.92); }
 .td-decision-summary { margin: 0; font-size: 12.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.72); }
@@ -64820,6 +64822,7 @@ tr.tag-diff-same {
 }
 .redownload-header h3 { font-size: 20px; font-weight: 800; color: #fff; margin: 0; letter-spacing: -0.02em; }
 .redownload-header-sub { font-size: 13px; color: rgba(255,255,255,0.3); margin: 6px 0 0; }
+.redownload-header-meta { font-size: 11.5px; color: rgba(255,255,255,0.45); margin: 4px 0 0; }
 
 .redownload-close {
     width: 32px; height: 32px; border: none; background: rgba(255,255,255,0.06);
