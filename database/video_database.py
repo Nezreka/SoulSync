@@ -5779,6 +5779,75 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def repair_owned_episode_files(self) -> list:
+        """Every owned episode with each of its files (quality/runtime checks) —
+        the episode twin of repair_owned_movie_files. ``runtime_minutes`` prefers
+        the EPISODE's own runtime, falling back to the show's typical episode
+        runtime (TMDB episode_run_time) when the episode row has none."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT e.id AS episode_id, e.season_number, e.episode_number, "
+                "e.title AS episode_title, s.id AS show_id, s.title AS show_title, "
+                "s.year AS show_year, s.tmdb_id AS show_tmdb_id, s.tvdb_id AS show_tvdb_id, "
+                "COALESCE(e.runtime_minutes, s.runtime_minutes) AS runtime_minutes, "
+                "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
+                "f.video_codec, f.audio_codec, f.release_source, f.runtime_seconds "
+                "FROM episodes e JOIN shows s ON s.id = e.show_id "
+                "JOIN media_files f ON f.episode_id = e.id "
+                "WHERE e.has_file=1 "
+                "ORDER BY s.title COLLATE NOCASE, e.season_number, e.episode_number, "
+                "f.size_bytes DESC").fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_expected_runtime_seconds(self, kind: str, media_id, season=None, episode=None) -> float | None:
+        """The known runtime (seconds) of a download's item, for the import's
+        duration-vs-expected check. Movies: the film's TMDB runtime. Episodes: the
+        exact episode's runtime, else the show's typical episode runtime. None when
+        unknown — the import must never reject on a guess."""
+        try:
+            mid = int(str(media_id or "").strip() or 0)
+        except (TypeError, ValueError):
+            return None
+        if mid <= 0:
+            return None
+        conn = self._get_connection()
+        try:
+            minutes = None
+            if str(kind or "").lower() == "movie":
+                row = conn.execute(
+                    "SELECT runtime_minutes FROM movies WHERE tmdb_id=?", (mid,)).fetchone()
+                minutes = (row["runtime_minutes"] if row else None)
+            else:
+                try:
+                    sn, en = int(season), int(episode)
+                except (TypeError, ValueError):
+                    sn = en = None
+                if sn is not None and en is not None:
+                    row = conn.execute(
+                        "SELECT COALESCE(e.runtime_minutes, s.runtime_minutes) AS m "
+                        "FROM episodes e JOIN shows s ON s.id = e.show_id "
+                        "WHERE (s.tvdb_id=? OR s.tmdb_id=?) "
+                        "AND e.season_number=? AND e.episode_number=?",
+                        (mid, mid, sn, en)).fetchone()
+                    minutes = (row["m"] if row else None)
+                if not minutes:
+                    row = conn.execute(
+                        "SELECT runtime_minutes FROM shows WHERE tvdb_id=? OR tmdb_id=?",
+                        (mid, mid)).fetchone()
+                    minutes = (row["runtime_minutes"] if row else None)
+            try:
+                minutes = float(minutes) if minutes else 0
+            except (TypeError, ValueError):
+                minutes = 0
+            return minutes * 60 if minutes > 0 else None
+        except Exception:   # noqa: BLE001 - a lookup failure skips the check, never blocks import
+            return None
+        finally:
+            conn.close()
+
     def media_file_stored_path(self, file_id) -> str | None:
         conn = self._get_connection()
         try:
