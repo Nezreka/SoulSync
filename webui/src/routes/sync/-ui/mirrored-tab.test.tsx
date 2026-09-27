@@ -155,13 +155,23 @@ describe('MirroredTab — load and card', () => {
 
   it('a pipeline_state with no live state paints the pipeline phase (534-542)', async () => {
     stubFetch();
-    responder = (url) =>
-      url === '/api/mirrored-playlists'
-        ? [{ ...ROW, pipeline_state: { status: 'running', progress: 40, phase: 'Discovering' } }]
-        : { states: [] };
+    responder = (url) => {
+      if (url === '/api/mirrored-playlists') {
+        return [
+          { ...ROW, pipeline_state: { status: 'running', progress: 40, phase: 'Discovering' } },
+        ];
+      }
+      if (url.includes('/pipeline/status')) {
+        return { status: 'running', progress: 40, phase: 'Discovering' };
+      }
+      return { states: [] };
+    };
     render(<Harness />);
-    await waitFor(() => expect(screen.getByText('Discovering 40%')).toBeInTheDocument());
-    expect(screen.getByText('Discovering 40%')).toHaveStyle({ color: '#38bdf8' });
+    await waitFor(() => {
+      const el = screen.getByText('Discovering 40%');
+      expect(el).toBeInTheDocument();
+      expect(el).toHaveStyle({ color: '#38bdf8' });
+    });
   });
 
   it('a LIVE state beats the row pipeline_state (the 534 precedence)', async () => {

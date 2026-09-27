@@ -949,15 +949,16 @@ export function MirroredTab({
               // carry, so the existing (tested) writer still produces them.
               const hash = mirroredHash(row.id);
               const live = vertical.states[hash];
+              const hasLive = Boolean(live?.phase && live.phase !== 'fresh');
               const phaseLine = mirroredPhaseLine(
-                live?.phase ?? pipelinePhaseFor(row),
-                live
+                hasLive ? live!.phase : pipelinePhaseFor(row),
+                hasLive
                   ? {
-                      discoveryProgress: live.discoveryProgress,
-                      spotifyMatches: live.spotifyMatches,
-                      spotifyTotal: live.spotifyTotal,
-                      pipeline_progress: live.pipeline_progress,
-                      pipeline_phase: live.pipeline_phase,
+                      discoveryProgress: live!.discoveryProgress,
+                      spotifyMatches: live!.spotifyMatches,
+                      spotifyTotal: live!.spotifyTotal,
+                      pipeline_progress: live!.pipeline_progress,
+                      pipeline_phase: live!.pipeline_phase,
                     }
                   : {
                       pipeline_progress: row.pipeline_state?.progress,
