@@ -7449,6 +7449,20 @@
 
                                                 <div class="form-group">
                                                     <label class="checkbox-label">
+                                                        <input type="checkbox" id="audiobook-remove-owned-from-wishlist">
+                                                        <span>Remove books from the wishlist once they're in the library</span>
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Off by default:
+                                                        a book that is downloaded or found in your library stays on the
+                                                        wishlist, marked "In library". Turn this on to drop it instead,
+                                                        the way the music wishlist does.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
                                                         <input type="checkbox" id="audiobook-embed-metadata">
                                                         <span>Write tags into audiobook files</span>
                                                     </label>

@@ -54,6 +54,21 @@ STATUS_FAILED = "failed"        # last attempt failed; retried on a later pass
 
 STATUS_CANCELLED = "cancelled"  # explicitly stopped; never automatically retried
 
+
+
+def remove_owned_from_wishlist() -> bool:
+    """Whether a book that reaches the library leaves the wishlist entirely.
+
+    Off by default: the row stays, marked done ("In library"). On, it is
+    deleted the way the music wishlist drops a track once it is owned.
+    """
+    try:
+        from core.settings import config_manager
+        return bool(config_manager.get("audiobooks.remove_owned_from_wishlist", False))
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 _STATUSES = (STATUS_WANTED, STATUS_SEARCHING, STATUS_GRABBED, STATUS_DONE, STATUS_FAILED, STATUS_CANCELLED)
 
 # Whether a wishlisted book must be downloaded in the narrator's reading it was
@@ -619,7 +634,10 @@ class AudiobookDatabase:
         params_tail = [str(asin or "").strip()] + ([] if profile_id is None else [int(profile_id)])
         conn = self._connect()
         try:
-            if count_attempt:
+            if status == STATUS_DONE and remove_owned_from_wishlist():
+                cursor = conn.execute(
+                    f"DELETE FROM audiobook_wishlist WHERE asin = ?{scope}", params_tail)
+            elif count_attempt:
                 cursor = conn.execute(f"""
                     UPDATE audiobook_wishlist
                     SET status = ?, last_error = ?, last_attempt_at = ?,
@@ -691,21 +709,30 @@ class AudiobookDatabase:
         the batch size kept it out of the next few passes. Every profile: the
         library is shared.
         """
+        owned = """
+            SELECT catalog_asin FROM audiobook_library
+            WHERE match_status IN ('identifier', 'automatic', 'confirmed')
+        """
         conn = self._connect()
         try:
-            cursor = conn.execute("""
-                UPDATE audiobook_wishlist
-                SET status = ?, last_error = '', status_changed_at = ?
-                WHERE status != ?
-                  AND asin IN (
-                      SELECT catalog_asin FROM audiobook_library
-                      WHERE match_status IN ('identifier', 'automatic', 'confirmed')
-                  )
-            """, (STATUS_DONE, _now(), STATUS_DONE))
+            if remove_owned_from_wishlist():
+                # Rows already marked done go too, so turning the setting on
+                # clears what earlier passes left behind.
+                cursor = conn.execute(
+                    f"DELETE FROM audiobook_wishlist WHERE status = ? OR asin IN ({owned})",
+                    (STATUS_DONE,))
+                verb = "removed from the wishlist"
+            else:
+                cursor = conn.execute(f"""
+                    UPDATE audiobook_wishlist
+                    SET status = ?, last_error = '', status_changed_at = ?
+                    WHERE status != ? AND asin IN ({owned})
+                """, (STATUS_DONE, _now(), STATUS_DONE))
+                verb = "marked done"
             conn.commit()
             if cursor.rowcount:
-                logger.info("%d wishlisted audiobook(s) are already in the library; marked done",
-                            cursor.rowcount)
+                logger.info("%d wishlisted audiobook(s) are already in the library; %s",
+                            cursor.rowcount, verb)
             return cursor.rowcount
         except sqlite3.Error as exc:
             logger.warning("Could not reconcile the wishlist with the library: %s", exc)
