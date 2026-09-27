@@ -255,6 +255,16 @@ describe('the source filter', () => {
     expect(lastQuery().has('source_filter')).toBe(false);
   });
 
+  it("hides the quality filter, which reads an artist's tracks", async () => {
+    // "Could be better" counts tracks below their quality profile, per artist.
+    // The albums endpoint reports no such count, so left visible with a
+    // `quality` value carried over from the artists view it would sit there
+    // claiming 0 and filtering nothing.
+    renderPage('/library?view=albums&quality=upgradable');
+    await screen.findByText('Parklife');
+    expect(document.querySelector('.library-upgrade-filter')).toBeNull();
+  });
+
   it('still hides the watchlist filter, which an album has no answer for', async () => {
     renderPage();
     await screen.findByText('Parklife');

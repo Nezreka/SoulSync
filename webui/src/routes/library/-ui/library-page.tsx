@@ -507,8 +507,9 @@ export function LibraryPage() {
             </select>
           </div>
           {/* The quality jobs' findings, where people look: only offered when
-              there is something to show, or while it's the active filter. */}
-          {upgradableTotal > 0 || search.quality ? (
+              there is something to show, or while it's the active filter — and
+              never in the album grid, which counts no upgradable tracks. */}
+          {!albumView && (upgradableTotal > 0 || search.quality) ? (
             <button
               type="button"
               className={`library-upgrade-filter${search.quality ? ' active' : ''}`}
