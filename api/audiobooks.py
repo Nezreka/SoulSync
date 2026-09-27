@@ -957,6 +957,9 @@ def create_audiobooks_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": "The book changed while saving. Refresh and try again."}), 409
         if action == "retry":
             db.update_library_entry(asin, match_checked_at=0)
+        if action == "confirm":
+            # The confirmed edition may be one the wishlist is still hunting.
+            db.mark_owned_wishlist_done()
         return jsonify({"success": True, "book": db.get_library_entry(asin)})
 
     @bp.route("/library/<asin>/cover", methods=["GET"])
