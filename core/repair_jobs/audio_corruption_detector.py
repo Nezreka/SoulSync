@@ -202,8 +202,8 @@ class _IntegrityMemory:
         self.commit()
         try:
             self._conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[Corrupt File Detector] error closing result memory: %s", exc)
 
 
 @register_job
@@ -324,7 +324,7 @@ class AudioCorruptionDetectorJob(RepairJob):
         seen_paths = set()
         work = []
         now = time.time()
-        for i, row in enumerate(rows):
+        for row in rows:
             if context.check_stop():
                 return result
             result.scanned += 1
