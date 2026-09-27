@@ -104,6 +104,13 @@ const enrichmentManagerState = {
     selectedItems: new Set(),  // ids checked for bulk retry
     pollTimer: null,
     loadToken: 0,       // guards against out-of-order async renders
+    // #1317: collapse the coverage section so the unmatched browser gets
+    // more room. remembered across sessions.
+    coverageCollapsed: (() => {
+        try { return localStorage.getItem('em-coverage-collapsed') === '1'; }
+        catch (_e) { return false; }
+    })(),
+    globalPriority: '',  // last 'process first everywhere' choice ('' = auto)
 };
 
 function _emEntityLabel(entity, plural) {
@@ -164,24 +171,15 @@ async function openEnrichmentManager(workerId) {
                         <h3 class="em-topbar-title">Enrichment Workers</h3>
                         <div class="em-topbar-sub">Match your library across every metadata source</div>
                     </div>
-                    <div class="em-global">
-                        <span class="em-global-label">Process first<br><span>everywhere</span></span>
-                        <div class="em-global-tabs" id="em-global-tabs">
-                            <button data-e="artist" onclick="setGlobalPriority('artist', this)">Artists</button>
-                            <button data-e="album"  onclick="setGlobalPriority('album', this)">Albums</button>
-                            <button data-e="track"  onclick="setGlobalPriority('track', this)">Tracks</button>
-                            <button data-e="" class="em-global-auto" onclick="setGlobalPriority('', this)">Auto</button>
-                        </div>
-                    </div>
                     <div class="em-topbar-actions">
-                        <button class="em-icon-btn em-retry-global" id="em-retry-global-btn"
-                                title="Re-queue every failed item across ALL workers"
-                                onclick="retryAllFailedEnrichmentGlobal(this)">↻ Retry all failed</button>
-                        <button class="em-icon-btn em-verify-global" id="em-verify-global-btn"
-                                title="Repair matches corrupted before the Aug 2026 matching fixes: reset artist id-collision clusters and degenerate-title false matches so the fixed workers rematch them"
-                                onclick="verifyEnrichmentMatchesGlobal(this)">✓ Verify matches</button>
                         <button class="em-icon-btn" id="em-refresh-btn" title="Refresh"
                                 onclick="refreshEnrichmentManager(this)">⟳</button>
+                        <div class="em-menu-wrap">
+                            <button class="em-icon-btn" id="em-menu-btn" title="More actions"
+                                    aria-haspopup="menu" aria-expanded="false"
+                                    onclick="toggleEmMenu(event)">⋮</button>
+                            <div class="em-menu" id="em-menu" role="menu" hidden></div>
+                        </div>
                         <button class="em-icon-btn em-icon-btn--close" title="Close"
                                 onclick="closeEnrichmentManager()">&times;</button>
                     </div>
@@ -225,6 +223,7 @@ async function openEnrichmentManager(workerId) {
 function closeEnrichmentManager() {
     const overlay = document.getElementById('enrichment-manager-overlay');
     enrichmentManagerState.open = false;
+    closeEmMenu();
     document.removeEventListener('keydown', _emOnKeydown);
     document.body.classList.remove('em-scroll-lock');
     if (enrichmentManagerState.pollTimer) {
@@ -304,16 +303,97 @@ function _emStatusInfo(status) {
     return { cls: 'stopped', label: 'Stopped' };
 }
 
+// ── Topbar overflow menu ────────────────────────────────────────────────────
+// The global actions (retry/verify across ALL workers, process-first
+// everywhere) used to sit in the topbar next to identically-labelled
+// per-worker buttons — a mis-click hazard. They now live in a ⋯ menu with
+// explicit "All workers" scope labels; process-first is a radio group.
+
+function _emMenuItems() {
+    const gp = enrichmentManagerState.globalPriority || '';
+    const prio = [
+        ['artist', 'Artists'],
+        ['album', 'Albums'],
+        ['track', 'Tracks'],
+        ['', 'Auto'],
+    ].map(([e, label]) => `
+        <button class="em-menu-item" role="menuitemradio" aria-checked="${(gp === e) ? 'true' : 'false'}"
+                onclick="setGlobalPriority('${e}'); closeEmMenu();">
+            <span class="em-menu-check">${(gp === e) ? '✓' : ''}</span>
+            <span class="em-menu-text">${label}</span>
+        </button>`).join('');
+    return `
+        <div class="em-menu-label" aria-hidden="true">Process first · everywhere</div>
+        ${prio}
+        <div class="em-menu-sep" aria-hidden="true"></div>
+        <button class="em-menu-item" role="menuitem" onclick="emMenuAction('retry')">
+            <span class="em-menu-ico" aria-hidden="true">↻</span>
+            <span class="em-menu-text">Retry all failed <span class="em-menu-sub">All workers</span></span>
+        </button>
+        <button class="em-menu-item" role="menuitem"
+                title="Repair matches corrupted before the Aug 2026 matching fixes: reset artist id-collision clusters and degenerate-title false matches so the fixed workers rematch them"
+                onclick="emMenuAction('verify')">
+            <span class="em-menu-ico" aria-hidden="true">✓</span>
+            <span class="em-menu-text">Verify matches <span class="em-menu-sub">All workers</span></span>
+        </button>`;
+}
+
+function _emRenderMenu() {
+    const menu = document.getElementById('em-menu');
+    if (menu) menu.innerHTML = _emMenuItems();
+}
+
+function toggleEmMenu(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('em-menu');
+    const btn = document.getElementById('em-menu-btn');
+    if (!menu || !btn) return;
+    if (menu.hidden) {
+        _emRenderMenu();
+        menu.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+        document.addEventListener('click', _emMenuOutside, true);
+        document.addEventListener('keydown', _emMenuKey, true);
+    } else {
+        closeEmMenu();
+    }
+}
+
+function closeEmMenu() {
+    const menu = document.getElementById('em-menu');
+    const btn = document.getElementById('em-menu-btn');
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', _emMenuOutside, true);
+    document.removeEventListener('keydown', _emMenuKey, true);
+}
+
+function _emMenuOutside(e) {
+    const wrap = document.querySelector('#enrichment-manager-overlay .em-menu-wrap');
+    if (wrap && !wrap.contains(e.target)) closeEmMenu();
+}
+
+function _emMenuKey(e) {
+    // Swallow Escape while the menu is open so it closes the menu instead of
+    // the whole modal (the modal's own keydown listener is bubble-phase).
+    if (e.key === 'Escape') { e.stopPropagation(); closeEmMenu(); }
+}
+
+function emMenuAction(which) {
+    closeEmMenu();
+    if (which === 'retry') retryAllFailedEnrichmentGlobal();
+    else verifyEnrichmentMatchesGlobal();
+}
+
 // Global "process first" — applies a group to EVERY worker. Like the per-worker
 // pin, it also re-queues that group's previously-failed items so each worker
 // sweeps ALL pending + failed of the group before moving on. Workers that don't
 // enrich the entity (Genius/album, Discogs/track) reject with 400 and are
 // skipped (no priority set, no re-queue). Workers run independently in parallel.
-async function setGlobalPriority(entity, btn) {
-    if (btn) {
-        document.querySelectorAll('#em-global-tabs button').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-    }
+async function setGlobalPriority(entity) {
+    enrichmentManagerState.globalPriority = entity || '';
+    _emRenderMenu();
     const perWorker = await Promise.all(_emVisibleWorkers().map(async (w) => {
         let okP = false, reset = 0;
         try {
@@ -491,6 +571,29 @@ async function _emLoadUnmatched() {
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
+// #1317: collapse/expand the coverage section. The toggle lives in the
+// section label row, which stays visible as a slim summary bar while the
+// cards fold away — the unmatched browser below grows to fill the space.
+function toggleEmCoverage() {
+    enrichmentManagerState.coverageCollapsed = !enrichmentManagerState.coverageCollapsed;
+    try {
+        localStorage.setItem('em-coverage-collapsed',
+            enrichmentManagerState.coverageCollapsed ? '1' : '0');
+    } catch (_e) { /* ignore */ }
+    _emApplyCoverageCollapsed();
+}
+
+function _emApplyCoverageCollapsed() {
+    const collapsed = enrichmentManagerState.coverageCollapsed;
+    const section = document.getElementById('em-coverage');
+    const btn = document.getElementById('em-coverage-toggle');
+    if (section) section.classList.toggle('em-coverage--collapsed', collapsed);
+    if (btn) {
+        btn.setAttribute('aria-expanded', String(!collapsed));
+        btn.title = collapsed ? 'Expand coverage section' : 'Collapse coverage section';
+    }
+}
+
 function renderEnrichmentPanel() {
     const panel = document.getElementById('em-panel');
     if (!panel) return;
@@ -505,17 +608,28 @@ function renderEnrichmentPanel() {
     panel.innerHTML = `
         <div class="em-panel-header" id="em-panel-header"></div>
         <div class="em-banner" id="em-banner" hidden></div>
-        <div class="em-section-label em-section-label--row">
-            <span>Coverage &amp; processing order <span class="em-section-sub">— click a group to enrich it first</span></span>
-            <span class="em-coverage-overall" id="em-coverage-overall"></span>
+        <div class="em-coverage" id="em-coverage">
+            <div class="em-section-label em-section-label--row em-coverage-head">
+                <span>Coverage &amp; processing order <span class="em-section-sub">— click a group to enrich it first</span></span>
+                <span class="em-coverage-right">
+                    <span class="em-coverage-overall" id="em-coverage-overall"></span>
+                    <button class="em-collapse-btn" id="em-coverage-toggle" onclick="toggleEmCoverage()"
+                            title="Collapse coverage section" aria-expanded="true" aria-controls="em-coverage-body">
+                        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </span>
+            </div>
+            <div class="em-coverage-body" id="em-coverage-body">
+                <div class="em-cards" id="em-cards"></div>
+            </div>
         </div>
-        <div class="em-cards" id="em-cards"></div>
         <div class="em-unmatched">
             <div class="em-unmatched-controls" id="em-unmatched-controls"></div>
             <div class="em-bulk-bar" id="em-bulk-bar" hidden></div>
             <div class="em-unmatched-list" id="em-unmatched-list" onkeydown="onEnrichmentListKey(event)"></div>
             <div class="em-pager" id="em-pager"></div>
         </div>`;
+    _emApplyCoverageCollapsed();
     _emRenderPanelHeader();
     _emRenderEntityCards();
     _emRenderUnmatchedControls();
@@ -679,21 +793,19 @@ function _emRenderPanelHeader() {
     host.innerHTML = `
         <div class="em-hero">
             <div class="em-hero-glow"></div>
-            ${_emIconHtml(id, 'lg')}
-            <div class="em-ph-titles">
-                <div class="em-ph-nameline">
-                    <span class="em-ph-name">${_emEscape(worker.name)} <span class="em-ph-name-sub">enrichment</span></span>
-                    <span class="em-pill" id="em-ph-pill"></span>
-                </div>
-                <div class="em-ph-sub" id="em-ph-current"></div>
+            ${_emIconHtml(id, '')}
+            <div class="em-hero-main">
+                <span class="em-ph-name">${_emEscape(worker.name)} <span class="em-ph-name-sub">enrichment</span></span>
+                <span class="em-pill" id="em-ph-pill"></span>
+                <span class="em-ph-sub em-hero-current" id="em-ph-current"></span>
             </div>
-            <div class="em-ph-actions">
+            <div class="em-hero-side">
                 <span id="em-ph-errors"></span>
                 <span id="em-ph-budget"></span>
-                ${_emHasRateGraph(id) ? `<button class="em-btn em-btn--ghost" id="em-ph-graph"
+                ${_emHasRateGraph(id) ? `<button class="em-btn em-btn--sm em-btn--ghost" id="em-ph-graph"
                     title="24-hour API call history"
                     onclick="_openRateModal('${id}')">📈 API Graph</button>` : ''}
-                <button class="em-btn" id="em-ph-toggle" onclick="toggleEnrichmentWorker('${id}')"></button>
+                <button class="em-btn em-btn--sm" id="em-ph-toggle" onclick="toggleEnrichmentWorker('${id}')"></button>
             </div>
         </div>`;
     _emUpdateHeaderLive();
@@ -778,14 +890,15 @@ function _emRenderUnmatchedControls() {
     const total = data ? (data.total || 0) : null;
     const entity = enrichmentManagerState.entityTab;
     const failed = enrichmentManagerState.breakdown?.[entity]?.not_found || 0;
+    const workerName = _emWorkerById[enrichmentManagerState.selected]?.name || 'this worker';
     const tabs = supported.map(e => `
         <button class="em-seg-tab ${e === enrichmentManagerState.entityTab ? 'active' : ''}"
                 onclick="setEnrichmentEntityTab('${e}')">${_emEntityLabel(e, true)}</button>`).join('');
     const bulkBtn = (failed
-        ? `<button class="em-btn em-btn--sm em-btn--ghost em-retry-all" title="Re-queue every not-found ${_emEntityLabel(entity, true).toLowerCase()}"
-                   onclick="retryAllFailedEnrichment(this)">↻ Retry all failed</button>`
+        ? `<button class="em-btn em-btn--sm em-btn--ghost em-retry-all" title="Re-queue ${workerName}'s failed ${_emEntityLabel(entity, true).toLowerCase()} for another pass"
+                   onclick="retryAllFailedEnrichment(this)">↻ Retry failed</button>`
         : '') +
-        `<button class="em-btn em-btn--sm em-btn--ghost" title="Repair pre-fix corruption for this worker: reset artist id-collision clusters and degenerate-title false matches for rematching"
+        `<button class="em-btn em-btn--sm em-btn--ghost" title="Repair pre-fix corruption for ${workerName}: reset artist id-collision clusters and degenerate-title false matches for rematching"
                  onclick="verifyEnrichmentMatches(this)">✓ Verify matches</button>`;
 
     host.innerHTML = `
@@ -1317,6 +1430,10 @@ window.openEnrichmentManager = openEnrichmentManager;
 window.closeEnrichmentManager = closeEnrichmentManager;
 window.refreshEnrichmentManager = refreshEnrichmentManager;
 window.selectEnrichmentWorker = selectEnrichmentWorker;
+window.toggleEmMenu = toggleEmMenu;
+window.closeEmMenu = closeEmMenu;
+window.emMenuAction = emMenuAction;
+window.toggleEmCoverage = toggleEmCoverage;
 window.setEnrichmentEntityTab = setEnrichmentEntityTab;
 window.setEnrichmentStatusFilter = setEnrichmentStatusFilter;
 window.onEnrichmentSearchInput = onEnrichmentSearchInput;

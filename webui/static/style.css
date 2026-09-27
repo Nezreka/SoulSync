@@ -75552,21 +75552,42 @@ body.max-performance .dash-card::after {
 }
 .em-topbar-sub { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 1px; }
 
-/* Global 'process first everywhere' control */
-.em-global { display: flex; align-items: center; gap: 11px; flex: 0 0 auto;
-    padding: 6px 6px 6px 12px; border-radius: 13px;
-    background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); }
-.em-global-label { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px;
-    color: rgba(255,255,255,0.4); line-height: 1.25; text-align: right; }
-.em-global-label span { color: rgba(255,255,255,0.7); }
-.em-global-tabs { display: inline-flex; gap: 3px; padding: 3px; background: rgba(255,255,255,0.05);
-    border-radius: 9px; border: 1px solid rgba(255,255,255,0.07); }
-.em-global-tabs button { padding: 6px 12px; border: none; background: transparent; border-radius: 7px;
-    color: rgba(255,255,255,0.6); font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.15s ease; }
-.em-global-tabs button:hover { color: #fff; background: rgba(255,255,255,0.06); }
-.em-global-tabs button.active { background: rgb(var(--accent-rgb)); color: #fff; box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.5); }
+.em-topbar-actions { display: flex; gap: 8px; flex: 0 0 auto; align-items: center; }
 
-.em-topbar-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+/* ── Topbar overflow menu (⋯) ────────────────────────────────────────────
+   Global actions live here now: process-first everywhere (radio group) and
+   the all-workers retry/verify, with explicit scope labels. */
+.em-menu-wrap { position: relative; flex: 0 0 auto; }
+.em-menu-wrap .em-icon-btn:hover { transform: none; }
+.em-menu-wrap .em-icon-btn[aria-expanded="true"] { background: rgba(255,255,255,0.16); }
+.em-menu {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+    min-width: 250px; padding: 6px;
+    background: linear-gradient(160deg, #232328, #17171b);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 12px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4);
+}
+.em-menu[hidden] { display: none; }
+.em-menu-label {
+    padding: 8px 10px 4px; font-size: 10px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.7px; color: rgba(255,255,255,0.4);
+}
+.em-menu-item {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 8px 10px; border: none; border-radius: 8px; background: transparent;
+    color: rgba(255,255,255,0.85); font-size: 13px; font-weight: 600;
+    cursor: pointer; text-align: left;
+    transition: background 0.12s ease;
+}
+.em-menu-item:hover { background: rgba(255,255,255,0.08); }
+.em-menu-item:focus-visible { outline: 2px solid rgba(var(--em-accent-rgb, 129,140,248), 0.7); outline-offset: -2px; }
+.em-menu-check { width: 16px; flex: 0 0 auto; color: rgb(var(--em-accent-rgb, 129,140,248)); font-weight: 800; }
+.em-menu-ico { width: 16px; flex: 0 0 auto; text-align: center; color: rgba(255,255,255,0.6); }
+.em-menu-text { flex: 1 1 auto; }
+.em-menu-sub {
+    display: block; font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.4);
+}
+.em-menu-sep { height: 1px; margin: 6px 4px; background: rgba(255,255,255,0.08); }
 .em-icon-btn--close { font-size: 20px; }
 
 .em-body { display: flex; flex: 1 1 auto; min-height: 0; }
@@ -75859,7 +75880,26 @@ body.em-scroll-lock { overflow: hidden; }
     font-size: 11px; font-weight: 800; letter-spacing: 0;
 }
 
-/* Hero header */
+/* Hero header — music modal: a single compact status strip (logo, name +
+   state pill, live "now enriching" line truncated, worker actions).
+   Scoped to #enrichment-manager-overlay: the video modal reuses .em-hero
+   with its own taller layout under #vem-overlay. */
+#enrichment-manager-overlay .em-hero {
+    position: relative; overflow: hidden;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 14px;
+    border-radius: 14px;
+    background:
+        linear-gradient(135deg, rgba(var(--em-accent-rgb, 99,102,241), 0.13), rgba(var(--em-accent-rgb, 99,102,241), 0.02) 60%),
+        rgba(255,255,255,0.03);
+    border: 1px solid rgba(var(--em-accent-rgb, 99,102,241), 0.2);
+}
+#enrichment-manager-overlay .em-hero-glow {
+    position: absolute; top: -80%; right: -5%; width: 220px; height: 220px;
+    background: radial-gradient(circle, rgba(var(--em-accent-rgb, 99,102,241), 0.18), transparent 70%);
+    pointer-events: none;
+}
+/* Video modal keeps the original taller hero. */
 .em-hero {
     position: relative; overflow: hidden;
     display: flex; align-items: center; gap: 16px;
@@ -75881,9 +75921,25 @@ body.em-scroll-lock { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) { .em-hero--live .em-hero-glow { animation: none; } }
 .em-hero .em-icon { width: 56px; height: 56px; }
 .em-hero .em-ph-titles { flex: 1 1 auto; min-width: 0; z-index: 1; }
+#enrichment-manager-overlay .em-hero .em-icon { width: 34px; height: 34px; z-index: 1; }
 .em-ph-nameline { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
 .em-ph-name-sub { font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.45); }
 .em-hero .em-ph-actions { z-index: 1; }
+#enrichment-manager-overlay .em-hero-main {
+    flex: 1 1 auto; min-width: 0; z-index: 1;
+    display: flex; align-items: baseline; gap: 10px;
+}
+#enrichment-manager-overlay .em-hero .em-ph-name { font-size: 16px; white-space: nowrap; }
+#enrichment-manager-overlay .em-hero .em-ph-name-sub { font-size: 12px; }
+#enrichment-manager-overlay .em-hero .em-pill { flex: 0 0 auto; }
+#enrichment-manager-overlay .em-hero-current {
+    margin-top: 0; min-width: 0; flex: 1 1 auto;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#enrichment-manager-overlay .em-hero-side {
+    flex: 0 0 auto; z-index: 1;
+    display: flex; align-items: center; gap: 8px;
+}
 
 /* Combined coverage + processing-order cards (click to enrich a group first) */
 .em-section-sub { font-weight: 500; text-transform: none; letter-spacing: 0; color: rgba(255,255,255,0.35); font-size: 11px; }
@@ -75925,6 +75981,34 @@ body.em-scroll-lock { overflow: hidden; }
 .em-section-label--row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .em-coverage-overall { font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: rgba(255,255,255,0.55); }
 .em-coverage-overall strong { color: rgb(var(--em-accent-rgb, 129,140,248)); font-weight: 800; }
+
+/* #1317: collapsible coverage section. The label row stays visible as a slim
+   summary bar while the cards fold away, giving the unmatched browser below
+   the freed space. */
+.em-coverage { flex: 0 0 auto; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.em-coverage-head { align-items: center; }
+.em-coverage-right { display: inline-flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.em-collapse-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 8px; padding: 0;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.65);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.em-collapse-btn:hover { background: rgba(255,255,255,0.12); color: #fff; border-color: rgba(255,255,255,0.22); }
+.em-collapse-btn:focus-visible { outline: 2px solid rgba(var(--em-accent-rgb, 129,140,248), 0.7); outline-offset: 2px; }
+.em-collapse-btn svg { transition: transform 0.25s ease; }
+.em-coverage--collapsed .em-collapse-btn svg { transform: rotate(-90deg); }
+.em-coverage-body {
+    display: grid; grid-template-rows: 1fr;
+    transition: grid-template-rows 0.28s ease;
+}
+.em-coverage--collapsed .em-coverage-body { grid-template-rows: 0fr; }
+.em-coverage-body > .em-cards { overflow: hidden; min-height: 0; }
+@media (prefers-reduced-motion: reduce) {
+    .em-coverage-body, .em-collapse-btn svg { transition: none; }
+}
 /* Accent-themed buttons / active states inside the panel */
 .em-panel .em-btn { border-color: rgba(var(--em-accent-rgb, 99,102,241), 0.45); background: rgba(var(--em-accent-rgb, 99,102,241), 0.16); }
 .em-panel .em-btn:hover:not(:disabled) { background: rgba(var(--em-accent-rgb, 99,102,241), 0.3); }
@@ -80928,25 +81012,6 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-jump-pill { bottom: 128px; }
 /* the mention pop sits above the (taller) composer now */
 .chat-mention-pop { bottom: 132px; }
-
-/* Global "Retry all failed" — a text button in the Manage Workers topbar
-   (video parity; overrides the round .em-icon-btn sizing; amber = retry). */
-.em-retry-global {
-    width: auto; height: 32px; padding: 0 13px; border-radius: 999px;
-    gap: 6px; font-size: 12px; font-weight: 800; white-space: nowrap;
-    color: #fbcd7a; background: rgba(245, 158, 11, 0.14);
-}
-.em-retry-global:hover { transform: none; background: rgba(245, 158, 11, 0.24); }
-.em-retry-global:disabled { opacity: 0.55; cursor: default; }
-
-/* Global "Verify matches" — same pill override beside it (green = repair). */
-.em-verify-global {
-    width: auto; height: 32px; padding: 0 13px; border-radius: 999px;
-    gap: 6px; font-size: 12px; font-weight: 800; white-space: nowrap;
-    color: #86efac; background: rgba(34, 197, 94, 0.14);
-}
-.em-verify-global:hover { transform: none; background: rgba(34, 197, 94, 0.24); }
-.em-verify-global:disabled { opacity: 0.55; cursor: default; }
 
 /* discography gap-fill (#1067): source badge on cards from other sources */
 .gapfill-source-badge {
