@@ -161,9 +161,8 @@ def test_db_layout_is_per_profile(db):
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
     web_server = pytest.importorskip('web_server')
-    import os
-    os.environ['DATABASE_PATH'] = str(tmp_path / 'w.db')
-    os.environ['SOULSYNC_TEST_DB_READY'] = '1'
+    monkeypatch.setenv('DATABASE_PATH', str(tmp_path / 'w.db'))
+    monkeypatch.setenv('SOULSYNC_TEST_DB_READY', '1')
     from core.security import session_profile as _sp
     _resolve = _sp.resolve_session_profile
     monkeypatch.setattr(_sp, 'resolve_session_profile',
