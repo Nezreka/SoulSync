@@ -41,6 +41,7 @@ describe('layout default zones cover every section exactly once', () => {
     expect(ids).toHaveLength(19);
     const zones = Object.values(DEFAULT_SECTION_ZONE);
     expect(zones).toHaveLength(19);
+    // pin-ok: verifying that the set of layout ids matches the keys of DEFAULT_SECTION_ZONE
     expect(new Set(ids)).toEqual(new Set(Object.keys(DEFAULT_SECTION_ZONE)));
     for (const zone of DISCOVER_ZONES) {
       expect(zones).toContain(zone.id);

@@ -14,6 +14,7 @@ import {
   fetchAdventurousness,
   fetchArtistInfo,
   fetchDeepCuts,
+  fetchDiscoverLayout,
   fetchHero,
   isSuccess,
   fetchLabelExplorer,
@@ -23,6 +24,7 @@ import {
   fetchYourAlbums,
   refreshYourAlbums,
   resolveCacheAlbum,
+  saveDiscoverLayout,
   setAdventurousness,
   unblacklistArtist,
 } from './-discover.api';
@@ -301,5 +303,24 @@ describe('the inbox', () => {
     await setInboxState(7, 'saved');
     expect((await dismissAllInbox()).dismissed).toBe(4);
     expect(seen).toEqual(['GET saved', 'STATE 7 {"state":"saved"}', 'DISMISS']);
+  });
+});
+
+describe('the layout', () => {
+  it('reads and saves the layout', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get('*/api/discover/layout', () => {
+        seen.push('GET');
+        return HttpResponse.json({ success: true, sections: [] });
+      }),
+      http.put('*/api/discover/layout', async ({ request }) => {
+        seen.push(`PUT ${JSON.stringify(await request.json())}`);
+        return HttpResponse.json({ success: true, sections: [] });
+      }),
+    );
+    expect((await fetchDiscoverLayout()).sections).toEqual([]);
+    await saveDiscoverLayout([]);
+    expect(seen).toEqual(['GET', 'PUT {"sections":[]}']);
   });
 });
