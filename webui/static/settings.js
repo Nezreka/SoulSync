@@ -3250,6 +3250,10 @@ async function loadSettingsData() {
             Math.round((ab.completeness_tolerance ?? 0.92) * 100));
         abVal(document.getElementById('audiobook-staging-days'), ab.staging_days ?? 7);
         abChecked(document.getElementById('audiobook-renumber-chapters'), ab.renumber_chapters);
+        // Off by default, unlike the toggles above: abChecked treats a
+        // missing key as on, which would switch this on for older configs.
+        const removeOwned = document.getElementById('audiobook-remove-owned-from-wishlist');
+        if (removeOwned) removeOwned.checked = ab.remove_owned_from_wishlist === true;
         abChecked(document.getElementById('audiobook-embed-metadata'), ab.embed_metadata);
         abChecked(document.getElementById('audiobook-embed-artwork'), ab.embed_artwork);
         abChecked(document.getElementById('audiobook-save-artwork'), ab.save_artwork);
@@ -6313,6 +6317,7 @@ async function saveSettings(quiet = false) {
             staging_days: Math.min(90, Math.max(1,
                 _cfgInt('audiobook-staging-days', 7))),
             renumber_chapters: _cfgBool('audiobook-renumber-chapters'),
+            remove_owned_from_wishlist: _cfgBool('audiobook-remove-owned-from-wishlist'),
             embed_metadata: _cfgBool('audiobook-embed-metadata'),
             embed_artwork: _cfgBool('audiobook-embed-artwork'),
             save_artwork: _cfgBool('audiobook-save-artwork'),

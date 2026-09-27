@@ -61,6 +61,8 @@ def test_audiobook_block_defaults(defaults):
     assert audiobooks["download_path"]
     assert audiobooks["embed_metadata"] is True
     assert audiobooks["renumber_chapters"] is True
+    # Existing behaviour unless the user opts in.
+    assert audiobooks["remove_owned_from_wishlist"] is False
 
 
 def test_audiobooks_do_not_inherit_the_music_source_chain(defaults):
@@ -118,7 +120,8 @@ def settings_js():
     return (_ROOT / "webui/static/settings.js").read_text(encoding="utf-8", errors="ignore")
 
 
-@pytest.mark.parametrize("element_id", ["audiobooks-path", "template-audiobook-path"])
+@pytest.mark.parametrize("element_id", ["audiobooks-path", "template-audiobook-path",
+                                        "audiobook-remove-owned-from-wishlist"])
 def test_the_settings_page_has_the_input(index_html, element_id):
     assert f'id="{element_id}"' in index_html
 
@@ -143,7 +146,8 @@ def _touch_count(js: str, element_id: str) -> int:
                   for kind in ("Str", "Bool", "Int", "Float")))
 
 
-@pytest.mark.parametrize("element_id", ["audiobooks-path", "template-audiobook-path"])
+@pytest.mark.parametrize("element_id", ["audiobooks-path", "template-audiobook-path",
+                                        "audiobook-remove-owned-from-wishlist"])
 def test_settings_js_reads_and_writes_the_input(settings_js, element_id):
     assert _touch_count(settings_js, element_id) >= 2
 
