@@ -76,12 +76,12 @@ import {
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
 import { safeFixablePending, visibleGroups } from '../-tools.groups';
+import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 import { FindingDetail } from './finding-detail';
 import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
 import { FindingsInbox } from './findings-inbox';
 import { HealthHero } from './health-hero';
-import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
@@ -1321,10 +1321,18 @@ export function FindingsSurface({
               reidentifyingFinding.title ||
               '',
           )}
-          artistName={String((reidentifyingFinding.details as Record<string, any>)?.artist_name || '')}
-          albumTitle={String((reidentifyingFinding.details as Record<string, any>)?.album_title || '')}
-          imageUrl={String((reidentifyingFinding.details as Record<string, any>)?.album_thumb_url || '')}
-          initialQuery={String((reidentifyingFinding.details as Record<string, any>)?.reidentify_query || '')}
+          artistName={String(
+            (reidentifyingFinding.details as Record<string, any>)?.artist_name || '',
+          )}
+          albumTitle={String(
+            (reidentifyingFinding.details as Record<string, any>)?.album_title || '',
+          )}
+          imageUrl={String(
+            (reidentifyingFinding.details as Record<string, any>)?.album_thumb_url || '',
+          )}
+          initialQuery={String(
+            (reidentifyingFinding.details as Record<string, any>)?.reidentify_query || '',
+          )}
           onApplied={async () => {
             if (reidentifyingFinding) {
               await dismissOne(reidentifyingFinding.id);
