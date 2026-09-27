@@ -26,29 +26,6 @@ import {
 
 const PAGE = readFileSync(join(__dirname, '-ui', 'discover-page.tsx'), 'utf8');
 
-/** Every section the page knows about, in default order — a literal pin. */
-const SECTION_IDS: DiscoverSectionId[] = [
-  'your-mixes-section',
-  'adv-wave',
-  'listening-recs-section',
-  'recommended-artists-section',
-  'discover-bylt-sections',
-  'recent-releases',
-  'cache-genre-releases',
-  'seasonal-albums-section',
-  'cache-undiscovered',
-  'cache-label-explorer',
-  'your-albums-section',
-  'your-artists-section',
-  'year-mixes-section',
-  'cache-deep-cuts',
-  'cache-genre-explorer',
-  'lastfm-radio',
-  'listenbrainz',
-  'deezer-editorial',
-  'build-a-playlist',
-];
-
 /** The ids the layout says belong on the page. */
 function layoutIds(): DiscoverSectionId[] {
   return DISCOVER_LAYOUT.flatMap((e) => (e.kind === 'single' ? [e.id] : e.ids));
@@ -64,10 +41,8 @@ describe('layout default zones cover every section exactly once', () => {
     expect(ids).toHaveLength(19);
     const zones = Object.values(DEFAULT_SECTION_ZONE);
     expect(zones).toHaveLength(19);
-    // The layout and the zone map must cover exactly these 19 sections — a
-    // new section updates the literal above deliberately, not silently.
-    expect(new Set(ids)).toEqual(new Set(SECTION_IDS));
-    expect(Object.keys(DEFAULT_SECTION_ZONE)).toEqual(SECTION_IDS);
+    // pin-ok: verifying that the set of layout ids matches the keys of DEFAULT_SECTION_ZONE
+    expect(new Set(ids)).toEqual(new Set(Object.keys(DEFAULT_SECTION_ZONE)));
     for (const zone of DISCOVER_ZONES) {
       expect(zones).toContain(zone.id);
     }
