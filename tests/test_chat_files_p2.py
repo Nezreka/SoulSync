@@ -175,6 +175,39 @@ def test_library_search_only_tracks_with_files(files_app):
     assert http.get("/api/chat/files/library-search?q=x").get_json()["tracks"] == []
 
 
+def test_wanted_resolve_share_matches_album(files_app):
+    http, state, client, uploads = files_app
+    r = http.post("/api/chat/wanted/resolve-share",
+                  json={"title": "The Resistance", "artist": "Muse", "type": "album"})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["ok"] is True and body["found"] is True
+    assert body["type"] == "album"
+    assert body["title"] == "The Resistance"
+    assert body["artist"] == "Muse"
+    assert len(body["tracks"]) == 2
+    assert body["tracks"][0]["title"] == "Uprising"
+    assert body["tracks"][0]["size"] == 4096
+
+
+def test_wanted_resolve_share_not_found(files_app):
+    http, state, client, uploads = files_app
+    r = http.post("/api/chat/wanted/resolve-share",
+                  json={"title": "Nonexistent", "artist": "Nobody"})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["ok"] is True and body["found"] is False
+
+
+def test_wanted_resolve_share_gated_by_send_permission(files_app):
+    http, state, client, uploads = files_app
+    state["admin"] = False
+    state["config"]["soulseek.chat_member_send"] = False
+    r = http.post("/api/chat/wanted/resolve-share",
+                  json={"title": "The Resistance", "artist": "Muse"})
+    assert r.status_code == 403
+
+
 def test_room_send_dresses_the_file_card(files_app):
     http, state, client, uploads = files_app
     r = http.post("/api/chat/room/message",
@@ -404,6 +437,35 @@ def test_frontend_save_wiring():
     # only audio cards get the save chip
     card = js[js.index("function _fileCardHtml"):js.index("function renderGroups")]
     assert "isAudio\n" in card or "(isAudio" in card
+
+
+def test_frontend_wanted_share_wiring():
+    js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
+    html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    css = (_ROOT / "webui" / "static" / "chat-overhaul.css").read_text(encoding="utf-8")
+
+    # Wanted card button and resolve API
+    assert "data-chat-wanted-share" in js
+    assert "'/api/chat/wanted/resolve-share'" in js
+    assert "_onShareWanted" in js
+
+    # Protocol handling
+    assert "'want.share'" in js
+    assert "'want.accept'" in js
+    assert "_handleWantedShareEvents" in js
+    assert "_acceptIncomingShare" in js
+
+    # HTML modals and settings switch
+    assert "data-chat-share-confirm-modal" in html
+    assert "data-chat-incoming-share-modal" in html
+    assert "data-chat-set-autoshare" in html
+
+    # CSS styles
+    assert ".chat-card-btn--share" in css
+    assert ".chat-wanted-badge--shared" in css
+    assert ".chat-wanted-badge--fulfilled" in css
+    assert ".chat-share-modal" in css
+
 
 
 def test_every_room_send_path_carries_the_channel_envelope():

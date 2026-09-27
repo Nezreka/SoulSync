@@ -10145,6 +10145,74 @@
                                     <div class="chat-want-results" data-chat-want-results></div>
                                 </div>
                             </div>
+                            <!-- Sharer Confirmation Modal: Direct P2P Share -->
+                            <div class="chat-peer-backdrop chat-share-backdrop" data-chat-share-backdrop hidden></div>
+                            <div class="chat-share-modal-overlay" data-chat-share-confirm-modal hidden>
+                                <div class="chat-share-modal">
+                                    <div class="chat-share-modal-head">
+                                        <div class="chat-share-modal-title">
+                                            <span class="chat-share-icon">⚡</span>
+                                            <div>
+                                                <div class="chat-share-heading">Direct P2P Share</div>
+                                                <div class="chat-share-sub">Offer your library files directly to <span class="chat-share-target-user" data-chat-share-target>@User</span></div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-share-close title="Close (Esc)">&times;</button>
+                                    </div>
+                                    <div class="chat-share-hero">
+                                        <div class="chat-share-thumb-wrap" data-chat-share-thumb>💿</div>
+                                        <div class="chat-share-hero-meta">
+                                            <div class="chat-share-hero-title" data-chat-share-title>Album Title</div>
+                                            <div class="chat-share-hero-artist" data-chat-share-artist>Artist Name</div>
+                                            <div class="chat-share-pills" data-chat-share-pills>
+                                                <span class="chat-share-pill" data-chat-share-cnt>0 tracks</span>
+                                                <span class="chat-share-pill" data-chat-share-size>0 MB</span>
+                                                <span class="chat-share-pill chat-share-pill--format" data-chat-share-format>FLAC</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="chat-share-tracklist-label">Tracks in your share:</div>
+                                    <div class="chat-share-tracklist" data-chat-share-tracks></div>
+                                    <div class="chat-share-modal-foot">
+                                        <button type="button" class="chat-card-btn" data-chat-share-cancel>Cancel</button>
+                                        <button type="button" class="chat-card-btn chat-card-btn--share chat-card-btn--glow" data-chat-share-send-btn>🚀 Send Share Offer</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Recipient Incoming Share Modal -->
+                            <div class="chat-peer-backdrop chat-incoming-backdrop" data-chat-incoming-backdrop hidden></div>
+                            <div class="chat-share-modal-overlay" data-chat-incoming-share-modal hidden>
+                                <div class="chat-share-modal chat-share-modal--incoming">
+                                    <div class="chat-share-modal-head">
+                                        <div class="chat-share-modal-title">
+                                            <span class="chat-share-icon">🎁</span>
+                                            <div>
+                                                <div class="chat-share-heading">Direct Share Offer</div>
+                                                <div class="chat-share-sub"><span class="chat-share-target-user" data-chat-incoming-sender>@User</span> is sharing their library copy with you!</div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-incoming-close title="Close (Esc)">&times;</button>
+                                    </div>
+                                    <div class="chat-share-hero">
+                                        <div class="chat-share-thumb-wrap" data-chat-incoming-thumb>💿</div>
+                                        <div class="chat-share-hero-meta">
+                                            <div class="chat-share-hero-title" data-chat-incoming-title>Album Title</div>
+                                            <div class="chat-share-hero-artist" data-chat-incoming-artist>Artist Name</div>
+                                            <div class="chat-share-pills" data-chat-incoming-pills>
+                                                <span class="chat-share-pill" data-chat-incoming-cnt>0 tracks</span>
+                                                <span class="chat-share-pill" data-chat-incoming-size>0 MB</span>
+                                                <span class="chat-share-pill chat-share-pill--format" data-chat-incoming-format>FLAC</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="chat-share-tracklist-label">Offered tracks:</div>
+                                    <div class="chat-share-tracklist" data-chat-incoming-tracks></div>
+                                    <div class="chat-share-modal-foot">
+                                        <button type="button" class="chat-card-btn" data-chat-incoming-decline>Decline</button>
+                                        <button type="button" class="chat-card-btn chat-card-btn--success chat-card-btn--glow" data-chat-incoming-accept>📥 Accept &amp; Start Download</button>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- jukebox YouTube search: rich pop-in, search-page video-card look -->
                             <div class="chat-settings-overlay" data-chat-jbx-search-modal hidden>
                                 <div class="chat-settings-modal chat-jbx-search-modal">
@@ -10264,6 +10332,14 @@
                                                             see it. This browser only.</span>
                                                     </span>
                                                     <input type="checkbox" class="chat-set-switch" data-chat-set-np>
+                                                </label>
+                                                <div class="chat-set-h">P2P Transfers</div>
+                                                <label class="chat-set-row">
+                                                    <span class="chat-set-row-text">
+                                                        <span class="chat-set-row-title">Auto-accept Wanted shares</span>
+                                                        <span class="chat-set-desc">Automatically download files shared to you for your Wanted / ISO requests without confirmation prompt.</span>
+                                                    </span>
+                                                    <input type="checkbox" class="chat-set-switch" data-chat-set-autoshare>
                                                 </label>
                                             </section>
                                             <section class="chat-set-panel" data-chat-setpanel="room" hidden>
