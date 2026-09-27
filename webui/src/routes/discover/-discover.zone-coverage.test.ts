@@ -2,56 +2,80 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { DISCOVER_LAYOUT, type DiscoverSectionId } from './-discover.layout';
+import {
+  DEFAULT_SECTION_ZONE,
+  DISCOVER_LAYOUT,
+  DISCOVER_ZONES,
+  type DiscoverSectionId,
+  type DiscoverZoneId,
+} from './-discover.layout';
 
 /**
- * A section is only on screen if it is in a ZONE list.
+ * The page's four zones render from the profile's layout, not hardcoded id
+ * lists.
  *
- * DISCOVER_LAYOUT gives a section its order and its empty policy, and it is
- * natural to assume that is what puts it on the page. It is not. The page
- * renders through renderZoneSections([...]) calls with hardcoded ids, so a
- * section can be fully registered — in the union, in the layout, with a render
- * case and a hasContent branch — and still never appear anywhere.
- *
- * That is exactly what happened to the Deezer editorial shelf: everything was
- * wired except the zone list, and the row was simply absent from the page with
- * nothing to explain it.
+ * The old version of this test parsed literal renderZoneSections([...]) calls
+ * out of discover-page.tsx. The page now renders each zone's sections from
+ * `pageLayout.sectionsByZone[zone]` (GET /api/discover/layout merged over the
+ * defaults), so the coverage guarantee moves: every section id must have
+ * exactly one default zone, and the page must render all four zones from the
+ * layout — a section registered in the layout can no longer be silently absent
+ * from a zone list (the Deezer editorial failure mode this test was written
+ * for).
  */
 
 const PAGE = readFileSync(join(__dirname, '-ui', 'discover-page.tsx'), 'utf8');
-
-/** Every id passed to a renderZoneSections([...]) call. */
-function zoneRenderedIds(): Set<string> {
-  const ids = new Set<string>();
-  const call = /renderZoneSections\(\s*\[([\s\S]*?)\]\s*\)/g;
-  let match: RegExpExecArray | null;
-  while ((match = call.exec(PAGE)) !== null) {
-    for (const id of match[1].matchAll(/'([a-z0-9-]+)'/g)) ids.add(id[1]);
-  }
-  return ids;
-}
 
 /** The ids the layout says belong on the page. */
 function layoutIds(): DiscoverSectionId[] {
   return DISCOVER_LAYOUT.flatMap((e) => (e.kind === 'single' ? [e.id] : e.ids));
 }
 
-describe('every laid-out section is actually rendered by a zone', () => {
-  it('finds the zone lists at all', () => {
-    // a regex that matched nothing would make the check below vacuous
-    const rendered = zoneRenderedIds();
-    expect(rendered.size).toBeGreaterThan(10);
-    expect(rendered.has('listenbrainz')).toBe(true);
+describe('layout default zones cover every section exactly once', () => {
+  it('knows all four zones', () => {
+    expect(DISCOVER_ZONES.map((z) => z.id)).toEqual(['for-you', 'new-missing', 'library', 'tools']);
   });
 
-  it('leaves no section registered but invisible', () => {
-    const rendered = zoneRenderedIds();
-    // 'adv-wave' is the dial, rendered inline rather than as a zone section
-    const orphans = layoutIds().filter((id) => id !== 'adv-wave' && !rendered.has(id));
-    expect(orphans, 'these sections are in DISCOVER_LAYOUT but no zone renders them').toEqual([]);
+  it('assigns every section to exactly one zone, no extras', () => {
+    const ids = layoutIds();
+    expect(ids).toHaveLength(19);
+    const zones = Object.values(DEFAULT_SECTION_ZONE);
+    expect(zones).toHaveLength(19);
+    expect(new Set(ids)).toEqual(new Set(Object.keys(DEFAULT_SECTION_ZONE)));
+    for (const zone of DISCOVER_ZONES) {
+      expect(zones).toContain(zone.id);
+    }
+    const perZone = Object.values(DEFAULT_SECTION_ZONE).reduce<Record<DiscoverZoneId, number>>(
+      (acc, zone) => {
+        acc[zone] += 1;
+        return acc;
+      },
+      { 'for-you': 0, 'new-missing': 0, library: 0, tools: 0 },
+    );
+    expect(perZone).toEqual({ 'for-you': 5, 'new-missing': 6, library: 3, tools: 5 });
+  });
+});
+
+describe('the page renders all four zones from the profile layout', () => {
+  it('drives every zone from the layout, not hardcoded id lists', () => {
+    for (const zone of DISCOVER_ZONES) {
+      expect(PAGE, `discover-page.tsx should render the ${zone.id} zone from the layout`).toContain(
+        `zoneSections('${zone.id}')`,
+      );
+    }
+    expect(PAGE).toContain('useDiscoverLayout');
+    expect(PAGE).not.toMatch(/renderZoneSections\(\s*\[/);
   });
 
-  it('renders the Deezer editorial shelf', () => {
-    expect(zoneRenderedIds().has('deezer-editorial')).toBe(true);
+  it('keeps StationsRow pinned right after Your Mixes in For You', () => {
+    expect(PAGE).toContain('renderForYouSections');
+    expect(PAGE).toContain("ids.indexOf('your-mixes-section')");
+    expect(PAGE).toContain('<StationsRow');
+  });
+
+  it('offers the Layout customizer from the pill rail', () => {
+    expect(PAGE).toContain('⚙️');
+    expect(PAGE).toContain('DiscoverLayoutModal');
+    expect(PAGE).toContain('setLayoutOpen(true)');
   });
 });

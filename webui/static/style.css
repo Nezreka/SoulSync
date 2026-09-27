@@ -40986,6 +40986,106 @@ div.artist-hero-badge {
     font-size: 13px;
 }
 
+/* Discover Layout Modal */
+.discover-layout-modal {
+    background: #1a1a1a;
+    border-radius: 16px;
+    width: 520px;
+    max-width: 95vw;
+    max-height: 84vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+}
+.discover-layout-modal-header {
+    padding: 20px 24px 12px;
+    position: relative;
+}
+.discover-layout-modal-header h2 {
+    margin: 0 0 4px;
+    font-size: 18px;
+}
+.discover-layout-modal-header p {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(255,255,255,0.55);
+}
+.discover-layout-modal-body {
+    padding: 4px 24px 12px;
+    overflow-y: auto;
+}
+.discover-layout-zone {
+    margin-bottom: 16px;
+}
+.discover-layout-zone h3 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255,255,255,0.45);
+}
+.discover-layout-zone ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.discover-layout-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.discover-layout-row:last-child { border-bottom: none; }
+.discover-layout-row.is-disabled .discover-layout-check span {
+    color: rgba(255,255,255,0.35);
+    text-decoration: line-through;
+}
+.discover-layout-check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    cursor: pointer;
+}
+.discover-layout-check input {
+    width: 16px;
+    height: 16px;
+    accent-color: #7c5cff;
+    cursor: pointer;
+}
+.discover-layout-movers {
+    display: flex;
+    gap: 4px;
+}
+.discover-layout-movers button {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.8);
+    font-size: 13px;
+    cursor: pointer;
+    line-height: 1;
+}
+.discover-layout-movers button:hover:not(:disabled) {
+    background: rgba(255,255,255,0.12);
+}
+.discover-layout-movers button:disabled {
+    opacity: 0.25;
+    cursor: default;
+}
+.discover-layout-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 24px 20px;
+}
+
 /* Discover Playlist Cards */
 .discover-playlist-card {
     background: #1a1a1a;

@@ -3588,6 +3588,21 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_inbox_state "
                            "ON discovery_inbox (profile_id, state)")
 
+            # Per-profile discover page layout: which of the 19 sections
+            # (core/discovery/layout.py) shows in which of the 4 zones, in
+            # what order, enabled or not. Empty for a profile means the
+            # defaults — the API merges saved rows over them.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_layout (
+                    profile_id INTEGER NOT NULL,
+                    section_id TEXT NOT NULL,
+                    zone TEXT NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (profile_id, section_id)
+                )
+            """)
+
             # Persistent failed-download blocklist: files that burned every
             # quarantine retry and hit a terminal import give-up. Fingerprint
             # = SHA1(service | normalized artist | normalized title | size);
@@ -21686,6 +21701,55 @@ class MusicDatabase:
         except Exception as e:
             logger.debug("Error clearing expired failed download blocklist: %s", e)
             return 0
+        finally:
+            if conn:
+                conn.close()
+
+    # ---- discover page layout ------------------------------------------------
+    # core/discovery/layout.py owns section ids, zones and validation; these
+    # methods are the per-profile persistence behind GET/PUT /api/discover/layout.
+
+    def get_discovery_layout(self, profile_id) -> list:
+        """Saved layout rows for a profile. Empty when never customized —
+        the API merges over the defaults then."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            rows = conn.execute(
+                "SELECT section_id, zone, position, enabled FROM discovery_layout "
+                "WHERE profile_id = ? ORDER BY position, section_id",
+                (int(profile_id),)).fetchall()
+            return [{'section_id': r[0], 'zone': r[1], 'position': r[2],
+                     'enabled': bool(r[3])} for r in rows]
+        except Exception as e:
+            logger.debug("Error reading discovery layout for %s: %s", profile_id, e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def save_discovery_layout(self, profile_id, entries) -> bool:
+        """Replace the profile's layout. ``entries`` are sanitized
+        ``{'id', 'zone', 'position', 'enabled'}`` dicts."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_layout WHERE profile_id = ?",
+                           (int(profile_id),))
+            for entry in entries or []:
+                cursor.execute(
+                    "INSERT INTO discovery_layout "
+                    "(profile_id, section_id, zone, position, enabled) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (int(profile_id), str(entry.get('id') or ''),
+                     str(entry.get('zone') or ''), int(entry.get('position') or 0),
+                     1 if entry.get('enabled') else 0))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("Error saving discovery layout for %s: %s", profile_id, e)
+            return False
         finally:
             if conn:
                 conn.close()
