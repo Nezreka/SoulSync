@@ -1792,8 +1792,11 @@ def test_docs_mention_youtube_reencode_default():
     root = Path(__file__).resolve().parents[2]
     index = (root / 'webui' / 'index.html').read_text(encoding='utf-8')
     helper = (root / 'webui' / 'static' / 'helper.js').read_text(encoding='utf-8')
-    docs = (root / 'webui' / 'static' / 'docs.js').read_text(encoding='utf-8')
-    youtube_docs = _slice_between(docs, 'YouTube Configuration', 'UI Appearance')
+    docs = ' '.join(
+        f.read_text(encoding='utf-8')
+        for f in sorted((root / 'webui' / 'static' / 'docs-content').glob('*.js'))
+    )
+    youtube_docs = _slice_between(docs, 'YouTube settings', 'Downloading Music')
     youtube_help = _slice_between(helper, "'#youtube-settings-container'", "'#quality-profile-section'")
     transcode_help = _slice_between(index, 'id="youtube-transcode"', 'id="youtube-transcode-options"')
     assert 'Re-encode YouTube audio' in youtube_docs
@@ -1849,11 +1852,14 @@ def test_user_facing_youtube_quality_copy_is_not_internal():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     helper = (root / 'webui' / 'static' / 'helper.js').read_text(encoding='utf-8')
-    docs = (root / 'webui' / 'static' / 'docs.js').read_text(encoding='utf-8')
+    docs = ' '.join(
+        f.read_text(encoding='utf-8')
+        for f in sorted((root / 'webui' / 'static' / 'docs-content').glob('*.js'))
+    )
     index = (root / 'webui' / 'index.html').read_text(encoding='utf-8')
 
     youtube_help = _slice_between(helper, "'#youtube-settings-container'", "'#quality-profile-section'")
-    other_docs = _slice_between(docs, 'YouTube Configuration', 'UI Appearance')
+    other_docs = _slice_between(docs, 'YouTube settings', 'Downloading Music')
     transcode_help = _slice_between(index, 'id="youtube-transcode"', 'id="youtube-transcode-options"')
 
     forbidden = ('itag', 'yt-dlp', 'bestaudio', 'extract_flat', 'ladder', 'probe', 'stamp')

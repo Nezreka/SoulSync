@@ -329,7 +329,7 @@
     color: #fbbf24 !important;
 }
 
-.genre-tag {
+.discover-hero .genre-tag {
     background: rgba(255, 255, 255, 0.08) !important;
     border: 1px solid rgba(255, 255, 255, 0.1) !important;
     border-radius: 9999px !important;
@@ -1655,5 +1655,475 @@
         align-items: center !important;
         min-height: auto !important;
         padding: 14px 16px !important;
+    }
+}
+
+/* ── Discovery feedback ⋯ (more / less like this, not now, block) ──────────
+   The same chip as the watchlist eye, in the opposite corner: hidden until the
+   card is hovered or focused, always shown where there is no hover. */
+.discover-feedback-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: opacity 180ms ease, background 180ms ease, color 180ms ease;
+}
+
+.discover-feedback-trigger:hover:not(:disabled),
+.discover-feedback-trigger[aria-expanded="true"] {
+    background: rgba(var(--accent-rgb), 0.85);
+    color: #fff;
+}
+
+.discover-feedback-trigger:focus-visible {
+    outline: 2px solid rgb(var(--accent-rgb));
+    outline-offset: 2px;
+}
+
+.discover-feedback-trigger:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.ya-card-feedback-btn,
+.recommended-card-feedback-btn,
+.discover-station-feedback-btn {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 4;
+    opacity: 0;
+}
+
+.ya-card:hover .ya-card-feedback-btn,
+.ya-card:focus-within .ya-card-feedback-btn,
+.recommended-artist-card:hover .recommended-card-feedback-btn,
+.recommended-artist-card:focus-within .recommended-card-feedback-btn,
+.discover-station-card:hover .discover-station-feedback-btn,
+.discover-station-card:focus-within .discover-station-feedback-btn,
+.discover-feedback-trigger[aria-expanded="true"] {
+    opacity: 1;
+}
+
+.bylt-track-feedback-btn {
+    width: 30px;
+    height: 30px;
+    background: transparent;
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.discover-feedback-menu {
+    min-width: 190px;
+}
+
+@media (hover: none) {
+    .ya-card-feedback-btn,
+    .recommended-card-feedback-btn,
+    .discover-station-feedback-btn {
+        opacity: 1;
+    }
+}
+
+/* reset taste, beside Close in the blocked artists modal: left, quiet until armed */
+.discover-reset-taste-btn {
+    margin-right: auto;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.discover-reset-taste-btn.armed {
+    border-color: rgba(255, 107, 107, 0.6);
+    color: #ff9a9a;
+}
+
+/* the hero's ⋯ sits in its action row, sized to the pills beside it */
+.discover-hero-feedback-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    font-size: 20px;
+    align-self: center;
+}
+
+/* ── Discovery inbox (releases, what's coming, saved, concerts) ──────────── */
+.discover-inbox {
+    margin: 0 0 36px;
+    padding: 16px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.discover-inbox-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.discover-inbox-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
+.discover-inbox-count {
+    min-width: 20px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgb(var(--accent-rgb));
+    color: #000;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+.discover-inbox-tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.discover-inbox-tab {
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.discover-inbox-tab.active {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: #fff;
+}
+
+.discover-inbox-clear {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.discover-inbox-clear:hover {
+    color: #fff;
+}
+
+.discover-inbox-note,
+.discover-inbox-empty {
+    margin: 10px 0 0;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.discover-inbox-list {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 8px;
+}
+
+.discover-inbox-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    min-width: 0;
+}
+
+.discover-inbox-art {
+    flex: 0 0 48px;
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.06);
+    font-size: 22px;
+}
+
+.discover-inbox-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.discover-inbox-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 0;
+}
+
+.discover-inbox-kind {
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgb(var(--accent-rgb));
+}
+
+.discover-inbox-name,
+.discover-inbox-sub {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.discover-inbox-name {
+    font-weight: 600;
+}
+
+.discover-inbox-sub {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.discover-inbox-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.discover-inbox-actions a.btn {
+    display: inline-flex;
+    align-items: center;
+    align-self: stretch;
+    text-decoration: none;
+}
+
+.discover-inbox-dismiss {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+}
+
+.discover-inbox-dismiss:hover {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.discover-inbox-more {
+    margin-top: 10px;
+    background: none;
+    border: none;
+    color: rgb(var(--accent-rgb));
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+@media (max-width: 600px) {
+    .discover-inbox {
+        padding: 12px;
+    }
+
+    .discover-inbox-list {
+        grid-template-columns: 1fr;
+    }
+
+    /* art | text on the first row, the actions under the text */
+    .discover-inbox-item {
+        display: grid;
+        grid-template-columns: 48px minmax(0, 1fr);
+        column-gap: 12px;
+        row-gap: 8px;
+    }
+
+    .discover-inbox-actions {
+        grid-column: 2;
+    }
+}
+
+/* ── Renewable mixes: the Build a mix button and the recipe editor ───────── */
+.discover-build-mix-btn {
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(var(--accent-rgb), 0.5);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.discover-build-mix-btn:hover {
+    background: rgba(var(--accent-rgb), 0.25);
+}
+
+.recipe-modal {
+    position: relative;
+    width: min(560px, calc(100vw - 32px));
+    max-height: calc(100vh - 48px);
+    display: flex;
+    flex-direction: column;
+    border-radius: 16px;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+.recipe-modal-header {
+    padding: 20px 56px 8px 24px;
+}
+
+.recipe-modal-header h2 {
+    margin: 0 0 4px;
+    font-size: 1.25rem;
+}
+
+.recipe-modal-header p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.recipe-modal-header .watch-all-close {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+}
+
+.recipe-modal-body {
+    padding: 12px 24px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.recipe-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.recipe-field input,
+.recipe-field select {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    font-size: 0.9rem;
+}
+
+.recipe-row {
+    display: flex;
+    gap: 12px;
+}
+
+.recipe-shares {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.recipe-shares legend {
+    padding: 0 6px;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.recipe-share {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 0.85rem;
+}
+
+.recipe-share input[type="range"] {
+    width: 100%;
+    accent-color: rgb(var(--accent-rgb));
+}
+
+.recipe-share-label {
+    display: flex;
+    justify-content: space-between;
+}
+
+.recipe-share-value {
+    color: rgb(var(--accent-rgb));
+    font-variant-numeric: tabular-nums;
+}
+
+.recipe-hint {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.recipe-error {
+    margin: 0;
+    color: #ff9a9a;
+    font-size: 0.85rem;
+}
+
+.recipe-modal-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 12px 24px 20px;
+}
+
+.recipe-delete {
+    margin-right: auto;
+    background: transparent;
+    border: 1px solid rgba(255, 107, 107, 0.4);
+    color: #ff9a9a;
+}
+
+.recipe-delete.armed {
+    background: rgba(255, 107, 107, 0.15);
+}
+
+@media (max-width: 600px) {
+    .recipe-modal-header {
+        padding-left: 16px;
+    }
+
+    .recipe-modal-body,
+    .recipe-modal-footer {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .recipe-row {
+        flex-direction: column;
     }
 }

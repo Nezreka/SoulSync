@@ -312,6 +312,23 @@ def _requeue_quarantined_task_for_retry(task_id, batch_id, trigger) -> bool:
         return False
 
 
+def _record_failed_download_blocklist(task_id, reason):
+    """Terminal import give-up: the file burned every quarantine retry, so its
+    fingerprint joins the failed-download blocklist (90 days) and future
+    searches skip it. Fail-open — the blocklist never sinks the import."""
+    if not task_id:
+        return
+    try:
+        with tasks_lock:
+            task = dict(download_tasks.get(task_id) or {})
+        from core.downloads.failed_blocklist import record_task_giveup
+        if record_task_giveup(get_database(), task, reason=reason):
+            logger.info(f"[FailedBlocklist] Task {task_id} blocked after terminal "
+                        f"import give-up: {reason}")
+    except Exception as exc:  # noqa: BLE001 - defensive
+        logger.debug(f"[FailedBlocklist] give-up record failed: {exc}")
+
+
 def import_rejection_reason(context: dict) -> str | None:
     """Human-readable reason if post-processing terminally rejected the file
     (quarantine or race-guard), else ``None`` for a clean import.
@@ -719,6 +736,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     file_path,
                     _expected_duration_ms,
                     length_tolerance_s=_duration_tolerance_override,
+                    verify_flac_decode=bool(
+                        config_manager.get('post_processing.verify_flac_decode', False)),
                 )
             except Exception as integrity_error:
                 logger.error(f"[Integrity] Check raised unexpectedly (continuing): {integrity_error}")
@@ -831,6 +850,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     if task_id in download_tasks:
                         download_tasks[task_id]['status'] = 'failed'
                         download_tasks[task_id]['error_message'] = f"Audio guard: {audio_reason}"
+                _record_failed_download_blocklist(task_id, f"audio guard: {audio_reason}")
             if task_id and batch_id:
                 _notify_download_completed(batch_id, task_id, success=False)
             return
@@ -1720,6 +1740,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                 f"Task {task_id} quarantined by the {trigger} guard with no "
                 f"retry candidate — marking failed: {reason}"
             )
+            _record_failed_download_blocklist(task_id, reason)
             if task_id:
                 with tasks_lock:
                     if task_id in download_tasks:
@@ -1786,6 +1807,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             if _attempt_version_mismatch_fallback(context, task_id, batch_id, runtime, metadata_runtime):
                 return
             logger.info(f"File was quarantined by AcoustID verification (task={task_id}): {failure_msg}")
+            _record_failed_download_blocklist(task_id, f"AcoustID verification failed: {failure_msg}")
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'failed'

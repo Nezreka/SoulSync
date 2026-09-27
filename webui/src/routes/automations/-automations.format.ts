@@ -297,6 +297,7 @@ const ACTION_LABELS: Record<string, string> = {
   cleanup_wishlist: 'Clean Up Wishlist',
   update_discovery_pool: 'Update Discovery',
   start_quality_scan: 'Run Quality Scan',
+  run_repair_job: 'Run Maintenance Job',
   backup_database: 'Backup Database',
   refresh_beatport_cache: 'Refresh Beatport Cache',
   clean_search_history: 'Clean Search History',

@@ -243,6 +243,13 @@ def scan(root: Optional[str] = None, db: Any = None, progress=None,
                 summary.update(counts, current=title)
                 report()
             summary.update(match_library(database,client=client,limit=match_limit,progress=matching_progress))
+            # matching is what gives a disk book its catalogue ASIN, so the
+            # books it just identified can only be reconciled now
+            try:
+                summary["wishlist_done"] = (summary.get("wishlist_done", 0)
+                                            + database.mark_owned_wishlist_done())
+            except Exception as exc:
+                logger.debug("Could not reconcile the wishlist after matching: %s", exc)
         summary["status"] = "error" if summary["errors"] else "completed"
         return summary
     except Exception as exc:

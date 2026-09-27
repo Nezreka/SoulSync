@@ -23,7 +23,7 @@ def _enable_login(monkeypatch):
     real_get = web_server.config_manager.get
     monkeypatch.setattr(web_server.config_manager, 'get',
                         lambda k, d=None: True if k == 'security.require_login' else real_get(k, d))
-    web_server._login_limiter.record_success('127.0.0.1')  # clean slate
+    web_server._login_limiter.reset()  # clean slate
 
 
 _GATED = '/api/profiles/me/connections'   # a normal, non-allowlisted endpoint

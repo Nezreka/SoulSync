@@ -202,10 +202,10 @@ def _tag_enabled(cfg, path: str) -> bool:
 def _names_match(a: str, b: str, threshold: float = 0.75) -> bool:
     if not a or not b:
         return False
-    from difflib import SequenceMatcher
-
-    norm = lambda s: re.sub(r"[^a-z0-9 ]", "", re.sub(r"\(.*?\)", "", s).lower()).strip()
-    return SequenceMatcher(None, norm(a), norm(b)).ratio() >= threshold
+    # any script, and two names that fold to nothing never match (#1306:
+    # two japanese titles both emptied to "" and read as a 1.0 match)
+    from core.text.fold import title_similarity
+    return title_similarity(a, b) >= threshold
 
 
 def _normalize_release_date_tag(value: Any) -> str:
@@ -924,12 +924,14 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
                     break
             if merged:
                 genre_string = ", ".join(merged)
+                from core.metadata.multi_value import genre_values
+                genres_out = genre_values(merged, bool(cfg.get("metadata_enhancement.tags.write_multi_artist", False)))
                 if isinstance(audio_file.tags, symbols.ID3):
-                    audio_file.tags.add(symbols.TCON(encoding=3, text=[genre_string]))
+                    audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
                 elif is_vorbis_like(audio_file, symbols):
-                    audio_file["GENRE"] = [genre_string]
+                    audio_file["GENRE"] = genres_out
                 elif isinstance(audio_file, symbols.MP4):
-                    audio_file["\xa9gen"] = [genre_string]
+                    audio_file["\xa9gen"] = genres_out
                 logger.info("Genres merged: %s", genre_string)
 
     isrc_candidates = []
@@ -973,12 +975,15 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         label_candidates.append(("Bandcamp", pp["bandcamp_label"]))
     if label_candidates and "LABEL" not in filtered_tags:
         label_source, final_label = label_candidates[0]
+        # "a;b;c" from a provider is three labels, written as three values (#1305)
+        from core.metadata.multi_value import split_values
+        label_values = split_values(final_label) or [final_label]
         if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TPUB(encoding=3, text=[final_label]))
+            audio_file.tags.add(symbols.TPUB(encoding=3, text=label_values))
         elif is_vorbis_like(audio_file, symbols):
-            audio_file["LABEL"] = [final_label]
+            audio_file["LABEL"] = label_values
         elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(final_label.encode("utf-8"))]
+            audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(v.encode("utf-8")) for v in label_values]
         logger.info("Label (%s): %s", label_source, final_label)
 
     if _tag_enabled(cfg, "lastfm.tags.url") and pp["lastfm_url"]:
@@ -1040,6 +1045,18 @@ def _update_album_year_in_database(db, metadata: dict, release_year) -> None:
                 conn.close()
     except Exception as exc:
         logger.error("Could not update album year in DB: %s", exc)
+
+
+def _album_artist_names(artists) -> list:
+    """names off an album context's artist list, [] unless there are two or
+    more real ones."""
+    names = []
+    for a in artists or []:
+        name = a.get("name", "") if isinstance(a, dict) else (a if isinstance(a, str) else "")
+        name = (name or "").strip()
+        if name and name != "Unknown Artist" and name not in names:
+            names.append(name)
+    return names if len(names) > 1 else []
 
 
 def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> dict:
@@ -1173,13 +1190,11 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     explicit_artist = track_info_ctx.get("_explicit_artist_context") if isinstance(track_info_ctx, dict) else None
     album_artists_for_collab = None
 
-    if isinstance(explicit_artist, dict) and explicit_artist.get("name"):
-        raw_album_artist = explicit_artist["name"]
-        album_artists_for_collab = [explicit_artist]
-    elif isinstance(explicit_artist, str) and explicit_artist:
-        raw_album_artist = explicit_artist
-        album_artists_for_collab = [{"name": explicit_artist}]
-    elif album_ctx and isinstance(album_ctx, dict):
+    # The track's own album context is ground truth — resolve it first so a
+    # batch-level hint below is sanity-checked instead of blindly trusted.
+    own_album_artist = ""
+    own_album_artists = None
+    if album_ctx and isinstance(album_ctx, dict):
         album_artists = album_ctx.get("artists", [])
         if album_artists:
             first_album_artist = album_artists[0]
@@ -1194,8 +1209,38 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
             # (bug #735: album-artist tag overwritten to "Unknown Artist" on
             # import). Only override when the album context names a real artist.
             if candidate and candidate != "Unknown Artist":
-                raw_album_artist = candidate
-                album_artists_for_collab = album_artists
+                own_album_artist = candidate
+                own_album_artists = album_artists
+
+    explicit_name = ""
+    if isinstance(explicit_artist, dict) and explicit_artist.get("name"):
+        explicit_name = str(explicit_artist["name"])
+    elif isinstance(explicit_artist, str) and explicit_artist:
+        explicit_name = explicit_artist
+
+    if explicit_name:
+        # #1316: a batch-level artist hint must never silently override the
+        # track's own album artist when they name different real artists (a
+        # poisoned wishlist batch stamped an unrelated artist on 899 tracks'
+        # album_artist tags). On disagreement trust the track data, loudly.
+        if (own_album_artist
+                and own_album_artist.strip().casefold() != explicit_name.strip().casefold()):
+            logger.warning(
+                "Metadata: explicit artist context '%s' disagrees with the track's "
+                "own album artist '%s' — trusting the track data (#1316)",
+                explicit_name, own_album_artist,
+            )
+            raw_album_artist = own_album_artist
+            album_artists_for_collab = own_album_artists
+        else:
+            raw_album_artist = explicit_name
+            album_artists_for_collab = (
+                [explicit_artist] if isinstance(explicit_artist, dict)
+                else [{"name": explicit_artist}]
+            )
+    elif own_album_artist:
+        raw_album_artist = own_album_artist
+        album_artists_for_collab = own_album_artists
 
     collab_mode = cfg.get("file_organization.collab_artist_mode", "first")
     if collab_mode == "first" and raw_album_artist:
@@ -1215,6 +1260,10 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                 except Exception as e:
                     logger.debug("itunes primary artist resolve failed: %s", e)
     metadata["album_artist"] = raw_album_artist
+    # every album artist, for the multi-value ALBUMARTISTS tag. only from an
+    # album context that names more than one. track artists aren't album
+    # artists, a feature doesn't make it a collab album
+    metadata["_album_artists_list"] = _album_artist_names(album_artists_for_collab)
 
     if album_info.get("is_album"):
         metadata["album"] = album_info.get("album_name", "Unknown Album")

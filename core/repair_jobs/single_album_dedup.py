@@ -2,7 +2,7 @@
 
 import re
 from collections import defaultdict
-from difflib import SequenceMatcher
+from core.text.fold import folded_similarity as _folded_similarity
 
 from core.repair_jobs import register_job
 from core.repair_jobs.base import (
@@ -187,12 +187,13 @@ class SingleAlbumDedupJob(RepairJob):
                     continue
 
                 # Compare titles
-                title_sim = SequenceMatcher(None, single['norm_title'], album_t['norm_title']).ratio()
+                # two titles that fold to nothing are not the same song (#1306)
+                title_sim = _folded_similarity(single['norm_title'], album_t['norm_title'])
                 if title_sim < title_threshold:
                     continue
 
                 # Compare artists
-                artist_sim = SequenceMatcher(None, single['norm_artist'], album_t['norm_artist']).ratio()
+                artist_sim = _folded_similarity(single['norm_artist'], album_t['norm_artist'])
                 if artist_sim < artist_threshold:
                     continue
 
@@ -292,9 +293,6 @@ def _extract_version_tag(text: str) -> str:
 
 
 def _normalize(text: str) -> str:
-    """Normalize text for fuzzy comparison."""
-    t = text.lower()
-    t = re.sub(r'\(.*?\)', '', t)
-    t = re.sub(r'\[.*?\]', '', t)
-    t = re.sub(r'[^a-z0-9 ]', '', t)
-    return t.strip()
+    """Normalize text for fuzzy comparison: any script (#1306)."""
+    from core.text.fold import fold_title
+    return fold_title(text or '')

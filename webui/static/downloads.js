@@ -662,7 +662,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                         Begin Analysis
                     </button>
                     <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
-                        Add to Wishlist
+                        ${typeof wishlistAddLabel === 'function' ? wishlistAddLabel() : 'Add to Wishlist'}
                     </button>
                     <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
                         Cancel All
@@ -5530,7 +5530,9 @@ function _patchOverlayActive() {
     if (host) host.innerHTML = _musicActiveHTML() + _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML();
 }
 
-function showToast(message, type = 'success', helpSection = null) {
+// opts.journal === false skips the server journal: for notes the server
+// already logged itself (profile:notify)
+function showToast(message, type = 'success', helpSection = null, opts = null) {
     const toastKey = `${type}:${message}`;
     const now = Date.now();
 
@@ -5545,7 +5547,7 @@ function showToast(message, type = 'success', helpSection = null) {
     if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
     _notifState.unreadCount++;
     _updateNotifBadge();
-    _queueNotifJournal(type, message);
+    if (!opts || opts.journal !== false) _queueNotifJournal(type, message);
 
     // Show compact toast — dismiss current if showing
     const container = document.getElementById('toast-container');

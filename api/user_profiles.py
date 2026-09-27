@@ -17,6 +17,7 @@ from flask import Blueprint, jsonify, request, session
 
 from core.metadata import registry as metadata_registry
 from core.metadata.status import invalidate_metadata_status_caches
+from core.permissions import may_manage_profile, profile_view_for
 from core.profile_context import admin_only, is_admin_request
 
 from utils.logging_config import get_logger
@@ -69,6 +70,48 @@ def configure(*, get_database, config_manager, get_current_profile_id, VALID_PAG
 
 def create_blueprint():
     return bp
+
+
+def _end_device():
+    """a sign-out takes this browser off the profile's device list."""
+    device_id, owner = session.get('device_id'), session.get('profile_id')
+    if device_id and owner:
+        try:
+            get_database().revoke_profile_device(owner, device_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("device revoke on logout failed", exc_info=True)
+
+
+def _audit(action, target_id=None, target_name=None, detail=None):
+    from api.profile_admin import audit
+    audit(action, target_id, target_name, detail)
+
+
+_RATINGS = ('G', 'PG', 'PG-13', 'R')
+
+
+def _admin_controls(data):
+    """the admin-only access knobs on a profile, cleaned: request quota and
+    the kids limits. returns (kwargs, error)."""
+    out = {}
+    if 'request_limit' in data:
+        try:
+            out['request_limit'] = max(0, min(1000, int(data['request_limit'] or 0)))
+        except (TypeError, ValueError):
+            return None, 'request_limit must be a number'
+    if 'request_limit_days' in data:
+        try:
+            out['request_limit_days'] = max(1, min(365, int(data['request_limit_days'] or 7)))
+        except (TypeError, ValueError):
+            return None, 'request_limit_days must be a number'
+    if 'hide_explicit' in data:
+        out['hide_explicit'] = 1 if data['hide_explicit'] else 0
+    if 'max_rating' in data:
+        rating = data['max_rating'] or None
+        if rating is not None and rating not in _RATINGS:
+            return None, 'max_rating must be one of ' + ', '.join(_RATINGS)
+        out['max_rating'] = rating
+    return out, None
 
 
 # --- Per-Profile ListenBrainz Settings ---
@@ -356,8 +399,23 @@ def _qs_metadata_sources():
     sources += [name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)]
     return sources
 _QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
-# Single download sources (everything the mode accepts except 'hybrid').
-_QS_DOWNLOAD_SOURCES = ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'torrent', 'usenet']
+
+
+def _qs_download_chain(mode, hybrid_order):
+    """The music download chain as settings saved it, each source with whether
+    it's set up (None when that can't be told). one source is single-source
+    mode, two or more is hybrid, same as the settings chain editor."""
+    if mode == 'hybrid':
+        order = [hybrid_order] if isinstance(hybrid_order, str) else (hybrid_order or [])
+        ids = [s for s in order if isinstance(s, str) and s]
+    else:
+        ids = [mode] if mode else []
+    try:
+        orchestrator = _download_orchestrator()
+        status = orchestrator.get_source_status() if orchestrator else {}
+    except Exception:
+        status = {}
+    return [{'id': s, 'ready': status.get(s)} for s in ids]
 
 
 def _qs_metadata_available(source):
@@ -389,7 +447,10 @@ def list_profiles():
     """List all profiles"""
     try:
         database = get_database()
-        profiles = database.get_all_profiles()
+        viewer_id = get_current_profile_id()
+        viewer_is_admin = is_admin_request()
+        profiles = [profile_view_for(p, viewer_id=viewer_id, viewer_is_admin=viewer_is_admin)
+                    for p in database.get_all_profiles()]
         return jsonify({'success': True, 'profiles': profiles,
                         # where an own-library folder goes on this install (#1199):
                         # a mount under /app in docker, anywhere otherwise
@@ -404,14 +465,17 @@ def create_profile():
     try:
         # Check that requester is admin
         database = get_database()
-        current = database.get_profile(get_current_profile_id())
-        if current and not current['is_admin']:
+        # fails closed: a session holding a deleted profile read as None here
+        # and the old `current and not admin` check waved it through
+        if not is_admin_request():
             return jsonify({'success': False, 'error': 'Admin only'}), 403
 
         data = request.json or {}
         name = data.get('name', '').strip()
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
+        if database.get_profile_by_name(name):
+            return jsonify({'success': False, 'error': 'Profile name already exists'}), 409
 
         avatar_color = data.get('avatar_color', '#6366f1')
         avatar_url = data.get('avatar_url') or None
@@ -429,6 +493,10 @@ def create_profile():
             return jsonify({'success': False,
                             'error': 'Login mode is on — give this profile a login '
                                      'password so they can sign in.'}), 400
+
+        _controls, control_error = _admin_controls(data)
+        if control_error:
+            return jsonify({'success': False, 'error': control_error}), 400
 
         # Profile settings: home_page, allowed_pages, can_download, allowed_sides
         home_page = data.get('home_page') or None
@@ -462,6 +530,10 @@ def create_profile():
 
         if password:
             database.set_profile_password(profile_id, password)
+        controls, _err = _admin_controls(data)
+        if controls:
+            database.update_profile(profile_id, **controls)
+        _audit('profile_created', profile_id, name)
 
         return jsonify({'success': True, 'profile_id': profile_id})
     except Exception as e:
@@ -477,22 +549,31 @@ def update_profile(profile_id):
         if not current:
             return jsonify({'success': False, 'error': 'Current profile not found'}), 404
 
-        # Only admin or self can update
-        if not current['is_admin'] and current_pid != profile_id:
+        # Only admin or self can update; profile 1 only by itself
+        if not may_manage_profile(current_pid, current['is_admin'], profile_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
 
         data = request.json or {}
         kwargs = {}
         if 'name' in data:
-            name = data['name'].strip()
+            name = str(data['name'] or '').strip()
             if not name:
                 return jsonify({'success': False, 'error': 'Name cannot be empty'}), 400
+            # names are login usernames, matched case-insensitively: "bob"
+            # next to "Bob" made sign-in pick whichever row came first
+            clash = database.get_profile_by_name(name)
+            if clash and int(clash['id']) != int(profile_id):
+                return jsonify({'success': False, 'error': 'Profile name already exists'}), 409
             kwargs['name'] = name
         if 'avatar_color' in data:
             kwargs['avatar_color'] = data['avatar_color']
         if 'avatar_url' in data:
             kwargs['avatar_url'] = data['avatar_url'] or None
         if 'is_admin' in data and current['is_admin']:
+            # profile 1 is always the admin everywhere (pid == 1 checks), so
+            # its flag can't be turned off; it would only make the row lie
+            if int(profile_id) == 1 and not data['is_admin']:
+                return jsonify({'success': False, 'error': 'The main admin profile stays an admin'}), 400
             # Prevent demoting the last admin
             if not data['is_admin']:
                 all_profiles = database.get_all_profiles()
@@ -539,6 +620,16 @@ def update_profile(profile_id):
                 # resolves admins to 'both'.
                 sides = data['allowed_sides']
                 kwargs['allowed_sides'] = sides if sides in ('music', 'video', 'both') else None
+            controls, control_error = _admin_controls(data)
+            if control_error:
+                return jsonify({'success': False, 'error': control_error}), 400
+            kwargs.update(controls)
+            if 'disabled' in data:
+                # turn a profile off without deleting it. never the owner or
+                # yourself: that would lock the install or you out
+                if int(profile_id) == 1 or int(profile_id) == int(current_pid):
+                    return jsonify({'success': False, 'error': "You can't turn this profile off"}), 400
+                kwargs['disabled'] = 1 if data['disabled'] else 0
 
         # own library (#1199): admin only, never on the admin profile itself
         library_result = None
@@ -577,6 +668,23 @@ def update_profile(profile_id):
         success = database.update_profile(profile_id, **kwargs) if kwargs else True
         if library_result is False:
             return jsonify({'success': False, 'error': 'Failed to save the library setting'}), 500
+        if success and kwargs.get('disabled'):
+            # turning it off signs it out everywhere now, not at its next pick
+            database.bump_profile_session_epoch(profile_id)
+            from core.security.session_epoch import forget
+            forget(profile_id)
+        if success and 'disabled' in kwargs:
+            _audit('profile_disabled' if kwargs['disabled'] else 'profile_enabled', profile_id,
+                   (database.get_profile(profile_id) or {}).get('name'))
+            kwargs.pop('disabled')
+        if success and (kwargs or library_result is not None):
+            changed = sorted(set(kwargs) | ({'library'} if library_result is not None else set()))
+            if 'is_admin' in kwargs:
+                _audit('admin_granted' if kwargs['is_admin'] else 'admin_revoked', profile_id,
+                       (database.get_profile(profile_id) or {}).get('name'))
+            if int(profile_id) != int(current_pid) or set(changed) - {'name', 'avatar_color', 'avatar_url', 'home_page'}:
+                _audit('profile_updated', profile_id, (database.get_profile(profile_id) or {}).get('name'),
+                       ', '.join(changed))
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -602,6 +710,7 @@ def delete_profile(profile_id):
         if success:
             from api.profiles import _sweep_video_profile_data
             _sweep_video_profile_data(profile_id)
+            _audit('profile_deleted', profile_id, target.get('name'))
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -625,11 +734,14 @@ def select_profile():
         profile = database.get_profile(profile_id)
         if not profile:
             return jsonify({'success': False, 'error': 'Profile not found'}), 404
+        if profile.get('disabled') and not profile.get('is_admin'):
+            return jsonify({'success': False, 'error': 'This profile is turned off', 'disabled': True}), 403
 
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        pin_checked = False
         if _require_login_enabled() and session.get('profile_id') != profile_id:
-            _ip = request.remote_addr or 'unknown'
-            _now = time.time()
-            _locked, _retry_after = _login_limiter.is_locked(_ip, _now)
+            _locked, _retry_after = _login_limiter.is_locked(_ip, profile['name'], _now)
             if _locked:
                 return (jsonify({'success': False, 'error': 'Too many attempts - please wait and try again'}),
                         429, {'Retry-After': str(_retry_after)})
@@ -637,23 +749,43 @@ def select_profile():
                 return jsonify({'success': False, 'error': 'Password required',
                                 'password_required': True}), 401
             if not database.verify_profile_password(profile_id, password):
-                _login_limiter.record_failure(_ip, _now)
+                _login_limiter.record_failure(_ip, profile['name'], _now)
                 return jsonify({'success': False, 'error': 'Invalid password'}), 401
-            _login_limiter.record_success(_ip)
+            _login_limiter.record_success(_ip, profile['name'])
         else:
-            # Only enforce PIN when multiple profiles exist (PIN protects against profile switching)
+            # the pin guards switching, so it's only asked for when there is
+            # someone to switch between. a pin that IS sent always gets
+            # checked though: a right admin pin also opens the launch lock.
             all_profiles = database.get_all_profiles()
-            if len(all_profiles) > 1 and profile['has_pin']:
-                if not pin:
-                    return jsonify({'success': False, 'error': 'PIN required', 'pin_required': True}), 401
+            must_check = len(all_profiles) > 1 and profile['has_pin']
+            if must_check and not pin:
+                return jsonify({'success': False, 'error': 'PIN required', 'pin_required': True}), 401
+            if pin and profile['has_pin']:
+                _pin_key = f"pin:{profile_id}"
+                _locked, _retry_after = _launch_pin_limiter.is_locked(_ip, _pin_key, _now)
+                if _locked:
+                    return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                            429, {'Retry-After': str(_retry_after)})
                 if not database.verify_profile_pin(profile_id, pin):
+                    _launch_pin_limiter.record_failure(_ip, _pin_key, _now)
                     return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
+                _launch_pin_limiter.record_success(_ip, _pin_key)
+                pin_checked = True
 
         session['profile_id'] = profile_id
+        # the epoch this sign-in counts under ("sign out everywhere" moves it)
+        session['profile_epoch'] = profile.get('session_epoch', 0)
+        if session.get('device_owner') != profile_id or not session.get('device_id'):
+            from core.security.devices import start_device
+            start_device(session, database.add_profile_device, profile_id, request.headers.get('User-Agent', ''),
+                         request.remote_addr or '')
+            session['device_owner'] = profile_id
         # If the admin PIN was just validated, also mark launch PIN as
-        # verified so the subsequent page reload doesn't ask again. A
+        # verified so the subsequent page reload doesn't ask again. only a pin
+        # that was actually checked counts: this used to fire for ANY pin on a
+        # single-profile install, where the check above is skipped. A
         # non-admin profile PIN must not unlock the admin launch lock.
-        if pin and profile_id == 1:
+        if pin_checked and profile_id == 1:
             session['launch_pin_verified'] = True
         return jsonify({'success': True, 'profile': profile})
     except Exception as e:
@@ -705,7 +837,7 @@ def verify_launch_pin():
         # correct entry clears it instantly, so normal use is never affected.
         _ip = request.remote_addr or 'unknown'
         _now = time.time()
-        _locked, _retry_after = _launch_pin_limiter.is_locked(_ip, _now)
+        _locked, _retry_after = _launch_pin_limiter.is_locked(_ip, "pin:1", _now)
         if _locked:
             return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
                     429, {'Retry-After': str(_retry_after)})
@@ -718,10 +850,10 @@ def verify_launch_pin():
         database = get_database()
         # Validate against admin profile (ID 1)
         if not database.verify_profile_pin(1, pin):
-            _launch_pin_limiter.record_failure(_ip, _now)
+            _launch_pin_limiter.record_failure(_ip, "pin:1", _now)
             return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
 
-        _launch_pin_limiter.record_success(_ip)
+        _launch_pin_limiter.record_success(_ip, "pin:1")
         session['launch_pin_verified'] = True
         return jsonify({'success': True})
     except Exception as e:
@@ -735,7 +867,7 @@ def set_profile_recovery_endpoint(profile_id):
         database = get_database()
         current_pid = get_current_profile_id()
         current = database.get_profile(current_pid)
-        if not current or (not current['is_admin'] and current_pid != profile_id):
+        if not current or not may_manage_profile(current_pid, current['is_admin'], profile_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
         data = request.json or {}
         ok = database.set_profile_recovery(profile_id, data.get('question', ''), data.get('answer', ''))
@@ -748,6 +880,15 @@ def set_profile_recovery_endpoint(profile_id):
 def reset_pin_via_credential():
     """Reset admin PIN by verifying a known API credential"""
     try:
+        # this clears a pin and can open the launch lock, so it gets the same
+        # brute-force budget as typing the pin itself
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        _locked, _retry_after = _launch_pin_limiter.is_locked(_ip, "credential-reset", _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
+
         data = request.json or {}
         credential = (data.get('credential') or '').strip()
         if not credential or len(credential) < 4:
@@ -766,21 +907,28 @@ def reset_pin_via_credential():
             ('Genius Access Token',    config_manager.get('genius.access_token', '')),
         ]
 
+        import hmac
         matched = False
         for _name, stored in checks:
-            if stored and credential == stored:
+            if stored and hmac.compare_digest(credential.encode('utf-8'), str(stored).encode('utf-8')):
                 matched = True
                 break
 
         if not matched:
+            _launch_pin_limiter.record_failure(_ip, "credential-reset", _now)
             return jsonify({'success': False, 'error': 'Credential does not match any configured service'}), 401
+        _launch_pin_limiter.record_success(_ip, "credential-reset")
 
-        # Credential verified — clear PIN for the requested profile (default: admin)
+        # Credential verified — clear the pin. a member's forgotten pin is the
+        # admin's to reset from Manage Profiles; a service credential only
+        # proves you run the install, so it's only good for the admin's own.
         database = get_database()
         try:
             target_profile = int(data.get('profile_id', 1))
         except (TypeError, ValueError):
             target_profile = 1
+        if target_profile != 1:
+            return jsonify({'success': False, 'error': 'Ask an admin to reset this PIN'}), 403
         database.update_profile(target_profile, pin_hash=None)
         # If clearing admin PIN, also disable launch lock
         if target_profile == 1:
@@ -794,8 +942,15 @@ def reset_pin_via_credential():
 
 @bp.route('/api/profiles/logout', methods=['POST'])
 def logout_profile():
-    """Clear session — back to profile picker"""
+    """Clear session — back to profile picker. drops the login and launch-pin
+    flags too: popping only the profile left an authenticated session with no
+    profile, which resolved to the admin."""
+    _end_device()
     session.pop('profile_id', None)
+    session.pop('profile_epoch', None)
+    session.pop('device_id', None)
+    session.pop('login_authenticated', None)
+    session.pop('launch_pin_verified', None)
     return jsonify({'success': True})
 
 @bp.route('/api/profiles/<int:profile_id>/set-pin', methods=['POST'])
@@ -806,7 +961,7 @@ def set_profile_pin(profile_id):
         current_pid = get_current_profile_id()
         current = database.get_profile(current_pid)
 
-        if not current or (not current['is_admin'] and current_pid != profile_id):
+        if not current or not may_manage_profile(current_pid, current['is_admin'], profile_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
 
         data = request.json or {}
@@ -819,6 +974,14 @@ def set_profile_pin(profile_id):
             pin_hash = None  # Remove PIN
 
         success = database.update_profile(profile_id, pin_hash=pin_hash)
+        if success and int(profile_id) != int(current_pid):
+            _audit('pin_reset' if pin_hash else 'pin_removed', profile_id,
+                   (database.get_profile(profile_id) or {}).get('name'))
+        # the launch lock checks the admin's pin, and a profile with no pin
+        # accepts any pin. clearing it with the lock still on left a lock
+        # that anything opened, so the lock goes with it.
+        if success and pin_hash is None and int(profile_id) == 1:
+            config_manager.set('security.require_pin_on_launch', False)
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -832,7 +995,7 @@ def set_profile_password_endpoint(profile_id):
         database = get_database()
         current_pid = get_current_profile_id()
         current = database.get_profile(current_pid)
-        if not current or (not current['is_admin'] and current_pid != profile_id):
+        if not current or not may_manage_profile(current_pid, current['is_admin'], profile_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
         data = request.json or {}
         password = data.get('password', '')
@@ -844,6 +1007,16 @@ def set_profile_password_endpoint(profile_id):
                             'error': "Can't remove this password while login mode is on — "
                                      "that profile couldn't sign in."}), 400
         ok = database.set_profile_password(profile_id, password)
+        if ok:
+            # a new password signs out every other browser on that profile;
+            # the one that changed it (if it's the profile's own) stays in
+            epoch = database.bump_profile_session_epoch(profile_id)
+            from core.security.session_epoch import forget
+            forget(profile_id)
+            if int(profile_id) == int(current_pid) and epoch is not None:
+                session['profile_epoch'] = epoch
+            if int(profile_id) != int(current_pid):
+                _audit('password_set', profile_id, (database.get_profile(profile_id) or {}).get('name'))
         return jsonify({'success': bool(ok), 'has_password': database.profile_has_password(profile_id)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1000,7 +1173,7 @@ def get_my_connections():
         fm_connected, fm_account = _profile_lastfm_connection(pid)
         return jsonify({
             'success': True,
-            'is_admin': pid == 1,
+            'is_admin': is_admin_request(),
             # whose listening this profile's stats read (#1293), for the card
             # at the top of My Account
             'listening': {
@@ -1366,10 +1539,12 @@ def get_active_sources():
                 'active': config_manager.get_active_media_server(),
                 'options': [{'id': s, 'available': _qs_server_available(s)} for s in _QS_MEDIA_SERVERS],
             },
+            # read-only here (#1301): the chain is edited in settings, where one
+            # source is single mode and two or more is hybrid
             'download': {
                 'mode': mode,
                 'hybrid_order': hybrid_order,
-                'options': [{'id': s} for s in _QS_DOWNLOAD_SOURCES],
+                'chain': _qs_download_chain(mode, hybrid_order),
             },
         })
     except Exception as e:
@@ -1379,13 +1554,24 @@ def get_active_sources():
 @bp.route('/api/profiles/active-sources', methods=['POST'])
 @admin_only
 def set_active_sources():
-    """Set the GLOBAL active metadata source / media server / download mode +
-    hybrid order (whichever fields are present). Admin-only; reuses the same
-    setters + client reloads the Settings save performs so changes take effect
-    immediately."""
+    """Set the GLOBAL active metadata source. Admin-only; reuses the same setter
+    the Settings save performs so the change takes effect immediately.
+
+    the media server and the download chain used to be switchable here too, one
+    click with no questions (#1301). switching servers means a fresh library
+    scan, and the download chain has its own editor in settings that this one
+    kept drifting from. both are changed in settings now; asking here says so.
+    """
     try:
         data = request.json or {}
         changed = []
+
+        if 'media_server' in data:
+            return jsonify({'success': False,
+                            'error': 'Change the media server in Settings, under Connections'}), 400
+        if 'download_mode' in data or 'hybrid_order' in data:
+            return jsonify({'success': False,
+                            'error': 'Change download sources in Settings, under Downloads'}), 400
 
         if 'metadata_source' in data:
             src = data['metadata_source']
@@ -1400,35 +1586,6 @@ def set_active_sources():
                 return jsonify({'success': False, 'error': _primary_err}), 400
             invalidate_metadata_status_caches()
             changed.append('metadata')
-
-        if 'media_server' in data:
-            srv = data['media_server']
-            if srv not in _QS_MEDIA_SERVERS:
-                return jsonify({'success': False, 'error': 'Unknown media server'}), 400
-            config_manager.set_active_media_server(srv)
-            for s in ('plex', 'jellyfin', 'navidrome'):
-                c = _media_server_engine().client(s)
-                if c:
-                    if s == 'plex':
-                        c.server = None
-                    else:
-                        c.reload_config()
-            changed.append('server')
-
-        if 'download_mode' in data:
-            mode = data['download_mode']
-            if mode not in (_QS_DOWNLOAD_SOURCES + ['hybrid']):
-                return jsonify({'success': False, 'error': 'Unknown download mode'}), 400
-            config_manager.set('download_source.mode', mode)
-            changed.append('download')
-
-        if 'hybrid_order' in data and isinstance(data['hybrid_order'], list):
-            clean = [s for s in data['hybrid_order'] if s in _QS_DOWNLOAD_SOURCES]
-            config_manager.set('download_source.hybrid_order', clean)
-            changed.append('download')
-
-        if 'download' in changed and _download_orchestrator():
-            _download_orchestrator().reload_settings()
 
         return jsonify({'success': True, 'changed': sorted(set(changed))})
     except Exception as e:

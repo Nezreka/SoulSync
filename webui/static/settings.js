@@ -1899,7 +1899,7 @@ const INVERT_BRAND_MARKS = new Set(['tidal', 'qobuz', 'soundcloud']);
 // "Other", so adding a source to HYBRID_SOURCES can never make it disappear.
 const DLCHAIN_GROUPS = [
     { label: 'Peer-to-peer', ids: ['soulseek'] },
-    { label: 'Streaming services', ids: ['tidal', 'qobuz', 'deezer_dl', 'amazon', 'soundcloud', 'hifi'] },
+    { label: 'Streaming services', ids: ['tidal', 'qobuz', 'deezer_dl', 'soundcloud', 'hifi'] },
     { label: 'Public video', ids: ['youtube'] },
     { label: 'Torrent & Usenet', ids: ['torrent', 'usenet', 'extto'] },
     { label: 'Library manager', ids: ['lidarr'] },
@@ -1912,7 +1912,6 @@ const HYBRID_SOURCES = [
     { id: 'qobuz', name: 'Qobuz', icon: '/static/img/brands/qobuz.svg', emoji: '🎧' },
     { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
     { id: 'deezer_dl', name: 'Deezer', icon: '/static/img/brands/deezer.png', emoji: '🎧' },
-    { id: 'amazon', name: 'Amazon Music', icon: null, emoji: '🛒' },
     { id: 'lidarr', name: 'Lidarr', icon: null, emoji: '📦' },
     { id: 'soundcloud', name: 'SoundCloud', icon: '/static/img/brands/soundcloud.png', emoji: '☁️' },
     { id: 'torrent', name: 'Torrent', icon: null, emoji: '🧲' },
@@ -1932,8 +1931,13 @@ const EXTRA_SOURCE_TILES = [
 ];
 const ALBUM_LEVEL_HYBRID_SOURCES = new Set(['soulseek', 'torrent', 'usenet']);
 
+// sources that can't be picked anymore. amazon ran through the public t2tunes
+// proxy and that site is gone (#1300). a saved chain that still names one gets
+// it dropped on load, so the next save writes a chain that actually works.
+const RETIRED_DOWNLOAD_SOURCES = new Set(['amazon']);
+
 let _hybridSourceOrder = ['soulseek', 'youtube'];
-let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, amazon: false, lidarr: false, soundcloud: false, torrent: false, usenet: false };
+let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, lidarr: false, soundcloud: false, torrent: false, usenet: false };
 // Enabled-but-not-fully-configured sources (per the server's status):
 // shown with a "needs setup" chip instead of being silently unchecked.
 let _hybridSourceUnready = {};
@@ -1954,7 +1958,6 @@ const SOURCE_CARD_HINTS = {
     qobuz: 'Account and stream quality',
     hifi: 'Public API instances',
     deezer_dl: 'ARL token',
-    amazon: 'Account',
     soundcloud: 'Anonymous — nothing to set up',
     lidarr: 'URL and API key',
     torrent: 'Runs on Prowlarr plus a torrent client',
@@ -2055,7 +2058,6 @@ const SOURCE_OPEN_PROBE = {
     tidal: () => checkTidalDownloadAuthStatus(),
     qobuz: () => checkQobuzAuthStatus(),
     hifi: () => testHiFiConnection(),
-    amazon: () => testAmazonConnection(),
     soundcloud: () => testSoundcloudConnection(),
 };
 
@@ -2202,7 +2204,7 @@ const SOURCE_CONFIG_ID_BY_SRC = {
     soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
     tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
     hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
-    amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
+    lidarr: 'lidarr-download-settings-container',
     soundcloud: 'soundcloud-download-settings-container',
     // Usenet is its own link in the chain and shares the Prowlarr panel. It had
     // no tile at all, so a usenet user saw nothing to click.
@@ -2215,7 +2217,7 @@ const HYBRID_SOURCE_CONFIG_ID = {
     soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
     tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
     hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
-    amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
+    lidarr: 'lidarr-download-settings-container',
     soundcloud: 'soundcloud-download-settings-container',
     torrent: 'torrent-client-settings-container',
     usenet: 'usenet-client-settings-container',
@@ -2318,7 +2320,6 @@ const HYBRID_SOURCE_PROBE = {
     // POST (the endpoint is POST-only) with an empty body so it tests the SAVED ARL; a GET here
     // 405s and the probe throws -> the dot goes red even though Deezer downloads fine.
     deezer_dl:  () => _ssJson('/api/deezer-download/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(j => j.success === true),
-    amazon:     () => _ssJson('/api/amazon/test-connection').then(j => j.connected === true),
     lidarr:     () => _ssTestConn('lidarr'),
     soundcloud: () => _ssJson('/api/soundcloud/status').then(j => j.available === true && j.reachable === true),
     torrent:    () => _ssTestConn('torrent_client'),
@@ -2714,7 +2715,8 @@ async function loadArtSourceOrder(settings) {
 }
 
 function loadHybridSourceOrder(settings) {
-    const order = settings.download_source?.hybrid_order;
+    const saved = settings.download_source?.hybrid_order;
+    const order = Array.isArray(saved) ? saved.filter(id => !RETIRED_DOWNLOAD_SOURCES.has(id)) : saved;
     const sourceStatus = settings._source_status || {};
 
     if (order && Array.isArray(order) && order.length > 0) {
@@ -2727,7 +2729,8 @@ function loadHybridSourceOrder(settings) {
         // Legacy: fall back to primary/secondary
         const primary = settings.download_source?.hybrid_primary || 'soulseek';
         const secondary = settings.download_source?.hybrid_secondary || 'youtube';
-        _hybridSourceOrder = [primary, secondary];
+        _hybridSourceOrder = [primary, secondary].filter(id => !RETIRED_DOWNLOAD_SOURCES.has(id));
+        if (!_hybridSourceOrder.length) _hybridSourceOrder = ['soulseek'];
         _hybridSourceEnabled = {};
         for (const src of HYBRID_SOURCES) {
             _hybridSourceEnabled[src.id] = src.id === primary || src.id === secondary;
@@ -3028,7 +3031,8 @@ async function loadSettingsData() {
         document.getElementById('playlists-materialize-mode').value = settings.playlists?.materialize_mode || 'symlink';
 
         // Populate Download Source settings
-        document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
+        const _savedMode = settings.download_source?.mode || 'soulseek';
+        document.getElementById('download-source-mode').value = RETIRED_DOWNLOAD_SOURCES.has(_savedMode) ? 'soulseek' : _savedMode;
         document.getElementById('stream-source').value = settings.download_source?.stream_source || 'youtube';
         document.getElementById('max-concurrent-downloads').value = settings.download_source?.max_concurrent || '3';
         // #1056 — 0/blank = each source's built-in default
@@ -3164,6 +3168,7 @@ async function loadSettingsData() {
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
         document.getElementById('audio-completeness-check').checked = settings.post_processing?.audio_completeness_check === true;
+        document.getElementById('verify-flac-decode').checked = settings.post_processing?.verify_flac_decode === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
         document.getElementById('retry-next-candidate').checked = settings.post_processing?.retry_next_candidate_on_mismatch !== false;
         document.getElementById('retry-exhaustive').checked = settings.post_processing?.retry_exhaustive === true;
@@ -3246,6 +3251,10 @@ async function loadSettingsData() {
             Math.round((ab.completeness_tolerance ?? 0.92) * 100));
         abVal(document.getElementById('audiobook-staging-days'), ab.staging_days ?? 7);
         abChecked(document.getElementById('audiobook-renumber-chapters'), ab.renumber_chapters);
+        // Off by default, unlike the toggles above: abChecked treats a
+        // missing key as on, which would switch this on for older configs.
+        const removeOwned = document.getElementById('audiobook-remove-owned-from-wishlist');
+        if (removeOwned) removeOwned.checked = ab.remove_owned_from_wishlist === true;
         abChecked(document.getElementById('audiobook-embed-metadata'), ab.embed_metadata);
         abChecked(document.getElementById('audiobook-embed-artwork'), ab.embed_artwork);
         abChecked(document.getElementById('audiobook-save-artwork'), ab.save_artwork);
@@ -3927,7 +3936,6 @@ function updateHybridSecondaryOptions() {
         { value: 'qobuz', label: 'Qobuz' },
         { value: 'hifi', label: 'HiFi' },
         { value: 'deezer_dl', label: 'Deezer' },
-        { value: 'amazon', label: 'Amazon Music' },
         { value: 'lidarr', label: 'Lidarr' },
         { value: 'soundcloud', label: 'SoundCloud' },
     ];
@@ -6163,9 +6171,6 @@ async function saveSettings(quiet = false) {
         deezer_download: {
             arl: document.getElementById('deezer-download-arl').value || '',
         },
-        amazon_download: {
-            // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
-        },
         lidarr_download: {
             url: document.getElementById('lidarr-url').value || '',
             api_key: document.getElementById('lidarr-api-key').value || '',
@@ -6275,6 +6280,7 @@ async function saveSettings(quiet = false) {
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
             audio_completeness_check: document.getElementById('audio-completeness-check').checked,
+            verify_flac_decode: document.getElementById('verify-flac-decode').checked,
             duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
             retry_next_candidate_on_mismatch: document.getElementById('retry-next-candidate').checked,
             retry_exhaustive: document.getElementById('retry-exhaustive').checked,
@@ -6313,6 +6319,7 @@ async function saveSettings(quiet = false) {
             staging_days: Math.min(90, Math.max(1,
                 _cfgInt('audiobook-staging-days', 7))),
             renumber_chapters: _cfgBool('audiobook-renumber-chapters'),
+            remove_owned_from_wishlist: _cfgBool('audiobook-remove-owned-from-wishlist'),
             embed_metadata: _cfgBool('audiobook-embed-metadata'),
             embed_artwork: _cfgBool('audiobook-embed-artwork'),
             save_artwork: _cfgBool('audiobook-save-artwork'),
@@ -7577,27 +7584,6 @@ async function testDeezerDownloadConnection() {
         }
     } catch (e) {
         statusEl.textContent = 'Connection error';
-        statusEl.style.color = '#f44336';
-    }
-}
-
-async function testAmazonConnection() {
-    const statusEl = document.getElementById('amazon-connection-status');
-    if (!statusEl) return;
-    statusEl.textContent = 'Checking...';
-    statusEl.style.color = '#aaa';
-    try {
-        const resp = await fetch('/api/amazon/test-connection');
-        const data = await resp.json();
-        if (data.connected) {
-            statusEl.textContent = '✓ Connected — T2Tunes up';
-            statusEl.style.color = '#4caf50';
-        } else {
-            statusEl.textContent = '✗ ' + (data.error || 'T2Tunes unreachable');
-            statusEl.style.color = '#f44336';
-        }
-    } catch (e) {
-        statusEl.textContent = '✗ Connection error';
         statusEl.style.color = '#f44336';
     }
 }

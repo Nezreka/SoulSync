@@ -783,6 +783,10 @@ def _match_disc_aware(query: str, api_tracks: List[Dict], threshold: float,
     return _match_title_to_api_track(query, api_tracks, threshold)
 
 
+# "01-01 - title" / "1.07 title": disc, separator, track, then a non-digit
+_DISC_TRACK_PREFIX = re.compile(r'^(\d{1,2})([-.])(\d{1,3})(?=\D|$)')
+
+
 def _planned_prefix(prefix: str, correct_num: int, correct_disc: int,
                     multi_disc: bool) -> Optional[str]:
     """The corrected filename prefix, PRESERVING the file's own convention.
@@ -829,6 +833,8 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
 
     multi_disc = _api_disc_count(api_tracks) > 1
     basename = os.path.splitext(filename)[0]
+    # #1306: "01-01 - x" is disc-track, not track "01" followed by "-01"
+    disc_track = _DISC_TRACK_PREFIX.match(basename.strip())
     prefix_match = re.match(r'^(\d+)', basename.strip())
     prefix = prefix_match.group(1) if prefix_match else ''
 
@@ -838,6 +844,8 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
     # only — an inferred disc is not a tag, so it never satisfies disc_ok)
     if not file_disc and multi_disc and len(prefix) == 4:
         file_disc = int(prefix[:2]) or None
+    if not file_disc and multi_disc and disc_track:
+        file_disc = int(disc_track.group(1)) or None
 
     file_title = _read_title_tag(audio)
     matched_track, match_score = (None, 0.0)
@@ -845,8 +853,9 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
         matched_track, match_score = _match_disc_aware(
             file_title, api_tracks, title_similarity, file_disc, multi_disc)
     if not matched_track:
-        # strip the WHOLE leading digit run ('0213 - X' → 'X', not '3 - X')
-        clean_name = re.sub(r'^\d+[\s.\-_]*', '', basename).strip()
+        # strip the WHOLE leading digit run ('0213 - X' → 'X', not '3 - X'),
+        # a disc-track pair included ('01-01 - X' → 'X')
+        clean_name = re.sub(r'^\d+(?:[-.]\d+)?[\s.\-_]*', '', basename).strip()
         if clean_name:
             matched_track, match_score = _match_disc_aware(
                 clean_name, api_tracks, title_similarity, file_disc, multi_disc)
@@ -872,12 +881,21 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
     total_discs = _api_disc_count(api_tracks)
     disc_ok = (not multi_disc) or (tag_disc == correct_disc)
 
-    planned = _planned_prefix(prefix, correct_num, correct_disc, multi_disc)
     new_basename = None
-    if planned is not None and prefix:
-        candidate = re.sub(r'^\d+', planned, basename, count=1)
-        if candidate != basename:
+    if disc_track:
+        # keep the file's own disc-track shape; only the track part moves
+        # (and the disc part too on a multi-disc album)
+        disc_part = f"{correct_disc:02d}" if multi_disc else disc_track.group(1)
+        planned_pair = f"{disc_part}{disc_track.group(2)}{correct_num:0{max(2, len(disc_track.group(3)))}d}"
+        candidate = planned_pair + basename.strip()[disc_track.end():]
+        if candidate != basename.strip():
             new_basename = candidate
+    else:
+        planned = _planned_prefix(prefix, correct_num, correct_disc, multi_disc)
+        if planned is not None and prefix:
+            candidate = re.sub(r'^\d+', planned, basename, count=1)
+            if candidate != basename:
+                new_basename = candidate
 
     if tag_ok and disc_ok and new_basename is None:
         return None
@@ -915,9 +933,12 @@ def _match_title_to_api_track(file_title: str, api_tracks: List[Dict],
     best_match = None
     best_key = (-1.0, -1.0)
 
+    from core.text.fold import folded_similarity
     for track in api_tracks:
         api_name = track.get('name', '')
-        norm_score = SequenceMatcher(None, norm_file, _normalize_title(api_name)).ratio()
+        # #1306: two titles that fold to nothing (any non-latin script used
+        # to) are NOT a 1.0 match
+        norm_score = folded_similarity(norm_file, _normalize_title(api_name))
         raw_score = SequenceMatcher(None, raw_file, api_name.lower().strip()).ratio()
         key = (norm_score, raw_score)
         if key > best_key:
@@ -930,12 +951,10 @@ def _match_title_to_api_track(file_title: str, api_tracks: List[Dict],
 
 
 def _normalize_title(title: str) -> str:
-    """Normalize a title for comparison."""
-    t = title.lower()
-    t = re.sub(r'\(.*?\)', '', t)
-    t = re.sub(r'\[.*?\]', '', t)
-    t = re.sub(r'[^a-z0-9 ]', '', t)
-    return t.strip()
+    """Normalize a title for comparison: any script's letters and digits,
+    bracketed qualifiers dropped (#1306: ascii-only emptied japanese titles)."""
+    from core.text.fold import fold_title
+    return fold_title(title or '')
 
 
 def _fix_track_number_tag(file_path: str, correct_num: int, total: int):

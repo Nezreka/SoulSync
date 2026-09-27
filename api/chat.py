@@ -19,6 +19,7 @@ when actually needed.
 
 import ipaddress
 import math as _math
+import os
 import re as _re
 import time
 from urllib.parse import urljoin, urlparse
@@ -1020,6 +1021,209 @@ def create_blueprint() -> Blueprint:
         except Exception as e:
             logger.debug("chat: library search failed: %s", e)
             return jsonify({"tracks": []})
+        finally:
+            if conn:
+                conn.close()
+
+    @bp.route("/api/chat/wanted/resolve-share", methods=["POST"])
+    def chat_wanted_resolve_share():
+        """Look up local library files matching a Wanted/ISO card, computing the
+        relative share filenames for Soulseek P2P direct sharing."""
+        if not _can_send():
+            return jsonify({"error": "Sending is disabled for this profile"}), 403
+
+        db = _db()
+        if db is None:
+            return jsonify({"ok": False, "error": "Database is unavailable"}), 503
+
+        payload = request.get_json(silent=True) or {}
+        title = str(payload.get("title") or "").strip()
+        artist = str(payload.get("artist") or "").strip()
+        album = str(payload.get("album") or "").strip()
+        req_type = str(payload.get("type") or "album").strip().lower()
+
+        if not title and not artist:
+            return jsonify({"ok": False, "error": "Title or artist required"}), 400
+
+        # Try to resolve configured slskd share directories
+        share_dirs = []
+        client = _client()
+        if client is not None and _run_async is not None:
+            try:
+                if hasattr(client, "get_share_directories"):
+                    share_dirs = _run_async(client.get_share_directories()) or []
+            except Exception as e:
+                logger.debug("chat: resolve-share could not get share dirs: %s", e)
+                share_dirs = []
+
+        conn = None
+        try:
+            conn = db._get_connection()
+            album_row = None
+            tracks_rows = []
+
+            # 1. Match album if requested or if not strictly a single track
+            if req_type in ("album", "ep", "single") or not req_type:
+                alb_query = title or album
+                if alb_query:
+                    like_alb = "%" + alb_query.replace("%", "\\%") + "%"
+                    like_art = "%" + artist.replace("%", "\\%") + "%" if artist else "%"
+                    album_row = conn.execute(
+                        """SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
+                                  al.thumb_url, ar.thumb_url as artist_thumb_url
+                           FROM albums al
+                           LEFT JOIN artists ar ON ar.id = al.artist_id
+                           WHERE al.title LIKE ? AND (ar.name LIKE ? OR ? LIKE ('%' || ar.name || '%') OR ? = '%')
+                           ORDER BY CASE WHEN LOWER(al.title) = LOWER(?) THEN 0 ELSE 1 END,
+                                    al.id LIMIT 1""",
+                        (like_alb, like_art, artist if artist else "%", like_art, alb_query)
+                    ).fetchone()
+
+                    # Fall back to album title if artist naming has slight discrepancy
+                    if not album_row and artist:
+                        album_row = conn.execute(
+                            """SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
+                                      al.thumb_url, ar.thumb_url as artist_thumb_url
+                               FROM albums al
+                               LEFT JOIN artists ar ON ar.id = al.artist_id
+                               WHERE al.title LIKE ?
+                               ORDER BY CASE WHEN LOWER(al.title) = LOWER(?) THEN 0 ELSE 1 END,
+                                        al.id LIMIT 1""",
+                            (like_alb, alb_query)
+                        ).fetchone()
+
+                if album_row:
+                    tracks_rows = conn.execute(
+                        """SELECT t.id, t.title, t.track_number, t.duration, t.file_path,
+                                  t.file_size, t.bitrate,
+                                  COALESCE(t.track_artist, ar.name, '') as artist,
+                                  al.title as album,
+                                  al.thumb_url as album_thumb_url,
+                                  ar.thumb_url as artist_thumb_url
+                           FROM tracks t
+                           JOIN albums al ON al.id = t.album_id
+                           LEFT JOIN artists ar ON ar.id = t.artist_id
+                           WHERE t.album_id = ? AND t.file_path IS NOT NULL AND t.file_path != ''
+                           ORDER BY t.track_number, t.id""",
+                        (album_row["id"],)
+                    ).fetchall()
+
+            # 2. If no album matched or if req_type is 'track', try track search
+            if not tracks_rows:
+                track_query = title
+                like_trk = "%" + track_query.replace("%", "\\%") + "%"
+                like_art = "%" + artist.replace("%", "\\%") + "%" if artist else "%"
+                tracks_rows = conn.execute(
+                    """SELECT t.id, t.title, t.track_number, t.duration, t.file_path,
+                              t.file_size, t.bitrate,
+                              COALESCE(t.track_artist, ar.name, '') as artist,
+                              COALESCE(al.title, '') as album,
+                              al.thumb_url as album_thumb_url,
+                              ar.thumb_url as artist_thumb_url
+                       FROM tracks t
+                       LEFT JOIN artists ar ON ar.id = t.artist_id
+                       LEFT JOIN albums al ON al.id = t.album_id
+                       WHERE t.title LIKE ? AND (ar.name LIKE ? OR t.track_artist LIKE ? OR ? LIKE ('%' || ar.name || '%') OR ? = '%')
+                         AND t.file_path IS NOT NULL AND t.file_path != ''
+                       ORDER BY CASE WHEN LOWER(t.title) = LOWER(?) THEN 0 ELSE 1 END,
+                                t.id LIMIT ?""",
+                    (like_trk, like_art, like_art, artist if artist else "%", like_art, track_query,
+                     1 if req_type == "track" else 50)
+                ).fetchall()
+
+                # Fallback to track title alone if artist string differs
+                if not tracks_rows and track_query and artist:
+                    tracks_rows = conn.execute(
+                        """SELECT t.id, t.title, t.track_number, t.duration, t.file_path,
+                                  t.file_size, t.bitrate,
+                                  COALESCE(t.track_artist, ar.name, '') as artist,
+                                  COALESCE(al.title, '') as album,
+                                  al.thumb_url as album_thumb_url,
+                                  ar.thumb_url as artist_thumb_url
+                           FROM tracks t
+                           LEFT JOIN artists ar ON ar.id = t.artist_id
+                           LEFT JOIN albums al ON al.id = t.album_id
+                           WHERE t.title LIKE ? AND t.file_path IS NOT NULL AND t.file_path != ''
+                           ORDER BY CASE WHEN LOWER(t.title) = LOWER(?) THEN 0 ELSE 1 END,
+                                    t.id LIMIT ?""",
+                        (like_trk, track_query, 1 if req_type == "track" else 50)
+                    ).fetchall()
+
+            if not tracks_rows:
+                return jsonify({"ok": True, "found": False, "message": "No matching local files found"})
+
+            # Helper to strip share directory from file path for Soulseek
+            def _to_share_path(fp: str) -> str:
+                norm_fp = fp.replace("\\", "/")
+                for sd in share_dirs:
+                    if not sd:
+                        continue
+                    norm_sd = sd.rstrip("/") + "/"
+                    if norm_fp.lower().startswith(norm_sd.lower()):
+                        rel = norm_fp[len(norm_sd):]
+                        return rel.replace("/", "\\")
+                parts = [p for p in norm_fp.split("/") if p]
+                if len(parts) >= 3:
+                    return "\\".join(parts[-3:])
+                elif len(parts) >= 2:
+                    return "\\".join(parts[-2:])
+                return norm_fp.replace("/", "\\")
+
+            def _to_share_dir(rel_fn: str) -> str:
+                norm = rel_fn.replace("/", "\\")
+                if "\\" in norm:
+                    return norm.rsplit("\\", 1)[0]
+                return ""
+
+            out_tracks = []
+            total_size = 0
+            for r in tracks_rows:
+                fp = str(r["file_path"] or "")
+                sz = int(r["file_size"] or 0)
+                if sz == 0 and os.path.exists(fp):
+                    try:
+                        sz = os.path.getsize(fp)
+                    except Exception as exc:
+                        logger.debug("Failed to get size for %s: %s", fp, exc)
+                total_size += sz
+                share_fn = _to_share_path(fp)
+                out_tracks.append({
+                    "id": r["id"],
+                    "title": r["title"] or "Unknown",
+                    "track_number": r["track_number"] or 1,
+                    "duration": r["duration"] or 0,
+                    "size": sz,
+                    "bitrate": r["bitrate"] or 0,
+                    "filename": share_fn,
+                    "artist": r["artist"] or artist,
+                    "album": r["album"] or (album_row["title"] if album_row else "")
+                })
+
+            resolved_title = (album_row["title"] if album_row else (out_tracks[0]["album"] or out_tracks[0]["title"]))
+            resolved_artist = (album_row["artist"] if album_row else out_tracks[0]["artist"])
+            primary_dir = _to_share_dir(out_tracks[0]["filename"]) if out_tracks else ""
+            res_img = (album_row["thumb_url"] if (album_row and "thumb_url" in album_row.keys() and album_row["thumb_url"])
+                       else (tracks_rows[0]["album_thumb_url"] if (tracks_rows and "album_thumb_url" in tracks_rows[0].keys() and tracks_rows[0]["album_thumb_url"]) else ""))
+            res_ar_img = (album_row["artist_thumb_url"] if (album_row and "artist_thumb_url" in album_row.keys() and album_row["artist_thumb_url"])
+                          else (tracks_rows[0]["artist_thumb_url"] if (tracks_rows and "artist_thumb_url" in tracks_rows[0].keys() and tracks_rows[0]["artist_thumb_url"]) else ""))
+
+            return jsonify({
+                "ok": True,
+                "found": True,
+                "type": "album" if (album_row or len(out_tracks) > 1) else "track",
+                "title": resolved_title,
+                "artist": resolved_artist,
+                "year": album_row["year"] if album_row else "",
+                "image_url": res_img or "",
+                "artist_image_url": res_ar_img or "",
+                "directory": primary_dir,
+                "track_count": len(out_tracks),
+                "total_size": total_size,
+                "tracks": out_tracks
+            })
+        except Exception as e:
+            logger.exception("chat: resolve-share failed")
+            return jsonify({"ok": False, "error": str(e)}), 500
         finally:
             if conn:
                 conn.close()

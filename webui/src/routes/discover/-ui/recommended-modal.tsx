@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import type { RecommendedArtist } from '../-discover.recommended';
 
-import { recommendationReason, recommendationReasonTitle } from '../-discover.helpers';
+import { explanationLine, explanationTitle } from '../-discover.explanation';
 import {
   recModalCountLabel,
   recModalGenres,
@@ -13,8 +13,10 @@ import {
   REC_MODAL_SEARCH_PLACEHOLDER,
   REC_MODAL_TITLE,
   REC_WATCH_ADD_LABEL,
+  recommendedIds,
   REC_WATCH_ON_LABEL,
 } from '../-discover.recommended';
+import { FeedbackMenu } from './feedback-menu';
 
 /**
  * The Recommended Artists modal.
@@ -143,10 +145,13 @@ function ModalCard({
   onAddToWatchlist,
 }: ModalCardProps) {
   const [broken, setBroken] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const id = artist.artist_id ?? '';
   const name = artist.artist_name ?? '';
   const image = imageOverride || artist.image_url;
   const clickable = recWatchlistClickable(id, name);
+
+  if (hidden) return null;
 
   return (
     <div
@@ -185,6 +190,14 @@ function ModalCard({
         </svg>
         <span className="sr-only">{watching ? REC_WATCH_ON_LABEL : REC_WATCH_ADD_LABEL}</span>
       </button>
+      {name ? (
+        <FeedbackMenu
+          entity={{ type: 'artist', name, ids: recommendedIds(artist) }}
+          explanation={artist.explanation}
+          onHidden={() => setHidden(true)}
+          className="recommended-card-feedback-btn"
+        />
+      ) : null}
       <a
         className="recommended-card-link"
         href={buildDetailPath(id, artistSource || null)}
@@ -204,9 +217,9 @@ function ModalCard({
           <span className="recommended-card-name">{name}</span>
           <span
             className="recommended-card-similarity"
-            title={recommendationReasonTitle(artist as never)}
+            title={explanationTitle(artist.explanation)}
           >
-            {recommendationReason(artist as never)}
+            {explanationLine(artist.explanation)}
           </span>
           <div className="recommended-card-genres">
             {recModalGenres(artist).map((g) => (

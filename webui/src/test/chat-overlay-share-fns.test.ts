@@ -16,16 +16,21 @@ const JS = readFileSync(resolve(process.cwd(), 'static/chat.js'), 'utf8');
 
 const BLOCK = JS.slice(
   JS.indexOf('function _ovToast'),
-  JS.indexOf("// ── shared file card (filepost.dev links dressed by envelope 'f') ────"),
+  // the section title after it; matched on its stable start so rewording the
+  // rest can't send the slice to end of file (a -1 here tested all of chat.js)
+  JS.indexOf('// ── shared file card'),
 );
 
 describe('the helpers it leans on are defined in chat.js', () => {
-  it.each(['postJSON', '_tagRoomPayload', 'toggleAttachPanel', '_ovToast'])(
-    '%s',
-    (name) => {
-      expect(JS.includes(`function ${name}(`), `${name} is not defined in chat.js`).toBe(true);
-    },
-  );
+  it('slices the block it means to', () => {
+    const start = JS.indexOf('function _ovToast');
+    expect(start).toBeGreaterThan(-1);
+    expect(JS.indexOf('// ── shared file card')).toBeGreaterThan(start);
+  });
+
+  it.each(['postJSON', '_tagRoomPayload', 'toggleAttachPanel', '_ovToast'])('%s', (name) => {
+    expect(JS.includes(`function ${name}(`), `${name} is not defined in chat.js`).toBe(true);
+  });
 });
 
 /** The block with comment lines stripped. Several of the comments explain WHY a
@@ -115,8 +120,14 @@ describe('the overlay picker is a real modal', () => {
     '.chat-ovl-cardname',
     '.chat-ovl-empty',
   ])('%s is actually styled', (cls) => {
-    expect(CSS.includes(`${cls} `) || CSS.includes(`${cls},`) || CSS.includes(`${cls}.`) ||
-      CSS.includes(`${cls}:`) || CSS.includes(`${cls}\n`), `${cls} has no rule`).toBe(true);
+    expect(
+      CSS.includes(`${cls} `) ||
+        CSS.includes(`${cls},`) ||
+        CSS.includes(`${cls}.`) ||
+        CSS.includes(`${cls}:`) ||
+        CSS.includes(`${cls}\n`),
+      `${cls} has no rule`,
+    ).toBe(true);
   });
 
   it('shows a rendered example of each template, not just its name', () => {

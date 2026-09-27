@@ -16,13 +16,22 @@ os.environ['SOULSYNC_TEST_DB_READY'] = '1'
 web_server = pytest.importorskip('web_server')
 
 
+_CREATED = []
+
+
 @pytest.fixture
 def client():
-    return web_server.app.test_client()
+    yield web_server.app.test_client()
+    # the profiles go with the test: left behind in the shared app database,
+    # every later no-session request in this worker answered profile_required
+    # (a second profile means one must be picked), failing unrelated tests
+    while _CREATED:
+        web_server.get_database().delete_profile(_CREATED.pop())
 
 
 def _as_nonadmin(client):
     pid = web_server.get_database().create_profile(name=f'u_{os.urandom(4).hex()}')
+    _CREATED.append(pid)
     with client.session_transaction() as s:
         s['profile_id'] = pid
     return pid

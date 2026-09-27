@@ -1582,6 +1582,8 @@
                     if (card) {
                         var btn = card.querySelector('[data-chat-wanted-have]');
                         if (btn) btn.classList.add('chat-card-btn--glow');
+                        var sBtn = card.querySelector('[data-chat-wanted-share]');
+                        if (sBtn) sBtn.classList.add('chat-card-btn--glow');
                     }
                 }
             });
@@ -1622,14 +1624,34 @@
             _scheduleWantedPresenceProbe(w);
         }
 
+        var shareBtn = '';
         var haveBtn = '';
         if (!isMe) {
+            shareBtn = '<button type="button" class="chat-card-btn chat-card-btn--share' + (inLib === true ? ' chat-card-btn--glow' : '') + '" ' +
+                'data-chat-wanted-share data-wanted-user="' + attr(requester) + '" data-wanted-title="' + attr(w.t) + '" data-wanted-artist="' + attr(w.a) + '" ' +
+                'title="Share your local copy directly with @' + attr(requester) + ' so they can download it!">' +
+                '⚡ Share Now</button>';
             haveBtn = '<button type="button" class="chat-card-btn chat-card-btn--success' + (inLib === true ? ' chat-card-btn--glow' : '') + '" ' +
                 'data-chat-wanted-have data-wanted-user="' + attr(requester) + '" data-wanted-title="' + attr(w.t) + '" data-wanted-artist="' + attr(w.a) + '" ' +
-                'title="Send @' + attr(requester) + ' a direct message saying you have this!">' +
-                '💬 I Have This! (Send PM)</button>';
+                'title="Send @' + attr(requester) + ' a direct message">' +
+                '💬 Message</button>';
         }
 
+        var pBadge = '';
+        var normT = (w.t || '').toLowerCase().trim();
+        (state.protocolLog || []).forEach(function (ev) {
+            if (!ev || !ev.p) return;
+            var pt = (ev.p.t || '').toLowerCase().trim();
+            if (pt && (pt === normT || pt.indexOf(normT) !== -1 || normT.indexOf(pt) !== -1)) {
+                if (ev.p.k === 'want.accept') {
+                    pBadge = '<span class="chat-wanted-badge chat-wanted-badge--fulfilled" title="Fulfilled by @' + attr(ev.p.to || ev.username) + '">✓ Fulfilled by @' + esc(ev.p.to || ev.username) + '</span>';
+                } else if (ev.p.k === 'want.share' && !pBadge) {
+                    pBadge = '<span class="chat-wanted-badge chat-wanted-badge--shared" title="Offered by @' + attr(ev.username) + '">⚡ Offered by @' + esc(ev.username) + '</span>';
+                }
+            }
+        });
+
+        var arImg = w.ar_img || _npArtCache['artist|||' + (w.a || '').toLowerCase().trim()] || '';
         return '<div class="chat-wanted-card" ' +
             'data-wanted-title="' + attr(w.t) + '" ' +
             'data-wanted-artist="' + attr(w.a) + '" ' +
@@ -1638,6 +1660,12 @@
             'data-wanted-id="' + attr(w.id || '') + '" ' +
             'data-wanted-src="' + attr(w.src || '') + '" ' +
             'data-wanted-img="' + attr(resolvedImg || w.img || '') + '" ' +
+            'data-wanted-artist-id="' + attr(w.ar_id || '') + '" ' +
+            'data-wanted-artist-img="' + attr(arImg) + '" ' +
+            'data-wanted-album-id="' + attr(w.al_id || '') + '" ' +
+            'data-wanted-total-tracks="' + attr(w.tot || 0) + '" ' +
+            'data-wanted-track-number="' + attr(w.tn || 0) + '" ' +
+            'data-wanted-disc-number="' + attr(w.disc || 0) + '" ' +
             'data-wanted-year="' + attr(w.y || '') + '" ' +
             'data-wanted-dur="' + attr(w.dur || 0) + '" ' +
             'data-wanted-key="' + attr(cacheKey) + '">' +
@@ -1646,16 +1674,21 @@
                 '<span class="chat-wanted-type-pill">' + ty + '</span>' +
                 (src ? '<span class="chat-wanted-src-pill">' + src.toUpperCase() + '</span>' : '') +
                 statusChip +
+                pBadge +
             '</div>' +
             '<div class="chat-wanted-body">' +
                 img +
                 '<div class="chat-wanted-meta">' +
                     '<div class="chat-wanted-title" title="' + attr(w.t) + '">' + t + '</div>' +
-                    '<div class="chat-wanted-artist" title="' + attr(w.a) + '">' + a + (y ? ' <span class="chat-wanted-year">(' + y + ')</span>' : '') + '</div>' +
+                    '<div class="chat-wanted-artist" title="' + attr(w.a) + '">' +
+                        (arImg ? '<img class="chat-wanted-artist-avatar" src="' + attr(arImg) + '" alt="" loading="lazy">' : '') +
+                        '<span>' + a + '</span>' + (y ? ' <span class="chat-wanted-year">(' + y + ')</span>' : '') +
+                    '</div>' +
                     '<div class="chat-wanted-req">Requested by <b>@' + esc(requester) + '</b></div>' +
                 '</div>' +
             '</div>' +
             '<div class="chat-wanted-actions">' +
+                shareBtn +
                 haveBtn +
                 '<button type="button" class="chat-card-btn chat-card-btn--accent" data-chat-card-dl title="Open Download Tracks modal">📥 Download</button>' +
                 '<button type="button" class="chat-card-btn chat-card-btn--wishlist" data-chat-wanted-wishlist title="Add to your Wishlist">➕ Wishlist</button>' +
@@ -1846,19 +1879,39 @@
                 }
                 var items = [];
                 var primarySrc = data.metadata_source || data.primary_source || 'spotify';
+                var artistMap = {};
+                var artistsList = data.artists || data.spotify_artists || [];
+                artistsList.forEach(function (ar) {
+                    var arName = (ar.name || '').toLowerCase().trim();
+                    var arImg = ar.image_url || (ar.images && ar.images[0] && (typeof ar.images[0] === 'string' ? ar.images[0] : ar.images[0].url)) || '';
+                    if (arName && !artistMap[arName]) {
+                        artistMap[arName] = { id: String(ar.id || ''), img: arImg, name: ar.name };
+                        if (arImg) _npArtCache['artist|||' + arName] = arImg;
+                    }
+                });
+
                 var albums = data.albums || data.spotify_albums || data.results || [];
                 albums.slice(0, 15).forEach(function (al) {
                     var albumImg = al.image_url ||
                         (al.images && al.images[0] && (typeof al.images[0] === 'string' ? al.images[0] : al.images[0].url)) ||
                         al.cover_xl || al.cover_big || al.cover_medium || '';
+                    var arName = al.artist || (al.artists && al.artists[0] && al.artists[0].name) || '';
+                    var arInfo = artistMap[arName.toLowerCase().trim()] || {};
+                    var arImg = (al.artists && al.artists[0] && al.artists[0].image_url) || arInfo.img || '';
+                    var arId = (al.artists && al.artists[0] && al.artists[0].id) || arInfo.id || '';
                     items.push({
                         name: al.name || al.title || '',
-                        artist: al.artist || (al.artists && al.artists[0] && al.artists[0].name) || '',
+                        artist: arName,
+                        artist_id: arId,
+                        artist_image: arImg,
+                        album: al.name || al.title || '',
+                        album_id: String(al.id || ''),
                         type: al.album_type || 'album',
                         year: al.release_date ? al.release_date.slice(0, 4) : (al.year || ''),
                         source: al.source || primarySrc,
                         id: String(al.id || ''),
-                        image_url: albumImg
+                        image_url: albumImg,
+                        total_tracks: al.total_tracks || 0
                     });
                 });
                 var tracks = data.tracks || data.spotify_tracks || [];
@@ -1867,16 +1920,27 @@
                         (tr.images && tr.images[0] && (typeof tr.images[0] === 'string' ? tr.images[0] : tr.images[0].url)) ||
                         (tr.album && tr.album.images && tr.album.images[0] && (typeof tr.album.images[0] === 'string' ? tr.album.images[0] : tr.album.images[0].url)) ||
                         '';
+                    var arName = tr.artist || (tr.artists && tr.artists[0] && tr.artists[0].name) || '';
+                    var arInfo = artistMap[arName.toLowerCase().trim()] || {};
+                    var arImg = (tr.artists && tr.artists[0] && tr.artists[0].image_url) || arInfo.img || '';
+                    var arId = (tr.artists && tr.artists[0] && tr.artists[0].id) || arInfo.id || '';
+                    var albName = (typeof tr.album === 'string' ? tr.album : (tr.album && tr.album.name)) || '';
+                    var albId = (tr.album && tr.album.id) ? String(tr.album.id) : '';
                     items.push({
                         name: tr.name || tr.title || '',
-                        artist: tr.artist || (tr.artists && tr.artists[0] && tr.artists[0].name) || '',
-                        album: (typeof tr.album === 'string' ? tr.album : (tr.album && tr.album.name)) || '',
+                        artist: arName,
+                        artist_id: arId,
+                        artist_image: arImg,
+                        album: albName,
+                        album_id: albId,
                         type: 'track',
                         year: tr.release_date ? tr.release_date.slice(0, 4) : '',
                         source: tr.source || primarySrc,
                         id: String(tr.id || ''),
                         image_url: trImg,
-                        duration_ms: tr.duration_ms || 0
+                        duration_ms: tr.duration_ms || 0,
+                        track_number: tr.track_number || 1,
+                        disc_number: tr.disc_number || 1
                     });
                 });
 
@@ -1891,11 +1955,14 @@
                     var thumb = item.image_url
                         ? '<img class="chat-want-res-img" src="' + attr(item.image_url) + '" alt="" loading="lazy">'
                         : '<div class="chat-want-res-img chat-want-res-img--ph">' + (item.type === 'track' ? '🎵' : '💿') + '</div>';
+                    var arBadge = item.artist_image
+                        ? '<img class="chat-wanted-artist-avatar" src="' + attr(item.artist_image) + '" alt="" loading="lazy">'
+                        : '';
                     return '<div class="chat-want-res-row">' +
                         thumb +
                         '<div class="chat-want-res-meta">' +
                             '<div class="chat-want-res-name">' + esc(item.name) + '</div>' +
-                            '<div class="chat-want-res-sub">' + esc(item.artist) + (item.year ? ' · ' + esc(item.year) : '') + '</div>' +
+                            '<div class="chat-want-res-sub">' + arBadge + esc(item.artist) + (item.year ? ' · ' + esc(item.year) : '') + '</div>' +
                             '<div class="chat-want-res-badges">' +
                                 '<span class="chat-want-res-pill">' + esc(item.type.toUpperCase()) + '</span>' +
                                 '<span class="chat-want-res-pill chat-want-res-pill--src">' + esc(item.source.toUpperCase()) + '</span>' +
@@ -1922,16 +1989,30 @@
         var id = String(item.id || '');
         var img = item.image_url || '';
         if (img && !/^https?:\/\//.test(img) && !/^\/api\//.test(img)) img = '';
+        var arImg = item.artist_image || '';
+        if (arImg && !/^https?:\/\//.test(arImg) && !/^\/api\//.test(arImg)) arImg = '';
+        var arId = String(item.artist_id || '');
+        var alId = String(item.album_id || '');
         var y = String(item.year || item.release_date || '').slice(0, 4);
-        var dur = item.duration_ms || 0;
+        var dur = Number(item.duration_ms) || 0;
+        var tot = Number(item.total_tracks) || 0;
+        var tn = Number(item.track_number) || 0;
+        var disc = Number(item.disc_number) || 0;
 
         // Cache art immediately so local rendering never flickers
         var key = a.toLowerCase().trim() + '|||' + t.toLowerCase().trim();
         if (img) _npArtCache[key] = img;
+        if (arImg) _npArtCache['artist|||' + a.toLowerCase().trim()] = arImg;
 
         var fallbackText = '🔍 In Search Of: [' + ty.toUpperCase() + '] ' + a + ' - ' + t + (y ? ' (' + y + ')' : '');
         var wantObj = { t: t, a: a, ty: ty, al: al, src: src, id: id, img: img, y: y };
+        if (arImg) wantObj.ar_img = arImg;
+        if (arId) wantObj.ar_id = arId;
+        if (alId) wantObj.al_id = alId;
         if (dur) wantObj.dur = dur;
+        if (tot) wantObj.tot = tot;
+        if (tn) wantObj.tn = tn;
+        if (disc) wantObj.disc = disc;
 
         var payload = {
             message: fallbackText,
@@ -2175,6 +2256,458 @@
         }
     }
 
+    // ── Direct P2P Share for Wanted / ISO Cards ──────────────────────────────
+    var _activeShareOffer = null;       // Current offer being prepared by sharer
+    var _incomingShareOffer = null;     // Current offer pending accept by recipient
+    var _handledShareOffers = {};       // Dedupe set for incoming offers
+
+    function _onShareWanted(requester, title, artist, album, type, cardEl) {
+        if (!requester || requester === 'you' || requester === state.selfName) {
+            if (typeof showToast === 'function') showToast('This is your own wanted card!', 'info');
+            return;
+        }
+        if (state.view !== 'room' || !state.room) {
+            if (typeof showToast === 'function') showToast('⚡ Direct sharing is only available in SoulSync rooms.', 'warning');
+            return;
+        }
+        if (!state.canSend) {
+            if (typeof showToast === 'function') showToast('Sending is disabled for this profile', 'warning');
+            return;
+        }
+        if (typeof showToast === 'function') showToast('Looking up matching files in your library…', 'info');
+
+        var cardImg = cardEl ? (cardEl.getAttribute('data-wanted-img') || '') : '';
+        var cardArImg = cardEl ? (cardEl.getAttribute('data-wanted-artist-img') || '') : '';
+        var cardYear = cardEl ? (cardEl.getAttribute('data-wanted-year') || '') : '';
+        var cardType = cardEl ? (cardEl.getAttribute('data-wanted-type') || type || 'album') : (type || 'album');
+        var cacheKeyArt = _npArtCache[(artist || '').toLowerCase().trim() + '|||' + (title || '').toLowerCase().trim()] || '';
+        var cacheKeyArImg = _npArtCache['artist|||' + (artist || '').toLowerCase().trim()] || '';
+
+        postJSON('/api/chat/wanted/resolve-share', {
+            title: title || '',
+            artist: artist || '',
+            album: album || '',
+            type: type || 'album'
+        }).then(function (res) {
+            if (!res.ok) {
+                if (typeof showToast === 'function') {
+                    showToast(res.body && res.body.error || 'Could not resolve library files', 'error');
+                }
+                return;
+            }
+            if (!res.body || !res.body.found || !res.body.tracks || !res.body.tracks.length) {
+                if (typeof showToast === 'function') {
+                    showToast('No matching files found in your library for "' + (title || 'release') + '"', 'warning');
+                }
+                return;
+            }
+
+            var d = res.body;
+            var resolvedImg = d.image_url || cardImg || cacheKeyArt || '';
+            var resolvedArImg = d.artist_image_url || cardArImg || cacheKeyArImg || '';
+            var resolvedYear = d.year || cardYear || '';
+            var resolvedType = d.type || cardType || 'album';
+
+            _activeShareOffer = {
+                to: requester,
+                title: d.title || title,
+                artist: d.artist || artist,
+                album: d.title || album || title,
+                type: resolvedType,
+                year: resolvedYear,
+                image_url: resolvedImg,
+                artist_image_url: resolvedArImg,
+                track_count: d.track_count || d.tracks.length,
+                total_size: d.total_size || 0,
+                directory: d.directory || '',
+                tracks: d.tracks || []
+            };
+
+            // Detect format from first track filename extension
+            var ext = 'AUDIO';
+            if (d.tracks[0] && d.tracks[0].filename) {
+                var mExt = d.tracks[0].filename.match(/\.([a-z0-9]+)$/i);
+                if (mExt) ext = mExt[1].toUpperCase();
+            }
+            _activeShareOffer.format = ext;
+
+            // Populate Sharer Confirm Modal
+            var modal = q('[data-chat-share-confirm-modal]');
+            var backdrop = q('[data-chat-share-backdrop]');
+            if (!modal) return;
+
+            var targetEl = modal.querySelector('[data-chat-share-target]');
+            if (targetEl) targetEl.textContent = '@' + requester;
+
+            // Ambient background banner
+            var bgEl = modal.querySelector('[data-chat-share-bg]');
+            if (bgEl) {
+                bgEl.style.backgroundImage = resolvedImg ? ('url("' + attr(resolvedImg) + '")') : '';
+            }
+
+            // Album cover artwork
+            var thumbEl = modal.querySelector('[data-chat-share-thumb]');
+            if (thumbEl) {
+                if (resolvedImg) {
+                    thumbEl.innerHTML = '<img class="chat-share-cover-img" src="' + attr(resolvedImg) + '" alt="' + attr(_activeShareOffer.title) + '" loading="lazy">';
+                } else {
+                    thumbEl.innerHTML = resolvedType === 'track' ? '🎵' : '💿';
+                }
+            }
+
+            // Artist circular avatar
+            var arImgEl = modal.querySelector('[data-chat-share-artist-img]');
+            if (arImgEl) {
+                if (resolvedArImg) {
+                    arImgEl.src = resolvedArImg;
+                    arImgEl.hidden = false;
+                    arImgEl.title = _activeShareOffer.artist;
+                } else {
+                    arImgEl.hidden = true;
+                    arImgEl.removeAttribute('src');
+                }
+            }
+
+            var titleEl = modal.querySelector('[data-chat-share-title]');
+            if (titleEl) titleEl.textContent = _activeShareOffer.title;
+
+            var artistNameEl = modal.querySelector('[data-chat-share-artist-name]');
+            if (artistNameEl) {
+                artistNameEl.textContent = _activeShareOffer.artist;
+            } else {
+                var artistEl = modal.querySelector('[data-chat-share-artist]');
+                if (artistEl) artistEl.textContent = _activeShareOffer.artist;
+            }
+
+            var yearEl = modal.querySelector('[data-chat-share-year]');
+            if (yearEl) yearEl.textContent = resolvedYear ? ('(' + resolvedYear + ')') : '';
+
+            var typeEl = modal.querySelector('[data-chat-share-type]');
+            if (typeEl) typeEl.textContent = (resolvedType || 'album').toUpperCase();
+
+            var cntEl = modal.querySelector('[data-chat-share-cnt]');
+            if (cntEl) cntEl.textContent = _activeShareOffer.track_count + ' track' + (_activeShareOffer.track_count === 1 ? '' : 's');
+
+            var sizeEl = modal.querySelector('[data-chat-share-size]');
+            if (sizeEl) sizeEl.textContent = _fmtSize(_activeShareOffer.total_size);
+
+            var fmtEl = modal.querySelector('[data-chat-share-format]');
+            if (fmtEl) fmtEl.textContent = ext;
+
+            // Render tracklist
+            var listEl = modal.querySelector('[data-chat-share-tracks]');
+            if (listEl) {
+                var html = '';
+                _activeShareOffer.tracks.forEach(function (tr, i) {
+                    var fn = _baseName(tr.filename || tr.title || ('Track ' + (i + 1)));
+                    var sz = tr.size ? _fmtSize(tr.size) : '';
+                    html += '<div class="chat-share-track-item">' +
+                        '<span class="chat-share-track-num">' + (tr.track_number || (i + 1)) + '</span>' +
+                        '<span class="chat-share-track-name" title="' + attr(tr.filename) + '">' + esc(fn) + '</span>' +
+                        '<span class="chat-share-track-size">' + esc(sz) + '</span>' +
+                    '</div>';
+                });
+                listEl.innerHTML = html;
+            }
+
+            modal.hidden = false;
+            if (backdrop) backdrop.hidden = false;
+        }).catch(function (err) {
+            if (typeof showToast === 'function') showToast('Failed to check library: ' + err.message, 'error');
+        });
+    }
+
+    function _closeShareConfirmModal() {
+        var modal = q('[data-chat-share-confirm-modal]');
+        var backdrop = q('[data-chat-share-backdrop]');
+        if (modal) modal.hidden = true;
+        if (backdrop) backdrop.hidden = true;
+        _activeShareOffer = null;
+    }
+
+    function _sendActiveShareOffer() {
+        if (!_activeShareOffer) return;
+        var offer = _activeShareOffer;
+        _closeShareConfirmModal();
+
+        // Pack tracks into strings: "filename|size|bitrate|title" (max 32 items for protocol payload)
+        var packed = (offer.tracks || []).slice(0, 32).map(function (tr) {
+            return [
+                tr.filename || '',
+                tr.size || 0,
+                tr.bitrate || 0,
+                (tr.title || '').slice(0, 80)
+            ].join('|');
+        });
+
+        var payload = {
+            to: offer.to,
+            t: (offer.title || '').slice(0, 120),
+            a: (offer.artist || '').slice(0, 120),
+            al: (offer.album || '').slice(0, 120),
+            ty: offer.type || 'album',
+            y: (offer.year || '').slice(0, 4),
+            img: (offer.image_url || '').slice(0, 250),
+            ar_img: (offer.artist_image_url || '').slice(0, 250),
+            cnt: offer.track_count || packed.length,
+            sz: offer.total_size || 0,
+            fmt: (offer.format || 'FLAC').slice(0, 10),
+            dir: (offer.directory || '').slice(0, 200),
+            tr: packed
+        };
+
+        sendProtocol('want.share', payload).then(function (res) {
+            if (typeof showToast === 'function') {
+                showToast('⚡ Sent share offer for "' + offer.title + '" to @' + offer.to + '!', 'success');
+            }
+        }).catch(function (e) {
+            if (typeof showToast === 'function') showToast('Could not send share offer: ' + e.message, 'error');
+        });
+    }
+
+    function _openIncomingShareModal(fromUser, p) {
+        _incomingShareOffer = {
+            from: fromUser,
+            p: p
+        };
+        var modal = q('[data-chat-incoming-share-modal]');
+        var backdrop = q('[data-chat-incoming-backdrop]');
+        if (!modal) return;
+
+        var incImg = p.img || '';
+        var incArImg = p.ar_img || '';
+        var normT = (p.t || '').toLowerCase().trim();
+        var normA = (p.a || '').toLowerCase().trim();
+
+        // If images missing from protocol wire, look up matching cards or art cache
+        if (!incImg || !incArImg) {
+            document.querySelectorAll('.chat-wanted-card').forEach(function (c) {
+                var ct = (c.getAttribute('data-wanted-title') || '').toLowerCase().trim();
+                if (ct && normT && (ct.indexOf(normT) !== -1 || normT.indexOf(ct) !== -1)) {
+                    if (!incImg) incImg = c.getAttribute('data-wanted-img') || '';
+                    if (!incArImg) incArImg = c.getAttribute('data-wanted-artist-img') || '';
+                }
+            });
+            if (!incImg && normA && normT) {
+                incImg = _npArtCache[normA + '|||' + normT] || '';
+            }
+            if (!incArImg && normA) {
+                incArImg = _npArtCache['artist|||' + normA] || '';
+            }
+        }
+
+        var senderEl = modal.querySelector('[data-chat-incoming-sender]');
+        if (senderEl) senderEl.textContent = '@' + fromUser;
+
+        // Ambient background banner
+        var bgEl = modal.querySelector('[data-chat-incoming-bg]');
+        if (bgEl) {
+            bgEl.style.backgroundImage = incImg ? ('url("' + attr(incImg) + '")') : '';
+        }
+
+        // Album cover artwork
+        var thumbEl = modal.querySelector('[data-chat-incoming-thumb]');
+        if (thumbEl) {
+            if (incImg) {
+                thumbEl.innerHTML = '<img class="chat-share-cover-img" src="' + attr(incImg) + '" alt="" loading="lazy">';
+            } else {
+                thumbEl.innerHTML = (p.ty === 'track') ? '🎵' : '💿';
+            }
+        }
+
+        // Artist circular avatar
+        var arImgEl = modal.querySelector('[data-chat-incoming-artist-img]');
+        if (arImgEl) {
+            if (incArImg) {
+                arImgEl.src = incArImg;
+                arImgEl.hidden = false;
+                arImgEl.title = p.a || 'Artist';
+            } else {
+                arImgEl.hidden = true;
+                arImgEl.removeAttribute('src');
+            }
+        }
+
+        var titleEl = modal.querySelector('[data-chat-incoming-title]');
+        if (titleEl) titleEl.textContent = p.t || 'Unknown Title';
+
+        var artistNameEl = modal.querySelector('[data-chat-incoming-artist-name]');
+        if (artistNameEl) {
+            artistNameEl.textContent = p.a || 'Unknown Artist';
+        } else {
+            var artistEl = modal.querySelector('[data-chat-incoming-artist]');
+            if (artistEl) artistEl.textContent = p.a || 'Unknown Artist';
+        }
+
+        var yearEl = modal.querySelector('[data-chat-incoming-year]');
+        if (yearEl) yearEl.textContent = p.y ? ('(' + p.y + ')') : '';
+
+        var typeEl = modal.querySelector('[data-chat-incoming-type]');
+        if (typeEl) typeEl.textContent = (p.ty || 'album').toUpperCase();
+
+        var cntEl = modal.querySelector('[data-chat-incoming-cnt]');
+        if (cntEl) cntEl.textContent = (p.cnt || (p.tr ? p.tr.length : 1)) + ' track' + (p.cnt === 1 ? '' : 's');
+
+        var sizeEl = modal.querySelector('[data-chat-incoming-size]');
+        if (sizeEl) sizeEl.textContent = p.sz ? _fmtSize(p.sz) : '—';
+
+        var fmtEl = modal.querySelector('[data-chat-incoming-format]');
+        if (fmtEl) fmtEl.textContent = p.fmt || 'FLAC';
+
+        var listEl = modal.querySelector('[data-chat-incoming-tracks]');
+        if (listEl) {
+            var html = '';
+            var trs = p.tr || [];
+            trs.forEach(function (s, i) {
+                var parts = String(s).split('|');
+                var fn = _baseName(parts[0] || ('Track ' + (i + 1)));
+                var sz = parts[1] ? _fmtSize(Number(parts[1])) : '';
+                html += '<div class="chat-share-track-item">' +
+                    '<span class="chat-share-track-num">' + (i + 1) + '</span>' +
+                    '<span class="chat-share-track-name" title="' + attr(parts[0]) + '">' + esc(fn) + '</span>' +
+                    '<span class="chat-share-track-size">' + esc(sz) + '</span>' +
+                '</div>';
+            });
+            listEl.innerHTML = html;
+        }
+
+        modal.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+    }
+
+    function _closeIncomingShareModal() {
+        var modal = q('[data-chat-incoming-share-modal]');
+        var backdrop = q('[data-chat-incoming-backdrop]');
+        if (modal) modal.hidden = true;
+        if (backdrop) backdrop.hidden = true;
+        _incomingShareOffer = null;
+    }
+
+    function _acceptIncomingShare(fromUser, p) {
+        var trs = p.tr || [];
+        var files = [];
+        trs.forEach(function (s) {
+            var parts = String(s).split('|');
+            if (parts[0]) {
+                files.push({
+                    filename: parts[0],
+                    size: Number(parts[1]) || 0
+                });
+            }
+        });
+
+        function _dispatchDownload(resolvedFiles) {
+            if (!resolvedFiles || !resolvedFiles.length) {
+                if (typeof showToast === 'function') showToast('No files to download from share offer', 'warning');
+                return;
+            }
+            postJSON('/api/chat/user/' + encodeURIComponent(fromUser) + '/download', { files: resolvedFiles }).then(function (res) {
+                if (!res.ok) {
+                    if (typeof showToast === 'function') {
+                        showToast(res.body && res.body.error || 'Could not queue shared download', 'error');
+                    }
+                    return;
+                }
+                var queued = res.body && res.body.queued || resolvedFiles.length;
+                if (typeof showToast === 'function') {
+                    showToast('📥 Queued ' + queued + ' track' + (queued === 1 ? '' : 's') + ' from @' + fromUser + ' — check Downloads!', 'success');
+                }
+                // Notify room / sharer that share was accepted
+                sendProtocol('want.accept', {
+                    to: fromUser,
+                    t: (p.t || '').slice(0, 120),
+                    a: (p.a || '').slice(0, 120)
+                });
+            });
+        }
+
+        // If files are present, download them. If files list was truncated or empty but directory is given, fetch directory
+        if (files.length > 0 && files.length >= (p.cnt || 0)) {
+            _dispatchDownload(files);
+        } else if (p.dir) {
+            getJSON('/api/chat/user/' + encodeURIComponent(fromUser) + '/shares/files?dir=' + encodeURIComponent(p.dir)).then(function (res) {
+                if (res.ok && res.body && res.body.files && res.body.files.length) {
+                    _dispatchDownload(res.body.files.map(function (f) {
+                        return { filename: f.filename, size: f.size || 0 };
+                    }));
+                } else if (files.length > 0) {
+                    _dispatchDownload(files);
+                } else {
+                    if (typeof showToast === 'function') showToast('Could not retrieve file list from @' + fromUser, 'error');
+                }
+            }).catch(function () {
+                if (files.length > 0) _dispatchDownload(files);
+            });
+        } else if (files.length > 0) {
+            _dispatchDownload(files);
+        } else {
+            if (typeof showToast === 'function') showToast('Share offer contained no file paths', 'error');
+        }
+    }
+
+    function _handleWantedShareEvents(fresh) {
+        if (!fresh || !fresh.length) return;
+        var isLive = state.pingArmed && !state.loadingOlder;
+        fresh.forEach(function (ev) {
+            if (!ev || !ev.p) return;
+            var p = ev.p;
+            if (p.k === 'want.share') {
+                var isForMe = p.to && (p.to.toLowerCase() === (state.selfName || '').toLowerCase());
+                // Update badges on matching wanted cards in the DOM
+                _markWantedCardStatus(p.t, p.a, '⚡ Offered by @' + ev.username, 'chat-wanted-badge--shared');
+
+                var offerKey = ev.username + '|' + (ev.timestamp || '') + '|' + (p.t || '');
+                if (!_handledShareOffers[offerKey]) {
+                    _handledShareOffers[offerKey] = true;
+                    if (isLive && isForMe && ev.username !== state.selfName) {
+                        _chatPing();
+                        var autoShare = false;
+                        try { autoShare = localStorage.getItem('chat_autoshare') === '1'; } catch (e) { /* ignore */ }
+                        if (autoShare) {
+                            if (typeof showToast === 'function') {
+                                showToast('⚡ Auto-accepting share for "' + (p.t || 'release') + '" from @' + ev.username + '…', 'info');
+                            }
+                            _acceptIncomingShare(ev.username, p);
+                        } else {
+                            _openIncomingShareModal(ev.username, p);
+                        }
+                    }
+                }
+            } else if (p.k === 'want.accept') {
+                var isForMeSharer = p.to && (p.to.toLowerCase() === (state.selfName || '').toLowerCase());
+                if (isLive && isForMeSharer && ev.username !== state.selfName) {
+                    if (typeof showToast === 'function') {
+                        showToast('🎉 @' + ev.username + ' accepted your share of "' + (p.t || 'wanted release') + '"!', 'success');
+                    }
+                }
+                // Mark cards as fulfilled
+                _markWantedCardStatus(p.t, p.a, '✓ Fulfilled by @' + (p.to || ev.username), 'chat-wanted-badge--fulfilled');
+            }
+        });
+    }
+
+    function _markWantedCardStatus(title, artist, text, className) {
+        if (!title) return;
+        var normT = title.toLowerCase().trim();
+        var cards = document.querySelectorAll('.chat-wanted-card');
+        cards.forEach(function (card) {
+            var cT = (card.getAttribute('data-wanted-title') || '').toLowerCase().trim();
+            if (cT === normT || (cT && normT && (cT.indexOf(normT) !== -1 || normT.indexOf(cT) !== -1))) {
+                var header = card.querySelector('.chat-wanted-header');
+                if (header) {
+                    var existing = header.querySelector('.' + className);
+                    if (!existing) {
+                        var badge = document.createElement('span');
+                        badge.className = 'chat-wanted-badge ' + className;
+                        badge.textContent = text;
+                        badge.title = text;
+                        header.appendChild(badge);
+                    }
+                }
+            }
+        });
+    }
+
     async function _addWantedToWishlist(w) {
         if (!w || (!w.t && !w.a)) return;
         var title = w.t || 'Unknown Title';
@@ -2254,8 +2787,12 @@
         }
 
         // 3. Build albumObj and tracks array with full context
+        var artistImg = (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists[0] && fullAlbumData.artists[0].image_url) || w.ar_img || _npArtCache['artist|||' + artist.toLowerCase().trim()] || '';
+        var artistId = (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists[0] && fullAlbumData.artists[0].id) || w.ar_id || null;
+        var albumId = (fullAlbumData && fullAlbumData.id) || w.al_id || id || null;
+
         var albumObj = {
-            id: id || null,
+            id: albumId,
             name: (fullAlbumData && fullAlbumData.name) || albumName,
             album_type: ty,
             image_url: (fullAlbumData && fullAlbumData.images && fullAlbumData.images[0] && fullAlbumData.images[0].url) || imgUrl,
@@ -2264,16 +2801,16 @@
                 : (imgUrl ? [{ url: imgUrl }] : []),
             artists: (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists.length)
                 ? fullAlbumData.artists
-                : [{ name: artist }],
+                : [{ name: artist, id: artistId, image_url: artistImg }],
             release_date: (fullAlbumData && fullAlbumData.release_date) || w.y || '',
-            total_tracks: (fullAlbumData && fullAlbumData.total_tracks) || 0,
+            total_tracks: (fullAlbumData && fullAlbumData.total_tracks) || w.tot || 0,
             source: src
         };
 
         var artistObj = {
-            id: (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists[0] && fullAlbumData.artists[0].id) || null,
+            id: artistId,
             name: artist,
-            image_url: '',
+            image_url: artistImg,
             source: src
         };
 
@@ -6741,6 +7278,12 @@
                 try { nOn = localStorage.getItem('chat_np') === '1'; } catch (err) { /* ignore */ }
                 el.checked = nOn;
             }
+            el = q('[data-chat-set-autoshare]');
+            if (el) {
+                var autoOn = false;
+                try { autoOn = localStorage.getItem('chat_autoshare') === '1'; } catch (err) { /* ignore */ }
+                el.checked = autoOn;
+            }
             // server copy wins on open — it's the one that followed the account
             if (typeof b.avatar !== 'undefined') {
                 try { localStorage.setItem('chat_avatar', String(_avatarId(b.avatar))); } catch (err) { /* ignore */ }
@@ -6779,6 +7322,10 @@
             if (!nEl.checked && state.canSend && state.view === 'room') {
                 try { sendProtocol('np.set', {}); } catch (err) { /* not in a room */ }
             }
+        }
+        var asEl = q('[data-chat-set-autoshare]');
+        if (asEl) {
+            try { localStorage.setItem('chat_autoshare', asEl.checked ? '1' : '0'); } catch (err) { /* ignore */ }
         }
         postJSON('/api/chat/settings', payload).then(function (res) {
             if (!res.ok) {
@@ -9426,6 +9973,37 @@
                 }
                 return;
             }
+            t = e.target.closest('[data-chat-wanted-share]');
+            if (t) {
+                var cShare = t.closest('.chat-wanted-card');
+                _onShareWanted(
+                    t.getAttribute('data-wanted-user') || '',
+                    t.getAttribute('data-wanted-title') || '',
+                    t.getAttribute('data-wanted-artist') || '',
+                    cShare ? cShare.getAttribute('data-wanted-album') || '' : '',
+                    cShare ? cShare.getAttribute('data-wanted-type') || 'album' : 'album',
+                    cShare
+                );
+                return;
+            }
+            t = e.target.closest('[data-chat-share-close]') || e.target.closest('[data-chat-share-cancel]') || e.target.closest('[data-chat-share-backdrop]');
+            if (t) { _closeShareConfirmModal(); return; }
+
+            t = e.target.closest('[data-chat-share-send-btn]');
+            if (t) { _sendActiveShareOffer(); return; }
+
+            t = e.target.closest('[data-chat-incoming-close]') || e.target.closest('[data-chat-incoming-decline]') || e.target.closest('[data-chat-incoming-backdrop]');
+            if (t) { _closeIncomingShareModal(); return; }
+
+            t = e.target.closest('[data-chat-incoming-accept]');
+            if (t) {
+                if (_incomingShareOffer) {
+                    var inc = _incomingShareOffer;
+                    _closeIncomingShareModal();
+                    _acceptIncomingShare(inc.from, inc.p);
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-wanted-have]');
             if (t) {
                 _onHaveWanted(
@@ -9979,6 +10557,10 @@
                 if (socD && !socD.hidden) { closeSocialModal(); }
                 var wantD = q('[data-chat-want-modal]');
                 if (wantD && !wantD.hidden) { closeWantedModal(); }
+                var shareM = q('[data-chat-share-confirm-modal]');
+                if (shareM && !shareM.hidden) { _closeShareConfirmModal(); }
+                var incM = q('[data-chat-incoming-share-modal]');
+                if (incM && !incM.hidden) { _closeIncomingShareModal(); }
             }
         });
 
@@ -10371,6 +10953,7 @@
             renderBusUI();
             _arcAnswerSyncs(fresh);
             _arcNoticeChallenges(fresh);
+            _handleWantedShareEvents(fresh);
             try {
                 document.dispatchEvent(new CustomEvent('soulsync:chat-protocol',
                     { detail: { events: fresh } }));

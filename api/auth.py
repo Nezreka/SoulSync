@@ -96,6 +96,21 @@ def require_api_key(f):
         if _should_persist_usage(key_hash, now):
             config_mgr.set("api_keys", stored_keys)
 
+        # a key is minted by an admin and acts with admin rights. the session
+        # gates ran first and may have left no profile (login/pin mode, or a
+        # multi-profile install with nothing picked), which made v1 admin
+        # routes like request approve answer "Admin only" to a valid key.
+        try:
+            from flask import g
+            g.is_admin = True
+            g.can_download = True
+            g.allowed_sides = 'both'
+            if getattr(g, 'profile_id', None) is None:
+                g.profile_id = 1
+                g.profile_name = matched.get("label") or "API"
+        except RuntimeError:
+            pass
+
         return f(*args, **kwargs)
 
     return decorated

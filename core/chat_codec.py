@@ -383,5 +383,32 @@ def want_of(payload) -> dict | None:
             out["dur"] = dur
     except (TypeError, ValueError):
         pass
+    ar_id = str(w.get("ar_id") or "").strip()[:120]
+    if ar_id:
+        out["ar_id"] = ar_id
+    ar_img = str(w.get("ar_img") or "").strip()[:1000]
+    if ar_img and (ar_img.startswith("https://") or ar_img.startswith("http://") or ar_img.startswith("/api/")):
+        out["ar_img"] = ar_img
+    al_id = str(w.get("al_id") or "").strip()[:120]
+    if al_id:
+        out["al_id"] = al_id
+    try:
+        tot = int(w.get("tot") or 0)
+        if 0 < tot < 10000:
+            out["tot"] = tot
+    except (TypeError, ValueError):
+        pass
+    try:
+        tn = int(w.get("tn") or 0)
+        if 0 < tn < 1000:
+            out["tn"] = tn
+    except (TypeError, ValueError):
+        pass
+    try:
+        disc = int(w.get("disc") or 0)
+        if 0 < disc < 100:
+            out["disc"] = disc
+    except (TypeError, ValueError):
+        pass
     return out
 

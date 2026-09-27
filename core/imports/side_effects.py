@@ -384,7 +384,7 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
         acquired_quality_json, retention_json = _retention_provenance_json(context)
 
         db = get_database()
-        db.record_track_download(
+        download_row_id = db.record_track_download(
             file_path=file_path,
             source_service=source_service,
             source_username=username,
@@ -409,6 +409,9 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
             acquired_quality_json=acquired_quality_json,
             retention_json=retention_json,
         )
+        # the "why this file" record for the task that fetched it
+        if download_row_id and context.get("task_id"):
+            db.link_download_decision(context["task_id"], download_row_id)
     except Exception as e:
         logger.debug("record_download_provenance failed: %s", e)
 

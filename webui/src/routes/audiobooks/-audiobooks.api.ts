@@ -402,9 +402,7 @@ export async function setNarratorMode(
 
 export async function clearAudiobookWishlist(): Promise<boolean> {
   try {
-    const data = await readJson<MutationResponse>(
-      audiobookClient.delete('audiobooks/wishlist'),
-    );
+    const data = await readJson<MutationResponse>(audiobookClient.delete('audiobooks/wishlist'));
     return Boolean(data?.success);
   } catch (err) {
     console.error('Failed to clear audiobook wishlist:', err);
@@ -418,7 +416,13 @@ export async function searchWishlistBook(
   if (!asin) return { success: false, error: 'No ASIN provided' };
   try {
     const data = await readJson<{ success?: boolean; outcome?: any; error?: string }>(
-      audiobookClient.post(`audiobooks/wishlist/${encodeURIComponent(asin)}/search`, { json: {} }),
+      // Searches every enabled source, often several queries each (Soulseek
+      // alone polls up to 45s per query), so ky's 10s default always fired
+      // while the server carried on and finished.
+      audiobookClient.post(`audiobooks/wishlist/${encodeURIComponent(asin)}/search`, {
+        json: {},
+        timeout: 300_000,
+      }),
     );
     return { success: Boolean(data?.success), outcome: data?.outcome, error: data?.error };
   } catch (err: any) {
@@ -431,7 +435,8 @@ export async function searchWishlistBook(
 export async function runWishlistPass(force = true): Promise<Record<string, number> | null> {
   try {
     const data = await readJson<{ success?: boolean; summary?: Record<string, number> }>(
-      audiobookClient.post('audiobooks/wishlist/search', { json: { force } }),
+      // A whole pass is one search per wanted book, so it has no upper bound.
+      audiobookClient.post('audiobooks/wishlist/search', { json: { force }, timeout: false }),
     );
     return data?.success ? (data.summary ?? null) : null;
   } catch (err) {

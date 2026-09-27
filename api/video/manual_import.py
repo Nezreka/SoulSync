@@ -118,13 +118,34 @@ def register_routes(bp):
         settings = organization.load(db)
         prober = probe if settings.get("verify_with_ffprobe", True) else None
         from core.video.recycle import discarder
-        patch = run_import(row, src, fs=real_fs(), prober=prober, settings=settings,
-                           force=True, override=override, recycle=discarder(db, settings))
+        from core.video.importer import plan_import
+        from core.video.download_monitor import _expected_duration_sec, _reclaim_source
+        fs = real_fs()
+        # Plan first and persist the destination BEFORE the file moves (same
+        # crash-window reasoning as the automatic path in download_monitor).
+        try:
+            probe_info = prober(src) if prober is not None else None
+        except Exception:   # noqa: BLE001 - a probe crash must not block the import
+            probe_info = None
+        plan = plan_import(row, src, list_dir=fs.list_dir, probe=probe_info,
+                           settings=settings, force=True, override=override,
+                           expected_duration_sec=_expected_duration_sec(db, row))
+        if plan["action"] in ("import", "upgrade") and plan.get("dest"):
+            try:
+                db.update_video_download(dl_id, dest_path=plan["dest"]["path"])
+            except Exception:   # noqa: BLE001, S110 - best-effort
+                pass
+        patch = run_import(row, src, fs=fs, settings=settings,
+                           force=True, override=override, recycle=discarder(db, settings),
+                           plan=plan)
         try:
             db.update_video_download(dl_id, **patch)
         except Exception:
             logger.exception("manual place: failed to persist import %s", dl_id)
             return jsonify({"success": False, "error": "Couldn't save the result."}), 500
+        # The row is persisted — now reclaim the download copy (see run_import).
+        if patch.get("status") == "completed":
+            _reclaim_source(patch.get("_cleanup_source"))
         ok = patch.get("status") == "completed"
         if ok:
             # Write NFO + artwork sidecars for the chosen identity (best-effort), then

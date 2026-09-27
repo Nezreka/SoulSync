@@ -46,9 +46,7 @@ describe('podcasts route', () => {
       expect(screen.getByRole('heading', { name: 'Podcasts' })).toBeInTheDocument();
     });
 
-    expect(
-      screen.getByPlaceholderText(/Search podcasts by title, topic, or host/i),
-    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Search podcasts or paste RSS URL/i)).toBeInTheDocument();
 
     // Check category pills
     expect(screen.getByRole('tab', { name: /Trending/i })).toBeInTheDocument();

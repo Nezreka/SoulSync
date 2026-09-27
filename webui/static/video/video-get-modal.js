@@ -777,6 +777,12 @@
     // Returns a positioned wrapper holding 0–2 buttons.
     function cardButton(o) {
         if (!o || !o.kind) return '';
+        // a profile without download rights asks instead: the get modal and the
+        // watchlist are gated for it. owned titles have nothing left to ask for.
+        if ((o.kind === 'movie' || o.kind === 'show') && typeof canDownload === 'function' && !canDownload()) {
+            var ask = (o.source !== 'library' && window.VideoRequests) ? VideoRequests.cardButton(o) : '';
+            return ask ? '<span class="vcard-ctrls">' + ask + '</span>' : '';
+        }
         var parts = [];
         if (o.kind === 'person') {
             if (window.VideoWatchlist) parts.push(VideoWatchlist.btn({ kind: 'person', tmdbId: o.tmdbId, title: o.title, poster: o.poster }));

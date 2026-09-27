@@ -38,7 +38,7 @@ interface Props {
  * new tab or toggled the watchlist. Without it every badge would just navigate
  * to artist detail.
  */
-function badgeClickHandler(action?: () => void) {
+export function badgeClickHandler(action?: () => void) {
   return (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -46,7 +46,7 @@ function badgeClickHandler(action?: () => void) {
   };
 }
 
-function BadgeIcon({ badge }: { badge: ArtistBadge }) {
+export function BadgeIcon({ badge }: { badge: ArtistBadge }) {
   const onClick = badgeClickHandler(
     badge.url ? () => window.open(badge.url as string, '_blank') : undefined,
   );
@@ -264,6 +264,14 @@ export function LibraryArtistCard({
         </h3>
         <div className="library-artist-stats">
           {tracks ? <span className="library-artist-stat">{tracks}</span> : null}
+          {artist.upgradable_count ? (
+            <span
+              className="library-artist-stat library-artist-upgradable"
+              title="Tracks below their quality profile"
+            >
+              {artist.upgradable_count} could be better
+            </span>
+          ) : null}
         </div>
       </div>
     </a>

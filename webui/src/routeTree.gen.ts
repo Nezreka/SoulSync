@@ -16,6 +16,7 @@ import { Route as ToolsRouteRouteImport } from './routes/tools/route'
 import { Route as SyncRouteRouteImport } from './routes/sync/route'
 import { Route as StatsRouteRouteImport } from './routes/stats/route'
 import { Route as SearchRouteRouteImport } from './routes/search/route'
+import { Route as RequestsRouteRouteImport } from './routes/requests/route'
 import { Route as PodcastsRouteRouteImport } from './routes/podcasts/route'
 import { Route as PlaylistExplorerRouteRouteImport } from './routes/playlist-explorer/route'
 import { Route as LibraryRouteRouteImport } from './routes/library/route'
@@ -76,6 +77,11 @@ const StatsRouteRoute = StatsRouteRouteImport.update({
 const SearchRouteRoute = SearchRouteRouteImport.update({
   id: '/search',
   path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RequestsRouteRoute = RequestsRouteRouteImport.update({
+  id: '/requests',
+  path: '/requests',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PodcastsRouteRoute = PodcastsRouteRouteImport.update({
@@ -221,6 +227,7 @@ export interface FileRoutesByFullPath {
   '/library': typeof LibraryRouteRoute
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
   '/podcasts': typeof PodcastsRouteRouteWithChildren
+  '/requests': typeof RequestsRouteRoute
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
   '/sync': typeof SyncRouteRoute
@@ -253,6 +260,7 @@ export interface FileRoutesByTo {
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
+  '/requests': typeof RequestsRouteRoute
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
   '/sync': typeof SyncRouteRoute
@@ -289,6 +297,7 @@ export interface FileRoutesById {
   '/library': typeof LibraryRouteRoute
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
   '/podcasts': typeof PodcastsRouteRouteWithChildren
+  '/requests': typeof RequestsRouteRoute
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
   '/sync': typeof SyncRouteRoute
@@ -326,6 +335,7 @@ export interface FileRouteTypes {
     | '/library'
     | '/playlist-explorer'
     | '/podcasts'
+    | '/requests'
     | '/search'
     | '/stats'
     | '/sync'
@@ -358,6 +368,7 @@ export interface FileRouteTypes {
     | '/issues'
     | '/library'
     | '/playlist-explorer'
+    | '/requests'
     | '/search'
     | '/stats'
     | '/sync'
@@ -393,6 +404,7 @@ export interface FileRouteTypes {
     | '/library'
     | '/playlist-explorer'
     | '/podcasts'
+    | '/requests'
     | '/search'
     | '/stats'
     | '/sync'
@@ -429,6 +441,7 @@ export interface RootRouteChildren {
   LibraryRouteRoute: typeof LibraryRouteRoute
   PlaylistExplorerRouteRoute: typeof PlaylistExplorerRouteRoute
   PodcastsRouteRoute: typeof PodcastsRouteRouteWithChildren
+  RequestsRouteRoute: typeof RequestsRouteRoute
   SearchRouteRoute: typeof SearchRouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
   SyncRouteRoute: typeof SyncRouteRoute
@@ -489,6 +502,13 @@ declare module '@tanstack/react-router' {
       path: '/search'
       fullPath: '/search'
       preLoaderRoute: typeof SearchRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/requests': {
+      id: '/requests'
+      path: '/requests'
+      fullPath: '/requests'
+      preLoaderRoute: typeof RequestsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/podcasts': {
@@ -744,6 +764,7 @@ const rootRouteChildren: RootRouteChildren = {
   LibraryRouteRoute: LibraryRouteRoute,
   PlaylistExplorerRouteRoute: PlaylistExplorerRouteRoute,
   PodcastsRouteRoute: PodcastsRouteRouteWithChildren,
+  RequestsRouteRoute: RequestsRouteRoute,
   SearchRouteRoute: SearchRouteRoute,
   StatsRouteRoute: StatsRouteRoute,
   SyncRouteRoute: SyncRouteRoute,

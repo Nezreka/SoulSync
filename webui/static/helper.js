@@ -3460,27 +3460,23 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.4.5': [
-        { date: 'September 2026 · 3.4.5' },
-        { title: 'Login gate fails closed', desc: 'A config read error no longer drops the login requirement, and unauthenticated sessions get no profile, admin or download rights instead of falling back to profile 1 (GHSA-j7g5-8j44-jqhm).', page: 'settings' },
-        { title: 'Stricter MusicBrainz matching', desc: 'Live, acoustic and language versions no longer match the plain recording, and transient MusicBrainz outages are no longer cached as a 30-day miss.', page: 'library' },
-        { title: 'Artist aliases reach recordings', desc: 'When the printed credit is in another script (山下達郎 for Tatsuro Yamashita), the matcher resolves the artist by alias and pins the recording search to its MBID. Shared or unknown names are refused rather than guessed.', page: 'library' },
-        { title: 'Better ListenBrainz exports', desc: 'Repair-flagged MBIDs are skipped instead of exported, and a new ISRC rung resolves tracks through the discovery match, so dual-title and romanised tracks export too.', page: 'sync' },
-        { title: 'MP3 quality upgrades replace the old copy', desc: 'Quality Upgrade Finder now replaces lower-bitrate MP3s with better MP3s under the assigned profile (#1270). Ordinary wishlist downloads stay protected, and upgrades keep integrity and length checks.', page: 'tools' },
-        { title: 'ListenBrainz and Maloja listens import', desc: 'Pull your ListenBrainz or Maloja listening history the same way as Last.fm: run once to backfill, hourly sync after, cancel, live status in the downloads tray, an automation block, and cross-source deduplication.', page: 'stats' },
-        { title: 'Smarter Soulseek picks', desc: 'Searches keep every late response and stop on slskd\'s real terminal state, candidates rank by observed peer speed inside confidence bands, and files are matched by several plausible title readings instead of one guess (#1262).', page: 'settings' },
-        { title: 'Retry slow Soulseek downloads', desc: 'Opt-in: a transfer sustained under 250 KB/s for a full window moves to the next validated peer, keeping the slow one as a last resort. Off by default in Soulseek settings.', page: 'settings' },
-        { title: 'Batches never stick in downloading', desc: 'Publish attempts are bounded, a healer errors batches with no live workers, failed publishes are retried until the budget runs out, and their staging is kept for manual recovery (#1277).', page: 'active-downloads' },
-        { title: 'Hybrid fallback on failure', desc: 'When a Soulseek transfer gives up, the failed transfer is cancelled in slskd, that source is marked exhausted and the worker moves to the next configured source such as YouTube.', page: 'active-downloads' },
-        { title: 'Deezer streaming and URLs', desc: 'Deezer as primary source no longer fails with "file not found" when streaming, and pasted Deezer track or album URLs resolve directly in search and album match.', page: 'search' },
-        { title: 'Own-library profiles warn loudly', desc: 'On a server without own-library support, downloads used to route silently to the shared folder. Now there is a warning log, one notification, and a warning on the settings save (#1276). Search downloads carry the profile too (#1279).', page: 'settings' },
-        { title: 'Compilations and artist credits', desc: 'Reorganize honours a manual compilation record_type, auto-detects multi-artist releases and separates album artist from track artist in templates. Navidrome and standalone scans record per-track artist credits.', page: 'library' },
-        { title: 'Comma-artist repair no longer loops', desc: 'Zero-padded ID3v2.4 tags read as two values and made every finding stale forever. Already-split files are skipped by the scan and resolved by the fix.', page: 'tools' },
-        { title: 'Audiobook wishlist redesign', desc: 'Dual view mode, 3D covers, live text filtering, quick-remove, Clear All and a targeted single-book search. Manual passes skip the cooldown and short releases are dropped.', page: 'wishlist' },
-        { title: 'Chat emoji and attachments', desc: 'New emoji picker with shortcode autocomplete, animated emojis that stay static until hovered, a hover action bar with quick reactions, and attachments in plain rooms and DMs.', page: 'chat' },
-        { title: 'No more fsync stalls on big libraries', desc: 'Database connections use synchronous=NORMAL under WAL, so commits no longer fsync one at a time and every endpoint stops timing out every few minutes on large libraries (#1267).', page: 'library' },
-        { title: 'Faster Docker builds', desc: 'The commit SHA moved below the heavy runtime layers so the build cache can hit on both architectures.' },
-        { title: 'Earlier versions', desc: '3.4.4 added a library and server account per profile, safer deep scans, folded-track sync reporting and weekly cleanup. 3.4.3 introduced the import inbox and Picard-style matcher.' },
+    '3.4.7': [
+        { date: 'September 2026 · 3.4.7' },
+        { title: 'Profiles rebuilt', desc: 'A "who\'s here?" picker, a pin pad with a lockout countdown, a quick-switch menu on your avatar, and add or edit with adult, teen, kids and guest presets. A browser with no profile picked no longer gets admin rights.' },
+        { title: 'Kids limits', desc: 'Hide explicit music and cap movie and TV ratings per profile. Anything over the cap or unrated is left out of lists and refused on play.' },
+        { title: 'Invites, devices and audit log', desc: 'One-use invite links with an access preset, turn a profile off without deleting it, sign one browser out from the devices list, sign out everywhere on a new password, and an admin audit log.' },
+        { title: 'Music requests', desc: 'Profiles that ask first send requests instead of downloading. Admins approve or decline on the new Requests page, and only approved rows download.' },
+        { title: 'Video requests', desc: 'Grouped by title, pick seasons for shows, progress like "3 of 10 episodes", a quality profile per request, and request quotas.' },
+        { title: 'Issues rebuilt', desc: 'A thread per issue, followers instead of duplicates, the fix action as the main button, bulk triage for admins, and "report a problem" from the player.', page: 'issues' },
+        { title: 'Help & Docs rebuilt', desc: 'Rewritten against the current app with search (/ or Ctrl+K), a table of contents, deep links and a mobile layout (#1310).', page: 'help' },
+        { title: 'Appears on', desc: 'Featured artists and collab albums now show on every credited artist\'s page, not just the first one.', page: 'library' },
+        { title: 'Collab album tags', desc: 'Collab albums are tagged with every album artist where Navidrome reads it, and fresh installs write the multi-value artists tag by default.', page: 'settings' },
+        { title: 'Labels and genres as multi-values', desc: 'A label list like "Columbia;BMG" is written as separate values, and genres follow the write multi-value setting (#1305).', page: 'settings' },
+        { title: 'Non-latin titles match correctly', desc: 'Japanese, Hebrew and Cyrillic titles no longer fold to nothing and match each other at 100%, so track number repair stops renumbering them (#1306).', page: 'tools' },
+        { title: 'Watchlist fixes', desc: 'Watched artists read as watched on their page (#1308), and scans re-check recent days so late-listed releases are not missed (#1309).' },
+        { title: 'ListenBrainz catches up', desc: 'History imported into ListenBrainz after your first sync is picked up now (#1311).', page: 'stats' },
+        { title: 'Search and download fixes', desc: 'Files results scroll instead of clipping (#1313), Deezer retries a failed login, and video imports survive permission errors on network shares.', page: 'search' },
+        { title: 'Earlier versions', desc: '3.4.6 rebuilt search, added per-profile listening history, a redesigned dashboard and a safer wishlist. 3.4.5 added the login-gate security fix and stricter MusicBrainz matching.' },
     ],
 };
 
@@ -3510,34 +3506,30 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.4.5: strict matching, safer login, smarter downloads',
-        description: 'A login-gate security fix, a much stricter MusicBrainz matcher with alias support, MP3 quality upgrades, ListenBrainz and Maloja listens import, and fixes across downloads, profiles, audiobooks and chat.',
+        title: '3.4.7: profiles, requests and a new help page',
+        description: 'Profiles, requests and issues rebuilt with kids limits and invites, a new Help & Docs page, every credited artist on their own page, and tagging and matching fixes.',
         features: [
-            'Login gate fails closed (GHSA-j7g5-8j44-jqhm): a transient config read error keeps the gate up, unauthenticated sessions are isolated with no profile, admin or download rights, and a WebSocket gate fault blocks the connection.',
-            'MusicBrainz matching rejects cross-version recordings (live, acoustic, language versions), stops caching outages as 30-day negative matches, and reaches recordings credited in another script by resolving the artist through its aliases and pinning the search to the artist MBID. Ambiguous names are refused rather than guessed.',
-            'ListenBrainz exports skip repair-flagged MBIDs, clear the DB column when the repair job fixes a file, and gain an ISRC rung that resolves through the discovery match. Thanks @nstrelow (#1271, #1272, #1273, #1274, #1275).',
-            'MP3 quality upgrades (#1270): finder-approved wishlist downloads replace a lower-bitrate MP3 under the assigned profile. Filenames are reused, MP3-only profiles refuse FLAC, and integrity and length guards still apply.',
-            'ListenBrainz and Maloja listens import on the Stats page with the same run, cancel and live status as the Last.fm pull, hourly sync once started, an automation block, and cross-source deduplication shared with Last.fm and server history.',
-            'Soulseek overhaul (@mandos21, #1262): searches merge every late response and stop on slskd\'s real terminal state, candidates rank by observed peer throughput within confidence bands, filenames are read through several plausible interpretations that grade rather than reject, album folders need one-to-one track coverage, and an opt-in slow-transfer retry (off by default, 250 KB/s floor) moves to a faster validated peer. Wishlist completion requires the recorded import destination.',
-            'Downloads: batches can no longer stick in downloading (#1277), failed publishes retry and keep their staging for recovery, failed Soulseek transfers fall back to the next hybrid source, Deezer streaming finds its file, pasted Deezer URLs resolve directly (@mon5termatt, #1281), and search downloads carry the profile for own-library routing (#1279).',
-            'Profiles and library: own-library profiles on an unsupported server warn loudly instead of routing silently (#1276), Navidrome and standalone scans record per-track artist credits (@sarab97, #1278), reorganize honours manual compilations and auto-detects multi-artist releases, and the comma-artist repair no longer loops on zero-padded tags.',
-            'Audiobooks: redesigned wishlist with dual view, 3D covers, filtering, quick-remove, Clear All and targeted search; manual passes skip the cooldown; release scoring drops short releases and protects soundtracks.',
-            'Chat: emoji picker overhaul with shortcode autocomplete, static-until-hover animated emojis, a hover action bar with quick reactions, attachments in plain rooms and DMs, and fixed DM popovers.',
-            'Large libraries no longer stall every few minutes: database connections use synchronous=NORMAL under WAL instead of fsyncing every commit, and stay on FULL if WAL is not active (@jcosmao, #1267).',
-            'Docker builds cache the venv, apt and Deno layers across commits (@splitsec2, #1282).',
+            'Profiles: a browser with no profile picked no longer gets admin rights, pins have a real brute-force limit, and a new picker, pin pad and quick-switch menu. Presets for adult, teen, kids and guest.',
+            'Kids limits hide explicit music and cap movie and TV ratings per profile. Invite links, turn a profile off, per-device sign out, sign out everywhere and an admin audit log.',
+            'Music requests: profiles that ask first send requests, admins approve on the new Requests page. Video requests pick seasons, show progress and respect quotas.',
+            'Issues: threads, followers, bulk triage and one fix button per category, shared by music and video.',
+            'Help & Docs rebuilt against the current app, with search, a table of contents, deep links and a mobile layout (#1310).',
+            'Featured artists and collab albums show under Appears on for every credited artist, and collab albums are tagged with every album artist.',
+            'Labels and genres are written as real multi-values (#1305). Non-latin titles no longer match each other at 100% (#1306).',
+            'Fixes: watchlist state on artist pages and late-listed releases (#1308, #1309), ListenBrainz history imported later (#1311), files search scrolling (#1313), Deezer login retry, and video imports on network shares.',
         ],
-        usage_note: 'Matching is stricter now: a track that used to match a live or acoustic version will show as unmatched until the right recording is found. Retry slow Soulseek downloads is off by default; enable it in Soulseek settings.',
+        usage_note: 'Set up profiles, kids limits and invites from Manage Profiles on the sidebar avatar.',
     },
     {
-        title: 'Earlier in 3.4.4',
-        description: 'A music library and server account per profile, safer deep scans, folded-track sync reporting, optional weekly cleanup, and chat room fixes.',
+        title: 'Earlier in 3.4.6',
+        description: 'Search rebuilt, per-profile listening history from ListenBrainz or Last.fm, a redesigned dashboard and Your Library tab, and a wishlist that keeps staged tracks.',
         features: [],
     },
 ];
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.4.5';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.4.7';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns
@@ -3566,7 +3558,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '3.4.5';
+    return versions[0] || '3.4.6';
 }
 
 function openWhatsNew() {

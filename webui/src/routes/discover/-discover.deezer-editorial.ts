@@ -79,9 +79,7 @@ export async function fetchDeezerEditorial(genreId: number): Promise<DeezerEdito
  * The server has supported ?q= since the shelf shipped; nothing called it, so
  * the capability existed and no user could reach it.
  */
-export async function searchDeezerPlaylists(
-  query: string,
-): Promise<DeezerEditorialPlaylist[]> {
+export async function searchDeezerPlaylists(query: string): Promise<DeezerEditorialPlaylist[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
   try {

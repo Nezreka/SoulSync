@@ -16,6 +16,7 @@ import {
   watchlistIdentity,
 } from '../-artist-detail.api';
 import { backButtonLabel, pushArtistOrigin, pushPageOrigin } from '../-artist-detail.back-label';
+import { peekArtistEdit } from '../-artist-detail.edit-focus';
 import {
   readEnhancedViewMode,
   showsEnhancedToggle,
@@ -44,6 +45,7 @@ import { useCompletionStream } from '../-artist-detail.use-completion';
 import { useEnhancedData } from '../-artist-detail.use-enhanced';
 import { useGapFill } from '../-artist-detail.use-gap-fill';
 import { clearVanillaArtist, syncVanillaArtist } from '../-artist-detail.vanilla-state';
+import { AppearsOnSection } from './appears-on-section';
 import { ArtistDetailBackButton } from './artist-detail-back-button';
 import { ArtistHero } from './artist-hero';
 import { ArtistVideosSection } from './artist-videos-section';
@@ -61,7 +63,7 @@ export function ArtistDetailPage() {
   // Deliberately NOT profile-scoped: /api/artist-detail is not, and the
   // vanilla never keyed this page on a profile either.
   const { source, id } = Route.useParams();
-  const { name } = Route.useSearch();
+  const { name, album: focusAlbumId } = Route.useSearch();
 
   const query = useQuery(artistDetailQueryOptions(source, id, name));
 
@@ -127,7 +129,16 @@ export function ArtistDetailPage() {
    */
   const profile = useProfile();
   const canEnhance = showsEnhancedToggle(Boolean(profile?.isAdmin), sourceOnly);
-  const [enhanced, setEnhanced] = useState(() => readEnhancedViewMode(profile?.profileId));
+  // Two ways to land here in the library view whatever was saved: an issue's
+  // "edit details", and ?album= from the library's album grid. Both name an
+  // album you OWN, and only this view lists those. Both are one-visit
+  // overrides — the stored preference is read, never rewritten.
+  const [enhanced, setEnhanced] = useState(
+    () =>
+      Boolean(focusAlbumId) ||
+      Boolean(peekArtistEdit(id)) ||
+      readEnhancedViewMode(profile?.profileId),
+  );
   const showEnhanced = canEnhance && enhanced;
   const enhancedState = useEnhancedData(payload?.artist?.id, showEnhanced);
 
@@ -485,6 +496,7 @@ export function ArtistDetailPage() {
                 status={enhancedState.status}
                 isAdmin={Boolean(profile?.isAdmin)}
                 onReload={enhancedState.reload}
+                focusAlbumId={focusAlbumId}
               />
             </div>
           ) : (
@@ -511,6 +523,15 @@ export function ArtistDetailPage() {
           {/* Live dates and setlists. Renders nothing unless a concert
               provider is configured, so it costs an unconfigured install
               exactly one request that answers "not set up". */}
+          {/* features and collabs filed under other artists. a source-only
+              artist has no library tracks to be credited on. */}
+          {sourceOnly ? null : (
+            <AppearsOnSection
+              artistId={payload.artist?.id}
+              artistName={String(payload.artist?.name || '')}
+            />
+          )}
+
           <ConcertsSection
             artistName={String(payload?.artist?.name || '')}
             mbid={String(payload?.artist?.musicbrainz_id || '')}

@@ -121,7 +121,9 @@ describe('the season action bar', () => {
   it('treats a filtered youtube view as not-the-season', () => {
     // A search result is a slice, so "grab everything missing" would grab the
     // wrong set. The old bar already knew this; keep it true after the lift.
-    expect(bar(partial(), { source: 'youtube', kind: 'channel', q: 'anything' }).innerHTML).toBe('');
+    expect(bar(partial(), { source: 'youtube', kind: 'channel', q: 'anything' }).innerHTML).toBe(
+      '',
+    );
   });
 
   it('drops the grab buttons when the grab module never loaded', () => {

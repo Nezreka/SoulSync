@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.5"
+_SOULSYNC_BASE_VERSION = "3.4.7"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -239,6 +239,7 @@ from core.tidal_worker import TidalWorker
 from core.qobuz_worker import QobuzWorker
 from core.hydrabase_worker import HydrabaseWorker
 from core.amazon_worker import AmazonWorker
+from core.amazon_outage import amazon_enrichment_should_run as _amazon_enrichment_should_run
 from core.hydrabase_client import HydrabaseClient
 from core.automation_engine import AutomationEngine
 
@@ -463,6 +464,10 @@ def _init_flask_secret_key():
         return _secrets.token_hex(32)
 
 app.secret_key = _init_flask_secret_key()
+# Flask's default cookie name is "session". Browsers don't scope cookies by port,
+# so another app on the same host using "session" overwrote this one, dropping the
+# selected profile and falling back to profile 1 (admin).
+app.config["SESSION_COOKIE_NAME"] = "soulsync_session"
 
 # --- Reverse-proxy mode (opt-in, default OFF) ---
 # OFF by default → a strict no-op, so direct/LAN installs are unchanged. Only when
@@ -540,10 +545,11 @@ def inject_webui_assets():
         'vite_assets': build_webui_vite_assets,
     }
 
-# Brute-force limiter for the launch-PIN unlock (lenient; only a flood of wrong
-# PINs from one IP trips it — correct entry clears it instantly).
-from core.security.rate_limit import AttemptLimiter as _AttemptLimiter
-_launch_pin_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
+# Brute-force limiter for every PIN check: the launch unlock and picking a
+# pinned profile. keyed by (ip, profile) so a correct pin on your own card
+# doesn't wipe the failures on someone else's.
+from core.security.rate_limit import TargetedLimiter as _TargetedLimiter
+_launch_pin_limiter = _TargetedLimiter(max_attempts=10, window_seconds=300)
 # the login/recovery limiter moved to api/login.py with its routes; imported
 # back because api/user_profiles gets it injected (admin clears lockouts)
 from api.login import login_limiter as _login_limiter
@@ -677,7 +683,58 @@ def _set_profile_context():
             return
 
     path = request.path
-    pid = session.get('profile_id', 1)
+    # no profile in the session is only the admin on a single-profile install;
+    # anywhere else it is no rights until a card is picked (logout, a deleted
+    # profile or a fresh browser used to land on profile 1 here)
+    from core.security.session_profile import resolve_session_profile, no_profile_request_is_blocked
+    _session_pid = session.get('profile_id')
+    _profile_count = 2
+    if _session_pid is None:
+        try:
+            _profile_count = len(get_database().get_all_profiles())
+        except Exception as e:
+            logger.debug("profile count for session resolve: %s", e)
+    pid = resolve_session_profile(session_pid=_session_pid,
+                                  login_mode=_require_login_enabled(),
+                                  profile_count=_profile_count)
+    if pid is None:
+        g.profile_id = None
+        g.is_admin = False
+        g.can_download = False
+        g.profile_name = "No profile"
+        g.allowed_sides = 'none'
+        if no_profile_request_is_blocked(path, request.method):
+            return jsonify({"error": "profile_required", "profile_required": True}), 401
+        return
+
+    # "sign out everywhere": a session signed in before the profile's epoch
+    # moved on has no profile any more
+    if _session_pid is not None:
+        from core.security import devices as _devices
+        from core.security.session_epoch import session_is_current
+        _device_id = session.get('device_id')
+        _signed_out = not session_is_current(
+            pid, session.get('profile_epoch', 0),
+            lambda p: (get_database().get_profile(p) or {}).get('session_epoch', 0))
+        # one device signed out from the profile's device list
+        # lazily: a session without a device id never touches the db here
+        if not _signed_out and not _devices.device_is_live(
+                _device_id, lambda d: get_database().get_profile_device(d)):
+            _signed_out = True
+        if not _signed_out:
+            _devices.touch(_device_id, lambda d: get_database().touch_profile_device(d))
+        if _signed_out:
+            for _k in ('profile_id', 'profile_epoch', 'device_id', 'login_authenticated', 'launch_pin_verified'):
+                session.pop(_k, None)
+            g.profile_id = None
+            g.is_admin = False
+            g.can_download = False
+            g.profile_name = "No profile"
+            g.allowed_sides = 'none'
+            if no_profile_request_is_blocked(path, request.method):
+                return jsonify({"error": "profile_required", "profile_required": True,
+                                "signed_out": True}), 401
+            return
 
     # Validate session profile still exists (handles deleted profiles), and stash
     # download permission on g so isolated blueprints (video) can gate without a
@@ -714,9 +771,31 @@ def _set_profile_context():
             g.can_download = bool((profile or {}).get('can_download', True))
             g.profile_name = (profile or {}).get('name') or ("Profile %s" % pid)
             g.is_admin = bool((profile or {}).get('is_admin', False))
+            # a turned-off profile is kept but can't be used, same as gone
+            if (profile or {}).get('disabled') and not g.is_admin:
+                for _k in ('profile_id', 'profile_epoch', 'device_id', 'login_authenticated'):
+                    session.pop(_k, None)
+                g.profile_id = None
+                g.is_admin = False
+                g.can_download = False
+                g.allowed_sides = 'none'
+                if no_profile_request_is_blocked(path, request.method):
+                    return jsonify({"error": "profile_required", "profile_required": True,
+                                    "disabled": True}), 401
+                return
             # get_profile resolves defaults (non-admin NULL → 'music'), so the
             # video blueprint can gate off g without a second music-DB read.
             g.allowed_sides = (profile or {}).get('allowed_sides') or 'music'
+            # the request quota, for isolated blueprints (video) that can't
+            # read the music db themselves
+            g.request_limit = int((profile or {}).get('request_limit') or 0)
+            g.request_limit_days = int((profile or {}).get('request_limit_days') or 7)
+            # a page left off the profile's list: its own apis refuse too,
+            # not just the hidden nav button
+            from core.permissions import page_denied
+            if page_denied(path, (profile or {}).get('allowed_pages'), g.is_admin):
+                g.profile_id = pid
+                return jsonify({"success": False, "error": "page_not_allowed"}), 403
         except Exception as e:
             logger.debug("profile session validate: %s", e)
 
@@ -928,15 +1007,10 @@ VALID_PAGE_IDS = {
 
 def check_download_permission():
     """Check if current profile has download permission. Returns error response or None if allowed."""
-    pid = get_current_profile_id()
-    if pid == 1:
-        return None  # Root admin always allowed
-    try:
-        profile = get_database().get_profile(pid)
-        if profile and not profile.get('can_download', True):
-            return jsonify({'success': False, 'error': 'Downloads are disabled for this profile.'}), 403
-    except Exception as e:
-        logger.debug("download permission check: %s", e)
+    from core.permissions import download_denied_reason
+    reason = download_denied_reason(get_current_profile_id(), lambda pid: get_database().get_profile(pid))
+    if reason:
+        return jsonify({'success': False, 'error': reason}), 403
     return None
 
 # --- Docker Helper Functions ---
@@ -1495,6 +1569,9 @@ def _register_automation_handlers():
         run_repair_job_now=lambda job_id, respect_enabled=False: (
             repair_worker.run_job_now(job_id, respect_enabled=respect_enabled)
             if repair_worker else None),
+        bulk_fix_repair_findings=(
+            (lambda finding_ids: repair_worker.bulk_fix_findings(finding_ids=finding_ids))
+            if repair_worker else None),
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -1538,6 +1615,24 @@ def _register_automation_handlers():
         _reg_fw(_notify_handle)
     except Exception:
         logger.exception("Could not wire video events -> notifications")
+    # issues + music requests publish through core.app_events (the video
+    # events have their own bus above)
+    try:
+        from core.app_events import register_forwarder as _reg_app_fw
+        _reg_app_fw(lambda etype, data: automation_engine.emit(etype, data or {}) if automation_engine else None)
+    except Exception:
+        logger.exception("Could not wire app events -> automation engine")
+    # requests: a finished download may be the title somebody asked for
+    try:
+        from core.video.download_events import register_event_forwarder as _reg_fw_req
+
+        def _request_arrivals(etype, _data):
+            if etype in ('video_download_completed', 'video_batch_complete'):
+                from api.video.requests import sweep_arrivals
+                sweep_arrivals()
+        _reg_fw_req(_request_arrivals)
+    except Exception:
+        logger.exception("Could not wire video events -> request arrivals")
 
     logger.info("Automation action handlers registered")
 
@@ -3454,6 +3549,7 @@ from core.debug_info import (
 
 
 @app.route('/api/debug-info')
+@admin_only
 def get_debug_info():
     return _debug_info_get()
 
@@ -4037,6 +4133,7 @@ _LIVE_LOG_BUFFER_MAX = 500
 
 
 @app.route('/api/logs/tail', methods=['GET'])
+@admin_only
 def get_log_tail():
     """Return the last N lines from a log file, optionally filtered by level."""
     log_source = request.args.get('source', 'app')
@@ -5933,6 +6030,9 @@ def _music_video_deps():
 @app.route('/api/music-video/download', methods=['POST'])
 def download_music_video():
     """Download a YouTube video as a music video file to the configured music videos folder."""
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
@@ -7252,7 +7352,15 @@ def get_task_detail(task_id):
         except Exception as hist_err:
             logger.debug(f"track-detail history lookup failed: {hist_err}")
 
-        detail = build_track_detail(task, history)
+        decision = task.get('decision_summary')
+        if not decision:
+            try:
+                decision = get_database().get_download_decision(task_id)
+            except Exception as dec_err:
+                logger.debug(f"track-detail decision lookup failed: {dec_err}")
+                decision = None
+
+        detail = build_track_detail(task, history, decision)
         return jsonify({"success": True, "detail": detail})
     except Exception as e:
         logger.error(f"get_task_detail error: {e}")
@@ -7334,6 +7442,9 @@ def download_selected_candidate(task_id):
             # pick something else if it fails". Stays set until the task
             # reaches a terminal state.
             task['_user_manual_pick'] = True
+            # a "grab anyway" on a below-profile row in the inspector
+            from core.downloads.decisions import is_quality_override
+            task['_override_quality'] = is_quality_override(data.get('override'))
             # Reset retry counters so previous auto-attempts don't
             # immediately exhaust the manual pick.
             task.pop('stuck_retry_count', None)
@@ -8087,6 +8198,7 @@ def get_library_artists():
         limit = int(request.args.get('limit', 75))
         watchlist_filter = request.args.get('watchlist', 'all')
         source_filter = request.args.get('source_filter', '')
+        quality_filter = request.args.get('quality', '')
 
         # Get database instance
         database = get_database()
@@ -8099,7 +8211,9 @@ def get_library_artists():
             limit=limit,
             watchlist_filter=watchlist_filter,
             profile_id=get_current_profile_id(),
-            source_filter=source_filter
+            source_filter=source_filter,
+            quality_filter=quality_filter,
+            sort=request.args.get('sort', ''),
         )
 
         # Fix image URLs for all artists
@@ -8129,6 +8243,72 @@ def get_library_artists():
                 "has_next": False
             }
         }), 500
+
+@app.route('/api/library/albums')
+def get_library_albums():
+    """Get albums for the library page's album view, with search and pagination"""
+    try:
+        result = get_database().get_library_albums(
+            search_query=request.args.get('search', ''),
+            letter=request.args.get('letter', 'all'),
+            page=int(request.args.get('page', 1)),
+            limit=int(request.args.get('limit', 75)),
+            profile_id=get_current_profile_id(),
+            source_filter=request.args.get('source_filter', ''),
+            sort=request.args.get('sort', ''),
+        )
+
+        # Media-server art is stored as a relative path; a browser cannot load it
+        for album in result['albums']:
+            if album.get('thumb_url'):
+                album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
+
+        return jsonify({
+            "success": True,
+            **result
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching library albums: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "albums": [],
+            "pagination": {
+                "page": 1,
+                "limit": 75,
+                "total_count": 0,
+                "total_pages": 0,
+                "has_prev": False,
+                "has_next": False
+            }
+        }), 500
+
+@app.route('/api/library/albums/<album_id>/tracks')
+def get_library_album_tracks(album_id):
+    """The tracks of one owned album, for the album card's play button.
+
+    Not /api/album/<id>/tracks, which resolves a metadata SOURCE's tracklist
+    for the download-missing modal. This returns the rows that have a file, so
+    the player queues them rather than treating each as a miss to acquire.
+    """
+    try:
+        tracks = get_database().get_tracks_by_album(album_id)
+        return jsonify({
+            "success": True,
+            "tracks": [{
+                'id': t.id,
+                'title': t.title,
+                'track_number': t.track_number,
+                'file_path': t.file_path,
+                'duration': t.duration,
+                'bitrate': t.bitrate,
+            } for t in tracks if t.file_path]
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching tracks for library album {album_id}: {e}")
+        return jsonify({"success": False, "error": str(e), "tracks": []}), 500
 
 @app.route('/api/library/unmatched-summary')
 def get_library_unmatched_summary():
@@ -8478,6 +8658,10 @@ def get_artist_enhanced_detail(artist_id):
         active_server = config_manager.get_active_media_server()
         server_connected = media_server_engine.is_connected() if media_server_engine else False
         result['server_type'] = active_server if server_connected else None
+
+        # which tracks the quality jobs say could be better
+        from core.quality.upgrades import annotate_enhanced_payload
+        annotate_enhanced_payload(database, result)
 
         return jsonify(result)
     except Exception as e:
@@ -11092,6 +11276,111 @@ def redownload_search_metadata(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector', upgrade=False):
+    """Search every configured download source for one track and stream the
+    verdicts: NDJSON, one line per source as it answers, then {"done": true}.
+
+    The candidate inspector is the only thing that fans out like this, and
+    only when a person opens it; automatic downloads stay on source priority.
+    Each line carries the accepted rows (ranked as before) and the rejected
+    ones with their reasons (core/downloads/candidate_pool.py).
+
+    ``upgrade``: judge as an upgrade — a hit must also reach the profile's
+    upgrade cutoff (core/quality/upgrades.py), not just what the everyday
+    download filter would take.
+    """
+    search_queries = matching_engine.generate_download_queries(track_obj)
+    if not search_queries:
+        artist = track_obj.artists[0] if track_obj.artists else ''
+        search_queries = [f"{artist} {track_obj.name}".strip()]
+    # First two queries: enough to catch the usual naming, fast enough to wait on.
+    search_queries = search_queries[:2]
+    database = get_database()
+
+    # Every configured source individually — hybrid search stops at the first hit.
+    download_clients = {}
+    try:
+        if download_orchestrator and hasattr(download_orchestrator, 'configured_clients'):
+            download_clients = dict(download_orchestrator.configured_clients())
+    except Exception as e:
+        logger.warning(f"[{log_tag}] Error getting download clients: {e}")
+    if not download_clients:
+        download_clients = {'default': download_orchestrator}
+
+    logger.info(f"[{log_tag}] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
+
+    from core.downloads.candidate_pool import build_source_rows, empty_source_rows
+    from core.downloads.provenance import build_policy_facet, new_provenance
+    from core.quality.source_map import quality_profile_context
+
+    # One provenance per interactive inspection: every streamed source payload
+    # carries the same search_mode/searched_at/policy_run_id. The run-level
+    # policy describes the ladder in effect; each candidate row gets its own
+    # facet (the rung it reached) via policy_profile.
+    _inspection_provenance = new_provenance('interactive')
+    _inspection_profile = None
+    try:
+        from core.quality.selection import load_profile_by_id
+        _inspection_profile = load_profile_by_id(quality_profile_id)
+        _inspection_policy = build_policy_facet(_inspection_profile)
+    except Exception:  # noqa: BLE001 - the search matters more than its facet
+        _inspection_policy = build_policy_facet(None)
+
+    def _is_failed_blocklisted(candidate, source_name):
+        """Files that terminally failed import skip the inspector too —
+        fail-open, a blocklist read never sinks the search."""
+        try:
+            from core.downloads.failed_blocklist import is_candidate_blocked
+            return is_candidate_blocked(database, candidate, source_name)
+        except Exception:  # noqa: BLE001
+            return False
+
+    bar = None
+    if upgrade:
+        from core.quality.upgrades import apply_upgrade_bar, upgrade_bar
+        bar = upgrade_bar(quality_profile_id)
+
+    def _search_one_source(source_name, client):
+        evaluated = []
+        for q in search_queries:
+            try:
+                # These clients are searched directly rather than through the
+                # orchestrator, so nothing else would enter the item's profile
+                # context and quality_tier_for_source would ask each source for
+                # the tier the APP default wants.
+                with quality_profile_context(quality_profile_id):
+                    tracks_result, _ = run_async(client.search(q, timeout=20))
+                if not tracks_result:
+                    continue
+                pairs = evaluate_candidates(tracks_result, track_obj, q, quality_profile_id)
+                if bar is not None:
+                    pairs = apply_upgrade_bar(pairs, *bar)
+                evaluated.append((q, pairs))
+            except Exception as e:
+                logger.debug(f"[{log_tag}] {source_name} search failed for query '{q}': {e}")
+        return build_source_rows(
+            evaluated, source_name=source_name, is_blacklisted=database.is_blacklisted,
+            is_failed_blocked=lambda c: _is_failed_blocklisted(c, source_name),
+            provenance=_inspection_provenance, policy=_inspection_policy,
+            policy_profile=_inspection_profile,
+        )
+
+    def generate_stream():
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {pool.submit(_search_one_source, name, client): name for name, client in download_clients.items()}
+            for future in as_completed(futures):
+                source_name = futures[future]
+                try:
+                    yield json.dumps({'source': source_name, **future.result()}) + '\n'
+                except Exception as e:
+                    yield json.dumps({'source': source_name, **empty_source_rows(
+                        str(e), provenance=_inspection_provenance,
+                        policy=_inspection_policy)}) + '\n'
+        yield json.dumps({'done': True}) + '\n'
+
+    return app.response_class(generate_stream(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
+
+
 @app.route('/api/library/track/<track_id>/redownload/search-sources', methods=['POST'])
 def redownload_search_sources(track_id):
     """Search all active download sources for a track using the selected metadata."""
@@ -11112,7 +11401,6 @@ def redownload_search_sources(track_id):
             explicit=parse_strict_int(data.get('quality_profile_id')),
         )
 
-        # Build a track-like object for query generation
         from core.itunes_client import Track as MetaTrack
         track_obj = MetaTrack(
             id=metadata.get('id', ''),
@@ -11122,106 +11410,10 @@ def redownload_search_sources(track_id):
             duration_ms=metadata.get('duration_ms', 0),
             popularity=0,
         )
-
-        # Generate search queries
-        search_queries = matching_engine.generate_download_queries(track_obj)
-        if not search_queries:
-            search_queries = [f"{metadata.get('artist', '')} {metadata['name']}".strip()]
-
-        # Use first 2 queries for speed
-        search_queries = search_queries[:2]
-
-        # Search ALL configured download sources individually (not through hybrid which stops at first hit)
-        candidates = []
-        database = get_database()
-
-        # Get all available download source clients via the orchestrator's
-        # generic accessor — replaces the old per-source if/hasattr chain
-        # that Cin called out as defeating the purpose of the registry refactor.
-        download_clients = {}
-        try:
-            if download_orchestrator and hasattr(download_orchestrator, 'configured_clients'):
-                download_clients = dict(download_orchestrator.configured_clients())
-        except Exception as e:
-            logger.warning(f"[Redownload] Error getting download clients: {e}")
-
-        if not download_clients:
-            # Fallback: use orchestrator directly
-            download_clients = {'default': download_orchestrator}
-
-        logger.info(f"[Redownload] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
-
-        def _search_one_source(source_name, client):
-            """Search a single download source and return formatted candidates."""
-            source_candidates = []
-            # These clients are searched directly rather than through the
-            # orchestrator, so nothing else would enter the item's profile
-            # context and quality_tier_for_source would ask each source for the
-            # tier the APP default wants.
-            from core.quality.source_map import quality_profile_context
-            for _qi, q in enumerate(search_queries):
-                try:
-                    with quality_profile_context(quality_profile_id):
-                        tracks_result, _ = run_async(client.search(q, timeout=20))
-                    if not tracks_result:
-                        continue
-                    valid = get_valid_candidates(tracks_result, track_obj, q,
-                                                 quality_profile_id)
-                    for candidate in valid:
-                        is_bl = database.is_blacklisted(candidate.username, candidate.filename)
-                        display_name = os.path.basename(candidate.filename.replace('\\', '/'))
-                        ext = os.path.splitext(display_name)[1].lstrip('.').upper()
-                        quality = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else candidate.quality or ''
-                        svc = source_name if source_name != 'default' else 'hybrid'
-                        uname = candidate.username
-                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon'):
-                            svc = uname
-                        source_candidates.append({
-                            'username': uname,
-                            'filename': candidate.filename,
-                            'display_name': display_name,
-                            'size': candidate.size or 0,
-                            'size_display': f"{(candidate.size or 0) / 1048576:.1f} MB",
-                            'bitrate': candidate.bitrate or 0,
-                            'quality': quality,
-                            'duration': candidate.duration or 0,
-                            'confidence': round(getattr(candidate, 'confidence', 0), 3),
-                            'source_service': svc,
-                            'source_query': q,
-                            'blacklisted': is_bl,
-                            'free_upload_slots': getattr(candidate, 'free_upload_slots', 0),
-                            'upload_speed': getattr(candidate, 'upload_speed', 0),
-                            'queue_length': getattr(candidate, 'queue_length', 0),
-                        })
-                except Exception as e:
-                    logger.debug(f"[Redownload] {source_name} search failed for query '{q}': {e}")
-            # Deduplicate within source
-            seen = set()
-            unique = []
-            for c in source_candidates:
-                key = f"{c['username']}|{c['filename']}"
-                if key not in seen:
-                    seen.add(key)
-                    unique.append(c)
-            unique.sort(key=lambda c: (-int(not c['blacklisted']), -c['confidence']))
-            return unique
-
-        # Stream NDJSON — one line per source as it completes
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        def generate_stream():
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                futures = {pool.submit(_search_one_source, name, client): name for name, client in download_clients.items()}
-                for future in as_completed(futures):
-                    source_name = futures[future]
-                    try:
-                        results = future.result()
-                        yield json.dumps({'source': source_name, 'candidates': results}) + '\n'
-                    except Exception as e:
-                        yield json.dumps({'source': source_name, 'candidates': [], 'error': str(e)}) + '\n'
-            yield json.dumps({'done': True}) + '\n'
-
-        return app.response_class(generate_stream(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
+        return _inspect_sources_stream(
+            track_obj, quality_profile_id, log_tag='Redownload',
+            upgrade=bool(data.get('upgrade')),
+        )
 
     except Exception as e:
         logger.error(f"Error in redownload source search: {e}", exc_info=True)
@@ -11236,7 +11428,111 @@ from core.library.redownload import (
 
 @app.route('/api/library/track/<track_id>/redownload/start', methods=['POST'])
 def redownload_start(track_id):
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     return _redownload_start_impl(track_id)
+
+
+# CANDIDATE INSPECTOR — the same per-source view, opened from a failed
+# download or a wishlist item instead of a library track.
+
+@app.route('/api/downloads/task/<task_id>/inspect', methods=['POST'])
+def inspect_task_sources(task_id):
+    """Every source's hits for a download task's track, with the verdicts.
+    A pick goes back through /download-candidate."""
+    try:
+        with tasks_lock:
+            task = download_tasks.get(task_id)
+            track_info = dict(task.get('track_info') or {}) if isinstance(task, dict) else None
+        if track_info is None:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+        if not track_info.get('name'):
+            return jsonify({"success": False, "error": "This download has no track name to search for"}), 400
+        return _inspect_sources_stream(
+            _pinned_batch.track_object(track_info),
+            track_info.get('quality_profile_id'),
+            log_tag='Inspector',
+        )
+    except Exception as e:
+        logger.error(f"Error in task source inspection: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _wishlist_track_for_inspector(track_id):
+    """The wishlist row, formatted the way wishlist downloads format it, for
+    the current profile. None when it isn't there (or isn't theirs)."""
+    if not track_id:
+        return None
+    from core.wishlist.service import WishlistService
+    row = get_database().get_wishlist_track(str(track_id), profile_id=get_current_profile_id())
+    if not row:
+        return None
+    return WishlistService.format_track_for_download(row)
+
+
+@app.route('/api/wishlist/inspect', methods=['POST'])
+def inspect_wishlist_sources():
+    """Search manually for one wishlist track: every source, with the verdicts."""
+    try:
+        data = request.get_json() or {}
+        track = _wishlist_track_for_inspector(data.get('track_id'))
+        if not track:
+            return jsonify({"success": False, "error": "That track isn't on your wishlist"}), 404
+        return _inspect_sources_stream(
+            _pinned_batch.track_object(track), track.get('quality_profile_id'),
+            log_tag='Inspector',
+        )
+    except Exception as e:
+        logger.error(f"Error in wishlist source inspection: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/wishlist/inspect/download', methods=['POST'])
+def download_wishlist_pick():
+    """Download the exact file picked in the inspector for a wishlist track.
+
+    A pinned one-task batch: that file, no hunting for another if it fails.
+    The task carries the wishlist row's own metadata, so a success tags it
+    properly and takes it off the wishlist the usual way.
+    """
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
+    try:
+        data = request.get_json() or {}
+        candidate = data.get('candidate') or {}
+        if not candidate.get('username') or not candidate.get('filename'):
+            return jsonify({"success": False, "error": "candidate with username and filename required"}), 400
+        if not _pinned_batch.is_pinnable(candidate.get('username')):
+            return jsonify({"success": False, "error": (
+                "Torrent and Usenet hits are whole releases and can't be picked one track at a time. "
+                "Use Download on the wishlist instead.")}), 400
+        track = _wishlist_track_for_inspector(data.get('track_id'))
+        if not track:
+            return jsonify({"success": False, "error": "That track isn't on your wishlist"}), 404
+
+        from core.downloads.decisions import is_quality_override
+        name = f"Wishlist: {track.get('artist_name') or 'Unknown'} - {track.get('name') or 'Unknown'}"
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(
+                candidate=_pinned_batch.candidate_from_result(candidate),
+                track_info=dict(track),
+            )],
+            name=name, profile_id=get_current_profile_id(),
+            source_page='Wishlist', playlist_prefix='wishlist_pick',
+        )
+        if is_quality_override(data.get('override')):
+            with tasks_lock:
+                for task_id in task_ids:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['_override_quality'] = True
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        add_activity_item("", "Wishlist Download Started", name, "Now")
+        return jsonify({"success": True, "batch_id": batch_id, "task_id": task_ids[0]})
+    except Exception as e:
+        logger.error(f"Error starting wishlist pick: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route('/api/library/artist/<artist_id>/sync', methods=['POST'])
@@ -11631,7 +11927,11 @@ from api.discover_routes import (  # noqa: E402
 )
 
 
+from core.discovery.blocked import WORKS as _BLOCKED_WORKS, hide_blocked_in_response as _hide_blocked_artists  # noqa: E402
+
+
 @app.route('/api/library/radio')
+@_hide_blocked_artists({'tracks': _BLOCKED_WORKS})
 def library_radio():
     """Get a smart queue of similar tracks for radio mode auto-play.
 
@@ -14064,8 +14364,6 @@ def _get_album_type_display(raw_type, track_count) -> str:
     # so both need to match here.
     if raw in ('compilation', 'compile'):
         return 'Compilation'
-    if raw == 'album':
-        return 'Album'
     if raw in ('single', 'ep'):
         # Match download-pipeline logic: Spotify labels both singles and EPs
         # as 'single', so final classification is by track count. Applying the
@@ -14077,7 +14375,10 @@ def _get_album_type_display(raw_type, track_count) -> str:
             return 'EP'
         return 'Album'
 
-    # Unknown/missing — infer from track count
+    # 'album', missing, or anything unrecognized: a bare 'album' is the
+    # default fallback at every upstream layer — not a signal. Verify
+    # against the track count when we have one; with no count, keep the
+    # "Album" default rather than guessing. Mirrors core/imports/paths.py.
     if tc <= 0:
         return 'Album'
     if tc <= 3:
@@ -15124,6 +15425,7 @@ def stop_duplicate_cleaner():
 # ===============================
 
 from core.downloads.validation import (
+    evaluate_candidates,
     get_valid_candidates,
     init as _init_download_validation,
 )
@@ -15513,6 +15815,7 @@ def _build_task_worker_deps():
         on_download_completed=lambda b, t, success: _on_download_completed(b, t, success=success),
         recover_worker_slot=_recover_worker_slot,
         try_version_mismatch_fallback=_try_version_mismatch_fallback_for_worker,
+        evaluate_candidates=evaluate_candidates,
     )
 
 
@@ -20443,7 +20746,9 @@ try:
     # (T2Tunes) that can be down, so it stays paused unless the user has
     # explicitly enabled it (amazon_enrichment_paused=False). This stops an
     # instance outage from grinding/log-flooding installs that never opted in.
-    if config_manager.get('amazon_enrichment_paused', True):
+    # the public t2tunes.site is gone for good (#1300), so an opt-in pointed at
+    # it just hammers a dead host. only a self-hosted amazon.base_url can run.
+    if not _amazon_enrichment_should_run(config_manager):
         amazon_worker.pause()
         logger.info("Amazon enrichment worker initialized (paused — enable it in Settings)")
     else:
@@ -21718,6 +22023,8 @@ def handle_profile_join(data):
     watches all); everyone else gets exactly their own."""
     requested = data.get('profile_id')
     pid, is_admin = _ws_session_profile()
+    if pid is None:
+        return
     target = requested if (is_admin and requested) else pid
     if target != requested and requested:
         logger.warning("profile:join — client asked for profile %s but session is %s; "
@@ -21732,11 +22039,21 @@ def handle_profile_join(data):
 def _ws_session_profile():
     """(profile_id, is_admin) for the CURRENT socket's session — server-side
     truth for room joins. Fail-closed to the session profile; profile 1 or an
-    is_admin-flagged profile counts as admin."""
-    try:
-        pid = int(session.get('profile_id', 1) or 1)
-    except (TypeError, ValueError):
-        pid = 1
+    is_admin-flagged profile counts as admin. no profile in the session is
+    (None, False) except on a single-profile install, same rule as http."""
+    from core.security.session_profile import resolve_session_profile
+    _session_pid = session.get('profile_id')
+    _count = 2
+    if _session_pid is None:
+        try:
+            _count = len(get_database().get_all_profiles())
+        except Exception:
+            _count = 2
+    pid = resolve_session_profile(session_pid=_session_pid,
+                                  login_mode=_require_login_enabled(),
+                                  profile_count=_count)
+    if pid is None:
+        return None, False
     if pid == 1:
         return pid, True
     try:
@@ -22295,6 +22612,29 @@ _cfg_is(
 )
 app.register_blueprint(_bp_is())
 
+# music requests: what a profile without download rights asked for
+from api.music_requests import configure as _cfg_mr, create_blueprint as _bp_mr
+_cfg_mr(get_database=get_database)
+app.register_blueprint(_bp_mr())
+
+# kids profiles: explicit music can't play and drops out of search/tracklists
+from api.content_guard import register as _reg_content_guard
+_reg_content_guard(app, get_database=get_database)
+
+# profile housekeeping: admin audit log, sign out everywhere, invites, avatars
+from api.profile_admin import configure as _cfg_pa, create_blueprint as _bp_pa
+_cfg_pa(get_database=get_database, config_manager=config_manager,
+        require_login_enabled=_require_login_enabled)
+app.register_blueprint(_bp_pa())
+
+# per-profile notes (request approved, issue answered): pushed to the
+# requester's profile room; core.profile_notify journals them too
+try:
+    from core.profile_notify import register_emitter as _reg_profile_notify
+    _reg_profile_notify(lambda event, payload, room: socketio.emit(event, payload, room=room))
+except Exception:
+    logger.exception("Could not wire profile notifications")
+
 # database updater/backup/maintenance
 from api.database_admin import configure as _cfg_dba, create_blueprint as _bp_dba
 _cfg_dba(
@@ -22755,7 +23095,12 @@ _emit_live_log_loop._source = 'app'
 
 @socketio.on('logs:subscribe')
 def handle_logs_subscribe(data):
-    """Client subscribes to live log stream with optional source."""
+    """Client subscribes to live log stream with optional source. admin only,
+    same as the Settings log viewer that sends it: logs carry paths, usernames
+    and server urls, and the source switch is global for every viewer."""
+    _pid, _is_admin = _ws_session_profile()
+    if not _is_admin:
+        return
     source = data.get('source', 'app')
     _emit_live_log_loop._source = source
     join_room('logs:live')

@@ -28,7 +28,8 @@ describe('the named surfaces request a sized image', () => {
 
     expect(source).toContain("from '@/platform/artwork-thumb'");
     // Non-greedy across the argument list: a call site may nest parens,
-    // e.g. thumb(String(album.thumb_url), 'card').
-    expect(source).toMatch(/thumb\([\s\S]*?'(grid|card|hero)'\)/);
+    // e.g. thumb(String(album.thumb_url), 'card'). every ThumbVariant counts,
+    // 'rail' included: the dashboard asks for the 320px rail size (5a90d6a77).
+    expect(source).toMatch(/thumb\([\s\S]*?'(grid|card|hero|rail)'\)/);
   });
 });

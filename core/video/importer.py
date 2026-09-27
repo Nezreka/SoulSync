@@ -30,6 +30,9 @@ from core.video.download_pipeline import basename_of
 from core.video.library_paths import quality_full
 from core.video.quality_eval import resolution_rank
 from core.video.release_parse import parse_release
+from utils.logging_config import get_logger
+
+logger = get_logger("video.importer")
 
 VIDEO_EXTS = frozenset({
     ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".ts", ".wmv",
@@ -52,6 +55,21 @@ _SRC_RANK = {"remux": 6, "bluray": 5, "web-dl": 4, "webrip": 3, "hdtv": 2, "dvd"
 def ext_of(path: Any) -> str:
     """Lower-cased extension (with dot) of a path's basename, '' if none."""
     return os.path.splitext(basename_of(path))[1].lower()
+
+
+def _as_int(v: Any) -> int | None:
+    """Coerce a year-ish value (int / '2024' / '2024-07-01') to an int, or None."""
+    if v is None:
+        return None
+    if isinstance(v, int):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    try:
+        return int(s[:4]) if len(s) >= 4 and s[:4].isdigit() else int(s)
+    except (TypeError, ValueError):
+        return None
 
 
 def is_video(path: Any) -> bool:
@@ -180,7 +198,8 @@ def _existing_match(scope: str, dest_dir: str, ctx: dict, list_dir: Callable) ->
 
 def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | None = None,
                 settings: dict | None = None, force: bool = False,
-                override: dict | None = None, library_dir: str | None = None) -> dict:
+                override: dict | None = None, library_dir: str | None = None,
+                expected_duration_sec: float | None = None) -> dict:
     """Decide what to do with a finished download. Returns one of:
 
       {"action": "import",  "dest": {...}, "quality_label": str}
@@ -191,7 +210,9 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     ffprobe ``mediainfo`` result (or None when ffprobe is unavailable) — when present
     we trust the FILE's real resolution over the scene name and reject corrupt /
     too-short junk. ``settings`` are the user's organisation settings (naming templates
-    + replace policy); None = defaults.
+    + replace policy); None = defaults. ``expected_duration_sec`` is the item's known
+    runtime (TMDB, resolved by the caller): a probed file running far shorter is a
+    truncated download or the wrong file entirely, and is rejected.
 
     MANUAL placement: ``force=True`` with an ``override`` ({scope, title, year, season,
     episode, episode_title, target_dir, media_id}) trusts the user's chosen identity —
@@ -233,6 +254,18 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 if not numbering_ok and not date_ok:
                     return _reject("Release is S%02dE%02d, not the episode requested"
                                    % (parsed.get("season") or 0, parsed.get("episode") or 0))
+                # Show-identity gate (the "Dark Matter" case): two shows can share a
+                # name AND an SxxExx. When the numbering matched but the release name
+                # carries a year that disagrees with the wanted show's year, it's the
+                # wrong show — reject rather than mis-file it. Skipped when the match
+                # came via air date (the year token there is the air date, and the
+                # date itself is the stronger identity).
+                if numbering_ok:
+                    want_year = _as_int(ctx.get("year"))
+                    rel_year = parsed.get("year")
+                    if want_year and rel_year and (rel_year < want_year or rel_year > want_year + 1):
+                        return _reject("Release is from %s, not %s (%s)"
+                                       % (rel_year, ctx.get("title") or "this show", want_year))
     else:
         if scope not in ("movie", "episode", "youtube"):
             return _reject("Pick a movie, an episode, or a YouTube video to place this file")
@@ -259,6 +292,22 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
             parsed["aspect"] = probe["aspect"]
         if probe.get("video_codec") and not parsed.get("codec"):
             parsed["codec"] = probe["video_codec"]
+
+    # Duration-vs-expected: the probed runtime against the item's known runtime.
+    # A file running far shorter than the film/episode is a truncated download or
+    # the wrong file wearing the right name — reject it instead of filing a broken
+    # item. Multi-episode spans scale the expectation (S01E01E02 ≈ 2× one episode).
+    # Unknown expected runtime → no judgement (never reject on a guess).
+    if probe is not None and not force and expected_duration_sec:
+        actual = probe.get("duration_sec") or 0
+        if probe.get("ok") and actual > 0:
+            span = 1
+            if scope == "episode" and parsed.get("episode") and parsed.get("episode_end"):
+                span = max(1, (parsed.get("episode_end") or 0) - parsed["episode"] + 1)
+            want = float(expected_duration_sec) * span
+            if want > 0 and actual < 0.75 * want:
+                return _reject("Runs %d of %d min — truncated download or the wrong file"
+                               % (int(actual // 60), int(want // 60)))
 
     root = (override.get("target_dir") if force else None) or dl.get("target_dir") or ""
     if not root:
@@ -378,7 +427,9 @@ def plan_subs(src_path: str, dest_path: str, list_dir: Callable) -> list:
 def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = None,
                settings: dict | None = None, force: bool = False,
                override: dict | None = None, library_dir: str | None = None,
-               recycle: Callable | None = None) -> dict:
+               recycle: Callable | None = None,
+               expected_duration_sec: float | None = None,
+               plan: dict | None = None) -> dict:
     """Execute the import and return a DB patch dict for the download row.
 
     ``fs`` is an injected facade with: ``list_dir(dir)->iterable[name]``,
@@ -388,19 +439,30 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
     copy with a move-to-trash (core.video.recycle.discarder); None = hard remove.
     ``settings`` are the user's organisation settings (transfer mode, subtitle carry);
     None = defaults. ``force``/``override`` drive a MANUAL placement (see ``plan_import``).
+    ``expected_duration_sec`` is the item's known runtime for the duration check.
+    ``plan`` is a pre-computed ``plan_import`` result — when given, the internal
+    planning (and probing) is skipped. The caller may have persisted the plan's
+    destination BEFORE the file moves, so a crash mid-import stays recoverable.
     A reject becomes an ``import_failed`` row with ``dest_path`` pointing at the file's
     current (unplaced) location so the Import page can resolve it; a success becomes a
-    ``completed`` row with ``dest_path`` set to its final home."""
+    ``completed`` row with ``dest_path`` set to its final home.
+
+    The download copy is NOT reclaimed here. On success in copy mode the patch carries
+    a transient ``_cleanup_source`` (stripped by update_video_download like the other
+    underscore keys); the caller removes it AFTER the row is persisted. Deleting before
+    the persist meant a restart in between left a correctly-placed library file with a
+    stuck 'importing' row that aged into a misleading 'failed'."""
     settings = organization.normalize(settings)
-    probe_info = None
-    if prober is not None:
-        try:
-            probe_info = prober(src_path)
-        except Exception:   # noqa: BLE001 - a probe crash must not block the import
-            probe_info = None
-    plan = plan_import(dl, src_path, list_dir=fs.list_dir, probe=probe_info,
-                       settings=settings, force=force, override=override,
-                       library_dir=library_dir)
+    if plan is None:
+        probe_info = None
+        if prober is not None:
+            try:
+                probe_info = prober(src_path)
+            except Exception:   # noqa: BLE001 - a probe crash must not block the import
+                probe_info = None
+        plan = plan_import(dl, src_path, list_dir=fs.list_dir, probe=probe_info,
+                           settings=settings, force=force, override=override,
+                           library_dir=library_dir, expected_duration_sec=expected_duration_sec)
     if plan["action"] == "reject":
         # Leave the file where it is; remember WHERE so manual import can find it.
         # _bad_release is transient (stripped by update_video_download): it tells
@@ -416,7 +478,12 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                 "quality_label": plan.get("quality_label") or dl.get("quality_label")}
 
     dest = plan["dest"]
-    move_mode = settings.get("transfer_mode") == "move"
+    # a torrent is never moved, whatever the setting: the client is still
+    # seeding that file, and taking it away broke the torrent (missing files,
+    # re-download) and left the seeding cleanup deleting nothing. radarr does
+    # the same: torrents are copied while they seed.
+    is_torrent = str(dl.get("source") or "").lower() == "torrent"
+    move_mode = settings.get("transfer_mode") == "move" and not is_torrent
     try:
         fs.makedirs(dest["dir"])
         replace_path = plan.get("replace_path")
@@ -442,22 +509,21 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                 (recycle or fs.remove)(plan["replace_path"])
             except Exception:   # noqa: BLE001 - failing to delete the old file isn't fatal
                 pass
-        # Copy mode reclaims the download copy UNLESS it's a torrent (keep seeding);
-        # move mode already relocated it.
-        if not move_mode and str(dl.get("source") or "").lower() != "torrent":
-            try:
-                fs.remove(src_path)
-            except Exception:   # noqa: BLE001
-                pass
     except Exception as e:   # noqa: BLE001 - any copy/mkdir failure → manual import
         return {"status": "import_failed", "progress": 100.0, "error": "Import failed: " + str(e),
                 "dest_path": src_path}
 
-    return {"status": "completed", "progress": 100.0, "dest_path": dest["path"],
-            "quality_label": plan.get("quality_label") or dl.get("quality_label"),
-            # transient (underscore = stripped by update_video_download): lets the
-            # monitor fire the 'Quality Upgrade Landed' event trigger
-            "_upgraded": plan["action"] == "upgrade"}
+    patch = {"status": "completed", "progress": 100.0, "dest_path": dest["path"],
+             "quality_label": plan.get("quality_label") or dl.get("quality_label"),
+             # transient (underscore = stripped by update_video_download): lets the
+             # monitor fire the 'Quality Upgrade Landed' event trigger
+             "_upgraded": plan["action"] == "upgrade"}
+    # Copy mode reclaims the download copy UNLESS it's a torrent (keep seeding);
+    # move mode already relocated it. Deferred: the caller removes the source only
+    # AFTER the completed row is persisted (see docstring).
+    if not move_mode and not is_torrent:
+        patch["_cleanup_source"] = src_path
+    return patch
 
 
 def atomic_verified_copy(src: str, dst: str) -> None:
@@ -482,7 +548,16 @@ def atomic_verified_copy(src: str, dst: str) -> None:
     tmp = os.path.join(os.path.dirname(d) or ".",
                        os.path.basename(d) + ".tmp." + uuid.uuid4().hex[:8])
     try:
-        shutil.copy2(src, tmp)
+        # the data first, then the metadata as a courtesy. copy2 did both, and
+        # on shares that refuse chmod/utime/xattrs (unraid shfs, nfs with squash,
+        # smb) the metadata step raised "[Errno 13] Permission denied" AFTER the
+        # data was safely copied, failing an import that had worked (a user's report, sept 25 2026)
+        shutil.copyfile(src, tmp)
+        try:
+            shutil.copystat(src, tmp)
+        except OSError as e:
+            logger.info("video import: kept the copy of %s without its timestamps/permissions (%s)",
+                        os.path.basename(d), e)
         src_size = os.path.getsize(src)
         tmp_size = os.path.getsize(tmp)
         if src_size != tmp_size:
@@ -513,7 +588,14 @@ def atomic_verified_move(src: str, dst: str) -> None:
         if getattr(e, "errno", None) != errno.EXDEV:
             raise            # real error (perms/space/missing) — not cross-device
     atomic_verified_copy(src, dst)
-    os.remove(str(src))
+    # the library copy is verified and in place. a download folder we may not
+    # delete from (slskd owns its files) leaves the old copy behind; that is
+    # not a failed import
+    try:
+        os.remove(str(src))
+    except OSError as e:
+        logger.warning("video import: placed %s but couldn't remove the download copy (%s)",
+                       os.path.basename(str(dst)), e)
 
 
 class _RealFS:

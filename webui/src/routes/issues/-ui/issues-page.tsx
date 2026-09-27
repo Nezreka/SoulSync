@@ -1,19 +1,30 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { Select } from '@/components/form';
+import { Select, TextInput } from '@/components/form';
 import { PageHeader } from '@/components/page-header';
 import { Show } from '@/components/primitives';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type { IssueCounts, IssuePriority, IssueRecord, IssuesSearch } from '../-issues.types';
+import type {
+  IssueCounts,
+  IssueEntityType,
+  IssuePriority,
+  IssueRecord,
+  IssuesSearch,
+} from '../-issues.types';
 
 import {
+  bulkResultToast,
+  bulkUpdateIssues,
+  type IssueBulkChange,
   issueCountsQueryOptions,
   issueListQueryOptions,
   invalidateIssuesQueries,
 } from '../-issues.api';
 import {
+  formatIssueAgo,
   formatIssueDate,
   getEntityDetails,
   getEntityLabel,
@@ -24,9 +35,15 @@ import {
   ISSUE_STATUS_META,
   getIssueCategoryMeta,
   getIssueStatusMeta,
+  issueMatchesText,
   parseSnapshot,
 } from '../-issues.helpers';
-import { ISSUE_CATEGORY_VALUES, ISSUE_SEARCH_STATUS_VALUES } from '../-issues.types';
+import {
+  ISSUE_CATEGORY_VALUES,
+  ISSUE_ENTITY_TYPE_VALUES,
+  ISSUE_PRIORITY_VALUES,
+  ISSUE_SEARCH_STATUS_VALUES,
+} from '../-issues.types';
 import { Route } from '../route';
 import { IssueDetailModal } from './issue-detail-modal';
 import styles from './issues-page.module.css';
@@ -62,17 +79,64 @@ export function IssuesPage() {
   );
 }
 
+type IssueScope = 'everyone' | 'mine';
+
 function IssueBoard() {
   const { isAdmin, profileId } = useProfile();
   const navigate = useNavigate({ from: Route.fullPath });
   const params = Route.useSearch();
+  // text search and the admin's mine/everyone toggle filter the loaded rows;
+  // the server has no param for either, and a page of 50 is cheap to scan
+  const [text, setText] = useState('');
+  const [scope, setScope] = useState<IssueScope>('everyone');
 
   const countsQuery = useQuery({
     ...issueCountsQueryOptions(profileId),
   });
-  const issuesQuery = useQuery({
+  const issuesQuery = useInfiniteQuery({
     ...issueListQueryOptions(profileId, params),
   });
+  const loaded = useMemo(
+    () => issuesQuery.data?.pages.flatMap((page) => page.issues ?? []) ?? [],
+    [issuesQuery.data],
+  );
+  const total = issuesQuery.data?.pages[0]?.total ?? loaded.length;
+  const visible = useMemo(
+    () =>
+      loaded.filter(
+        (issue) =>
+          (scope === 'everyone' || issue.profile_id === profileId) && issueMatchesText(issue, text),
+      ),
+    [loaded, scope, profileId, text],
+  );
+  const narrowed = Boolean(text.trim()) || scope === 'mine';
+
+  // admin bulk triage: ticked rows, always a subset of what's on screen
+  const [picked, setPicked] = useState<ReadonlySet<number>>(() => new Set());
+  // a new filter starts a new selection. same set back when nothing is
+  // ticked, so this never costs a render (the list rebuilds on each one)
+  useEffect(() => {
+    setPicked((current) => (current.size ? new Set() : current));
+  }, [params.status, params.category, params.entity, text, scope]);
+  const selectedIds = useMemo(
+    () => visible.filter((issue) => picked.has(issue.id)).map((issue) => issue.id),
+    [visible, picked],
+  );
+  const togglePicked = (id: number) =>
+    setPicked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const onEntityChange = (entity: IssueEntityType | 'all') => {
+    void navigate({
+      to: Route.fullPath,
+      search: (prev) => ({ ...prev, entity: entity === 'all' ? undefined : entity }),
+      replace: true,
+    });
+  };
 
   const onCategoryChange = (category: IssuesSearch['category']) => {
     void navigate({
@@ -99,18 +163,232 @@ function IssueBoard() {
         onCategoryChange={onCategoryChange}
         onStatusChange={onStatusChange}
       />
+      <div className={styles.issuesRefine}>
+        <TextInput
+          id="issues-filter-text"
+          aria-label="Search issues"
+          type="search"
+          placeholder="Search titles, items, people…"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+        />
+        <Select
+          id="issues-filter-entity"
+          aria-label="Item type"
+          value={params.entity ?? 'all'}
+          onChange={(event) => onEntityChange(event.target.value as IssueEntityType | 'all')}
+        >
+          <option value="all">All items</option>
+          {ISSUE_ENTITY_TYPE_VALUES.map((entity) => (
+            <option key={entity} value={entity}>
+              {ENTITY_FILTER_LABELS[entity]}
+            </option>
+          ))}
+        </Select>
+        <Show when={isAdmin}>
+          <div className={styles.issuesScope} role="group" aria-label="Whose issues">
+            {(['everyone', 'mine'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={styles.issuesScopeButton}
+                aria-pressed={scope === option}
+                onClick={() => setScope(option)}
+              >
+                {option === 'everyone' ? 'Everyone' : 'Mine'}
+              </button>
+            ))}
+          </div>
+        </Show>
+      </div>
       <IssueBoardStats counts={countsQuery.data ?? EMPTY_ISSUE_COUNTS} />
       <IssueBoardList
-        categoryFilter={params.category}
-        issues={issuesQuery.data?.issues ?? []}
+        filtered={
+          params.status !== 'open' ||
+          params.category !== 'all' ||
+          Boolean(params.entity) ||
+          narrowed
+        }
+        issues={visible}
         issuesError={issuesQuery.error}
         issuesLoading={issuesQuery.isLoading}
+        profileId={profileId}
         showReporterName={isAdmin}
-        statusFilter={params.status}
+        selectable={isAdmin}
+        picked={picked}
+        onTogglePicked={togglePicked}
       />
+      <Show when={isAdmin && selectedIds.length > 0}>
+        <IssueBulkBar
+          ids={selectedIds}
+          total={visible.length}
+          onSelectAll={() => setPicked(new Set(visible.map((issue) => issue.id)))}
+          onClear={() => setPicked(new Set())}
+        />
+      </Show>
+      <Show when={issuesQuery.hasNextPage}>
+        <div className={styles.issuesMore}>
+          <span className={styles.issuesMoreCount}>
+            Showing {loaded.length} of {total}
+          </span>
+          <button
+            type="button"
+            className={styles.issuesMoreButton}
+            disabled={issuesQuery.isFetchingNextPage}
+            onClick={() => void issuesQuery.fetchNextPage()}
+          >
+            {issuesQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      </Show>
     </div>
   );
 }
+
+/**
+ * the slim bar that shows up once rows are ticked: resolve, close, priority,
+ * delete. one call to /bulk, then counts and list refresh together.
+ */
+function IssueBulkBar({
+  ids,
+  total,
+  onSelectAll,
+  onClear,
+}: {
+  ids: number[];
+  total: number;
+  onSelectAll: () => void;
+  onClear: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [priorityOpen, setPriorityOpen] = useState(false);
+  const priorityRef = useRef<HTMLDivElement | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: (change: IssueBulkChange) => bulkUpdateIssues(ids, change),
+    onSuccess: (result, change) => {
+      const toast = bulkResultToast(change, result);
+      window.showToast?.(toast.message, toast.type);
+      onClear();
+      void invalidateIssuesQueries(queryClient);
+    },
+    onError: (error) => {
+      window.showToast?.(error instanceof Error ? error.message : 'Something went wrong', 'error');
+    },
+  });
+
+  useEffect(() => {
+    if (!priorityOpen) return;
+    const onDown = (event: MouseEvent) => {
+      if (!priorityRef.current?.contains(event.target as Node)) setPriorityOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPriorityOpen(false);
+    };
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [priorityOpen]);
+
+  const remove = async () => {
+    const ok = await window.showConfirmDialog?.({
+      title: ids.length === 1 ? 'Delete this issue?' : `Delete ${ids.length} issues?`,
+      message: 'The reports and their threads are removed for good.',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      destructive: true,
+    });
+    if (ok) mutation.mutate({ delete: true });
+  };
+
+  const busy = mutation.isPending;
+  return (
+    <div className={styles.bulkBar} role="toolbar" aria-label="Selected issues">
+      <span className={styles.bulkCount} aria-live="polite">
+        {ids.length} selected
+      </span>
+      <Show when={ids.length < total}>
+        <button type="button" className={styles.bulkQuiet} onClick={onSelectAll}>
+          Select all {total}
+        </button>
+      </Show>
+      <span className={styles.bulkSpacer} />
+      <button
+        type="button"
+        className={styles.bulkButton}
+        disabled={busy}
+        onClick={() => mutation.mutate({ status: 'resolved' })}
+      >
+        Resolve
+      </button>
+      <button
+        type="button"
+        className={styles.bulkButton}
+        disabled={busy}
+        title="Close without a change"
+        onClick={() => mutation.mutate({ status: 'dismissed' })}
+      >
+        Close
+      </button>
+      <div className={styles.bulkMenuRoot} ref={priorityRef}>
+        <button
+          type="button"
+          className={styles.bulkButton}
+          disabled={busy}
+          aria-haspopup="menu"
+          aria-expanded={priorityOpen}
+          onClick={() => setPriorityOpen((open) => !open)}
+        >
+          Priority ▾
+        </button>
+        {priorityOpen ? (
+          <div className={styles.bulkMenu} role="menu" aria-label="Priority">
+            {ISSUE_PRIORITY_VALUES.map((priority, index) => (
+              <button
+                key={priority}
+                autoFocus={index === 0}
+                type="button"
+                role="menuitem"
+                className={styles.bulkMenuItem}
+                onClick={() => {
+                  setPriorityOpen(false);
+                  mutation.mutate({ priority });
+                }}
+              >
+                {priority[0].toUpperCase() + priority.slice(1)}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        className={`${styles.bulkButton} ${styles.bulkDanger}`}
+        disabled={busy}
+        onClick={() => void remove()}
+      >
+        Delete
+      </button>
+      <button
+        type="button"
+        className={styles.bulkClose}
+        aria-label="Clear selection"
+        onClick={onClear}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+const ENTITY_FILTER_LABELS: Record<IssueEntityType, string> = {
+  track: 'Tracks',
+  album: 'Albums',
+  artist: 'Artists',
+};
 
 function IssueBoardHeader({
   category,
@@ -233,22 +511,33 @@ function IssueBoardStats({ counts }: { counts: IssueCounts }) {
 }
 
 function IssueBoardList({
-  categoryFilter,
+  filtered,
   issues,
   issuesError,
   issuesLoading,
+  profileId,
   showReporterName,
-  statusFilter,
+  selectable,
+  picked,
+  onTogglePicked,
 }: {
-  categoryFilter: string;
+  filtered: boolean;
   issues: IssueRecord[];
   issuesError: unknown;
   issuesLoading: boolean;
+  profileId: number;
   showReporterName: boolean;
-  statusFilter: IssuesSearch['status'];
+  selectable: boolean;
+  picked: ReadonlySet<number>;
+  onTogglePicked: (id: number) => void;
 }) {
+  const selecting = selectable && issues.some((issue) => picked.has(issue.id));
   return (
-    <div className={styles.issuesList} id="issues-list" data-testid="issue-list">
+    <div
+      className={`${styles.issuesList} ${selecting ? styles.issuesListSelecting : ''}`}
+      id="issues-list"
+      data-testid="issue-list"
+    >
       <IssueBoardListContent />
     </div>
   );
@@ -282,16 +571,32 @@ function IssueBoardList({
           </div>
           <div className={styles.issuesEmptyTitle}>No issues found</div>
           <div className={styles.issuesEmptyText}>
-            {statusFilter !== 'open' || categoryFilter !== 'all'
-              ? 'Try adjusting your filters'
-              : 'No issues have been reported yet'}
+            {filtered ? 'Try adjusting your filters' : 'No issues have been reported yet'}
           </div>
         </div>
       );
     }
 
     return issues.map((issue) => (
-      <IssueBoardCard key={issue.id} issue={issue} showReporterName={showReporterName} />
+      <div
+        key={issue.id}
+        className={`${styles.issueRow} ${picked.has(issue.id) ? styles.issueRowPicked : ''}`}
+      >
+        <Show when={selectable}>
+          <input
+            type="checkbox"
+            className={styles.issueRowCheck}
+            aria-label={`Select ${issue.title}`}
+            checked={picked.has(issue.id)}
+            onChange={() => onTogglePicked(issue.id)}
+          />
+        </Show>
+        <IssueBoardCard
+          issue={issue}
+          showReporterName={showReporterName}
+          unread={Boolean(issue.reporter_unread) && issue.profile_id === profileId}
+        />
+      </div>
     ));
   }
 }
@@ -299,9 +604,12 @@ function IssueBoardList({
 function IssueBoardCard({
   issue,
   showReporterName,
+  unread,
 }: {
   issue: IssueRecord;
   showReporterName: boolean;
+  /** the reporter has news on this one they haven't opened */
+  unread: boolean;
 }) {
   const snapshot = parseSnapshot(issue.snapshot_data);
   const artwork = getIssueArtwork(snapshot);
@@ -311,7 +619,7 @@ function IssueBoardCard({
   const catMeta = getIssueCategoryMeta(issue.category) || ISSUE_CATEGORY_META.other;
   const priorityClass = getIssuePriorityClassName(getPriorityClassName(issue.priority));
   const statusClassName = getIssueStatusClassName(issue.status);
-  const createdDate = formatIssueDate(issue.created_at);
+  const createdDate = formatIssueAgo(issue.created_at);
 
   return (
     <Link
@@ -333,9 +641,9 @@ function IssueBoardCard({
             {catMeta.icon}
           </span>
           <span className={styles.issueCardTitle}>{issue.title}</span>
-          <Show when={issue.admin_response}>
-            <span className={styles.issueCardResponded} title="Admin has responded">
-              💬
+          <Show when={unread}>
+            <span className={styles.issueCardUnread} title="New reply or status change">
+              New
             </span>
           </Show>
         </div>
@@ -350,7 +658,9 @@ function IssueBoardCard({
           <div className={styles.issueCardDescription}>{issue.description}</div>
         </Show>
         <div className={styles.issueCardFooter}>
-          <span className={styles.issueCardDate}>{createdDate}</span>
+          <span className={styles.issueCardDate} title={formatIssueDate(issue.created_at)}>
+            {createdDate}
+          </span>
           <Show when={showReporterName && issue.reporter_name}>
             <span className={styles.issueCardProfile}>by {issue.reporter_name}</span>
           </Show>
@@ -413,7 +723,7 @@ const ISSUE_CATEGORY_FILTER_GROUPS = [
       applies.length === 1 && applies.includes('album'),
   },
   {
-    label: 'Both',
+    label: 'Several',
     matches: (applies: Array<'track' | 'album' | 'artist'>) => applies.length > 1,
   },
 ] as const;

@@ -5,6 +5,7 @@ bodies byte-identical; only the decorator changed.
 
 from flask import Blueprint, jsonify, request
 
+from core.discovery.blocked import WORKS, hide_blocked_in_response as _hide_blocked
 from core.personalized import api as _personalized_api
 from core.profile_context import get_current_profile_id
 from utils.logging_config import get_logger
@@ -55,6 +56,7 @@ def personalized_list_playlists():
 
 @bp.route('/api/personalized/playlist/<kind>', methods=['GET'])
 @bp.route('/api/personalized/playlist/<kind>/<variant>', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
 def personalized_get_playlist(kind, variant=''):
     """Get one personalized playlist + its current track snapshot.
 
@@ -73,6 +75,7 @@ def personalized_get_playlist(kind, variant=''):
 
 @bp.route('/api/personalized/playlist/<kind>/refresh', methods=['POST'])
 @bp.route('/api/personalized/playlist/<kind>/<variant>/refresh', methods=['POST'])
+@_hide_blocked({'tracks': WORKS})
 def personalized_refresh_playlist(kind, variant=''):
     """Run the kind's generator and persist the snapshot."""
     try:

@@ -350,6 +350,11 @@ def test_catalog_covers_every_handler_and_flags_the_dead_ends(worker):
     assert catalog['orphan_file']['destructive'] is True
     assert catalog['missing_lyrics']['destructive'] is False
 
+    # Corrupt files are quarantined, so their confirmation must not claim the
+    # generic "cannot be undone"; types without their own wording send none.
+    assert 'deleted-files folder' in catalog['corrupt_audio']['confirm']
+    assert 'confirm' not in catalog['orphan_file']
+
 
 def test_catalog_reports_which_jobs_emitted_a_type(worker):
     _raise(worker)

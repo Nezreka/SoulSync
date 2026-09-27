@@ -161,7 +161,15 @@ def _parse_bandcamp_date(value: Optional[str]) -> str:
 
 
 def _normalize_for_match(value: str) -> str:
-    return re.sub(r'[^a-z0-9 ]', '', (value or '').lower()).strip()
+    # any script (#1306); brackets kept, they can be part of a name here
+    from core.text.fold import fold_title
+    return fold_title(value or '', drop_brackets=False)
+
+
+def _ratio(a: str, b: str) -> float:
+    """folded strings compared; two empties are not a match."""
+    from core.text.fold import folded_similarity
+    return folded_similarity(a, b)
 
 
 def _best_match(candidates, artist_name: str, title: str):
@@ -177,12 +185,12 @@ def _best_match(candidates, artist_name: str, title: str):
     best = None
     best_score = 0.0
     for candidate in candidates:
-        title_score = SequenceMatcher(None, title_norm, _normalize_for_match(candidate.name)).ratio()
+        title_score = _ratio(title_norm, _normalize_for_match(candidate.name))
         if title_score < 0.75:
             continue
         candidate_artists = candidate.artists or []
         artist_score = max(
-            (SequenceMatcher(None, artist_norm, _normalize_for_match(a)).ratio() for a in candidate_artists),
+            (_ratio(artist_norm, _normalize_for_match(a)) for a in candidate_artists),
             default=0.0,
         )
         if artist_score < 0.6:
@@ -204,7 +212,7 @@ def _best_name_match(candidates, name: str):
     best = None
     best_score = 0.0
     for candidate in candidates:
-        score = SequenceMatcher(None, target, _normalize_for_match(candidate.name)).ratio()
+        score = _ratio(target, _normalize_for_match(candidate.name))
         if score > best_score:
             best_score = score
             best = candidate

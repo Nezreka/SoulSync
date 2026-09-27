@@ -4,11 +4,13 @@ import os
 from collections import defaultdict
 from difflib import SequenceMatcher
 
+from core.imports.compilation import VARIOUS_ARTIST_NAMES
 from core.imports.file_ops import _strip_slskd_dedup_suffix
 from core.library.duplicate_rules import (
     is_lossy_companion_pair as _is_lossy_companion_pair,
     lossy_companion_exts,
 )
+from core.library.file_tags import read_embedded_tags
 from core.repair_jobs import register_job
 from core.repair_jobs.base import (
     JobContext,
@@ -84,7 +86,8 @@ class DuplicateDetectorJob(RepairJob):
             cursor.execute("""
                 SELECT t.id, t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name),
                        al.title, t.file_path,
-                       t.bitrate, t.duration, al.thumb_url, ar.thumb_url, ar.id
+                       t.bitrate, t.duration, al.thumb_url, ar.thumb_url, ar.id,
+                       t.track_artist, ar.name
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -92,6 +95,15 @@ class DuplicateDetectorJob(RepairJob):
                   AND t.file_path IS NOT NULL AND t.file_path != ''
             """ + locked_filter)
             tracks = cursor.fetchall()
+            # #1315: track_artist only exists for rows written by a post-3.4.6
+            # sync. older rows on compilation albums still fall back to the
+            # album artist ('Various Artists') and can never match the
+            # performer's own copy — the exact #1263 miss, surviving the
+            # #1263 fix. heal those rows from the file's own tags before
+            # bucketing, and persist so the read happens once.
+            healed_artists = self._heal_compilation_track_artists(cursor, tracks)
+            if healed_artists:
+                conn.commit()
         except Exception as e:
             logger.error("Error fetching tracks from DB: %s", e, exc_info=True)
             result.errors += 1
@@ -112,7 +124,12 @@ class DuplicateDetectorJob(RepairJob):
         buckets = defaultdict(list)
         hand_tagged = hand_tagged_path_keys(context.db)
         for row in tracks:
-            track_id, title, artist_name, album_title, file_path, bitrate, duration, album_thumb, artist_thumb, artist_id = row
+            (track_id, title, artist_name, album_title, file_path, bitrate,
+             duration, album_thumb, artist_thumb, artist_id,
+             _raw_track_artist, _album_artist) = row
+            # #1315 healing: prefer the file-tag credit over the
+            # 'Various Artists' fallback for rows that never synced it
+            artist_name = healed_artists.get(track_id, artist_name)
             # same reason, for a hand-tagged file whose row isn't locked yet
             if is_hand_tagged_path(file_path, hand_tagged):
                 continue
@@ -199,6 +216,49 @@ class DuplicateDetectorJob(RepairJob):
         logger.info("Duplicate scan: %d tracks checked, %d duplicate groups found",
                      result.scanned, result.findings_created)
         return result
+
+    def _heal_compilation_track_artists(self, cursor, tracks) -> dict:
+        """Backfill NULL track_artist from the file's own tags (#1315).
+
+        track_artist is only written by a post-3.4.6 sync, so every older
+        row on a compilation album falls back to the album artist
+        ('Various Artists') and can never match the performer's own copy
+        — the exact #1263 miss, surviving the #1263 fix. For those rows
+        the ground truth is in the file: read its embedded artist tag,
+        use it for this scan, and persist it so the read happens once.
+
+        Scoped to compilation-marker album artists so a normal library
+        doesn't pay a tag read per track. Mirrors the sync convention —
+        only a credit that differs from the album artist is stored, so a
+        NULL that genuinely means "same as album artist" stays NULL.
+        """
+        healed = {}
+        for row in tracks:
+            track_id, file_path = row[0], row[4]
+            raw_track_artist, album_artist = row[10], row[11] or ''
+            if raw_track_artist:
+                continue  # already has a per-track credit
+            album_artist_norm = album_artist.strip().lower()
+            if album_artist_norm not in VARIOUS_ARTIST_NAMES:
+                continue
+            tag_artist = _embedded_artist_name(file_path)
+            if not tag_artist:
+                continue
+            tag_norm = tag_artist.lower()
+            if tag_norm in VARIOUS_ARTIST_NAMES:
+                continue  # the file says so too — nothing learned
+            if tag_norm == album_artist_norm:
+                continue  # fallback was already right; keep the NULL
+            healed[track_id] = tag_artist
+        for track_id, artist in healed.items():
+            cursor.execute(
+                "UPDATE tracks SET track_artist = ? WHERE id = ? "
+                "AND (track_artist IS NULL OR track_artist = '')",
+                (artist, track_id))
+        if healed:
+            logger.info("duplicate detector: healed track_artist for %d "
+                        "compilation tracks from file tags", len(healed))
+        return healed
 
     def _scan_bucket(
         self,
@@ -396,6 +456,18 @@ class DuplicateDetectorJob(RepairJob):
         merged = self.default_settings.copy()
         merged.update(cfg)
         return merged
+
+
+def _embedded_artist_name(file_path: str) -> str:
+    """The file's own embedded artist tag, '' when unreadable. Never raises."""
+    try:
+        info = read_embedded_tags(file_path)
+    except Exception:
+        return ''
+    if not info.get('available'):
+        return ''
+    tags = info.get('tags') or {}
+    return (tags.get('artist') or '').strip()
 
 
 def _normalize(text: str) -> str:

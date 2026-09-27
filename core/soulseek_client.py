@@ -418,8 +418,14 @@ class SoulseekClient(DownloadSourcePlugin):
             'completed', 'cancelled', 'failed', 'errored', 'timedout', 'timed out',
         } for flag in state.split(','))
 
-    def _process_search_responses(self, responses_data: List[Dict[str, Any]]) -> tuple[List[TrackResult], List[AlbumResult]]:
-        """Process search response data into TrackResult and AlbumResult objects"""
+    def _process_search_responses(self, responses_data: List[Dict[str, Any]],
+                                  extra_extensions=None) -> tuple[List[TrackResult], List[AlbumResult]]:
+        """Process search response data into TrackResult and AlbumResult objects
+
+        ``extra_extensions`` widens the audio filter for one search only (e.g.
+        the audiobook search asks for ``.m4b``) without touching the shared
+        music list.
+        """
         from collections import defaultdict
         import re
         
@@ -430,6 +436,10 @@ class SoulseekClient(DownloadSourcePlugin):
         
         # Audio file extensions to filter for
         audio_extensions = AUDIO_EXTENSIONS
+        if extra_extensions:
+            audio_extensions = audio_extensions | {
+                f".{str(ext).lower().lstrip('.')}" for ext in extra_extensions
+            }
         
         for response_data in responses_data:
             username = response_data.get('username', '')
@@ -643,7 +653,8 @@ class SoulseekClient(DownloadSourcePlugin):
         
         return None
     
-    async def search(self, query: str, timeout: int = None, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
+    async def search(self, query: str, timeout: int = None, progress_callback=None,
+                     extra_extensions=None) -> tuple[List[TrackResult], List[AlbumResult]]:
         if not self.base_url:
             logger.debug("Soulseek client not configured")
             return [], []
@@ -738,7 +749,8 @@ class SoulseekClient(DownloadSourcePlugin):
 
                         # Reprocess complete peer snapshots so a folder that
                         # arrives over multiple polls has one coherent album.
-                        all_tracks, all_albums = self._process_search_responses(list(responses_by_peer.values()))
+                        all_tracks, all_albums = self._process_search_responses(
+                            list(responses_by_peer.values()), extra_extensions)
                         
                         # Sort by quality score for better display order
                         all_tracks.sort(key=lambda x: x.quality_score, reverse=True)
@@ -2668,6 +2680,27 @@ class SoulseekClient(DownloadSourcePlugin):
     async def get_user_info(self, username: str) -> Optional[Dict[str, Any]]:
         """A peer's info card (description, slots, queue) — best-effort."""
         return await self._make_request('GET', f'users/{self._quote(username)}/info')
+
+    async def get_share_directories(self) -> List[str]:
+        """Fetch the list of shared directory paths configured in slskd."""
+        if not self.base_url:
+            return []
+        try:
+            opts = await self._make_request('GET', 'options')
+            if isinstance(opts, dict):
+                shares = opts.get('shares') or opts.get('Shares') or {}
+                if isinstance(shares, dict):
+                    dirs = shares.get('directories') or shares.get('Directories') or []
+                    if isinstance(dirs, list):
+                        out = []
+                        for d in dirs:
+                            p = d.get('path') or d.get('Path') or '' if isinstance(d, dict) else (str(d) if d else '')
+                            if p:
+                                out.append(str(p).replace('\\', '/').rstrip('/'))
+                        return out
+        except Exception as e:
+            logger.debug("Failed to get slskd share directories: %s", e)
+        return []
 
     async def explore_api_endpoints(self) -> Dict[str, Any]:
         """Explore available API endpoints to find the correct download endpoint"""

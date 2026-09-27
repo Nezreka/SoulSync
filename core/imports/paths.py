@@ -387,8 +387,6 @@ def get_album_type_display(raw_type, track_count) -> str:
 
     if raw in ("compilation", "compile"):
         return "Compilation"
-    if raw == "album":
-        return "Album"
     if raw in ("single", "ep"):
         # Unknown track count must not collapse to Single: an EP whose count
         # was lost in a handoff kept getting filed as [Single] (#1064). With
@@ -401,6 +399,12 @@ def get_album_type_display(raw_type, track_count) -> str:
             return "EP"
         return "Album"
 
+    # 'album', missing, or anything unrecognized: a bare 'album' is the
+    # default fallback at every upstream layer (wishlist payloads,
+    # album_grouping, import context) — not a signal. Deezer's track-level
+    # responses hardcode album_type='album', so trusting it files every
+    # Deezer single/EP under Album/. Verify against the track count when we
+    # have one; with no count, keep the "Album" default rather than guessing.
     if tc <= 0:
         return "Album"
     if tc <= 3:

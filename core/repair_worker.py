@@ -57,7 +57,7 @@ _ABSENCE_IS_THE_FINDING = frozenset({'dead_file', 'empty_folder'})
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
     'dead_file',              # 'remove' drops the library row + file
-    'corrupt_audio',          # deletes and re-wishlists
+    'corrupt_audio',          # moves to the deleted-files folder, re-wishlists
     'unwanted_content',       # deletes/quarantines live + spoken content
     'short_preview_track',    # deletes the clip, re-wishlists the real track
     'expired_download',       # deletes the aged download
@@ -96,12 +96,16 @@ FINDING_TYPE_META = {
     'missing_lossy_copy':       {'label': 'Missing Lossy Copy', 'verb': 'Convert'},
     'unwanted_content':         {'label': 'Unwanted Content', 'verb': 'Remove'},
     'unknown_artist':           {'label': 'Unknown Artist', 'verb': 'Identify'},
+    'suspect_album_tag':        {'label': 'Suspect Album Tags', 'verb': 'Re-identify'},
     'acoustid_mismatch':        {'label': 'AcoustID Mismatch', 'verb': 'Re-tag'},
     'quality_upgrade':          {'label': 'Quality Upgrades', 'verb': 'Upgrade'},
     'missing_discography_track':{'label': 'Missing Discography', 'verb': 'Add to Wishlist'},
     'library_retag':            {'label': 'Library Re-tag', 'verb': 'Apply Tags'},
     'short_preview_track':      {'label': 'Preview Clips', 'verb': 'Re-download'},
-    'corrupt_audio':            {'label': 'Corrupt Audio', 'verb': 'Re-download'},
+    'corrupt_audio':            {'label': 'Corrupt Audio', 'verb': 'Re-download',
+                                 'confirm': ('The damaged files move to the deleted-files folder, where they '
+                                             'can be restored until retention clears them, and the tracks '
+                                             'are re-downloaded.')},
     'canonical_version':        {'label': 'Canonical Version', 'verb': 'Pin Version'},
     'genre_cleanup':            {'label': 'Genre Cleanup', 'verb': 'Clean Genres'},
     'comma_artist_split':       {'label': 'Combined Artists', 'verb': 'Split Artists'},
@@ -161,6 +165,7 @@ JOB_CATEGORIES = {
     'genre_enrichment': 'Tags & metadata',
     'comma_artist_splitter': 'Tags & metadata',
     'unknown_artist_fixer': 'Tags & metadata',
+    'suspect_album_tag_detector': 'Tags & metadata',
     'metadata_gap_filler': 'Tags & metadata',
     'canonical_version_resolve': 'Tags & metadata',
     'missing_cover_art': 'Artwork & lyrics',
@@ -314,6 +319,50 @@ def _delete_file_if_present(file_path, transfer_folder, config_manager=None, dow
     if resolved is None:
         return False, f'file could not be located ({_path_mapping_hint(config_manager)})'
     return False, 'file was already gone'
+
+
+def _quarantine_file_if_present(file_path, transfer_folder, source,
+                                config_manager=None, download_folder=None):
+    """Move a library file into the deleted-files quarantine instead of deleting it.
+
+    Returns ``(moved, note, dest)``. The file keeps its path relative to the
+    transfer folder (or its name, for files outside it) and is recorded in the
+    quarantine manifest, so the deleted-files manager can restore it and the
+    library.deleted_keep_days retention ages it out like any other removal.
+    """
+    if not file_path:
+        return False, None, None
+    resolved = _resolve_file_path(
+        file_path, transfer_folder,
+        download_folder=download_folder,
+        config_manager=config_manager)
+    if resolved is None:
+        return False, f'file could not be located ({_path_mapping_hint(config_manager)})', None
+    if not os.path.exists(resolved):
+        return False, 'file was already gone', None
+    from core.repair_jobs.base import deleted_quarantine_root
+    from core.library.deleted_quarantine import record_deleted_entry
+    deleted_root = deleted_quarantine_root(transfer_folder)
+    try:
+        rel = os.path.relpath(resolved, transfer_folder)
+    except ValueError:
+        rel = os.path.basename(resolved)
+    if rel.startswith('..') or os.path.isabs(rel):
+        rel = os.path.basename(resolved)
+    dest = os.path.join(deleted_root, rel)
+    base, ext = os.path.splitext(dest)
+    n = 1
+    while os.path.exists(dest):
+        dest = f"{base}_{n}{ext}"
+        n += 1
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.move(resolved, dest)
+    except OSError as e:
+        logger.warning("Could not move %s to the deleted folder: %s", resolved, e)
+        return False, str(e), None
+    record_deleted_entry(deleted_root, dest, resolved, source)
+    return True, None, dest
 
 
 class RepairWorker:
@@ -1908,6 +1957,9 @@ class RepairWorker:
                 'fixable': fixable,
                 'destructive': slug in DESTRUCTIVE_FINDING_TYPES,
                 'job_ids': sorted(jobs_by_type.get(slug, [])),
+                # What the bulk-fix confirmation says for this type, where the
+                # generic "moves or deletes files ... cannot be undone" is wrong.
+                **({'confirm': meta['confirm']} if meta.get('confirm') else {}),
             })
         return catalog
 
@@ -1950,6 +2002,7 @@ class RepairWorker:
             'genre_cleanup': self._fix_genre_cleanup,
             'genre_enrichment': self._fix_genre_enrichment,
             'comma_artist_split': self._fix_comma_artist_split,
+            'suspect_album_tag': self._fix_suspect_album_tag,
         }
 
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
@@ -1959,6 +2012,66 @@ class RepairWorker:
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_suspect_album_tag(self, entity_type, entity_id, file_path, details):
+        """Re-identify a track with suspect album tags.
+
+        If a specific release was picked via fix_action or details ('source:track_id'),
+        apply it via stage_file_for_reidentify.
+        Otherwise, prompt the user to use the Re-identify modal.
+        """
+        source = details.get('source')
+        source_track_id = details.get('source_track_id') or details.get('track_id_picked')
+        fix_action = details.get('_fix_action')
+
+        if isinstance(fix_action, str) and ':' in fix_action:
+            parts = fix_action.split(':', 1)
+            source, source_track_id = parts[0], parts[1]
+
+        if not source or not source_track_id:
+            return {
+                'success': False,
+                'error': 'Please use the Re-identify button to select the target album release.',
+            }
+
+        try:
+            from core.imports.rematch_search import resolve_hint_fields
+            from core.imports.rematch_apply import stage_file_for_reidentify, build_reidentify_hint
+            from core.imports.rematch_hints import create_hint
+            from core.library.path_resolver import resolve_library_file_path
+
+            hint_fields = resolve_hint_fields(source, source_track_id)
+            if not hint_fields:
+                return {'success': False, 'error': 'Could not resolve the selected release metadata'}
+
+            conn = self.db._get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT file_path FROM tracks WHERE id = ?", (str(entity_id),))
+                row = cur.fetchone()
+            finally:
+                conn.close()
+
+            if not row or not row['file_path']:
+                return {'success': False, 'error': 'Library track has no file on disk'}
+
+            resolved = resolve_library_file_path(row['file_path'], transfer_folder=self.transfer_folder, config_manager=self._config_manager)
+            if not resolved or not os.path.exists(resolved):
+                return {'success': False, 'error': f'Source file not found on disk: {row["file_path"]}'}
+
+            staged_path = stage_file_for_reidentify(resolved, self.transfer_folder)
+            replace = bool(details.get('replace', True))
+            hint = build_reidentify_hint(
+                source=source,
+                original_path=row['file_path'],
+                resolved_fields=hint_fields,
+                replace_original=replace,
+            )
+            create_hint(staged_path, hint)
+            return {'success': True, 'action': 'reidentify_staged', 'message': f'Staged for re-identification under {hint_fields.get("album_title", "new album")}'}
+        except Exception as e:
+            logger.error("Failed to apply re-identify for track %s: %s", entity_id, e)
+            return {'success': False, 'error': str(e)}
 
     def _fix_genre_cleanup(self, entity_type, entity_id, file_path, details):
         """#1057 — rewrite a stored genre list to only its whitelisted genres.
@@ -2732,10 +2845,15 @@ class RepairWorker:
                 conn.close()
 
     def _fix_corrupt_audio(self, entity_type, entity_id, file_path, details):
-        """Approve a corrupt-file finding: delete the damaged file, drop its DB row, and
-        re-add the track to the wishlist (full payload) so the real version downloads.
-        Frame-corrupt audio can't be repaired by re-tagging — the data is gone — so a
-        fresh download is the only cure. Mirrors the preview-clip redownload path (#1000).
+        """Approve a corrupt-file finding: move the damaged file to the deleted-files
+        quarantine, drop its DB row, and re-add the track to the wishlist (full
+        payload) so the real version downloads. Frame-corrupt audio can't be
+        repaired by re-tagging — the data is gone — so a fresh download is the only
+        cure (#1000).
+
+        Quarantined rather than deleted: until a replacement has actually arrived,
+        the damaged copy is still the only one, and it can be restored from the
+        deleted-files manager if the re-download never succeeds.
         """
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
@@ -2812,14 +2930,14 @@ class RepairWorker:
             if not added:
                 return {'success': False, 'error': 'Failed to add to wishlist (may already exist or be blocklisted)'}
 
-            # Delete the corrupt file (path resolved like the other delete tools).
+            # Quarantine the corrupt file (path resolved like the other delete tools).
             target_path = file_path or details.get('original_path')
-            deleted_file = False
-            delete_note = None
+            moved = False
+            move_note = None
             if target_path:
                 download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-                deleted_file, delete_note = _delete_file_if_present(
-                    target_path, self.transfer_folder,
+                moved, move_note, _dest = _quarantine_file_if_present(
+                    target_path, self.transfer_folder, 'corrupt_audio',
                     config_manager=self._config_manager,
                     download_folder=download_folder)
 
@@ -2828,9 +2946,10 @@ class RepairWorker:
             conn.commit()
 
             return {'success': True, 'action': 'added_to_wishlist',
-                    'message': (f'Deleted corrupt file and re-wishlisted "{track_name}" for download'
-                                if deleted_file else
-                                f'Re-wishlisted "{track_name}" (corrupt file not deleted: {delete_note or "already gone"})')}
+                    'message': (f'Moved the corrupt file to the deleted folder and re-wishlisted '
+                                f'"{track_name}" for download'
+                                if moved else
+                                f'Re-wishlisted "{track_name}" (corrupt file not moved: {move_note or "already gone"})')}
         except Exception as e:
             logger.error("Corrupt-file fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}

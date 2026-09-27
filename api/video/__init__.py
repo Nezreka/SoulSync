@@ -74,7 +74,7 @@ def create_video_blueprint() -> Blueprint:
         # Per-profile side access: a music-only profile gets NOTHING from the
         # video blueprint (its whole UI is hidden for them — any request here is
         # a deep link or a probe). Admins always have both sides.
-        if not is_admin and getattr(g, "allowed_sides", "both") == "music":
+        if not is_admin and getattr(g, "allowed_sides", "both") not in ("video", "both"):
             return jsonify({"error": "Video access is disabled for this profile."}), 403
 
         # Management surfaces + credential/settings-only endpoints — admin for ANY
@@ -124,7 +124,15 @@ def create_video_blueprint() -> Blueprint:
                 "/api/video/wishlist/youtube/download-all",
                 "/api/video/wishlist/add",
                 "/api/video/watchlist/add", "/api/video/youtube/wishlist/add",
-                "/api/video/watch/grab"):
+                "/api/video/watch/grab",
+                # the wishlist and watchlist are shared by the household: a
+                # profile that can't add to them can't empty them either (it
+                # used to, and that dropped every approved request with it),
+                # and searching/retrying spends the same indexer budget as a grab
+                "/api/video/wishlist/remove", "/api/video/wishlist/clear",
+                "/api/video/wishlist/search", "/api/video/wishlist/retry",
+                "/api/video/watchlist/remove", "/api/video/watchlist/person",
+                "/api/video/watchlist/studio", "/api/video/youtube/wishlist/remove"):
             return jsonify({"error": "Downloads are disabled for this profile."}), 403
 
     from .dashboard import register_routes as reg_dashboard

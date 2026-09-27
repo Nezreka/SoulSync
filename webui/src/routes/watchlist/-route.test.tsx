@@ -721,17 +721,18 @@ describe('watchlist route', () => {
     window.showToast = vi.fn();
     renderWatchlistRoute(['/watchlist?settings=true']);
 
-    await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: 'Global Watchlist Settings' })).toBeInTheDocument();
-    });
+    const dialog = await screen.findByRole('dialog', { name: 'Global Watchlist Settings' });
+    const inDialog = within(dialog);
 
-    // The accessible name is the whole label, icon included ("💿Albums Full-length
-    // studio albums"), so these match on a distinctive substring.
-    for (const label of [/Full-length studio albums/, /Extended plays/, /Single tracks and/]) {
-      const box = screen.getByRole('checkbox', { name: label });
-      if ((box as HTMLInputElement).checked) fireEvent.click(box);
+    // each box is found through its description text and the label around it.
+    // a checkbox role query has to compute every label's accessible name, and
+    // three of those took this test past its time budget.
+    for (const text of [/Full-length studio albums/, /Extended plays/, /Single tracks and/]) {
+      const box = inDialog.getByText(text).closest('label')!.querySelector('input')!;
+      expect(box.type).toBe('checkbox');
+      if (box.checked) fireEvent.click(box);
     }
-    fireEvent.click(screen.getByRole('button', { name: 'Save Global Settings' }));
+    fireEvent.click(inDialog.getByRole('button', { name: 'Save Global Settings' }));
 
     await waitFor(() => {
       expect(window.showToast).toHaveBeenCalledWith(

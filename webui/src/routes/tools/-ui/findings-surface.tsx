@@ -29,7 +29,6 @@
  * duplicate), so the backend refuses an action that spans more than one type.
  */
 
-import { FindingsAlbumGrid } from './findings-album-grid';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
@@ -77,8 +76,10 @@ import {
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
 import { safeFixablePending, visibleGroups } from '../-tools.groups';
+import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 import { FindingDetail } from './finding-detail';
 import { useFindingPrompts } from './finding-prompts';
+import { FindingsAlbumGrid } from './findings-album-grid';
 import { FindingsInbox } from './findings-inbox';
 import { HealthHero } from './health-hero';
 
@@ -106,6 +107,7 @@ const TYPE_DEAD = 'dead_file';
 const TYPE_ACOUSTID = 'acoustid_mismatch';
 const TYPE_BACKFILL = 'missing_discography_track';
 const TYPE_QUALITY = 'quality_upgrade';
+const TYPE_SUSPECT_ALBUM = 'suspect_album_tag';
 
 /** Above this many files, a whole-group orphan DELETE goes through the
  *  type-the-phrase dialog. Same number the filter-wide Fix All has always
@@ -141,7 +143,7 @@ export interface FindingsSurfaceProps {
   trackCount: number | null;
   /** A jump from the run history: scope the surface to one job's open
    *  findings. The token re-fires the same job. */
-  focusJob?: { jobId: string; token: number } | null;
+  focusJob?: { jobId: string; token: number; query?: string } | null;
   /** `updateRepairStatus()` — refresh the pending badge after any mutation. */
   onStatusChanged: () => void;
 }
@@ -195,6 +197,7 @@ export function FindingsSurface({
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
   const [busyFix, setBusyFix] = useState<ReadonlySet<number>>(() => new Set());
+  const [reidentifyingFinding, setReidentifyingFinding] = useState<RepairFinding | null>(null);
 
   const [bulkRun, setBulkRun] = useState<BulkFixStatus | null>(null);
   const bulkTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -347,7 +350,8 @@ export function FindingsSurface({
     setJobFilter(focusJob.jobId);
     setStatusFilter('pending');
     setSeverityFilter('');
-    setQuery('');
+    // a jump from an issue carries the item it was about
+    setQuery(focusJob.query ?? '');
     setOpenType('');
     setPage(0);
   }, [focusJob]);
@@ -486,6 +490,10 @@ export function FindingsSurface({
         }
         // 'add_to_wishlist' falls through with no fix_action — the handler
         // already adds to the wishlist by default.
+      }
+      if (type === TYPE_SUSPECT_ALBUM) {
+        setReidentifyingFinding(finding);
+        return;
       }
 
       setBusyFix((current) => new Set(current).add(finding.id));
@@ -768,9 +776,11 @@ export function FindingsSurface({
         // spell out what happens to files; safe ones just confirm the scale.
         const confirmed = await window.showConfirmDialog?.({
           title: `${info?.verb || 'Fix'} ${label}`,
-          message: info?.destructive
-            ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This moves or deletes files on disk and cannot be undone.`
-            : `Apply "${info?.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This only writes metadata — no files are deleted or moved.`,
+          message: info?.confirm
+            ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? ${info.confirm}`
+            : info?.destructive
+              ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This moves or deletes files on disk and cannot be undone.`
+              : `Apply "${info?.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This only writes metadata — no files are deleted or moved.`,
           confirmText: info?.verb || 'Fix',
           destructive: Boolean(info?.destructive),
         });
@@ -970,11 +980,13 @@ export function FindingsSurface({
      album card and mean nothing. */
   const viewSwitch = openType ? (
     <div className="repair-view-switch" role="group" aria-label="Group findings by">
-      {([
-        ['list', 'List'],
-        ['album', 'Albums'],
-        ['artist', 'Artists'],
-      ] as const).map(([value, label]) => (
+      {(
+        [
+          ['list', 'List'],
+          ['album', 'Albums'],
+          ['artist', 'Artists'],
+        ] as const
+      ).map(([value, label]) => (
         <button
           type="button"
           key={value}
@@ -1010,148 +1022,154 @@ export function FindingsSurface({
       {viewSwitch ? <div className="repair-findings-toolbar">{viewSwitch}</div> : null}
       {groupedView}
       {groupedView ? null : (
-    <>
-      {bar.showBar ? (
-        <div className="repair-findings-bulk" id="repair-findings-selection">
-          <span className="repair-bulk-count">{bar.countLabel}</span>
-          <button className="btn btn--sm btn--primary" type="button" onClick={() => void bulkFix()}>
-            Fix Selected
-          </button>
-          <button
-            className="btn btn--sm btn--secondary"
-            type="button"
-            onClick={() => void bulkDismiss()}
-          >
-            Dismiss Selected
-          </button>
-        </div>
-      ) : null}
+        <>
+          {bar.showBar ? (
+            <div className="repair-findings-bulk" id="repair-findings-selection">
+              <span className="repair-bulk-count">{bar.countLabel}</span>
+              <button
+                className="btn btn--sm btn--primary"
+                type="button"
+                onClick={() => void bulkFix()}
+              >
+                Fix Selected
+              </button>
+              <button
+                className="btn btn--sm btn--secondary"
+                type="button"
+                onClick={() => void bulkDismiss()}
+              >
+                Dismiss Selected
+              </button>
+            </div>
+          ) : null}
 
-      <div className="repair-list-controls">
-        <label className="repair-select-all" title="Select all on this page">
-          <input
-            type="checkbox"
-            id="repair-select-all-cb"
-            checked={bar.selectAllChecked}
-            ref={(node) => {
-              if (node) node.indeterminate = bar.selectAllIndeterminate;
-            }}
-            onChange={(event) => toggleSelectAll(event.target.checked)}
-          />
-          <span>Select all on this page</span>
-        </label>
-        <select
-          id="repair-findings-sort"
-          title="Sort"
-          value={sort}
-          onChange={(event) => {
-            setSort(event.target.value);
-            setPage(0);
-          }}
-        >
-          {SORT_OPTIONS.map((option) => (
-            <option value={option.value} key={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <select
-          id="repair-page-size-select"
-          title="Findings per page"
-          value={String(pageSize)}
-          onChange={(event) => changePageSize(event.target.value)}
-        >
-          {REPAIR_PAGE_SIZE_OPTIONS.map((size) => (
-            <option value={String(size)} key={size}>
-              {size} / page
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="repair-findings-list" id="repair-findings-list">
-        {loadError !== null ? (
-          <div className="repair-empty">
-            Error loading findings
-            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>{loadError}</div>
+          <div className="repair-list-controls">
+            <label className="repair-select-all" title="Select all on this page">
+              <input
+                type="checkbox"
+                id="repair-select-all-cb"
+                checked={bar.selectAllChecked}
+                ref={(node) => {
+                  if (node) node.indeterminate = bar.selectAllIndeterminate;
+                }}
+                onChange={(event) => toggleSelectAll(event.target.checked)}
+              />
+              <span>Select all on this page</span>
+            </label>
+            <select
+              id="repair-findings-sort"
+              title="Sort"
+              value={sort}
+              onChange={(event) => {
+                setSort(event.target.value);
+                setPage(0);
+              }}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option value={option.value} key={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              id="repair-page-size-select"
+              title="Findings per page"
+              value={String(pageSize)}
+              onChange={(event) => changePageSize(event.target.value)}
+            >
+              {REPAIR_PAGE_SIZE_OPTIONS.map((size) => (
+                <option value={String(size)} key={size}>
+                  {size} / page
+                </option>
+              ))}
+            </select>
           </div>
-        ) : items === null ? (
-          <div className="repair-loading">Loading findings...</div>
-        ) : items.length === 0 ? (
-          <div className="repair-empty">Nothing here matches your filters.</div>
-        ) : (
-          items.map((finding) => (
-            <FindingCard
-              finding={finding}
-              key={finding.id}
-              selected={selected.has(finding.id)}
-              expanded={expanded.has(finding.id)}
-              fixing={busyFix.has(finding.id)}
-              onToggleSelect={toggleSelect}
-              onToggleDetail={toggleDetail}
-              jobLabel={jobLabel}
-              onFix={fixOne}
-              onDismiss={dismissOne}
-              onReopen={reopenOne}
-              onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
-              onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
-            />
-          ))
-        )}
-      </div>
 
-      <div className="repair-findings-pagination" id="repair-findings-pagination">
-        {items && items.length > 0 && pagination.totalPages > 1 ? (
-          <>
-            {pagination.showPrev ? (
-              <button
-                className="repair-page-btn"
-                type="button"
-                onClick={() => setPage(serverPage - 1)}
-              >
-                &larr;
-              </button>
+          <div className="repair-findings-list" id="repair-findings-list">
+            {loadError !== null ? (
+              <div className="repair-empty">
+                Error loading findings
+                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>{loadError}</div>
+              </div>
+            ) : items === null ? (
+              <div className="repair-loading">Loading findings...</div>
+            ) : items.length === 0 ? (
+              <div className="repair-empty">Nothing here matches your filters.</div>
+            ) : (
+              items.map((finding) => (
+                <FindingCard
+                  finding={finding}
+                  key={finding.id}
+                  selected={selected.has(finding.id)}
+                  expanded={expanded.has(finding.id)}
+                  fixing={busyFix.has(finding.id)}
+                  onToggleSelect={toggleSelect}
+                  onToggleDetail={toggleDetail}
+                  jobLabel={jobLabel}
+                  onFix={fixOne}
+                  onDismiss={dismissOne}
+                  onReopen={reopenOne}
+                  onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
+                  onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="repair-findings-pagination" id="repair-findings-pagination">
+            {items && items.length > 0 && pagination.totalPages > 1 ? (
+              <>
+                {pagination.showPrev ? (
+                  <button
+                    className="repair-page-btn"
+                    type="button"
+                    onClick={() => setPage(serverPage - 1)}
+                  >
+                    &larr;
+                  </button>
+                ) : null}
+                {pagination.showFirst ? (
+                  <button className="repair-page-btn" type="button" onClick={() => setPage(0)}>
+                    1
+                  </button>
+                ) : null}
+                {pagination.showFirstEllipsis ? (
+                  <span className="repair-page-info">...</span>
+                ) : null}
+                {pagination.pages.map((index) => (
+                  <button
+                    className={`repair-page-btn ${index === serverPage ? 'active' : ''}`}
+                    type="button"
+                    key={index}
+                    onClick={() => setPage(index)}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
+                {pagination.showLastEllipsis ? <span className="repair-page-info">...</span> : null}
+                {pagination.showLast ? (
+                  <button
+                    className="repair-page-btn"
+                    type="button"
+                    onClick={() => setPage(pagination.totalPages - 1)}
+                  >
+                    {pagination.totalPages}
+                  </button>
+                ) : null}
+                {pagination.showNext ? (
+                  <button
+                    className="repair-page-btn"
+                    type="button"
+                    onClick={() => setPage(serverPage + 1)}
+                  >
+                    &rarr;
+                  </button>
+                ) : null}
+                <span className="repair-page-info">{total.toLocaleString()} total</span>
+              </>
             ) : null}
-            {pagination.showFirst ? (
-              <button className="repair-page-btn" type="button" onClick={() => setPage(0)}>
-                1
-              </button>
-            ) : null}
-            {pagination.showFirstEllipsis ? <span className="repair-page-info">...</span> : null}
-            {pagination.pages.map((index) => (
-              <button
-                className={`repair-page-btn ${index === serverPage ? 'active' : ''}`}
-                type="button"
-                key={index}
-                onClick={() => setPage(index)}
-              >
-                {index + 1}
-              </button>
-            ))}
-            {pagination.showLastEllipsis ? <span className="repair-page-info">...</span> : null}
-            {pagination.showLast ? (
-              <button
-                className="repair-page-btn"
-                type="button"
-                onClick={() => setPage(pagination.totalPages - 1)}
-              >
-                {pagination.totalPages}
-              </button>
-            ) : null}
-            {pagination.showNext ? (
-              <button
-                className="repair-page-btn"
-                type="button"
-                onClick={() => setPage(serverPage + 1)}
-              >
-                &rarr;
-              </button>
-            ) : null}
-            <span className="repair-page-info">{total.toLocaleString()} total</span>
-          </>
-        ) : null}
-      </div>
-    </>
+          </div>
+        </>
       )}
     </>
   );
@@ -1294,6 +1312,38 @@ export function FindingsSurface({
       )}
 
       {prompts.promptNode}
+
+      {reidentifyingFinding ? (
+        <ReidentifyModal
+          trackId={reidentifyingFinding.entity_id}
+          trackTitle={String(
+            (reidentifyingFinding.details as Record<string, any>)?.track_title ||
+              reidentifyingFinding.title ||
+              '',
+          )}
+          artistName={String(
+            (reidentifyingFinding.details as Record<string, any>)?.artist_name || '',
+          )}
+          albumTitle={String(
+            (reidentifyingFinding.details as Record<string, any>)?.album_title || '',
+          )}
+          imageUrl={String(
+            (reidentifyingFinding.details as Record<string, any>)?.album_thumb_url || '',
+          )}
+          initialQuery={String(
+            (reidentifyingFinding.details as Record<string, any>)?.reidentify_query || '',
+          )}
+          onApplied={async () => {
+            if (reidentifyingFinding) {
+              await dismissOne(reidentifyingFinding.id);
+            }
+          }}
+          onClose={() => {
+            setReidentifyingFinding(null);
+            refreshAll();
+          }}
+        />
+      ) : null}
     </>
   );
 }

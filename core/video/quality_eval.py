@@ -229,15 +229,36 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
             if want_date and parsed.get("air_date") == want_date:
                 return None, None
             return None, "Wrong episode"
+        # Show-identity gate (the "Dark Matter" case): two different shows can share
+        # a name AND an SxxExx — "Dark Matter (2015)" and "Dark Matter (2024)" both
+        # have an S02E06. When the release name carries a year and it disagrees with
+        # the wanted show's first-air year, it's the wrong show. Same rule as movies
+        # (earlier year, or >1 later, is a different show); an unknown year passes
+        # because TV scene releases usually omit it. Skipped when the match came via
+        # air date (the year token there is the air date itself, not disambiguation).
+        py, wy = parsed.get("year"), _as_year(want_year)
+        if wy and py and (py < wy or py > wy + 1):
+            return None, "Wrong year (%s — wanted %s)" % (py, wy)
         return None, None
     if scope == "season":
         if not parsed.get("is_season_pack"):
             return None, "Not a full-season pack"
         if want_season is not None and season != want_season:
             return None, "Wrong season"
+        # Same show-identity gate as episodes: a year-tagged pack for the wrong
+        # show's season must not satisfy this show's season search.
+        py, wy = parsed.get("year"), _as_year(want_year)
+        if wy and py and (py < wy or py > wy + 1):
+            return None, "Wrong year (%s — wanted %s)" % (py, wy)
         return None, None
     if scope == "series":
-        return (None, None) if parsed.get("is_series_pack") else (None, "Not a complete-series pack")
+        if not parsed.get("is_series_pack"):
+            return None, "Not a complete-series pack"
+        # Same show-identity gate: a year-tagged complete pack for the wrong show.
+        py, wy = parsed.get("year"), _as_year(want_year)
+        if wy and py and (py < wy or py > wy + 1):
+            return None, "Wrong year (%s — wanted %s)" % (py, wy)
+        return None, None
     return None, None
 
 

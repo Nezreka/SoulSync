@@ -60,7 +60,10 @@ describe('the corpus itself', () => {
     // nothing about where the line actually sits.
     expect(CORPUS.accept.length).toBeGreaterThanOrEqual(10);
     expect(CORPUS.reject.length).toBeGreaterThanOrEqual(15);
-    const whys = [...CORPUS.accept, ...CORPUS.reject].map((c) => c.why).join(' ').toLowerCase();
+    const whys = [...CORPUS.accept, ...CORPUS.reject]
+      .map((c) => c.why)
+      .join(' ')
+      .toLowerCase();
     for (const cap of ['24 char', '512', 'sixteen', '32', 'nesting', 'magnitude']) {
       expect(whys, `the corpus never exercises the ${cap} cap`).toContain(cap);
     }
