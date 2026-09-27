@@ -163,6 +163,26 @@ def test_unknown_count_ep_stays_ep():
     assert get_album_type_display('album', 0) == 'Album'
 
 
+def test_bare_album_filler_verified_against_track_count():
+    # 2026-09-27 (CAL, Yellowcard discography via Deezer): Deezer's
+    # track-level responses hardcode album_type='album', and every upstream
+    # layer defaults to 'album' when the type is missing. The filing function
+    # trusted a bare 'album' unconditionally, so every single/EP filed under
+    # Album/. A bare 'album' is not a signal — verify against the track
+    # count when we have one.
+    assert get_album_type_display('album', 2) == 'Single'
+    assert get_album_type_display('album', 3) == 'Single'
+    assert get_album_type_display('album', 5) == 'EP'
+    assert get_album_type_display('album', 6) == 'EP'
+    assert get_album_type_display('album', 9) == 'Album'
+    assert get_album_type_display('album', 12) == 'Album'
+    # no count to verify against — keep the default, don't guess
+    assert get_album_type_display('album', 0) == 'Album'
+    assert get_album_type_display('album', None) == 'Album'
+    assert get_album_type_display('', 2) == 'Single'
+    assert get_album_type_display(None, 5) == 'EP'
+
+
 # ── end-to-end: discography add → wishlist classification ────────────────────
 
 def test_filler_album_single_path_end_to_end():

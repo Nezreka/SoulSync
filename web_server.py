@@ -14270,8 +14270,6 @@ def _get_album_type_display(raw_type, track_count) -> str:
     # so both need to match here.
     if raw in ('compilation', 'compile'):
         return 'Compilation'
-    if raw == 'album':
-        return 'Album'
     if raw in ('single', 'ep'):
         # Match download-pipeline logic: Spotify labels both singles and EPs
         # as 'single', so final classification is by track count. Applying the
@@ -14283,7 +14281,10 @@ def _get_album_type_display(raw_type, track_count) -> str:
             return 'EP'
         return 'Album'
 
-    # Unknown/missing — infer from track count
+    # 'album', missing, or anything unrecognized: a bare 'album' is the
+    # default fallback at every upstream layer — not a signal. Verify
+    # against the track count when we have one; with no count, keep the
+    # "Album" default rather than guessing. Mirrors core/imports/paths.py.
     if tc <= 0:
         return 'Album'
     if tc <= 3:
