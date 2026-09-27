@@ -352,8 +352,9 @@ export function WishlistPage() {
                   onChange={(event) => retryProfileMutation.mutate(event.target.value)}
                 >
                   {retryProfileOptions.map((p) => (
-                    <option key={p.name} value={p.name}>
+                    <option key={p.name} value={p.name} disabled={p.name === 'custom'}>
                       {p.label}
+                      {p.name === 'custom' ? ' (API only)' : ''}
                     </option>
                   ))}
                   {activeIsCustom && (

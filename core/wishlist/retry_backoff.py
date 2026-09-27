@@ -184,8 +184,9 @@ def set_active_retry_profile(database, payload: Dict[str, Any]) -> Dict[str, Any
 
 
 def list_retry_profiles(database) -> List[Dict[str, Any]]:
-    """The built-ins, plus the active custom profile when one is set (custom
-    stays API-only: the UI lists only the three named profiles)."""
+    """The built-ins, plus the active custom profile when one is set. The custom
+    entry is display-only: it can be set through the API, not picked in the
+    UI."""
     profiles = builtin_retry_profiles()
     active = get_active_retry_profile(database)
     if active.get('name') == 'custom' and not any(p['name'] == 'custom' for p in profiles):
