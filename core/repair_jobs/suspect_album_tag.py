@@ -22,7 +22,7 @@ logger = get_logger("repair_job.suspect_album_tag")
 # Album name patterns that are almost always compilations / samplers.
 # A track by a named artist inside one of these is very likely wrong-tagged.
 _COMPILATION_PATTERNS = re.compile(
-    r'\b(hitzone|now\s*(?:\d|that\'?s\s+what\s+i\s+call\s+music)|top\s*\d{2,3}|vol\.?\s*\d|various\s*artists?|'
+    r'\b(hitzone|now\s*(?:\d+|that\'?s\s+what\s+i\s+call\s+music)|top\s*\d{2,3}|vol\.?\s*\d|various\s*artists?|'
     r'best\s+of|greatest\s+hits?|ultimate\s+collection|the\s+collection|'
     r'essential\s+hits?|playlist|soundtrack|ost|karaoke|tribute\s+to|'
     r'years\s+of\s+hits?|summer\s+hits?|chart\s+hits?)\b',

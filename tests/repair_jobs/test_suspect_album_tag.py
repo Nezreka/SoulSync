@@ -135,10 +135,14 @@ def test_various_artist_detection():
 def test_compilation_regex_patterns():
     assert _COMPILATION_PATTERNS.search("Hitzone 43")
     assert _COMPILATION_PATTERNS.search("Now That's What I Call Music 80")
+    assert _COMPILATION_PATTERNS.search("Now 45")
+    assert _COMPILATION_PATTERNS.search("Now 114")
+    assert _COMPILATION_PATTERNS.search("NOW 80")
     assert _COMPILATION_PATTERNS.search("Top 40 Summer Hits")
     assert _COMPILATION_PATTERNS.search("The Best Of 2000s")
     assert _COMPILATION_PATTERNS.search("Greatest Hits")
     assert not _COMPILATION_PATTERNS.search("Leave This Town")
+    assert not _COMPILATION_PATTERNS.search("The Now Show")
 
 
 def test_flags_lone_track_missing_cover_art():
