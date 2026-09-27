@@ -70959,7 +70959,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 }
 .listen-band {
     display: grid;
-    grid-template-columns: minmax(340px, 1.6fr) minmax(240px, 1fr);
+    grid-template-columns: minmax(280px, 1.6fr) minmax(220px, 1fr);
     gap: 14px;
 }
 .listen-hero {
@@ -71071,7 +71071,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     color: rgba(255, 255, 255, 0.35);
     transition: transform 0.18s ease, color 0.18s ease;
 }
-@media (max-width: 767px) {
+@media (max-width: 960px) {
     .listen-band {
         grid-template-columns: 1fr;
     }
@@ -85483,7 +85483,7 @@ body.src-modal-open { overflow: hidden; }
     z-index: 6;
 }
 #dashboard-page .dash-hero .hello-greeting {
-    font-size: 44px;
+    font-size: clamp(32px, 3.8vw, 44px);
     letter-spacing: -0.02em;
     line-height: 1.1;
     text-transform: none;
@@ -85499,7 +85499,11 @@ body.src-modal-open { overflow: hidden; }
 }
 #dashboard-page .dash-hero .hello-greeting > span::first-letter { text-transform: uppercase; }
 
-#dashboard-page .dash-hero-numbers { gap: 36px; }
+#dashboard-page .dash-hero-numbers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: clamp(18px, 2.5vw, 36px);
+}
 #dashboard-page .dash-hero-number {
     display: flex;
     flex-direction: column;
@@ -85965,27 +85969,184 @@ body.src-modal-open { overflow: hidden; }
 #dashboard-page .dash-footer .dash-qs-accent { align-items: center; flex-wrap: wrap; }
 #dashboard-page .dash-footer .dash-qs-swatch { flex: none; width: 16px; height: 16px; aspect-ratio: 1; }
 
-/* narrower windows: one column, the rail after the music */
-@media (max-width: 1180px) {
-    #dashboard-page .dashboard-header.dash-hero { grid-template-columns: 1fr; }
-    #dashboard-page .orb-stage { min-height: 220px; }
-    #dashboard-page .dash-layout { grid-template-columns: 1fr; }
-    #dashboard-page .dash-side { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+/* ── Responsive layout for tablets, mid-width laptops, and small screens ── */
+
+/* 1. Laptops, split screens, and large tablet landscape (<= 1260px) */
+@media (max-width: 1260px) {
+    #dashboard-page .dashboard-header.dash-hero {
+        grid-template-columns: 1fr;
+        gap: 26px;
+        padding: 30px 32px 26px;
+    }
+    #dashboard-page .orb-stage {
+        min-height: 210px;
+        padding: 18px 20px 32px;
+    }
+    #dashboard-page .orb-stage .header-actions {
+        max-width: 580px;
+    }
+    #dashboard-page .dash-layout {
+        grid-template-columns: 1fr;
+        gap: 24px;
+    }
+    #dashboard-page .dash-side {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+        align-items: start;
+    }
+    /* Symmetrical 2-col rail layout: quick-nav tiles span full width on row 2 */
+    #dashboard-page .dash-side > .header-quick-nav {
+        grid-column: 1 / -1;
+    }
 }
-/* a phone: no orb canvas (worker-orbs is off below 768px), so the stage is
-   just the worker buttons in a tidy grid */
+
+/* 2. Standard tablets (portrait & landscape, <= 960px) */
+@media (max-width: 960px) {
+    #dashboard-page .dashboard-header.dash-hero {
+        padding: 24px 24px 22px;
+        gap: 22px;
+    }
+    #dashboard-page .dash-hero .hello-greeting {
+        font-size: clamp(26px, 4vw, 34px);
+    }
+    #dashboard-page .dash-hero-numbers {
+        gap: 18px 26px;
+    }
+    #dashboard-page .dash-hero-number-value {
+        font-size: 22px;
+    }
+    #dashboard-page .orb-stage {
+        min-height: 190px;
+    }
+    #dashboard-page .orb-stage .header-actions {
+        max-width: 500px;
+        gap: 10px 14px;
+    }
+    #dashboard-page .dash-side {
+        gap: 16px;
+    }
+    #dashboard-page .dash-tiles .dash-tile.header-button {
+        min-height: 84px;
+        padding: 14px 16px;
+    }
+    #dashboard-page .dash-rail-head {
+        flex-wrap: wrap;
+        gap: 8px 14px;
+    }
+    #dashboard-page .dash-rail-subtitle {
+        font-size: 12px;
+    }
+    #dashboard-page .dash-rail .dash-rail-card {
+        width: 140px;
+    }
+}
+
+/* 3. Mobile phones and small tablet portrait (<= 768px) */
 @media (max-width: 768px) {
-    #dashboard-page .dashboard-header.dash-hero { padding: 22px 16px 20px; margin: -16px -12px 0 -12px; gap: 20px; }
-    #dashboard-page .dash-hero .hello-greeting { font-size: 30px; }
-    #dashboard-page .dash-hero-numbers { gap: 20px; }
-    #dashboard-page .dash-hero-number-value { font-size: 20px; }
-    #dashboard-page .orb-stage { min-height: 0; padding: 14px 12px 34px; }
-    #dashboard-page .orb-stage .header-actions { max-width: none; gap: 10px 12px; }
-    #dashboard-page .dash-side { display: flex; }
+    #dashboard-page .dashboard-header.dash-hero {
+        padding: 20px 16px 18px;
+        margin: -16px -12px 0 -12px;
+        gap: 18px;
+    }
+    #dashboard-page .dash-hero .hello-greeting {
+        font-size: 26px;
+    }
+    #dashboard-page .dash-hero-numbers {
+        gap: 14px 20px;
+    }
+    #dashboard-page .dash-hero-number {
+        flex: 1 1 calc(50% - 20px);
+        min-width: 110px;
+    }
+    #dashboard-page .dash-hero-number-value {
+        font-size: 20px;
+    }
+    #dashboard-page .orb-stage {
+        min-height: 0;
+        padding: 14px 12px 34px;
+    }
+    #dashboard-page .orb-stage .header-actions {
+        max-width: none;
+        gap: 10px 12px;
+    }
+    #dashboard-page .dash-side {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+    #dashboard-page .dash-side > .header-quick-nav {
+        grid-column: auto;
+    }
     /* no hover on a phone, so the worker tooltips only ever pushed the page
        sideways from off-screen. tapping a worker still toggles it. */
-    #dashboard-page .orb-stage .header-actions [id$="-tooltip"] { display: none; }
+    #dashboard-page .orb-stage .header-actions [id$="-tooltip"] {
+        display: none;
+    }
+    #dashboard-page .dash-footer {
+        padding-top: 14px;
+    }
+    #dashboard-page .dash-footer .dash-quick-settings {
+        gap: 8px 10px;
+    }
+    #dashboard-page .dash-footer .dash-qs-accent {
+        width: 100%;
+        margin-left: 0;
+        padding-top: 4px;
+    }
 }
+
+/* 4. Compact mobile screens (<= 460px) */
+@media (max-width: 460px) {
+    #dashboard-page .dash-tiles.header-quick-nav {
+        grid-template-columns: 1fr;
+    }
+    #dashboard-page .dash-hero-numbers {
+        gap: 12px 16px;
+    }
+    #dashboard-page .dash-hero-library .library-status-header {
+        gap: 8px;
+    }
+    #dashboard-page .dash-hero-library .library-status-info {
+        flex-basis: 100%;
+    }
+}
+
+/* 5. Touchscreen devices: ensure action buttons are accessible without hover */
+@media (hover: none) {
+    #dashboard-page .dash-sync-actions {
+        position: static;
+        transform: none;
+        display: flex;
+        gap: 6px;
+    }
+    #dashboard-page .dash-sync-missing,
+    #dashboard-page .dash-sync-done {
+        display: none;
+    }
+    #dashboard-page .dash-sync-row {
+        padding: 4px 6px 4px 4px;
+        min-height: 44px;
+    }
+    #dashboard-page .dash-sync-act {
+        width: 34px;
+        height: 34px;
+    }
+    #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-actions {
+        position: static;
+        transform: none;
+        display: flex;
+        gap: 6px;
+    }
+    #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row {
+        padding: 8px 10px;
+        min-height: 44px;
+    }
+    #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-when {
+        display: none;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     #dashboard-page .dash-hero-library .scanning .library-status-dot { animation: none; }
 }

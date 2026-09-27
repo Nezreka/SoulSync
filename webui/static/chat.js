@@ -1633,8 +1633,8 @@
                 '⚡ Share Now</button>';
             haveBtn = '<button type="button" class="chat-card-btn chat-card-btn--success' + (inLib === true ? ' chat-card-btn--glow' : '') + '" ' +
                 'data-chat-wanted-have data-wanted-user="' + attr(requester) + '" data-wanted-title="' + attr(w.t) + '" data-wanted-artist="' + attr(w.a) + '" ' +
-                'title="Send @' + attr(requester) + ' a direct message saying you have this!">' +
-                '💬 I Have This! (Send PM)</button>';
+                'title="Send @' + attr(requester) + ' a direct message">' +
+                '💬 Message</button>';
         }
 
         var pBadge = '';
@@ -1651,6 +1651,7 @@
             }
         });
 
+        var arImg = w.ar_img || _npArtCache['artist|||' + (w.a || '').toLowerCase().trim()] || '';
         return '<div class="chat-wanted-card" ' +
             'data-wanted-title="' + attr(w.t) + '" ' +
             'data-wanted-artist="' + attr(w.a) + '" ' +
@@ -1659,6 +1660,12 @@
             'data-wanted-id="' + attr(w.id || '') + '" ' +
             'data-wanted-src="' + attr(w.src || '') + '" ' +
             'data-wanted-img="' + attr(resolvedImg || w.img || '') + '" ' +
+            'data-wanted-artist-id="' + attr(w.ar_id || '') + '" ' +
+            'data-wanted-artist-img="' + attr(arImg) + '" ' +
+            'data-wanted-album-id="' + attr(w.al_id || '') + '" ' +
+            'data-wanted-total-tracks="' + attr(w.tot || 0) + '" ' +
+            'data-wanted-track-number="' + attr(w.tn || 0) + '" ' +
+            'data-wanted-disc-number="' + attr(w.disc || 0) + '" ' +
             'data-wanted-year="' + attr(w.y || '') + '" ' +
             'data-wanted-dur="' + attr(w.dur || 0) + '" ' +
             'data-wanted-key="' + attr(cacheKey) + '">' +
@@ -1673,7 +1680,10 @@
                 img +
                 '<div class="chat-wanted-meta">' +
                     '<div class="chat-wanted-title" title="' + attr(w.t) + '">' + t + '</div>' +
-                    '<div class="chat-wanted-artist" title="' + attr(w.a) + '">' + a + (y ? ' <span class="chat-wanted-year">(' + y + ')</span>' : '') + '</div>' +
+                    '<div class="chat-wanted-artist" title="' + attr(w.a) + '">' +
+                        (arImg ? '<img class="chat-wanted-artist-avatar" src="' + attr(arImg) + '" alt="" loading="lazy">' : '') +
+                        '<span>' + a + '</span>' + (y ? ' <span class="chat-wanted-year">(' + y + ')</span>' : '') +
+                    '</div>' +
                     '<div class="chat-wanted-req">Requested by <b>@' + esc(requester) + '</b></div>' +
                 '</div>' +
             '</div>' +
@@ -1869,19 +1879,39 @@
                 }
                 var items = [];
                 var primarySrc = data.metadata_source || data.primary_source || 'spotify';
+                var artistMap = {};
+                var artistsList = data.artists || data.spotify_artists || [];
+                artistsList.forEach(function (ar) {
+                    var arName = (ar.name || '').toLowerCase().trim();
+                    var arImg = ar.image_url || (ar.images && ar.images[0] && (typeof ar.images[0] === 'string' ? ar.images[0] : ar.images[0].url)) || '';
+                    if (arName && !artistMap[arName]) {
+                        artistMap[arName] = { id: String(ar.id || ''), img: arImg, name: ar.name };
+                        if (arImg) _npArtCache['artist|||' + arName] = arImg;
+                    }
+                });
+
                 var albums = data.albums || data.spotify_albums || data.results || [];
                 albums.slice(0, 15).forEach(function (al) {
                     var albumImg = al.image_url ||
                         (al.images && al.images[0] && (typeof al.images[0] === 'string' ? al.images[0] : al.images[0].url)) ||
                         al.cover_xl || al.cover_big || al.cover_medium || '';
+                    var arName = al.artist || (al.artists && al.artists[0] && al.artists[0].name) || '';
+                    var arInfo = artistMap[arName.toLowerCase().trim()] || {};
+                    var arImg = (al.artists && al.artists[0] && al.artists[0].image_url) || arInfo.img || '';
+                    var arId = (al.artists && al.artists[0] && al.artists[0].id) || arInfo.id || '';
                     items.push({
                         name: al.name || al.title || '',
-                        artist: al.artist || (al.artists && al.artists[0] && al.artists[0].name) || '',
+                        artist: arName,
+                        artist_id: arId,
+                        artist_image: arImg,
+                        album: al.name || al.title || '',
+                        album_id: String(al.id || ''),
                         type: al.album_type || 'album',
                         year: al.release_date ? al.release_date.slice(0, 4) : (al.year || ''),
                         source: al.source || primarySrc,
                         id: String(al.id || ''),
-                        image_url: albumImg
+                        image_url: albumImg,
+                        total_tracks: al.total_tracks || 0
                     });
                 });
                 var tracks = data.tracks || data.spotify_tracks || [];
@@ -1890,16 +1920,27 @@
                         (tr.images && tr.images[0] && (typeof tr.images[0] === 'string' ? tr.images[0] : tr.images[0].url)) ||
                         (tr.album && tr.album.images && tr.album.images[0] && (typeof tr.album.images[0] === 'string' ? tr.album.images[0] : tr.album.images[0].url)) ||
                         '';
+                    var arName = tr.artist || (tr.artists && tr.artists[0] && tr.artists[0].name) || '';
+                    var arInfo = artistMap[arName.toLowerCase().trim()] || {};
+                    var arImg = (tr.artists && tr.artists[0] && tr.artists[0].image_url) || arInfo.img || '';
+                    var arId = (tr.artists && tr.artists[0] && tr.artists[0].id) || arInfo.id || '';
+                    var albName = (typeof tr.album === 'string' ? tr.album : (tr.album && tr.album.name)) || '';
+                    var albId = (tr.album && tr.album.id) ? String(tr.album.id) : '';
                     items.push({
                         name: tr.name || tr.title || '',
-                        artist: tr.artist || (tr.artists && tr.artists[0] && tr.artists[0].name) || '',
-                        album: (typeof tr.album === 'string' ? tr.album : (tr.album && tr.album.name)) || '',
+                        artist: arName,
+                        artist_id: arId,
+                        artist_image: arImg,
+                        album: albName,
+                        album_id: albId,
                         type: 'track',
                         year: tr.release_date ? tr.release_date.slice(0, 4) : '',
                         source: tr.source || primarySrc,
                         id: String(tr.id || ''),
                         image_url: trImg,
-                        duration_ms: tr.duration_ms || 0
+                        duration_ms: tr.duration_ms || 0,
+                        track_number: tr.track_number || 1,
+                        disc_number: tr.disc_number || 1
                     });
                 });
 
@@ -1914,11 +1955,14 @@
                     var thumb = item.image_url
                         ? '<img class="chat-want-res-img" src="' + attr(item.image_url) + '" alt="" loading="lazy">'
                         : '<div class="chat-want-res-img chat-want-res-img--ph">' + (item.type === 'track' ? '🎵' : '💿') + '</div>';
+                    var arBadge = item.artist_image
+                        ? '<img class="chat-wanted-artist-avatar" src="' + attr(item.artist_image) + '" alt="" loading="lazy">'
+                        : '';
                     return '<div class="chat-want-res-row">' +
                         thumb +
                         '<div class="chat-want-res-meta">' +
                             '<div class="chat-want-res-name">' + esc(item.name) + '</div>' +
-                            '<div class="chat-want-res-sub">' + esc(item.artist) + (item.year ? ' · ' + esc(item.year) : '') + '</div>' +
+                            '<div class="chat-want-res-sub">' + arBadge + esc(item.artist) + (item.year ? ' · ' + esc(item.year) : '') + '</div>' +
                             '<div class="chat-want-res-badges">' +
                                 '<span class="chat-want-res-pill">' + esc(item.type.toUpperCase()) + '</span>' +
                                 '<span class="chat-want-res-pill chat-want-res-pill--src">' + esc(item.source.toUpperCase()) + '</span>' +
@@ -1945,16 +1989,30 @@
         var id = String(item.id || '');
         var img = item.image_url || '';
         if (img && !/^https?:\/\//.test(img) && !/^\/api\//.test(img)) img = '';
+        var arImg = item.artist_image || '';
+        if (arImg && !/^https?:\/\//.test(arImg) && !/^\/api\//.test(arImg)) arImg = '';
+        var arId = String(item.artist_id || '');
+        var alId = String(item.album_id || '');
         var y = String(item.year || item.release_date || '').slice(0, 4);
-        var dur = item.duration_ms || 0;
+        var dur = Number(item.duration_ms) || 0;
+        var tot = Number(item.total_tracks) || 0;
+        var tn = Number(item.track_number) || 0;
+        var disc = Number(item.disc_number) || 0;
 
         // Cache art immediately so local rendering never flickers
         var key = a.toLowerCase().trim() + '|||' + t.toLowerCase().trim();
         if (img) _npArtCache[key] = img;
+        if (arImg) _npArtCache['artist|||' + a.toLowerCase().trim()] = arImg;
 
         var fallbackText = '🔍 In Search Of: [' + ty.toUpperCase() + '] ' + a + ' - ' + t + (y ? ' (' + y + ')' : '');
         var wantObj = { t: t, a: a, ty: ty, al: al, src: src, id: id, img: img, y: y };
+        if (arImg) wantObj.ar_img = arImg;
+        if (arId) wantObj.ar_id = arId;
+        if (alId) wantObj.al_id = alId;
         if (dur) wantObj.dur = dur;
+        if (tot) wantObj.tot = tot;
+        if (tn) wantObj.tn = tn;
+        if (disc) wantObj.disc = disc;
 
         var payload = {
             message: fallbackText,
@@ -2218,6 +2276,13 @@
         }
         if (typeof showToast === 'function') showToast('Looking up matching files in your library…', 'info');
 
+        var cardImg = cardEl ? (cardEl.getAttribute('data-wanted-img') || '') : '';
+        var cardArImg = cardEl ? (cardEl.getAttribute('data-wanted-artist-img') || '') : '';
+        var cardYear = cardEl ? (cardEl.getAttribute('data-wanted-year') || '') : '';
+        var cardType = cardEl ? (cardEl.getAttribute('data-wanted-type') || type || 'album') : (type || 'album');
+        var cacheKeyArt = _npArtCache[(artist || '').toLowerCase().trim() + '|||' + (title || '').toLowerCase().trim()] || '';
+        var cacheKeyArImg = _npArtCache['artist|||' + (artist || '').toLowerCase().trim()] || '';
+
         postJSON('/api/chat/wanted/resolve-share', {
             title: title || '',
             artist: artist || '',
@@ -2238,12 +2303,20 @@
             }
 
             var d = res.body;
+            var resolvedImg = d.image_url || cardImg || cacheKeyArt || '';
+            var resolvedArImg = d.artist_image_url || cardArImg || cacheKeyArImg || '';
+            var resolvedYear = d.year || cardYear || '';
+            var resolvedType = d.type || cardType || 'album';
+
             _activeShareOffer = {
                 to: requester,
                 title: d.title || title,
                 artist: d.artist || artist,
                 album: d.title || album || title,
-                type: d.type || type || 'album',
+                type: resolvedType,
+                year: resolvedYear,
+                image_url: resolvedImg,
+                artist_image_url: resolvedArImg,
                 track_count: d.track_count || d.tracks.length,
                 total_size: d.total_size || 0,
                 directory: d.directory || '',
@@ -2266,11 +2339,51 @@
             var targetEl = modal.querySelector('[data-chat-share-target]');
             if (targetEl) targetEl.textContent = '@' + requester;
 
+            // Ambient background banner
+            var bgEl = modal.querySelector('[data-chat-share-bg]');
+            if (bgEl) {
+                bgEl.style.backgroundImage = resolvedImg ? ('url("' + attr(resolvedImg) + '")') : '';
+            }
+
+            // Album cover artwork
+            var thumbEl = modal.querySelector('[data-chat-share-thumb]');
+            if (thumbEl) {
+                if (resolvedImg) {
+                    thumbEl.innerHTML = '<img class="chat-share-cover-img" src="' + attr(resolvedImg) + '" alt="' + attr(_activeShareOffer.title) + '" loading="lazy">';
+                } else {
+                    thumbEl.innerHTML = resolvedType === 'track' ? '🎵' : '💿';
+                }
+            }
+
+            // Artist circular avatar
+            var arImgEl = modal.querySelector('[data-chat-share-artist-img]');
+            if (arImgEl) {
+                if (resolvedArImg) {
+                    arImgEl.src = resolvedArImg;
+                    arImgEl.hidden = false;
+                    arImgEl.title = _activeShareOffer.artist;
+                } else {
+                    arImgEl.hidden = true;
+                    arImgEl.removeAttribute('src');
+                }
+            }
+
             var titleEl = modal.querySelector('[data-chat-share-title]');
             if (titleEl) titleEl.textContent = _activeShareOffer.title;
 
-            var artistEl = modal.querySelector('[data-chat-share-artist]');
-            if (artistEl) artistEl.textContent = _activeShareOffer.artist;
+            var artistNameEl = modal.querySelector('[data-chat-share-artist-name]');
+            if (artistNameEl) {
+                artistNameEl.textContent = _activeShareOffer.artist;
+            } else {
+                var artistEl = modal.querySelector('[data-chat-share-artist]');
+                if (artistEl) artistEl.textContent = _activeShareOffer.artist;
+            }
+
+            var yearEl = modal.querySelector('[data-chat-share-year]');
+            if (yearEl) yearEl.textContent = resolvedYear ? ('(' + resolvedYear + ')') : '';
+
+            var typeEl = modal.querySelector('[data-chat-share-type]');
+            if (typeEl) typeEl.textContent = (resolvedType || 'album').toUpperCase();
 
             var cntEl = modal.querySelector('[data-chat-share-cnt]');
             if (cntEl) cntEl.textContent = _activeShareOffer.track_count + ' track' + (_activeShareOffer.track_count === 1 ? '' : 's');
@@ -2333,6 +2446,9 @@
             a: (offer.artist || '').slice(0, 120),
             al: (offer.album || '').slice(0, 120),
             ty: offer.type || 'album',
+            y: (offer.year || '').slice(0, 4),
+            img: (offer.image_url || '').slice(0, 250),
+            ar_img: (offer.artist_image_url || '').slice(0, 250),
             cnt: offer.track_count || packed.length,
             sz: offer.total_size || 0,
             fmt: (offer.format || 'FLAC').slice(0, 10),
@@ -2358,14 +2474,76 @@
         var backdrop = q('[data-chat-incoming-backdrop]');
         if (!modal) return;
 
+        var incImg = p.img || '';
+        var incArImg = p.ar_img || '';
+        var normT = (p.t || '').toLowerCase().trim();
+        var normA = (p.a || '').toLowerCase().trim();
+
+        // If images missing from protocol wire, look up matching cards or art cache
+        if (!incImg || !incArImg) {
+            document.querySelectorAll('.chat-wanted-card').forEach(function (c) {
+                var ct = (c.getAttribute('data-wanted-title') || '').toLowerCase().trim();
+                if (ct && normT && (ct.indexOf(normT) !== -1 || normT.indexOf(ct) !== -1)) {
+                    if (!incImg) incImg = c.getAttribute('data-wanted-img') || '';
+                    if (!incArImg) incArImg = c.getAttribute('data-wanted-artist-img') || '';
+                }
+            });
+            if (!incImg && normA && normT) {
+                incImg = _npArtCache[normA + '|||' + normT] || '';
+            }
+            if (!incArImg && normA) {
+                incArImg = _npArtCache['artist|||' + normA] || '';
+            }
+        }
+
         var senderEl = modal.querySelector('[data-chat-incoming-sender]');
         if (senderEl) senderEl.textContent = '@' + fromUser;
+
+        // Ambient background banner
+        var bgEl = modal.querySelector('[data-chat-incoming-bg]');
+        if (bgEl) {
+            bgEl.style.backgroundImage = incImg ? ('url("' + attr(incImg) + '")') : '';
+        }
+
+        // Album cover artwork
+        var thumbEl = modal.querySelector('[data-chat-incoming-thumb]');
+        if (thumbEl) {
+            if (incImg) {
+                thumbEl.innerHTML = '<img class="chat-share-cover-img" src="' + attr(incImg) + '" alt="" loading="lazy">';
+            } else {
+                thumbEl.innerHTML = (p.ty === 'track') ? '🎵' : '💿';
+            }
+        }
+
+        // Artist circular avatar
+        var arImgEl = modal.querySelector('[data-chat-incoming-artist-img]');
+        if (arImgEl) {
+            if (incArImg) {
+                arImgEl.src = incArImg;
+                arImgEl.hidden = false;
+                arImgEl.title = p.a || 'Artist';
+            } else {
+                arImgEl.hidden = true;
+                arImgEl.removeAttribute('src');
+            }
+        }
 
         var titleEl = modal.querySelector('[data-chat-incoming-title]');
         if (titleEl) titleEl.textContent = p.t || 'Unknown Title';
 
-        var artistEl = modal.querySelector('[data-chat-incoming-artist]');
-        if (artistEl) artistEl.textContent = p.a || 'Unknown Artist';
+        var artistNameEl = modal.querySelector('[data-chat-incoming-artist-name]');
+        if (artistNameEl) {
+            artistNameEl.textContent = p.a || 'Unknown Artist';
+        } else {
+            var artistEl = modal.querySelector('[data-chat-incoming-artist]');
+            if (artistEl) artistEl.textContent = p.a || 'Unknown Artist';
+        }
+
+        var yearEl = modal.querySelector('[data-chat-incoming-year]');
+        if (yearEl) yearEl.textContent = p.y ? ('(' + p.y + ')') : '';
+
+        var typeEl = modal.querySelector('[data-chat-incoming-type]');
+        if (typeEl) typeEl.textContent = (p.ty || 'album').toUpperCase();
 
         var cntEl = modal.querySelector('[data-chat-incoming-cnt]');
         if (cntEl) cntEl.textContent = (p.cnt || (p.tr ? p.tr.length : 1)) + ' track' + (p.cnt === 1 ? '' : 's');
@@ -2609,8 +2787,12 @@
         }
 
         // 3. Build albumObj and tracks array with full context
+        var artistImg = (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists[0] && fullAlbumData.artists[0].image_url) || w.ar_img || _npArtCache['artist|||' + artist.toLowerCase().trim()] || '';
+        var artistId = (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists[0] && fullAlbumData.artists[0].id) || w.ar_id || null;
+        var albumId = (fullAlbumData && fullAlbumData.id) || w.al_id || id || null;
+
         var albumObj = {
-            id: id || null,
+            id: albumId,
             name: (fullAlbumData && fullAlbumData.name) || albumName,
             album_type: ty,
             image_url: (fullAlbumData && fullAlbumData.images && fullAlbumData.images[0] && fullAlbumData.images[0].url) || imgUrl,
@@ -2619,16 +2801,16 @@
                 : (imgUrl ? [{ url: imgUrl }] : []),
             artists: (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists.length)
                 ? fullAlbumData.artists
-                : [{ name: artist }],
+                : [{ name: artist, id: artistId, image_url: artistImg }],
             release_date: (fullAlbumData && fullAlbumData.release_date) || w.y || '',
-            total_tracks: (fullAlbumData && fullAlbumData.total_tracks) || 0,
+            total_tracks: (fullAlbumData && fullAlbumData.total_tracks) || w.tot || 0,
             source: src
         };
 
         var artistObj = {
-            id: (fullAlbumData && fullAlbumData.artists && fullAlbumData.artists[0] && fullAlbumData.artists[0].id) || null,
+            id: artistId,
             name: artist,
-            image_url: '',
+            image_url: artistImg,
             source: src
         };
 

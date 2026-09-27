@@ -1070,7 +1070,7 @@ def create_blueprint() -> Blueprint:
                     like_art = "%" + artist.replace("%", "\\%") + "%" if artist else "%"
                     album_row = conn.execute(
                         """SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
-                                  al.thumb_url
+                                  al.thumb_url, ar.thumb_url as artist_thumb_url
                            FROM albums al
                            LEFT JOIN artists ar ON ar.id = al.artist_id
                            WHERE al.title LIKE ? AND (ar.name LIKE ? OR ? LIKE ('%' || ar.name || '%') OR ? = '%')
@@ -1083,7 +1083,7 @@ def create_blueprint() -> Blueprint:
                     if not album_row and artist:
                         album_row = conn.execute(
                             """SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
-                                      al.thumb_url
+                                      al.thumb_url, ar.thumb_url as artist_thumb_url
                                FROM albums al
                                LEFT JOIN artists ar ON ar.id = al.artist_id
                                WHERE al.title LIKE ?
@@ -1097,7 +1097,9 @@ def create_blueprint() -> Blueprint:
                         """SELECT t.id, t.title, t.track_number, t.duration, t.file_path,
                                   t.file_size, t.bitrate,
                                   COALESCE(t.track_artist, ar.name, '') as artist,
-                                  al.title as album
+                                  al.title as album,
+                                  al.thumb_url as album_thumb_url,
+                                  ar.thumb_url as artist_thumb_url
                            FROM tracks t
                            JOIN albums al ON al.id = t.album_id
                            LEFT JOIN artists ar ON ar.id = t.artist_id
@@ -1115,7 +1117,9 @@ def create_blueprint() -> Blueprint:
                     """SELECT t.id, t.title, t.track_number, t.duration, t.file_path,
                               t.file_size, t.bitrate,
                               COALESCE(t.track_artist, ar.name, '') as artist,
-                              COALESCE(al.title, '') as album
+                              COALESCE(al.title, '') as album,
+                              al.thumb_url as album_thumb_url,
+                              ar.thumb_url as artist_thumb_url
                        FROM tracks t
                        LEFT JOIN artists ar ON ar.id = t.artist_id
                        LEFT JOIN albums al ON al.id = t.album_id
@@ -1133,7 +1137,9 @@ def create_blueprint() -> Blueprint:
                         """SELECT t.id, t.title, t.track_number, t.duration, t.file_path,
                                   t.file_size, t.bitrate,
                                   COALESCE(t.track_artist, ar.name, '') as artist,
-                                  COALESCE(al.title, '') as album
+                                  COALESCE(al.title, '') as album,
+                                  al.thumb_url as album_thumb_url,
+                                  ar.thumb_url as artist_thumb_url
                            FROM tracks t
                            LEFT JOIN artists ar ON ar.id = t.artist_id
                            LEFT JOIN albums al ON al.id = t.album_id
@@ -1196,6 +1202,10 @@ def create_blueprint() -> Blueprint:
             resolved_title = (album_row["title"] if album_row else (out_tracks[0]["album"] or out_tracks[0]["title"]))
             resolved_artist = (album_row["artist"] if album_row else out_tracks[0]["artist"])
             primary_dir = _to_share_dir(out_tracks[0]["filename"]) if out_tracks else ""
+            res_img = (album_row["thumb_url"] if (album_row and "thumb_url" in album_row.keys() and album_row["thumb_url"])
+                       else (tracks_rows[0]["album_thumb_url"] if (tracks_rows and "album_thumb_url" in tracks_rows[0].keys() and tracks_rows[0]["album_thumb_url"]) else ""))
+            res_ar_img = (album_row["artist_thumb_url"] if (album_row and "artist_thumb_url" in album_row.keys() and album_row["artist_thumb_url"])
+                          else (tracks_rows[0]["artist_thumb_url"] if (tracks_rows and "artist_thumb_url" in tracks_rows[0].keys() and tracks_rows[0]["artist_thumb_url"]) else ""))
 
             return jsonify({
                 "ok": True,
@@ -1204,6 +1214,8 @@ def create_blueprint() -> Blueprint:
                 "title": resolved_title,
                 "artist": resolved_artist,
                 "year": album_row["year"] if album_row else "",
+                "image_url": res_img or "",
+                "artist_image_url": res_ar_img or "",
                 "directory": primary_dir,
                 "track_count": len(out_tracks),
                 "total_size": total_size,

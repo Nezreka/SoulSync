@@ -185,6 +185,8 @@ def test_wanted_resolve_share_matches_album(files_app):
     assert body["type"] == "album"
     assert body["title"] == "The Resistance"
     assert body["artist"] == "Muse"
+    assert "image_url" in body
+    assert "artist_image_url" in body
     assert len(body["tracks"]) == 2
     assert body["tracks"][0]["title"] == "Uprising"
     assert body["tracks"][0]["size"] == 4096
