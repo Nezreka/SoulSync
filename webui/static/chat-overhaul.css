@@ -5432,3 +5432,278 @@
     line-height: 1.45;
     color: rgba(255, 255, 255, 0.9);
 }
+
+/* ── Direct P2P Share & Wanted Handshake Modals ── */
+.chat-share-backdrop,
+.chat-incoming-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(5px);
+    z-index: 10065;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.24s ease;
+}
+
+.chat-share-backdrop:not([hidden]),
+.chat-incoming-backdrop:not([hidden]) {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.chat-share-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10070;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    pointer-events: auto;
+}
+
+.chat-share-modal-overlay[hidden] {
+    display: none !important;
+}
+
+.chat-share-modal {
+    background: #111622;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    width: min(520px, 95vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+    animation: popShareModal 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes popShareModal {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.chat-share-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(30, 27, 75, 0.2) 100%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chat-share-modal--incoming .chat-share-modal-head {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(6, 78, 59, 0.2) 100%);
+}
+
+.chat-share-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.chat-share-icon {
+    font-size: 26px;
+    line-height: 1;
+}
+
+.chat-share-heading {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.chat-share-sub {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-top: 2px;
+}
+
+.chat-share-target-user {
+    color: #a78bfa;
+    font-weight: 600;
+}
+
+.chat-share-modal--incoming .chat-share-target-user {
+    color: #34d399;
+}
+
+.chat-share-hero {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.chat-share-thumb-wrap {
+    width: 60px;
+    height: 60px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chat-share-hero-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.chat-share-hero-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-share-hero-artist {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+}
+
+.chat-share-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.chat-share-pill {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.chat-share-pill--format {
+    background: rgba(139, 92, 246, 0.2);
+    color: #c4b5fd;
+    border: 1px solid rgba(139, 92, 246, 0.4);
+}
+
+.chat-share-modal--incoming .chat-share-pill--format {
+    background: rgba(16, 185, 129, 0.2);
+    color: #6ee7b7;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.chat-share-tracklist-label {
+    padding: 12px 20px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.chat-share-tracklist {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 240px;
+    padding: 4px 20px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.chat-share-track-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    font-size: 12.5px;
+    transition: background 0.15s ease;
+}
+
+.chat-share-track-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.chat-share-track-num {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.4);
+    width: 20px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.chat-share-track-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: rgba(255, 255, 255, 0.88);
+}
+
+.chat-share-track-size {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    flex-shrink: 0;
+}
+
+.chat-share-modal-foot {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 20px;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chat-card-btn--share {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.25) 0%, rgba(99, 102, 241, 0.35) 100%);
+    border-color: rgba(139, 92, 246, 0.55);
+    color: #ddd6fe;
+}
+
+.chat-card-btn--share:hover {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.42) 0%, rgba(99, 102, 241, 0.55) 100%);
+    border-color: #a78bfa;
+    color: #fff;
+    box-shadow: 0 0 16px rgba(139, 92, 246, 0.5);
+}
+
+.chat-wanted-badge--shared {
+    background: rgba(139, 92, 246, 0.25);
+    border: 1px solid #8b5cf6;
+    color: #c4b5fd;
+    font-weight: 700;
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.35);
+}
+
+.chat-wanted-badge--fulfilled {
+    background: rgba(59, 130, 246, 0.25);
+    border: 1px solid #3b82f6;
+    color: #93c5fd;
+    font-weight: 700;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.35);
+}
+
