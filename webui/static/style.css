@@ -75925,6 +75925,34 @@ body.em-scroll-lock { overflow: hidden; }
 .em-section-label--row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .em-coverage-overall { font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: rgba(255,255,255,0.55); }
 .em-coverage-overall strong { color: rgb(var(--em-accent-rgb, 129,140,248)); font-weight: 800; }
+
+/* #1317: collapsible coverage section. The label row stays visible as a slim
+   summary bar while the cards fold away, giving the unmatched browser below
+   the freed space. */
+.em-coverage { flex: 0 0 auto; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.em-coverage-head { align-items: center; }
+.em-coverage-right { display: inline-flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.em-collapse-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 8px; padding: 0;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.65);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.em-collapse-btn:hover { background: rgba(255,255,255,0.12); color: #fff; border-color: rgba(255,255,255,0.22); }
+.em-collapse-btn:focus-visible { outline: 2px solid rgba(var(--em-accent-rgb, 129,140,248), 0.7); outline-offset: 2px; }
+.em-collapse-btn svg { transition: transform 0.25s ease; }
+.em-coverage--collapsed .em-collapse-btn svg { transform: rotate(-90deg); }
+.em-coverage-body {
+    display: grid; grid-template-rows: 1fr;
+    transition: grid-template-rows 0.28s ease;
+}
+.em-coverage--collapsed .em-coverage-body { grid-template-rows: 0fr; }
+.em-coverage-body > .em-cards { overflow: hidden; min-height: 0; }
+@media (prefers-reduced-motion: reduce) {
+    .em-coverage-body, .em-collapse-btn svg { transition: none; }
+}
 /* Accent-themed buttons / active states inside the panel */
 .em-panel .em-btn { border-color: rgba(var(--em-accent-rgb, 99,102,241), 0.45); background: rgba(var(--em-accent-rgb, 99,102,241), 0.16); }
 .em-panel .em-btn:hover:not(:disabled) { background: rgba(var(--em-accent-rgb, 99,102,241), 0.3); }

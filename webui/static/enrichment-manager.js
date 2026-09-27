@@ -104,6 +104,12 @@ const enrichmentManagerState = {
     selectedItems: new Set(),  // ids checked for bulk retry
     pollTimer: null,
     loadToken: 0,       // guards against out-of-order async renders
+    // #1317: collapse the coverage section so the unmatched browser gets
+    // more room. remembered across sessions.
+    coverageCollapsed: (() => {
+        try { return localStorage.getItem('em-coverage-collapsed') === '1'; }
+        catch (_e) { return false; }
+    })(),
 };
 
 function _emEntityLabel(entity, plural) {
@@ -491,6 +497,29 @@ async function _emLoadUnmatched() {
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
+// #1317: collapse/expand the coverage section. The toggle lives in the
+// section label row, which stays visible as a slim summary bar while the
+// cards fold away — the unmatched browser below grows to fill the space.
+function toggleEmCoverage() {
+    enrichmentManagerState.coverageCollapsed = !enrichmentManagerState.coverageCollapsed;
+    try {
+        localStorage.setItem('em-coverage-collapsed',
+            enrichmentManagerState.coverageCollapsed ? '1' : '0');
+    } catch (_e) { /* ignore */ }
+    _emApplyCoverageCollapsed();
+}
+
+function _emApplyCoverageCollapsed() {
+    const collapsed = enrichmentManagerState.coverageCollapsed;
+    const section = document.getElementById('em-coverage');
+    const btn = document.getElementById('em-coverage-toggle');
+    if (section) section.classList.toggle('em-coverage--collapsed', collapsed);
+    if (btn) {
+        btn.setAttribute('aria-expanded', String(!collapsed));
+        btn.title = collapsed ? 'Expand coverage section' : 'Collapse coverage section';
+    }
+}
+
 function renderEnrichmentPanel() {
     const panel = document.getElementById('em-panel');
     if (!panel) return;
@@ -505,17 +534,28 @@ function renderEnrichmentPanel() {
     panel.innerHTML = `
         <div class="em-panel-header" id="em-panel-header"></div>
         <div class="em-banner" id="em-banner" hidden></div>
-        <div class="em-section-label em-section-label--row">
-            <span>Coverage &amp; processing order <span class="em-section-sub">— click a group to enrich it first</span></span>
-            <span class="em-coverage-overall" id="em-coverage-overall"></span>
+        <div class="em-coverage" id="em-coverage">
+            <div class="em-section-label em-section-label--row em-coverage-head">
+                <span>Coverage &amp; processing order <span class="em-section-sub">— click a group to enrich it first</span></span>
+                <span class="em-coverage-right">
+                    <span class="em-coverage-overall" id="em-coverage-overall"></span>
+                    <button class="em-collapse-btn" id="em-coverage-toggle" onclick="toggleEmCoverage()"
+                            title="Collapse coverage section" aria-expanded="true" aria-controls="em-coverage-body">
+                        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </span>
+            </div>
+            <div class="em-coverage-body" id="em-coverage-body">
+                <div class="em-cards" id="em-cards"></div>
+            </div>
         </div>
-        <div class="em-cards" id="em-cards"></div>
         <div class="em-unmatched">
             <div class="em-unmatched-controls" id="em-unmatched-controls"></div>
             <div class="em-bulk-bar" id="em-bulk-bar" hidden></div>
             <div class="em-unmatched-list" id="em-unmatched-list" onkeydown="onEnrichmentListKey(event)"></div>
             <div class="em-pager" id="em-pager"></div>
         </div>`;
+    _emApplyCoverageCollapsed();
     _emRenderPanelHeader();
     _emRenderEntityCards();
     _emRenderUnmatchedControls();
