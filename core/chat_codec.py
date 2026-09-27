@@ -440,17 +440,64 @@ BADGE_RESERVED = frozenset(
 )
 
 
-def _badge_reserved_hit(b: str) -> bool:
-    """True if the badge impersonates staff. Punctuation is stripped before
-    the check so 'LEAD DEV!', 'd.e.v', '(admin)' and 'SoulSync Admin' all
-    match, while 'device' / 'devon' (reserved word only as a substring) do
-    not. The JS _cleanBadge mirrors this exactly — keep them in sync."""
+# Profanity blocked from user flair badges. Checked with the same
+# punctuation-normalized, whole-word matching as BADGE_RESERVED, so
+# 'f.u.c.k' and 'shit-head' are caught while innocent substrings pass.
+BADGE_PROFANE = frozenset(
+    {
+        "fuck",
+        "fucker",
+        "fucking",
+        "motherfucker",
+        "shit",
+        "shite",
+        "bullshit",
+        "dipshit",
+        "horseshit",
+        "bitch",
+        "cunt",
+        "dick",
+        "dickhead",
+        "cock",
+        "pussy",
+        "whore",
+        "slut",
+        "bastard",
+        "asshole",
+        "arsehole",
+        "twat",
+        "wanker",
+        "prick",
+        "faggot",
+        "nigger",
+        "nigga",
+        "chink",
+        "spic",
+        "kike",
+        "retard",
+    }
+)
+
+
+def _badge_blocked_hit(b: str, blocked: frozenset) -> bool:
+    """True if the badge hits a blocked-word set. Punctuation is stripped
+    before the check so 'f.u.c.k', '(admin)' and 'SoulSync Admin' all match,
+    while 'device' / 'devon' (blocked word only as a substring) do not.
+    The JS _cleanBadge mirrors this exactly — keep them in sync."""
     norm = re.sub(r"[^a-z0-9]+", " ", b.lower()).strip()
     if not norm:
         return False
-    if norm.replace(" ", "") in {r.replace(" ", "") for r in BADGE_RESERVED}:
+    if norm.replace(" ", "") in {w.replace(" ", "") for w in blocked}:
         return True
-    return any(w in BADGE_RESERVED for w in norm.split())
+    return any(w in blocked for w in norm.split())
+
+
+def _badge_reserved_hit(b: str) -> bool:
+    return _badge_blocked_hit(b, BADGE_RESERVED)
+
+
+def _badge_profane_hit(b: str) -> bool:
+    return _badge_blocked_hit(b, BADGE_PROFANE)
 
 
 def badge_of(payload) -> str | None:
@@ -466,5 +513,7 @@ def badge_of(payload) -> str | None:
     if any(c in b for c in "<>&\"'"):
         return None
     if _badge_reserved_hit(b):
+        return None
+    if _badge_profane_hit(b):
         return None
     return b
