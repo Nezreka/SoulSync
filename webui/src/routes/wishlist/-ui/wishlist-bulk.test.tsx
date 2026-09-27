@@ -128,4 +128,52 @@ describe('WishlistList bulk actions', () => {
     expect(screen.getByTestId('wl-bulkbar-count')).toHaveTextContent('0 selected');
     expect(onBulkAction).not.toHaveBeenCalled();
   });
+
+  it('shift-click selects the whole visible range', () => {
+    const three = group('Aphex Twin', [
+      track({ id: 't1', track: 'One' }),
+      track({ id: 't2', track: 'Two' }),
+      track({ id: 't3', track: 'Three' }),
+    ]);
+    const onBulkAction = vi.fn(async () => ({ success: true }));
+    render(
+      <WishlistList
+        groups={[three]}
+        artistImages={new Map()}
+        onRemoveAlbum={() => {}}
+        onRemoveTrack={() => {}}
+        onBulkAction={onBulkAction}
+      />,
+    );
+    fireEvent.click(screen.getByText('Expand all'));
+
+    // Plain clicks toggle one row each…
+    fireEvent.click(screen.getByTestId('wl-select-t1'));
+    expect(screen.getByTestId('wl-bulkbar-count')).toHaveTextContent('1 selected');
+
+    // …but shift-click fills the span between the last click and this one.
+    // Without range logic this would read "2 selected".
+    fireEvent.click(screen.getByTestId('wl-select-t3'), { shiftKey: true });
+    expect(screen.getByTestId('wl-bulkbar-count')).toHaveTextContent('3 selected');
+  });
+
+  it('grabs every track by the artist from the section header', async () => {
+    const onBulkAction = vi.fn(
+      async (action: WishlistBulkAction, ids: string[]): Promise<WishlistBulkResponse> => ({
+        success: true,
+        results: ids.map((id) => ({ id, ok: true, message: 'Queued for download' })),
+      }),
+    );
+    const onGrabArtist = vi.fn((group: WishlistArtistGroup) => {
+      const ids = [...group.albums.flatMap((a) => a.tracks), ...group.singles].map((t) => t.id);
+      void onBulkAction('grab', ids);
+    });
+    render(<WishlistList {...PROPS} onBulkAction={onBulkAction} onGrabArtist={onGrabArtist} />);
+
+    fireEvent.click(screen.getByLabelText('Download all tracks by Aphex Twin now'));
+    expect(onGrabArtist).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(onBulkAction).toHaveBeenCalledWith('grab', ['t1', 't2']);
+    });
+  });
 });

@@ -21,6 +21,10 @@ Use :func:`blocks_for_scope` to get the filtered lists for one side.
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 TRIGGERS: list[dict] = [
     {"type": "schedule", "label": "Schedule", "icon": "clock", "scope": "both", "description": "Run on a timer interval", "available": True,
      "config_fields": [
@@ -647,8 +651,8 @@ def _repair_job_options() -> list[dict]:
         from core.repair_jobs import get_all_jobs
         jobs = sorted(get_all_jobs().values(), key=lambda job: job.display_name.lower())
         options += [{"value": job.job_id, "label": job.display_name} for job in jobs]
-    except Exception:                                       # noqa: BLE001
-        pass
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not load repair-job options: %s", exc)
     return options
 
 

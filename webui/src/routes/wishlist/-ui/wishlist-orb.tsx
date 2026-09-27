@@ -1,6 +1,10 @@
 import { useRef, useState } from 'react';
 
-import type { ParsedWishlistTrack, WishlistArtistGroup } from '../-wishlist.types';
+import type {
+  ParsedWishlistTrack,
+  WishlistAlbumGroup,
+  WishlistArtistGroup,
+} from '../-wishlist.types';
 
 import {
   artistHue,
@@ -24,6 +28,14 @@ interface Props {
   onToggleExpand: () => void;
   onRemoveAlbum: (albumName: string) => void;
   onRemoveTrack: (trackId: string) => void;
+  /** Queue every wanted track by this artist, right now. */
+  onGrabArtist?: () => void;
+  /** Queue one album's tracks without touching the rest of the artist. */
+  onGrabAlbum?: (album: WishlistAlbumGroup) => void;
+  /** Drop the whole artist from the wishlist (confirms first). */
+  onRemoveArtist?: () => void;
+  /** A bulk action is in flight — the grab buttons stand down. */
+  actionBusy?: boolean;
 }
 
 /** One artist orb plus its expanded album fan / singles orbit. */
@@ -37,6 +49,10 @@ export function WishlistOrb({
   onToggleExpand,
   onRemoveAlbum,
   onRemoveTrack,
+  onGrabArtist = () => {},
+  onGrabAlbum = () => {},
+  onRemoveArtist = () => {},
+  actionBusy = false,
 }: Props) {
   // Which album tile is open. Local to this orb: the vanilla handler collapsed
   // tiles within `.wl-album-fan`, i.e. per artist, not globally.
@@ -129,6 +145,38 @@ export function WishlistOrb({
       </div>
 
       <div className="wl-orb-expanded">
+        {/* Fan header: the artist-level actions the wishlist always needed —
+            grab everything now, or drop the artist, without checkbox duty. */}
+        <div className="wlp-fan-head">
+          <span className="wlp-fan-artist">{group.name}</span>
+          <span className="wlp-fan-count">{trackCountLabel(group.total)}</span>
+          <span className="wlp-fan-spacer" aria-hidden="true" />
+          <button
+            type="button"
+            className="wlp-btn wlp-btn--sm wlp-btn--primary"
+            disabled={actionBusy}
+            title={`Download all ${trackCountLabel(group.total)} by ${group.name} now`}
+            aria-label={`Download all tracks by ${group.name} now`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onGrabArtist();
+            }}
+          >
+            <span aria-hidden="true">⬇ </span>Grab all
+          </button>
+          <button
+            type="button"
+            className="wlp-btn wlp-btn--sm wlp-btn--danger"
+            title={`Remove ${group.name} from the wishlist`}
+            aria-label={`Remove ${group.name} from the wishlist`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemoveArtist();
+            }}
+          >
+            Remove artist
+          </button>
+        </div>
         {everExpandedRef.current && hasAlbums ? (
           <div className="wl-album-fan">
             {group.albums.map((album) => (
@@ -153,6 +201,19 @@ export function WishlistOrb({
                   <div className="wl-album-tile-count">{trackCountLabel(album.tracks.length)}</div>
                 </div>
                 <span className="wl-album-tile-badge">{album.tracks.length}</span>
+                <button
+                  type="button"
+                  className="wlp-tile-grab"
+                  disabled={actionBusy}
+                  title={`Download "${album.name}" now`}
+                  aria-label={`Download album ${album.name} now`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onGrabAlbum(album);
+                  }}
+                >
+                  <span aria-hidden="true">⬇</span>
+                </button>
                 <button
                   type="button"
                   className="wl-album-tile-remove"

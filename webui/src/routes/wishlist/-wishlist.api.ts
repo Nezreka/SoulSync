@@ -5,6 +5,7 @@ import { apiClient, readJson } from '@/app/api-client';
 import type {
   WishlistBulkAction,
   WishlistBulkResponse,
+  WishlistBulkResult,
   WishlistCycleResponse,
   WishlistRetryProfileResponse,
   WishlistStatsResponse,
@@ -121,4 +122,39 @@ export async function bulkWishlistAction(
   return readJson<WishlistBulkResponse>(
     apiClient.post('wishlist/bulk', { json: { action, track_ids: trackIds } }),
   );
+}
+
+/**
+ * The bulk endpoint caps a call at 200 ids (400 beyond that), so big
+ * selections — a whole artist, every stuck track — are split into sequential
+ * chunks and the per-item `results` merged back together. A chunk that fails
+ * at the transport level aborts the rest; the error names how far it got so
+ * the toast can stay honest about partial progress.
+ */
+export const BULK_WISHLIST_MAX_IDS = 200;
+
+export async function bulkWishlistActionChunked(
+  action: WishlistBulkAction,
+  trackIds: string[],
+): Promise<WishlistBulkResponse> {
+  const results: WishlistBulkResult[] = [];
+  let batchId: string | undefined;
+  let done = 0;
+  for (let i = 0; i < trackIds.length; i += BULK_WISHLIST_MAX_IDS) {
+    const chunk = trackIds.slice(i, i + BULK_WISHLIST_MAX_IDS);
+    let response: WishlistBulkResponse;
+    try {
+      response = await bulkWishlistAction(action, chunk);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Bulk ${action} stopped after ${done} of ${trackIds.length} tracks: ${reason}`,
+      );
+    }
+    done += chunk.length;
+    if (response.results) results.push(...response.results);
+    // Each chunk is its own download batch; keep the first id for reference.
+    if (response.batch_id && !batchId) batchId = response.batch_id;
+  }
+  return { success: true, batch_id: batchId, results };
 }

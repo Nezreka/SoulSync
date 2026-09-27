@@ -7,6 +7,7 @@ import type {
   WishlistBulkResponse,
 } from '../-wishlist.types';
 
+import { trackCountLabel } from '../-wishlist.helpers';
 import { openWishlistInspector } from '../../../features/downloads/inspector-modal';
 
 /**
@@ -50,8 +51,10 @@ function TrackRow({
   onRemoveTrack: (trackId: string) => void;
   /** Present only on album rows — the ✕ on the album cell removes the set. */
   onRemoveAlbum?: (albumName: string) => void;
-  /** When present, renders the bulk-selection checkbox column. */
-  selection?: { checked: boolean; onToggle: () => void } | null;
+  /** When present, renders the bulk-selection checkbox column. The boolean is
+      shiftKey: shift-click selects the whole visible range, like every mail
+      client and file manager. */
+  selection?: { checked: boolean; onToggle: (range: boolean) => void } | null;
   /** Per-item outcome of the last bulk action — rendered in the status cell. */
   outcome?: { ok: boolean; message: string } | null;
 }) {
@@ -71,7 +74,11 @@ function TrackRow({
           type="checkbox"
           className="wl-list-check"
           checked={selection.checked}
-          onChange={selection.onToggle}
+          // Click carries shiftKey for range-select; change is a noop because
+          // the controlled `checked` flips in the click handler, which fires
+          // first. Keyboard (Space) also fires click, with shiftKey false.
+          onClick={(event) => selection.onToggle(event.shiftKey)}
+          onChange={() => {}}
           aria-label={`Select ${track.track} by ${track.artist}`}
           data-testid={`wl-select-${track.id}`}
         />
@@ -149,6 +156,7 @@ export function WishlistList({
   filterActive = false,
   onBulkAction,
   bulkBusy = false,
+  onGrabArtist,
 }: {
   /** Keyed by LOWERCASED artist name — buildArtistImageMap's contract. */
   artistImages: Map<string, string>;
@@ -161,6 +169,8 @@ export function WishlistList({
   onBulkAction?: (action: WishlistBulkAction, trackIds: string[]) => Promise<WishlistBulkResponse>;
   /** True while a bulk action is in flight — disables the bulk buttons. */
   bulkBusy?: boolean;
+  /** Queue every wanted track by the artist, right now. */
+  onGrabArtist?: (group: WishlistArtistGroup) => void;
 }) {
   const [sort, setSort] = useState<WishlistListSort>('failing');
   const sorted = useMemo(() => sortGroups(groups, sort), [groups, sort]);
@@ -169,6 +179,7 @@ export function WishlistList({
   // explicit all-expanded state.
   const [openArtists, setOpenArtists] = useState<Set<string> | null>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [lastCheckedId, setLastCheckedId] = useState<string | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, { ok: boolean; message: string }>>({});
   const allOpen = openArtists === null;
   const isOpen = (name: string) => filterActive || allOpen || openArtists.has(name);
@@ -204,13 +215,38 @@ export function WishlistList({
     });
   }, [allIds]);
 
-  const toggleSelected = (id: string) =>
+  const toggleSelected = (id: string, range: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev);
+      if (range && lastCheckedId && lastCheckedId !== id) {
+        // Shift-click: select the whole visible span between the last
+        // clicked row and this one, in rendered order.
+        const a = visibleIds.indexOf(lastCheckedId);
+        const b = visibleIds.indexOf(id);
+        if (a !== -1 && b !== -1) {
+          const [from, to] = a < b ? [a, b] : [b, a];
+          for (let i = from; i <= to; i++) next.add(visibleIds[i]);
+          return next;
+        }
+      }
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    setLastCheckedId(id);
+  };
+
+  // Flat id order of the rows actually on screen — the shift-click range
+  // walks this, so collapsed artists contribute nothing.
+  const visibleIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const g of sorted) {
+      if (!(filterActive || allOpen || openArtists?.has(g.name))) continue;
+      for (const album of g.albums) for (const t of album.tracks) ids.push(t.id);
+      for (const t of g.singles) ids.push(t.id);
+    }
+    return ids;
+  }, [sorted, filterActive, allOpen, openArtists]);
 
   const runBulk = async (action: WishlistBulkAction) => {
     if (!onBulkAction || selected.size === 0 || bulkBusy) return;
@@ -226,7 +262,9 @@ export function WishlistList({
   };
 
   const selectionProps = (id: string) =>
-    onBulkAction ? { checked: selected.has(id), onToggle: () => toggleSelected(id) } : null;
+    onBulkAction
+      ? { checked: selected.has(id), onToggle: (range: boolean) => toggleSelected(id, range) }
+      : null;
 
   return (
     <div className="wl-list" data-testid="wishlist-list">
@@ -256,7 +294,10 @@ export function WishlistList({
       </div>
 
       {onBulkAction ? (
-        <div className="wl-bulkbar" data-testid="wl-bulkbar">
+        <div
+          className={`wl-bulkbar${selected.size > 0 ? ' has-selection' : ''}`}
+          data-testid="wl-bulkbar"
+        >
           <span className="wl-bulkbar-count" data-testid="wl-bulkbar-count">
             {selected.size} selected
           </span>
@@ -347,6 +388,20 @@ export function WishlistList({
             {group.failingCount > 0 && (
               <span className="wl-list-failing-badge">⚠ {group.failingCount} failing</span>
             )}
+            {onGrabArtist ? (
+              <button
+                type="button"
+                className="wlp-sec-grab"
+                title={`Download all ${trackCountLabel(group.total)} by ${group.name} now`}
+                aria-label={`Download all tracks by ${group.name} now`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onGrabArtist(group);
+                }}
+              >
+                <span aria-hidden="true">⬇ </span>Grab all
+              </button>
+            ) : null}
           </div>
 
           {isOpen(group.name) &&
