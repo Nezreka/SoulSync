@@ -7085,8 +7085,7 @@
                                                     <small class="settings-hint setting-help-body" hidden>Variables:
                                                         <code>$albumartist</code>, <code>$artist</code>,
                                                         <code>$artistletter</code>, <code>$album</code>,
-                                                        <code>$albumtype</code>, <code>$atypes</code>,
-                                                        <code>$title</code>,
+                                                        <code>$albumtype</code>, <code>$title</code>,
                                                         <code>$track</code>, <code>$disc</code> (01),
                                                         <code>$discnum</code> (1), <code>$cdnum</code> (CD01),
                                                         <code>$year</code>, <code>$quality</code> (filename only),
@@ -7099,23 +7098,6 @@
                                                         gives you a disc folder only where there is more than one disc.
                                                         Put any of them in the template and it replaces the automatic
                                                         disc folder from &ldquo;Multi-Disc Folder Label&rdquo; below.
-                                                        <code>$atypes</code> is the beets-style release label: empty
-                                                        for an ordinary album, and one bracketed tag per qualifier the
-                                                        release actually carries, so
-                                                        <code>$albumartist/[$year]$atypes $album</code> gives
-                                                        <code>[2019] Tokyo</code> for an album but
-                                                        <code>[2017][EP][Live] Audiotree Live</code> for a live EP.
-                                                        (<code>$albumtype</code> is the older one-word form and always
-                                                        resolves — an ordinary album renders the word
-                                                        &ldquo;Album&rdquo;.) The labels match the beets defaults:
-                                                        <code>[EP]</code>, <code>[Single]</code>, <code>[OST]</code>,
-                                                        <code>[Live]</code>, <code>[Anthology]</code>,
-                                                        <code>[Remix]</code>, and nothing for an ordinary album.
-                                                        Note that <em>Live</em>, <em>OST</em>, <em>Anthology</em> and
-                                                        <em>Remix</em> come from MusicBrainz secondary types; Spotify,
-                                                        Deezer and iTunes don't publish those, so with those sources
-                                                        you'll generally only see <code>[EP]</code> and
-                                                        <code>[Single]</code>.
                                                         Use <code>${var}</code> to append text:
                                                         <code>${albumtype}s</code> → Albums</small>
                                                 </div>
@@ -7153,13 +7135,9 @@
                                                         <code>$albumartist</code>, <code>$artist</code>,
                                                         <code>$artistletter</code>, <code>$title</code>,
                                                         <code>$track</code> (01), <code>$album</code>,
-                                                        <code>$albumtype</code>, <code>$atypes</code>,
-                                                        <code>$year</code>,
+                                                        <code>$albumtype</code>, <code>$year</code>,
                                                         <code>$quality</code> (filename only). Use <code>${var}</code>
-                                                        to append text: <code>${albumtype}s</code> → Singles.
-                                                        <code>$atypes</code> is the beets-style release label: empty for
-                                                        an ordinary release, bracketed tags otherwise
-                                                        (<code>[Single]</code>, <code>[EP][Live]</code>).</small>
+                                                        to append text: <code>${albumtype}s</code> → Singles</small>
                                                 </div>
 
                                                 <!-- Playlist Path Template: hidden from the UI. Playlists now import
@@ -10374,6 +10352,17 @@
                                                     <span class="chat-set-h-note">saves as soon as you pick one</span>
                                                 </div>
                                                 <div class="chat-avpicker" data-chat-avpicker></div>
+                                                <div class="chat-set-h">Badge
+                                                    <span class="chat-set-h-note">shows next to your name in the room</span>
+                                                </div>
+                                                <label class="chat-set-field">
+                                                    <span class="chat-set-row-title">Flair badge</span>
+                                                    <input class="chat-input" data-chat-set-badge type="text" maxlength="24"
+                                                        placeholder="e.g. vinyl nerd" autocomplete="off">
+                                                    <span class="chat-set-desc">A short tag shown next to your name.
+                                                        Plain text only — staff words like "admin" or "dev" aren't
+                                                        allowed.</span>
+                                                </label>
                                             </section>
                                             <section class="chat-set-panel" data-chat-setpanel="alerts" hidden>
                                                 <div class="chat-set-h">Notifications</div>
@@ -10439,6 +10428,15 @@
                                                     </span>
                                                     <input type="checkbox" class="chat-set-switch"
                                                         data-chat-set-autoprove>
+                                                </label>
+                                                <div class="chat-set-h">History</div>
+                                                <label class="chat-set-field">
+                                                    <span class="chat-set-row-title">Keep chat history (days)</span>
+                                                    <input class="chat-input" data-chat-set-retention type="number"
+                                                        min="0" max="3650" step="1" placeholder="30" autocomplete="off">
+                                                    <span class="chat-set-desc">Room messages older than this are
+                                                        pruned daily. 0 = keep everything (up to 5,000 messages per
+                                                        room).</span>
                                                 </label>
                                             </section>
                                             <section class="chat-set-panel" data-chat-setpanel="integrations" hidden>

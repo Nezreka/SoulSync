@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import zlib
 
 from utils.logging_config import get_logger
@@ -412,3 +413,58 @@ def want_of(payload) -> dict | None:
         pass
     return out
 
+
+
+BADGE_MAX_LEN = 24
+# Staff-impersonation guard: these read as authority in a public room, so no
+# client may wear them as flair. Enforced on SEND (api/chat refuses them) and
+# on RECEIVE (badge_of drops them) — a hostile client crafting its own
+# envelope can't dress as staff, and every client folds the same stream.
+BADGE_RESERVED = frozenset(
+    {
+        "admin",
+        "administrator",
+        "mod",
+        "moderator",
+        "dev",
+        "developer",
+        "lead dev",
+        "leaddev",
+        "soulsync",
+        "system",
+        "owner",
+        "staff",
+        "support",
+        "official",
+    }
+)
+
+
+def _badge_reserved_hit(b: str) -> bool:
+    """True if the badge impersonates staff. Punctuation is stripped before
+    the check so 'LEAD DEV!', 'd.e.v', '(admin)' and 'SoulSync Admin' all
+    match, while 'device' / 'devon' (reserved word only as a substring) do
+    not. The JS _cleanBadge mirrors this exactly — keep them in sync."""
+    norm = re.sub(r"[^a-z0-9]+", " ", b.lower()).strip()
+    if not norm:
+        return False
+    if norm.replace(" ", "") in {r.replace(" ", "") for r in BADGE_RESERVED}:
+        return True
+    return any(w in BADGE_RESERVED for w in norm.split())
+
+
+def badge_of(payload) -> str | None:
+    """The validated user flair badge from a decoded envelope ({'bg': ...}),
+    or None. REMOTE input — short, plain text, no markup characters (the
+    frontend escapes on render anyway; this keeps the wire value honest)."""
+    b = (payload or {}).get("bg") if isinstance(payload, dict) else None
+    if not isinstance(b, str):
+        return None
+    b = " ".join(b.split())[:BADGE_MAX_LEN].strip()
+    if not b:
+        return None
+    if any(c in b for c in "<>&\"'"):
+        return None
+    if _badge_reserved_hit(b):
+        return None
+    return b
