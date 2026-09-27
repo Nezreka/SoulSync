@@ -563,6 +563,25 @@ class DatabaseUpdateWorker:
                         self._emit_signal('phase_changed',
                                           f"Deep scan: {len(kept)} track(s) kept, their listing failed this run")
                     stale -= fenced
+            # The media server answering is not the same as the media server
+            # being DONE: while Navidrome is mid-rescan its Subsonic answers
+            # are HTTP 200 with transiently incomplete listings. Every one of
+            # those looks "fully trusted" (no failures recorded), so the 50%
+            # guard is bypassed and live tracks get deleted as stale. Never
+            # remove on a scan that ran during a server-side rescan.
+            if stale and self.server_type == "navidrome":
+                try:
+                    _server_scanning = bool(self.media_client.is_library_scanning())
+                except Exception:
+                    _server_scanning = False
+                if _server_scanning:
+                    logger.warning(
+                        "Skipping stale removal: Navidrome is running its own library "
+                        "scan — its listings are transiently incomplete, so %d unseen "
+                        "track(s) are unscanned, not gone", len(stale))
+                    self._emit_signal('phase_changed',
+                                      "Deep scan: media server is rescanning, keeping every track")
+                    stale = set()
             if stale:
                 # A fully-trusted scan may exceed the 50% threshold: the server
                 # answered (verified fetch), every artist processed cleanly, and
