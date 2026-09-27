@@ -179,6 +179,7 @@ class RecommendedArtist:
     score: float                                    # Σ seed_weight × similarity
     seed_count: int                                 # distinct seeds endorsing it (consensus)
     seeds: List[str] = field(default_factory=list)  # display names of those seeds
+    seed_scores: Dict[str, float] = field(default_factory=dict)  # each seed's normalized share of score
 
 
 def rank_recommended_artists(
@@ -222,10 +223,13 @@ def rank_recommended_artists(
                 continue
             sim_score = _positive_float(sim.get("score", 1.0))
             row = acc.setdefault(
-                a_norm, {"name": str(sim.get("name") or "").strip(), "score": 0.0, "seeds": {}}
+                a_norm, {"name": str(sim.get("name") or "").strip(), "score": 0.0, "seeds": {},
+                         "seed_scores": {}}
             )
-            row["score"] += weight * sim_score
+            contrib = weight * sim_score
+            row["score"] += contrib
             row["seeds"].setdefault(s_name, s_display)   # one seed counts once
+            row["seed_scores"][s_name] = row["seed_scores"].get(s_name, 0.0) + contrib
 
     out: List[RecommendedArtist] = []
     floor = max(1, int(min_seed_count))
@@ -233,11 +237,16 @@ def rank_recommended_artists(
         seed_count = len(row["seeds"])
         if seed_count < floor:
             continue
+        total = row["score"]
+        seed_scores = ({row["seeds"][s]: round(c / total, 4)
+                        for s, c in row["seed_scores"].items()}
+                       if total else {})
         out.append(RecommendedArtist(
             name=row["name"],
             score=round(row["score"], 6),
             seed_count=seed_count,
             seeds=list(row["seeds"].values()),
+            seed_scores=seed_scores,
         ))
     out.sort(key=lambda r: (-r.score, -r.seed_count, r.name.lower()))
     return out[:limit]

@@ -4535,7 +4535,8 @@ class WatchlistScanner:
                         genres = None
                 return {'name': r.name, 'seed_count': r.seed_count, 'seeds': r.seeds[:5],
                         'explanation': explanation('listened', r.seeds[:5],
-                                                   consensus_confidence(r.seed_count)),
+                                                   consensus_confidence(r.seed_count),
+                                                   components=r.seed_scores or None),
                         'score': r.score, 'spotify_artist_id': m.get('spotify_artist_id'),
                         'itunes_artist_id': m.get('itunes_artist_id'),
                         'deezer_artist_id': m.get('deezer_artist_id'),

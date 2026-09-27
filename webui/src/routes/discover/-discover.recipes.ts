@@ -12,7 +12,7 @@ import { apiClient, readJson } from '@/app/api-client';
 import type { Explanation } from './-discover.explanation';
 import type { DiscoverMix, MixAction } from './-discover.mixes';
 
-import { explanationLine } from './-discover.explanation';
+import { explanationLine, sourceMixLine } from './-discover.explanation';
 
 export type RecipeSchedule = 'daily' | 'weekly' | 'manual';
 
@@ -20,6 +20,8 @@ export interface Recipe {
   name: string;
   seeds: string[];
   genres: string[];
+  tags: string[];
+  related_artists: string[];
   year_from: number | null;
   year_to: number | null;
   mix: { library: number; discovery: number; trending: number };
@@ -36,6 +38,7 @@ export interface RecipeMixCard {
   tracks: unknown[];
   counts?: Record<string, number>;
   replaced?: number;
+  broadened?: string[];
   generated_at?: string | null;
 }
 
@@ -84,13 +87,27 @@ export function recipeMix(card: RecipeMixCard): DiscoverMix {
     { label: 'Keep this one', primary: true, onclick: `recipe-keep:${id}` },
     { label: 'Edit mix', closeFirst: true, onclick: `recipe-edit:${id}` },
   ];
+  const subtitle = explanationLine(card.explanation) || 'Your mix';
+  const mixLine = sourceMixLine(card.explanation);
   return {
     key: card.key,
     title: card.name,
-    subtitle: explanationLine(card.explanation) || 'Your mix',
+    subtitle: subtitle + (mixLine ? ` · ${mixLine}` : '') + broadenedNote(card),
     tracks: card.tracks,
     actions,
   };
+}
+
+/** `['year_range']` → ' (broadened: years)'; nothing broadened → ''. */
+const BROADENED_LABEL: Record<string, string> = {
+  year_range: 'years',
+  tags: 'tags',
+  genres: 'genres',
+};
+
+function broadenedNote(card: RecipeMixCard): string {
+  const stages = (card.broadened ?? []).map((s) => BROADENED_LABEL[s] ?? s).filter(Boolean);
+  return stages.length ? ` (broadened: ${stages.join(', ')})` : '';
 }
 
 // ── the form ────────────────────────────────────────────────────────────────
@@ -99,6 +116,8 @@ export interface RecipeForm {
   name: string;
   seeds: string;
   genres: string;
+  tags: string;
+  relatedArtists: string;
   yearFrom: string;
   yearTo: string;
   library: number;
@@ -112,6 +131,8 @@ export const RECIPE_FORM_DEFAULTS: RecipeForm = {
   name: '',
   seeds: '',
   genres: '',
+  tags: '',
+  relatedArtists: '',
   yearFrom: '',
   yearTo: '',
   library: 60,
@@ -143,8 +164,13 @@ function parseYear(text: string): number | null {
 /** What's wrong with the form, or '' when it can be saved. */
 export function recipeFormProblem(form: RecipeForm): string {
   if (!form.name.trim()) return 'Give the mix a name.';
-  if (!parseNames(form.seeds).length && !parseNames(form.genres).length)
-    return 'Add at least one artist or genre to build from.';
+  if (
+    !parseNames(form.seeds).length &&
+    !parseNames(form.genres).length &&
+    !parseNames(form.tags).length &&
+    !parseNames(form.relatedArtists).length
+  )
+    return 'Add at least one artist, genre, tag or related artist to build from.';
   if (form.library + form.discovery + form.trending <= 0)
     return 'Turn up at least one of library, discovery or trending.';
   return '';
@@ -155,6 +181,8 @@ export function recipeFromForm(form: RecipeForm): Recipe {
     name: form.name.trim(),
     seeds: parseNames(form.seeds),
     genres: parseNames(form.genres),
+    tags: parseNames(form.tags),
+    related_artists: parseNames(form.relatedArtists),
     year_from: parseYear(form.yearFrom),
     year_to: parseYear(form.yearTo),
     mix: { library: form.library, discovery: form.discovery, trending: form.trending },
@@ -167,8 +195,10 @@ export function formFromRecipe(recipe: Recipe): RecipeForm {
   const pct = (v: number) => Math.round((v ?? 0) * 100);
   return {
     name: recipe.name,
-    seeds: recipe.seeds.join(', '),
-    genres: recipe.genres.join(', '),
+    seeds: (recipe.seeds ?? []).join(', '),
+    genres: (recipe.genres ?? []).join(', '),
+    tags: (recipe.tags ?? []).join(', '),
+    relatedArtists: (recipe.related_artists ?? []).join(', '),
     yearFrom: recipe.year_from != null ? String(recipe.year_from) : '',
     yearTo: recipe.year_to != null ? String(recipe.year_to) : '',
     library: pct(recipe.mix.library),

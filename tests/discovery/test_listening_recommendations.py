@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.discovery.listening_recommendations import (
     adventurousness_weights,
     aggregate_candidate_tracks,
@@ -143,6 +145,21 @@ def test_case_insensitive_dedup_and_matching():
     assert len(out) == 1 and out[0].name in ("Muse", "MUSE")
     assert out[0].score == 2.0                # accumulated (still one seed)
     assert out[0].seed_count == 1
+
+
+def test_seed_scores_record_each_seeds_normalized_share():
+    seeds = [_seed("A", weight=3), _seed("B", weight=1)]
+    sims = {"a": [{"name": "Common"}], "b": [{"name": "Common"}]}
+    out = rank_recommended_artists(seeds, sims)
+    assert len(out) == 1
+    assert out[0].seed_scores == {"A": 0.75, "B": 0.25}   # 3/4 and 1/4 of the total
+
+
+def test_seed_scores_sum_to_one_and_default_empty():
+    seeds = [_seed("A"), _seed("B")]
+    sims = {"a": [{"name": "Common"}], "b": [{"name": "Common"}]}
+    out = rank_recommended_artists(seeds, sims)
+    assert sum(out[0].seed_scores.values()) == pytest.approx(1.0)
 
 
 def test_empty_and_limit():
