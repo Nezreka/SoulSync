@@ -115,6 +115,29 @@
         if (_wv >= 0 && _wv <= 100) state.watch.vol = _wv;
     } catch (e) { /* ignore */ }
 
+    // ── per-channel read markers (unread badges) ─────────────────────────
+    // chanSeen is per ROOM: the key carries the room name so markers never
+    // leak across rooms. Persisted — without this a reload wiped the markers
+    // and every loaded historical message relit its channel's badge.
+    function _chanSeenKey() { return 'chat_chan_seen_' + (state.room || ''); }
+    function _saveChanSeen() {
+        try { localStorage.setItem(_chanSeenKey(), JSON.stringify(state.chanSeen || {})); }
+        catch (e) { /* private mode */ }
+    }
+    function _loadChanSeen() {
+        var map = {};
+        try { map = JSON.parse(localStorage.getItem(_chanSeenKey()) || '{}') || {}; }
+        catch (e) { map = {}; }
+        // trust nothing from storage: slug → timestamp strings only
+        var clean = {};
+        Object.keys(map).forEach(function (k) {
+            if (typeof map[k] === 'string' && map[k]) {
+                clean[String(k).slice(0, 48)] = map[k].slice(0, 40);
+            }
+        });
+        state.chanSeen = clean;
+    }
+
     function q(sel) {
         var page = document.getElementById('chat-page');
         return page ? page.querySelector(sel) : null;
@@ -2970,6 +2993,17 @@
             (isLeadDev(name) ? 'LEAD DEV' : 'DEV') + '</span>';
     }
 
+    // User flair badge from the envelope ('bg' tag) — the one users set in
+    // the chat settings modal. Re-validated at render: archived messages and
+    // hostile envelopes both funnel through _cleanBadge, and the value is
+    // escaped like everything off the wire. Deliberately NOT the dev style —
+    // the ✔ check and the indigo pulse stay exclusive to real staff.
+    function userBadge(m) {
+        var b = m && typeof m.badge === 'string' ? _cleanBadge(m.badge) : '';
+        if (!b) return '';
+        return '<span class="chat-user-badge" title="User flair">' + esc(b) + '</span>';
+    }
+
     // Consecutive messages from the same sender (same app-ness, <5 min apart)
     // fold under one avatar + name header, with day separators between dates.
     function renderGroups(msgs) {
@@ -2994,14 +3028,17 @@
                 lastDay = day;
             }
             var t = Date.parse(String(m.timestamp || '').replace(' ', 'T')) || 0;
+            // badge is part of the group identity: a user changing flair
+            // mid-stream must not visually merge into their earlier group
+            var badge = _cleanBadge(m.badge);
             if (group && group.user === user && group.ext === ext && group.self === self &&
-                    (t - group.t) < GAP) {
+                    group.badge === badge && (t - group.t) < GAP) {
                 group.html += _lineHtml(m);
                 group.t = t;
                 continue;
             }
             flush();
-            group = { user: user, ext: ext, self: self, t: t, html:
+            group = { user: user, ext: ext, self: self, badge: badge, t: t, html:
                 '<div class="chat-group' + (self ? ' chat-group--self' : '') +
                     (ext ? ' chat-group--ext' : '') + '">' +
                 _avatar(user, avMap) +
@@ -3010,6 +3047,7 @@
                     '" style="color:hsl(' + _hue(user) + ',65%,68%)" title="Message ' +
                     attr(user) + '">' + esc(user) + '</button>' +
                 devBadge(user) +
+                userBadge(m) +
                 (!self && isFriend(user) ? '<span class="chat-friend-badge" title="Friend">⭐ Friend</span>' : '') +
                 (ext ? '<span class="chat-peer-badge chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '<span class="chat-peer-badge chat-peer-badge--soulsync">SoulSync</span>') +
                 '<span class="chat-msg-time">' + esc(fmtTime(m.timestamp)) + '</span>' +
@@ -3148,6 +3186,20 @@
                 localStorage.setItem('chat_seen_' + (state.room || ''),
                     String(msgs[msgs.length - 1].timestamp || ''));
             } catch (e) { /* ignore */ }
+            // the active channel is excluded from its own badge, but its
+            // marker still advances here — otherwise leaving the channel
+            // later would resurrect messages we already read as "unread"
+            var _chNewest = '';
+            for (var _ci = 0; _ci < msgs.length; _ci++) {
+                if (_msgChannel(msgs[_ci]) === state.channel) {
+                    var _cts = String(msgs[_ci].timestamp || '');
+                    if (_cts > _chNewest) _chNewest = _cts;
+                }
+            }
+            if (_chNewest && state.chanSeen[state.channel] !== _chNewest) {
+                state.chanSeen[state.channel] = _chNewest;
+                _saveChanSeen();
+            }
         }
     }
 
@@ -3804,6 +3856,7 @@
             }
         });
         if (newest) state.chanSeen[slug] = newest;
+        _saveChanSeen();
         state.lastStamp = null;      // force a repaint — the filter changed, not the data
         state.newMarker = null;
         state.arcade = null;      // leaving for a channel leaves the arcade
@@ -7288,6 +7341,15 @@
             if (typeof b.avatar !== 'undefined') {
                 try { localStorage.setItem('chat_avatar', String(_avatarId(b.avatar))); } catch (err) { /* ignore */ }
             }
+            // same for the flair badge: server wins, localStorage is the cache
+            if (typeof b.badge !== 'undefined') {
+                try { localStorage.setItem('chat_badge', _cleanBadge(b.badge || '')); } catch (err) { /* ignore */ }
+            }
+            var bgEl = q('[data-chat-set-badge]');
+            if (bgEl) bgEl.value = _myBadge();
+            var rtEl = q('[data-chat-set-retention]');
+            if (rtEl) rtEl.value = (typeof b.history_retention_days === 'number'
+                ? b.history_retention_days : 30);
             renderAvatarPicker();
             _setSettingsTab('profile');     // always open on the avatar
             overlay.hidden = false;
@@ -7310,6 +7372,15 @@
         if (fEl && fEl.value.trim()) payload.filepost_key = fEl.value.trim();
         var xEl = q('[data-chat-set-filepost-expiry]');
         if (xEl) payload.filepost_expiry = xEl.value || '';
+        // flair badge: cleaned client-side, re-validated server-side (the
+        // POST 400s on staff words — the user sees WHY it didn't save)
+        var bgEl = q('[data-chat-set-badge]');
+        if (bgEl) payload.badge = _cleanBadge(bgEl.value);
+        var rtEl = q('[data-chat-set-retention]');
+        if (rtEl) {
+            var _rd = parseInt(rtEl.value, 10);
+            payload.history_retention_days = isNaN(_rd) ? 30 : Math.max(0, Math.min(3650, _rd));
+        }
         // local-only: the mention ping never leaves this browser
         var pEl = q('[data-chat-set-ping]');
         if (pEl) {
@@ -7335,6 +7406,10 @@
                 return;
             }
             if (overlay) overlay.hidden = true;
+            // the save echoes the server-validated badge — cache exactly that
+            if (typeof res.body.badge !== 'undefined') {
+                try { localStorage.setItem('chat_badge', _cleanBadge(res.body.badge || '')); } catch (err) { /* ignore */ }
+            }
             // a home-room rename moves the active view with it when the home
             // room WAS the active room; an extra room stays put
             var wasHome = state.room === state.homeRoom;
@@ -7451,6 +7526,10 @@
             return payload;
         }
         if (_myAvatar()) payload.avatar = _myAvatar();
+        // flair badge rides the envelope like the avatar — a few bytes on a
+        // message already being sent, no extra carriers. plain mode has no
+        // envelope, so there's nowhere for it to go (same as the avatar).
+        if (_myBadge()) payload.badge = _myBadge();
         if (_chanRoom()) {
             payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;
             if (state.thread) {
@@ -8120,6 +8199,41 @@
         try { return _avatarId(localStorage.getItem('chat_avatar')); } catch (e) { return 0; }
     }
 
+    // User flair badge (the 'bg' envelope tag). The authoritative copy lives
+    // in server config (soulseek.chat_badge, set in the chat settings modal);
+    // localStorage is the send-time cache, synced on settings open/save like
+    // the avatar. _cleanBadge mirrors core/chat_codec.py badge_of — the
+    // server re-validates on send, this just keeps the UI honest.
+    var _BADGE_RESERVED = ['admin', 'administrator', 'mod', 'moderator',
+        'dev', 'developer', 'lead dev', 'leaddev',
+        'soulsync', 'system', 'owner', 'staff', 'support', 'official'];
+    // Mirrors core/chat_codec._badge_reserved_hit — keep in sync. Strips
+    // punctuation first so 'LEAD DEV!', 'd.e.v', '(admin)', 'SoulSync Admin'
+    // all match; 'device' / 'devon' (substring only) do not.
+    function _badgeReservedHit(b) {
+        var norm = b.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        if (!norm) return false;
+        var compact = norm.replace(/ /g, '');
+        for (var i = 0; i < _BADGE_RESERVED.length; i++) {
+            if (_BADGE_RESERVED[i].replace(/ /g, '') === compact) return true;
+        }
+        var words = norm.split(' ');
+        for (var j = 0; j < words.length; j++) {
+            if (_BADGE_RESERVED.indexOf(words[j]) > -1) return true;
+        }
+        return false;
+    }
+    function _cleanBadge(s) {
+        var b = String(s || '').replace(/\s+/g, ' ').trim().slice(0, 24);
+        if (!b || /[<>&"']/.test(b)) return '';
+        if (_badgeReservedHit(b)) return '';
+        return b;
+    }
+    function _myBadge() {
+        try { return _cleanBadge(localStorage.getItem('chat_badge') || ''); }
+        catch (e) { return ''; }
+    }
+
     // username -> avatar id, from the hello beacons AND from anything they've
     // said (messages carry the id, so history alone is enough to paint faces).
     // Discovered avatars are persisted to localStorage so silent peers who
@@ -8607,6 +8721,7 @@
         try {
             state.newMarker = localStorage.getItem('chat_seen_' + (state.room || '')) || null;
         } catch (e) { state.newMarker = null; }
+        _loadChanSeen();   // per-channel badges survive reloads (per room)
         renderHead(); renderComposer(); renderSide(null);
         var host = q('[data-chat-messages]');
         if (host) host.innerHTML = '<div class="chat-empty">Loading…</div>';
@@ -12542,6 +12657,9 @@
                 mergeMessages(d.messages);
                 _clearTypingFor(d.messages);
                 renderMessages(state.msgs);
+                // live arrivals in OTHER channels must light their badges now —
+                // renderMessages repaints the column, not the channel list
+                renderChannels();
             } else {
                 refresh();               // live update fallback
             }
@@ -12616,6 +12734,10 @@
                         // send format: the filter/channel rules that decide
                         // envelope vs plain (tests/js/chat_send_format_harness.mjs)
                         _plainOn: _plainOn, _tagRoomPayload: _tagRoomPayload,
+                        // notification logic: per-room read markers + unread fold
+                        // (tests/js/chat_notify_harness.mjs)
+                        _chanSeenKey: _chanSeenKey, _loadChanSeen: _loadChanSeen,
+                        _saveChanSeen: _saveChanSeen, _chanUnread: _chanUnread,
                         _testSetState: function (patch) {
                             Object.keys(patch || {}).forEach(function (k) { state[k] = patch[k]; });
                         } };

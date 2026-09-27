@@ -125,6 +125,27 @@ def _room_name() -> str:
         return "SoulSync"
 
 
+RETENTION_DAYS_DEFAULT = 30
+RETENTION_DAYS_MAX = 3650  # ~10 years; beyond that you're archiving, not chatting
+
+
+def _retention_days(cfg_getter=None) -> int:
+    """The configured room-history retention in days, sanitized. 0 = keep
+    everything (the 5,000-per-room count cap still bounds disk)."""
+    get = cfg_getter or _config_get
+    try:
+        raw = get("soulseek.chat_history_retention_days", RETENTION_DAYS_DEFAULT)
+    except Exception:
+        return RETENTION_DAYS_DEFAULT
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        return RETENTION_DAYS_DEFAULT
+    if days != days:  # NaN
+        return RETENTION_DAYS_DEFAULT
+    return max(0, min(days, RETENTION_DAYS_MAX))
+
+
 def _extra_rooms() -> list:
     """Extra Soulseek rooms the admin joined (beyond the community room).
     Persisted in config because slskd forgets its rooms on restart — the
@@ -244,6 +265,12 @@ def _unwrap_room_messages(messages):
                     m["av"] = _av
             except (TypeError, ValueError):
                 pass
+            # User flair badge ('bg'). badge_of re-validates on receive, so a
+            # hostile client can't smuggle a staff word past the send guard —
+            # every client folds the same verdict from the same stream.
+            _bg = chat_codec.badge_of(dec)
+            if _bg:
+                m["badge"] = _bg
             _th = dec.get("th")
             if isinstance(_th, str) and _th.strip():
                 m["th"] = _th.strip()[:160]
@@ -722,6 +749,7 @@ def create_blueprint() -> Blueprint:
                 return _config_get(key, default)
             except Exception:
                 return default
+
         return jsonify({
             "room": str(_cfg("soulseek.chat_room", "SoulSync") or "SoulSync"),
             "member_send": bool(_cfg("soulseek.chat_member_send", False)),
@@ -733,6 +761,12 @@ def create_blueprint() -> Blueprint:
             # Chosen preset avatar (0 = none). Server-side so it follows the
             # account across browsers rather than living in one localStorage.
             "avatar": int(_cfg("soulseek.chat_avatar", 0) or 0),
+            # Flair badge shown next to the account's name in the room.
+            # Server-side for the same reason as the avatar.
+            "badge": str(_cfg("soulseek.chat_badge", "") or ""),
+            # Room-history retention, in days (0 = keep everything, up to the
+            # 5,000-per-room count cap). Default 30.
+            "history_retention_days": _retention_days(_cfg),
         })
 
     @bp.route("/api/chat/settings", methods=["POST"])
@@ -765,6 +799,35 @@ def create_blueprint() -> Blueprint:
             elif not _avatar_allowed(_av, _self_username(_client())):
                 _av = 0          # reserved for someone else — don't store it
             _config_set("soulseek.chat_avatar", _av)
+        if "badge" in body:
+            # present = intentional: a value sets it, empty string clears it.
+            # badge_of is the same validator the wire uses — a staff word the
+            # user typed is refused HERE with the reason, not silently sent
+            # as nothing (the send path would 400 on it).
+            from core import chat_codec as _cc
+
+            _raw = str(body.get("badge") or "")
+            _clean = _cc.badge_of({"bg": _raw}) or ""
+            if _raw.strip() and not _clean:
+                return jsonify({"error": 'That badge can\'t be used — keep it short, plain text, and nothing staff-like ("admin", "dev", "moderator"…).'}), 400
+            _config_set("soulseek.chat_badge", _clean)
+        if "history_retention_days" in body:
+            try:
+                _days = int(body.get("history_retention_days"))
+            except (TypeError, ValueError):
+                _days = RETENTION_DAYS_DEFAULT
+            _days = max(0, min(_days, RETENTION_DAYS_MAX))
+            _config_set("soulseek.chat_history_retention_days", _days)
+            # the new window applies NOW, not on tomorrow's scheduled sweep —
+            # lowering it to 7 days shouldn't leave 30 days of rows overnight
+            try:
+                _db_inst = _db()
+                if _db_inst is not None and _days > 0:
+                    _n = _db_inst.prune_chat_messages(_days)
+                    if _n:
+                        logger.info("chat: retention change pruned %d messages older than %d days", _n, _days)
+            except Exception:
+                logger.debug("chat: retention prune on save failed", exc_info=True)
         if "giphy_key" in body:
             # present = intentional: a value sets it, empty string clears it
             _config_set("soulseek.chat_giphy_key", str(body.get("giphy_key") or "").strip())
@@ -1992,6 +2055,18 @@ def create_blueprint() -> Blueprint:
                 extra["av"] = _av
         except (TypeError, ValueError):
             pass
+        # User flair badge. Validated by the SAME codec the receive path
+        # uses, so anything that leaves here renders on every client.
+        # Refused loudly rather than silently dropped: a staff-impersonation
+        # word ("admin", "dev") failing quiet would leave the user thinking
+        # their badge was live.
+        _badge_raw = body.get("badge")
+        if _badge_raw:
+            _bd = chat_codec.badge_of({"bg": _badge_raw})
+            if _bd is None:
+                return jsonify({"error": 'That badge can\'t be used — keep it short, plain text, and nothing staff-like ("admin", "dev", "moderator"…).'}), 400
+            extra = dict(extra or {})
+            extra["bg"] = _bd
         # Thread membership (parent message key + carried display name).
         thread = str(body.get("thread") or "").strip()[:160]
         if thread:

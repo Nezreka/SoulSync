@@ -821,7 +821,7 @@ class MusicDatabase:
             # whole row (add_chat_messages requires a message) and a template
             # shared into the room simply vanished on reload.
             for _chat_col in ('chan TEXT', 'thread TEXT', 'thread_name TEXT', 'av INTEGER',
-                              'edit_target TEXT', 'overlay TEXT', 'np TEXT', 'want TEXT'):
+                              'edit_target TEXT', 'overlay TEXT', 'np TEXT', 'want TEXT', 'badge TEXT'):
                 try:
                     cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN " + _chat_col)
                 except sqlite3.OperationalError:
@@ -14708,6 +14708,7 @@ class MusicDatabase:
             except (TypeError, ValueError):
                 _av = None
             _ed = m.get('ed')
+            _badge = m.get('badge')
             rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json, fil_json,
                          str(_chan)[:24] if _chan else None,
                          str(_th)[:160] if _th else None,
@@ -14716,7 +14717,8 @@ class MusicDatabase:
                          str(_ed)[:160] if _ed else None,
                          ovl_json,
                          np_json,
-                         want_json))
+                         want_json,
+                         str(_badge)[:24] if _badge else None))
         if not rows:
             return 0
         try:
@@ -14724,8 +14726,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want, badge) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -14740,6 +14742,39 @@ class MusicDatabase:
             return 0
 
     _CHAT_REACTIONS_KEEP = 20000   # per room — rows are tiny, but still bounded
+
+    def prune_chat_messages(self, older_than_days) -> int:
+        """Time-based retention for the room archive: delete messages older
+        than ``older_than_days``. The per-room COUNT cap in add_chat_messages
+        stays as the disk bound; this is the age bound. ``0``/None/invalid =
+        disabled (count cap only). Returns rows deleted.
+
+        Timestamps are slskd ISO-ish strings ('2026-07-19 10:00:00'), which
+        sort lexicographically, so the cutoff is formatted to match. Rows
+        with malformed timestamps sort wherever they sort — they're pruned
+        only if they compare older than the cutoff."""
+        try:
+            days = float(older_than_days)
+        except (TypeError, ValueError):
+            return 0
+        if not days or days <= 0 or days != days:  # 0/negative/NaN = disabled
+            return 0
+        from datetime import timedelta
+
+        # slskd stamps are server-local naive strings, so the cutoff is one
+        # too — same clock, exact boundary, no timezone guessing.
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                before = conn.total_changes
+                cursor.execute("DELETE FROM chat_room_messages WHERE timestamp < ?", (cutoff,))
+                deleted = conn.total_changes - before
+                conn.commit()
+                return deleted
+        except Exception as e:
+            logger.error("Error pruning chat archive: %s", e)
+            return 0
 
     def add_chat_reactions(self, room: str, reactions) -> int:
         """Archive the aggregated reaction map ({target_key: {emoji: [users]}}).
@@ -14956,7 +14991,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want, badge FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -14997,6 +15032,8 @@ class MusicDatabase:
                     r['ed'] = r.pop('edit_target')
                 else:
                     r.pop('edit_target', None)
+                if not r.get('badge'):
+                    r.pop('badge', None)
                 # Rebuild the share card the live path hands the frontend:
                 # name, layer count and the asset refs it needs, so a reader
                 # can still adopt a template shared days ago.
