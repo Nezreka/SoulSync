@@ -64,3 +64,18 @@ def test_pagination_and_letter_filter(db):
     assert p1["pagination"]["total_count"] == p2["pagination"]["total_count"] == 4
     d = db.get_library_artists(search_query="", letter="D", page=1, limit=50, watchlist_filter="all", profile_id=1, source_filter="plex")
     assert [a["name"] for a in d["artists"]] == ["Dupe"]
+
+
+def test_sort_recent_puts_recently_added_first(db):
+    c = sqlite3.connect(str(db.database_path))
+    # 'beta' joined the library last, whatever the fixture's insert order was.
+    c.execute("UPDATE artists SET created_at = datetime('now', '+1 day') WHERE id = 2")
+    c.commit()
+    c.close()
+    names = [a["name"] for a in db.get_library_artists(sort="recent")["artists"]]
+    assert names[0] == "beta"
+
+
+def test_an_unknown_sort_falls_back_to_name_order(db):
+    names = [a["name"] for a in db.get_library_artists(sort="year_desc")["artists"]]
+    assert names == ["Alpha", "beta", "Dupe", "Gamma"]

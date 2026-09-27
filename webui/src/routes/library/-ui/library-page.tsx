@@ -79,6 +79,20 @@ const SOURCE_LABELS: Record<string, string> = {
 
 const SEARCH_DEBOUNCE_MS = 300;
 
+/** Sort options per view: '' is the natural A-Z order in both. */
+const SORT_OPTIONS = {
+  artists: [
+    { value: '', label: 'A–Z' },
+    { value: 'recent', label: 'Recently added' },
+  ],
+  albums: [
+    { value: '', label: 'A–Z' },
+    { value: 'year_desc', label: 'Newest first' },
+    { value: 'year_asc', label: 'Oldest first' },
+    { value: 'recent', label: 'Recently added' },
+  ],
+} as const;
+
 /**
  * The "you have tracks nobody could identify" strip (#1202).
  *
@@ -213,6 +227,42 @@ export function LibraryPage() {
   // the vanilla handler only repainted the one badge, and a refetch here would
   // pull all 75 artists back down for a one-field change.
   const queryClient = useQueryClient();
+
+  const setSearch = (patch: Partial<typeof search>) =>
+    void navigate({ search: (prev) => ({ ...prev, ...patch, page: patch.page ?? 1 }) });
+
+  /**
+   * Switching grids keeps the sort when the other view offers it ('recent'
+   * exists in both) and resets it otherwise — a year sort carried into the
+   * artists view would be a URL param nothing honors.
+   */
+  const switchView = (view: 'artists' | 'albums') => {
+    const offered = SORT_OPTIONS[view].some((o) => o.value === search.sort);
+    setSearch({ view, sort: offered ? search.sort : '' });
+  };
+
+  /**
+   * Warm the other grid's first page while the pointer (or keyboard focus) is
+   * still on its tab, so the click lands on cached rows instead of a cold
+   * fetch. The prefetched params mirror what the tab will actually navigate
+   * to — including the sort reset switchView applies.
+   */
+  const prefetchView = (view: 'artists' | 'albums') => {
+    if (view === search.view) return;
+    const offered = SORT_OPTIONS[view].some((o) => o.value === search.sort);
+    const target = { ...search, view, sort: offered ? search.sort : '' };
+    // One call per branch: the two options types are different generics and a
+    // union of them is not acceptable to prefetchQuery.
+    if (view === 'albums') {
+      void queryClient
+        .prefetchQuery(libraryAlbumsQueryOptions(profileId, target))
+        .catch(() => undefined);
+    } else {
+      void queryClient
+        .prefetchQuery(libraryArtistsQueryOptions(profileId, target))
+        .catch(() => undefined);
+    }
+  };
   // Tracked per artist, not off the mutation's `variables`: those hold only the
   // LATEST call, so adding a second artist while the first is still in flight
   // would move the "..." off the card that is actually waiting.
@@ -250,9 +300,6 @@ export function LibraryPage() {
     },
     onError: (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error'),
   });
-
-  const setSearch = (patch: Partial<typeof search>) =>
-    void navigate({ search: (prev) => ({ ...prev, ...patch, page: patch.page ?? 1 }) });
 
   /**
    * Load the same popularity-ranked list as the artist hero and hand the whole
@@ -373,15 +420,21 @@ export function LibraryPage() {
           <span className="watchlist-all-icon">📻</span>
           <span className="watchlist-all-text">Radio</span>
         </button>
-        <button
-          type="button"
-          className="library-watchlist-all-btn library-export-btn"
-          title="Export artists — pick watchlist or whole library, as JSON / CSV / text"
-          onClick={() => setExporting(true)}
-        >
-          <span className="watchlist-all-icon">⬇</span>
-          <span className="watchlist-all-text">Export</span>
-        </button>
+        {/* The export is artist-scoped (watchlist/library artists as JSON/CSV/
+            text); in the album grid it would export something no card shows,
+            so it is gone rather than present and misleading — the same call
+            the watchlist filter got. */}
+        {albumView ? null : (
+          <button
+            type="button"
+            className="library-watchlist-all-btn library-export-btn"
+            title="Export artists — pick watchlist or whole library, as JSON / CSV / text"
+            onClick={() => setExporting(true)}
+          >
+            <span className="watchlist-all-icon">⬇</span>
+            <span className="watchlist-all-text">Export</span>
+          </button>
+        )}
         {exporting ? <ExportArtistsModal onClose={() => setExporting(false)} /> : null}
         {watchingAll ? <WatchAllModal onClose={() => setWatchingAll(false)} /> : null}
       </div>
@@ -427,14 +480,17 @@ export function LibraryPage() {
           </div>
 
           {/* Wears the watchlist filter's chip classes — it is the same
-              segmented control, in the same row. */}
+              segmented control, in the same row. Hovering (or tabbing to) the
+              other tab warms its first page so the click lands on cache. */}
           <div className="watchlist-filter" role="group" aria-label="Library view">
             {(['artists', 'albums'] as const).map((v) => (
               <button
                 key={v}
                 type="button"
                 className={`watchlist-filter-btn${search.view === v ? ' active' : ''}`}
-                onClick={() => setSearch({ view: v })}
+                onClick={() => switchView(v)}
+                onMouseEnter={() => prefetchView(v)}
+                onFocus={() => prefetchView(v)}
               >
                 {v === 'artists' ? 'Artists' : 'Albums'}
               </button>
@@ -476,6 +532,23 @@ export function LibraryPage() {
             </>
           )}
 
+          {/* Grid order. The year sorts are album-view only — an artist has no
+              single year to sort by — so the options change with the view and
+              switchView resets a sort the other view does not offer. */}
+          <div className="library-source-filter">
+            <select
+              className="library-source-filter-select"
+              aria-label="Sort library"
+              value={search.sort}
+              onChange={(e) => setSearch({ sort: e.target.value })}
+            >
+              {SORT_OPTIONS[albumView ? 'albums' : 'artists'].map((o) => (
+                <option key={o.value || 'az'} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
           {/* Both views have one, over different columns: an album's ids are
               its own, so JioSaavn and Bandcamp are offered here and Genius,
               which is artist-only, is not. The `source` value is shared, and
@@ -544,7 +617,7 @@ export function LibraryPage() {
         {loading ? (
           <div className="library-loading">
             <div className="loading-spinner" />
-            <div className="loading-text">Loading artists...</div>
+            <div className="loading-text">Loading {albumView ? 'albums' : 'artists'}...</div>
           </div>
         ) : null}
 

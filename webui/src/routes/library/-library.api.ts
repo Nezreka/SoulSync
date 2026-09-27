@@ -56,13 +56,22 @@ export function libraryArtistsQueryOptions(profileId: number, search: LibrarySea
   };
   if (search.source) params.source_filter = search.source;
   if (search.quality) params.quality = search.quality;
+  // '' is the default order and stays in the key so the default view and an
+  // explicitly sorted view never share a cache entry.
+  params.sort = search.sort;
+  // The default sort isn't sent on the wire: the backend treats a missing
+  // sort the same as ''.
+  const requestParams = { ...params };
+  if (!requestParams.sort) delete requestParams.sort;
 
   return queryOptions({
     // Every filter is part of the key: changing any of them is a different
     // result set, and paging back should hit the cache rather than refetch.
     queryKey: [...LIBRARY_QUERY_KEY, 'artists', profileId, params] as const,
     queryFn: () =>
-      readJson<LibraryArtistsResponse>(apiClient.get('library/artists', { searchParams: params })),
+      readJson<LibraryArtistsResponse>(
+        apiClient.get('library/artists', { searchParams: requestParams }),
+      ),
   });
 }
 
@@ -81,11 +90,20 @@ export function libraryAlbumsQueryOptions(profileId: number, search: LibrarySear
     limit: LIBRARY_PAGE_SIZE,
   };
   if (search.source) params.source_filter = search.source;
+  // '' is the default order and stays in the key so the default view and an
+  // explicitly sorted view never share a cache entry.
+  params.sort = search.sort;
+  // The default sort isn't sent on the wire: the backend treats a missing
+  // sort the same as ''.
+  const requestParams = { ...params };
+  if (!requestParams.sort) delete requestParams.sort;
 
   return queryOptions({
     queryKey: [...LIBRARY_QUERY_KEY, 'albums', profileId, params] as const,
     queryFn: () =>
-      readJson<LibraryAlbumsResponse>(apiClient.get('library/albums', { searchParams: params })),
+      readJson<LibraryAlbumsResponse>(
+        apiClient.get('library/albums', { searchParams: requestParams }),
+      ),
   });
 }
 

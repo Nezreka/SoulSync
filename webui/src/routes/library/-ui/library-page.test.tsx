@@ -637,3 +637,43 @@ describe('LibraryPage unmatched-imports banner (#1202)', () => {
     expect(banner()).toBeNull();
   });
 });
+
+describe('Sort', () => {
+  it('offers only the sorts that make sense for artists', async () => {
+    renderPage('/library');
+    await screen.findByText('Aphex Twin');
+
+    const select = screen.getByLabelText('Sort library') as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'recent']);
+  });
+
+  it('sends the chosen sort to the API and keeps it in the URL', async () => {
+    const { router } = renderPage('/library');
+    await screen.findByText('Aphex Twin');
+
+    fireEvent.change(screen.getByLabelText('Sort library'), { target: { value: 'recent' } });
+    await waitFor(() => expect(lastQuery().get('sort')).toBe('recent'));
+    expect(router.state.location.search).toMatchObject({ sort: 'recent', page: 1 });
+  });
+
+  it('leaves the default sort off the wire while keeping it in the URL', async () => {
+    const { router } = renderPage('/library');
+    await screen.findByText('Aphex Twin');
+
+    expect(lastQuery().has('sort')).toBe(false);
+    expect(router.state.location.search).toMatchObject({ sort: '', page: 1 });
+  });
+
+  it('warms the albums grid when the pointer reaches its tab', async () => {
+    renderPage('/library');
+    await screen.findByText('Aphex Twin');
+    const before = requested.filter((u) => u.includes('/api/library/albums')).length;
+
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Albums' }));
+    await waitFor(() =>
+      expect(requested.filter((u) => u.includes('/api/library/albums')).length).toBeGreaterThan(
+        before,
+      ),
+    );
+  });
+});

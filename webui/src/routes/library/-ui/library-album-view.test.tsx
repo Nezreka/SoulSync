@@ -317,3 +317,134 @@ describe('when the albums fail to load', () => {
     );
   });
 });
+
+describe('Grid pass: sort, loading copy, export visibility', () => {
+  it('offers the album sorts and sends the chosen one to the API', async () => {
+    const { router } = renderPage('/library?view=albums');
+    await screen.findByText('Parklife');
+
+    const select = screen.getByLabelText('Sort library') as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual([
+      '',
+      'year_desc',
+      'year_asc',
+      'recent',
+    ]);
+
+    fireEvent.change(select, { target: { value: 'year_desc' } });
+    await waitFor(() => expect(lastQuery().get('sort')).toBe('year_desc'));
+    expect(router.state.location.search).toMatchObject({ sort: 'year_desc', page: 1 });
+  });
+
+  it('ignores a made-up sort value in the URL', async () => {
+    renderPage('/library?view=albums&sort=newest');
+    await screen.findByText('Parklife');
+    // The invalid value normalizes to the default, and the default is not
+    // sent on the wire.
+    expect(lastQuery().has('sort')).toBe(false);
+    expect((screen.getByLabelText('Sort library') as HTMLSelectElement).value).toBe('');
+  });
+
+  it('resets a year sort when switching to the artists view', async () => {
+    const { router } = renderPage('/library?view=albums&sort=year_desc');
+    await screen.findByText('Parklife');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artists' }));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ view: 'artists', sort: '' }),
+    );
+  });
+
+  it('keeps "recently added" when switching views, since both offer it', async () => {
+    const { router } = renderPage('/library?view=albums&sort=recent');
+    await screen.findByText('Parklife');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artists' }));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ view: 'artists', sort: 'recent' }),
+    );
+  });
+
+  it('warms the other grid on hover, before the click', async () => {
+    renderPage('/library?view=albums&sort=recent');
+    await screen.findByText('Parklife');
+    const artistsBefore = requested.filter((u) => u.includes('/api/library/artists')).length;
+
+    // Hovering the Artists tab prefetches it with the sort the click would
+    // actually navigate to ('recent' survives the switch).
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Artists' }));
+    await waitFor(() =>
+      expect(requested.filter((u) => u.includes('/api/library/artists')).length).toBeGreaterThan(
+        artistsBefore,
+      ),
+    );
+    const params = new URL(
+      requested.filter((u) => u.includes('/api/library/artists')).at(-1)!,
+      'http://x',
+    ).searchParams;
+    expect(params.get('sort')).toBe('recent');
+  });
+
+  it('does not prefetch the tab that is already showing', async () => {
+    renderPage('/library?view=albums');
+    await screen.findByText('Parklife');
+    const before = albumCalls().length;
+
+    // The stats label also reads "Albums" — the tab is the button.
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Albums' }));
+    // Let any stray request land.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(albumCalls().length).toBe(before);
+  });
+
+  it('names the view in the loading state', async () => {
+    // Fail the route loader's cache warm; the loader swallows the error, the
+    // route still commits, and the component's own query retries — the retry
+    // is pending in between, which is the state whose copy is under test.
+    const albumsBody = {
+      success: true,
+      albums: [album({ id: 'al1', title: 'Parklife' })],
+      pagination: {
+        page: 1,
+        limit: 75,
+        total_count: 1,
+        total_pages: 1,
+        has_prev: false,
+        has_next: false,
+      },
+    };
+    let albumsCalls = 0;
+    const passthrough = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes('/api/library/albums')) {
+          albumsCalls += 1;
+          if (albumsCalls === 1) return new Response('nope', { status: 500 });
+          return new Response(JSON.stringify(albumsBody), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return (passthrough as typeof fetch)(input, init);
+      }),
+    );
+    renderPage('/library?view=albums');
+
+    expect(await screen.findByText('Loading albums...')).toBeTruthy();
+    await screen.findByText('Parklife');
+  });
+
+  it('hides the artist export in the album view', async () => {
+    renderPage('/library?view=albums');
+    await screen.findByText('Parklife');
+    expect(screen.queryByText('Export')).toBeNull();
+  });
+
+  it('still shows the export in the artists view', async () => {
+    renderPage('/library');
+    await screen.findByText('Aphex Twin');
+    expect(screen.getByText('Export')).toBeTruthy();
+  });
+});

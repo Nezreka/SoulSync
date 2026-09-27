@@ -87,6 +87,19 @@ export const librarySearchSchema = z.object({
     )
     .default('artists')
     .catch('artists'),
+  /**
+   * Grid order. '' is the view's natural order (A-Z) and is not sent to the
+   * API; 'year_desc'/'year_asc' are album-view only, 'recent' is offered in
+   * both. Anything else falls back to '' — the backend whitelists too, so a
+   * hand-typed value can never reach the ORDER BY.
+   */
+  sort: z
+    .preprocess((v) => {
+      const s = searchString(v) ?? '';
+      return s === 'year_desc' || s === 'year_asc' || s === 'recent' ? s : '';
+    }, z.string())
+    .default('')
+    .catch(''),
 });
 
 export type LibrarySearch = z.infer<typeof librarySearchSchema>;

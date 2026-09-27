@@ -8209,6 +8209,7 @@ def get_library_artists():
             profile_id=get_current_profile_id(),
             source_filter=source_filter,
             quality_filter=quality_filter,
+            sort=request.args.get('sort', ''),
         )
 
         # Fix image URLs for all artists
@@ -8249,7 +8250,8 @@ def get_library_albums():
             page=int(request.args.get('page', 1)),
             limit=int(request.args.get('limit', 75)),
             profile_id=get_current_profile_id(),
-            source_filter=request.args.get('source_filter', '')
+            source_filter=request.args.get('source_filter', ''),
+            sort=request.args.get('sort', ''),
         )
 
         # Media-server art is stored as a relative path; a browser cannot load it
