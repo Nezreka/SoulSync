@@ -6391,6 +6391,26 @@
                                                             you see padded/silent files slip through. Applies to all
                                                             download sources.</div>
                                                     </div>
+                                                    <div class="form-group">
+                                                        <div class="setting-row">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="verify-flac-decode">
+                                                                Verify FLAC decode with flac -t
+                                                            </label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-body" hidden>Opt-in second integrity
+                                                            tier: a FLAC that passes the size/parse/duration checks is
+                                                            fully decoded with <code>flac -t</code>, which also verifies
+                                                            the STREAMINFO MD5. A file that fails is quarantined and
+                                                            the next candidate is tried, so a damaged replacement can
+                                                            never take the place of a good file. <strong>Off by
+                                                                default.</strong> Fails open — if the flac binary is
+                                                            missing or the check times out, the file is left alone
+                                                            rather than quarantined.</div>
+                                                    </div>
                                                 </div>
                                             </div><!-- end Audio Verification body -->
 
