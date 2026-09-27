@@ -18352,7 +18352,7 @@ class MusicDatabase:
                 'server_source': server_source
             }
 
-    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "", quality_filter: str = "") -> Dict[str, Any]:
+    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "", quality_filter: str = "", sort: str = "name") -> Dict[str, Any]:
         """
         Get artists for the library page with search, filtering, and pagination
 
@@ -18365,6 +18365,8 @@ class MusicDatabase:
             source_filter: Filter by metadata source match (e.g. "spotify", "!spotify" for unmatched)
             quality_filter: "upgradable" keeps artists with a track the quality
                 jobs say could be better (a pending finding)
+            sort: 'name' (A-Z, the default) or 'recent' (recently added first);
+                unknown values fall back to 'name'
 
         Returns:
             Dict containing artists list, pagination info, and total count
@@ -18489,6 +18491,10 @@ class MusicDatabase:
 
                 # Step 2: Get paginated artist rows (no album/track joins — fast)
                 offset = (page - 1) * limit
+                # Whitelisted — never interpolated from the raw request value.
+                order_by = {
+                    'recent': "a.created_at DESC, a.id DESC",
+                }.get(sort, "a.name COLLATE NOCASE")
                 artists_query = f"""
                     SELECT
                         a.id,
@@ -18513,7 +18519,7 @@ class MusicDatabase:
                         AND a.id = (SELECT MIN(a2.id) FROM artists a2
                                     WHERE a2.name = a.name AND a2.server_source = a.server_source
                                       AND +a2.owner_profile_id IS a.owner_profile_id)
-                    ORDER BY a.name COLLATE NOCASE
+                    ORDER BY {order_by}
                     LIMIT ? OFFSET ?
                 """
                 query_params = params + [limit, offset]
@@ -18696,7 +18702,7 @@ class MusicDatabase:
                 }
             }
 
-    def get_library_albums(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 75, profile_id: int = 1, source_filter: str = "") -> Dict[str, Any]:
+    def get_library_albums(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 75, profile_id: int = 1, source_filter: str = "", sort: str = "title") -> Dict[str, Any]:
         """Albums for the library page's album view, with search, source filter
         and pagination.
 
@@ -18708,6 +18714,11 @@ class MusicDatabase:
         The track count is counted off the tracks table rather than read from
         albums.track_count: the media-server import leaves that column NULL on
         essentially every row, so reading it would put "0 tracks" on the card.
+
+        sort is one of 'title' (A-Z, the default), 'year_desc' (newest first),
+        'year_asc' (oldest first) or 'recent' (recently added first). Unknown
+        values fall back to 'title'. Year sorts put unknown years last —
+        an album with no year is not "older" than a 1969 record.
         """
         try:
             with self._get_connection() as conn:
@@ -18767,6 +18778,13 @@ class MusicDatabase:
                 cursor.execute(f"SELECT COUNT(*) as total_count FROM albums al WHERE {where_clause}", params)
                 total_count = cursor.fetchone()['total_count']
 
+                # Whitelisted — never interpolated from the raw request value.
+                order_by = {
+                    'year_desc': "al.year IS NULL, al.year DESC, al.title COLLATE NOCASE",
+                    'year_asc': "al.year IS NULL, al.year ASC, al.title COLLATE NOCASE",
+                    'recent': "al.created_at DESC, al.id DESC",
+                }.get(sort, "al.title COLLATE NOCASE, a.name COLLATE NOCASE")
+
                 offset = (page - 1) * limit
                 cursor.execute(f"""
                     SELECT
@@ -18793,7 +18811,7 @@ class MusicDatabase:
                     FROM albums al
                     LEFT JOIN artists a ON a.id = al.artist_id
                     WHERE {where_clause}
-                    ORDER BY al.title COLLATE NOCASE, a.name COLLATE NOCASE
+                    ORDER BY {order_by}
                     LIMIT ? OFFSET ?
                 """, params + [limit, offset])
 

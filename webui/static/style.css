@@ -30086,6 +30086,16 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     contain: layout style;
 }
 
+/* The album view wears the artist card's classes tile-for-tile, but its grid
+   is denser: square covers stay legible smaller, so the album view fits more
+   per row instead of looking like a copy of the artist tab. The id beats the
+   class selectors below (including the responsive ones), so each breakpoint
+   gets its own album step. */
+#library-albums-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+}
+
 /* Library Artist Card — full-bleed photo style */
 @keyframes cardFadeIn {
     from {
@@ -30421,6 +30431,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         gap: 16px;
     }
 
+    #library-albums-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+
 }
 
 @media (max-width: 768px) {
@@ -30447,6 +30461,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .library-artists-grid {
         grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
         gap: 10px;
+    }
+
+    #library-albums-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     }
 
     .library-artist-card {

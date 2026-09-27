@@ -163,3 +163,50 @@ def test_carries_the_provider_ids_each_badge_is_drawn_from(sourced):
     # an absent key and a null one have to read the same to it.
     assert album['jiosaavn_id'] is None
     assert album['spotify_album_id'] is None
+
+
+def _with_yearless_album(db):
+    c = sqlite3.connect(str(db.database_path))
+    c.execute(
+        "INSERT INTO albums (id, artist_id, title, year, server_source) VALUES ('al6', 'a1', 'Zebra Crossing', NULL, 'plex')"
+    )
+    # Make it the most recently added row no matter when the fixture ran.
+    c.execute("UPDATE albums SET created_at = datetime('now', '+1 day') WHERE id = 'al6'")
+    c.execute("UPDATE albums SET created_at = datetime('now', '-1 day') WHERE id != 'al6'")
+    c.commit()
+    c.close()
+
+
+def test_sort_year_desc_puts_newest_first(db):
+    assert titles(db.get_library_albums(sort='year_desc')) == [
+        '13', 'Be Here Now', 'Definitely Maybe', 'Parklife',
+    ]
+
+
+def test_sort_year_asc_puts_oldest_first(db):
+    assert titles(db.get_library_albums(sort='year_asc')) == [
+        'Definitely Maybe', 'Parklife', 'Be Here Now', '13',
+    ]
+
+
+def test_year_sorts_put_unknown_years_last_not_first(db):
+    _with_yearless_album(db)
+    assert titles(db.get_library_albums(sort='year_desc'))[-1] == 'Zebra Crossing'
+    assert titles(db.get_library_albums(sort='year_asc'))[-1] == 'Zebra Crossing'
+
+
+def test_sort_recent_puts_recently_added_first(db):
+    _with_yearless_album(db)
+    assert titles(db.get_library_albums(sort='recent'))[0] == 'Zebra Crossing'
+
+
+def test_an_unknown_sort_falls_back_to_title_order(db):
+    assert titles(db.get_library_albums(sort='newest')) == [
+        '13', 'Be Here Now', 'Definitely Maybe', 'Parklife',
+    ]
+
+
+def test_sort_does_not_change_what_matches(db):
+    assert db.get_library_albums(search_query='here', sort='year_desc')['pagination'][
+        'total_count'
+    ] == 1
