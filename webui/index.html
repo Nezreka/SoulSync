@@ -6388,6 +6388,25 @@
                                                             you see padded/silent files slip through. Applies to all
                                                             download sources.</div>
                                                     </div>
+                                                    <div class="form-group">
+                                                        <div class="setting-row">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="verify-flac-decode">
+                                                                Verify FLAC files with a full decode (flac -t)
+                                                            </label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-body" hidden>Decodes every downloaded
+                                                            FLAC with <code>flac -t</code>, which also checks the file's
+                                                            MD5 signature. Catches damaged audio in the middle of a file
+                                                            whose size, header and length all look fine. A file that fails
+                                                            is quarantined and the next source is tried, so a
+                                                            re-download from the Corrupt File Detector can't replace a
+                                                            damaged file with another damaged one. <strong>Off by
+                                                            default:</strong> it fully decodes each FLAC.</div>
+                                                    </div>
                                                 </div>
                                             </div><!-- end Audio Verification body -->
 

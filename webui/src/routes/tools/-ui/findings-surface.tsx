@@ -769,9 +769,11 @@ export function FindingsSurface({
         // spell out what happens to files; safe ones just confirm the scale.
         const confirmed = await window.showConfirmDialog?.({
           title: `${info?.verb || 'Fix'} ${label}`,
-          message: info?.destructive
-            ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This moves or deletes files on disk and cannot be undone.`
-            : `Apply "${info?.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This only writes metadata — no files are deleted or moved.`,
+          message: info?.confirm
+            ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? ${info.confirm}`
+            : info?.destructive
+              ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This moves or deletes files on disk and cannot be undone.`
+              : `Apply "${info?.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This only writes metadata — no files are deleted or moved.`,
           confirmText: info?.verb || 'Fix',
           destructive: Boolean(info?.destructive),
         });

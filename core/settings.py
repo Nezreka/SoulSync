@@ -588,6 +588,10 @@ class ConfigManager:
                 "usenet_path_mappings": [],
             },
             "post_processing": {
+                # Tier-2 integrity: fully decode each downloaded FLAC with
+                # `flac -t` (frames + MD5). Off by default: a full decode per
+                # file. See core/imports/file_integrity.py.
+                "verify_flac_decode": False,
                 # When a download is quarantined (AcoustID mismatch, integrity /
                 # duration failure), retry the next-best candidate instead of
                 # failing outright. Default ON (PR #801's documented default —

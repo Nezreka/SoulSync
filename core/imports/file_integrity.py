@@ -24,10 +24,16 @@ Three checks, in order from cheapest to most expensive:
    transfer matched on a similarly-named track.
 
 This is the "tier 1" integrity layer — universal across formats, no
-external binary dep. A future tier could verify the FLAC STREAMINFO MD5
-by actually decoding the audio (requires `flac` binary or libflac
-wrapper); skipped for now since tier 1 catches the vast majority of
-real-world corruption.
+external binary dep.
+
+Tier 2, opt-in (``verify_flac_decode``, setting
+post_processing.verify_flac_decode): a FLAC that passes tier 1 is fully
+decoded with ``flac -t``, which also checks the STREAMINFO MD5. That is
+the only check that sees damaged frames in the middle of a file whose
+header, size and length are all fine. It costs a full decode per FLAC,
+hence off by default. It is what makes the Corrupt File Detector's
+re-download safe: a replacement that is itself damaged is quarantined and
+retried instead of landing in the library.
 """
 
 from __future__ import annotations
@@ -38,7 +44,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -287,7 +293,59 @@ def _confirm_broken_audio(file_path: str) -> Optional[str]:
         return None
 
 
+_FLAC_DECODE_TIMEOUT_S = 600
+
+
+def flac_decode_test(file_path: str) -> Tuple[bool, str]:
+    """Fully decode a FLAC with ``flac -t`` (frames + STREAMINFO MD5).
+
+    Returns ``(ok, reason)``. Fails OPEN — no ``flac`` binary, a timeout or an
+    OS error is ``(True, "")`` — because a false failure here quarantines a good
+    download. Same test as the Corrupt File Detector's library scan.
+    """
+    flac_bin = shutil.which("flac")
+    if not flac_bin:
+        return True, ""
+    try:
+        proc = subprocess.run([flac_bin, "-t", "-s", file_path], capture_output=True,
+                              text=True, errors="replace", timeout=_FLAC_DECODE_TIMEOUT_S)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.debug("[Integrity] flac -t could not run on %s: %s", file_path, exc)
+        return True, ""
+    if proc.returncode == 0:
+        return True, ""
+    lines = [line.strip() for line in (proc.stderr or "").splitlines() if line.strip()]
+    return False, (lines[0][:200] if lines else "flac -t reported errors")
+
+
 def check_audio_integrity(
+    file_path: str,
+    expected_duration_ms: Optional[int] = None,
+    *,
+    length_tolerance_s: Optional[float] = None,
+    min_file_size_bytes: int = _MIN_FILE_SIZE_BYTES,
+    verify_flac_decode: bool = False,
+) -> IntegrityResult:
+    """Tier 1 (see ``_check_audio_integrity_tier1``), then tier 2 for a FLAC
+    when ``verify_flac_decode`` is on: a full ``flac -t`` decode."""
+    result = _check_audio_integrity_tier1(
+        file_path, expected_duration_ms,
+        length_tolerance_s=length_tolerance_s,
+        min_file_size_bytes=min_file_size_bytes)
+    if not (result.ok and verify_flac_decode and str(file_path).lower().endswith(".flac")):
+        return result
+    ok, reason = flac_decode_test(str(file_path))
+    checks = {**result.checks, "flac_decode": "passed" if ok else "failed"}
+    if ok:
+        return IntegrityResult(ok=True, reason=result.reason, checks=checks)
+    return IntegrityResult(
+        ok=False,
+        reason=f"FLAC decode test failed ({reason}) — damaged audio frames",
+        checks=checks,
+    )
+
+
+def _check_audio_integrity_tier1(
     file_path: str,
     expected_duration_ms: Optional[int] = None,
     *,

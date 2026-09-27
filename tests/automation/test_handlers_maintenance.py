@@ -26,6 +26,7 @@ from core.automation.handlers.database_update import (
 )
 from core.automation.handlers.duplicate_cleaner import auto_run_duplicate_cleaner
 from core.automation.handlers.quality_scanner import auto_start_quality_scan
+from core.automation.handlers.run_repair import auto_run_repair_job
 from core.automation.handlers.maintenance import (
     auto_clear_quarantine, auto_cleanup_wishlist,
     auto_update_discovery_pool, auto_backup_database,
@@ -280,6 +281,59 @@ class TestQualityScanner:
         result = auto_start_quality_scan({}, deps)
         assert result['status'] == 'skipped'
         assert 'disabled' in result['reason']
+
+
+# ─── run_repair_job ───────────────────────────────────────────────────
+
+
+class TestRunRepairJob:
+    def _record(self, answer=True):
+        calls = []
+
+        def _run(job_id, **kw):
+            calls.append((job_id, kw))
+            return answer(job_id) if callable(answer) else answer
+
+        return calls, _run
+
+    def test_runs_the_chosen_job_respecting_its_toggle(self):
+        calls, run = self._record()
+        result = auto_run_repair_job({'job_id': 'audio_corruption_detector'},
+                                     _build_deps(run_repair_job_now=run))
+        assert calls == [('audio_corruption_detector', {'respect_enabled': True})]
+        assert result['status'] == 'completed'
+        assert result['jobs'] == 'audio_corruption_detector'
+
+    def test_all_queues_only_the_jobs_that_are_switched_on(self):
+        from core.repair_jobs import get_all_jobs
+        calls, run = self._record(lambda job_id: job_id in ('audio_corruption_detector', 'dead_file_cleaner'))
+        result = auto_run_repair_job({'job_id': 'all'}, _build_deps(run_repair_job_now=run))
+        assert {job for job, _ in calls} == set(get_all_jobs())
+        assert all(kw == {'respect_enabled': True} for _, kw in calls)
+        assert result['queued'] == 2
+
+    def test_a_switched_off_job_is_skipped_not_failed(self):
+        _, run = self._record(False)
+        result = auto_run_repair_job({'job_id': 'audio_corruption_detector'},
+                                     _build_deps(run_repair_job_now=run))
+        assert result['status'] == 'skipped'
+        assert 'switched off' in result['reason']
+
+    def test_an_unknown_job_is_an_error_and_queues_nothing(self):
+        calls, run = self._record()
+        result = auto_run_repair_job({'job_id': 'no_such_job'}, _build_deps(run_repair_job_now=run))
+        assert result['status'] == 'error'
+        assert calls == []
+
+    def test_the_block_lists_every_registered_job(self):
+        from core.automation.blocks import blocks_for_scope
+        from core.repair_jobs import get_all_jobs
+        block = next(a for a in blocks_for_scope('music')['actions'] if a['type'] == 'run_repair_job')
+        values = {o['value'] for o in block['config_fields'][0]['options']}
+        assert values == {'all', *get_all_jobs()}
+        assert block['category'] == 'Maintenance'
+        video = {a['type'] for a in blocks_for_scope('video')['actions']}
+        assert 'run_repair_job' not in video
 
 
 # ─── clear_quarantine ────────────────────────────────────────────────

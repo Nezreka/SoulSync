@@ -736,6 +736,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     file_path,
                     _expected_duration_ms,
                     length_tolerance_s=_duration_tolerance_override,
+                    verify_flac_decode=bool(
+                        config_manager.get('post_processing.verify_flac_decode', False)),
                 )
             except Exception as integrity_error:
                 logger.error(f"[Integrity] Check raised unexpectedly (continuing): {integrity_error}")

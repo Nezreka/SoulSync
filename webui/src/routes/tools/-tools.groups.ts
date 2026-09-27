@@ -42,6 +42,8 @@ export interface FindingTypeInfo {
   fixable: boolean;
   destructive: boolean;
   job_ids?: string[];
+  /** What the bulk-fix confirmation says, when the generic warning is wrong. */
+  confirm?: string;
 }
 
 // ── One line explaining every finding type ───────────────────────────────────
