@@ -25,6 +25,8 @@ const RECIPE: Recipe = {
   name: 'Prog',
   seeds: ['Tool', 'Soen'],
   genres: [],
+  tags: ['progressive metal'],
+  related_artists: ['Karnivool'],
   year_from: 2010,
   year_to: null,
   mix: { library: 0.6, discovery: 0.3, trending: 0.1 },
@@ -41,6 +43,8 @@ describe('the form', () => {
       name: 'Prog',
       seeds: 'Tool, Soen',
       genres: '',
+      tags: 'progressive metal',
+      relatedArtists: 'Karnivool',
       yearFrom: '2010',
       yearTo: '',
       library: 60,
@@ -55,10 +59,23 @@ describe('the form', () => {
     });
   });
 
+  it('reads a legacy recipe that predates tags', () => {
+    const legacy = { ...RECIPE } as Partial<Recipe>;
+    delete legacy.tags;
+    delete legacy.related_artists;
+    const form = formFromRecipe(legacy as Recipe);
+    expect(form.tags).toBe('');
+    expect(form.relatedArtists).toBe('');
+  });
+
   it('says what stops it being saved', () => {
     expect(recipeFormProblem(RECIPE_FORM_DEFAULTS)).toBe('Give the mix a name.');
     expect(recipeFormProblem({ ...RECIPE_FORM_DEFAULTS, name: 'x' })).toBe(
-      'Add at least one artist or genre to build from.',
+      'Add at least one artist, genre, tag or related artist to build from.',
+    );
+    expect(recipeFormProblem({ ...RECIPE_FORM_DEFAULTS, name: 'x', tags: 'metal' })).toBe('');
+    expect(recipeFormProblem({ ...RECIPE_FORM_DEFAULTS, name: 'x', relatedArtists: 'Soen' })).toBe(
+      '',
     );
     expect(
       recipeFormProblem({
@@ -102,6 +119,26 @@ describe('the mix card', () => {
       'recipe-keep:7',
       'recipe-edit:7',
     ]);
+  });
+
+  it('says where most of it came from', () => {
+    const mix = recipeMix({
+      ...card,
+      explanation: {
+        kind: 'listened',
+        seeds: [{ name: 'Tool' }],
+        source_mix: { library: 0.8, discovery: 0.2, trending: 0 },
+      },
+    });
+    expect(mix.subtitle).toBe('Because you listen to Tool · More from your library');
+  });
+
+  it('notes a broadened mix in the subtitle', () => {
+    const mix = recipeMix({ ...card, broadened: ['year_range'] });
+    expect(mix.subtitle).toBe('Because you listen to Tool & Soen (broadened: years)');
+    expect(recipeMix({ ...card, broadened: [] }).subtitle).toBe(
+      'Because you listen to Tool & Soen',
+    );
   });
 
   it('reads its verbs back and nothing else', () => {

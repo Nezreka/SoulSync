@@ -357,9 +357,14 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
             "owned_count": len(owned_tracks),
             "total": len(tracks),
             # made from artists you play; confidence is the share of it that
-            # is already yours rather than discovery flavor
-            "explanation": explanation("listened", cluster['artists'],
-                                       len(owned_tracks) / len(tracks) if tracks else None),
+            # is already yours rather than discovery flavor, and the source
+            # mix says the same thing as actual owned/discovery shares
+            "explanation": explanation(
+                "listened", cluster['artists'],
+                len(owned_tracks) / len(tracks) if tracks else None,
+                source_mix=({'owned': len(owned_tracks) / len(tracks),
+                             'discovery': (len(tracks) - len(owned_tracks)) / len(tracks)}
+                            if tracks else None)),
         })
     return {
         "mixes": mixes,

@@ -162,19 +162,67 @@ describe('CandidateInspectorModal', () => {
       expect.objectContaining({ destructive: true }),
     );
   });
+
+  it('shows the inspection date and the ladder rung from the streamed payload', async () => {
+    vi.stubGlobal(
+      'fetch',
+      stream({
+        source: 'soulseek',
+        candidates: [ACCEPTED],
+        provenance: {
+          search_mode: 'interactive',
+          searched_at: '2026-09-26 15:00:00',
+          policy_run_id: 'abc123def456',
+        },
+        policy: {
+          target_index: 0,
+          target_label: 'FLAC 24-bit/96kHz',
+          target_count: 3,
+          tier_score: null,
+          fallback_enabled: true,
+        },
+      }),
+    );
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+
+    await screen.findByText('Interactive Search');
+    expect(
+      screen.getByText('Searched 2026-09-26 · ladder rung 1 of 3: FLAC 24-bit/96kHz'),
+    ).toBeTruthy();
+  });
+
+  it("shows each candidate's ladder rung from its row policy facet", async () => {
+    const WITH_RUNG = {
+      ...ACCEPTED,
+      policy: {
+        target_index: 1,
+        target_label: 'FLAC 16-bit',
+        target_count: 3,
+        tier_score: 0.8,
+        fallback_enabled: true,
+      },
+    };
+    vi.stubGlobal('fetch', stream({ source: 'soulseek', candidates: [WITH_RUNG, ACCEPTED] }));
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+
+    const chip = await screen.findByText('rung 2/3');
+    expect(chip.getAttribute('title')).toBe('Ladder rung: FLAC 16-bit');
+    // the row without a facet renders no rung chip
+    expect(screen.queryAllByText(/rung \d+\/\d+/)).toHaveLength(1);
+  });
 });
 
 describe('the host and its entry points', () => {
   it('opens and closes through the shared host', async () => {
     vi.stubGlobal('fetch', stream({ source: 'soulseek', candidates: [ACCEPTED] }));
     render(<CandidateInspectorHost />);
-    expect(screen.queryByText('Search every source')).toBeNull();
+    expect(screen.queryByText('Interactive Search')).toBeNull();
     act(() =>
       openWishlistInspector({ id: 'sp-fade', name: 'Fade Into You', artist: 'Mazzy Star' }),
     );
-    await screen.findByText('Search every source');
+    await screen.findByText('Interactive Search');
     fireEvent.click(screen.getByLabelText('Close'));
-    expect(screen.queryByText('Search every source')).toBeNull();
+    expect(screen.queryByText('Interactive Search')).toBeNull();
   });
 
   it('wishlist picks post the track, the file and any override', async () => {

@@ -8,6 +8,9 @@ Sources, each independent (one failing never blanks the rest):
   the radar skips them, the inbox is where they belong.
 - saved_rec: a recommendation saved from its ⋯ menu.
 - concert: a watchlist artist playing soon, when Ticketmaster is set up.
+- artist_news: what a registered news provider said about a watchlist
+  artist in the last 30 days. No provider registered means the source is
+  "off", not failed.
 
 States per profile: unread, saved, dismissed, added. A refresh adds new items
 as unread and never resets a state someone chose. "Added" is observed, not
@@ -28,11 +31,12 @@ from utils.logging_config import get_logger
 
 logger = get_logger("discovery.inbox")
 
-KINDS = ('new_release', 'upcoming', 'saved_rec', 'concert')
+KINDS = ('new_release', 'upcoming', 'saved_rec', 'concert', 'artist_news')
 STATES = ('unread', 'saved', 'dismissed', 'added')
-SOURCES = ('releases', 'concerts')
+SOURCES = ('releases', 'concerts', 'news')
 
 NEW_RELEASE_DAYS = 30        # how far back a release still counts as news
+NEWS_KEEP_DAYS = 30           # how long a news item stays news
 CONCERT_ARTISTS = 25         # watchlist artists asked about per refresh
 STALE_AFTER = timedelta(hours=6)
 KEEP_DISMISSED = timedelta(days=90)
@@ -135,11 +139,12 @@ def _visible(database, profile_id: int, rows: List[Dict[str, Any]]) -> List[Dict
 
 
 def _ordered(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """New releases and saved recs newest first; upcoming releases and
-    concerts soonest first, after them."""
+    """New releases, artist news, and saved recs newest first; upcoming
+    releases and concerts soonest first, after them."""
     out: List[Dict[str, Any]] = []
     for kind, newest_first in (('new_release', True), ('saved_rec', True),
-                               ('upcoming', False), ('concert', False)):
+                               ('artist_news', True), ('upcoming', False),
+                               ('concert', False)):
         group = [r for r in rows if r.get('kind') == kind]
         key = 'updated_at' if kind == 'saved_rec' else 'item_date'
         group.sort(key=lambda r: (r.get(key) or '', r.get('id') or 0), reverse=newest_first)
@@ -237,6 +242,87 @@ def collect_concerts(database, profile_id: int,
     return added
 
 
+# ---- artist news ---------------------------------------------------------------
+
+NewsProvider = Callable[[str, Dict[str, Any]], Optional[List[Dict[str, Any]]]]
+"""A news provider answers ``provider(artist_name, context)`` with a list of
+dicts: ``title`` (required), ``url``, ``published_at`` (or ``date``),
+``image_url``, ``summary``. Anything malformed is skipped."""
+
+_news_providers: Dict[str, NewsProvider] = {}
+_news_guard = threading.Lock()
+
+
+def register_news_provider(name: str, provider: NewsProvider) -> None:
+    with _news_guard:
+        _news_providers[name] = provider
+
+
+def unregister_news_provider(name: str) -> bool:
+    with _news_guard:
+        return _news_providers.pop(name, None) is not None
+
+
+def list_news_providers() -> List[str]:
+    with _news_guard:
+        return list(_news_providers)
+
+
+def _news_item(item: Any) -> Optional[Dict[str, Any]]:
+    """A provider item that survives: a dict with a real title."""
+    if not isinstance(item, dict):
+        return None
+    title = str(item.get('title') or '').strip()
+    if not title:
+        return None
+    published = str(item.get('published_at') or item.get('date') or '').strip()[:10]
+    return {'title': title,
+            'url': str(item.get('url') or '').strip(),
+            'published': published,
+            'image_url': str(item.get('image_url') or '').strip(),
+            'summary': str(item.get('summary') or '').strip()[:500]}
+
+
+def collect_news(database, profile_id: int,
+                 providers: Optional[Dict[str, NewsProvider]] = None) -> Optional[int]:
+    """News about watchlist artists from the registered providers. None when
+    no provider is registered: that's "off", not a failure. Every provider
+    that answered keeps what it found even when another one raised; when
+    every provider failed the source failed."""
+    if providers is None:
+        with _news_guard:
+            providers = dict(_news_providers)
+    if not providers:
+        return None
+    watched = _watchlist(database, profile_id)
+    if not watched:
+        return 0
+    added, asked, failed_providers, errors = 0, 0, 0, []
+    for provider_name, provider in providers.items():
+        try:
+            for key, artist in watched.items():
+                asked += 1
+                items = provider(artist.artist_name,
+                                 {'provider': provider_name}) or []
+                for item in items:
+                    news = _news_item(item)
+                    if news is None:
+                        continue
+                    if upsert(database, profile_id, 'artist_news',
+                              item_key(key, news['title'], news['published']),
+                              title=news['title'], artist_name=artist.artist_name,
+                              image_url=news['image_url'], item_date=news['published'],
+                              payload={'url': news['url'], 'provider': provider_name,
+                                       'summary': news['summary'] or None}):
+                        added += 1
+        except Exception as exc:  # noqa: BLE001 - one provider never blanks the rest
+            failed_providers += 1
+            errors.append(f"{provider_name}: {exc}")
+    if failed_providers and failed_providers == len(providers):
+        raise SourceFailed(errors[0])
+    return added
+
+
 def save_rec(database, profile_id: int, entity: Dict[str, Any],
              explanation: Optional[Dict[str, Any]] = None, image_url: str = '') -> Optional[int]:
     """A recommendation kept for later from its ⋯ menu: saved from the start,
@@ -303,6 +389,11 @@ def _prune(database, profile_id: int, today: date) -> None:
         cur.execute("DELETE FROM discovery_inbox WHERE profile_id = ? AND kind = 'new_release' "
                     "AND state IN ('unread', 'added') AND item_date < ?",
                     (profile_id, (today - timedelta(days=NEW_RELEASE_DAYS)).isoformat()))
+        # news stops being news NEWS_KEEP_DAYS after its date; a saved one
+        # the user explicitly kept stays. dateless items have no age to outlive.
+        cur.execute("DELETE FROM discovery_inbox WHERE profile_id = ? AND kind = 'artist_news' "
+                    "AND state != 'saved' AND item_date != '' AND item_date < ?",
+                    (profile_id, (today - timedelta(days=NEWS_KEEP_DAYS)).isoformat()))
         # expired "not now" answers are filtered out of reads; delete them so
         # the table doesn't grow. same text comparison the read query uses.
         cur.execute("DELETE FROM discovery_feedback WHERE profile_id = ? AND kind = 'not_now' "
@@ -344,7 +435,8 @@ def refresh(database, profile_id: int, *, today: Optional[date] = None,
     today = today or date.today()
     sources: Dict[str, Dict[str, Any]] = {}
     for name, run in (('releases', lambda: collect_releases(database, profile_id, today)),
-                      ('concerts', lambda: collect_concerts(database, profile_id, concerts))):
+                      ('concerts', lambda: collect_concerts(database, profile_id, concerts)),
+                      ('news', lambda: collect_news(database, profile_id))):
         try:
             n = run()
             sources[name] = {'state': 'off'} if n is None else {'state': 'ok', 'count': n}

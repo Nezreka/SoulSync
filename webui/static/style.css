@@ -40986,6 +40986,106 @@ div.artist-hero-badge {
     font-size: 13px;
 }
 
+/* Discover Layout Modal */
+.discover-layout-modal {
+    background: #1a1a1a;
+    border-radius: 16px;
+    width: 520px;
+    max-width: 95vw;
+    max-height: 84vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+}
+.discover-layout-modal-header {
+    padding: 20px 24px 12px;
+    position: relative;
+}
+.discover-layout-modal-header h2 {
+    margin: 0 0 4px;
+    font-size: 18px;
+}
+.discover-layout-modal-header p {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(255,255,255,0.55);
+}
+.discover-layout-modal-body {
+    padding: 4px 24px 12px;
+    overflow-y: auto;
+}
+.discover-layout-zone {
+    margin-bottom: 16px;
+}
+.discover-layout-zone h3 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255,255,255,0.45);
+}
+.discover-layout-zone ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.discover-layout-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.discover-layout-row:last-child { border-bottom: none; }
+.discover-layout-row.is-disabled .discover-layout-check span {
+    color: rgba(255,255,255,0.35);
+    text-decoration: line-through;
+}
+.discover-layout-check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    cursor: pointer;
+}
+.discover-layout-check input {
+    width: 16px;
+    height: 16px;
+    accent-color: #7c5cff;
+    cursor: pointer;
+}
+.discover-layout-movers {
+    display: flex;
+    gap: 4px;
+}
+.discover-layout-movers button {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.8);
+    font-size: 13px;
+    cursor: pointer;
+    line-height: 1;
+}
+.discover-layout-movers button:hover:not(:disabled) {
+    background: rgba(255,255,255,0.12);
+}
+.discover-layout-movers button:disabled {
+    opacity: 0.25;
+    cursor: default;
+}
+.discover-layout-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 24px 20px;
+}
+
 /* Discover Playlist Cards */
 .discover-playlist-card {
     background: #1a1a1a;
@@ -49185,6 +49285,8 @@ div.artist-hero-badge {
 }
 .td-decision-title { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: rgba(255, 255, 255, 0.5); }
 .td-decision-subtitle { font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.4); margin-top: 2px; }
+.td-decision-provenance { margin: 4px 0 0; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45); }
+.td-decision-policy { margin: 2px 0 0; font-size: 11.5px; color: rgba(255, 255, 255, 0.55); }
 .td-decision-win { display: flex; flex-direction: column; gap: 2px; }
 .td-decision-win .td-decision-name { font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, 0.92); }
 .td-decision-summary { margin: 0; font-size: 12.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.72); }
@@ -64820,6 +64922,7 @@ tr.tag-diff-same {
 }
 .redownload-header h3 { font-size: 20px; font-weight: 800; color: #fff; margin: 0; letter-spacing: -0.02em; }
 .redownload-header-sub { font-size: 13px; color: rgba(255,255,255,0.3); margin: 6px 0 0; }
+.redownload-header-meta { font-size: 11.5px; color: rgba(255,255,255,0.45); margin: 4px 0 0; }
 
 .redownload-close {
     width: 32px; height: 32px; border: none; background: rgba(255,255,255,0.06);
@@ -69751,6 +69854,28 @@ body.max-performance #page-particles-canvas {
     color: rgb(var(--accent-light-rgb));
 }
 
+/* Retry profile select in the stats strip — reads as a stat value. */
+.wishlist-retry-profile-select {
+    background: transparent;
+    border: 0;
+    color: rgb(var(--accent-light-rgb));
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+    max-width: 10rem;
+    text-overflow: ellipsis;
+}
+.wishlist-retry-profile-select:disabled {
+    cursor: wait;
+    opacity: 0.7;
+}
+.wishlist-retry-profile-select option {
+    color: #111;
+    font-weight: 400;
+}
+
 .wishlist-stat-label {
     font-size: 11px;
     font-weight: 500;
@@ -69853,6 +69978,17 @@ body.max-performance #page-particles-canvas {
     overflow: hidden; text-overflow: ellipsis; }
 .wl-list-tries { font-size: 11.5px; color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .wl-list-tries--failing { color: #fbbf24; font-weight: 600; }
+.wl-list-tries--ok { color: #6ee7a8; font-weight: 600; }
+.wl-list-tries--fail { color: #f87171; font-weight: 600; }
+/* Bulk queue actions: a leading checkbox column and the selection bar. */
+.wl-list-track--select { grid-template-columns: 22px 38px minmax(0, 1fr) 92px 130px auto; }
+.wl-list-check { width: 15px; height: 15px; accent-color: #7dd3fc; cursor: pointer; }
+.wl-bulkbar { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    margin: 6px 0 2px; background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; }
+.wl-bulkbar-count { font-size: 12px; color: rgba(255,255,255,0.6); min-width: 76px;
+    font-variant-numeric: tabular-nums; }
+.wl-bulkbar .wl-chip:disabled { opacity: 0.4; cursor: default; }
 .wl-list-last { font-size: 11.5px; color: rgba(255,255,255,0.35); white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
 .wl-list-track-actions { display: flex; gap: 6px; justify-content: flex-end; opacity: 0;
@@ -69866,6 +70002,7 @@ body.max-performance #page-particles-canvas {
 .wl-list-btn--x:hover { color: #f87171; border-color: rgba(248,113,113,0.4); }
 @media (max-width: 700px) {
     .wl-list-track { grid-template-columns: 38px 1fr 80px auto; }
+    .wl-list-track--select { grid-template-columns: 22px 38px 1fr 80px auto; }
     .wl-list-last { display: none; }
     .wl-list-album { margin-left: 0; }
 }

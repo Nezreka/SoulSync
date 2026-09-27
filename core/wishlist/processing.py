@@ -1059,20 +1059,26 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                 if _backoff:
                     from datetime import datetime as _dt, timezone as _tz
 
-                    from core.wishlist.retry_backoff import split_due_for_retry
+                    from core.wishlist.retry_backoff import (
+                        get_active_retry_profile, split_due_for_retry)
                     # NAIVE UTC on purpose: last_attempted is SQLite's naive-UTC
                     # CURRENT_TIMESTAMP and the parser yields naive datetimes —
                     # an aware 'now' would TypeError on comparison.
+                    _retry_profile = get_active_retry_profile(music_database)
                     wishlist_tracks, _cooling = split_due_for_retry(
-                        wishlist_tracks, _dt.now(_tz.utc).replace(tzinfo=None))
+                        wishlist_tracks, _dt.now(_tz.utc).replace(tzinfo=None),
+                        profile=_retry_profile)
                     if _cooling:
+                        _profile_label = _retry_profile.get('label') or 'Standard'
                         logger.info(
                             f"[Auto-Wishlist] {len(_cooling)} track(s) cooling down after "
-                            f"repeated failures (retry backoff) — skipped this cycle")
+                            f"repeated failures ({_profile_label} retry profile) — "
+                            f"skipped this cycle")
                         runtime.update_automation_progress(
                             automation_id, log_line=(
                                 f'{len(_cooling)} repeatedly-failing track(s) on backoff '
-                                f'cooldown — retried later automatically'),
+                                f'cooldown ({_profile_label} profile) — retried later '
+                                f'automatically'),
                             log_type='info')
 
                 # CYCLE FILTERING: Get current cycle and filter tracks by category

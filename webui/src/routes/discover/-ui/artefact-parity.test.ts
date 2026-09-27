@@ -103,6 +103,9 @@ const NEW_IDS = [
   'station-sel-count',
   'station-dl-selected',
   'station-sync-selected',
+  // the layout customizer (sep 27): the vanilla had no layout customization,
+  // so the modal overlay id is new by construction.
+  'discover-layout-modal-overlay',
 ];
 
 /**

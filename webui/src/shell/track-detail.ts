@@ -82,6 +82,18 @@ export interface DecisionBlock {
   accepted_total?: number;
   rejected_total?: number;
   rejected_counts?: Record<string, number>;
+  /** Search provenance (core/downloads/provenance.py): which search ran. */
+  search_mode?: 'automatic' | 'interactive';
+  searched_at?: string;
+  policy_run_id?: string;
+  /** Candidate policy facet: the ladder rung the winner reached. */
+  policy?: {
+    target_index?: number;
+    target_label?: string;
+    target_count?: number;
+    tier_score?: number | null;
+    fallback_enabled?: boolean;
+  };
 }
 
 function _tdEsc(s: unknown): string {
@@ -308,6 +320,32 @@ export function renderDecisionBlock(decision: DecisionBlock | null): void {
   const rejected = decision.rejected_total || 0;
   const accepted = decision.accepted_total || 0;
 
+  // Search provenance: which search produced this decision (automatic worker
+  // vs interactive inspection) and the policy rung the winner reached.
+  const modeLabel =
+    decision.search_mode === 'interactive' ? 'Interactive Search' : 'Automatic Search';
+  const searchedDate = String(decision.searched_at || '').split(' ')[0];
+  box.append(
+    _el(
+      'p',
+      'td-decision-provenance',
+      searchedDate ? `${modeLabel} · searched ${searchedDate}` : modeLabel,
+    ),
+  );
+  const policy = decision.policy;
+  if (policy && policy.target_label) {
+    const rung = (policy.target_index ?? 0) + 1;
+    const total = policy.target_count ?? 0;
+    const tier = policy.tier_score == null ? '' : ` · tier ${policy.tier_score}`;
+    box.append(
+      _el(
+        'p',
+        'td-decision-policy',
+        `Ladder rung ${rung} of ${total}: ${policy.target_label}${tier}`,
+      ),
+    );
+  }
+
   if (decision.outcome === 'chosen') {
     box.append(_el('h3', 'td-decision-title', 'Why this file'));
     const chosen = decision.chosen;
@@ -402,7 +440,7 @@ function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): 
     // The candidate inspector: every source searched for this track, with why
     // each hit would or wouldn't be taken. Lives in the React app.
     if (window.openDownloadTaskInspector) {
-      add('🧭 See what every source has', 'td-action-secondary', () => {
+      add('🧭 Interactive Search', 'td-action-secondary', () => {
         closeTrackDetail();
         window.openDownloadTaskInspector?.(taskId, {
           name: d.title,

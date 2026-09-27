@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from core.downloads.candidate_pool import ALTERNATIVES_KEPT, summarize_pool
+from core.downloads.provenance import build_policy_facet
 from core.runtime_state import download_tasks, tasks_lock
 from utils.logging_config import get_logger
 
@@ -34,16 +35,22 @@ def _artist_of(track) -> str:
 
 
 def record(task_id: str, pool: Iterable[tuple], *, outcome: str, track=None,
-           quality_profile_id=None, merge: bool = False, database=None) -> Optional[dict]:
+           quality_profile_id=None, merge: bool = False, database=None,
+           provenance: Optional[dict] = None) -> Optional[dict]:
     """Summarize ``pool`` for ``task_id`` and store it. Returns the summary.
 
     ``merge``: this search generation only re-ran the queries a quarantine
     retry hadn't tried yet, so its pool is partial. Fold it into what the task
     already knew instead of replacing it.
+
+    ``provenance`` is ``core.downloads.provenance.new_provenance`` output;
+    the policy facet (the ladder rung the winner reached) is computed from
+    the quality profile and stored with the summary.
     """
     if outcome not in OUTCOMES:
         raise ValueError(f"unknown decision outcome {outcome!r}")
     try:
+        pool = list(pool)  # summarize_pool + _policy_facet both walk it
         with tasks_lock:
             task = download_tasks.get(task_id) or {}
             chosen_key = None
@@ -55,14 +62,17 @@ def record(task_id: str, pool: Iterable[tuple], *, outcome: str, track=None,
             summary['chosen'] = _bare_chosen(*chosen_key)
         if previous:
             summary = _merge(previous, summary)
+        summary['policy'] = _policy_facet(pool, chosen_key, quality_profile_id)
         with tasks_lock:
             if task_id in download_tasks:
-                download_tasks[task_id]['decision_summary'] = {'outcome': outcome, **summary}
+                download_tasks[task_id]['decision_summary'] = {
+                    'outcome': outcome, **summary, **(provenance or {})}
         (database or _database()).record_download_decision(
             task_id, outcome=outcome, summary=summary,
             track_title=str(getattr(track, 'name', '') or ''),
             track_artist=_artist_of(track),
             quality_profile_id=quality_profile_id,
+            provenance=provenance,
         )
         return summary
     except Exception as exc:  # noqa: BLE001 - a record must never cost a download
@@ -131,6 +141,32 @@ def _merge(previous: dict, latest: dict) -> dict:
         'rejected_total': int(previous.get('rejected_total') or 0) + int(latest.get('rejected_total') or 0),
         'rejected_counts': dict(sorted(counts.items(), key=lambda kv: -kv[1])),
     }
+
+
+def _policy_facet(pool: Iterable[tuple], chosen_key, quality_profile_id) -> dict:
+    """The ladder facet for this record: where the winner landed.
+
+    Never raises and never costs the record — an unreadable profile just
+    yields the empty-ladder facet.
+    """
+    try:
+        from core.quality.selection import load_profile_by_id
+        profile = load_profile_by_id(quality_profile_id)
+    except Exception:  # noqa: BLE001
+        profile = None
+    candidate = None
+    try:
+        if chosen_key:
+            for cand, _decision in pool:
+                if (getattr(cand, 'username', ''), getattr(cand, 'filename', '')) == tuple(chosen_key):
+                    candidate = cand
+                    break
+    except Exception:  # noqa: BLE001
+        candidate = None
+    try:
+        return build_policy_facet(profile, candidate)
+    except Exception:  # noqa: BLE001
+        return build_policy_facet(None)
 
 
 def _bare_chosen(username: str, filename: str) -> dict:

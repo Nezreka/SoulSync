@@ -181,6 +181,47 @@ def get_recommended_stations():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@bp.route('/api/discover/layout', methods=['GET'])
+def get_discover_layout():
+    """The profile's discover page layout: saved rows merged over the
+    defaults, so newly shipped sections appear. Empty saved layout ==
+    exactly the current page order."""
+    try:
+        from core.discovery import layout as layout_mod
+        db = get_database()
+        saved = db.get_discovery_layout(get_current_profile_id())
+        response = jsonify({"success": True,
+                            "sections": layout_mod.merge_over_defaults(saved)})
+        # The user edits this in the layout modal: a cached copy would show
+        # the pre-save order until it expires.
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    except Exception as e:
+        logger.error(f"[Discover] layout read failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/layout', methods=['PUT'])
+def save_discover_layout():
+    """Replace the profile's discover page layout. Unknown section ids and
+    missing sections are 400s; duplicates are deduped; invalid zones fall
+    back to the section's default zone."""
+    try:
+        from core.discovery import layout as layout_mod
+        data = request.get_json(silent=True) or {}
+        try:
+            entries = layout_mod.sanitize(data.get('sections'))
+        except layout_mod.LayoutValidationError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        db = get_database()
+        if not db.save_discovery_layout(get_current_profile_id(), entries):
+            return jsonify({"success": False, "error": "could not save layout"}), 500
+        return jsonify({"success": True, "sections": entries})
+    except Exception as e:
+        logger.error(f"[Discover] layout save failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/discover/stations/<artist_id>/snapshot', methods=['POST'])
 @_hide_blocked({'snapshot.tracks': WORKS})
 def get_station_snapshot(artist_id):

@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import type { GrabRule, InspectorCandidate } from './inspector';
+import type { GrabRule, InspectorCandidate, InspectorSearchMeta } from './inspector';
 import type { SourceColumnData } from './inspector-columns';
 
 import { bestCandidateIndex, streamInspection } from './inspector';
@@ -10,9 +10,9 @@ import { SourceColumn } from './inspector-columns';
 /**
  * The candidate inspector on its own: every download source's hits for one
  * track, what passed and what didn't and why, and a way to take one. Opened
- * from a wishlist item ("search manually") and from a failed download ("see
- * what every source has"). The redownload modal hosts the same columns inside
- * its own three steps.
+ * from a wishlist item ("Interactive Search") and from a failed download
+ * (also "Interactive Search"). The redownload modal hosts the same columns
+ * inside its own three steps.
  */
 
 export interface InspectorTarget {
@@ -42,14 +42,22 @@ export function CandidateInspectorModal({
   const [pickedIdx, setPickedIdx] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState('');
+  // Provenance + policy facet from the first streamed payload: one per
+  // inspection (core/downloads/provenance.py).
+  const [searchMeta, setSearchMeta] = useState<InspectorSearchMeta | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void streamInspection(target.searchUrl, target.searchBody, (source, fresh, all, rejected) => {
-      if (cancelled) return;
-      setColumns((prev) => [...prev, { source, candidates: fresh, rejected }]);
-      setCandidates([...all]);
-    })
+    void streamInspection(
+      target.searchUrl,
+      target.searchBody,
+      (source, fresh, all, rejected, meta) => {
+        if (cancelled) return;
+        setColumns((prev) => [...prev, { source, candidates: fresh, rejected }]);
+        setCandidates([...all]);
+        if (meta?.provenance) setSearchMeta((prev) => prev ?? meta);
+      },
+    )
       .then(() => {
         if (!cancelled) setStreamDone(true);
       })
@@ -105,11 +113,19 @@ export function CandidateInspectorModal({
       <div className="redownload-modal">
         <div className="redownload-header">
           <div>
-            <h3 id="rdl-inspector-title">Search every source</h3>
+            <h3 id="rdl-inspector-title">Interactive Search</h3>
             <p className="redownload-header-sub">
               What each download source has for this track, and why SoulSync would or wouldn't take
               it
             </p>
+            {searchMeta?.provenance ? (
+              <p className="redownload-header-meta">
+                Searched {String(searchMeta.provenance.searched_at || '').split(' ')[0]}
+                {searchMeta.policy?.target_label
+                  ? ` · ladder rung ${(searchMeta.policy.target_index ?? 0) + 1} of ${searchMeta.policy.target_count ?? 0}: ${searchMeta.policy.target_label}`
+                  : ''}
+              </p>
+            ) : null}
           </div>
           <button className="redownload-close" type="button" aria-label="Close" onClick={onClose}>
             ×

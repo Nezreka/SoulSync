@@ -116,8 +116,8 @@ describe('WishlistList', () => {
     fireEvent.click(screen.getAllByTitle('Expand')[0]);
     fireEvent.click(screen.getAllByTitle('Expand')[0]);
 
-    // "Search manually" opens the candidate inspector on that exact track.
-    fireEvent.click(screen.getAllByTitle('Search manually')[0]);
+    // "Interactive Search" opens the candidate inspector on that exact track.
+    fireEvent.click(screen.getAllByTitle('Interactive Search')[0]);
     expect(openWishlistInspector).toHaveBeenCalledWith({
       id: 'f1',
       name: 'Ghost',

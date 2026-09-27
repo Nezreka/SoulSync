@@ -340,6 +340,7 @@ NOT_A_SURFACE = {
     '/api/discovery-pool/fix',  # links a mirrored track to caller-supplied match; write ack only
     '/api/discovery-pool/rematch',  # replaces/clears a discovery cache entry; write ack only
     '/api/discover/listenbrainz/refresh',  # playlist refresh summary counts, no rows
+    '/api/discover/layout',  # page layout configuration (section ids, zones, enabled), no artist rows
 }
 
 

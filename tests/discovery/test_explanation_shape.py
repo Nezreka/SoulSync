@@ -7,6 +7,7 @@ cards, daily mixes and stations.
 
 from __future__ import annotations
 
+import math
 from datetime import date
 
 import pytest
@@ -15,11 +16,16 @@ from core.discovery.explain import KINDS, consensus_confidence, explanation, see
 
 
 def _valid(e):
-    assert set(e) == {'kind', 'seeds', 'confidence'}
+    assert set(e) <= {'kind', 'seeds', 'confidence', 'components', 'source_mix'}
     assert e['kind'] in KINDS
     for s in e['seeds']:
         assert set(s) == {'name', 'id', 'source'} and s['name']
     assert e['confidence'] is None or 0.0 <= e['confidence'] <= 1.0
+    for key in ('components', 'source_mix'):
+        if key in e:
+            assert isinstance(e[key], dict) and e[key]
+            for name, value in e[key].items():
+                assert name and isinstance(value, float) and math.isfinite(value)
     return e
 
 
@@ -62,6 +68,44 @@ def test_seed_normalises():
 
 
 # ---------------------------------------------------------------------------
+# optional score components and source mix
+# ---------------------------------------------------------------------------
+
+def test_components_and_source_mix_ride_along():
+    e = _valid(explanation('listened', ['Tool'], 0.8,
+                           components={'Tool': 1.0},
+                           source_mix={'direct': 0.6, 'genre': 0.4}))
+    assert e['components'] == {'Tool': 1.0}
+    assert e['source_mix'] == {'direct': 0.6, 'genre': 0.4}
+
+
+def test_empty_or_missing_maps_are_omitted():
+    e = _valid(explanation('listened', ['Tool'], 0.8, components={}, source_mix=None))
+    assert 'components' not in e and 'source_mix' not in e
+    e = _valid(explanation('listened', ['Tool']))
+    assert 'components' not in e and 'source_mix' not in e
+
+
+def test_weight_values_are_sanitized():
+    e = explanation('listened', ['Tool'], None, components={
+        'Tool': '1.234',   # numeric strings coerce, rounded to two decimals
+        '': 2.0,           # blank names go
+        True: 1.0,         # non-string names go
+        'bool': True,       # booleans go
+        'nan': float('nan'), 'inf': float('inf'),   # non-finite goes
+        'junk': 'nope',     # malformed goes
+    })
+    assert e['components'] == {'Tool': 1.23}
+
+
+def test_a_map_with_nothing_usable_is_omitted():
+    e = _valid(explanation('listened', ['Tool'], None,
+                           components={'': 1.0, 'x': float('nan')},
+                           source_mix={'y': 'junk'}))
+    assert 'components' not in e and 'source_mix' not in e
+
+
+# ---------------------------------------------------------------------------
 # the producers write it
 # ---------------------------------------------------------------------------
 
@@ -77,8 +121,10 @@ def test_bylt_sections_carry_it_from_the_seed_identity():
     assert e['kind'] == 'listened'
     assert e['seeds'] == [{'name': 'Tool', 'id': 'dz-tool', 'source': 'deezer'}]
     assert e['confidence'] == 0.7    # half direct, half genre
+    assert e['source_mix'] == {'direct': 0.5, 'genre': 0.5}
     all_direct = section_from_shelf(Shelf(seed=seed_id, selected=picks[:1]))['explanation']
     assert all_direct['confidence'] == 0.9
+    assert all_direct['source_mix'] == {'direct': 1.0, 'genre': 0.0}
 
 
 def test_a_bylt_generation_stored_before_the_shape_still_serves_one():
@@ -233,3 +279,6 @@ def test_the_listening_recs_scan_writes_it(db, monkeypatch):
     assert e['kind'] == 'listened'
     assert {s['name'] for s in e['seeds']} == {'Daft Punk', 'Justice'}
     assert e['confidence'] == 0.75
+    # each recommending seed's normalized share of the score rides along
+    assert set(e['components']) == {'Daft Punk', 'Justice'}
+    assert sum(e['components'].values()) == pytest.approx(1.0)

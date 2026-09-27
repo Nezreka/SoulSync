@@ -123,4 +123,43 @@ describe('renderDecisionBlock', () => {
     expect(box.textContent).toContain('<img src=x');
     expect(box.querySelector('.td-decision-summary')?.textContent).toBe('It was the only match.');
   });
+
+  it('labels which search ran and the ladder rung it reached', () => {
+    renderDecisionBlock({
+      outcome: 'chosen',
+      search_mode: 'automatic',
+      searched_at: '2026-09-26 14:03:22',
+      policy_run_id: 'abc123def456',
+      policy: {
+        target_index: 1,
+        target_label: 'FLAC 16-bit',
+        target_count: 9,
+        tier_score: 85.0,
+        fallback_enabled: true,
+      },
+    });
+    expect(box.querySelector('.td-decision-provenance')?.textContent).toBe(
+      'Automatic Search · searched 2026-09-26',
+    );
+    expect(box.querySelector('.td-decision-policy')?.textContent).toBe(
+      'Ladder rung 2 of 9: FLAC 16-bit · tier 85',
+    );
+  });
+
+  it('labels an interactive inspection and hides the policy line without a rung', () => {
+    renderDecisionBlock({
+      outcome: 'nothing_passed',
+      search_mode: 'interactive',
+      searched_at: '2026-09-26 15:00:00',
+    });
+    expect(box.querySelector('.td-decision-provenance')?.textContent).toBe(
+      'Interactive Search · searched 2026-09-26',
+    );
+    expect(box.querySelector('.td-decision-policy')).toBeNull();
+  });
+
+  it('defaults to the automatic search label when provenance is missing', () => {
+    renderDecisionBlock({ outcome: 'nothing_passed', rejected_total: 0 });
+    expect(box.querySelector('.td-decision-provenance')?.textContent).toBe('Automatic Search');
+  });
 });

@@ -2,9 +2,10 @@
  * The discovery inbox: one place for things worth coming back to.
  *
  * The server keeps it (core/discovery/inbox.py): watchlist releases, what's
- * coming out, recommendations saved from their ⋯ menu, and concerts when
- * Ticketmaster is set up. It refreshes in the background, and when a source
- * doesn't answer it says so and shows the rest, so this never renders blank.
+ * coming out, recommendations saved from their ⋯ menu, concerts when
+ * Ticketmaster is set up, and artist news from registered providers. It
+ * refreshes in the background, and when a source doesn't answer it says so
+ * and shows the rest, so this never renders blank.
  */
 
 import type { Explanation } from './-discover.explanation';
@@ -12,7 +13,7 @@ import type { RecentAlbum } from './-discover.recent-releases';
 
 import { explanationLine } from './-discover.explanation';
 
-export type InboxKind = 'new_release' | 'upcoming' | 'saved_rec' | 'concert';
+export type InboxKind = 'new_release' | 'upcoming' | 'saved_rec' | 'concert' | 'artist_news';
 export type InboxView = 'new' | 'saved';
 
 export interface InboxItem {
@@ -55,6 +56,7 @@ const KIND_LABEL: Record<InboxKind, string> = {
   upcoming: 'Coming soon',
   saved_rec: 'Saved',
   concert: 'Live',
+  artist_news: 'Artist news',
 };
 
 export function inboxKindLabel(kind: string): string {
@@ -64,6 +66,7 @@ export function inboxKindLabel(kind: string): string {
 const SOURCE_NAME: Record<string, string> = {
   releases: 'Your release scan',
   concerts: 'Ticketmaster',
+  news: 'Artist news',
 };
 
 /** "Ticketmaster didn't answer, showing the rest" - never a blank inbox. */
@@ -109,6 +112,8 @@ export function inboxWhen(item: InboxItem, today: Date = new Date()): string {
     }
     case 'concert':
       return day ? `Live ${shortDate(day)}` : 'Live';
+    case 'artist_news':
+      return day ? `News · ${shortDate(day)}` : 'News';
     case 'saved_rec':
       return explanationLine(item.payload?.explanation ?? undefined) || 'Saved';
     default:

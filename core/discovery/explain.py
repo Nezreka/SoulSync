@@ -18,6 +18,7 @@ None when the producer has no honest number.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Iterable, List, Optional
 
 KINDS = ('similar_to', 'listened', 'genre', 'new_release', 'trending')
@@ -29,10 +30,43 @@ def seed(name: Any, id: Any = None, source: Optional[str] = None) -> Dict[str, A
             'source': source or None}
 
 
+def _weights(mapping: Any) -> Optional[Dict[str, float]]:
+    """Sanitize an optional explanation weight map.
+
+    Returns a plain ``{name: rounded float}`` dict, or None when the mapping
+    is missing, empty, or carries nothing usable. Blank names, booleans,
+    non-numeric strings, and NaN/infinity are rejected; values are coerced
+    to finite floats rounded to two decimals.
+    """
+    if not isinstance(mapping, dict) or not mapping:
+        return None
+    clean: Dict[str, float] = {}
+    for key, value in mapping.items():
+        name = key.strip() if isinstance(key, str) else ''
+        if not name:
+            continue
+        if isinstance(value, bool):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(number):
+            continue
+        clean[name] = round(number, 2)
+    return clean or None
+
+
 def explanation(kind: str, seeds: Iterable[Any] = (),
-                confidence: Optional[float] = None) -> Dict[str, Any]:
+                confidence: Optional[float] = None,
+                components: Optional[Dict[str, Any]] = None,
+                source_mix: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The shape. ``seeds`` takes seed dicts or plain names; blanks and
-    repeats go, and at most five are kept (the line names two or three)."""
+    repeats go, and at most five are kept (the line names two or three).
+    ``components`` is an optional map of score-component name to weight
+    (e.g. each recommending seed's contribution); ``source_mix`` is an
+    optional map of source name to share. Invalid or empty maps are
+    omitted, so producers that have nothing honest to say stay silent."""
     if kind not in KINDS:
         raise ValueError(f"unknown explanation kind: {kind!r}")
     out: List[Dict[str, Any]] = []
@@ -58,7 +92,14 @@ def explanation(kind: str, seeds: Iterable[Any] = (),
             confidence = round(min(1.0, max(0.0, float(confidence))), 2)
         except (TypeError, ValueError):
             confidence = None
-    return {'kind': kind, 'seeds': out, 'confidence': confidence}
+    result = {'kind': kind, 'seeds': out, 'confidence': confidence}
+    weights = _weights(components)
+    if weights is not None:
+        result['components'] = weights
+    mix = _weights(source_mix)
+    if mix is not None:
+        result['source_mix'] = mix
+    return result
 
 
 def consensus_confidence(endorsements: Any) -> Optional[float]:

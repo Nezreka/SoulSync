@@ -1,6 +1,7 @@
 """Renewable mixes (plan phase 7): daily mixes as recipes you keep.
 
-A recipe says what a mix is made of: seed artists and/or genres, a year
+A recipe says what a mix is made of: seed artists and/or genres, tags and
+related artists as extra filters and sources, a year
 range, how much comes from the library, the discovery pool and what's
 trending, how long it is, and how often it renews. Each generation follows
 the same rules:
@@ -8,6 +9,10 @@ the same rules:
 - one song per artist.
 - a source that comes up short hands its share to the others, so the mix
   reaches its length whenever the pools can fill it.
+- when the filters leave the mix empty, they broaden in order — the year
+  range widens, then the tag filter drops, then the genre filter drops —
+  and the generation serves the fullest mix found and records which
+  broadenings produced it.
 - a reserve is kept: the next best tracks, still one per artist and none by
   an artist already in the mix.
 - a track that keeps failing to download (the wishlist retried it and gave
@@ -31,7 +36,7 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -48,6 +53,8 @@ FAILING_RETRIES = 2           # the wishlist gave up on it this many times
 PAYLOAD_VERSION = 1
 MAX_SEEDS = 10
 MAX_GENRES = 10
+MAX_TAGS = 10               # tag filters, same style as genres
+MAX_RELATED = 10            # related-artist names folded into the circle
 
 
 def _norm(text: Any) -> str:
@@ -77,6 +84,8 @@ class Recipe:
     name: str
     seeds: List[str] = field(default_factory=list)
     genres: List[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+    related_artists: List[str] = field(default_factory=list)
     year_from: Optional[int] = None
     year_to: Optional[int] = None
     mix: Dict[str, float] = field(default_factory=lambda: dict(DEFAULT_MIX))
@@ -92,8 +101,10 @@ class Recipe:
             raise ValueError('a recipe needs a name')
         seeds = _clean_names(d.get('seeds'), MAX_SEEDS)
         genres = _clean_names(d.get('genres'), MAX_GENRES)
-        if not seeds and not genres:
-            raise ValueError('a recipe needs seed artists or genres')
+        tags = _clean_names(d.get('tags'), MAX_TAGS)
+        related = _clean_names(d.get('related_artists'), MAX_RELATED)
+        if not seeds and not genres and not tags and not related:
+            raise ValueError('a recipe needs seed artists, genres, tags, or related artists')
         year_from, year_to = _year(d.get('year_from')), _year(d.get('year_to'))
         if year_from and year_to and year_from > year_to:
             year_from, year_to = year_to, year_from
@@ -111,11 +122,12 @@ class Recipe:
         except (TypeError, ValueError):
             length = 40
         schedule = d.get('schedule') if d.get('schedule') in SCHEDULES else 'weekly'
-        return cls(name, seeds, genres, year_from, year_to, mix,
+        return cls(name, seeds, genres, tags, related, year_from, year_to, mix,
                    max(MIN_LENGTH, min(MAX_LENGTH, length)), schedule)
 
     def to_dict(self) -> Dict[str, Any]:
         return {'name': self.name, 'seeds': list(self.seeds), 'genres': list(self.genres),
+                'tags': list(self.tags), 'related_artists': list(self.related_artists),
                 'year_from': self.year_from, 'year_to': self.year_to, 'mix': dict(self.mix),
                 'length': self.length, 'schedule': self.schedule}
 
@@ -318,6 +330,19 @@ def _genre_match(raw: Any, wanted: Sequence[str]) -> bool:
     return any(_norm(w) in names or any(_norm(w) in n for n in names) for w in wanted)
 
 
+def _tag_match(tags: Sequence[str], raw: Any) -> bool:
+    """a track's tags are its genres: the tag filter matches the track or
+    artist genre metadata, the same field the genre filter reads"""
+    if not tags:
+        return True
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        parsed = str(raw or '').split(',')
+    names = {_norm(g) for g in (parsed or []) if g} if isinstance(parsed, list) else {_norm(parsed)}
+    return any(_norm(t) in names for t in tags)
+
+
 def _in_years(year: Any, recipe: Recipe) -> bool:
     y = _year(str(year or '')[:4])
     if recipe.year_from is None and recipe.year_to is None:
@@ -328,10 +353,39 @@ def _in_years(year: Any, recipe: Recipe) -> bool:
         recipe.year_to is None or y <= recipe.year_to)
 
 
+def _related_names(database, related: Sequence[str]) -> List[str]:
+    """Related artists are names, but a value matching a local artist ID
+    (spotify/itunes/deezer/musicbrainz) resolves to that artist's name so it
+    feeds the seed circle. Unknown values stay names; there is no remote
+    lookup — an ID nobody here knows is just a name that matches nothing."""
+    names = [str(r or '').strip() for r in related or []]
+    names = [n for n in names if n]
+    if not names:
+        return []
+    found: Dict[str, str] = {}
+    try:
+        with database._get_connection() as conn:
+            cur = conn.cursor()
+            cols = [c[1] for c in cur.execute('PRAGMA table_info(artists)').fetchall()]
+            id_cols = [c for c in ('spotify_artist_id', 'itunes_artist_id', 'deezer_id',
+                                   'musicbrainz_id') if c in cols]
+            for col in id_cols:
+                cur.execute(f"SELECT {col}, name FROM artists WHERE {col} IN "
+                            f"({','.join('?' * len(names))})", names)
+                for id_val, name in cur.fetchall():
+                    if id_val and name:
+                        found.setdefault(str(id_val), name)
+    except Exception as exc:  # noqa: BLE001 - unresolvable means names
+        logger.debug("related-artist id resolution failed: %s", exc)
+    return [found.get(n, n) for n in names]
+
+
 def _circle(database, recipe: Recipe, profile_id: int) -> Tuple[List[str], set]:
-    """The seeds and the artists similar to them, and the library's names."""
+    """The seeds and the artists similar to them, and the library's names.
+    Related artists feed the same circle as seeds: seeds in every respect
+    but the label."""
     from core.personalized.daily_mixes import _seed_edges
-    seeds = [_norm(s) for s in recipe.seeds]
+    seeds = [_norm(s) for s in list(recipe.seeds) + _related_names(database, recipe.related_artists)]
     if not seeds:
         similars, owned = _seed_edges(database, [], profile_id)
         return [], owned
@@ -363,13 +417,16 @@ def library_pool(database, recipe: Recipe, profile_id: int, circle: Sequence[str
             "WHERE t.file_path IS NOT NULL AND t.file_path != ''")
         rows = [dict(r) for r in cur.fetchall()]
     in_circle = set(circle)
+    has_seeds = bool(recipe.seeds or recipe.related_artists)
     by_artist: Dict[str, List[Dict[str, Any]]] = {}
     for r in rows:
         artist = _norm(r['artist'])
-        if recipe.seeds and artist not in in_circle and not (
+        if has_seeds and artist not in in_circle and not (
                 recipe.genres and _genre_match(r['artist_genres'] or r['album_genres'], recipe.genres)):
             continue
-        if not recipe.seeds and not _genre_match(r['artist_genres'] or r['album_genres'], recipe.genres):
+        if not has_seeds and not _genre_match(r['artist_genres'] or r['album_genres'], recipe.genres):
+            continue
+        if not _tag_match(recipe.tags, r['artist_genres'] or r['album_genres']):
             continue
         if not _in_years(r['year'], recipe):
             continue
@@ -422,11 +479,14 @@ def _pool_track(r: Dict[str, Any]) -> Dict[str, Any]:
 
 def discovery_pool(database, recipe: Recipe, profile_id: int, circle: Sequence[str],
                    owned: set, rows: List[Dict[str, Any]], rng: random.Random) -> List[Dict[str, Any]]:
-    """Unowned tracks by the seeds' similar artists and/or in the genres."""
+    """Unowned tracks by the seeds' similar artists and/or in the genres or tags."""
     in_circle = set(circle)
+    has_seeds = bool(recipe.seeds or recipe.related_artists)
     fit = [r for r in rows if _norm(r['artist_name']) not in owned
-           and ((recipe.seeds and _norm(r['artist_name']) in in_circle)
-                or (recipe.genres and _genre_match(r['artist_genres'], recipe.genres)))
+           and ((has_seeds and _norm(r['artist_name']) in in_circle)
+                or (recipe.genres and _genre_match(r['artist_genres'], recipe.genres))
+                or (recipe.tags and _tag_match(recipe.tags, r['artist_genres'])))
+           and _tag_match(recipe.tags, r['artist_genres'])
            and _in_years(r['release_date'], recipe)]
     rng.shuffle(fit)
     rank = {a: i for i, a in enumerate(circle)}
@@ -437,16 +497,20 @@ def discovery_pool(database, recipe: Recipe, profile_id: int, circle: Sequence[s
 def trending_pool(recipe: Recipe, owned: set, rows: List[Dict[str, Any]],
                   circle: Sequence[str] = ()) -> List[Dict[str, Any]]:
     """The pool's most popular tracks in the genres and years, whoever
-    brought them in. A recipe with no genres has nothing to be popular IN
-    but its seeds, so there it's the most popular of the seeds' circle."""
+    brought them in. A recipe with no genres or tags has nothing to be
+    popular IN but its seeds, so there it's the most popular of the seeds'
+    circle."""
     in_circle = set(circle)
 
     def fits(r) -> bool:
         if recipe.genres:
             return _genre_match(r['artist_genres'], recipe.genres)
+        if recipe.tags:
+            return _tag_match(recipe.tags, r['artist_genres'])
         return _norm(r['artist_name']) in in_circle
 
     fit = [r for r in rows if _norm(r['artist_name']) not in owned and fits(r)
+           and _tag_match(recipe.tags, r['artist_genres'])
            and _in_years(r['release_date'], recipe)]
     fit.sort(key=lambda r: -(r.get('popularity') or 0))
     return [_pool_track(r) for r in fit]
@@ -465,6 +529,40 @@ def _fingerprints(database, profile_id: int) -> Tuple[str, str]:
             Taste.load(database, profile_id).fingerprint())
 
 
+def _widen_years(recipe: Recipe) -> Recipe:
+    """One broadening step: the year range grows by its own span on each
+    side (a one-sided bound grows outward by that much)."""
+    lo = recipe.year_from if recipe.year_from is not None else 1900
+    hi = recipe.year_to if recipe.year_to is not None else 2100
+    step = max(5, hi - lo)
+    return replace(
+        recipe,
+        year_from=None if recipe.year_from is None else max(1900, lo - step),
+        year_to=None if recipe.year_to is None else min(2100, hi + step))
+
+
+# broadenings, in the order a short generation relaxes them
+_BROADENINGS = (
+    ('year_range', _widen_years),
+    ('tags', lambda r: replace(r, tags=[])),
+    ('genres', lambda r: replace(r, genres=[])),
+)
+
+
+def _build_variant(database, variant: Recipe, profile_id: int, circle: Sequence[str],
+                   owned: set, rows: List[Dict[str, Any]], rng: random.Random,
+                   skip_artist) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """One generation attempt under one filter variant: pools in, mix and
+    reserve out. The circle and the skip rules don't change between
+    broadenings — only the filters do."""
+    pools = {
+        'library': library_pool(database, variant, profile_id, circle, rng),
+        'discovery': discovery_pool(database, variant, profile_id, circle, owned, rows, rng),
+        'trending': trending_pool(variant, owned, rows, circle),
+    }
+    return build_mix(pools, variant, skip_artist=skip_artist)
+
+
 def generate(database, profile_id: int, recipe_id: int, recipe: Recipe,
              seed: Optional[str] = None) -> Dict[str, Any]:
     from core.discovery.blocked import BlockedArtists
@@ -477,21 +575,42 @@ def generate(database, profile_id: int, recipe_id: int, recipe: Recipe,
     circle, owned = _circle(database, recipe, profile_id)
     circle = [a for a in circle if not blocked.blocks_name(a)]
     rows = _pool_rows(database, profile_id)
-    pools = {
-        'library': library_pool(database, recipe, profile_id, circle, rng),
-        'discovery': discovery_pool(database, recipe, profile_id, circle, owned, rows, rng),
-        'trending': trending_pool(recipe, owned, rows, circle),
-    }
-    tracks, reserve = build_mix(
-        pools, recipe,
-        skip_artist=lambda a: blocked.blocks_name(a) or taste.artist_factor(a) < 1.0)
-    kind = 'listened' if recipe.seeds else 'genre'
-    why = explanation(kind, recipe.seeds or recipe.genres, None)
+    skip_artist = lambda a: blocked.blocks_name(a) or taste.artist_factor(a) < 1.0  # noqa: E731
+
+    # progressively broaden when the filters leave the mix empty: widen the
+    # years, drop the tags, drop the genres. a stage can also narrow — with
+    # seeds, the genre filter was widening beyond the circle — so the mix
+    # served is the fullest one found, and broadened names the relaxations
+    # that produced it
+    broadened: List[str] = []
+    variant = recipe
+    tracks, reserve = _build_variant(
+        database, variant, profile_id, circle, owned, rows, rng, skip_artist)
+    best, best_reserve, best_broadened = tracks, reserve, []
+    for stage, relax in _BROADENINGS:
+        if best:
+            break
+        relaxed = relax(variant)
+        if relaxed == variant:      # e.g. widening an unbounded year range
+            continue
+        variant = relaxed
+        broadened.append(stage)
+        tracks, reserve = _build_variant(
+            database, variant, profile_id, circle, owned, rows, rng, skip_artist)
+        if len(tracks) > len(best):
+            best, best_reserve, best_broadened = tracks, reserve, list(broadened)
+    tracks, reserve, broadened = best, best_reserve, best_broadened
+
+    kind = 'listened' if (recipe.seeds or recipe.related_artists) else 'genre'
+    counts = {s: sum(1 for t in tracks if t.get('mix_source') == s) for s in SOURCES}
+    total = sum(counts.values())
+    why = explanation(kind, recipe.seeds or recipe.related_artists or recipe.genres, None,
+                      source_mix={s: counts[s] / total for s in SOURCES} if total else None)
     blocked_fp, taste_fp = blocked.fingerprint(), taste.fingerprint()
     return {
         'recipe_id': recipe_id, 'name': recipe.name, 'recipe': recipe.to_dict(),
         'tracks': tracks, 'reserve': reserve, 'explanation': why,
-        'counts': {s: sum(1 for t in tracks if t.get('mix_source') == s) for s in SOURCES},
+        'counts': counts, 'broadened': broadened,
         'generated_at': _now().isoformat(timespec='seconds'),
         'blocked': blocked_fp, 'taste': taste_fp, 'v': PAYLOAD_VERSION,
     }
@@ -517,13 +636,23 @@ def _track_ids(track: Dict[str, Any]) -> set:
     return {str(i) for i in ids if i}
 
 
+def _recipe_shape(d: Any) -> Dict[str, Any]:
+    """A stored recipe dict run through the current shape, so a recipe saved
+    before new optional fields existed compares equal to its defaults
+    instead of looking edited on every read."""
+    try:
+        return Recipe.from_dict(d or {}).to_dict()
+    except (ValueError, AttributeError, TypeError):
+        return d if isinstance(d, dict) else {}
+
+
 def is_stale(payload: Any, recipe_row: Dict[str, Any], fingerprints: Tuple[str, str],
              now: Optional[datetime] = None) -> bool:
     if not isinstance(payload, dict) or payload.get('v') != PAYLOAD_VERSION:
         return True
     if (payload.get('blocked'), payload.get('taste')) != fingerprints:
         return True
-    if payload.get('recipe') != recipe_row.get('recipe'):
+    if _recipe_shape(payload.get('recipe')) != _recipe_shape(recipe_row.get('recipe')):
         return True            # the recipe was edited
     every = SCHEDULES.get((recipe_row.get('recipe') or {}).get('schedule'))
     if every is None:

@@ -3410,10 +3410,26 @@ class MusicDatabase:
                     outcome TEXT NOT NULL,
                     chosen_json TEXT,
                     alternatives_json TEXT,
+                    search_mode TEXT,
+                    searched_at TEXT,
+                    policy_run_id TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dd_task_key ON download_decisions (task_key)")
+
+            # Provenance: which search produced the decision, when (UTC), and the
+            # 12-char policy run id. One provenance per automatic worker run and
+            # one per interactive inspection (core/downloads/provenance.py).
+            # MUST come before the index below: an old table has no
+            # search_mode/searched_at/policy_run_id columns, and indexing a
+            # missing column aborts DB init.
+            cursor.execute("PRAGMA table_info(download_decisions)")
+            dd_cols = {c[1] for c in cursor.fetchall()}
+            for _col in ['search_mode', 'searched_at', 'policy_run_id']:
+                if _col not in dd_cols:
+                    cursor.execute(f"ALTER TABLE download_decisions ADD COLUMN {_col} TEXT")
+                    logger.info(f"Added {_col} column to download_decisions")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dd_track_download ON download_decisions (track_download_id)")
 
             # Durable record of completed TORRENT grabs so the seeding sweep
@@ -3556,7 +3572,7 @@ class MusicDatabase:
                 CREATE TABLE IF NOT EXISTS discovery_inbox (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     profile_id INTEGER NOT NULL DEFAULT 1,
-                    kind TEXT NOT NULL,               -- new_release | upcoming | saved_rec | concert
+                    kind TEXT NOT NULL,               -- new_release | upcoming | saved_rec | concert | artist_news
                     entity_key TEXT NOT NULL,
                     title TEXT NOT NULL,
                     artist_name TEXT,
@@ -3571,6 +3587,44 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_inbox_state "
                            "ON discovery_inbox (profile_id, state)")
+
+            # Per-profile discover page layout: which of the 19 sections
+            # (core/discovery/layout.py) shows in which of the 4 zones, in
+            # what order, enabled or not. Empty for a profile means the
+            # defaults — the API merges saved rows over them.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_layout (
+                    profile_id INTEGER NOT NULL,
+                    section_id TEXT NOT NULL,
+                    zone TEXT NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (profile_id, section_id)
+                )
+            """)
+
+            # Persistent failed-download blocklist: files that burned every
+            # quarantine retry and hit a terminal import give-up. Fingerprint
+            # = SHA1(service | normalized artist | normalized title | size);
+            # Soulseek peers collapse to the service 'soulseek'. 90-day
+            # expiry, capped at 5000 rows. Separate from the user's download
+            # blocklist (username/filename they flagged) and the quarantine.
+            # core/downloads/failed_blocklist.py owns it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS failed_download_blocklist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fingerprint TEXT NOT NULL UNIQUE,
+                    service TEXT NOT NULL DEFAULT '',
+                    artist TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    reason TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_failed_blocklist_expires "
+                           "ON failed_download_blocklist (expires_at)")
 
             # Renewable mixes: a recipe (seeds / genres, years, source mix,
             # length, schedule) per row; each generation is stored as a
@@ -21429,12 +21483,17 @@ class MusicDatabase:
 
     def record_download_decision(self, task_key: str, *, outcome: str, summary: dict,
                                  track_title: str = '', track_artist: str = '',
-                                 quality_profile_id=None) -> Optional[int]:
+                                 quality_profile_id=None, provenance: Optional[dict] = None) -> Optional[int]:
         """Store (or replace) the decision behind one download task.
 
         ``summary`` is ``core.downloads.candidate_pool.summarize_pool`` output.
         A task that retries replaces its row, so each task has one answer. The
         table keeps the newest DOWNLOAD_DECISIONS_KEPT rows.
+
+        ``provenance`` is ``core.downloads.provenance.new_provenance`` output
+        (``search_mode``/``searched_at``/``policy_run_id``). When a retry record
+        omits it, the task's previous provenance is preserved instead of being
+        blanked.
         """
         if not task_key:
             return None
@@ -21444,14 +21503,25 @@ class MusicDatabase:
             rest = {k: v for k, v in summary.items() if k != 'chosen'}
             conn = self._get_connection()
             cursor = conn.cursor()
+            provenance = provenance or {}
+            old = cursor.execute(
+                "SELECT search_mode, searched_at, policy_run_id FROM download_decisions"
+                " WHERE task_key = ? ORDER BY id DESC LIMIT 1",
+                (str(task_key),),
+            ).fetchone()
+            old_mode, old_at, old_run = (old or (None, None, None))
+            search_mode = provenance.get('search_mode') or old_mode or 'automatic'
+            searched_at = provenance.get('searched_at') or old_at
+            policy_run_id = provenance.get('policy_run_id') or old_run
             cursor.execute("DELETE FROM download_decisions WHERE task_key = ?", (str(task_key),))
             cursor.execute(
                 """INSERT INTO download_decisions
                    (task_key, track_title, track_artist, quality_profile_id, outcome,
-                    chosen_json, alternatives_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    chosen_json, alternatives_json, search_mode, searched_at, policy_run_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (str(task_key), track_title or '', track_artist or '', quality_profile_id,
-                 outcome, json.dumps(chosen) if chosen else None, json.dumps(rest)),
+                 outcome, json.dumps(chosen) if chosen else None, json.dumps(rest),
+                 search_mode, searched_at, policy_run_id),
             )
             new_id = cursor.lastrowid
             cursor.execute(
@@ -21475,7 +21545,8 @@ class MusicDatabase:
             conn = self._get_connection()
             row = conn.execute(
                 """SELECT id, track_download_id, task_key, track_title, track_artist,
-                          quality_profile_id, outcome, chosen_json, alternatives_json, created_at
+                          quality_profile_id, outcome, chosen_json, alternatives_json,
+                          search_mode, searched_at, policy_run_id, created_at
                    FROM download_decisions WHERE task_key = ? ORDER BY id DESC LIMIT 1""",
                 (str(task_key),),
             ).fetchone()
@@ -21493,7 +21564,8 @@ class MusicDatabase:
             conn = self._get_connection()
             row = conn.execute(
                 """SELECT id, track_download_id, task_key, track_title, track_artist,
-                          quality_profile_id, outcome, chosen_json, alternatives_json, created_at
+                          quality_profile_id, outcome, chosen_json, alternatives_json,
+                          search_mode, searched_at, policy_run_id, created_at
                    FROM download_decisions WHERE track_download_id = ? ORDER BY id DESC LIMIT 1""",
                 (int(track_download_id),),
             ).fetchone()
@@ -21525,6 +21597,163 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    # ---- failed-download blocklist -------------------------------------------
+    # core/downloads/failed_blocklist.py owns the fingerprinting and the
+    # fail-open policy; these methods are the SQL surface it calls.
+
+    def record_failed_download(self, fingerprint: str, service: str, artist: str,
+                               title: str, size_bytes: int, reason: str,
+                               expires_at: str, max_entries: int) -> bool:
+        """Block a fingerprint until expires_at. Re-recording refreshes the
+        expiry; oldest rows past max_entries are dropped."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO failed_download_blocklist "
+                "(fingerprint, service, artist, title, size_bytes, reason, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(fingerprint) DO UPDATE SET "
+                "expires_at = excluded.expires_at, reason = excluded.reason, "
+                "created_at = CURRENT_TIMESTAMP",
+                (fingerprint, service, artist, title, size_bytes, reason, expires_at))
+            cursor.execute(
+                "DELETE FROM failed_download_blocklist WHERE id NOT IN "
+                "(SELECT id FROM failed_download_blocklist "
+                "ORDER BY created_at DESC, id DESC LIMIT ?)",
+                (max_entries,))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("Error recording failed download blocklist entry: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def is_download_blocked(self, fingerprint: str, now: str) -> bool:
+        """Is this fingerprint currently blocked (unexpired)?"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                "SELECT 1 FROM failed_download_blocklist "
+                "WHERE fingerprint = ? AND expires_at > ?",
+                (fingerprint, now)).fetchone()
+            return row is not None
+        except Exception as e:
+            logger.debug("Error checking failed download blocklist: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def list_failed_downloads(self, limit: int = 200) -> list:
+        """Newest blocklist entries first, for the API."""
+        try:
+            limit = max(1, min(int(limit or 200), 1000))
+        except (TypeError, ValueError):
+            limit = 200
+        conn = None
+        try:
+            conn = self._get_connection()
+            rows = conn.execute(
+                "SELECT fingerprint, service, artist, title, size_bytes, "
+                "reason, created_at, expires_at FROM failed_download_blocklist "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                (limit,)).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.debug("Error listing failed download blocklist: %s", e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def remove_failed_download(self, fingerprint: str) -> bool:
+        """Unblock one fingerprint. True when a row was actually removed."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.execute(
+                "DELETE FROM failed_download_blocklist WHERE fingerprint = ?",
+                (str(fingerprint or ''),))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug("Error removing failed download blocklist entry: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def clear_expired_failed_downloads(self, now: str) -> int:
+        """Delete expired blocklist rows. Returns the number removed."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.execute(
+                "DELETE FROM failed_download_blocklist WHERE expires_at <= ?",
+                (now,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.debug("Error clearing expired failed download blocklist: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
+    # ---- discover page layout ------------------------------------------------
+    # core/discovery/layout.py owns section ids, zones and validation; these
+    # methods are the per-profile persistence behind GET/PUT /api/discover/layout.
+
+    def get_discovery_layout(self, profile_id) -> list:
+        """Saved layout rows for a profile. Empty when never customized —
+        the API merges over the defaults then."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            rows = conn.execute(
+                "SELECT section_id, zone, position, enabled FROM discovery_layout "
+                "WHERE profile_id = ? ORDER BY position, section_id",
+                (int(profile_id),)).fetchall()
+            return [{'section_id': r[0], 'zone': r[1], 'position': r[2],
+                     'enabled': bool(r[3])} for r in rows]
+        except Exception as e:
+            logger.debug("Error reading discovery layout for %s: %s", profile_id, e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def save_discovery_layout(self, profile_id, entries) -> bool:
+        """Replace the profile's layout. ``entries`` are sanitized
+        ``{'id', 'zone', 'position', 'enabled'}`` dicts."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_layout WHERE profile_id = ?",
+                           (int(profile_id),))
+            for entry in entries or []:
+                cursor.execute(
+                    "INSERT INTO discovery_layout "
+                    "(profile_id, section_id, zone, position, enabled) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (int(profile_id), str(entry.get('id') or ''),
+                     str(entry.get('zone') or ''), int(entry.get('position') or 0),
+                     1 if entry.get('enabled') else 0))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("Error saving discovery layout for %s: %s", profile_id, e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
     @staticmethod
     def _download_decision_row(row) -> dict:
         def _load(text, fallback):
@@ -21547,6 +21776,10 @@ class MusicDatabase:
             'accepted_total': rest.get('accepted_total', 0),
             'rejected_total': rest.get('rejected_total', 0),
             'rejected_counts': rest.get('rejected_counts', {}),
+            'policy': rest.get('policy'),
+            'search_mode': row['search_mode'] or 'automatic',
+            'searched_at': row['searched_at'] or '',
+            'policy_run_id': row['policy_run_id'] or '',
             'created_at': row['created_at'],
         }
 
