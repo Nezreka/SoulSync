@@ -43,3 +43,16 @@ def test_audio_quality_supports_direct_and_attribute_slskd_shapes():
         48_000,
         16,
     )
+
+
+def test_extra_extensions_widen_one_search_without_touching_music():
+    client = SoulseekClient.__new__(SoulseekClient)
+    response = [{'username': 'peer', 'files': [
+        {'filename': 'Books\\Author\\Book.m4b', 'size': 300_000_000},
+    ]}]
+
+    music_tracks, _ = client._process_search_responses(response)
+    book_tracks, _ = client._process_search_responses(response, extra_extensions=['.m4b'])
+
+    assert music_tracks == []
+    assert [t.filename for t in book_tracks] == ['Books\\Author\\Book.m4b']

@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 
 import { DISCOVER_LAYOUT, type DiscoverSectionId } from './-discover.layout';
@@ -19,10 +18,7 @@ import { DISCOVER_LAYOUT, type DiscoverSectionId } from './-discover.layout';
  * nothing to explain it.
  */
 
-const PAGE = readFileSync(
-  join(__dirname, '-ui', 'discover-page.tsx'),
-  'utf8',
-);
+const PAGE = readFileSync(join(__dirname, '-ui', 'discover-page.tsx'), 'utf8');
 
 /** Every id passed to a renderZoneSections([...]) call. */
 function zoneRenderedIds(): Set<string> {

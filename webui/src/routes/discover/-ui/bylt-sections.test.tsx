@@ -1,5 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { server } from '@/test/msw';
 
 import type { ByltSection } from '../-discover.bylt';
 
@@ -276,4 +279,37 @@ it('keeps long shelves compact until explicitly expanded', () => {
   expect(screen.getAllByRole('listitem')).toHaveLength(10);
   fireEvent.click(screen.getByRole('button', { name: 'Show less' }));
   expect(screen.getAllByRole('listitem')).toHaveLength(4);
+});
+
+// ── the ⋯ feedback menu (plan 5c) ─────────────────────────────────────────
+
+function captureFeedback(): Record<string, unknown>[] {
+  const posted: Record<string, unknown>[] = [];
+  window.showToast = vi.fn() as never;
+  server.use(
+    http.post('*/api/discover/feedback', async ({ request }) => {
+      posted.push((await request.json()) as Record<string, unknown>);
+      return HttpResponse.json({ success: true, id: 1 });
+    }),
+  );
+  return posted;
+}
+
+describe('the ⋯ on a shelf row', () => {
+  it("answers about the TRACK, with the shelf's explanation, and drops the row on not now", async () => {
+    const posted = captureFeedback();
+    const explanation = { kind: 'listened', seeds: [{ name: 'Aphex Twin' }], confidence: 0.9 };
+    render(<ByltSections sections={[section({ explanation })]} />);
+    fireEvent.click(screen.getByLabelText('Tell discovery about Xtal'));
+    fireEvent.click(screen.getByText('Not now'));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toEqual({
+      action: 'not_now',
+      entity: { type: 'track', name: 'Xtal', artist_name: 'Aphex Twin' },
+      explanation,
+    });
+    await waitFor(() => expect(screen.queryByText('Xtal')).toBeNull());
+    expect(screen.getByText('Tha')).toBeTruthy();
+    server.resetHandlers();
+  });
 });

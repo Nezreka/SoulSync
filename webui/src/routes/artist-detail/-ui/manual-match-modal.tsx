@@ -194,7 +194,7 @@ export function ManualMatchModal({
                   </div>
                 </div>
                 <button
-                  className="enhanced-meta-save-btn"
+                  className="enhanced-meta-save-btn lib-btn primary"
                   type="button"
                   onClick={() => void applyMatch(result)}
                 >

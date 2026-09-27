@@ -106,15 +106,20 @@ def test_approve_show_follows_watchlist(client):
 
 
 def test_approve_surfaces_resolve_failure(client, monkeypatch):
-    """If the status flip fails after the add, the API must say so — the old
-    code returned success and the row kept showing Approve."""
+    """The request is claimed (pending -> approved) BEFORE the title is added,
+    so a deny can't land mid-approve. If the claim fails the API says so; if
+    the add fails the claim is handed back and the row is pending again."""
     c, db = client
     rid = _file_request(c, 2)
-    monkeypatch.setattr(type(db), "resolve_video_request",
-                        lambda self, *a, **k: False)
+    real_claim = type(db).claim_video_requests
+    monkeypatch.setattr(type(db), "claim_video_requests", lambda self, *a, **k: [])
     r = c.post(f"/api/video/requests/{rid}/approve")
-    assert r.status_code == 500
-    assert not r.get_json()["success"]
+    assert r.status_code == 409 and not r.get_json()["success"]
+    monkeypatch.setattr(type(db), "claim_video_requests", real_claim)
+    monkeypatch.setattr(type(db), "add_movie_to_wishlist", lambda self, *a, **k: False)
+    r = c.post(f"/api/video/requests/{rid}/approve")
+    assert r.status_code == 500 and not r.get_json()["success"]
+    assert db.get_video_request(rid)["status"] == "pending"
 
 
 def test_approve_admin_only(client):

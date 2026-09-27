@@ -64,7 +64,7 @@ describe('the toast', () => {
 
 describe('the request', () => {
   it('DELETEs the artist endpoint and returns the payload', async () => {
-    const fetchSpy = vi.fn(
+    const fetchSpy = vi.fn<typeof fetch>(
       async () => new Response(JSON.stringify({ success: true, albums_deleted: 3 })),
     );
     vi.stubGlobal('fetch', fetchSpy);
@@ -77,7 +77,9 @@ describe('the request', () => {
   });
 
   it('encodes an id that would otherwise break the path', async () => {
-    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ success: true })));
+    const fetchSpy = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ success: true })),
+    );
     vi.stubGlobal('fetch', fetchSpy);
 
     await deleteArtistRequest('a/b');

@@ -2,14 +2,16 @@ import { useMemo, useState } from 'react';
 
 import type { ParsedWishlistTrack, WishlistArtistGroup } from '../-wishlist.types';
 
+import { openWishlistInspector } from '../../../features/downloads/inspector-modal';
+
 /**
  * The dense LIST view — the nebula's operational twin (Boulder: "alternative
  * ways to display the wishlist? no functional change").
  *
  * Display-only by contract: every action here is one the nebula already has,
  * invoked through the SAME seams — remove via the page's mutations,
- * manual search via window._searchWishlistTrackManually (the orb fan's
- * button, wishlist-orb.tsx:238), artist navigation via
+ * manual search via the candidate inspector (the orb fan's button does the
+ * same), artist navigation via
  * window._navigateToArtistFromWishlist. Sorting is a local lens over the
  * groups the page already filtered; it fetches nothing and mutates nothing.
  */
@@ -84,7 +86,14 @@ function TrackRow({
           type="button"
           className="wl-list-btn"
           title="Search manually"
-          onClick={() => window._searchWishlistTrackManually?.(track.artist, track.track)}
+          onClick={() =>
+            openWishlistInspector({
+              id: track.id,
+              name: track.track,
+              artist: track.artist,
+              album: track.album,
+            })
+          }
         >
           🔍
         </button>

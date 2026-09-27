@@ -429,6 +429,7 @@ describe('hero elements the vanilla globals reach for by id', () => {
       'library-artist-watchlist-btn',
       'discog-download-wrap',
       'library-artist-enhance-btn',
+      'library-artist-report-btn',
     ]);
   });
 

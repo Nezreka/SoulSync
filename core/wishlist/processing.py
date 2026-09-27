@@ -933,8 +933,25 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
 
                 # Check if wishlist has tracks across all profiles
                 database = runtime.get_profiles_database()
+                # a profile without download rights keeps a wishlist of
+                # requests: the scheduler only downloads the rows an admin
+                # approved (it used to grab every profile's whole list)
+                from core.permissions import profile_can_download
                 all_profiles = database.get_all_profiles()
-                count = sum(wishlist_service.get_wishlist_count(profile_id=p['id']) for p in all_profiles)
+                approved_only = {p['id']: not profile_can_download(p) for p in all_profiles}
+
+                def _count(p):
+                    if approved_only[p['id']]:
+                        return wishlist_service.get_wishlist_count(profile_id=p['id'], approved_only=True)
+                    return wishlist_service.get_wishlist_count(profile_id=p['id'])
+
+                def _tracks(p):
+                    if approved_only[p['id']]:
+                        return wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id'],
+                                                                                 approved_only=True)
+                    return wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id'])
+
+                count = sum(_count(p) for p in all_profiles)
                 logger.info(f"[Auto-Wishlist] Wishlist count check: {count} tracks found across {len(all_profiles)} profiles")
                 runtime.update_automation_progress(automation_id, progress=10, phase='Checking wishlist',
                                                    log_line=f'{count} tracks across {len(all_profiles)} profiles', log_type='info')
@@ -984,7 +1001,7 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                 # Get wishlist tracks for processing - combine all profiles
                 raw_wishlist_tracks = []
                 for profile in all_profiles:
-                    raw_wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=profile['id']))
+                    raw_wishlist_tracks.extend(_tracks(profile))
                 if not raw_wishlist_tracks:
                     logger.warning("No tracks returned from wishlist service.")
                     return

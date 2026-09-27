@@ -67,6 +67,14 @@ export const librarySearchSchema = z.object({
     .preprocess((v) => searchString(v) ?? '', z.string())
     .default('')
     .catch(''),
+  /**
+   * 'upgradable' keeps artists with a track the quality jobs say could be
+   * better; '' is everyone and is not sent.
+   */
+  quality: z
+    .preprocess((v) => (searchString(v) === 'upgradable' ? 'upgradable' : ''), z.string())
+    .default('')
+    .catch(''),
 });
 
 export type LibrarySearch = z.infer<typeof librarySearchSchema>;
@@ -83,6 +91,8 @@ export interface LibraryArtist {
   image_url?: string | null;
   track_count?: number;
   is_watched?: boolean;
+  /** Tracks with a pending quality finding (they could be better). */
+  upgradable_count?: number;
   /** Provider ids — each present one adds a badge, in this declaration order. */
   spotify_artist_id?: string | null;
   musicbrainz_id?: string | null;
@@ -112,6 +122,8 @@ export interface LibraryArtistsResponse {
   error?: string;
   artists?: LibraryArtist[];
   pagination?: LibraryPagination;
+  /** Every track in this library that could be better, whatever the filters. */
+  upgradable_total?: number;
 }
 
 /** A resolved badge, ready to render. `url` null means it is not a link. */

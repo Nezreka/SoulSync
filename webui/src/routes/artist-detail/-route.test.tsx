@@ -189,7 +189,13 @@ describe('artist-detail route', () => {
             },
           };
         } else if (url.includes('/api/album/1/tracks')) {
-          body = { success: true, tracks: [{ id: 'sp-1', name: 'Xtal' }, { id: 'sp-2', name: 'Tha' }] };
+          body = {
+            success: true,
+            tracks: [
+              { id: 'sp-1', name: 'Xtal' },
+              { id: 'sp-2', name: 'Tha' },
+            ],
+          };
         } else if (url.includes('/api/library/check-tracks')) {
           body = {
             success: true,

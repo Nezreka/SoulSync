@@ -52,15 +52,20 @@ describe('the release card play button', () => {
     // A leftover translate(-50%, -50%) would drag the button back over the
     // middle even with the anchor moved - and the touch-device block is the
     // easy one to miss, because it is the state that is always visible.
-    const hover = rule('.artist-detail-page .release-card.album-card:hover .release-card-play-btn,');
+    const hover = rule(
+      '.artist-detail-page .release-card.album-card:hover .release-card-play-btn,',
+    );
     // Find the touch block by scanning every '@media (hover: none)' for the one
     // whose body actually mentions this button. Reaching for indexOf/lastIndexOf
     // lands on unrelated blocks - an earlier version of this test did exactly
     // that and asserted against CSS for a completely different component, so it
     // passed while the button was centred.
     const blocks: string[] = [];
-    for (let i = CSS.indexOf('@media (hover: none)'); i !== -1;
-         i = CSS.indexOf('@media (hover: none)', i + 1)) {
+    for (
+      let i = CSS.indexOf('@media (hover: none)');
+      i !== -1;
+      i = CSS.indexOf('@media (hover: none)', i + 1)
+    ) {
       blocks.push(CSS.slice(i, CSS.indexOf('\n}', i)));
     }
     const touch = blocks.filter((b) => b.includes('.release-card-play-btn'));

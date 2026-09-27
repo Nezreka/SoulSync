@@ -98,8 +98,9 @@ describe('the poster', () => {
     // poster_url is only whatever the grab caller happened to pass, and
     // wishlist-driven grabs routinely pass nothing. a library row can always
     // resolve its own art.
-    expect(art({ media_source: 'library', media_id: '2948', kind: 'show' }))
-      .toBe('/api/video/poster/show/2948?w=120');
+    expect(art({ media_source: 'library', media_id: '2948', kind: 'show' })).toBe(
+      '/api/video/poster/show/2948?w=120',
+    );
   });
 
   it('has nothing to offer for a tmdb row that carried no poster', () => {
@@ -119,7 +120,16 @@ describe('the card', () => {
   const ROW = JS.slice(JS.indexOf('function _dlCard'), JS.indexOf('function loadActiveDownloads'));
   // the real function, so these assert on rendered html rather than on source
   // text. every dependency it closes over has to come with it.
-  const deps = ['formatBytes', 'formatSpeed', '_esc', '_dlActive', '_dlStatus', '_dlPct', '_dlSub', '_dlArt']
+  const deps = [
+    'formatBytes',
+    'formatSpeed',
+    '_esc',
+    '_dlActive',
+    '_dlStatus',
+    '_dlPct',
+    '_dlSub',
+    '_dlArt',
+  ]
     .map((n) => extractFunction(n, JS))
     .join('\n');
   const card = fn('_dlCard', `${deps}\n`) as (d: Record<string, unknown>) => string;
@@ -132,8 +142,11 @@ describe('the card', () => {
   });
 
   it('escapes the title and the poster url', () => {
-    const html = card({ title: '<img onerror=alert(1)>', status: 'queued',
-                        poster_url: '"><script>x</script>' });
+    const html = card({
+      title: '<img onerror=alert(1)>',
+      status: 'queued',
+      poster_url: '"><script>x</script>',
+    });
     expect(html).not.toContain('<img onerror=alert(1)>');
     expect(html).not.toContain('<script>');
     expect(html).toContain('&lt;img');
@@ -151,8 +164,12 @@ describe('the card', () => {
     // string is in the source proves nothing: wrapping it in `art ? '' : ...`
     // keeps the string and breaks the behaviour, which is exactly what a
     // negative-check caught here.
-    const html = card({ title: 'Severance', status: 'downloading', progress: 40,
-                        poster_url: '/api/video/poster/show/9' });
+    const html = card({
+      title: 'Severance',
+      status: 'downloading',
+      progress: 40,
+      poster_url: '/api/video/poster/show/9',
+    });
     expect(html).toContain('vdn-letter');
     expect(html).toContain('<img');
   });
@@ -242,7 +259,9 @@ describe('the markup and styles exist', () => {
   it.each(['.vdn-card', '.vdn-art', '.vdn-name', '.vdn-bar-fill', '.vdn-pill', '.vdn-grid'])(
     '%s is styled',
     (cls) => {
-      expect(CSS.includes(`${cls} `) || CSS.includes(`${cls},`) || CSS.includes(`${cls}--`)).toBe(true);
+      expect(CSS.includes(`${cls} `) || CSS.includes(`${cls},`) || CSS.includes(`${cls}--`)).toBe(
+        true,
+      );
     },
   );
 
@@ -254,11 +273,14 @@ describe('the markup and styles exist', () => {
   });
 });
 
-describe('it does not squat in another component\'s namespace', () => {
+describe("it does not squat in another component's namespace", () => {
   it('uses vdn-, because vdl- belongs to the download modal', () => {
     // video-download-view.js owns ~170 vdl- classes. sharing the prefix is how
     // two unrelated components end up sharing a rule by accident.
-    const mine = JS.slice(JS.indexOf('function _dlArt'), JS.indexOf('function scheduleDownloadPoll'));
+    const mine = JS.slice(
+      JS.indexOf('function _dlArt'),
+      JS.indexOf('function scheduleDownloadPoll'),
+    );
     expect(mine).not.toMatch(/vdl-/);
     const at = HTML.indexOf('data-video-dl-section');
     expect(HTML.slice(at - 900, at + 500)).not.toMatch(/class="vdl-/);

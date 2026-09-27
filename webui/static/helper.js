@@ -3460,29 +3460,23 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.4.6': [
-        { date: 'September 2026 · 3.4.6' },
-        { title: 'Basic search rebuilt', desc: 'One search field with the source inside it, quiet rows with a quality badge and one Download button. Download asks how the file comes in: as-is, enriched, or tag it yourself. Every download is a real batch on the Downloads page.', page: 'search' },
-        { title: 'Tag it yourself', desc: 'For bootlegs, live sets and anything no service knows. The release is tagged exactly as you type it and locked, so rescans and maintenance jobs leave it alone. Unlock it from the album menu.', page: 'search' },
-        { title: 'Search page rebuilt', desc: 'Catalog, videos and files tabs, the source as a pill in the field, pasted links and MBIDs go straight to lookup, filter pills with counts, a top result, and library artists first.', page: 'search' },
-        { title: 'Your own listening history', desc: 'Connect your own ListenBrainz or type your Last.fm username in My Account, and your stats, recently played, daily mixes, stations and recommendations follow your listening. Everyone else keeps the shared history (#1293).', page: 'stats' },
-        { title: 'My Account is one modal', desc: 'My Accounts and My Settings merged: one person icon, whose listening your stats read, your media server login, then Spotify, Tidal, ListenBrainz and Last.fm.' },
-        { title: 'Wishlist keeps staged tracks', desc: 'A track is no longer dropped from the wishlist before its album publishes, and an interrupted album is published on startup instead of vanishing. Every removal writes an audit row (@mandos21, #1288).', page: 'wishlist' },
-        { title: 'Rips and compilations claim their files', desc: 'Untagged torrent rips and tagged compilations now match their staged files instead of finishing with nothing claimed.', page: 'active-downloads' },
-        { title: 'Music videos get their own batches', desc: 'Each video is its own batch with a real phase and history row, matching needs artist and title to agree, and cancel stops the download and removes partial files.', page: 'active-downloads' },
-        { title: 'No more freezes during sync', desc: 'A playlist sync or a slow Amazon lookup no longer freezes search, downloads and chat while it runs.', page: 'sync' },
-        { title: 'Tidal and Deezer enrichment work again', desc: 'Tidal retired its old search path and Deezer\'s artist filter returns nothing, so both marked everything not found. Both are fixed and Tidal\'s not found rows are requeued (#1290, #1295).', page: 'settings' },
-        { title: 'Amazon needs a self-hosted proxy', desc: 'The public t2tunes proxy is gone. Amazon enrichment stays paused until you point it at your own instance, and Amazon is no longer a download source (#1300).', page: 'settings' },
-        { title: 'Your Library tab redesigned', desc: 'Source dots on the artist, bigger album art, a missing-tracks pill, one action row with the rest in a menu, and a match meter per track instead of nine chips.', page: 'library' },
-        { title: 'Delete an artist', desc: 'Admins can remove a library artist from its detail page. Database only, no files are touched.', page: 'library' },
-        { title: 'Same-named releases stay separate', desc: 'Releases that differ only by disambiguation no longer merge into one album. The disambiguation goes on the folder, with a new $disambiguation variable (#1299).', page: 'library' },
-        { title: 'Compilations file under Various Artists', desc: 'A soundtrack with one track by an artist no longer lands on that artist. The multi-artist compilation toggle is now in Settings.', page: 'settings' },
-        { title: 'Genre cleanup sticks', desc: 'Genres fixed by the genre jobs are locked, so a media server scan no longer puts the old ones back.', page: 'tools' },
-        { title: 'Import and matching fixes', desc: 'The auto-import scan reads the folder you configured, a shared "the" no longer makes two songs the same (#1292), Navidrome paths resolve for the duplicate cleaner (#1298), and new singles show within 12 hours.', page: 'import' },
-        { title: 'Redesigned dashboard', desc: 'A hero with one scan button, worker orbs on their own stage, and a system rail with playlist sync health, up next, watchlist and wishlist tiles.', page: 'dashboard' },
-        { title: 'Active sources panel', desc: 'The sidebar panel shows your server and download chain as saved, with status and one button into Settings. It no longer switches the media server mid-scan (#1301).' },
-        { title: 'Chat on phones and laptops', desc: 'The chat page fits every width again, playing videos survive new messages, and link previews can no longer be steered into your LAN.', page: 'chat' },
-        { title: 'Earlier versions', desc: '3.4.5 added the login-gate security fix, stricter MusicBrainz matching, MP3 quality upgrades, ListenBrainz and Maloja listens import and a Soulseek overhaul. 3.4.4 added a library and server account per profile.' },
+    '3.4.7': [
+        { date: 'September 2026 · 3.4.7' },
+        { title: 'Profiles rebuilt', desc: 'A "who\'s here?" picker, a pin pad with a lockout countdown, a quick-switch menu on your avatar, and add or edit with adult, teen, kids and guest presets. A browser with no profile picked no longer gets admin rights.' },
+        { title: 'Kids limits', desc: 'Hide explicit music and cap movie and TV ratings per profile. Anything over the cap or unrated is left out of lists and refused on play.' },
+        { title: 'Invites, devices and audit log', desc: 'One-use invite links with an access preset, turn a profile off without deleting it, sign one browser out from the devices list, sign out everywhere on a new password, and an admin audit log.' },
+        { title: 'Music requests', desc: 'Profiles that ask first send requests instead of downloading. Admins approve or decline on the new Requests page, and only approved rows download.' },
+        { title: 'Video requests', desc: 'Grouped by title, pick seasons for shows, progress like "3 of 10 episodes", a quality profile per request, and request quotas.' },
+        { title: 'Issues rebuilt', desc: 'A thread per issue, followers instead of duplicates, the fix action as the main button, bulk triage for admins, and "report a problem" from the player.', page: 'issues' },
+        { title: 'Help & Docs rebuilt', desc: 'Rewritten against the current app with search (/ or Ctrl+K), a table of contents, deep links and a mobile layout (#1310).', page: 'help' },
+        { title: 'Appears on', desc: 'Featured artists and collab albums now show on every credited artist\'s page, not just the first one.', page: 'library' },
+        { title: 'Collab album tags', desc: 'Collab albums are tagged with every album artist where Navidrome reads it, and fresh installs write the multi-value artists tag by default.', page: 'settings' },
+        { title: 'Labels and genres as multi-values', desc: 'A label list like "Columbia;BMG" is written as separate values, and genres follow the write multi-value setting (#1305).', page: 'settings' },
+        { title: 'Non-latin titles match correctly', desc: 'Japanese, Hebrew and Cyrillic titles no longer fold to nothing and match each other at 100%, so track number repair stops renumbering them (#1306).', page: 'tools' },
+        { title: 'Watchlist fixes', desc: 'Watched artists read as watched on their page (#1308), and scans re-check recent days so late-listed releases are not missed (#1309).' },
+        { title: 'ListenBrainz catches up', desc: 'History imported into ListenBrainz after your first sync is picked up now (#1311).', page: 'stats' },
+        { title: 'Search and download fixes', desc: 'Files results scroll instead of clipping (#1313), Deezer retries a failed login, and video imports survive permission errors on network shares.', page: 'search' },
+        { title: 'Earlier versions', desc: '3.4.6 rebuilt search, added per-profile listening history, a redesigned dashboard and a safer wishlist. 3.4.5 added the login-gate security fix and stricter MusicBrainz matching.' },
     ],
 };
 
@@ -3512,32 +3506,30 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.4.6: search rebuilt, your own listening, safer wishlist',
-        description: 'Basic search and the search page rebuilt, per-profile listening history from ListenBrainz or Last.fm, a redesigned dashboard and Your Library tab, a wishlist that keeps staged tracks, and fixes for dead Tidal, Deezer and Amazon endpoints.',
+        title: '3.4.7: profiles, requests and a new help page',
+        description: 'Profiles, requests and issues rebuilt with kids limits and invites, a new Help & Docs page, every credited artist on their own page, and tagging and matching fixes.',
         features: [
-            'Basic search: one field with the source inside it and one Download button that asks how the file comes in: as-is, enriched (one metadata provider end to end), or tag it yourself for bootlegs and live sets, tagged as typed and locked. Every download is a real batch on the Downloads page.',
-            'Search page: catalog, videos and files tabs, pasted links and MBIDs go straight to lookup, filter pills with counts, a top result, library artists first, and label tiles. Two-character names search remote sources again (#1291).',
-            'Per-profile listening history (#1293): a profile with its own ListenBrainz or Last.fm username gets its own stats, recently played, daily mixes, stations and recommendations. Everyone else keeps the shared history. My Accounts and My Settings are one modal now.',
-            'Wishlist (@mandos21, #1288): a staged track stays wishlisted until its album publishes, interrupted albums publish on startup, and every removal writes an audit row.',
-            'Downloads: torrent rips and compilations claim their staged files, and music videos get their own batches, strict matching and real cancel.',
-            'A playlist sync or a slow Amazon lookup no longer freezes the rest of the app.',
-            'Tidal (#1290) and Deezer (#1295) enrichment work again after API changes. The public Amazon proxy is gone, so Amazon now needs a self-hosted instance (#1300).',
-            'Library: Your Library tab redesigned, delete an artist from its page, same-named releases stay separate (#1299), compilations file under Various Artists, genre cleanup survives server scans, reorganize writes album artist from the source, and the import scan reads the folder you configured.',
-            'Dashboard redesigned with a hero, an orb stage and a system rail. The sidebar active sources panel shows status and hands changes to Settings (#1301).',
-            'Chat fits phones and laptops, playing videos survive new messages, and link previews can no longer be steered into your LAN.',
+            'Profiles: a browser with no profile picked no longer gets admin rights, pins have a real brute-force limit, and a new picker, pin pad and quick-switch menu. Presets for adult, teen, kids and guest.',
+            'Kids limits hide explicit music and cap movie and TV ratings per profile. Invite links, turn a profile off, per-device sign out, sign out everywhere and an admin audit log.',
+            'Music requests: profiles that ask first send requests, admins approve on the new Requests page. Video requests pick seasons, show progress and respect quotas.',
+            'Issues: threads, followers, bulk triage and one fix button per category, shared by music and video.',
+            'Help & Docs rebuilt against the current app, with search, a table of contents, deep links and a mobile layout (#1310).',
+            'Featured artists and collab albums show under Appears on for every credited artist, and collab albums are tagged with every album artist.',
+            'Labels and genres are written as real multi-values (#1305). Non-latin titles no longer match each other at 100% (#1306).',
+            'Fixes: watchlist state on artist pages and late-listed releases (#1308, #1309), ListenBrainz history imported later (#1311), files search scrolling (#1313), Deezer login retry, and video imports on network shares.',
         ],
-        usage_note: 'Connect your own ListenBrainz or Last.fm in My Account to make your stats and mixes yours. Amazon enrichment stays paused until amazon base URL points at a self-hosted instance.',
+        usage_note: 'Set up profiles, kids limits and invites from Manage Profiles on the sidebar avatar.',
     },
     {
-        title: 'Earlier in 3.4.5',
-        description: 'A login-gate security fix, stricter MusicBrainz matching, MP3 quality upgrades, ListenBrainz and Maloja listens import, and a Soulseek selection overhaul.',
+        title: 'Earlier in 3.4.6',
+        description: 'Search rebuilt, per-profile listening history from ListenBrainz or Last.fm, a redesigned dashboard and Your Library tab, and a wishlist that keeps staged tracks.',
         features: [],
     },
 ];
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.4.6';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.4.7';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns

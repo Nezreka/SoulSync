@@ -30,6 +30,9 @@ from core.video.download_pipeline import basename_of
 from core.video.library_paths import quality_full
 from core.video.quality_eval import resolution_rank
 from core.video.release_parse import parse_release
+from utils.logging_config import get_logger
+
+logger = get_logger("video.importer")
 
 VIDEO_EXTS = frozenset({
     ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".ts", ".wmv",
@@ -416,7 +419,12 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                 "quality_label": plan.get("quality_label") or dl.get("quality_label")}
 
     dest = plan["dest"]
-    move_mode = settings.get("transfer_mode") == "move"
+    # a torrent is never moved, whatever the setting: the client is still
+    # seeding that file, and taking it away broke the torrent (missing files,
+    # re-download) and left the seeding cleanup deleting nothing. radarr does
+    # the same: torrents are copied while they seed.
+    is_torrent = str(dl.get("source") or "").lower() == "torrent"
+    move_mode = settings.get("transfer_mode") == "move" and not is_torrent
     try:
         fs.makedirs(dest["dir"])
         replace_path = plan.get("replace_path")
@@ -444,7 +452,7 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                 pass
         # Copy mode reclaims the download copy UNLESS it's a torrent (keep seeding);
         # move mode already relocated it.
-        if not move_mode and str(dl.get("source") or "").lower() != "torrent":
+        if not move_mode and not is_torrent:
             try:
                 fs.remove(src_path)
             except Exception:   # noqa: BLE001
@@ -482,7 +490,16 @@ def atomic_verified_copy(src: str, dst: str) -> None:
     tmp = os.path.join(os.path.dirname(d) or ".",
                        os.path.basename(d) + ".tmp." + uuid.uuid4().hex[:8])
     try:
-        shutil.copy2(src, tmp)
+        # the data first, then the metadata as a courtesy. copy2 did both, and
+        # on shares that refuse chmod/utime/xattrs (unraid shfs, nfs with squash,
+        # smb) the metadata step raised "[Errno 13] Permission denied" AFTER the
+        # data was safely copied, failing an import that had worked (a user's report, sept 25 2026)
+        shutil.copyfile(src, tmp)
+        try:
+            shutil.copystat(src, tmp)
+        except OSError as e:
+            logger.info("video import: kept the copy of %s without its timestamps/permissions (%s)",
+                        os.path.basename(d), e)
         src_size = os.path.getsize(src)
         tmp_size = os.path.getsize(tmp)
         if src_size != tmp_size:
@@ -513,7 +530,14 @@ def atomic_verified_move(src: str, dst: str) -> None:
         if getattr(e, "errno", None) != errno.EXDEV:
             raise            # real error (perms/space/missing) — not cross-device
     atomic_verified_copy(src, dst)
-    os.remove(str(src))
+    # the library copy is verified and in place. a download folder we may not
+    # delete from (slskd owns its files) leaves the old copy behind; that is
+    # not a failed import
+    try:
+        os.remove(str(src))
+    except OSError as e:
+        logger.warning("video import: placed %s but couldn't remove the download copy (%s)",
+                       os.path.basename(str(dst)), e)
 
 
 class _RealFS:

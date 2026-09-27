@@ -159,10 +159,7 @@ export function rememberRoutedTab(id: string): void {
   try {
     const current = readRememberedRoutedTabs();
     if (current.includes(id as SyncTabId)) return;
-    window.localStorage.setItem(
-      OPENED_TABS_STORAGE_KEY,
-      JSON.stringify([...current, id]),
-    );
+    window.localStorage.setItem(OPENED_TABS_STORAGE_KEY, JSON.stringify([...current, id]));
   } catch {
     // storage unavailable - the chip still lives for this session
   }

@@ -23,6 +23,7 @@ from core.audiobook_soulseek import (
     is_enabled,
     landing_path,
     search,
+    single_file_folder,
     status_for,
 )
 
@@ -195,6 +196,57 @@ def test_a_search_ranks_the_folders_it_finds():
     client.search = fake_search
     found = search(BOOK, client=client)
     assert found and found[0].protocol == "soulseek"
+
+
+def _lone_m4b(path=r"@@abc\Audiobooks\Andy Weir - Project Hail Mary.m4b",
+              username="peer", size=480_000_000):
+    """One file holding the whole book, as most peers share an .m4b."""
+    return SimpleNamespace(filename=path, size=size, username=username,
+                           free_upload_slots=1, queue_length=0)
+
+
+def test_a_search_asks_for_m4b_and_finds_a_book_shared_as_one_file():
+    client = MagicMock()
+    asked = {}
+
+    async def fake_search(query, **kwargs):
+        asked.update(kwargs)
+        return [_lone_m4b()], []
+
+    client.search = fake_search
+    found = search(BOOK, client=client)
+    assert ".m4b" in asked.get("extra_extensions", ())
+    assert found and found[0].soulseek["single_file"] is True
+    assert found[0].soulseek["file_count"] == 1
+
+
+def test_a_lone_file_is_judged_on_its_folder_and_its_name():
+    release = album_to_release(single_file_folder(_lone_m4b()), BOOK)
+    assert release.title == "Audiobooks - Andy Weir - Project Hail Mary"
+    assert release.audio_format == "m4b"
+
+
+def test_a_lone_file_named_like_its_folder_is_not_titled_twice():
+    lone = _lone_m4b(r"Books\Project Hail Mary [Ray Porter]\Project Hail Mary.m4b")
+    release = album_to_release(single_file_folder(lone), BOOK)
+    assert release.title == "Project Hail Mary [Ray Porter]"
+
+
+def test_lone_books_in_one_shared_folder_stay_separate_releases():
+    first = album_to_release(single_file_folder(_lone_m4b(r"Audiobooks\A.m4b")), BOOK)
+    second = album_to_release(single_file_folder(_lone_m4b(r"Audiobooks\B.m4b")), BOOK)
+    assert first.guid != second.guid
+
+
+def test_a_file_at_the_root_of_a_share_is_not_a_release():
+    assert single_file_folder(_lone_m4b("Project Hail Mary.m4b")) is None
+
+
+def test_a_lone_file_grab_lands_on_the_file_not_the_shared_folder():
+    release = album_to_release(single_file_folder(_lone_m4b()), BOOK)
+    started = grab(release, client=_download_client())
+    assert started["ok"] is True
+    assert started["folder"] == os.path.join("Audiobooks", "Andy Weir - Project Hail Mary.m4b")
 
 
 def test_an_unreachable_slskd_returns_nothing_rather_than_raising():

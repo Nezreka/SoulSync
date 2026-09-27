@@ -59,7 +59,7 @@ def test_short_copy_is_refused_and_never_reaches_the_final_name(tmp_path, monkey
         with open(d, "wb") as f:
             f.write(b"m" * 1_000)             # silently short
 
-    monkeypatch.setattr(imp.shutil, "copy2", short_copy2)
+    monkeypatch.setattr(imp.shutil, "copyfile", short_copy2)
     with pytest.raises(OSError, match="short copy"):
         atomic_verified_copy(str(src), str(dst))
     assert not dst.exists()                   # nothing at the final name
@@ -76,7 +76,7 @@ def test_interrupted_copy_leaves_nothing_at_the_final_name(tmp_path, monkeypatch
             f.write(b"partial")
         raise OSError("connection reset")
 
-    monkeypatch.setattr(imp.shutil, "copy2", exploding_copy2)
+    monkeypatch.setattr(imp.shutil, "copyfile", exploding_copy2)
     with pytest.raises(OSError, match="connection reset"):
         atomic_verified_copy(str(src), str(dst))
     assert not dst.exists()
@@ -121,7 +121,7 @@ def test_cross_device_failed_copy_keeps_the_source(tmp_path, monkeypatch):
         raise OSError("no space left on device")
 
     monkeypatch.setattr(imp.os, "replace", always_exdev)
-    monkeypatch.setattr(imp.shutil, "copy2", broken_copy2)
+    monkeypatch.setattr(imp.shutil, "copyfile", broken_copy2)
     with pytest.raises(OSError, match="no space"):
         atomic_verified_move(str(src), str(dst))
     assert src.exists()                       # source untouched
@@ -156,7 +156,7 @@ def test_real_fs_facade_routes_through_the_atomic_helpers(tmp_path, monkeypatch)
         with open(d, "wb") as f:
             f.write(b"a")
 
-    monkeypatch.setattr(imp.shutil, "copy2", short_copy2)
+    monkeypatch.setattr(imp.shutil, "copyfile", short_copy2)
     with pytest.raises(OSError, match="short copy"):
         fs.copy(str(src), str(tmp_path / "lib" / "b.mkv"))
 
@@ -168,3 +168,50 @@ def test_download_monitor_mover_is_atomic_too(tmp_path):
     assert dst.read_bytes() == b"m" * 3_000
     assert not src.exists()
     assert _no_tmp_leftovers(dst.parent)
+
+
+# ── sept 25 2026: "[Errno 13] Permission denied" on some tv imports ──────────
+
+def test_a_share_that_refuses_file_metadata_still_imports(tmp_path, monkeypatch):
+    """copy2 copied the data, then copystat (chmod/utime/xattrs) raised EACCES
+    on shares that don't allow it, and the import failed with the file already
+    copied. the data copy is the import; metadata is a courtesy."""
+    src = tmp_path / "dl" / "Show.S01E01.mkv"
+    src.parent.mkdir()
+    src.write_bytes(b"x" * 4096)
+    dst = tmp_path / "lib" / "Show - S01E01.mkv"
+    dst.parent.mkdir()
+
+    def refuse(*a, **k):
+        raise PermissionError(errno.EACCES, "Permission denied")
+    monkeypatch.setattr(imp.shutil, "copystat", refuse)
+    atomic_verified_copy(str(src), str(dst))
+    assert dst.read_bytes() == b"x" * 4096
+    assert not [p for p in dst.parent.iterdir() if ".tmp." in p.name]
+
+
+def test_a_move_whose_source_can_not_be_deleted_still_imports(tmp_path, monkeypatch):
+    """cross-device move: the verified copy landed, then deleting the slskd-
+    owned download raised EACCES and the whole import read as failed."""
+    src = tmp_path / "dl" / "Show.S01E02.mkv"
+    src.parent.mkdir()
+    src.write_bytes(b"y" * 2048)
+    dst = tmp_path / "lib" / "Show - S01E02.mkv"
+    real_replace = os.replace
+
+    def cross_device(a, b):
+        if str(a) == str(src):
+            raise OSError(errno.EXDEV, "cross-device")
+        return real_replace(a, b)
+
+    real_remove = os.remove
+
+    def locked(p):
+        if str(p) == str(src):
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return real_remove(p)
+    monkeypatch.setattr(imp.os, "replace", cross_device)
+    monkeypatch.setattr(imp.os, "remove", locked)
+    atomic_verified_move(str(src), str(dst))
+    assert dst.read_bytes() == b"y" * 2048
+    assert src.exists()          # left behind, not an error

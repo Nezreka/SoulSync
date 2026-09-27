@@ -455,17 +455,33 @@ def _build_album_track_entry(track_item: Any, album_info: Dict[str, Any], source
 _RAW_TYPE_KEYS = ('album_type', 'record_type', 'type', 'primary-type', 'collectionType')
 
 
+# Values that actually distinguish a release kind. A bare 'album' is NOT in
+# this set on purpose: it is the universal filler. SpotipyFree's formatAlbum()
+# hardcodes ``album["album_type"] = "album"`` on EVERY album (verified against
+# the published package — the old "#1064" comment claiming it emits no type
+# key was wrong), and the Discogs/Qobuz/Hydrabase/Bandcamp converters default
+# to 'album' when the provider gives no type. Treating that filler as an
+# explicit signal is exactly how a discography of singles/EPs all filed under
+# Album/ (CAL, 2026-09-24). Only a distinguishing value is trusted outright;
+# 'album' is verified against the real track count at the call site instead —
+# a genuine 7+ track album still derives to 'album', so nothing real changes.
+_EXPLICIT_TYPE_VALUES = ('single', 'ep', 'compilation', 'compile')
+
+
 def _has_explicit_type_signal(album_data: Any) -> bool:
-    """Did the SOURCE actually say what kind of release this is? SpotipyFree
-    (the no-auth Spotify fallback most installs ride) emits NO type key at
-    all — and the converters' 'album' default then poisoned every
-    discography single/EP into the Albums bucket (#1064). Absence must stay
-    distinguishable from a real 'album'."""
+    """Did the SOURCE actually say what kind of release this is?
+
+    Only a *distinguishing* type counts as a signal. A bare ``'album'``
+    does not: it is the value every filler and default produces, so it is
+    indistinguishable from "the source didn't say". The count-based
+    derivation at the call site re-verifies it — genuine albums keep their
+    type, mislabeled singles/EPs get corrected.
+    """
     if not isinstance(album_data, dict):
         album_data = getattr(album_data, '__dict__', None) or {}
     for key in _RAW_TYPE_KEYS:
         v = album_data.get(key)
-        if v is not None and str(v).strip():
+        if v is not None and str(v).strip().lower() in _EXPLICIT_TYPE_VALUES:
             return True
     return False
 

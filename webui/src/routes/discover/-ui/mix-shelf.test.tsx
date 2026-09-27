@@ -186,9 +186,14 @@ describe('the shelf', () => {
     expect(screen.getByText('Second')).toBeInTheDocument();
   });
 
-  it('vanishes when it has no mixes', () => {
-    const { container } = render(<MixShelf {...shelf({ mixes: [] })} />);
-    expect(container.querySelector('.discover-section')).toBeNull();
+  it('vanishes when it has no mixes, except Made For You', () => {
+    // Made For You holds 'Build a mix', so it stays, saying why it's empty
+    const { container, unmount } = render(<MixShelf {...shelf({ mixes: [] })} />);
+    expect(container.querySelector('.discover-section')).not.toBeNull();
+    expect(container.textContent).toContain('You can build your own now.');
+    unmount();
+    const decades = render(<MixShelf {...shelf({ id: 'year-mixes-section', mixes: [] })} />);
+    expect(decades.container.querySelector('.discover-section')).toBeNull();
   });
 
   it('renders a section header and optional actions', () => {

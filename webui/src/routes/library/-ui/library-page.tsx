@@ -124,7 +124,7 @@ export function LibraryPage() {
   }, [draft, navigate]);
 
   const query = useQuery(libraryArtistsQueryOptions(profileId, search));
-  const { artists, pagination } = useMemo(() => {
+  const { artists, pagination, upgradableTotal } = useMemo(() => {
     try {
       return readArtistsResponse(query.data);
     } catch {
@@ -132,6 +132,7 @@ export function LibraryPage() {
       // renders empty rather than taking the page down.
       return {
         artists: [],
+        upgradableTotal: 0,
         pagination: { page: 1, totalPages: 0, totalCount: 0, hasPrev: false, hasNext: false },
       };
     }
@@ -391,6 +392,20 @@ export function LibraryPage() {
               </optgroup>
             </select>
           </div>
+          {/* The quality jobs' findings, where people look: only offered when
+              there is something to show, or while it's the active filter. */}
+          {upgradableTotal > 0 || search.quality ? (
+            <button
+              type="button"
+              className={`library-upgrade-filter${search.quality ? ' active' : ''}`}
+              aria-pressed={Boolean(search.quality)}
+              title="Artists with tracks below their quality profile (from Library Maintenance)"
+              onClick={() => setSearch({ quality: search.quality ? '' : 'upgradable' })}
+            >
+              Could be better
+              <span className="library-upgrade-filter-count">{upgradableTotal}</span>
+            </button>
+          ) : null}
         </div>
 
         <div className="alphabet-selector" id="alphabet-selector">

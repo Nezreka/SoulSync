@@ -14,6 +14,16 @@ from utils.logging_config import get_logger
 
 logger = get_logger("personalized_playlists")
 
+
+def _blocklist_profile() -> int:
+    """Whose blocks apply: the request's profile, or the background override.
+    Blocks are per profile, so one profile's block never thins another's mix."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return get_current_profile_id() or 1
+    except Exception:  # noqa: BLE001 - no flask, no profile context
+        return 1
+
 class PersonalizedPlaylistsService:
     """Service for generating personalized playlists from library and discovery pool"""
 
@@ -168,7 +178,7 @@ class PersonalizedPlaylistsService:
             source = ?
             AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
             AND LOWER(artist_name) NOT IN
-                (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
+                (this profile's blocked artists, by name)
 
         When `exclude_owned=True` (default) the WHERE additionally excludes
         any discovery_pool row whose IDs already match a row in the local
@@ -228,14 +238,14 @@ class PersonalizedPlaylistsService:
                 FROM discovery_pool
                 WHERE source = ?
                   AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
-                  AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist UNION SELECT LOWER(name) FROM blocklist WHERE entity_type='artist')
+                  AND LOWER(artist_name) NOT IN (SELECT LOWER(name) FROM blocklist WHERE entity_type='artist' AND profile_id = ?)
                   {owned_clause}
                   {extra_where}
                 ORDER BY {order_by}
                 LIMIT ?
             """
 
-            params = (source,) + tuple(extra_params) + (fetch_limit,)
+            params = (source, _blocklist_profile()) + tuple(extra_params) + (fetch_limit,)
 
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
@@ -844,10 +854,10 @@ class PersonalizedPlaylistsService:
                         source
                     FROM discovery_pool
                     WHERE (artist_name LIKE ? OR track_name LIKE ?) AND source = ?
-                      AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist UNION SELECT LOWER(name) FROM blocklist WHERE entity_type='artist')
+                      AND LOWER(artist_name) NOT IN (SELECT LOWER(name) FROM blocklist WHERE entity_type='artist' AND profile_id = ?)
                     ORDER BY RANDOM()
                     LIMIT ?
-                """, (f'%{category}%', f'%{category}%', active_source, limit))
+                """, (f'%{category}%', f'%{category}%', active_source, _blocklist_profile(), limit))
 
                 rows = cursor.fetchall()
                 return [self._build_track_dict(row, active_source) for row in rows]

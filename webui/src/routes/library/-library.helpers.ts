@@ -200,6 +200,7 @@ export function trackCountLabel(count: number | undefined): string {
  */
 export function readArtistsResponse(payload: LibraryArtistsResponse | undefined): {
   artists: LibraryArtist[];
+  upgradableTotal: number;
   pagination: {
     page: number;
     totalPages: number;
@@ -212,6 +213,7 @@ export function readArtistsResponse(payload: LibraryArtistsResponse | undefined)
   const p = payload?.pagination;
   return {
     artists: payload?.artists ?? [],
+    upgradableTotal: payload?.upgradable_total ?? 0,
     pagination: {
       page: p?.page ?? 1,
       totalPages: p?.total_pages ?? 0,

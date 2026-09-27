@@ -15,10 +15,7 @@ import { describe, expect, it } from 'vitest';
  * readers out of video-wishlist.js against those snapshots.
  */
 
-const SRC = readFileSync(
-  resolve(process.cwd(), 'static/video/video-wishlist.js'),
-  'utf8',
-);
+const SRC = readFileSync(resolve(process.cwd(), 'static/video/video-wishlist.js'), 'utf8');
 
 /** Pull the two diagnostic functions out of the IIFE and make them callable. */
 function readers(): {
@@ -38,7 +35,13 @@ function readers(): {
 const SNAP = {
   chain: ['torrent', 'soulseek'],
   sources: {
-    torrent: { ran: false, reason: 'Prowlarr not configured', results: 0, accepted: 0, rejected: 0 },
+    torrent: {
+      ran: false,
+      reason: 'Prowlarr not configured',
+      results: 0,
+      accepted: 0,
+      rejected: 0,
+    },
     soulseek: {
       ran: true,
       results: 4,
@@ -54,7 +57,9 @@ describe('per-source diagnostics', () => {
     const { sourceLines } = readers();
     const lines = sourceLines({ search_snapshot: SNAP });
     expect(lines[0]).toBe('• torrent: could not search — Prowlarr not configured');
-    expect(lines[1]).toBe("• soulseek: 4 found, none accepted — Best found: SD — SD isn't in your enabled tiers");
+    expect(lines[1]).toBe(
+      "• soulseek: 4 found, none accepted — Best found: SD — SD isn't in your enabled tiers",
+    );
   });
 
   it('reports each source in the order the chain tried them', () => {
@@ -71,7 +76,10 @@ describe('per-source diagnostics', () => {
 
   it('reports usable results when a source did find something', () => {
     const { sourceLines } = readers();
-    const snap = { chain: ['torrent'], sources: { torrent: { ran: true, results: 6, accepted: 2 } } };
+    const snap = {
+      chain: ['torrent'],
+      sources: { torrent: { ran: true, results: 6, accepted: 2 } },
+    };
     expect(sourceLines({ search_snapshot: snap })).toEqual(['• torrent: 2 usable of 6']);
   });
 

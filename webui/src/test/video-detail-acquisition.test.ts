@@ -24,9 +24,9 @@ function panel(state: unknown): HTMLElement {
   // _ACQ_STATES is module state the function closes over, so it rides along too.
   const states = SRC.slice(SRC.indexOf('var _ACQ_STATES'), SRC.indexOf('function acqPanelHtml'));
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const build = new Function(
-    `${preamble}\n${states}\n${body}\nreturn acqPanelHtml;`,
-  )() as (s: unknown) => string;
+  const build = new Function(`${preamble}\n${states}\n${body}\nreturn acqPanelHtml;`)() as (
+    s: unknown,
+  ) => string;
   const host = document.createElement('div');
   host.innerHTML = build(state);
   return host;
@@ -45,7 +45,10 @@ const ZERO = { owned: 0, wanted: 0, queued: 0, downloading: 0, failed: 0, ignore
 
 describe('the acquisition panel', () => {
   it('shows a chip for every state that is actually true', () => {
-    const host = panel({ total: 4, counts: { ...ZERO, owned: 1, wanted: 1, failed: 1, ignored: 1 } });
+    const host = panel({
+      total: 4,
+      counts: { ...ZERO, owned: 1, wanted: 1, failed: 1, ignored: 1 },
+    });
     expect(chips(host)).toEqual({ Owned: '1', Wanted: '1', Failed: '1', Ignored: '1' });
   });
 
@@ -96,9 +99,12 @@ describe('the acquisition panel', () => {
   it('drops the bar once nothing is outstanding', () => {
     // A full green bar under "8 Owned" repeats the chip and nothing else. It
     // earns its place only while something is still missing.
-    expect(panel({ total: 8, counts: { ...ZERO, owned: 8 } }).querySelector('.vd-acq-bar')).toBeNull();
-    expect(panel({ total: 8, counts: { ...ZERO, owned: 7, wanted: 1 } })
-      .querySelector('.vd-acq-bar')).not.toBeNull();
+    expect(
+      panel({ total: 8, counts: { ...ZERO, owned: 8 } }).querySelector('.vd-acq-bar'),
+    ).toBeNull();
+    expect(
+      panel({ total: 8, counts: { ...ZERO, owned: 7, wanted: 1 } }).querySelector('.vd-acq-bar'),
+    ).not.toBeNull();
   });
 
   it('draws no coverage bar when there is nothing to be a share of', () => {

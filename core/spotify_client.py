@@ -470,6 +470,7 @@ class Track:
     release_date: Optional[str] = None
     album_type: Optional[str] = None
     total_tracks: Optional[int] = None
+    explicit: Optional[bool] = None
 
     @classmethod
     def from_spotify_track(cls, track_data: Dict[str, Any]) -> 'Track':
@@ -492,7 +493,8 @@ class Track:
             image_url=album_image_url,
             release_date=track_data.get('album', {}).get('release_date'),
             album_type=track_data.get('album', {}).get('album_type'),
-            total_tracks=track_data.get('album', {}).get('total_tracks')
+            total_tracks=track_data.get('album', {}).get('total_tracks'),
+            explicit=track_data.get('explicit'),
         )
 
 @dataclass

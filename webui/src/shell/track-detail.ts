@@ -11,13 +11,21 @@
  * (still classic) - reached through window at call time.
  */
 
+import type { CandidateDecision } from '../features/downloads/decisions';
+
+import { decisionLabel, decisionPill, rejectionSummary } from '../features/downloads/decisions';
 import { escapeHtml } from './html';
 
 declare global {
   /* eslint-disable no-var */
-  var showConfirmDialog: (opts: {
-    title: string; message: string; confirmText?: string; cancelText?: string;
-  }) => Promise<boolean>;
+  var showConfirmDialog:
+    | ((opts: {
+        title: string;
+        message: string;
+        confirmText?: string;
+        cancelText?: string;
+      }) => Promise<boolean>)
+    | undefined;
   var showCandidatesModal: (taskId: string) => void;
   /* eslint-enable no-var */
 }
@@ -52,6 +60,28 @@ interface TrackDetailPayload {
   quarantine_entry_id?: string | number;
   expected?: { title?: string; artist?: string };
   downloaded?: { title?: string; artist?: string };
+  decision?: DecisionBlock | null;
+}
+
+/** A stored candidate, as core/downloads/candidate_pool.py summarizes it. */
+export interface DecisionCandidate {
+  username?: string;
+  display_name?: string;
+  source_service?: string;
+  quality?: string;
+  quality_label?: string;
+  confidence?: number;
+  duration?: number;
+  decision?: CandidateDecision;
+}
+
+export interface DecisionBlock {
+  outcome: string;
+  chosen?: DecisionCandidate | null;
+  alternatives?: DecisionCandidate[];
+  accepted_total?: number;
+  rejected_total?: number;
+  rejected_counts?: Record<string, number>;
 }
 
 function _tdEsc(s: unknown): string {
@@ -60,7 +90,7 @@ function _tdEsc(s: unknown): string {
 
 function _tdSetText(id: string, value: unknown, fallback = '—'): void {
   const el = document.getElementById(id);
-  if (el) el.textContent = (value && String(value).trim()) ? String(value) : fallback;
+  if (el) el.textContent = value && String(value).trim() ? String(value) : fallback;
 }
 
 // Release the preview <audio> so the OS file handle is freed before any move
@@ -106,7 +136,11 @@ export async function openTrackDetail(taskId: string): Promise<void> {
   let detail: TrackDetailPayload;
   try {
     const resp = await fetch(`/api/downloads/task/${encodeURIComponent(taskId)}/detail`);
-    const data = (await resp.json()) as { success?: boolean; error?: string; detail?: TrackDetailPayload };
+    const data = (await resp.json()) as {
+      success?: boolean;
+      error?: string;
+      detail?: TrackDetailPayload;
+    };
     if (!data.success) {
       window.showToast?.(data.error || 'Could not load track detail', 'error');
       return;
@@ -167,17 +201,29 @@ function _tdRender(d: TrackDetailPayload, taskId: string): void {
 
   // Expected vs downloaded (only when we have provenance)
   const prov = document.getElementById('td-provenance');
-  const exp = (d.expected && (d.expected.title || d.expected.artist));
-  const dl = (d.downloaded && (d.downloaded.title || d.downloaded.artist));
+  const exp = d.expected && (d.expected.title || d.expected.artist);
+  const dl = d.downloaded && (d.downloaded.title || d.downloaded.artist);
   if (prov) {
     if (exp || dl) {
       prov.hidden = false;
-      _tdSetText('td-exp', exp ? `${d.expected!.title}${d.expected!.artist ? ' — ' + d.expected!.artist : ''}` : '', '—');
-      _tdSetText('td-dl', dl ? `${d.downloaded!.title}${d.downloaded!.artist ? ' — ' + d.downloaded!.artist : ''}` : '', '—');
+      _tdSetText(
+        'td-exp',
+        exp ? `${d.expected!.title}${d.expected!.artist ? ' — ' + d.expected!.artist : ''}` : '',
+        '—',
+      );
+      _tdSetText(
+        'td-dl',
+        dl
+          ? `${d.downloaded!.title}${d.downloaded!.artist ? ' — ' + d.downloaded!.artist : ''}`
+          : '',
+        '—',
+      );
     } else {
       prov.hidden = true;
     }
   }
+
+  renderDecisionBlock(d.decision ?? null);
 
   // Reason banner (quarantined / failed)
   const reason = document.getElementById('td-reason');
@@ -211,6 +257,124 @@ function _tdRender(d: TrackDetailPayload, taskId: string): void {
   _tdRenderActions(d, taskId, kind);
 }
 
+const SOURCE_NAMES: Record<string, string> = {
+  soulseek: 'Soulseek',
+  youtube: 'YouTube',
+  tidal: 'Tidal',
+  qobuz: 'Qobuz',
+  hifi: 'HiFi',
+  deezer_dl: 'Deezer',
+  lidarr: 'Lidarr',
+  amazon: 'Amazon Music',
+  soundcloud: 'SoundCloud',
+  torrent: 'Torrent',
+  usenet: 'Usenet',
+};
+
+function _el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  cls: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function _candidateLine(c: DecisionCandidate): string {
+  const bits = [SOURCE_NAMES[c.source_service || ''] || c.source_service || ''];
+  if (c.source_service === 'soulseek' && c.username) bits.push(c.username);
+  if (c.quality_label || c.quality) bits.push(String(c.quality_label || c.quality));
+  const score = c.decision?.score ?? c.confidence;
+  if (score != null) bits.push(`match ${Math.round(Number(score) * 100)}%`);
+  return bits.filter(Boolean).join(' · ');
+}
+
+/**
+ * "Why this file": what won and why, what came next, what got turned away.
+ * Built from DOM nodes, never innerHTML: file names come from other people.
+ */
+export function renderDecisionBlock(decision: DecisionBlock | null): void {
+  const box = document.getElementById('td-decision');
+  if (!box) return;
+  box.replaceChildren();
+  if (!decision || !decision.outcome) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const counts = decision.rejected_counts || {};
+  const rejected = decision.rejected_total || 0;
+  const accepted = decision.accepted_total || 0;
+
+  if (decision.outcome === 'chosen') {
+    box.append(_el('h3', 'td-decision-title', 'Why this file'));
+    const chosen = decision.chosen;
+    if (chosen) {
+      const win = _el('div', 'td-decision-win');
+      win.append(
+        _el('span', 'td-decision-name', chosen.display_name || ''),
+        _el('span', 'td-decision-meta', _candidateLine(chosen)),
+      );
+      box.append(win);
+    }
+    const runnersUp = Math.max(0, accepted - 1);
+    const parts = [];
+    if (runnersUp) parts.push(`${runnersUp} other${runnersUp === 1 ? '' : 's'} also passed`);
+    if (rejected) parts.push(`${rejected} passed over: ${rejectionSummary(counts)}`);
+    box.append(
+      _el(
+        'p',
+        'td-decision-summary',
+        parts.length ? `${parts.join('. ')}.` : 'It was the only match.',
+      ),
+    );
+  } else {
+    box.append(
+      _el(
+        'h3',
+        'td-decision-title',
+        decision.outcome === 'nothing_passed' ? 'Why nothing was downloaded' : 'Why it stopped',
+      ),
+    );
+    const text =
+      decision.outcome === 'nothing_passed'
+        ? rejected
+          ? `Nothing passed: ${rejectionSummary(counts)}.`
+          : 'The search came back empty.'
+        : `${accepted} passed the checks, but none of them would start downloading.` +
+          (rejected ? ` Passed over: ${rejectionSummary(counts)}.` : '');
+    box.append(_el('p', 'td-decision-summary', text));
+  }
+
+  const alternatives = (decision.alternatives || []).slice(0, 5);
+  if (alternatives.length) {
+    box.append(
+      _el('div', 'td-decision-subtitle', decision.chosen ? 'Next in line' : 'Closest results'),
+    );
+    const list = _el('ul', 'td-decision-list');
+    for (const alt of alternatives) {
+      const item = _el('li', 'td-decision-item');
+      const text = _el('div', 'td-decision-text');
+      text.append(
+        _el('span', 'td-decision-name', alt.display_name || ''),
+        _el('span', 'td-decision-meta', _candidateLine(alt)),
+      );
+      const d = alt.decision;
+      const pill = _el(
+        'span',
+        `td-decision-pill stage-${d && !d.accepted ? d.stage || 'decision' : 'ok'}`,
+        d && !d.accepted ? decisionPill(alt) || decisionLabel(d.code) : 'passed',
+      );
+      if (d?.detail) pill.title = d.detail;
+      item.append(text, pill);
+      list.append(item);
+    }
+    box.append(list);
+  }
+}
+
 function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): void {
   const el = document.getElementById('td-actions');
   if (!el) return;
@@ -225,13 +389,28 @@ function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): 
   };
 
   if (kind === 'quarantined') {
-    add('✓ Accept & Import', 'td-action-primary', (e) =>
-      void _tdAccept(e.currentTarget as HTMLButtonElement, d.quarantine_entry_id, taskId));
+    add(
+      '✓ Accept & Import',
+      'td-action-primary',
+      (e) => void _tdAccept(e.currentTarget as HTMLButtonElement, d.quarantine_entry_id, taskId),
+    );
     add('🔍 Search for a different result', 'td-action-secondary', () => {
       closeTrackDetail();
       if (taskId) showCandidatesModal(taskId);
     });
   } else if (kind === 'failed' || kind === 'not_found') {
+    // The candidate inspector: every source searched for this track, with why
+    // each hit would or wouldn't be taken. Lives in the React app.
+    if (window.openDownloadTaskInspector) {
+      add('🧭 See what every source has', 'td-action-secondary', () => {
+        closeTrackDetail();
+        window.openDownloadTaskInspector?.(taskId, {
+          name: d.title,
+          artist: d.artist,
+          album: d.album,
+        });
+      });
+    }
     add('🔍 Search for a different result', 'td-action-secondary', () => {
       closeTrackDetail();
       if (taskId) showCandidatesModal(taskId);
@@ -240,12 +419,16 @@ function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): 
   // completed / in_progress: no destructive actions - the player + info is it.
 }
 
-async function _tdAccept(button: HTMLButtonElement, entryId: string | number | undefined, taskId: string): Promise<void> {
+async function _tdAccept(
+  button: HTMLButtonElement,
+  entryId: string | number | undefined,
+  taskId: string,
+): Promise<void> {
   if (!entryId) {
     window.showToast?.('Cannot accept — missing quarantine id.', 'error');
     return;
   }
-  const confirmed = await showConfirmDialog({
+  const confirmed = await showConfirmDialog?.({
     title: 'Accept Quarantined File',
     message: 'Import this file and skip the quarantine checks for this approved pass?',
     confirmText: 'Accept & Import',
@@ -268,13 +451,21 @@ async function _tdAccept(button: HTMLButtonElement, entryId: string | number | u
       closeTrackDetail();
       return;
     }
-    const needsRecover = /thin sidecar|recover to staging|embedded context|missing file or sidecar/i.test(data.error || '');
+    const needsRecover =
+      /thin sidecar|recover to staging|embedded context|missing file or sidecar/i.test(
+        data.error || '',
+      );
     if (needsRecover) {
       button.textContent = 'Recovering…';
-      const rec = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/recover`, { method: 'POST' });
+      const rec = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/recover`, {
+        method: 'POST',
+      });
       const recData = (await rec.json()) as { success?: boolean; error?: string };
       if (recData.success) {
-        window.showToast?.('Older entry — moved to Staging. Finish it from the Import page.', 'success');
+        window.showToast?.(
+          'Older entry — moved to Staging. Finish it from the Import page.',
+          'success',
+        );
         closeTrackDetail();
         return;
       }

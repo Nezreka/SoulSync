@@ -746,9 +746,9 @@ def _profile() -> int:
     An explicit parameter still wins, so nothing that already passes one
     changes behaviour.
     """
-    from .helpers import parse_profile_id
+    from .helpers import acting_profile_id
 
-    return parse_profile_id(request)
+    return acting_profile_id(request)
 
 
 def create_podcasts_blueprint() -> Blueprint:
@@ -941,10 +941,8 @@ def create_podcasts_blueprint() -> Blueprint:
         db = _db()
         if db is None:
             return jsonify({"success": True, "podcasts": []})
-        try:
-            profile_id = int(request.args.get("profile_id") or _profile())
-        except (ValueError, TypeError):
-            profile_id = _profile()
+        from .helpers import acting_profile_id
+        profile_id = acting_profile_id(request, request.args.get("profile_id"))
         try:
             items = db.get_watchlist_podcasts(profile_id=profile_id)
             return jsonify({"success": True, "podcasts": items})
@@ -1009,11 +1007,8 @@ def create_podcasts_blueprint() -> Blueprint:
         except (ValueError, TypeError):
             episode_count = None
 
-        profile_id = body.get("profile_id") or _profile()
-        try:
-            profile_id = int(profile_id)
-        except (ValueError, TypeError):
-            profile_id = _profile()
+        from .helpers import acting_profile_id
+        profile_id = acting_profile_id(request, body.get("profile_id"))
 
         db = _db()
         if db is None:
@@ -1203,11 +1198,9 @@ def create_podcasts_blueprint() -> Blueprint:
         if db is None:
             return jsonify({"success": False, "error": "Database unavailable"}), 500
 
-        try:
-            profile_id = int(request.args.get("profile_id")
-                             or body_json.get("profile_id") or _profile())
-        except (ValueError, TypeError):
-            profile_id = _profile()
+        from .helpers import acting_profile_id
+        profile_id = acting_profile_id(request, request.args.get("profile_id")
+                                       or body_json.get("profile_id"))
 
         imported_count = 0
         errors = 0
@@ -1248,10 +1241,8 @@ def create_podcasts_blueprint() -> Blueprint:
         if db is None:
             return jsonify({"success": False, "error": "Database unavailable"}), 500
 
-        try:
-            profile_id = int(request.args.get("profile_id") or _profile())
-        except (ValueError, TypeError):
-            profile_id = _profile()
+        from .helpers import acting_profile_id
+        profile_id = acting_profile_id(request, request.args.get("profile_id"))
 
         try:
             shows = db.get_watchlist_podcasts(profile_id=profile_id)

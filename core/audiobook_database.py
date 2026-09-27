@@ -33,6 +33,18 @@ logger = get_logger("audiobook_database")
 
 DEFAULT_DB_PATH = os.path.join("database", "audiobooks.db")
 
+
+def resolve_db_path(db_path: Optional[str] = None) -> str:
+    """The file to open: an explicit path, else AUDIOBOOK_DATABASE_PATH.
+
+    Same rule as video_library.db. In Docker, database/ is inside the image,
+    so without the env override every container recreate wiped the wishlist,
+    download history and watchlist. The Dockerfile points it at /app/data.
+    """
+    if db_path is None or db_path == DEFAULT_DB_PATH:
+        return os.environ.get("AUDIOBOOK_DATABASE_PATH") or DEFAULT_DB_PATH
+    return db_path
+
 # Wishlist row states.
 STATUS_WANTED = "wanted"        # waiting for the next search pass
 STATUS_SEARCHING = "searching"  # a search is running right now
@@ -41,6 +53,21 @@ STATUS_DONE = "done"            # imported into the library
 STATUS_FAILED = "failed"        # last attempt failed; retried on a later pass
 
 STATUS_CANCELLED = "cancelled"  # explicitly stopped; never automatically retried
+
+
+
+def remove_owned_from_wishlist() -> bool:
+    """Whether a book that reaches the library leaves the wishlist entirely.
+
+    Off by default: the row stays, marked done ("In library"). On, it is
+    deleted the way the music wishlist drops a track once it is owned.
+    """
+    try:
+        from core.settings import config_manager
+        return bool(config_manager.get("audiobooks.remove_owned_from_wishlist", False))
+    except Exception:                                       # noqa: BLE001
+        return False
+
 
 _STATUSES = (STATUS_WANTED, STATUS_SEARCHING, STATUS_GRABBED, STATUS_DONE, STATUS_FAILED, STATUS_CANCELLED)
 
@@ -150,7 +177,7 @@ class AudiobookDatabase:
     """
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH) -> None:
-        self.db_path = db_path
+        self.db_path = resolve_db_path(db_path)
         self._local = threading.local()
         self._init_lock = threading.Lock()
         self._initialized = False
@@ -607,7 +634,10 @@ class AudiobookDatabase:
         params_tail = [str(asin or "").strip()] + ([] if profile_id is None else [int(profile_id)])
         conn = self._connect()
         try:
-            if count_attempt:
+            if status == STATUS_DONE and remove_owned_from_wishlist():
+                cursor = conn.execute(
+                    f"DELETE FROM audiobook_wishlist WHERE asin = ?{scope}", params_tail)
+            elif count_attempt:
                 cursor = conn.execute(f"""
                     UPDATE audiobook_wishlist
                     SET status = ?, last_error = ?, last_attempt_at = ?,
@@ -679,21 +709,30 @@ class AudiobookDatabase:
         the batch size kept it out of the next few passes. Every profile: the
         library is shared.
         """
+        owned = """
+            SELECT catalog_asin FROM audiobook_library
+            WHERE match_status IN ('identifier', 'automatic', 'confirmed')
+        """
         conn = self._connect()
         try:
-            cursor = conn.execute("""
-                UPDATE audiobook_wishlist
-                SET status = ?, last_error = '', status_changed_at = ?
-                WHERE status != ?
-                  AND asin IN (
-                      SELECT catalog_asin FROM audiobook_library
-                      WHERE match_status IN ('identifier', 'automatic', 'confirmed')
-                  )
-            """, (STATUS_DONE, _now(), STATUS_DONE))
+            if remove_owned_from_wishlist():
+                # Rows already marked done go too, so turning the setting on
+                # clears what earlier passes left behind.
+                cursor = conn.execute(
+                    f"DELETE FROM audiobook_wishlist WHERE status = ? OR asin IN ({owned})",
+                    (STATUS_DONE,))
+                verb = "removed from the wishlist"
+            else:
+                cursor = conn.execute(f"""
+                    UPDATE audiobook_wishlist
+                    SET status = ?, last_error = '', status_changed_at = ?
+                    WHERE status != ? AND asin IN ({owned})
+                """, (STATUS_DONE, _now(), STATUS_DONE))
+                verb = "marked done"
             conn.commit()
             if cursor.rowcount:
-                logger.info("%d wishlisted audiobook(s) are already in the library; marked done",
-                            cursor.rowcount)
+                logger.info("%d wishlisted audiobook(s) are already in the library; %s",
+                            cursor.rowcount, verb)
             return cursor.rowcount
         except sqlite3.Error as exc:
             logger.warning("Could not reconcile the wishlist with the library: %s", exc)
@@ -1333,7 +1372,7 @@ def subsystem_in_use(db_path: str = DEFAULT_DB_PATH) -> bool:
     touches the feature completely unchanged by it — no file, no threads, no
     polling.
     """
-    return os.path.exists(db_path)
+    return os.path.exists(resolve_db_path(db_path))
 
 
 def get_audiobook_db() -> AudiobookDatabase:

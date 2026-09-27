@@ -19,30 +19,8 @@ import {
   switchBlocklistTab,
   unblockEntry,
 } from './blocklist';
-import {
-  connectMyAccount,
-  closeMyAccountsModal,
-  disconnectMyAccount,
-  openMyAccountsModal,
-  openPersonalSettings,
-  saveMyAccountToken,
-} from './my-accounts';
-import {
-  closeDownloadOriginsModal,
-  deleteSelectedOriginEntries,
-  openDownloadOriginsModal,
-  switchDownloadOriginTab,
-  toggleAllOriginEntries,
-  toggleOriginEntry,
-  toggleOriginGroup,
-} from './origin-history';
-import {
-  closeServiceSwitchModal,
-  openServiceSwitchModal,
-  openServiceSwitchSettings,
-  setActiveSource,
-  switchServiceSwitchTab,
-} from './service-switch';
+import { patchChatMessages } from './chat-morph';
+import { refreshDiscoverInboxBadge, startDiscoverInboxBadge } from './discover-inbox-badge';
 import {
   _handoffLibrarySearchToEnhancedSearch,
   _updateSidebarLibraryBreadcrumb,
@@ -60,12 +38,32 @@ import {
   _mlmSourceDebounce,
   openManualLibraryMatchTool,
 } from './manual-library-match';
+import {
+  connectMyAccount,
+  closeMyAccountsModal,
+  disconnectMyAccount,
+  openMyAccountsModal,
+  openPersonalSettings,
+  saveMyAccountToken,
+} from './my-accounts';
+import {
+  closeDownloadOriginsModal,
+  deleteSelectedOriginEntries,
+  openDownloadOriginsModal,
+  switchDownloadOriginTab,
+  toggleAllOriginEntries,
+  toggleOriginEntry,
+  toggleOriginGroup,
+} from './origin-history';
 import './server-activity';
 import {
-  closeTrackDetail,
-  openTrackDetail,
-} from './track-detail';
-import { patchChatMessages } from './chat-morph';
+  closeServiceSwitchModal,
+  openServiceSwitchModal,
+  openServiceSwitchSettings,
+  setActiveSource,
+  switchServiceSwitchTab,
+} from './service-switch';
+import { closeTrackDetail, openTrackDetail } from './track-detail';
 import {
   closeWatchlistHistoryModal,
   openWatchlistHistoryModal,
@@ -128,6 +126,9 @@ export const SHELL_WINDOW_EXPORTS = {
   // server-activity.js (ported aug 26): self-assigns window.ServerActivity
   // chat.js renderMessages patches the list instead of rebuilding it (sept 24)
   patchChatMessages,
+  // the Discover inbox badge (sept 26)
+  refreshDiscoverInboxBadge,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);
+startDiscoverInboxBadge();

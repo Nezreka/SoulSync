@@ -53,9 +53,9 @@ describe('the star rating is not printed twice', () => {
 
 describe('the management actions collapse into one button', () => {
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const moreCount = new Function(
-    `${extractFunction('moreCount', SRC)}\nreturn moreCount;`,
-  )() as (html: string) => number;
+  const moreCount = new Function(`${extractFunction('moreCount', SRC)}\nreturn moreCount;`)() as (
+    html: string,
+  ) => number;
 
   it('counts the actions destined for the menu', () => {
     expect(moreCount('')).toBe(0);
@@ -91,8 +91,10 @@ describe('the management actions collapse into one button', () => {
 
 describe('the overflow menu stays inside the hero', () => {
   const CSS = readFileSync(resolve(process.cwd(), 'static/video/video-side.css'), 'utf8');
-  const rule = CSS.slice(CSS.indexOf('\n.vd-more-menu {'),
-                         CSS.indexOf('}', CSS.indexOf('\n.vd-more-menu {')));
+  const rule = CSS.slice(
+    CSS.indexOf('\n.vd-more-menu {'),
+    CSS.indexOf('}', CSS.indexOf('\n.vd-more-menu {')),
+  );
 
   it('opens upward, because the billboard clips whatever drops below', () => {
     // .vd-billboard has overflow:hidden - its backdrop runs a Ken Burns scale to
@@ -108,8 +110,10 @@ describe('the overflow menu stays inside the hero', () => {
   });
 
   it('still clips the backdrop, which is what the overflow was for', () => {
-    const bb = CSS.slice(CSS.indexOf('\n.vd-billboard {'),
-                         CSS.indexOf('}', CSS.indexOf('\n.vd-billboard {')));
+    const bb = CSS.slice(
+      CSS.indexOf('\n.vd-billboard {'),
+      CSS.indexOf('}', CSS.indexOf('\n.vd-billboard {')),
+    );
     expect(bb).toContain('overflow: hidden');
   });
 });
@@ -122,7 +126,9 @@ describe('the overflow menu opens and closes', () => {
       '<button class="vd-manage-btn vd-more-btn" data-vd-act="more" aria-expanded="false"></button>' +
       '<div class="vd-more-menu" data-vd-more-menu hidden></div></div>';
     const preamble = `function q(sel) { return host.querySelector(sel); }`;
-    const bodies = ['toggleMoreMenu', 'closeMoreMenu'].map((n) => extractFunction(n, SRC)).join('\n');
+    const bodies = ['toggleMoreMenu', 'closeMoreMenu']
+      .map((n) => extractFunction(n, SRC))
+      .join('\n');
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
     const api = new Function(
       'host',

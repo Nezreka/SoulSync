@@ -174,6 +174,18 @@ describe('fire-and-forget side effects', () => {
     expect(window.checkArtistEnhanceEligibility).not.toHaveBeenCalled();
   });
 
+  it('asks what a LIBRARY artist appears on', async () => {
+    renderPage();
+    await waitFor(() => expect(requested).toContain('/api/artist/42/appears-on'));
+  });
+
+  it('does not ask for a source artist, it has no library tracks', async () => {
+    stubDetail({ success: true, artist: { id: 'sp1', name: 'X' }, discography: {} });
+    renderPage();
+    await screen.findByText('X');
+    expect(requested.some((u) => u.includes('/appears-on'))).toBe(false);
+  });
+
   it('wires the watchlist button to the canonical Spotify identity', async () => {
     // Local now (initializeLibraryWatchlistButton's port): the hero checks the
     // status itself and reflects it on the button.

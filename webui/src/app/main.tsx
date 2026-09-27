@@ -1,6 +1,7 @@
 import '@vitejs/plugin-react/preamble';
 import { createRoot } from 'react-dom/client';
 
+import { mountCandidateInspectorHost } from '@/features/downloads/inspector-modal';
 import { mountLibraryDiscographySourceSelector } from '@/features/settings/library-discography-source';
 import { bindWindowWebRouter } from '@/platform/shell/bridge';
 import { ROUTER_ROOT_ID } from '@/platform/shell/route-controllers';
@@ -23,10 +24,16 @@ if (typeof Node === 'function' && Node.prototype) {
     return originalRemoveChild.call(this, child) as T;
   };
   const originalInsertBefore = Node.prototype.insertBefore;
-  Node.prototype.insertBefore = function <T extends Node>(newNode: T, referenceNode: Node | null): T {
+  Node.prototype.insertBefore = function <T extends Node>(
+    newNode: T,
+    referenceNode: Node | null,
+  ): T {
     if (referenceNode && referenceNode.parentNode !== this) {
       if (typeof console !== 'undefined' && console.warn) {
-        console.warn('Cannot insert before: reference node is not a child of this node', referenceNode);
+        console.warn(
+          'Cannot insert before: reference node is not a child of this node',
+          referenceNode,
+        );
       }
       return newNode;
     }
@@ -48,4 +55,5 @@ export async function bootstrapApp() {
 }
 
 void mountLibraryDiscographySourceSelector();
+mountCandidateInspectorHost();
 void bootstrapApp();

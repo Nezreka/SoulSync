@@ -69,6 +69,32 @@ def _invalidate_discover_shelf_cache():
         logger.debug("discover shelf cache invalidation skipped: %s", e)
 
 
+# #1309: each scan looked only at releases dated AFTER the previous scan. a
+# release lands in a provider's catalogue days late (and a day-precision date
+# reads as midnight utc, earlier than a scan that ran that morning), so once
+# the scan had passed its date it was never seen again, though the artist
+# page listed it. re-check this much before the last scan every time; owned,
+# wishlisted and ignore-listed albums are skipped downstream, so the overlap
+# only ever catches what was missed.
+INCREMENTAL_OVERLAP_DAYS = 14
+
+
+def incremental_cutoff(last_scan, lookback_period=None):
+    """the release-date cutoff for an incremental scan: the last scan minus
+    the overlap, never further back than a numeric lookback setting."""
+    if last_scan is None:
+        return None
+    ts = last_scan if last_scan.tzinfo else last_scan.replace(tzinfo=timezone.utc)
+    overlap = INCREMENTAL_OVERLAP_DAYS
+    try:
+        days = int(lookback_period)
+        if 0 < days < overlap:
+            overlap = days
+    except (TypeError, ValueError):
+        pass
+    return ts - timedelta(days=overlap)
+
+
 def watchlist_source_identity(artist):
     """(id, provider) for a watchlist artist - never the id alone.
 
@@ -1754,7 +1780,7 @@ class WatchlistScanner:
                 cutoff_timestamp = None
                 needs_full_discog = True
             elif last_scan_timestamp is not None:
-                cutoff_timestamp = last_scan_timestamp
+                cutoff_timestamp = incremental_cutoff(last_scan_timestamp, lookback_period)
 
                 # Check if a lookback period change requires a one-time wider window
                 rescan_cutoff = self._get_rescan_cutoff()
@@ -4317,6 +4343,11 @@ class WatchlistScanner:
                              for r in artist_rows if r.get('name')}
 
             seeds = seed_identities(seed_names, by_name)
+            # a seed you asked for more of gets its shelf first; one you asked
+            # for less of goes last (stable, so play order breaks ties)
+            from core.discovery.feedback import Taste
+            taste = Taste.load(self.database, profile_id)
+            seeds = sorted(seeds, key=lambda sd: -taste.seed_weight(sd.name))
             edges = self.database.get_similar_artist_edges(
                 sorted({i for seed in seeds for i in seed.bare_ids}), profile_id=profile_id)
 
@@ -4333,6 +4364,7 @@ class WatchlistScanner:
                 # shelf a real relationship could not.
                 related = related + related_from_genres(
                     seed, genre_by_artist, pool_artists, doc_counts)
+                related = taste.adjust_related(seed.name, related)
                 per_seed.append((seed, collect_candidates(seed, related, pool_by_artist)))
 
             shelves = allocate_shelves(per_seed)
@@ -4479,10 +4511,19 @@ class WatchlistScanner:
             # popularity are independent, so the top-200 already spans pop-96 favourites down to
             # pop-1 deep cuts. The track-mix fetch below still only touches recs[:20], so the scan
             # cost is unchanged; the row itself renders 18 and the dial chooses which 18.
+            # more / less like this: seeds you asked for more of count for more,
+            # artists and seed edges you asked for less of for less
+            from core.discovery.feedback import Taste
+            taste = Taste.load(self.database, profile_id)
+            seeds = taste.adjust_seeds(seeds)
+            similars_by_seed = {seed: taste.adjust_related(seed, sims, weight_key='score')
+                                for seed, sims in similars_by_seed.items()}
             recs = rank_recommended_artists(seeds, similars_by_seed, owned, limit=200)
             if not recs:
                 logger.info("[Listening Recs] no recommendations yet (no similar-artist coverage)")
                 return
+
+            from core.discovery.explain import consensus_confidence, explanation
 
             def _enrich(r):
                 m = artist_meta_by_name.get(r.name.lower(), {})
@@ -4493,6 +4534,8 @@ class WatchlistScanner:
                     except Exception:
                         genres = None
                 return {'name': r.name, 'seed_count': r.seed_count, 'seeds': r.seeds[:5],
+                        'explanation': explanation('listened', r.seeds[:5],
+                                                   consensus_confidence(r.seed_count)),
                         'score': r.score, 'spotify_artist_id': m.get('spotify_artist_id'),
                         'itunes_artist_id': m.get('itunes_artist_id'),
                         'deezer_artist_id': m.get('deezer_artist_id'),

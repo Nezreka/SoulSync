@@ -189,17 +189,28 @@ def register_routes(bp):
     @bp.route("/detail/show/<int:show_id>", methods=["GET"])
     def video_show_detail(show_id):
         from . import get_video_db
+        from .kids import restricted_response, video_cap
+        from core.content_filter import title_allowed
         data = get_video_db().show_detail(show_id)
         if not data:
             return jsonify({"error": "not found"}), 404
+        # kids profiles: over the cap (or unrated) is a hard no
+        cap = video_cap()
+        if cap is not None and not title_allowed(data.get("content_rating"), cap):
+            return restricted_response()
         return jsonify(data)
 
     @bp.route("/detail/movie/<int:movie_id>", methods=["GET"])
     def video_movie_detail(movie_id):
         from . import get_video_db
+        from .kids import restricted_response, video_cap
+        from core.content_filter import title_allowed
         data = get_video_db().movie_detail(movie_id)
         if not data:
             return jsonify({"error": "not found"}), 404
+        cap = video_cap()
+        if cap is not None and not title_allowed(data.get("content_rating"), cap):
+            return restricted_response()
         return jsonify(data)
 
     @bp.route("/detail/show/<int:show_id>/sync", methods=["POST"])
@@ -273,11 +284,23 @@ def register_routes(bp):
             d = None
         if not d:
             return jsonify({"error": "not found"}), 404
+        # a redirect points at the library detail, which does its own check
+        if not d.get("redirect"):
+            from .kids import restricted_response, video_cap
+            from core.content_filter import title_allowed
+            cap = video_cap()
+            if cap is not None and not title_allowed(d.get("content_rating"), cap):
+                return restricted_response()
         return jsonify(d)
 
     @bp.route("/tmdb/show/<int:tv_id>/season/<int:season_number>", methods=["GET"])
     def video_tmdb_season(tv_id, season_number):
         """Lazy per-season episodes for a TMDB (un-owned) show detail."""
+        from . import get_video_db
+        from .kids import restricted_response, tmdb_title_allowed, video_cap
+        cap = video_cap()
+        if cap is not None and not tmdb_title_allowed(get_video_db(), "show", tv_id, cap):
+            return restricted_response()
         try:
             from core.video.enrichment.engine import get_video_enrichment_engine
             d = get_video_enrichment_engine().tmdb_season(tv_id, season_number)
@@ -291,6 +314,11 @@ def register_routes(bp):
     @bp.route("/episode/<int:tmdb_id>/<int:season>/<int:episode>", methods=["GET"])
     def video_episode_extra(tmdb_id, season, episode):
         """Episode expand: guest stars + bigger still (by the SHOW's tmdb id)."""
+        from . import get_video_db
+        from .kids import restricted_response, tmdb_title_allowed, video_cap
+        cap = video_cap()
+        if cap is not None and not tmdb_title_allowed(get_video_db(), "show", tmdb_id, cap):
+            return restricted_response()
         try:
             from core.video.enrichment.engine import get_video_enrichment_engine
             d = get_video_enrichment_engine().episode_extra(tmdb_id, season, episode)
@@ -312,6 +340,13 @@ def register_routes(bp):
             d = None
         if not d:
             return jsonify({"error": "not found"}), 404
+        # kids: the filmography keeps only what the profile's cap allows
+        from .kids import filter_tmdb_items, video_cap
+        cap = video_cap()
+        if cap is not None and d.get("credits"):
+            from . import get_video_db
+            d = dict(d)
+            d["credits"] = filter_tmdb_items(get_video_db(), d["credits"], cap)
         return jsonify(d)
 
     @bp.route("/detail/<kind>/<int:item_id>/extras", methods=["GET"])
@@ -319,6 +354,11 @@ def register_routes(bp):
         """Live TMDB extras (trailer / where-to-watch / similar) for the detail page."""
         if kind not in ("movie", "show"):
             return jsonify({}), 400
+        from . import get_video_db
+        from .kids import library_title_allowed, restricted_response, video_cap
+        cap = video_cap()
+        if cap is not None and not library_title_allowed(get_video_db(), kind, item_id, cap):
+            return restricted_response()
         try:
             from core.video.enrichment.engine import get_video_enrichment_engine
             return jsonify(get_video_enrichment_engine().item_extras(kind, item_id))

@@ -78,6 +78,9 @@ def create_blueprint():
 @bp.route('/api/wishlist/process', methods=['POST'])
 def process_wishlist_api():
     """Trigger wishlist processing via API. Processes pending wishlist tracks in the background."""
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     try:
         # #1134: this passed is_auto_processing_flag=<raw wishlist_auto_processing
         # lambda> — a kwarg the factory never accepted, so the route 500'd on

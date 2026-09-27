@@ -763,7 +763,15 @@ class ConfigManager:
                 # that contains it and tag it as that album, so it groups with its
                 # album-mates and gets the album cover (not the single's). Off by
                 # default — it's an extra per-import metadata lookup.
-                "single_to_album": False
+                "single_to_album": False,
+                "tags": {
+                    # the multi-value ARTISTS tag next to the display string,
+                    # so navidrome/jellyfin link a song to every artist on it.
+                    # on for fresh installs only. these defaults are never
+                    # merged into a saved config, so existing installs keep
+                    # tagging the way they always have
+                    "write_multi_artist": True,
+                },
             },
             "musicbrainz": {
                 "base_url": "https://musicbrainz.org/ws/2",
@@ -966,6 +974,9 @@ class ConfigManager:
                 # Chapter files arrive named however the uploader left them.
                 # On by default: a book whose files sort wrong plays wrong.
                 "renumber_chapters": True,
+                # Off keeps an owned book on the wishlist as "In library";
+                # on drops it, like the music wishlist does.
+                "remove_owned_from_wishlist": False,
             },
             "podcasts": {
                 "download_path": default_podcast_path,

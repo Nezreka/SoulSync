@@ -122,6 +122,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         self._user_data = None
         self._authenticated = False
         self._pending_arl: Optional[str] = None
+        # a failed login keeps its arl pending and waits this long before the
+        # next try, doubling each miss (see is_authenticated)
+        self._auth_retry_at = 0.0
+        self._auth_retry_wait = 0.0
 
         # Quality preference
         self._quality = quality_tier_for_source('deezer', default='flac')
@@ -133,8 +137,11 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             if is_boot_phase():
                 self._pending_arl = arl
                 logger.debug("Deezer ARL present — authentication deferred until after boot")
-            else:
-                self._authenticate(arl)
+            elif not self._authenticate(arl):
+                # same as a failed reconnect: retry later, don't stay dead
+                self._pending_arl = arl
+                self._auth_retry_wait = self._AUTH_RETRY_FIRST
+                self._auth_retry_at = time.time() + self._AUTH_RETRY_FIRST
 
         logger.info(f"Deezer download client initialized (download path: {self.download_path})")
 
@@ -271,12 +278,28 @@ class DeezerDownloadClient(DownloadSourcePlugin):
     def is_available(self) -> bool:
         return self.is_authenticated()
 
+    # retry waits after a failed login: 30s, doubling, capped at 30 min
+    _AUTH_RETRY_FIRST = 30.0
+    _AUTH_RETRY_MAX = 1800.0
+
     def is_authenticated(self) -> bool:
         if self._pending_arl and not self._authenticated:
             from core.boot_phase import is_boot_phase
-            if not is_boot_phase():
+            now = time.time()
+            if not is_boot_phase() and now >= getattr(self, '_auth_retry_at', 0.0):
                 self._authenticate(self._pending_arl)
-                self._pending_arl = None
+                if self._authenticated:
+                    self._pending_arl = None
+                    self._auth_retry_wait = 0.0
+                else:
+                    # a dropped connection is not a bad arl. keep it and try
+                    # again later instead of staying logged out until restart.
+                    # backs off so a really bad arl doesn't hit deezer on
+                    # every status poll
+                    wait = getattr(self, '_auth_retry_wait', 0.0)
+                    wait = min(wait * 2, self._AUTH_RETRY_MAX) if wait else self._AUTH_RETRY_FIRST
+                    self._auth_retry_wait = wait
+                    self._auth_retry_at = now + wait
         return self._authenticated
 
     async def check_connection(self) -> bool:
@@ -338,7 +361,18 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         if not arl:
             return False
         self._authenticated = False
-        return self._authenticate(arl)
+        ok = self._authenticate(arl)
+        if not ok:
+            # every settings save lands here. deezer dropping the connection
+            # at that moment used to leave downloads logged out until the
+            # next save or a restart; keep the arl so is_authenticated retries
+            self._pending_arl = arl
+            self._auth_retry_wait = self._AUTH_RETRY_FIRST
+            self._auth_retry_at = time.time() + self._AUTH_RETRY_FIRST
+        else:
+            self._pending_arl = None
+            self._auth_retry_wait = 0.0
+        return ok
 
     def get_quality_label(self) -> str:
         """Get human-readable label for current quality setting."""

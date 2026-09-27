@@ -188,8 +188,12 @@ export function discogCardVisible(
   return true;
 }
 
-/** The footer line + submit label (826-840). */
-export function discogFooter(selection: { tracks: number }[]): {
+/** The footer line + submit label (826-840). asksFirst: a profile without
+ * download rights, whose wishlist adds are requests. */
+export function discogFooter(
+  selection: { tracks: number }[],
+  asksFirst = false,
+): {
   info: string;
   submitText: string;
   disabled: boolean;
@@ -198,7 +202,12 @@ export function discogFooter(selection: { tracks: number }[]): {
   const tracks = selection.reduce((sum, s) => sum + (s.tracks || 0), 0);
   return {
     info: `${releases} release${releases !== 1 ? 's' : ''} · ${tracks} tracks`,
-    submitText: releases > 0 ? `Add ${releases} to Wishlist` : 'Select releases',
+    submitText:
+      releases === 0
+        ? 'Select releases'
+        : asksFirst
+          ? `Request ${releases}`
+          : `Add ${releases} to Wishlist`,
     disabled: releases === 0,
   };
 }

@@ -40,6 +40,7 @@ _ALLOWED_WINDOW = {
     # sibling video-side module namespaces (each published by its own IIFE)
     "window.VideoGet", "window.VideoWatchlist", "window.VideoYoutube", "window.VideoDownload",
     "window.VideoGrab", "window.VideoManage", "window.VideoPoster", "window.VideoIssues",
+    "window.VideoRequestSheet", "window.VideoRequests",
     "window.VideoCalendar", "window.VideoOverlayEditor", "window.VideoCollectionEditor",
     "window.videoWorkerOrbs", "window._videoWorkerOrbsEnabled",
     "window._buildAutomationSection", "window._buildAutomationHub",

@@ -68,6 +68,9 @@ const KNOWN_IDS = new Set<string>([
  * component SOURCE and cannot tell a prop from an attribute.
  */
 const NEW_IDS = [
+  // the discovery inbox (best-in-class phase 6): a section the vanilla never had
+  'discover-inbox',
+  'discover-inbox-title',
   // Deezer's editors publish curated playlists and the public api serves them
   // with no key. A shelf the vanilla never had, so its section anchor is new.
   'deezer-editorial',
