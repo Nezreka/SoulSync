@@ -332,9 +332,9 @@ def check_audio_integrity(
         file_path, expected_duration_ms,
         length_tolerance_s=length_tolerance_s,
         min_file_size_bytes=min_file_size_bytes)
-    if not (result.ok and verify_flac_decode and file_path.lower().endswith(".flac")):
+    if not (result.ok and verify_flac_decode and str(file_path).lower().endswith(".flac")):
         return result
-    ok, reason = flac_decode_test(file_path)
+    ok, reason = flac_decode_test(str(file_path))
     checks = {**result.checks, "flac_decode": "passed" if ok else "failed"}
     if ok:
         return IntegrityResult(ok=True, reason=result.reason, checks=checks)

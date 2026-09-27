@@ -11,9 +11,9 @@ This scans library FLAC files and DECODE-TESTS each one — preferring ``flac -t
 falling back to a full ffmpeg decode. Any file that fails to decode cleanly is
 surfaced as a finding.
 
-Approving a finding (repair_worker._fix_corrupt_audio) deletes the corrupt file,
-drops its DB row so the track goes missing, and re-adds it to the Wishlist so the
-real version downloads again — same delete+re-download payload as the preview-clip
+Approving a finding (repair_worker._fix_corrupt_audio) moves the corrupt file to
+the deleted-files quarantine, drops its DB row so the track goes missing, and
+re-adds it to the Wishlist so the real version downloads again — same delete+re-download payload as the preview-clip
 tool. The scan itself ONLY creates findings; nothing is deleted or wishlisted
 without the user approving (auto_fix is off), and findings can be fixed in bulk or
 one at a time from the findings list like every other job.
@@ -220,8 +220,9 @@ class AudioCorruptionDetectorJob(RepairJob):
         'decode.\n\n'
         'A finding is created for each damaged file. Frame-corrupt audio cannot be '
         'repaired by re-tagging — the data itself is gone — so approving a finding '
-        'DELETES the file, marks the track missing, and re-adds it to your Wishlist so '
-        'the real version downloads again. You can fix findings one at a time or in bulk.\n\n'
+        'moves the file to the deleted-files folder (restorable until retention clears '
+        'it), marks the track missing, and re-adds it to your Wishlist so the real '
+        'version downloads again. You can fix findings one at a time or in bulk.\n\n'
         'This is opt-in and does real work (it decodes every file). Files that pass '
         'are remembered, so later runs only decode files that are new, changed, '
         'failed before, or have not been re-tested in a while.\n\n'
@@ -307,6 +308,15 @@ class AudioCorruptionDetectorJob(RepairJob):
         recheck_days = max(0, self._setting_int(context, 'recheck_after_days', 30))
         workers = min(8, max(1, self._setting_int(context, 'workers', 2)))
         memory = _IntegrityMemory.open(context.db)
+        try:
+            return self._scan_files(context, result, rows, total, cutoff_mtime,
+                                    recheck_days, workers, memory)
+        finally:
+            if memory:
+                memory.close()
+
+    def _scan_files(self, context, result, rows, total, cutoff_mtime,
+                    recheck_days, workers, memory) -> JobResult:
         remembered_rows = memory.load() if memory else {}
 
         # Pass 1, cheap: resolve, stat, and decide what actually needs a decode.
@@ -316,8 +326,6 @@ class AudioCorruptionDetectorJob(RepairJob):
         now = time.time()
         for i, row in enumerate(rows):
             if context.check_stop():
-                if memory:
-                    memory.close()
                 return result
             result.scanned += 1
             resolved = _resolve(row['file_path'], context)
@@ -355,6 +363,7 @@ class AudioCorruptionDetectorJob(RepairJob):
         # report is handled here, on this thread.
         tested = 0
         done = total - len(work)
+        since_commit = 0
         stopped = False
         pending = {}
         queue = iter(work)
@@ -373,10 +382,12 @@ class AudioCorruptionDetectorJob(RepairJob):
                     row, resolved, identity_before = pending.pop(future)
                     done += 1
                     tested += 1
+                    since_commit += 1
                     self._handle_verdict(context, result, memory, row, resolved,
                                          identity_before, future, done, total)
-                if memory and done % 50 == 0:
+                if memory and since_commit >= 50:
                     memory.commit()
+                    since_commit = 0
                 if context.check_stop() or context.wait_if_paused():
                     stopped = True
                     for future in pending:
@@ -384,11 +395,12 @@ class AudioCorruptionDetectorJob(RepairJob):
                     break
                 top_up()
 
-        if memory:
-            if not stopped and cutoff_mtime is None:
-                # a full pass saw every library FLAC: forget files that left it
-                memory.prune(seen_paths, remembered_rows)
-            memory.close()
+        # A full pass saw every library FLAC, so remembered files it did not see
+        # have left the library. Not when paths failed to resolve: an unmounted
+        # library "sees" nothing, and forgetting everything would cost a full
+        # re-decode of a library that never changed.
+        if memory and not stopped and cutoff_mtime is None and unresolved * 100 <= total:
+            memory.prune(seen_paths, remembered_rows)
         if stopped:
             return result
 
@@ -476,7 +488,8 @@ class AudioCorruptionDetectorJob(RepairJob):
                     description=(
                         f'"{title}" by {artist} failed a decode test '
                         f'({reason}). The audio is damaged and can\'t be repaired by '
-                        're-tagging — approve to delete it and re-download the real version.'),
+                        're-tagging — approve to move it to the deleted-files folder and '
+                        're-download the real version.'),
                     details={
                         'track_id': row['id'],
                         'title': row['title'],

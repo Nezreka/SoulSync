@@ -460,3 +460,43 @@ def test_a_full_pass_forgets_files_that_left_the_library(tmp_path, monkeypatch):
     db.drop_track(3)
     _run(db, tmp_path, monkeypatch)
     assert db.remembered() == set(files[:2])
+
+
+def test_a_run_stopped_partway_keeps_what_it_already_decoded(tmp_path, monkeypatch):
+    db, files = _library(tmp_path, count=120)
+    monkeypatch.setattr(mod, "_decoder_available", lambda: True)
+    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p, **kw: p)
+    decoded = []
+    monkeypatch.setattr(mod, "check_flac_integrity", lambda p: decoded.append(p) or (True, ""))
+    cfg = MagicMock()
+    cfg.get.side_effect = lambda key, default=None: (
+        {"workers": 1} if key.endswith(".settings") else default)
+    ctx = JobContext(db=db, transfer_folder=str(tmp_path), config_manager=cfg,
+                     should_stop=lambda: len(decoded) >= 75)
+
+    AudioCorruptionDetectorJob().scan(ctx)
+
+    assert 75 <= len(decoded) < 120
+    assert db.remembered() == set(decoded)          # nothing decoded was lost
+
+
+def test_an_unreachable_library_does_not_wipe_the_memory(tmp_path, monkeypatch):
+    db, files = _library(tmp_path)
+    _run(db, tmp_path, monkeypatch)
+    assert db.remembered() == set(files)
+
+    monkeypatch.setattr(mod, "_decoder_available", lambda: True)
+    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p, **kw: None)
+    monkeypatch.setattr(mod.os.path, "isfile", lambda p: False)
+    cfg = MagicMock()
+    cfg.get.side_effect = lambda key, default=None: default
+    AudioCorruptionDetectorJob().scan(JobContext(db=db, transfer_folder=str(tmp_path),
+                                                 config_manager=cfg))
+    assert db.remembered() == set(files)
+
+
+def test_the_finding_says_the_file_is_quarantined_not_deleted(tmp_path, monkeypatch):
+    db, files = _library(tmp_path, count=1)
+    _, findings, _ = _run(db, tmp_path, monkeypatch, verdicts={files[0]: (False, "bad")})
+    assert "deleted-files folder" in findings[0]["description"]
+    assert "DELETES" not in AudioCorruptionDetectorJob.help_text
