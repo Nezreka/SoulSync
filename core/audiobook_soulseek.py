@@ -29,6 +29,7 @@ import asyncio
 import json
 import os
 import re
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence
 
 from utils.logging_config import get_logger
@@ -43,6 +44,11 @@ MAX_FILES_PER_BOOK = 400
 MIN_FILES_PER_BOOK = 1
 
 _AUDIO_SUFFIXES = (".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".opus", ".wav", ".aac", ".wma")
+
+# Audiobook-only formats the shared Soulseek search would otherwise drop. Its
+# audio filter is music's list, and .m4b is not music, but it is how most
+# books are shared.
+_SEARCH_EXTRA_EXTENSIONS = (".m4b",)
 
 
 def _run(coro):
@@ -139,6 +145,53 @@ def dominant_format(files: Sequence[Dict[str, Any]]) -> str:
     return max(counts.items(), key=lambda item: item[1])[0]
 
 
+def single_file_folder(track: Any) -> Optional[Any]:
+    """A lone audio file, shaped like a one-file folder result.
+
+    Books are very often shared as ONE .m4b. The search only groups two or
+    more files in a folder into an album and hands a lone file back as a
+    track, so without this every single-file book was invisible.
+    """
+    filename = str(getattr(track, "filename", "") or "")
+    match = re.match(r"^(.*[^\\/])[\\/]+[^\\/]+$", filename)
+    if not match:
+        return None
+    album_path = match.group(1)
+    return SimpleNamespace(
+        username=str(getattr(track, "username", "") or ""),
+        album_path=album_path,
+        album_title=_folder_of(album_path),
+        tracks=[track],
+        free_upload_slots=getattr(track, "free_upload_slots", 0),
+        queue_length=getattr(track, "queue_length", 0),
+        single_file=True,
+    )
+
+
+def _basename(path: str) -> str:
+    parts = [part for part in re.split(r"[\\/]+", path) if part]
+    return parts[-1] if parts else ""
+
+
+def _single_file_title(folder: str, filename: str) -> str:
+    """What a one-file release is judged on: the folder AND the file name.
+
+    The folder alone is often generic ("Audiobooks") and the file alone can
+    drop the narrator the folder carries, so both are kept unless one already
+    contains the other.
+    """
+    stem = os.path.splitext(_basename(filename))[0]
+
+    def flat(text: str) -> str:
+        return " ".join(re.findall(r"[a-z0-9]+", text.lower()))
+
+    if not folder or flat(stem) in flat(folder):
+        return folder or stem
+    if flat(folder) in flat(stem):
+        return stem
+    return f"{folder} - {stem}"
+
+
 def album_to_release(album: Any, book: Dict[str, Any]) -> Optional[Any]:
     """Turn one slskd folder into a release the ranker can score.
 
@@ -167,6 +220,12 @@ def album_to_release(album: Any, book: Dict[str, Any]) -> Optional[Any]:
     # peer actually named the book, so it carries the narrator and the
     # unabridged marker the same way a torrent name does.
     name = folder_name(album)
+    single = bool(getattr(album, "single_file", False))
+    guid = f"soulseek::{username}::{album_path}"
+    if single:
+        name = _single_file_title(name, files[0]["filename"])
+        # Several lone books can share one peer folder ("Audiobooks").
+        guid = f"{guid}::{_basename(files[0]['filename'])}"
     size = sum(int(entry.get("size") or 0) for entry in files)
     durations = [entry["duration"] for entry in files if entry.get("duration") is not None]
     # Missing/zero chapter lengths are unknown, not silence. A partial sum is
@@ -186,7 +245,7 @@ def album_to_release(album: Any, book: Dict[str, Any]) -> Optional[Any]:
         # and knowing who it came from is what lets a user recognise a good one.
         indexer=f"soulseek:{username}",
         size_bytes=size,
-        guid=f"soulseek::{username}::{album_path}",
+        guid=guid,
         download_url=None,
         magnet_uri=None,
         # Free upload slots stand in for seeders: both answer "can I actually
@@ -205,6 +264,7 @@ def album_to_release(album: Any, book: Dict[str, Any]) -> Optional[Any]:
             "album_path": album_path,
             "files": files,
             "file_count": len(files),
+            "single_file": single,
             "queue_length": int(getattr(album, "queue_length", 0) or 0),
             "duration_seconds": total_duration_sec,
         },
@@ -250,12 +310,13 @@ def search(
     collected: List[Any] = []
     for query in queries:
         try:
-            _tracks, albums = _run(client.search(query))
+            tracks, albums = _run(client.search(query, extra_extensions=_SEARCH_EXTRA_EXTENSIONS))
         except Exception as exc:                            # noqa: BLE001
             logger.warning("Soulseek audiobook search failed for %r: %s", query, exc)
             continue
 
-        for album in albums or []:
+        lone = [single_file_folder(track) for track in tracks or []]
+        for album in list(albums or []) + [folder for folder in lone if folder is not None]:
             release = album_to_release(album, book)
             if release is not None:
                 collected.append(release)
@@ -317,8 +378,14 @@ def grab(release: Any, save_path: Optional[str] = None, client: Any = None) -> D
                 "refs": [], "username": username, "folder": ""}
 
     logger.info("Started %d/%d files from %s", len(refs), len(files), username)
+    folder = _folder_of(str(payload.get("album_path") or ""))
+    if payload.get("single_file") and folder:
+        # Point at the file, not its folder: a lone book usually sits in a
+        # shared folder like "Audiobooks", and importing that folder would
+        # sweep in any other book downloaded from it.
+        folder = os.path.join(folder, _basename(str(files[0].get("filename") or "")))
     return {"ok": True, "refs": refs, "username": username,
-            "folder": _folder_of(str(payload.get("album_path") or "")), "error": ""}
+            "folder": folder, "error": ""}
 
 
 def _folder_of(album_path: str) -> str:

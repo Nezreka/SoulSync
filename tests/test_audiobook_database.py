@@ -493,3 +493,89 @@ def test_existing_library_migrates_without_losing_books(tmp_path):
         assert migrated.get_library_scan_state()['checked'] == 1
     finally:
         migrated.close()
+
+
+def test_the_default_path_follows_the_env_override(tmp_path, monkeypatch):
+    # Docker keeps database/ inside the image; without the override every
+    # container recreate wiped the audiobook wishlist.
+    from core.audiobook_database import AudiobookDatabase, subsystem_in_use
+
+    target = tmp_path / "data" / "audiobooks.db"
+    monkeypatch.setenv("AUDIOBOOK_DATABASE_PATH", str(target))
+    assert subsystem_in_use() is False
+
+    db = AudiobookDatabase()
+    assert db.db_path == str(target)
+    assert target.exists()
+    assert subsystem_in_use() is True
+    db.close()
+
+
+def test_an_explicit_path_wins_over_the_env_override(tmp_path, monkeypatch):
+    from core.audiobook_database import AudiobookDatabase
+
+    monkeypatch.setenv("AUDIOBOOK_DATABASE_PATH", str(tmp_path / "env.db"))
+    db = AudiobookDatabase(str(tmp_path / "explicit.db"))
+    assert db.db_path == str(tmp_path / "explicit.db")
+    assert not (tmp_path / "env.db").exists()
+    db.close()
+
+
+def test_without_the_override_the_default_is_unchanged(monkeypatch):
+    from core.audiobook_database import DEFAULT_DB_PATH, resolve_db_path
+
+    monkeypatch.delenv("AUDIOBOOK_DATABASE_PATH", raising=False)
+    assert resolve_db_path() == DEFAULT_DB_PATH
+
+
+def _remove_owned(on: bool):
+    from unittest.mock import patch
+    return patch("core.audiobook_database.remove_owned_from_wishlist", return_value=on)
+
+
+def _owned(db, asin):
+    db.add_to_library({"asin": asin, "title": "Owned"}, f"/books/{asin}")
+
+
+def test_a_finished_book_stays_marked_done_by_default(db):
+    db.add_to_wishlist({"asin": "B000000001", "title": "Wanted"}, profile_id=1)
+    with _remove_owned(False):
+        assert db.mark_wishlist_status("B000000001", "done", profile_id=None)
+    assert db.get_wishlist(1)[0]["status"] == "done"
+
+
+def test_a_finished_book_leaves_the_wishlist_when_asked(db):
+    db.add_to_wishlist({"asin": "B000000001", "title": "Wanted"}, profile_id=1)
+    db.add_to_wishlist({"asin": "B000000001", "title": "Wanted"}, profile_id=2)
+    db.add_to_wishlist({"asin": "B000000002", "title": "Other"}, profile_id=1)
+    with _remove_owned(True):
+        assert db.mark_wishlist_status("B000000001", "done", profile_id=None)
+    assert [r["asin"] for r in db.get_wishlist(1)] == ["B000000002"]
+    assert db.get_wishlist(2) == []
+
+
+def test_other_states_are_untouched_when_removal_is_on(db):
+    db.add_to_wishlist({"asin": "B000000001", "title": "Wanted"}, profile_id=1)
+    with _remove_owned(True):
+        db.mark_wishlist_status("B000000001", "failed", profile_id=1, error="nothing")
+    assert db.get_wishlist(1)[0]["status"] == "failed"
+
+
+def test_reconciling_removes_owned_and_already_done_rows_when_asked(db):
+    db.add_to_wishlist({"asin": "B000000001", "title": "Owned"}, profile_id=1)
+    db.add_to_wishlist({"asin": "B000000002", "title": "Done earlier"}, profile_id=1)
+    db.add_to_wishlist({"asin": "B000000003", "title": "Still wanted"}, profile_id=1)
+    _owned(db, "B000000001")
+    with _remove_owned(False):
+        db.mark_wishlist_status("B000000002", "done", profile_id=1)
+    with _remove_owned(True):
+        assert db.mark_owned_wishlist_done() == 2
+    assert [r["asin"] for r in db.get_wishlist(1)] == ["B000000003"]
+
+
+def test_reconciling_marks_owned_rows_done_by_default(db):
+    db.add_to_wishlist({"asin": "B000000001", "title": "Owned"}, profile_id=1)
+    _owned(db, "B000000001")
+    with _remove_owned(False):
+        assert db.mark_owned_wishlist_done() == 1
+    assert db.get_wishlist(1)[0]["status"] == "done"

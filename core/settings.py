@@ -974,6 +974,9 @@ class ConfigManager:
                 # Chapter files arrive named however the uploader left them.
                 # On by default: a book whose files sort wrong plays wrong.
                 "renumber_chapters": True,
+                # Off keeps an owned book on the wishlist as "In library";
+                # on drops it, like the music wishlist does.
+                "remove_owned_from_wishlist": False,
             },
             "podcasts": {
                 "download_path": default_podcast_path,

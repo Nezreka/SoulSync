@@ -1186,6 +1186,21 @@ def test_library_match_confirmation_keeps_physical_identity_and_origin(client, c
     assert not wishlist_db.is_owned('B000000001')
 
 
+def test_confirming_a_match_finishes_the_wanted_book(client, catalog, wishlist_db):
+    # Without this the wishlist kept hunting a book the user had just
+    # confirmed owning until the next scan or wishlist pass.
+    wishlist_db.add_to_wishlist({'asin': 'B000000001', 'title': 'Wanted'}, profile_id=1)
+    wishlist_db.add_to_library({'asin': 'local:copy', 'title': 'Local'}, '/books/Local', origin='disk')
+    row = wishlist_db.get_library_entry('local:copy')
+    catalog.get_book.return_value = _item('B000000001')
+    result = client.patch('/api/audiobooks/library/local:copy/match', json={
+        'action': 'confirm', 'catalog_asin': 'B000000001',
+        'scan_signature': row['scan_signature'], 'match_revision': row['match_revision'],
+    })
+    assert result.status_code == 200
+    assert wishlist_db.get_wishlist(1)[0]['status'] == 'done'
+
+
 def test_library_match_lookup_failure_does_not_change_ownership(client, catalog, wishlist_db):
     wishlist_db.add_to_library({'asin': 'local:copy', 'title': 'Local'}, '/books/Local')
     row = wishlist_db.get_library_entry('local:copy')
