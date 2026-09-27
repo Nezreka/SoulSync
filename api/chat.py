@@ -1177,8 +1177,8 @@ def create_blueprint() -> Blueprint:
                 if sz == 0 and os.path.exists(fp):
                     try:
                         sz = os.path.getsize(fp)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Failed to get size for %s: %s", fp, exc)
                 total_size += sz
                 share_fn = _to_share_path(fp)
                 out_tracks.append({
