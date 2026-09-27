@@ -104,6 +104,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='discover-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='watchlist-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='chat-overhaul.css', v=static_v) }}">
+    <!-- Wishlist premier redesign — pure reskin + additive wlp-* markup; every
+         JS-referenced hook (.wl-*, #wishlist-*, data-testid) is untouched. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='wishlist-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='profiles.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='docs.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
@@ -6387,25 +6390,6 @@
                                                             already catch previews on their own, so only turn this on if
                                                             you see padded/silent files slip through. Applies to all
                                                             download sources.</div>
-                                                    </div>
-                                                    <div class="form-group">
-                                                        <div class="setting-row">
-                                                            <label class="checkbox-label">
-                                                                <input type="checkbox" id="verify-flac-decode">
-                                                                Verify FLAC files with a full decode (flac -t)
-                                                            </label>
-                                                            <span class="info-icon" role="button" tabindex="0"
-                                                                title="What's this?" onclick="toggleSettingHelp(this)"
-                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                        </div>
-                                                        <div class="setting-help-body" hidden>Decodes every downloaded
-                                                            FLAC with <code>flac -t</code>, which also checks the file's
-                                                            MD5 signature. Catches damaged audio in the middle of a file
-                                                            whose size, header and length all look fine. A file that fails
-                                                            is quarantined and the next source is tried, so a
-                                                            re-download from the Corrupt File Detector can't replace a
-                                                            damaged file with another damaged one. <strong>Off by
-                                                            default:</strong> it fully decodes each FLAC.</div>
                                                     </div>
                                                 </div>
                                             </div><!-- end Audio Verification body -->

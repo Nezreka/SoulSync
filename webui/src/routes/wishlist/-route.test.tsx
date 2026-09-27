@@ -365,11 +365,187 @@ describe('wishlist route', () => {
     });
   });
 
+  it('keeps the audiobook tab on its original presentation', async () => {
+    stubFetch();
+    renderRoute(['/wishlist?media=audiobooks']);
+
+    // Legacy header, not the music hero: the star title and the count meta.
+    await waitFor(() =>
+      expect(document.querySelector('.wishlist-page-title')?.textContent).toContain('Wishlist'),
+    );
+    expect(document.querySelector('.wlp-hero')).not.toBeInTheDocument();
+    // Its original Clear All action is still there.
+    expect(screen.getByRole('button', { name: 'Clear All' })).toBeInTheDocument();
+  });
+
   it('redirects away when the profile may not see the wishlist', async () => {
     stubFetch();
     window.SoulSyncWebShellBridge = createShellBridge({ isPageAllowed: (p) => p !== 'wishlist' });
     const { history } = renderRoute();
     await waitFor(() => expect(history.location.pathname).not.toBe('/wishlist'));
+  });
+
+  it('offers a one-click retry for every stuck track from the triage banner', async () => {
+    const bulkCalls: { action: string; ids: string[] }[] = [];
+    stubFetch({
+      albums: [
+        albumRow('Aphex Twin', 'SAW', 'Xtal', 5),
+        albumRow('Boards of Canada', 'MHTRTC', 'Roygbiv', 0),
+      ],
+    });
+    const base = globalThis.fetch as unknown as (
+      i: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (i: RequestInfo | URL, init?: RequestInit) => {
+        const url = i instanceof Request ? i.url : String(i);
+        if (url.includes('wishlist/bulk')) {
+          // ky POSTs a Request object; the JSON body lives on it, not init.
+          const body = (await (i as Request).json()) as {
+            action: string;
+            track_ids: string[];
+          };
+          bulkCalls.push({ action: body.action, ids: body.track_ids });
+          return res({
+            success: true,
+            results: body.track_ids.map((id) => ({ id, ok: true, message: 'Retrying' })),
+          });
+        }
+        return base(i, init);
+      }),
+    );
+    renderRoute();
+
+    // The banner names the stuck count…
+    await waitFor(() => expect(screen.getByText('Retry all now')).toBeInTheDocument());
+    expect(screen.getByRole('alert')).toHaveTextContent('1 track keeps failing');
+
+    fireEvent.click(screen.getByText('Retry all now'));
+    await waitFor(() => expect(bulkCalls).toHaveLength(1));
+    // …and retries ONLY the stuck track, not the healthy one.
+    expect(bulkCalls[0].action).toBe('retry');
+    expect(bulkCalls[0].ids).toEqual(['Aphex Twin-SAW-Xtal']);
+  });
+
+  it('grabs a whole artist and a single album from the orb fan', async () => {
+    const bulkCalls: { action: string; ids: string[] }[] = [];
+    stubFetch({
+      albums: [albumRow('Aphex Twin', 'SAW', 'Xtal'), albumRow('Aphex Twin', 'SAW', 'Ageispolis')],
+    });
+    const base = globalThis.fetch as unknown as (
+      i: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (i: RequestInfo | URL, init?: RequestInit) => {
+        const url = i instanceof Request ? i.url : String(i);
+        if (url.includes('wishlist/bulk')) {
+          // ky POSTs a Request object; the JSON body lives on it, not init.
+          const body = (await (i as Request).json()) as {
+            action: string;
+            track_ids: string[];
+          };
+          bulkCalls.push({ action: body.action, ids: body.track_ids });
+          return res({
+            success: true,
+            results: body.track_ids.map((id) => ({ id, ok: true, message: 'Queued' })),
+          });
+        }
+        return base(i, init);
+      }),
+    );
+    renderRoute();
+
+    await waitFor(() => expect(document.querySelector('.wl-orb')).toBeTruthy());
+    fireEvent.click(document.querySelector('.wl-orb')!);
+
+    // Fan header: one click queues the artist's whole wishlist share.
+    fireEvent.click(screen.getByLabelText('Download all tracks by Aphex Twin now'));
+    await waitFor(() => expect(bulkCalls).toHaveLength(1));
+    expect(bulkCalls[0]).toEqual({
+      action: 'grab',
+      ids: ['Aphex Twin-SAW-Xtal', 'Aphex Twin-SAW-Ageispolis'],
+    });
+
+    // Album tile: grab just that album.
+    fireEvent.click(screen.getByLabelText('Download album SAW now'));
+    await waitFor(() => expect(bulkCalls).toHaveLength(2));
+    expect(bulkCalls[1].action).toBe('grab');
+    expect(bulkCalls[1].ids).toHaveLength(2);
+  });
+
+  it('removes a whole artist by exact track id, never by album name', async () => {
+    const bulkCalls: { action: string; ids: string[] }[] = [];
+    stubFetch({
+      albums: [albumRow('Aphex Twin', 'SAW', 'Xtal'), albumRow('Aphex Twin', 'SAW', 'Ageispolis')],
+    });
+    const base = globalThis.fetch as unknown as (
+      i: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (i: RequestInfo | URL, init?: RequestInit) => {
+        const url = i instanceof Request ? i.url : String(i);
+        if (url.includes('wishlist/bulk')) {
+          // ky POSTs a Request object; the JSON body lives on it, not init.
+          const body = (await (i as Request).json()) as {
+            action: string;
+            track_ids: string[];
+          };
+          bulkCalls.push({ action: body.action, ids: body.track_ids });
+          return res({
+            success: true,
+            results: body.track_ids.map((id) => ({ id, ok: true, message: 'Skipped' })),
+          });
+        }
+        // The name-based album endpoint must NOT be touched: it matches by
+        // album title across the whole wishlist, so a shared title would
+        // nuke another artist's tracks.
+        if (url.includes('remove-album')) {
+          throw new Error('remove-album must not be used for artist removal');
+        }
+        return base(i, init);
+      }),
+    );
+    window.showConfirmDialog = vi.fn(async () => true);
+    renderRoute();
+
+    await waitFor(() => expect(document.querySelector('.wl-orb')).toBeTruthy());
+    fireEvent.click(document.querySelector('.wl-orb')!);
+    fireEvent.click(screen.getByLabelText('Remove Aphex Twin from the wishlist'));
+
+    await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
+    await waitFor(() => expect(bulkCalls).toHaveLength(1));
+    // Exact ids, one call — no per-album name matching.
+    expect(bulkCalls[0]).toEqual({
+      action: 'skip',
+      ids: ['Aphex Twin-SAW-Xtal', 'Aphex Twin-SAW-Ageispolis'],
+    });
+  });
+
+  it('sorts the nebula without touching the list sort', async () => {
+    stubFetch({
+      albums: [
+        albumRow('Boards of Canada', 'MHTRTC', 'Roygbiv'),
+        albumRow('Aphex Twin', 'SAW', 'Xtal'),
+      ],
+    });
+    renderRoute();
+
+    await waitFor(() => expect(document.querySelectorAll('.wl-orb-group')).toHaveLength(2));
+    const names = () =>
+      [...document.querySelectorAll('.wl-orb-group')].map(
+        (o) => o.getAttribute('data-artist') ?? '',
+      );
+    // Both hold one track: busiest-first keeps API order.
+    expect(names()).toEqual(['Boards of Canada', 'Aphex Twin']);
+
+    fireEvent.change(screen.getByLabelText('Sort nebula'), { target: { value: 'name' } });
+    expect(names()).toEqual(['Aphex Twin', 'Boards of Canada']);
   });
 });
 
