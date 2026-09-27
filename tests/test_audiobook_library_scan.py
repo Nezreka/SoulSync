@@ -155,6 +155,27 @@ def test_a_book_emptied_but_not_deleted_is_forgotten(tmp_path, db):
     assert scan(root=str(tmp_path), db=db)["removed"] == 1
 
 
+def test_a_wanted_book_matched_during_the_scan_is_done_at_once(tmp_path, db):
+    # A disk book without a sidecar only gets its catalogue ASIN from the
+    # matching phase, which runs after the first reconcile.
+    from core.audiobook_database import STATUS_DONE
+    db.add_to_wishlist({"asin": "B08G9PRS1K", "title": "Project Hail Mary"}, profile_id=1)
+    make_book_folder(tmp_path, "Andy Weir", "Project Hail Mary", sidecar=False)
+
+    def fake_match(database, **_kwargs):
+        for row in database.get_library():
+            database.apply_library_match(row["asin"], signature=row["scan_signature"],
+                                         revision=row["match_revision"], status="automatic",
+                                         catalog_asin="B08G9PRS1K", book=BOOK)
+        return {"matched": 1}
+
+    with patch("core.audiobook_library_matching.match_library", side_effect=fake_match):
+        summary = scan(root=str(tmp_path), db=db, match_catalog=True)
+
+    assert summary["wishlist_done"] == 1
+    assert db.get_wishlist(1)[0]["status"] == STATUS_DONE
+
+
 def test_forgetting_a_book_leaves_the_wishlist_alone(tmp_path, db):
     # Deleting a copy says something about the copy, not about wanting the
     # book. Re-queueing it would start a download nobody asked for.
