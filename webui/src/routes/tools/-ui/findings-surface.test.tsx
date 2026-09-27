@@ -1093,6 +1093,46 @@ describe('per-finding actions', () => {
     expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/8/dismiss'))).toBe(true);
     expect(onStatusChanged).toHaveBeenCalled();
   });
+
+  it('opens the Re-identify modal when clicking fix on a suspect_album_tag finding', async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 42,
+          finding_type: 'suspect_album_tag',
+          entity_id: '123',
+          title: 'Suspect album tag: "Song"',
+          details: {
+            track_id: 123,
+            track_title: 'Song',
+            artist_name: 'Artist',
+            album_title: 'Hitzone',
+            reidentify_query: 'Song Artist',
+          },
+        }),
+      ]),
+      '/api/reidentify/sources': {
+        success: true,
+        sources: [{ source: 'spotify', name: 'Spotify', active: true }],
+      },
+      '/api/reidentify/search?source=spotify&q=Song%20Artist': {
+        success: true,
+        results: [],
+      },
+    });
+    await renderList();
+    await flush();
+
+    const fixBtn = document.querySelector('.repair-finding-btn.fix') as HTMLElement;
+    expect(fixBtn).not.toBeNull();
+    expect(fixBtn.textContent).toBe('Re-identify');
+
+    fireEvent.click(fixBtn);
+    await flush();
+
+    expect(document.getElementById('reid-modal')).not.toBeNull();
+    expect(document.getElementById('reid-hero-title')?.textContent).toBe('Song');
+  });
 });
 
 // ── Bulk paths ───────────────────────────────────────────────────────────────

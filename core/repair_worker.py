@@ -96,6 +96,7 @@ FINDING_TYPE_META = {
     'missing_lossy_copy':       {'label': 'Missing Lossy Copy', 'verb': 'Convert'},
     'unwanted_content':         {'label': 'Unwanted Content', 'verb': 'Remove'},
     'unknown_artist':           {'label': 'Unknown Artist', 'verb': 'Identify'},
+    'suspect_album_tag':        {'label': 'Suspect Album Tags', 'verb': 'Re-identify'},
     'acoustid_mismatch':        {'label': 'AcoustID Mismatch', 'verb': 'Re-tag'},
     'quality_upgrade':          {'label': 'Quality Upgrades', 'verb': 'Upgrade'},
     'missing_discography_track':{'label': 'Missing Discography', 'verb': 'Add to Wishlist'},
@@ -164,6 +165,7 @@ JOB_CATEGORIES = {
     'genre_enrichment': 'Tags & metadata',
     'comma_artist_splitter': 'Tags & metadata',
     'unknown_artist_fixer': 'Tags & metadata',
+    'suspect_album_tag_detector': 'Tags & metadata',
     'metadata_gap_filler': 'Tags & metadata',
     'canonical_version_resolve': 'Tags & metadata',
     'missing_cover_art': 'Artwork & lyrics',
@@ -2000,6 +2002,7 @@ class RepairWorker:
             'genre_cleanup': self._fix_genre_cleanup,
             'genre_enrichment': self._fix_genre_enrichment,
             'comma_artist_split': self._fix_comma_artist_split,
+            'suspect_album_tag': self._fix_suspect_album_tag,
         }
 
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
@@ -2009,6 +2012,66 @@ class RepairWorker:
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_suspect_album_tag(self, entity_type, entity_id, file_path, details):
+        """Re-identify a track with suspect album tags.
+
+        If a specific release was picked via fix_action or details ('source:track_id'),
+        apply it via stage_file_for_reidentify.
+        Otherwise, prompt the user to use the Re-identify modal.
+        """
+        source = details.get('source')
+        source_track_id = details.get('source_track_id') or details.get('track_id_picked')
+        fix_action = details.get('_fix_action')
+
+        if isinstance(fix_action, str) and ':' in fix_action:
+            parts = fix_action.split(':', 1)
+            source, source_track_id = parts[0], parts[1]
+
+        if not source or not source_track_id:
+            return {
+                'success': False,
+                'error': 'Please use the Re-identify button to select the target album release.',
+            }
+
+        try:
+            from core.imports.rematch_search import resolve_hint_fields
+            from core.imports.rematch_apply import stage_file_for_reidentify, build_reidentify_hint
+            from core.imports.rematch_hints import create_hint
+            from core.library.path_resolver import resolve_library_file_path
+
+            hint_fields = resolve_hint_fields(source, source_track_id)
+            if not hint_fields:
+                return {'success': False, 'error': 'Could not resolve the selected release metadata'}
+
+            conn = self.db._get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT file_path FROM tracks WHERE id = ?", (str(entity_id),))
+                row = cur.fetchone()
+            finally:
+                conn.close()
+
+            if not row or not row['file_path']:
+                return {'success': False, 'error': 'Library track has no file on disk'}
+
+            resolved = resolve_library_file_path(row['file_path'], transfer_folder=self.transfer_folder, config_manager=self._config_manager)
+            if not resolved or not os.path.exists(resolved):
+                return {'success': False, 'error': f'Source file not found on disk: {row["file_path"]}'}
+
+            staged_path = stage_file_for_reidentify(resolved, self.transfer_folder)
+            replace = bool(details.get('replace', True))
+            hint = build_reidentify_hint(
+                source=source,
+                original_path=row['file_path'],
+                resolved_fields=hint_fields,
+                replace_original=replace,
+            )
+            create_hint(staged_path, hint)
+            return {'success': True, 'action': 'reidentify_staged', 'message': f'Staged for re-identification under {hint_fields.get("album_title", "new album")}'}
+        except Exception as e:
+            logger.error("Failed to apply re-identify for track %s: %s", entity_id, e)
+            return {'success': False, 'error': str(e)}
 
     def _fix_genre_cleanup(self, entity_type, entity_id, file_path, details):
         """#1057 — rewrite a stored genre list to only its whitelisted genres.

@@ -81,6 +81,7 @@ import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
 import { FindingsInbox } from './findings-inbox';
 import { HealthHero } from './health-hero';
+import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
@@ -106,6 +107,7 @@ const TYPE_DEAD = 'dead_file';
 const TYPE_ACOUSTID = 'acoustid_mismatch';
 const TYPE_BACKFILL = 'missing_discography_track';
 const TYPE_QUALITY = 'quality_upgrade';
+const TYPE_SUSPECT_ALBUM = 'suspect_album_tag';
 
 /** Above this many files, a whole-group orphan DELETE goes through the
  *  type-the-phrase dialog. Same number the filter-wide Fix All has always
@@ -195,6 +197,7 @@ export function FindingsSurface({
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
   const [busyFix, setBusyFix] = useState<ReadonlySet<number>>(() => new Set());
+  const [reidentifyingFinding, setReidentifyingFinding] = useState<RepairFinding | null>(null);
 
   const [bulkRun, setBulkRun] = useState<BulkFixStatus | null>(null);
   const bulkTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -487,6 +490,10 @@ export function FindingsSurface({
         }
         // 'add_to_wishlist' falls through with no fix_action — the handler
         // already adds to the wishlist by default.
+      }
+      if (type === TYPE_SUSPECT_ALBUM) {
+        setReidentifyingFinding(finding);
+        return;
       }
 
       setBusyFix((current) => new Set(current).add(finding.id));
@@ -1305,6 +1312,30 @@ export function FindingsSurface({
       )}
 
       {prompts.promptNode}
+
+      {reidentifyingFinding ? (
+        <ReidentifyModal
+          trackId={reidentifyingFinding.entity_id}
+          trackTitle={String(
+            (reidentifyingFinding.details as Record<string, any>)?.track_title ||
+              reidentifyingFinding.title ||
+              '',
+          )}
+          artistName={String((reidentifyingFinding.details as Record<string, any>)?.artist_name || '')}
+          albumTitle={String((reidentifyingFinding.details as Record<string, any>)?.album_title || '')}
+          imageUrl={String((reidentifyingFinding.details as Record<string, any>)?.album_thumb_url || '')}
+          initialQuery={String((reidentifyingFinding.details as Record<string, any>)?.reidentify_query || '')}
+          onApplied={async () => {
+            if (reidentifyingFinding) {
+              await dismissOne(reidentifyingFinding.id);
+            }
+          }}
+          onClose={() => {
+            setReidentifyingFinding(null);
+            refreshAll();
+          }}
+        />
+      ) : null}
     </>
   );
 }
