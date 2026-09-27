@@ -1390,7 +1390,7 @@ async function _emRunMatchSearch(service, entityType, entityId, query, container
                     <div class="enhanced-match-result-id">ID: ${_emEscape(r.id)}${providerLabel}</div>
                 </div>`;
             const btn = document.createElement('button');
-            btn.className = 'enhanced-meta-save-btn';
+            btn.className = 'enhanced-meta-save-btn lib-btn primary';
             btn.textContent = 'Match';
             btn.onclick = () => _emApplyMatch(entityType, entityId, r.provider || service, r.id, overlay);
             row.appendChild(btn);
