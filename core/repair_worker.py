@@ -57,7 +57,7 @@ _ABSENCE_IS_THE_FINDING = frozenset({'dead_file', 'empty_folder'})
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
     'dead_file',              # 'remove' drops the library row + file
-    'corrupt_audio',          # deletes and re-wishlists
+    'corrupt_audio',          # moves to the deleted-files folder, re-wishlists
     'unwanted_content',       # deletes/quarantines live + spoken content
     'short_preview_track',    # deletes the clip, re-wishlists the real track
     'expired_download',       # deletes the aged download
@@ -101,7 +101,10 @@ FINDING_TYPE_META = {
     'missing_discography_track':{'label': 'Missing Discography', 'verb': 'Add to Wishlist'},
     'library_retag':            {'label': 'Library Re-tag', 'verb': 'Apply Tags'},
     'short_preview_track':      {'label': 'Preview Clips', 'verb': 'Re-download'},
-    'corrupt_audio':            {'label': 'Corrupt Audio', 'verb': 'Re-download'},
+    'corrupt_audio':            {'label': 'Corrupt Audio', 'verb': 'Re-download',
+                                 'confirm': ('The damaged files move to the deleted-files folder, where they '
+                                             'can be restored until retention clears them, and the tracks '
+                                             'are re-downloaded.')},
     'canonical_version':        {'label': 'Canonical Version', 'verb': 'Pin Version'},
     'genre_cleanup':            {'label': 'Genre Cleanup', 'verb': 'Clean Genres'},
     'comma_artist_split':       {'label': 'Combined Artists', 'verb': 'Split Artists'},
@@ -1952,6 +1955,9 @@ class RepairWorker:
                 'fixable': fixable,
                 'destructive': slug in DESTRUCTIVE_FINDING_TYPES,
                 'job_ids': sorted(jobs_by_type.get(slug, [])),
+                # What the bulk-fix confirmation says for this type, where the
+                # generic "moves or deletes files ... cannot be undone" is wrong.
+                **({'confirm': meta['confirm']} if meta.get('confirm') else {}),
             })
         return catalog
 

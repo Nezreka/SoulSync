@@ -500,3 +500,23 @@ def test_the_finding_says_the_file_is_quarantined_not_deleted(tmp_path, monkeypa
     _, findings, _ = _run(db, tmp_path, monkeypatch, verdicts={files[0]: (False, "bad")})
     assert "deleted-files folder" in findings[0]["description"]
     assert "DELETES" not in AudioCorruptionDetectorJob.help_text
+
+
+def test_the_summary_counts_a_reconfirmed_corrupt_file(tmp_path, monkeypatch):
+    # A second run re-tests a damaged file whose finding already exists: no NEW
+    # finding, but it is still corrupt and the summary must say so.
+    db, files = _library(tmp_path, count=2)
+    bad = {files[0]: (False, "bad")}
+    _run(db, tmp_path, monkeypatch, verdicts=bad)
+
+    lines = []
+    monkeypatch.setattr(mod.logger, "info", lambda msg, *args: lines.append(msg % args))
+    cfg = MagicMock()
+    cfg.get.side_effect = lambda key, default=None: default
+    ctx = JobContext(db=db, transfer_folder=str(tmp_path), config_manager=cfg,
+                     create_finding=lambda **kw: False)          # already has a finding
+    result = AudioCorruptionDetectorJob().scan(ctx)
+
+    assert result.findings_created == 0
+    summary = [line for line in lines if "decode-tested" in line][-1]
+    assert "1 corrupt (0 new findings)" in summary

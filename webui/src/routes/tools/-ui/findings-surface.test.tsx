@@ -528,6 +528,39 @@ describe('the findings inbox', () => {
     );
   });
 
+  it("uses the type's own confirmation when the generic warning would be wrong", async () => {
+    // Corrupt files are quarantined, not deleted: "cannot be undone" is untrue.
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'corrupt_audio', pending: 2 })] },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'corrupt_audio',
+            label: 'Corrupt Audio',
+            verb: 'Re-download',
+            destructive: true,
+            confirm: 'The damaged files move to the deleted-files folder.',
+          }),
+        ],
+      },
+      '/bulk-fix-start': { started: true, total: 2 },
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(screen.getByText('Re-download…'));
+    await flush();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destructive: true,
+        message: expect.stringContaining('The damaged files move to the deleted-files folder.'),
+      }),
+    );
+    expect(confirmSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('cannot be undone') }),
+    );
+  });
+
   it('still gates a mass orphan delete behind the witness-me phrase', async () => {
     routes({
       [GROUPS]: { groups: [group({ finding_type: 'orphan_file', pending: 120 })] },

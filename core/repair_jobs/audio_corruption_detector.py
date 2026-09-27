@@ -361,7 +361,7 @@ class AudioCorruptionDetectorJob(RepairJob):
 
         # Pass 2: decode. Only the tests run on the pool; everything they
         # report is handled here, on this thread.
-        tested = 0
+        tested = corrupt = 0
         done = total - len(work)
         since_commit = 0
         stopped = False
@@ -383,8 +383,8 @@ class AudioCorruptionDetectorJob(RepairJob):
                     done += 1
                     tested += 1
                     since_commit += 1
-                    self._handle_verdict(context, result, memory, row, resolved,
-                                         identity_before, future, done, total)
+                    corrupt += self._handle_verdict(context, result, memory, row, resolved,
+                                                    identity_before, future, done, total)
                 if memory and since_commit >= 50:
                     memory.commit()
                     since_commit = 0
@@ -410,9 +410,11 @@ class AudioCorruptionDetectorJob(RepairJob):
         # the old line reported every skip as tested, which hid the path-
         # resolution failure completely ('6741 decode-tested ... in 0.1s').
         logger.info(
-            "[Corrupt File Detector] %d of %d FLAC files decode-tested, %d corrupt, "
-            "%d passed recently, %d path-unresolved, %d outside the modified window",
-            tested, total, result.findings_created, remembered, unresolved, outside_window)
+            "[Corrupt File Detector] %d of %d FLAC files decode-tested, %d corrupt "
+            "(%d new findings), %d passed recently, %d path-unresolved, "
+            "%d outside the modified window",
+            tested, total, corrupt, result.findings_created, remembered, unresolved,
+            outside_window)
         if total and unresolved == total:
             # Every single path failed to resolve — that's a mapping problem,
             # not a healthy library. Say so where the user is looking.
@@ -426,7 +428,8 @@ class AudioCorruptionDetectorJob(RepairJob):
         return result
 
     def _handle_verdict(self, context, result, memory, row, resolved,
-                        identity_before, future, done, total) -> None:
+                        identity_before, future, done, total) -> bool:
+        """Record one decode verdict. True when the file is corrupt."""
         title = row['title'] or 'Unknown'
         artist = row['artist_name'] or 'Unknown'
         if context.report_progress:
@@ -442,7 +445,7 @@ class AudioCorruptionDetectorJob(RepairJob):
             logger.debug("[Corrupt File Detector] decode test errored for %s: %s",
                          os.path.basename(resolved), e)
             result.errors += 1
-            return
+            return False
 
         # A decode verdict only means something if the bytes under it held
         # still. The scan walks the library while the import pipeline is
@@ -462,12 +465,12 @@ class AudioCorruptionDetectorJob(RepairJob):
                 context.report_progress(
                     log_line=(f'Skipped {artist} — {title}: the file changed '
                               f'while it was being tested'), log_type='info')
-            return
+            return False
 
         if ok:
             if memory:
                 memory.passed(resolved, identity_after)
-            return
+            return False
         if memory:
             memory.forget(resolved)
 
@@ -506,6 +509,7 @@ class AudioCorruptionDetectorJob(RepairJob):
                 logger.debug("[Corrupt File Detector] create finding failed for track %s: %s",
                              row['id'], e)
                 result.errors += 1
+        return True
 
     def estimate_scope(self, context: JobContext) -> int:
         conn = None
