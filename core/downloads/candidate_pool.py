@@ -9,7 +9,7 @@ with the reason they lost, capped so a 400-hit Soulseek search doesn't ship
 from __future__ import annotations
 
 import os
-from typing import Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from core.downloads.decisions import Decision, reject, rejection_counts
 
@@ -70,6 +70,7 @@ def build_source_rows(
     *,
     source_name: str,
     is_blacklisted: Callable[[str, str], bool],
+    is_failed_blocked: Optional[Callable[[Any], bool]] = None,
     reject_cap: int = REJECTED_ROW_CAP,
 ) -> dict:
     """Turn ``[(query, [(candidate, Decision), ...]), ...]`` into the payload.
@@ -77,7 +78,9 @@ def build_source_rows(
     The same file often comes back for both queries; one row per
     (username, filename), and an accepted sighting beats a rejected one.
     A blacklisted file is a rejection whatever validation said, since the
-    download worker skips it anyway.
+    download worker skips it anyway. A failed-blocklisted file (terminal
+    import give-up, core/downloads/failed_blocklist.py) is rejected the same
+    way, through the existing 'blacklisted' code.
     """
     picked: dict = {}
     order = []
@@ -96,6 +99,9 @@ def build_source_rows(
         candidate, decision, query = picked[key]
         if decision.accepted and _safe_blacklisted(is_blacklisted, *key):
             decision = reject('blacklisted', 'you blacklisted this file', decision.score)
+        elif (decision.accepted and is_failed_blocked is not None
+                and _safe_failed_blocked(is_failed_blocked, candidate)):
+            decision = reject('blacklisted', 'this file failed import before', decision.score)
         (accepted if decision.accepted else rejected).append((candidate, decision, query))
 
     accepted.sort(key=lambda t: -(t[1].score or 0))
@@ -114,6 +120,13 @@ def _safe_blacklisted(is_blacklisted, username, filename) -> bool:
     try:
         return bool(is_blacklisted(username, filename))
     except Exception:  # noqa: BLE001 - a blacklist read must not sink the search
+        return False
+
+
+def _safe_failed_blocked(is_failed_blocked, candidate) -> bool:
+    try:
+        return bool(is_failed_blocked(candidate))
+    except Exception:  # noqa: BLE001 - a blocklist read must not sink the search
         return False
 
 

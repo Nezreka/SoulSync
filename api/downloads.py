@@ -150,3 +150,46 @@ def register_routes(bp):
             return api_success({"message": "All downloads cancelled and cleared."})
         except Exception as e:
             return api_error("DOWNLOAD_ERROR", str(e), 500)
+
+    @bp.route("/downloads/failed-blocklist", methods=["GET"])
+    @require_api_key
+    def list_failed_blocklist():
+        """List the persistent failed-download blocklist, newest first.
+
+        Query params:
+            limit: max entries (default 200, max 1000).
+
+        Separate from the user's download blocklist and the quarantine: these
+        are files that terminally failed import after every quarantine retry.
+        """
+        try:
+            from database.music_database import get_database
+            from core.downloads.failed_blocklist import list_route
+            data, status = list_route(get_database(),
+                                      limit=request.args.get("limit", 200))
+            if status == 200:
+                return api_success(data)
+            return api_error("BLOCKLIST_ERROR", data["message"], status)
+        except Exception as e:
+            return api_error("BLOCKLIST_ERROR", str(e), 500)
+
+    @bp.route("/downloads/failed-blocklist", methods=["DELETE"])
+    @require_api_key
+    def delete_failed_blocklist_entry():
+        """Unblock one fingerprint.
+
+        Body: {"fingerprint": "..."}
+        """
+        body = request.get_json(silent=True) or {}
+        fp = body.get("fingerprint")
+        if not fp:
+            return api_error("BAD_REQUEST", "Missing 'fingerprint' in body.", 400)
+        try:
+            from database.music_database import get_database
+            from core.downloads.failed_blocklist import delete_route
+            data, status = delete_route(get_database(), fp)
+            if status == 200:
+                return api_success(data)
+            return api_error("BLOCKLIST_ERROR", data["message"], status)
+        except Exception as e:
+            return api_error("BLOCKLIST_ERROR", str(e), 500)

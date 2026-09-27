@@ -101,7 +101,6 @@ export interface WishlistArtistGroup {
 
 /** The three bulk queue actions POST /api/wishlist/bulk supports. */
 export type WishlistBulkAction = 'grab' | 'skip' | 'retry';
-
 /** One per-item outcome from a bulk action. */
 export interface WishlistBulkResult {
   id: string;
@@ -117,5 +116,22 @@ export interface WishlistBulkResponse {
   success?: boolean;
   batch_id?: string;
   results?: WishlistBulkResult[];
+  error?: string;
+}
+
+/** A wishlist retry profile: how long failing tracks cool down between cycles. */
+export interface WishlistRetryProfile {
+  name: string;
+  label: string;
+  description: string;
+  /** Attempt count → cooldown seconds; attempts past the ladder use max_cooldown. */
+  ladder: Record<string, number>;
+  max_cooldown: number;
+}
+
+export interface WishlistRetryProfileResponse {
+  success?: boolean;
+  profile?: WishlistRetryProfile;
+  profiles?: WishlistRetryProfile[];
   error?: string;
 }

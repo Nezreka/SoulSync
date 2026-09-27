@@ -221,6 +221,39 @@ def set_wishlist_cycle(runtime: WishlistRouteRuntime, cycle: str) -> tuple[Dict[
         return {"error": str(exc)}, 500
 
 
+def get_retry_profile(runtime: WishlistRouteRuntime) -> tuple[Dict[str, Any], int]:
+    """The active wishlist retry profile plus every selectable profile."""
+    try:
+        from core.wishlist.retry_backoff import (
+            get_active_retry_profile, list_retry_profiles, profile_to_json)
+        database = runtime.get_music_database()
+        profile = get_active_retry_profile(database)
+        return {
+            "success": True,
+            "profile": profile_to_json(profile),
+            "profiles": [profile_to_json(p) for p in list_retry_profiles(database)],
+        }, 200
+    except Exception as exc:
+        runtime.logger.error("Error getting wishlist retry profile: %s", exc)
+        return {"error": str(exc)}, 500
+
+
+def set_retry_profile(runtime: WishlistRouteRuntime,
+                      payload: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
+    """Set the active wishlist retry profile. An invalid body is a 400."""
+    try:
+        from core.wishlist.retry_backoff import set_active_retry_profile, profile_to_json
+        try:
+            profile = set_active_retry_profile(runtime.get_music_database(), payload or {})
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        runtime.logger.info("Wishlist retry profile set to: %s", profile["name"])
+        return {"success": True, "profile": profile_to_json(profile)}, 200
+    except Exception as exc:
+        runtime.logger.error("Error setting wishlist retry profile: %s", exc)
+        return {"error": str(exc)}, 500
+
+
 def _needs_image_fix(url: str | None) -> bool:
     """True when an image URL won't render in the browser as-is — a media-server RELATIVE
     path (/library/.., /Items/.., /rest/..) or an internal/localhost host. Spotify/iTunes CDN

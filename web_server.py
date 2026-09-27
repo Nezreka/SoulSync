@@ -11241,6 +11241,15 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
     from core.downloads.candidate_pool import build_source_rows, empty_source_rows
     from core.quality.source_map import quality_profile_context
 
+    def _is_failed_blocklisted(candidate, source_name):
+        """Files that terminally failed import skip the inspector too —
+        fail-open, a blocklist read never sinks the search."""
+        try:
+            from core.downloads.failed_blocklist import is_candidate_blocked
+            return is_candidate_blocked(database, candidate, source_name)
+        except Exception:  # noqa: BLE001
+            return False
+
     bar = None
     if upgrade:
         from core.quality.upgrades import apply_upgrade_bar, upgrade_bar
@@ -11266,6 +11275,7 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
                 logger.debug(f"[{log_tag}] {source_name} search failed for query '{q}': {e}")
         return build_source_rows(
             evaluated, source_name=source_name, is_blacklisted=database.is_blacklisted,
+            is_failed_blocked=lambda c: _is_failed_blocklisted(c, source_name),
         )
 
     def generate_stream():

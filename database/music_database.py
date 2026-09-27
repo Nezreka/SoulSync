@@ -3556,7 +3556,7 @@ class MusicDatabase:
                 CREATE TABLE IF NOT EXISTS discovery_inbox (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     profile_id INTEGER NOT NULL DEFAULT 1,
-                    kind TEXT NOT NULL,               -- new_release | upcoming | saved_rec | concert
+                    kind TEXT NOT NULL,               -- new_release | upcoming | saved_rec | concert | artist_news
                     entity_key TEXT NOT NULL,
                     title TEXT NOT NULL,
                     artist_name TEXT,
@@ -3571,6 +3571,29 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_inbox_state "
                            "ON discovery_inbox (profile_id, state)")
+
+            # Persistent failed-download blocklist: files that burned every
+            # quarantine retry and hit a terminal import give-up. Fingerprint
+            # = SHA1(service | normalized artist | normalized title | size);
+            # Soulseek peers collapse to the service 'soulseek'. 90-day
+            # expiry, capped at 5000 rows. Separate from the user's download
+            # blocklist (username/filename they flagged) and the quarantine.
+            # core/downloads/failed_blocklist.py owns it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS failed_download_blocklist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fingerprint TEXT NOT NULL UNIQUE,
+                    service TEXT NOT NULL DEFAULT '',
+                    artist TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    reason TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_failed_blocklist_expires "
+                           "ON failed_download_blocklist (expires_at)")
 
             # Renewable mixes: a recipe (seeds / genres, years, source mix,
             # length, schedule) per row; each generation is stored as a
@@ -21521,6 +21544,114 @@ class MusicDatabase:
         except Exception as e:
             logger.debug("Error linking download decision for %s: %s", task_key, e)
             return False
+        finally:
+            if conn:
+                conn.close()
+
+    # ---- failed-download blocklist -------------------------------------------
+    # core/downloads/failed_blocklist.py owns the fingerprinting and the
+    # fail-open policy; these methods are the SQL surface it calls.
+
+    def record_failed_download(self, fingerprint: str, service: str, artist: str,
+                               title: str, size_bytes: int, reason: str,
+                               expires_at: str, max_entries: int) -> bool:
+        """Block a fingerprint until expires_at. Re-recording refreshes the
+        expiry; oldest rows past max_entries are dropped."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO failed_download_blocklist "
+                "(fingerprint, service, artist, title, size_bytes, reason, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(fingerprint) DO UPDATE SET "
+                "expires_at = excluded.expires_at, reason = excluded.reason, "
+                "created_at = CURRENT_TIMESTAMP",
+                (fingerprint, service, artist, title, size_bytes, reason, expires_at))
+            cursor.execute(
+                "DELETE FROM failed_download_blocklist WHERE id NOT IN "
+                "(SELECT id FROM failed_download_blocklist "
+                "ORDER BY created_at DESC, id DESC LIMIT ?)",
+                (max_entries,))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("Error recording failed download blocklist entry: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def is_download_blocked(self, fingerprint: str, now: str) -> bool:
+        """Is this fingerprint currently blocked (unexpired)?"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                "SELECT 1 FROM failed_download_blocklist "
+                "WHERE fingerprint = ? AND expires_at > ?",
+                (fingerprint, now)).fetchone()
+            return row is not None
+        except Exception as e:
+            logger.debug("Error checking failed download blocklist: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def list_failed_downloads(self, limit: int = 200) -> list:
+        """Newest blocklist entries first, for the API."""
+        try:
+            limit = max(1, min(int(limit or 200), 1000))
+        except (TypeError, ValueError):
+            limit = 200
+        conn = None
+        try:
+            conn = self._get_connection()
+            rows = conn.execute(
+                "SELECT fingerprint, service, artist, title, size_bytes, "
+                "reason, created_at, expires_at FROM failed_download_blocklist "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                (limit,)).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.debug("Error listing failed download blocklist: %s", e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def remove_failed_download(self, fingerprint: str) -> bool:
+        """Unblock one fingerprint. True when a row was actually removed."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.execute(
+                "DELETE FROM failed_download_blocklist WHERE fingerprint = ?",
+                (str(fingerprint or ''),))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug("Error removing failed download blocklist entry: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def clear_expired_failed_downloads(self, now: str) -> int:
+        """Delete expired blocklist rows. Returns the number removed."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.execute(
+                "DELETE FROM failed_download_blocklist WHERE expires_at <= ?",
+                (now,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.debug("Error clearing expired failed download blocklist: %s", e)
+            return 0
         finally:
             if conn:
                 conn.close()

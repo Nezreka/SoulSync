@@ -69751,6 +69751,28 @@ body.max-performance #page-particles-canvas {
     color: rgb(var(--accent-light-rgb));
 }
 
+/* Retry profile select in the stats strip — reads as a stat value. */
+.wishlist-retry-profile-select {
+    background: transparent;
+    border: 0;
+    color: rgb(var(--accent-light-rgb));
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+    max-width: 10rem;
+    text-overflow: ellipsis;
+}
+.wishlist-retry-profile-select:disabled {
+    cursor: wait;
+    opacity: 0.7;
+}
+.wishlist-retry-profile-select option {
+    color: #111;
+    font-weight: 400;
+}
+
 .wishlist-stat-label {
     font-size: 11px;
     font-weight: 500;

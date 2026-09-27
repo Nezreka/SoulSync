@@ -36,6 +36,8 @@ from core.wishlist.routes import (
     get_wishlist_count as _wishlist_get_wishlist_count,
     get_wishlist_cycle as _wishlist_get_wishlist_cycle,
     get_wishlist_stats as _wishlist_get_wishlist_stats,
+    get_retry_profile as _wishlist_get_retry_profile,
+    set_retry_profile as _wishlist_set_retry_profile,
     get_wishlist_tracks as _wishlist_get_wishlist_tracks,
     process_wishlist_api as _wishlist_process_api,
     remove_album_from_wishlist as _wishlist_remove_album_from_wishlist,
@@ -170,6 +172,33 @@ def set_wishlist_cycle():
     except Exception as e:
         logger.error(f"Error setting wishlist cycle: {e}")
         return jsonify({"error": str(e)}), 500
+
+@bp.route('/api/wishlist/retry-profile', methods=['GET'])
+def get_wishlist_retry_profile():
+    """
+    Get the active wishlist retry profile and the profiles to choose from.
+
+    Returns:
+        {
+            "profile": {name, label, description, ladder, max_cooldown},
+            "profiles": [...]
+        }
+    """
+    payload, status = _wishlist_get_retry_profile(_build_wishlist_route_runtime())
+    return jsonify(payload), status
+
+@bp.route('/api/wishlist/retry-profile', methods=['PUT'])
+def set_wishlist_retry_profile():
+    """
+    Set the active wishlist retry profile.
+
+    Body:
+        {"profile": "standard" | "aggressive" | "patient"} or
+        {"profile": "custom", "ladder": {"2": 3600, ...}, "max_cooldown": 86400}
+    """
+    payload, status = _wishlist_set_retry_profile(
+        _build_wishlist_route_runtime(), request.get_json(force=True, silent=True) or {})
+    return jsonify(payload), status
 
 @bp.route('/api/discovery/lookback-period', methods=['GET'])
 def get_discovery_lookback_period():

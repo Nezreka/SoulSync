@@ -7,6 +7,7 @@ from core.wishlist.routes import (
     add_album_track_to_wishlist,
     bulk_wishlist_action,
     clear_wishlist,
+    get_retry_profile,
     get_wishlist_count,
     get_wishlist_cycle,
     get_wishlist_stats,
@@ -16,6 +17,7 @@ from core.wishlist.routes import (
     remove_batch_from_wishlist,
     remove_track_from_wishlist,
     set_wishlist_cycle,
+    set_retry_profile,
 )
 
 
@@ -112,6 +114,13 @@ class _FakeMusicDatabase:
         self.ignore_writes = []
         self.retry_resets = []
         self.wishlist_rows = {}
+        self.metadata = {}
+
+    def get_metadata(self, key, default=None):
+        return self.metadata.get(key, default)
+
+    def set_metadata(self, key, value):
+        self.metadata[key] = value
 
     def _get_connection(self):
         return _FakeConnection(self)
@@ -777,3 +786,50 @@ def test_bulk_grab_without_runner_is_500():
 
     assert status == 500
     assert payload["success"] is False
+
+
+def test_get_retry_profile_defaults_to_standard():
+    runtime, _service, _db, _logger, _a = _build_runtime()
+
+    payload, status = get_retry_profile(runtime)
+
+    assert status == 200
+    assert payload["success"] is True
+    assert payload["profile"]["name"] == "standard"
+    assert {p["name"] for p in payload["profiles"]} == {
+        "standard", "aggressive", "patient"}             # custom is API-only
+
+
+def test_set_retry_profile_switches_and_persists():
+    runtime, _service, _db, _logger, _a = _build_runtime()
+
+    payload, status = set_retry_profile(runtime, {"profile": "patient"})
+
+    assert status == 200
+    assert payload["profile"]["name"] == "patient"
+    payload, status = get_retry_profile(runtime)
+    assert status == 200
+    assert payload["profile"]["name"] == "patient"
+
+
+def test_set_retry_profile_rejects_garbage_with_400():
+    runtime, _service, _db, _logger, _a = _build_runtime()
+
+    payload, status = set_retry_profile(runtime, {"profile": "turbo"})
+
+    assert status == 400
+    assert "error" in payload
+    # the active profile is unchanged
+    payload, _ = get_retry_profile(runtime)
+    assert payload["profile"]["name"] == "standard"
+
+
+def test_set_retry_profile_accepts_a_custom_ladder():
+    runtime, _service, _db, _logger, _a = _build_runtime()
+
+    payload, status = set_retry_profile(runtime, {
+        "profile": "custom", "ladder": {"2": 600, "3": 3600}, "max_cooldown": 7200})
+
+    assert status == 200
+    assert payload["profile"]["name"] == "custom"
+    assert payload["profile"]["ladder"] == {"2": 600, "3": 3600}

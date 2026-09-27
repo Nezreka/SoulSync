@@ -6,6 +6,7 @@ import type {
   WishlistBulkAction,
   WishlistBulkResponse,
   WishlistCycleResponse,
+  WishlistRetryProfileResponse,
   WishlistStatsResponse,
   WishlistTracksResponse,
 } from './-wishlist.types';
@@ -29,6 +30,27 @@ export function wishlistCycleQueryOptions(profileId: number) {
     queryKey: [...WISHLIST_QUERY_KEY, 'cycle', profileId] as const,
     queryFn: () => readJson<WishlistCycleResponse>(apiClient.get('wishlist/cycle')),
   });
+}
+
+/**
+ * The wishlist retry profile: how long repeatedly-failing tracks cool down
+ * between scheduled cycles. The profile is global, not per-profile, but the
+ * query is still keyed by profile like every other wishlist query.
+ */
+export function wishlistRetryProfileQueryOptions(profileId: number) {
+  return queryOptions({
+    queryKey: [...WISHLIST_QUERY_KEY, 'retry-profile', profileId] as const,
+    queryFn: () => readJson<WishlistRetryProfileResponse>(apiClient.get('wishlist/retry-profile')),
+  });
+}
+
+/** Set the active retry profile by name; a custom ladder stays API-only. */
+export async function setWishlistRetryProfile(name: string): Promise<WishlistRetryProfileResponse> {
+  const payload = await readJson<WishlistRetryProfileResponse>(
+    apiClient.put('wishlist/retry-profile', { json: { profile: name } }),
+  );
+  assertSuccess(payload, 'Could not change the retry profile.');
+  return payload;
 }
 
 export function wishlistTracksQueryOptions(profileId: number, category: 'albums' | 'singles') {

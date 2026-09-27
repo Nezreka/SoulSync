@@ -47,6 +47,18 @@ describe('inboxWhen', () => {
     ).toBe('Because you listen to Tool');
     expect(inboxWhen(item({ kind: 'saved_rec' }), TODAY)).toBe('Saved');
   });
+
+  it('dates artist news', () => {
+    const news = (d: string) => inboxWhen(item({ kind: 'artist_news', item_date: d }), TODAY);
+    expect(news('2026-08-20')).toBe('News · Aug 20');
+    expect(news('')).toBe('News');
+    expect(inboxKindLabel('artist_news')).toBe('Artist news');
+    expect(isRelease(item({ kind: 'artist_news' }))).toBe(false);
+  });
+
+  it('names the news source when it does not answer', () => {
+    expect(unansweredLine(['news'])).toBe("Artist news didn't answer, showing the rest");
+  });
 });
 
 describe('the rest', () => {

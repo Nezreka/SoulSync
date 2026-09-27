@@ -33,6 +33,14 @@ const SAVED = {
   artist_name: 'Karnivool',
   payload: { entity_type: 'artist', ids: { deezer: 'dz-k' } },
 };
+const NEWS = {
+  id: 4,
+  kind: 'artist_news',
+  title: 'Tour announced',
+  artist_name: 'Tool',
+  item_date: '2026-08-20',
+  payload: { url: 'https://news/1', provider: 'wire' },
+};
 
 let states: { id: string; state: unknown }[] = [];
 let dismissedAll = 0;
@@ -125,6 +133,15 @@ describe('DiscoveryInbox', () => {
     expect(screen.queryByLabelText('Save Karnivool')).toBeNull();
     expect(screen.getByText('Artist').getAttribute('href')).toBe('/artist/Karnivool');
     expect(screen.getByLabelText('Remove Karnivool')).toBeTruthy();
+  });
+
+  it('shows artist news with its date and an external Read link', async () => {
+    stub({ new: [NEWS] });
+    mount();
+    await screen.findByText('Tour announced');
+    expect(screen.getByText('Artist news')).toBeTruthy();
+    expect(screen.getByText('Tool · News · Aug 20')).toBeTruthy();
+    expect(screen.getByText('Read').getAttribute('href')).toBe('https://news/1');
   });
 
   it('says which source did not answer instead of going blank', async () => {

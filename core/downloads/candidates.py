@@ -497,6 +497,16 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 continue
         except Exception as e:
             logger.debug("blacklist check failed: %s", e)
+
+        # Failed-download blocklist — skip files that terminally failed import
+        # before (quarantine retries exhausted). Fail-open, like the check above.
+        try:
+            from core.downloads.failed_blocklist import is_candidate_blocked
+            if is_candidate_blocked(deps.get_database(), candidate):
+                logger.info(f"[Modal Worker] Skipping failed-blocklisted file: {source_key}")
+                continue
+        except Exception as e:
+            logger.debug("failed-blocklist check failed: %s", e)
         
         # CRITICAL: Add source to used_sources IMMEDIATELY to prevent race conditions
         # This must happen BEFORE starting download to prevent multiple retries from picking same source

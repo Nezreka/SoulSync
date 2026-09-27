@@ -11,9 +11,11 @@ import {
   bulkWishlistAction,
   removeWishlistAlbum,
   removeWishlistTrack,
+  setWishlistRetryProfile,
   WISHLIST_QUERY_KEY,
   wishlistArtistPhotosQueryOptions,
   wishlistCycleQueryOptions,
+  wishlistRetryProfileQueryOptions,
   wishlistStatsQueryOptions,
   wishlistTracksQueryOptions,
 } from '../-wishlist.api';
@@ -66,6 +68,7 @@ export function WishlistPage() {
 
   const statsQuery = useQuery(wishlistStatsQueryOptions(profileId));
   const cycleQuery = useQuery(wishlistCycleQueryOptions(profileId));
+  const retryProfileQuery = useQuery(wishlistRetryProfileQueryOptions(profileId));
   const albumsQuery = useQuery(wishlistTracksQueryOptions(profileId, 'albums'));
   const singlesQuery = useQuery(wishlistTracksQueryOptions(profileId, 'singles'));
   const photosQuery = useQuery(wishlistArtistPhotosQueryOptions(profileId));
@@ -148,6 +151,24 @@ export function WishlistPage() {
       );
       void refresh();
       window.updateWishlistCount?.();
+    },
+    onError: (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error'),
+  });
+
+  // The retry profile select lives in the stats strip. A custom ladder stays
+  // API-only: it shows as the current value when active, but can't be picked.
+  const retryProfileData = retryProfileQuery.data;
+  const retryProfileOptions = retryProfileData?.profiles ?? [];
+  const activeIsCustom =
+    retryProfileData?.profile?.name === 'custom' &&
+    !retryProfileOptions.some((p) => p.name === 'custom');
+  const retryProfileMutation = useMutation({
+    mutationFn: (name: string) => setWishlistRetryProfile(name),
+    onSuccess: (response) => {
+      window.showToast?.(`Retry profile: ${response.profile?.label ?? 'updated'}`, 'success');
+      void queryClient.invalidateQueries({
+        queryKey: [...WISHLIST_QUERY_KEY, 'retry-profile'],
+      });
     },
     onError: (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error'),
   });
@@ -315,6 +336,34 @@ export function WishlistPage() {
                 {currentCycle === 'albums' ? 'Albums/EPs' : 'Singles'}
               </span>
               <span className="wishlist-stat-label">Next Cycle</span>
+            </div>
+            <div className="wishlist-stat-divider" />
+            <div className="wishlist-stat-item">
+              <span className="wishlist-stat-value">
+                <select
+                  className="wishlist-retry-profile-select"
+                  aria-label="Retry profile"
+                  title={
+                    retryProfileData?.profile?.description ||
+                    'How long repeatedly-failing tracks wait between scheduled retries'
+                  }
+                  value={retryProfileData?.profile?.name ?? 'standard'}
+                  disabled={retryProfileQuery.isPending || retryProfileMutation.isPending}
+                  onChange={(event) => retryProfileMutation.mutate(event.target.value)}
+                >
+                  {retryProfileOptions.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.label}
+                    </option>
+                  ))}
+                  {activeIsCustom && (
+                    <option value="custom" disabled>
+                      {retryProfileData?.profile?.label ?? 'Custom'} (API only)
+                    </option>
+                  )}
+                </select>
+              </span>
+              <span className="wishlist-stat-label">Retry Profile</span>
             </div>
           </div>
 
