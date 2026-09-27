@@ -192,6 +192,33 @@ def test_broken_files_truncated_and_stub(db, worker):
     assert pend["Cut Short"]["severity"] == "warning"
 
 
+def test_broken_files_finds_truncated_episodes(db, worker):
+    conn = db._get_connection()
+    cur = conn.execute(
+        "INSERT INTO shows(server_source, server_id, title, tmdb_id, runtime_minutes) "
+        "VALUES ('plex', 's1', 'Some Show', 9001, 42)")
+    show_id = cur.lastrowid
+    cur = conn.execute("INSERT INTO seasons(show_id, season_number) VALUES (?, 1)", (show_id,))
+    season_id = cur.lastrowid
+    cur = conn.execute(
+        "INSERT INTO episodes(show_id, season_id, season_number, episode_number, title, "
+        "runtime_minutes, has_file) VALUES (?, ?, 1, 1, 'Pilot', 42, 1), (?, ?, 1, 2, 'Fine', 42, 1)",
+        (show_id, season_id, show_id, season_id))
+    ep_ids = [cur.lastrowid - 1, cur.lastrowid]
+    conn.execute("INSERT INTO media_files(episode_id, relative_path, size_bytes, runtime_seconds) "
+                 "VALUES (?, '/show-s01e01.mkv', ?, ?)", (ep_ids[0], 1024**3, 20 * 60))
+    conn.execute("INSERT INTO media_files(episode_id, relative_path, size_bytes, runtime_seconds) "
+                 "VALUES (?, '/show-s01e02.mkv', ?, ?)", (ep_ids[1], 1024**3, 41 * 60))
+    conn.commit(); conn.close()
+    worker._run_job("broken_files", forced=True)
+    pend = _pending(db)
+    assert len(pend) == 1
+    f = pend[0]
+    assert f["entity_type"] == "episode"
+    assert "Some Show S01E01" in f["title"] and "runs 20 of 42 min" in f["title"]
+    assert f["details"]["show_tmdb_id"] == 9001 and f["details"]["episode_number"] == 1
+
+
 # ── Metadata Gaps ────────────────────────────────────────────────────────────
 def test_metadata_gaps_scan_respects_locks_and_fixes(db, worker, monkeypatch):
     bare = db.upsert_movie("plex", {"server_id": "m1", "title": "Bare", "genres": [],

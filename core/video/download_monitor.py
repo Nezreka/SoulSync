@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 
@@ -97,6 +98,114 @@ def _move(src: str, dest: str) -> None:
     atomic_verified_move(src, dest)
 
 
+def _expected_duration_sec(db, dl) -> float | None:
+    """The download's item runtime (seconds) for the import's duration-vs-expected
+    check — TMDB-backed via the library DB. None when unknown: the check is
+    skipped, never guessed."""
+    from core.video.importer import _scope_of, _search_ctx
+    try:
+        scope = _scope_of(dl)
+    except Exception:   # noqa: BLE001
+        return None
+    if scope not in ("movie", "episode"):
+        return None
+    try:
+        ctx = _search_ctx(dl)
+        return db.get_expected_runtime_seconds(
+            scope, dl.get("media_id"),
+            season=ctx.get("season"), episode=ctx.get("episode"))
+    except Exception:   # noqa: BLE001 - a lookup failure skips the check, never blocks import
+        return None
+
+
+def _soulseek_size_error(dl, src) -> str | None:
+    """Error text when a finished Soulseek transfer's bytes fall well short of what
+    was advertised — the backstop for truncations the duration check can't see
+    (unknown runtime). Soulseek reports exact file sizes, so a >10% shortfall is an
+    incomplete download, not a rounding quirk. None = ok / not applicable."""
+    if str(dl.get("source") or "").lower() != "soulseek":
+        return None
+    try:
+        want = int(dl.get("size_bytes") or 0)
+    except (TypeError, ValueError):
+        return None
+    if want <= 0:
+        return None
+    try:
+        actual = os.path.getsize(src)
+    except OSError:
+        return None
+    if actual < 0.9 * want:
+        return ("File is %.1f MB of the %.1f MB Soulseek advertised — the download looks incomplete"
+                % (actual / 1048576, want / 1048576))
+    return None
+
+
+def _reclaim_source(path) -> None:
+    """Remove a download copy AFTER its import row is persisted (best-effort)."""
+    if not path:
+        return
+    try:
+        os.remove(str(path))
+    except OSError as e:
+        logger.info("video import: couldn't reclaim download copy %s (%s)",
+                    os.path.basename(str(path)), e)
+
+
+_TEMP_PATTERNS = (
+    # "<name>.tmp.<8 hex>" — the importer's atomic-copy temp name
+    re.compile(r"\.tmp\.[0-9a-f]{8}$"),
+    # "<name>.part" — the YouTube move's cross-device temp name
+    re.compile(r"\.part$"),
+)
+_TEMP_MAX_AGE = 3600  # only reap temps older than an hour (a live transfer is never idle that long)
+
+
+def _sweep_import_temps(db) -> int:
+    """Delete stale import temp files left by crashed imports.
+
+    A kill/restart mid-copy orphans the importer's ``<name>.tmp.<hex>`` (in the
+    library folder, where Plex/Jellyfin try to index it) and the YouTube lane's
+    ``<name>.part``. Nothing else reaps them, so they accumulate forever. Only
+    files older than an hour are touched — an in-flight transfer is never that idle.
+    Returns the count removed. Best-effort; never raises."""
+    roots = set()
+    for key in ("movies_path", "tv_path", "youtube_path", "transfer_path"):
+        try:
+            v = db.get_setting(key)
+        except Exception:   # noqa: BLE001
+            v = None
+        if v:
+            roots.add(os.path.abspath(str(v)))
+    try:
+        from core.settings import config_manager
+        dl_dir = str(config_manager.get("soulseek.download_path", "") or "")
+        if dl_dir:
+            roots.add(os.path.abspath(dl_dir))
+    except Exception:   # noqa: BLE001
+        pass
+    now = time.time()
+    removed = 0
+    for root in sorted(roots):
+        if not os.path.isdir(root):
+            continue
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for fn in filenames:
+                if not any(rx.search(fn) for rx in _TEMP_PATTERNS):
+                    continue
+                p = os.path.join(dirpath, fn)
+                try:
+                    if now - os.path.getmtime(p) < _TEMP_MAX_AGE:
+                        continue
+                    os.remove(p)
+                    removed += 1
+                except OSError:
+                    continue
+    if removed:
+        logger.info("video monitor: swept %d stale import temp file(s)", removed)
+    return removed
+
+
 def _make_organizer(db):
     """A per-tick organizer closure: post-process a finished download into the library
     via the importer (Radarr-style parse → ffprobe-verify → templated rename →
@@ -114,7 +223,7 @@ def _make_organizer(db):
         settings = organization.default_settings()
     prober = probe if settings.get("verify_with_ffprobe", True) else None
 
-    def organize(dl, src):
+    def organize(dl, src, *, _pre_persist_dest=True):
         # The file's down — flip to 'importing' so the UI shows the post-processing phase
         # (move into the library + nfo/artwork sidecars + subtitles) instead of sitting on
         # 'downloading' while this runs. Best-effort; the patch below is the real transition.
@@ -122,10 +231,36 @@ def _make_organizer(db):
             db.update_video_download(dl["id"], status="importing", progress=100)
         except Exception:   # noqa: BLE001, S110 - a status blip must never wedge the import
             pass
+        # Byte-count backstop (Soulseek only): a completed transfer that delivered
+        # far fewer bytes than advertised is an incomplete download. Retryable, not
+        # terminal — another user may have the whole file — and the (user, file)
+        # pair is blocklisted via _bad_release so the retry doesn't re-grab it.
+        size_err = _soulseek_size_error(dl, src)
+        if size_err:
+            return {"status": "failed", "progress": 100.0, "error": size_err,
+                    "dest_path": src, "_bad_release": True}
         from core.video.recycle import discarder
-        patch = run_import(dl, src, fs=fs, prober=prober, settings=settings,
-                           library_dir=_owned_library_dir(db, dl),
-                           recycle=discarder(db, settings))
+        from core.video.importer import plan_import
+        # Plan BEFORE the file moves: move mode relocates the source before the
+        # completed row is persisted, so a crash in between used to strand the row
+        # at importing/100% with the file already in the library. The destination
+        # is persisted up front — the next tick then completes via the dest_path
+        # check in _complete_via_file instead of wedging. (Pack episodes skip this:
+        # they share the pack row, and already_placed makes packs crash-safe.)
+        try:
+            probe_info = prober(src) if prober is not None else None
+        except Exception:   # noqa: BLE001 - a probe crash must not block the import
+            probe_info = None
+        plan = plan_import(dl, src, list_dir=fs.list_dir, probe=probe_info,
+                           settings=settings, library_dir=_owned_library_dir(db, dl),
+                           expected_duration_sec=_expected_duration_sec(db, dl))
+        if _pre_persist_dest and plan["action"] in ("import", "upgrade") and plan.get("dest"):
+            try:
+                db.update_video_download(dl["id"], dest_path=plan["dest"]["path"])
+            except Exception:   # noqa: BLE001, S110 - best-effort; the completed persist is the real one
+                pass
+        patch = run_import(dl, src, fs=fs, settings=settings,
+                           recycle=discarder(db, settings), plan=plan)
         if patch.get("status") == "completed" and patch.get("dest_path"):
             if settings.get("save_artwork") or settings.get("write_nfo"):
                 write_sidecars(db, dl, patch["dest_path"], settings, fs)
@@ -232,7 +367,9 @@ def _make_pack_importer(db, organize):
         for (season, episode), info in sorted(claimed.items()):
             ep_dl = _episode_row(dl, season, episode, info["path"], info.get("size_bytes"))
             try:
-                patch = organize(ep_dl, info["path"])
+                # No dest pre-persist: the episodes share the pack row, and a
+                # crash mid-pack re-drives cleanly via already_placed.
+                patch = organize(ep_dl, info["path"], _pre_persist_dest=False)
             except Exception:   # noqa: BLE001 - one bad episode must not abandon the rest
                 logger.exception("pack %s: S%02dE%02d import raised", dl.get("id"), season, episode)
                 failed.append((season, episode, "the import raised"))
@@ -243,7 +380,9 @@ def _make_pack_importer(db, organize):
                             season, episode, patch.get("error") or "import refused")
                 continue
             imported.append((season, episode, patch))
-            _record_pack_episode(db, ep_dl, patch)
+            if _record_pack_episode(db, ep_dl, patch):
+                # The episode row is persisted — now reclaim the pack copy.
+                _reclaim_source(patch.get("_cleanup_source"))
             # Per EPISODE, not per pack: the row that just landed is the only one this
             # file satisfies, and a below-cutoff episode still keeps its row so the
             # upgrade-until-cutoff sweep can better it later.
@@ -868,6 +1007,11 @@ def _tick(db) -> None:
             continue
         _misses.pop(dl["id"], None)
         if upd.get("status") == "failed":
+            # A proven-bad release (importer-proved junk, or a truncated transfer)
+            # is blocklisted before the retry so the next candidate isn't the
+            # same file from the same user.
+            if upd.get("_bad_release") and dl.get("username") and dl.get("filename"):
+                _blocklist_release(db, dl, upd.get("error") or "Bad release")
             _fail_or_retry(db, dl, upd.get("error"))      # auto-retry before truly failing
             continue
         # Stall/queue timeout — a transfer sitting with no % movement for too long
@@ -919,6 +1063,12 @@ def _tick(db) -> None:
                 # rejects (pack / wrong episode / not-an-upgrade) are NOT tagged.
                 if upd.get("_bad_release") and dl.get("username") and dl.get("filename"):
                     _blocklist_release(db, dl, upd.get("error") or "Bad release")
+            # The import placed the file and the row is persisted — NOW reclaim the
+            # download copy. Reclaiming before the persist (the old order) meant a
+            # restart in between left a correctly-placed library file with a stuck
+            # 'importing' row that aged into a misleading 'failed'.
+            if upd.get("status") == "completed":
+                _reclaim_source(upd.get("_cleanup_source"))
         except Exception:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:
@@ -953,6 +1103,12 @@ def _recover_youtube(db_provider) -> None:
 
 def _run(db_provider) -> None:
     logger.info("video download monitor started")
+    try:
+        db = db_provider()
+        if db is not None:
+            _sweep_import_temps(db)   # reap .tmp.<hex> / .part litter from crashed imports
+    except Exception:
+        logger.exception("video import temp sweep failed")
     while True:
         try:
             db = db_provider()

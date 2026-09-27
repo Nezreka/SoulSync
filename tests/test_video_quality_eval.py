@@ -109,3 +109,38 @@ def test_parse_release_year_uses_the_release_year_not_a_title_year():
     from core.video.release_parse import parse_release
     assert parse_release("Blade.Runner.2049.2017.1080p.BluRay")["year"] == 2017   # title year first, release last
     assert parse_release("Movie.2160p.WEB")["year"] is None                        # resolution ≠ year
+
+
+def test_episode_wrong_show_year_is_rejected():
+    """The 'Dark Matter' case: two shows share a name AND an SxxExx. A year-tagged
+    release for the 2015 show must not satisfy the 2024 show's S02E06 search."""
+    prof = default_profile()
+    old = evaluate_release(parse_release("Dark.Matter.2015.S02E06.1080p.WEB-DL-GRP"),
+                           prof, scope="episode", want_season=2, want_episode=6,
+                           want_year=2024, want_title="Dark Matter")
+    assert not old["accepted"] and "year" in old["rejected"].lower()
+    # the right show's year passes
+    new = evaluate_release(parse_release("Dark.Matter.2024.S02E06.1080p.WEB-DL-GRP"),
+                           prof, scope="episode", want_season=2, want_episode=6,
+                           want_year=2024, want_title="Dark Matter")
+    assert new["accepted"]
+    # no year in the name → no judgement (TV scene releases usually omit it)
+    noyear = evaluate_release(parse_release("Dark.Matter.S02E06.1080p.WEB-DL-GRP"),
+                              prof, scope="episode", want_season=2, want_episode=6,
+                              want_year=2024, want_title="Dark Matter")
+    assert noyear["accepted"]
+    # a season pack for the wrong show's season is rejected too
+    pack = evaluate_release(parse_release("Dark.Matter.2015.S02.1080p.WEB-DL-GRP"),
+                            prof, scope="season", want_season=2,
+                            want_year=2024, want_title="Dark Matter")
+    assert not pack["accepted"] and "year" in pack["rejected"].lower()
+
+
+def test_episode_year_gate_yields_to_air_date():
+    """A daily whose identity comes from its air date isn't year-gated: the year
+    token in 'Show.2026.07.08' is the air date, not show disambiguation."""
+    prof = default_profile()
+    v = evaluate_release(parse_release("The.Daily.Show.2026.07.08.Guest.1080p.WEB-GRP"),
+                         prof, scope="episode", want_year=2020, want_title="The Daily Show",
+                         want_date="2026-07-08")
+    assert v["accepted"]
