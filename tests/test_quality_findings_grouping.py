@@ -272,3 +272,27 @@ def test_lossless_ignores_bitrate_the_way_tier_score_does(worker):
 
     # worst first: the 16/44 file, despite carrying the far larger bitrate
     assert _labels(worker, 'quality') == ['FLAC 16/44', 'FLAC 24/192']
+
+
+def test_get_finding_albums_returns_finding_types_and_error_count(worker):
+    """Album groups should aggregate distinct finding types and count errors."""
+    _add(worker, artist='Radiohead', album='In Rainbows', fmt='mp3', bitrate=128)
+    conn = worker.db._get_connection()
+    # Add a corrupt_audio finding to the same album
+    conn.execute(
+        "INSERT INTO repair_findings (job_id, finding_type, severity, status, title, details_json, created_at) "
+        "VALUES ('audio_corruption', 'corrupt_audio', 'error', 'pending', 'Corrupt Song', ?, '2026-01-02')",
+        (json.dumps({'expected_artist': 'Radiohead', 'album_title': 'In Rainbows', 'current_format': 'flac'}),)
+    )
+    conn.commit()
+    conn.close()
+
+    groups = worker.get_finding_albums(group_by='album')
+    assert len(groups) == 1
+    g = groups[0]
+    assert g['artist'] == 'Radiohead'
+    assert g['album'] == 'In Rainbows'
+    assert g['count'] == 2
+    assert set(g['finding_types']) == {'quality_upgrade', 'corrupt_audio'}
+    assert g['error_count'] == 0
+

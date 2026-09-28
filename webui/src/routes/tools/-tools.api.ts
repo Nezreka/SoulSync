@@ -155,8 +155,8 @@ export interface FindingsQuery {
   sort?: string;
   /** Title + path search. Non-empty search escapes the grouping entirely. */
   q?: string;
-  page: number;
-  limit: number;
+  page?: number;
+  limit?: number;
 }
 
 /**
@@ -171,8 +171,8 @@ export async function fetchRepairFindings(query: FindingsQuery): Promise<RepairF
   if (query.findingType) params.set('finding_type', query.findingType);
   if (query.sort) params.set('sort', query.sort);
   if (query.q) params.set('q', query.q);
-  params.set('page', String(query.page));
-  params.set('limit', String(query.limit));
+  params.set('page', String(query.page ?? 0));
+  params.set('limit', String(query.limit ?? 30));
 
   const response = await fetch(`/api/repair/findings?${params}`);
   if (!response.ok) {
@@ -206,6 +206,8 @@ export interface FindingAlbumGroup {
   album_thumb_url: string | null;
   artist_thumb_url: string | null;
   artist_id: string | null;
+  finding_types?: string[];
+  error_count?: number;
   first_seen: string | null;
   last_seen: string | null;
 }

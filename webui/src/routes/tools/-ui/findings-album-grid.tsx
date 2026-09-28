@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { fetchFindingAlbums, type FindingAlbumGroup } from '../-tools.api';
+import { VinylCoverFallback } from './album-cover-fallback';
 
 /**
  * The upgrade backlog as albums or artists, not as forty thousand rows.
@@ -27,6 +28,7 @@ export interface FindingsAlbumGridProps {
   q?: string;
   /** Drill into one group — the surface switches back to the flat list, filtered. */
   onOpen: (group: FindingAlbumGroup) => void;
+  selectedGroupKey?: string | null;
 }
 
 /** Album art first, artist as the fallback, then a letter tile. Never a broken
@@ -39,6 +41,27 @@ function artFor(group: FindingAlbumGroup): string | null {
 function initial(group: FindingAlbumGroup): string {
   const source = group.group_by === 'artist' ? group.artist : group.album;
   return (source || '?').trim().charAt(0).toUpperCase() || '?';
+}
+
+function findingTagLabel(type: string): string {
+  switch (type) {
+    case 'corrupt_audio':
+      return 'Corrupt';
+    case 'short_preview_track':
+      return 'Preview';
+    case 'quality_upgrade':
+      return 'Low Quality';
+    case 'fake_lossless':
+      return 'Fake FLAC';
+    case 'dead_file':
+      return 'Dead File';
+    case 'missing_discography_track':
+      return 'Missing';
+    case 'missing_lyrics':
+      return 'Missing Lyrics';
+    default:
+      return type.replace(/_/g, ' ');
+  }
 }
 
 /** "MP3 128kbps" alone when everything matches, "MP3 128kbps → MP3 320kbps"
@@ -62,6 +85,7 @@ export function FindingsAlbumGrid({
   findingType,
   q,
   onOpen,
+  selectedGroupKey,
 }: FindingsAlbumGridProps) {
   const [groups, setGroups] = useState<FindingAlbumGroup[] | null>(null);
 
@@ -94,11 +118,13 @@ export function FindingsAlbumGrid({
       {groups.map((group) => {
         const art = artFor(group);
         const name = group.group_by === 'artist' ? group.artist : group.album;
+        const isSelected = selectedGroupKey === group.key;
+
         return (
           <button
             type="button"
             role="listitem"
-            className="repair-album-card"
+            className={`repair-album-card ${isSelected ? 'active' : ''}`}
             key={group.key}
             onClick={() => onOpen(group)}
             title={`Show the ${trackLabel(group.count)} flagged in ${name || 'this group'}`}
@@ -107,9 +133,20 @@ export function FindingsAlbumGrid({
               {art ? (
                 <img src={art} alt="" loading="lazy" />
               ) : (
-                <span className="repair-album-art-fallback">{initial(group)}</span>
+                <VinylCoverFallback
+                  name={name || 'Unknown'}
+                  initialChar={initial(group)}
+                />
               )}
               <span className="repair-album-count">{group.count}</span>
+              {group.error_count && group.error_count > 0 ? (
+                <span
+                  className="repair-album-error-badge"
+                  title={`${group.error_count} fix attempts failed`}
+                >
+                  ⚠️ {group.error_count}
+                </span>
+              ) : null}
             </div>
             <div className="repair-album-meta">
               <div className="repair-album-name" title={name || ''}>
@@ -120,8 +157,25 @@ export function FindingsAlbumGrid({
                   {group.artist}
                 </div>
               ) : null}
-              <div className="repair-album-quality">{qualityRange(group)}</div>
+              {qualityRange(group) ? (
+                <div className="repair-album-quality">{qualityRange(group)}</div>
+              ) : null}
               <div className="repair-album-tracks">{trackLabel(group.count)}</div>
+
+              {group.finding_types && group.finding_types.length > 0 ? (
+                <div className="repair-album-tags">
+                  {group.finding_types.slice(0, 2).map((ft) => (
+                    <span key={ft} className={`repair-album-tag ${ft}`}>
+                      {findingTagLabel(ft)}
+                    </span>
+                  ))}
+                  {group.finding_types.length > 2 ? (
+                    <span className="repair-album-tag more">
+                      +{group.finding_types.length - 2}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </button>
         );

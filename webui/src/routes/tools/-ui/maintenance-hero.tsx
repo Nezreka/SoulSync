@@ -404,6 +404,7 @@ export function MaintenanceHero() {
         trackCount={trackCount}
         focusJob={jobFocus}
         onStatusChanged={refreshStatus}
+        defaultView="albums"
       />
 
       <section className="repair-section" id="repair-section-operations">

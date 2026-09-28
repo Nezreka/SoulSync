@@ -109,9 +109,7 @@ FINDING_TYPE_META = {
     'canonical_version':        {'label': 'Canonical Version', 'verb': 'Pin Version'},
     'genre_cleanup':            {'label': 'Genre Cleanup', 'verb': 'Clean Genres'},
     'comma_artist_split':       {'label': 'Combined Artists', 'verb': 'Split Artists'},
-    # Emitted, but no handler exists — the UI must show review-only, never a
-    # button that can only fail.
-    'fake_lossless':            {'label': 'Fake Lossless', 'verb': None},
+    'fake_lossless':            {'label': 'Fake Lossless', 'verb': 'Re-download FLAC'},
     'album_needs_enrichment':   {'label': 'Needs Enrichment', 'verb': None},
 }
 
@@ -1544,6 +1542,8 @@ class RepairWorker:
         conn = None
         try:
             conn = self.db._get_connection()
+            has_error_col = self._has_column(conn.cursor(), 'repair_findings', 'last_error')
+            error_count_expr = "SUM(CASE WHEN last_error IS NOT NULL AND last_error != '' THEN 1 ELSE 0 END)" if has_error_col else "0"
             rows = conn.execute(f"""
                 SELECT {artist_expr}                        AS artist,
                        {album_expr}                         AS album,
@@ -1559,6 +1559,8 @@ class RepairWorker:
                        MAX(json_extract(details_json, '$.album_thumb_url'))  AS album_thumb_url,
                        MAX(json_extract(details_json, '$.artist_thumb_url')) AS artist_thumb_url,
                        MAX(json_extract(details_json, '$.artist_id'))        AS artist_id,
+                       GROUP_CONCAT(DISTINCT finding_type)  AS finding_types_raw,
+                       {error_count_expr}                   AS error_count,
                        MIN(created_at)                      AS first_seen,
                        MAX(created_at)                      AS last_seen
                 FROM repair_findings
@@ -1588,7 +1590,49 @@ class RepairWorker:
                               ('_best_label', 'best_quality')):
                 raw_label = d.pop(src, None) or ''
                 d[dest] = raw_label.split('|', 1)[1] if '|' in raw_label else ''
+            d['finding_types'] = [t.strip() for t in (d.pop('finding_types_raw', '') or '').split(',') if t.strip()]
+            d['error_count'] = int(d.get('error_count') or 0)
             out.append(d)
+
+        # Look up missing album cover art from albums table if not in details_json
+        missing_albums = [d['album'] for d in out if not d.get('album_thumb_url') and d.get('album')]
+        if missing_albums:
+            try:
+                conn = self.db._get_connection()
+                cur = conn.cursor()
+                if self._has_column(cur, 'albums', 'thumb_url'):
+                    placeholders = ','.join('?' for _ in missing_albums)
+                    cur.execute(f"SELECT title, thumb_url FROM albums WHERE title IN ({placeholders}) AND thumb_url IS NOT NULL AND thumb_url != ''", missing_albums)
+                    album_map = {row[0]: row[1] for row in cur.fetchall()}
+                    for d in out:
+                        if not d.get('album_thumb_url') and d.get('album') in album_map:
+                            d['album_thumb_url'] = album_map[d['album']]
+            except Exception:
+                pass
+            finally:
+                if conn:
+                    conn.close()
+
+        # Look up missing artist thumbs from artists table
+        missing_artists = [d['artist'] for d in out if not d.get('artist_thumb_url') and d.get('artist')]
+        if missing_artists:
+            try:
+                conn = self.db._get_connection()
+                cur = conn.cursor()
+                col = 'thumb_url' if self._has_column(cur, 'artists', 'thumb_url') else 'image_url' if self._has_column(cur, 'artists', 'image_url') else None
+                if col:
+                    placeholders = ','.join('?' for _ in missing_artists)
+                    cur.execute(f"SELECT name, {col} FROM artists WHERE name IN ({placeholders}) AND {col} IS NOT NULL AND {col} != ''", missing_artists)
+                    artist_map = {row[0]: row[1] for row in cur.fetchall()}
+                    for d in out:
+                        if not d.get('artist_thumb_url') and d.get('artist') in artist_map:
+                            d['artist_thumb_url'] = artist_map[d['artist']]
+            except Exception:
+                pass
+            finally:
+                if conn:
+                    conn.close()
+
         return out
 
     def get_finding_groups(self) -> List[dict]:
@@ -2003,6 +2047,7 @@ class RepairWorker:
             'genre_enrichment': self._fix_genre_enrichment,
             'comma_artist_split': self._fix_comma_artist_split,
             'suspect_album_tag': self._fix_suspect_album_tag,
+            'fake_lossless': self._fix_fake_lossless,
         }
 
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
@@ -2411,7 +2456,8 @@ class RepairWorker:
             if success:
                 return {'success': True, 'action': 'added_to_wishlist',
                         'message': f"Added '{track_name}' to wishlist"}
-            return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist)"}
+            return {'success': True, 'action': 'already_wishlisted',
+                    'message': f"'{track_name}' is already in wishlist for backfill"}
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
@@ -2608,7 +2654,8 @@ class RepairWorker:
             if success:
                 return {'success': True, 'action': 'added_to_wishlist',
                         'message': f"Added '{track_name}' to wishlist for re-download"}
-            return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist or be blocklisted)"}
+            return {'success': True, 'action': 'already_wishlisted',
+                    'message': f"'{track_name}' is already queued in wishlist for quality upgrade"}
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
@@ -2617,9 +2664,6 @@ class RepairWorker:
            'redownload' (default) — add to wishlist + remove DB entry
            'remove' — just remove the dead DB entry without re-downloading
         """
-        if not entity_id:
-            return {'success': False, 'error': 'No track ID associated with this finding'}
-
         fix_action = details.get('_fix_action', 'redownload')
 
         # Simple removal — just delete the dead track record
@@ -2628,11 +2672,14 @@ class RepairWorker:
             try:
                 conn = self.db._get_connection()
                 cursor = conn.cursor()
-                cursor.execute("SELECT title FROM tracks WHERE id = ?", (entity_id,))
-                row = cursor.fetchone()
-                track_name = row['title'] if row else 'Unknown'
-                cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
-                conn.commit()
+                track_name = details.get('title') or 'Unknown'
+                if entity_id:
+                    cursor.execute("SELECT title FROM tracks WHERE id = ?", (entity_id,))
+                    row = cursor.fetchone()
+                    if row and row['title']:
+                        track_name = row['title']
+                    cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                    conn.commit()
                 return {'success': True, 'action': 'removed',
                         'message': f'Removed "{track_name}" from database'}
             except Exception as e:
@@ -2643,180 +2690,94 @@ class RepairWorker:
                     conn.close()
 
         # Default: re-download flow
-        conn = None
+        track_data = self._track_identity_for_redownload(entity_id, details)
+        if not track_data:
+            return {'success': False, 'error': 'Could not resolve track identity from database or finding details'}
+
+        track_name = track_data.get('name', details.get('title', 'Unknown'))
+        source_info = {
+            'original_path': file_path or details.get('original_path', ''),
+            'album_title': track_data.get('album', {}).get('name', details.get('album', '')),
+            'artist': ((track_data.get('artists') or [{}])[0].get('name') if track_data.get('artists') else details.get('artist', '')),
+            'reason': 'dead_file_redownload',
+        }
+
         try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Fetch full track + album + artist data from DB
-            cursor.execute("""
-                SELECT t.id, t.title, t.track_number, t.duration, t.bitrate,
-                       t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
-                       ar.name AS artist_name, ar.spotify_artist_id,
-                       al.title AS album_title, al.spotify_album_id,
-                       al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.id = ?
-            """, (entity_id,))
-            row = cursor.fetchone()
-
-            if not row:
-                return {'success': False, 'error': 'Track not found in database'}
-
-            track_name = row['title'] or details.get('title', 'Unknown')
-            artist_name = row['artist_name'] or details.get('artist', 'Unknown Artist')
-            album_title = row['album_title'] or details.get('album', '')
-
-            # Best available ID for wishlist (spotify preferred, then itunes, deezer, fallback)
-            wishlist_id = (row['spotify_track_id']
-                           or row['itunes_track_id']
-                           or row['deezer_id']
-                           or f"redownload_{entity_id}")
-
-            # Build album images list
-            album_images = []
-            album_thumb = row['album_thumb'] or details.get('album_thumb_url')
-            if album_thumb:
-                album_images = [{'url': album_thumb}]
-
-            # Build wishlist-compatible track data
-            spotify_track_data = {
-                'id': wishlist_id,
-                'name': track_name,
-                'artists': [{'name': artist_name}],
-                'album': {
-                    'name': album_title or track_name,
-                    'id': row['spotify_album_id'] or '',
-                    'release_date': str(row['year']) if row['year'] else '',
-                    'images': album_images,
-                    'album_type': row['record_type'] or 'album',
-                    'total_tracks': row['track_count'] or 0,
-                    'artists': [{'name': artist_name}],
-                },
-                'duration_ms': row['duration'] or 0,
-                'track_number': row['track_number'] or 1,
-                'disc_number': 1,
-                'explicit': False,
-                'external_urls': {},
-                'popularity': 0,
-                'preview_url': None,
-                'uri': f"spotify:track:{row['spotify_track_id']}" if row['spotify_track_id'] else '',
-                'is_local': False,
-            }
-
-            source_info = {
-                'original_path': file_path or details.get('original_path', ''),
-                'album_title': album_title,
-                'artist': artist_name,
-                'reason': 'dead_file_redownload',
-            }
-
             added = self.db.add_to_wishlist(
-                spotify_track_data,
+                track_data,
                 failure_reason='Dead file — re-download requested',
                 source_type='redownload',
                 source_info=source_info,
             )
 
-            if not added:
-                return {'success': False, 'error': 'Failed to add to wishlist (may already exist)'}
+            # Remove dead track entry from DB regardless of whether wishlist already had it
+            if entity_id:
+                try:
+                    conn = self.db._get_connection()
+                    conn.cursor().execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    logger.debug("Failed to remove dead track row %s: %s", entity_id, e)
 
-            # Remove dead track entry from DB
-            cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
-            conn.commit()
-
-            return {'success': True, 'action': 'added_to_wishlist',
-                    'message': f'Added "{track_name}" to wishlist for re-download'}
+            if added:
+                return {'success': True, 'action': 'added_to_wishlist',
+                        'message': f'Added "{track_name}" to wishlist for re-download'}
+            return {'success': True, 'action': 'already_wishlisted',
+                    'message': f'"{track_name}" is already in wishlist for re-download; removed dead database entry'}
         except Exception as e:
             logger.error("Dead file re-download failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
-        finally:
-            if conn:
-                conn.close()
 
     def _fix_short_preview_track(self, entity_type, entity_id, file_path, details):
         """Approve a preview-clip finding: delete the ~30s preview file, drop its DB row, and
         re-add the track to the wishlist (full payload) so the real version downloads. Mirrors
         the dead-file 'redownload' payload + the acoustid-mismatch file delete. (Tools #937-adj)
         """
-        if not entity_id:
-            return {'success': False, 'error': 'No track ID associated with this finding'}
-        conn = None
+        # Resolve entity_id from file_path if entity_id missing
+        if not entity_id and file_path:
+            try:
+                conn = self.db._get_connection()
+                cur = conn.cursor()
+                cur.execute("SELECT id FROM tracks WHERE file_path = ?", (file_path,))
+                r = cur.fetchone()
+                if r:
+                    entity_id = r['id'] if isinstance(r, dict) else r[0]
+                conn.close()
+            except Exception:
+                pass
+
+        track_data = self._track_identity_for_redownload(entity_id, details)
+        if not track_data:
+            return {'success': False, 'error': 'Could not resolve track identity from database or finding details'}
+
+        track_name = track_data.get('name', details.get('title', 'Unknown'))
+        artist_name = (track_data.get('artists') or [{}])[0].get('name') if track_data.get('artists') else details.get('artist', 'Unknown Artist')
+        album_title = track_data.get('album', {}).get('name') or details.get('album', '')
+
+        # Real expected length from finding details if available
+        if details.get('expected_duration_s'):
+            track_data['duration_ms'] = int(float(details['expected_duration_s']) * 1000)
+
+        # Captured album art from finding details
+        album_thumb = details.get('album_thumb_url')
+        if album_thumb:
+            track_data['album']['images'] = [{'url': album_thumb}]
+
+        source_info = {
+            'original_path': file_path or details.get('original_path', ''),
+            'album_title': album_title,
+            'artist': artist_name,
+            'reason': 'preview_clip_redownload',
+        }
+
         try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, t.track_number, t.duration, t.bitrate,
-                       t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
-                       ar.name AS artist_name, ar.spotify_artist_id,
-                       al.title AS album_title, al.spotify_album_id,
-                       al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.id = ?
-            """, (entity_id,))
-            row = cursor.fetchone()
-            if not row:
-                return {'success': False, 'error': 'Track not found in database'}
-
-            track_name = row['title'] or details.get('title', 'Unknown')
-            artist_name = row['artist_name'] or details.get('artist', 'Unknown Artist')
-            album_title = row['album_title'] or details.get('album', '')
-
-            wishlist_id = (row['spotify_track_id']
-                           or row['itunes_track_id']
-                           or row['deezer_id']
-                           or f"preview_redl_{entity_id}")
-
-            # Prefer the finding's stored art (the scan captures the metadata source's CDN image)
-            # over the library album thumb, which is often empty for un-enriched HiFi previews.
-            album_images = []
-            album_thumb = details.get('album_thumb_url') or row['album_thumb']
-            if album_thumb:
-                album_images = [{'url': album_thumb}]
-
-            spotify_track_data = {
-                'id': wishlist_id,
-                'name': track_name,
-                'artists': [{'name': artist_name}],
-                'album': {
-                    'name': album_title or track_name,
-                    'id': row['spotify_album_id'] or '',
-                    'release_date': str(row['year']) if row['year'] else '',
-                    'images': album_images,
-                    'album_type': row['record_type'] or 'album',
-                    'total_tracks': row['track_count'] or 0,
-                    'artists': [{'name': artist_name}],
-                },
-                'duration_ms': int((details.get('expected_duration_s') or 0) * 1000) or (row['duration'] or 0),
-                'track_number': row['track_number'] or 1,
-                'disc_number': 1,
-                'explicit': False,
-                'external_urls': {},
-                'popularity': 0,
-                'preview_url': None,
-                'uri': f"spotify:track:{row['spotify_track_id']}" if row['spotify_track_id'] else '',
-                'is_local': False,
-            }
-
-            source_info = {
-                'original_path': file_path or details.get('original_path', ''),
-                'album_title': album_title,
-                'artist': artist_name,
-                'reason': 'preview_clip_redownload',
-            }
-
             added = self.db.add_to_wishlist(
-                spotify_track_data,
+                track_data,
                 failure_reason='Preview clip — re-downloading full track',
                 source_type='redownload',
                 source_info=source_info,
             )
-            if not added:
-                return {'success': False, 'error': 'Failed to add to wishlist (may already exist or be blocklisted)'}
 
             # Delete the preview file (path resolved like the other delete tools).
             target_path = file_path or details.get('original_path')
@@ -2830,19 +2791,29 @@ class RepairWorker:
                     download_folder=download_folder)
 
             # Drop the DB row so the track shows as missing.
-            cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
-            conn.commit()
+            if entity_id:
+                try:
+                    conn = self.db._get_connection()
+                    conn.cursor().execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    logger.debug("Failed to drop track row %s: %s", entity_id, e)
 
-            return {'success': True, 'action': 'added_to_wishlist',
-                    'message': (f'Deleted preview clip and re-wishlisted "{track_name}" for full download'
-                                if deleted_file else
-                                f'Re-wishlisted "{track_name}" (preview file not deleted: {delete_note or "already gone"})')}
+            action = 'added_to_wishlist' if added else 'already_wishlisted'
+            if added:
+                msg = (f'Deleted preview clip and re-wishlisted "{track_name}" for full download'
+                       if deleted_file else
+                       f'Re-wishlisted "{track_name}" (preview file not deleted: {delete_note or "already gone"})')
+            else:
+                msg = (f'"{track_name}" is already in wishlist for re-download; deleted preview clip'
+                       if deleted_file else
+                       f'"{track_name}" is already in wishlist for re-download')
+
+            return {'success': True, 'action': action, 'message': msg}
         except Exception as e:
             logger.error("Preview-clip fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
-        finally:
-            if conn:
-                conn.close()
 
     def _fix_corrupt_audio(self, entity_type, entity_id, file_path, details):
         """Approve a corrupt-file finding: move the damaged file to the deleted-files
@@ -2855,80 +2826,44 @@ class RepairWorker:
         the damaged copy is still the only one, and it can be restored from the
         deleted-files manager if the re-download never succeeds.
         """
-        if not entity_id:
-            return {'success': False, 'error': 'No track ID associated with this finding'}
-        conn = None
+        if not entity_id and file_path:
+            try:
+                conn = self.db._get_connection()
+                cur = conn.cursor()
+                cur.execute("SELECT id FROM tracks WHERE file_path = ?", (file_path,))
+                r = cur.fetchone()
+                if r:
+                    entity_id = r['id'] if isinstance(r, dict) else r[0]
+                conn.close()
+            except Exception:
+                pass
+
+        track_data = self._track_identity_for_redownload(entity_id, details)
+        if not track_data:
+            return {'success': False, 'error': 'Could not resolve track identity from database or finding details'}
+
+        track_name = track_data.get('name', details.get('title', 'Unknown'))
+        artist_name = (track_data.get('artists') or [{}])[0].get('name') if track_data.get('artists') else details.get('artist', 'Unknown Artist')
+        album_title = track_data.get('album', {}).get('name') or details.get('album', '')
+
+        album_thumb = details.get('album_thumb_url')
+        if album_thumb:
+            track_data['album']['images'] = [{'url': album_thumb}]
+
+        source_info = {
+            'original_path': file_path or details.get('original_path', ''),
+            'album_title': album_title,
+            'artist': artist_name,
+            'reason': 'corrupt_file_redownload',
+        }
+
         try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, t.track_number, t.duration,
-                       t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
-                       ar.name AS artist_name, ar.spotify_artist_id,
-                       al.title AS album_title, al.spotify_album_id,
-                       al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.id = ?
-            """, (entity_id,))
-            row = cursor.fetchone()
-            if not row:
-                return {'success': False, 'error': 'Track not found in database'}
-
-            track_name = row['title'] or details.get('title', 'Unknown')
-            artist_name = row['artist_name'] or details.get('artist', 'Unknown Artist')
-            album_title = row['album_title'] or details.get('album', '')
-
-            wishlist_id = (row['spotify_track_id']
-                           or row['itunes_track_id']
-                           or row['deezer_id']
-                           or f"corrupt_redl_{entity_id}")
-
-            album_images = []
-            album_thumb = details.get('album_thumb_url') or row['album_thumb']
-            if album_thumb:
-                album_images = [{'url': album_thumb}]
-
-            spotify_track_data = {
-                'id': wishlist_id,
-                'name': track_name,
-                'artists': [{'name': artist_name}],
-                'album': {
-                    'name': album_title or track_name,
-                    'id': row['spotify_album_id'] or '',
-                    'release_date': str(row['year']) if row['year'] else '',
-                    'images': album_images,
-                    'album_type': row['record_type'] or 'album',
-                    'total_tracks': row['track_count'] or 0,
-                    'artists': [{'name': artist_name}],
-                },
-                'duration_ms': row['duration'] or 0,
-                'track_number': row['track_number'] or 1,
-                'disc_number': 1,
-                'explicit': False,
-                'external_urls': {},
-                'popularity': 0,
-                'preview_url': None,
-                'uri': f"spotify:track:{row['spotify_track_id']}" if row['spotify_track_id'] else '',
-                'is_local': False,
-            }
-
-            source_info = {
-                'original_path': file_path or details.get('original_path', ''),
-                'album_title': album_title,
-                'artist': artist_name,
-                'reason': 'corrupt_file_redownload',
-            }
-
             added = self.db.add_to_wishlist(
-                spotify_track_data,
+                track_data,
                 failure_reason='Corrupt file — re-downloading',
                 source_type='redownload',
                 source_info=source_info,
             )
-            if not added:
-                return {'success': False, 'error': 'Failed to add to wishlist (may already exist or be blocklisted)'}
 
             # Quarantine the corrupt file (path resolved like the other delete tools).
             target_path = file_path or details.get('original_path')
@@ -2942,20 +2877,116 @@ class RepairWorker:
                     download_folder=download_folder)
 
             # Drop the DB row so the track shows as missing.
-            cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
-            conn.commit()
+            if entity_id:
+                try:
+                    conn = self.db._get_connection()
+                    conn.cursor().execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    logger.debug("Failed to drop track row %s: %s", entity_id, e)
 
-            return {'success': True, 'action': 'added_to_wishlist',
-                    'message': (f'Moved the corrupt file to the deleted folder and re-wishlisted '
-                                f'"{track_name}" for download'
-                                if moved else
-                                f'Re-wishlisted "{track_name}" (corrupt file not moved: {move_note or "already gone"})')}
+            action = 'added_to_wishlist' if added else 'already_wishlisted'
+            if added:
+                msg = (f'Moved the corrupt file to the deleted folder and re-wishlisted '
+                       f'"{track_name}" for download'
+                       if moved else
+                       f'Re-wishlisted "{track_name}" (corrupt file not moved: {move_note or "already gone"})')
+            else:
+                msg = (f'"{track_name}" is already in wishlist for re-download; moved corrupt file to the deleted folder'
+                       if moved else
+                       f'"{track_name}" is already in wishlist for re-download')
+
+            return {'success': True, 'action': action, 'message': msg}
         except Exception as e:
             logger.error("Corrupt-file fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
-        finally:
-            if conn:
+
+    def _fix_fake_lossless(self, entity_type, entity_id, file_path, details):
+        """Fix a fake lossless finding.
+        Action depends on details['_fix_action']:
+           'redownload' (default): queue track to wishlist for genuine FLAC download
+           'delete': delete fake file and remove DB row
+        """
+        fix_action = details.get('_fix_action', 'redownload')
+
+        if fix_action == 'delete':
+            deleted_file, delete_note = _delete_file_if_present(
+                file_path, self.transfer_folder, config_manager=self._config_manager)
+            if file_path:
+                resolved = _resolve_file_path(
+                    file_path, self.transfer_folder,
+                    config_manager=self._config_manager)
+                if deleted_file and resolved:
+                    self._cleanup_empty_parents(resolved)
+
+            if not entity_id and file_path:
+                try:
+                    conn = self.db._get_connection()
+                    cur = conn.cursor()
+                    cur.execute("SELECT id FROM tracks WHERE file_path = ?", (file_path,))
+                    row = cur.fetchone()
+                    if row:
+                        entity_id = row['id'] if isinstance(row, dict) else row[0]
+                    conn.close()
+                except Exception:
+                    pass
+
+            if entity_id:
+                try:
+                    conn = self.db._get_connection()
+                    conn.cursor().execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    return {'success': False, 'error': f'DB delete failed: {e}'}
+
+            if not deleted_file and delete_note:
+                return {'success': True, 'action': 'deleted_file',
+                        'message': f'Removed library record, but file not deleted: {delete_note}'}
+            return {'success': True, 'action': 'deleted_file',
+                    'message': f'Deleted fake lossless file: {os.path.basename(file_path or "")}'}
+
+        # Default: redownload flow
+        if not entity_id and file_path:
+            try:
+                conn = self.db._get_connection()
+                cur = conn.cursor()
+                cur.execute("SELECT id FROM tracks WHERE file_path = ?", (file_path,))
+                row = cur.fetchone()
+                if row:
+                    entity_id = row['id'] if isinstance(row, dict) else row[0]
                 conn.close()
+            except Exception:
+                pass
+
+        track_data = self._track_identity_for_redownload(entity_id, details)
+        if not track_data:
+            return {'success': False, 'error': 'Could not resolve track identity for fake lossless file'}
+
+        track_name = track_data.get('name', details.get('title', 'Unknown'))
+        source_info = {
+            'original_path': file_path or details.get('original_path', ''),
+            'album_title': track_data.get('album', {}).get('name', details.get('album', '')),
+            'artist': ((track_data.get('artists') or [{}])[0].get('name') if track_data.get('artists') else details.get('artist', '')),
+            'reason': 'fake_lossless_redownload',
+        }
+
+        try:
+            added = self.db.add_to_wishlist(
+                track_data,
+                failure_reason=f"Fake lossless detected — spectral cutoff at ~{details.get('detected_cutoff_khz', '?')} kHz",
+                source_type='repair',
+                source_info=source_info,
+            )
+            if added:
+                return {'success': True, 'action': 'added_to_wishlist',
+                        'message': f'Added "{track_name}" to wishlist for genuine lossless download'}
+            return {'success': True, 'action': 'already_wishlisted',
+                    'message': f'"{track_name}" is already in wishlist for re-download'}
+        except Exception as e:
+            logger.error("Fake lossless re-download failed for track %s: %s", entity_id, e)
+            return {'success': False, 'error': str(e)}
 
     def _fix_orphan_file(self, entity_type, entity_id, file_path, details):
         """Handle an orphan file — move to staging or delete based on user choice.
