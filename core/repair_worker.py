@@ -1607,8 +1607,8 @@ class RepairWorker:
                     for d in out:
                         if not d.get('album_thumb_url') and d.get('album') in album_map:
                             d['album_thumb_url'] = album_map[d['album']]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to enrich album thumbnails for findings: %s", e)
             finally:
                 if conn:
                     conn.close()
@@ -1627,8 +1627,8 @@ class RepairWorker:
                     for d in out:
                         if not d.get('artist_thumb_url') and d.get('artist') in artist_map:
                             d['artist_thumb_url'] = artist_map[d['artist']]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to enrich artist thumbnails for findings: %s", e)
             finally:
                 if conn:
                     conn.close()
@@ -2744,8 +2744,8 @@ class RepairWorker:
                 if r:
                     entity_id = r['id'] if isinstance(r, dict) else r[0]
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to resolve track id for %s: %s", file_path, e)
 
         track_data = self._track_identity_for_redownload(entity_id, details)
         if not track_data:
@@ -2835,8 +2835,8 @@ class RepairWorker:
                 if r:
                     entity_id = r['id'] if isinstance(r, dict) else r[0]
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to resolve track id for %s: %s", file_path, e)
 
         track_data = self._track_identity_for_redownload(entity_id, details)
         if not track_data:
@@ -2929,8 +2929,8 @@ class RepairWorker:
                     if row:
                         entity_id = row['id'] if isinstance(row, dict) else row[0]
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to resolve track id for %s: %s", file_path, e)
 
             if entity_id:
                 try:
@@ -2957,8 +2957,8 @@ class RepairWorker:
                 if row:
                     entity_id = row['id'] if isinstance(row, dict) else row[0]
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to resolve track id for %s: %s", file_path, e)
 
         track_data = self._track_identity_for_redownload(entity_id, details)
         if not track_data:

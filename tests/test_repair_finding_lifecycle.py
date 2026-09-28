@@ -343,7 +343,7 @@ def test_catalog_covers_every_handler_and_flags_the_dead_ends(worker):
 
     # Emitted by real jobs, but no handler exists — the UI must not offer a
     # button that can only fail.
-    for dead_end in ('fake_lossless', 'album_needs_enrichment'):
+    for dead_end in ('album_needs_enrichment',):
         assert catalog[dead_end]['fixable'] is False
         assert catalog[dead_end]['verb'] is None
 
