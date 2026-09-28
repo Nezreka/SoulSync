@@ -59492,6 +59492,38 @@ tr.tag-diff-same {
     text-overflow: ellipsis;
 }
 
+.album-track-diagnostic {
+    margin-top: 6px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    line-height: 1.4;
+}
+
+.album-track-diagnostic.corrupt {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+}
+
+.album-track-diagnostic.fake {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    color: #fcd34d;
+}
+
+.album-track-diagnostic .diagnostic-icon {
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.album-track-diagnostic .diagnostic-text {
+    flex: 1;
+}
+
 .album-track-error-callout {
     margin-top: 6px;
     padding: 6px 10px;

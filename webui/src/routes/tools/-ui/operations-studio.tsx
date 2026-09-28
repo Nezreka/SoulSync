@@ -180,7 +180,7 @@ export interface OperationsStudioProps {
   progress: Record<string, RepairJobProgress>;
   runs: RepairJobRun[];
   onChanged: () => void;
-  onShowFindings: (jobId: string) => void;
+  onShowFindings: (jobId: string, options?: { severity?: string; findingType?: string }) => void;
   onSwitchToAdvanced: (category?: string) => void;
 }
 
@@ -454,10 +454,7 @@ export function OperationsStudio({
                 type="button"
                 className="operations-triage-btn suggestions"
                 disabled={suggestionCount === 0}
-                onClick={() => {
-                  const target = document.getElementById('repair-section-findings');
-                  target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
+                onClick={() => onShowFindings('', { severity: 'info' })}
               >
                 Review Suggestions ➔
               </button>
@@ -481,10 +478,7 @@ export function OperationsStudio({
                 type="button"
                 className="operations-triage-btn quarantine"
                 disabled={quarantineCount === 0}
-                onClick={() => {
-                  const target = document.getElementById('repair-section-findings');
-                  target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
+                onClick={() => onShowFindings('', { severity: 'error' })}
               >
                 🛡️ Inspect Quarantine ➔
               </button>
@@ -653,7 +647,13 @@ export function OperationsStudio({
                           (j) => repairJobBadge(j).kind === 'pending',
                         );
                         if (firstWithFindings) {
-                          onShowFindings(firstWithFindings.job_id);
+                          onShowFindings(firstWithFindings.job_id, {
+                            severity: pillar.id === 'audio' ? 'error' : undefined,
+                          });
+                        } else {
+                          onShowFindings('', {
+                            severity: pillar.id === 'audio' ? 'error' : undefined,
+                          });
                         }
                       }}
                     >

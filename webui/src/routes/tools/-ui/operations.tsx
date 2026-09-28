@@ -533,7 +533,7 @@ export interface OperationsProps {
   runs: RepairJobRun[];
   onChanged: () => void;
   onHelp: (job: RepairJob) => void;
-  onShowFindings: (jobId: string) => void;
+  onShowFindings: (jobId: string, options?: { severity?: string; findingType?: string }) => void;
   mode?: 'simple' | 'advanced';
   onModeChange?: (mode: 'simple' | 'advanced') => void;
   defaultMode?: 'simple' | 'advanced';

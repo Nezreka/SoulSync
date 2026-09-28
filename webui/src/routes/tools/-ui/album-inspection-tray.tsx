@@ -139,6 +139,24 @@ export function AlbumInspectionTray({
   const handleFixAllOnAlbum = async () => {
     if (!findings || findings.length === 0) return;
     const fixable = findings.filter((f) => f.status === 'pending');
+    if (fixable.length === 0) return;
+
+    const hasDestructive = fixable.some(
+      (f) =>
+        f.finding_type === 'corrupt_audio' ||
+        f.finding_type === 'fake_lossless' ||
+        f.finding_type === 'orphan_file',
+    );
+    if (hasDestructive) {
+      const confirmed = await window.showConfirmDialog?.({
+        title: 'Resolve Album Issues',
+        message: `This album has ${fixable.length} issues, including files that will be moved to quarantine and re-downloaded. Proceed?`,
+        confirmText: 'Resolve & Replace',
+        destructive: false,
+      });
+      if (!confirmed) return;
+    }
+
     for (const f of fixable) {
       setBusyIds((prev) => new Set(prev).add(f.id));
       try {
@@ -379,6 +397,26 @@ export function AlbumInspectionTray({
                       <div className="album-track-desc">
                         {f.description || details.description || f.file_path}
                       </div>
+
+                      {f.finding_type === 'corrupt_audio' ? (
+                        <div className="album-track-diagnostic corrupt">
+                          <span className="diagnostic-icon">🔴</span>
+                          <span className="diagnostic-text">
+                            <strong>Corrupt Audio:</strong>{' '}
+                            {details.error_type ||
+                              'Frame checksum mismatch or header damage. Re-downloading replaces and quarantines this file.'}
+                          </span>
+                        </div>
+                      ) : f.finding_type === 'fake_lossless' ? (
+                        <div className="album-track-diagnostic fake">
+                          <span className="diagnostic-icon">🟡</span>
+                          <span className="diagnostic-text">
+                            <strong>Spectral Transcode:</strong>{' '}
+                            {details.spectral_status ||
+                              'Frequency drops off sharply at 16.0 kHz. File appears to be an upscaled lossy transcode.'}
+                          </span>
+                        </div>
+                      ) : null}
 
                       {f.last_error ? (
                         <div className="album-track-error-callout" role="alert">

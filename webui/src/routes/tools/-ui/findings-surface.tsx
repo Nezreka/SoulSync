@@ -367,17 +367,15 @@ export function FindingsSurface({
     void loadFindings();
   }, [loadFindings]);
 
-  /** Arriving from a run row. Reset everything that could hide the rows the
-   *  user just asked for — a stale search or a dismissed-status filter would
-   *  make the jump land on an empty surface. */
+  /** Arriving from a run row or Studio Triage Center. Reset everything that could hide
+   *  the rows the user just asked for. */
   useEffect(() => {
     if (!focusJob) return;
-    setJobFilter(focusJob.jobId);
+    setJobFilter(focusJob.jobId || '');
     setStatusFilter('pending');
-    setSeverityFilter('');
-    // a jump from an issue carries the item it was about
+    setSeverityFilter(focusJob.severity ?? '');
     setQuery(focusJob.query ?? '');
-    setOpenType('');
+    setOpenType(focusJob.findingType ?? '');
     setPage(0);
   }, [focusJob]);
 
@@ -544,16 +542,9 @@ export function FindingsSurface({
     [dismissOne, prompts, refreshAll],
   );
 
-  const handleInspectRedownload = useCallback(
-    (finding: RepairFinding) => {
-      if (finding.entity_id) {
-        setRedownloadFinding(finding);
-      } else {
-        void fixOne(finding);
-      }
-    },
-    [fixOne],
-  );
+  const handleInspectRedownload = useCallback((finding: RepairFinding) => {
+    setRedownloadFinding(finding);
+  }, []);
 
   /** `selectDuplicateToKeep`. */
   const keepDuplicate = useCallback(
@@ -1447,17 +1438,20 @@ export function FindingsSurface({
         />
       ) : null}
 
-      {redownloadFinding && redownloadFinding.entity_id ? (
+      {redownloadFinding ? (
         <RedownloadModal
           track={{
-            id: redownloadFinding.entity_id,
-            track_id: redownloadFinding.entity_id,
+            id: redownloadFinding.entity_id || String(redownloadFinding.id),
+            track_id: redownloadFinding.entity_id || String(redownloadFinding.id),
             title: String(
               (redownloadFinding.details as Record<string, any>)?.track_title ||
                 redownloadFinding.title ||
                 '',
             ),
-            file_path: (redownloadFinding.details as Record<string, any>)?.file_path || '',
+            file_path:
+              (redownloadFinding.details as Record<string, any>)?.file_path ||
+              redownloadFinding.file_path ||
+              '',
             format: (redownloadFinding.details as Record<string, any>)?.format || '',
             bitrate: (redownloadFinding.details as Record<string, any>)?.bitrate || 0,
           }}
@@ -1473,14 +1467,17 @@ export function FindingsSurface({
               '',
             tracks: [
               {
-                id: redownloadFinding.entity_id,
-                track_id: redownloadFinding.entity_id,
+                id: redownloadFinding.entity_id || String(redownloadFinding.id),
+                track_id: redownloadFinding.entity_id || String(redownloadFinding.id),
                 title: String(
                   (redownloadFinding.details as Record<string, any>)?.track_title ||
                     redownloadFinding.title ||
                     '',
                 ),
-                file_path: (redownloadFinding.details as Record<string, any>)?.file_path || '',
+                file_path:
+                  (redownloadFinding.details as Record<string, any>)?.file_path ||
+                  redownloadFinding.file_path ||
+                  '',
               },
             ],
           }}

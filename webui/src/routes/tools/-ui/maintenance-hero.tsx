@@ -335,11 +335,21 @@ export function MaintenanceHero() {
     jobId: string;
     token: number;
     query?: string;
+    severity?: string;
+    findingType?: string;
   } | null>(null);
-  const showJobFindings = useCallback((jobId: string) => {
-    setJobFocus((previous) => ({ jobId, token: (previous?.token || 0) + 1 }));
-    jumpToSection('repair-section-findings');
-  }, []);
+  const showJobFindings = useCallback(
+    (jobId: string, options?: { severity?: string; findingType?: string }) => {
+      setJobFocus((previous) => ({
+        jobId,
+        severity: options?.severity,
+        findingType: options?.findingType,
+        token: (previous?.token || 0) + 1,
+      }));
+      jumpToSection('repair-section-findings');
+    },
+    [],
+  );
 
   // sent here from an issue ("find duplicates"): that job's findings, searched
   useEffect(() => {

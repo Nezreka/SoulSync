@@ -228,6 +228,30 @@ describe('OperationsStudio (Simple Mode)', () => {
     expect(screen.getByText('⏹ Stop Operation')).not.toBeNull();
   });
 
+  it('navigates with severity filtering when Quarantine or Suggestions is clicked', async () => {
+    const onShowFindings = vi.fn();
+    render(
+      <OperationsStudio
+        jobs={testJobs}
+        progress={{}}
+        runs={[]}
+        onChanged={vi.fn()}
+        onShowFindings={onShowFindings}
+        onSwitchToAdvanced={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Review Suggestions ➔')).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByText('Review Suggestions ➔'));
+    expect(onShowFindings).toHaveBeenCalledWith('', { severity: 'info' });
+
+    fireEvent.click(screen.getByText('🛡️ Inspect Quarantine ➔'));
+    expect(onShowFindings).toHaveBeenCalledWith('', { severity: 'error' });
+  });
+
   it('renders all 1-Click Playbooks', () => {
     render(
       <OperationsStudio
