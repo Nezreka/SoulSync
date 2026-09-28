@@ -321,26 +321,30 @@ function drawStack(
   const M = Math.round(96 * s);
 
   ctx.fillStyle = palette.accent;
-  ctx.font = font(700, 30, s);
-  ctx.fillText(spaced(model.period.toUpperCase()), M, 150 * s);
+  ctx.font = font(700, 26, s);
+  ctx.fillText(spaced(model.period.toUpperCase()), M, 138 * s);
 
   ctx.fillStyle = palette.text;
-  ctx.font = font(800, 92, s);
+  ctx.font = font(800, 80, s);
   model.titleLines.forEach((line, i) => {
-    ctx.fillText(line, M, (268 + i * 100) * s);
+    ctx.fillText(line, M, (230 + i * 88) * s);
   });
 
-  let y = 430 * s;
+  let y = 356 * s;
   if (model.artUrls.length) {
-    const gap = Math.round(16 * s);
-    const tile = (W - M * 2 - gap) / 2;
-    model.artUrls.slice(0, 4).forEach((_, index) => {
-      const x = M + (index % 2) * (tile + gap);
-      const ty = y + Math.floor(index / 2) * (tile + gap);
-      drawTile(ctx, images[index], x, ty, tile, palette, 20 * s);
+    const count = Math.min(model.artUrls.length, 4);
+    const gap = Math.round(14 * s);
+    const availableW = W - M * 2;
+    const tileW = Math.min(Math.floor((availableW - (count - 1) * gap) / count), Math.floor(220 * s));
+    const totalW = count * tileW + (count - 1) * gap;
+    const startX = M + Math.floor((availableW - totalW) / 2);
+    model.artUrls.slice(0, count).forEach((_, index) => {
+      const x = startX + index * (tileW + gap);
+      drawTile(ctx, images[index], x, y, tileW, palette, 16 * s);
     });
-    const rows = Math.ceil(Math.min(model.artUrls.length, 4) / 2);
-    y += rows * (tile + gap) + 34 * s;
+    y += tileW + 42 * s;
+  } else {
+    y += 20 * s;
   }
 
   y = drawHighlight(ctx, model, y, M);
@@ -366,24 +370,27 @@ function drawPoster(
 
   // Scrim: bottom-heavy so the type sits on solid ground whatever the cover.
   const scrim = ctx.createLinearGradient(0, 0, 0, H);
-  scrim.addColorStop(0, hero ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0)');
-  scrim.addColorStop(0.42, hero ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0)');
+  scrim.addColorStop(0, hero ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0)');
+  scrim.addColorStop(0.36, hero ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0)');
   scrim.addColorStop(1, palette.scrim);
   ctx.fillStyle = scrim;
   ctx.fillRect(0, 0, W, H);
 
   ctx.fillStyle = palette.accent;
-  ctx.font = font(700, 30, s);
-  ctx.fillText(spaced(model.period.toUpperCase()), M, 150 * s);
+  ctx.font = font(700, 26, s);
+  ctx.fillText(spaced(model.period.toUpperCase()), M, 138 * s);
 
   // Type is bottom-anchored here, not top — a poster reads up from its base.
   const rows = model.stats.length;
-  let y = H - M - rows * 74 * s - (model.highlight ? 150 * s : 0);
+  const highlightHeight = model.highlight
+    ? (model.runnersUp.length ? 180 * s : 144 * s)
+    : 0;
+  let y = H - 90 * s - rows * 66 * s - highlightHeight;
 
   ctx.fillStyle = palette.text;
-  ctx.font = font(800, 92, s);
+  ctx.font = font(800, 80, s);
   model.titleLines.forEach((line, i) => {
-    ctx.fillText(line, M, y - (model.titleLines.length - i) * 100 * s + 40 * s);
+    ctx.fillText(line, M, y - (model.titleLines.length - i) * 88 * s + 32 * s);
   });
 
   y = drawHighlight(ctx, model, y, M);
@@ -417,25 +424,25 @@ function drawMosaic(
     ctx.restore();
   }
 
-  const panelTop = Math.min(rowsNeeded * tile, H * 0.52);
-  const panel = ctx.createLinearGradient(0, panelTop - 160 * s, 0, panelTop + 120 * s);
+  const panelTop = Math.min(rowsNeeded * tile, H * 0.42);
+  const panel = ctx.createLinearGradient(0, panelTop - 140 * s, 0, panelTop + 100 * s);
   panel.addColorStop(0, 'rgba(0,0,0,0)');
   panel.addColorStop(1, palette.from);
   ctx.fillStyle = panel;
-  ctx.fillRect(0, panelTop - 160 * s, W, 280 * s);
+  ctx.fillRect(0, panelTop - 140 * s, W, 240 * s);
   ctx.fillStyle = palette.from;
-  ctx.fillRect(0, panelTop + 118 * s, W, H - panelTop);
+  ctx.fillRect(0, panelTop + 98 * s, W, H - panelTop);
 
-  let y = panelTop + 90 * s;
+  let y = panelTop + 72 * s;
   ctx.fillStyle = palette.accent;
-  ctx.font = font(700, 30, s);
+  ctx.font = font(700, 26, s);
   ctx.fillText(spaced(model.period.toUpperCase()), M, y);
-  y += 76 * s;
+  y += 58 * s;
 
   ctx.fillStyle = palette.text;
-  ctx.font = font(800, 76, s);
+  ctx.font = font(800, 68, s);
   ctx.fillText(model.titleLines.join(' '), M, y);
-  y += 60 * s;
+  y += 48 * s;
 
   y = drawHighlight(ctx, model, y, M);
   drawStatRows(ctx, model, y, M);
@@ -453,28 +460,28 @@ function drawHighlight(
   let y = yIn;
 
   ctx.textAlign = 'left';
-  ctx.fillStyle = palette.muted;
-  ctx.font = font(600, 26, s);
+  ctx.fillStyle = palette.accent;
+  ctx.font = font(700, 24, s);
   ctx.fillText(spaced(model.highlight.label.toUpperCase()), M, y);
-  y += 52 * s;
-
-  ctx.fillStyle = palette.text;
-  ctx.font = font(800, 54, s);
-  ctx.fillText(ellipsize(ctx, model.highlight.name, W - M * 2), M, y);
   y += 44 * s;
 
+  ctx.fillStyle = palette.text;
+  ctx.font = font(800, 50, s);
+  ctx.fillText(ellipsize(ctx, model.highlight.name, W - M * 2), M, y);
+  y += 38 * s;
+
   ctx.fillStyle = palette.muted;
-  ctx.font = font(500, 30, s);
+  ctx.font = font(500, 28, s);
   ctx.fillText(ellipsize(ctx, model.highlight.sub, W - M * 2), M, y);
-  y += 30 * s;
+  y += 28 * s;
 
   if (model.runnersUp.length) {
-    y += 34 * s;
+    y += 26 * s;
     ctx.fillStyle = palette.muted;
-    ctx.font = font(500, 27, s);
+    ctx.font = font(500, 24, s);
     ctx.fillText(ellipsize(ctx, model.runnersUp.join('  ·  '), W - M * 2), M, y);
   }
-  return y + 46 * s;
+  return y + 40 * s;
 }
 
 /** Labels left, values right, a hairline under each — the aligned numbers are
@@ -489,23 +496,23 @@ function drawStatRows(
   let y = yIn;
   model.stats.forEach((stat) => {
     ctx.fillStyle = palette.muted;
-    ctx.font = font(500, 30, s);
+    ctx.font = font(500, 28, s);
     ctx.textAlign = 'left';
     ctx.fillText(stat.label, M, y);
 
     ctx.fillStyle = palette.text;
-    ctx.font = font(700, 34, s);
+    ctx.font = font(700, 32, s);
     ctx.textAlign = 'right';
     ctx.fillText(stat.value, W - M, y);
 
     ctx.textAlign = 'left';
     ctx.strokeStyle = palette.tile;
-    ctx.lineWidth = Math.max(1, 2 * s);
+    ctx.lineWidth = Math.max(1, 1.5 * s);
     ctx.beginPath();
-    ctx.moveTo(M, y + 22 * s);
-    ctx.lineTo(W - M, y + 22 * s);
+    ctx.moveTo(M, y + 20 * s);
+    ctx.lineTo(W - M, y + 20 * s);
     ctx.stroke();
-    y += 74 * s;
+    y += 66 * s;
   });
   return y;
 }
@@ -516,10 +523,23 @@ function drawFooter(
   M: number,
   H: number,
 ): void {
-  ctx.fillStyle = model.palette.accent;
-  ctx.font = font(700, 30, model.scale);
+  const { palette, width: W, scale: s } = model;
+  const y = H - 72 * s;
+
+  // Watermark brand
+  ctx.fillStyle = palette.accent;
+  ctx.font = font(800, 26, s);
   ctx.textAlign = 'left';
-  ctx.fillText('SoulSync', M, H - 82 * model.scale);
+  ctx.fillText('SoulSync', M, y);
+
+  // Period on right
+  if (model.period) {
+    ctx.fillStyle = palette.muted;
+    ctx.font = font(600, 20, s);
+    ctx.textAlign = 'right';
+    ctx.fillText(model.period, W - M, y);
+    ctx.textAlign = 'left';
+  }
 }
 
 function drawTile(
@@ -532,11 +552,29 @@ function drawTile(
   radius: number,
 ): void {
   ctx.save();
+  // Drop shadow behind tile
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetY = 6;
+  roundedRect(ctx, x, y, size, size, radius);
+  ctx.fillStyle = palette.tile;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
   roundedRect(ctx, x, y, size, size, radius);
   ctx.clip();
   ctx.fillStyle = palette.tile;
   ctx.fillRect(x, y, size, size);
   if (img) ctx.drawImage(img, x, y, size, size);
+  ctx.restore();
+
+  // Crisp hairline outline
+  ctx.save();
+  roundedRect(ctx, x, y, size, size, radius);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+  ctx.lineWidth = Math.max(1, 1.5);
+  ctx.stroke();
   ctx.restore();
 }
 
