@@ -1501,6 +1501,15 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                         s_album = {'name': s_album}  # Normalize string album to dict
                     s_artists = spotify_data.get('artists', [])
 
+                    # The track's own album artist — ground truth for the #1316
+                    # disagreement check below (album.artists[0] of THIS row).
+                    _own_aa_artists = s_album.get('artists') or []
+                    _own_aa_first = _own_aa_artists[0] if isinstance(_own_aa_artists, list) and _own_aa_artists else None
+                    if isinstance(_own_aa_first, dict):
+                        _own_album_artist_name = str(_own_aa_first.get('name') or '').strip()
+                    else:
+                        _own_album_artist_name = str(_own_aa_first or '').strip()
+
                     # We need at least an album name and artist
                     if s_album and isinstance(s_album, dict) and s_album.get('name'):
                         # Use pre-computed album-level artist for folder consistency.
@@ -1513,6 +1522,26 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                         if not album_id_for_lookup:
                             album_id_for_lookup = 'wishlist_album'
                         artist_ctx = wishlist_album_artist_map.get(album_id_for_lookup, {})
+                        # #1316 (filing side): the map is first-row-wins, so one
+                        # poisoned row's album artist would be stamped onto every
+                        # other track of the album, and the filing path trusts
+                        # _explicit_artist_context unconditionally. Apply the
+                        # same disagreement check the tag path uses
+                        # (core/metadata/source.py): on disagreement trust this
+                        # track's own album artist, loudly — the map is fallback
+                        # only.
+                        _map_artist_name = str((artist_ctx or {}).get('name') or '').strip()
+                        if (_own_album_artist_name
+                                and _own_album_artist_name.casefold() != 'unknown artist'
+                                and _map_artist_name
+                                and _map_artist_name.casefold() != 'unknown artist'
+                                and _own_album_artist_name.casefold() != _map_artist_name.casefold()):
+                            logger.warning(
+                                "[Wishlist] explicit artist context '%s' disagrees with track '%s' "
+                                "own album artist '%s' — trusting the track data (#1316)",
+                                _map_artist_name, track_info.get('name'), _own_album_artist_name,
+                            )
+                            artist_ctx = {'name': _own_album_artist_name}
                         if not artist_ctx or not artist_ctx.get('name'):
                             # Fallback: per-track resolution from artists array
                             _fb_artists = track_info.get('artists', [])

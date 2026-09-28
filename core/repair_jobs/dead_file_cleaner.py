@@ -75,6 +75,37 @@ class DeadFileCleanerJob(RepairJob):
     }
     auto_fix = False
 
+    def _setting_float(self, context: JobContext, key: str, default: float) -> float:
+        """A float setting. The Tools page saves job settings as one dict under
+        ``repair.jobs.<id>.settings``; this job used to read only the flat
+        ``repair.jobs.<id>.<key>``, so a value set in the UI never applied.
+        Both are read, the dict first."""
+        cm = getattr(context, 'config_manager', None)
+        if cm is None:
+            return default
+        saved = cm.get(self.get_config_key('settings'), {})
+        value = saved.get(key) if isinstance(saved, dict) else None
+        if value is None:
+            value = cm.get(self.get_config_key(key), None)
+        try:
+            return default if value is None else float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _setting_int(self, context: JobContext, key: str, default: int) -> int:
+        """An int setting — same dict-first lookup as :meth:`_setting_float`."""
+        cm = getattr(context, 'config_manager', None)
+        if cm is None:
+            return default
+        saved = cm.get(self.get_config_key('settings'), {})
+        value = saved.get(key) if isinstance(saved, dict) else None
+        if value is None:
+            value = cm.get(self.get_config_key(key), None)
+        try:
+            return default if value is None else int(value)
+        except (TypeError, ValueError):
+            return default
+
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
@@ -124,19 +155,12 @@ class DeadFileCleanerJob(RepairJob):
             download_folder = context.config_manager.get('soulseek.download_path', '')
 
         # Mass-false-positive guard thresholds (see default_settings).
-        max_unresolved_fraction = 0.5
-        min_tracks_for_guard = 25
-        if context.config_manager:
-            try:
-                max_unresolved_fraction = float(context.config_manager.get(
-                    self.get_config_key('max_unresolved_fraction'), 0.5))
-            except (TypeError, ValueError):
-                max_unresolved_fraction = 0.5
-            try:
-                min_tracks_for_guard = int(context.config_manager.get(
-                    self.get_config_key('min_tracks_for_guard'), 25))
-            except (TypeError, ValueError):
-                min_tracks_for_guard = 25
+        # The Tools page saves these as one dict under
+        # repair.jobs.dead_file_cleaner.settings (dict first, flat key fallback).
+        max_unresolved_fraction = self._setting_float(
+            context, 'max_unresolved_fraction', 0.5)
+        min_tracks_for_guard = self._setting_int(
+            context, 'min_tracks_for_guard', 25)
 
         if context.report_progress:
             context.report_progress(phase=f'Checking {total} tracks...', total=total)

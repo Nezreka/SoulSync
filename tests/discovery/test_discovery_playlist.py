@@ -754,3 +754,146 @@ def test_no_alias_dep_wired_is_not_an_error():
 
     extra = deps._db.extra_data_writes[0][1]
     assert extra.get('wing_it_fallback') is True
+
+
+# ---------------------------------------------------------------------------
+# M12: enrichment-attempt marker on fresh matches with unknown track_number
+# ---------------------------------------------------------------------------
+
+
+def test_fresh_match_with_unknown_track_number_persists_attempt_marker():
+    """M12: when a fresh match completes with track_number=None (the provider
+    doesn't know it), the worker must persist
+    'track_number_unknown_enrichment_attempted' so the pipeline pre-scan gate
+    treats the match as complete instead of re-discovering it forever."""
+    match = _FakeMatch()
+    match.track_number = None  # provider genuinely doesn't know it
+    match.disc_number = None
+    tracks = [_track(track_id=1)]
+    deps = _build_deps(
+        tracks_by_playlist={'p1': tracks},
+        spotify_results=[match],
+        score_result=(match, 0.95, 0),
+    )
+
+    dp.run_playlist_discovery_worker([_playlist('p1')], deps=deps)
+
+    assert len(deps._db.extra_data_writes) == 1
+    _, extra = deps._db.extra_data_writes[0]
+    assert extra['matched_data']['track_number'] is None
+    assert extra['track_number_unknown_enrichment_attempted'] is True
+
+
+def test_fresh_match_with_known_track_number_has_no_attempt_marker():
+    """No marker when the track number is known — nothing to excuse."""
+    match = _FakeMatch()
+    match.track_number = 8
+    match.disc_number = 2
+    tracks = [_track(track_id=1)]
+    deps = _build_deps(
+        tracks_by_playlist={'p1': tracks},
+        spotify_results=[match],
+        score_result=(match, 0.95, 0),
+    )
+
+    dp.run_playlist_discovery_worker([_playlist('p1')], deps=deps)
+
+    assert len(deps._db.extra_data_writes) == 1
+    _, extra = deps._db.extra_data_writes[0]
+    assert extra['matched_data']['track_number'] == 8
+    assert 'track_number_unknown_enrichment_attempted' not in extra
+
+
+def test_marked_match_is_not_rediscovered_next_run():
+    """End-to-end M12: a marked match written by run 1 is skipped by run 2's
+    pre-scan (should_rediscover) — the loop terminates."""
+    from core.discovery.manual_match import should_rediscover
+
+    match = _FakeMatch()
+    match.track_number = None
+    match.disc_number = None
+    tracks = [_track(track_id=1)]
+    deps = _build_deps(
+        tracks_by_playlist={'p1': tracks},
+        spotify_results=[match],
+        score_result=(match, 0.95, 0),
+    )
+    dp.run_playlist_discovery_worker([_playlist('p1')], deps=deps)
+    _, extra = deps._db.extra_data_writes[0]
+
+    # simulate the next pipeline pre-scan reading the merged extra_data back
+    assert should_rediscover(extra) is False
+
+
+# ---------------------------------------------------------------------------
+# S6: honest discovery counters (Wing It stubs are not "discovered")
+# ---------------------------------------------------------------------------
+
+
+def test_wing_it_rows_reported_separately_from_matched():
+    """S6: an all-miss run must not report its Wing It stubs as discovered —
+    the completion event carries matched/wing-it separately, with
+    discovered_count kept as total rows written for compatibility."""
+    match = _FakeMatch()
+    tracks = [_track(track_id=1), _track(track_id=2)]
+    deps = _build_deps(
+        tracks_by_playlist={'p1': tracks},
+        spotify_results=[match],
+        score_result=(match, 0.5, 0),  # below threshold → Wing It for both
+    )
+
+    dp.run_playlist_discovery_worker([_playlist('p1')], deps=deps)
+
+    events = [d for name, d in deps._auto.events if name == 'discovery_completed']
+    assert len(events) == 1
+    payload = events[0]
+    assert payload['wing_it_count'] == '2'
+    assert payload['matched_count'] == '0'
+    assert payload['failed_count'] == '0'
+    # total rows written — preserved for existing consumers
+    assert payload['discovered_count'] == '2'
+
+
+def test_mixed_run_reports_matched_and_wing_it_honestly():
+    """One real match + one Wing It stub → matched_count=1, wing_it_count=1."""
+    match = _FakeMatch()
+    tracks = [_track(track_id=1), _track(track_id=2)]
+    calls = {'n': 0}
+
+    def scorer(title, artist, duration_ms, results):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            return (match, 0.95, 0)
+        return (None, 0.0, -1)
+
+    deps = _build_deps(
+        tracks_by_playlist={'p1': tracks},
+        spotify_results=[match],
+        score_result=(match, 0.95, 0),
+    )
+    deps.discovery_score_candidates = scorer
+
+    dp.run_playlist_discovery_worker([_playlist('p1')], deps=deps)
+
+    events = [d for name, d in deps._auto.events if name == 'discovery_completed']
+    assert len(events) == 1
+    payload = events[0]
+    assert payload['matched_count'] == '1', payload
+    assert payload['wing_it_count'] == '1', payload
+    assert payload['discovered_count'] == '2', payload
+
+
+def test_discovery_completed_still_emitted_for_wing_it_only():
+    """S6: downstream triggering is preserved — Wing It rows were written,
+    so discovery_completed must still fire."""
+    match = _FakeMatch()
+    tracks = [_track(track_id=1)]
+    deps = _build_deps(
+        tracks_by_playlist={'p1': tracks},
+        spotify_results=[match],
+        score_result=(match, 0.5, 0),
+    )
+
+    dp.run_playlist_discovery_worker([_playlist('p1')], deps=deps)
+
+    assert any(name == 'discovery_completed' for name, _ in deps._auto.events)

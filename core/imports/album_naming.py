@@ -157,6 +157,12 @@ def resolve_album_group(artist_context: dict, album_info: dict, original_album: 
                     _album_editions[album_key] = "deluxe"
                     _album_name_cache[album_key] = final_album_name
                     logger.info("Album cache upgrade: %r -> %r", album_key, final_album_name)
+                    # M5: signal the upgrade on album_info so the caller can
+                    # relocate tracks already filed under the standard folder
+                    # — otherwise the album is split across two folders by
+                    # processing order.
+                    if isinstance(album_info, dict):
+                        album_info["_album_group_upgraded_from"] = cached_name
                     return final_album_name
                 logger.info("Using cached album name for %r: %r", album_key, cached_name)
                 return cached_name

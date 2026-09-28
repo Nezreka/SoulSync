@@ -446,6 +446,10 @@ def test_musicbrainz_release_lookup_failure_does_not_poison_cache(monkeypatch):
     monkeypatch.setattr(ms, "get_config_manager", lambda: _Config({"musicbrainz.embed_tags": True}))
     monkeypatch.setattr(ms, "mb_release_cache", {})
     monkeypatch.setattr(ms, "mb_release_detail_cache", {})
+    # L4 caches: reset per test like the release caches above, or artist
+    # lookups leak between tests (module-level, keyed by name/MBID).
+    monkeypatch.setattr(ms, "mb_artist_cache", {})
+    monkeypatch.setattr(ms, "mb_artist_detail_cache", {})
 
     service = _FakeMBService()
     runtime = types.SimpleNamespace(mb_worker=types.SimpleNamespace(mb_service=service))
@@ -701,6 +705,10 @@ def _build_mb_genre_test(monkeypatch, *, recording_genres, release_genres, artis
     monkeypatch.setattr(ms, "get_config_manager", lambda: _Config({"musicbrainz.embed_tags": True}))
     monkeypatch.setattr(ms, "mb_release_cache", {})
     monkeypatch.setattr(ms, "mb_release_detail_cache", {})
+    # L4 caches: reset per test like the release caches above, or artist
+    # lookups leak between tests (module-level, keyed by name/MBID).
+    monkeypatch.setattr(ms, "mb_artist_cache", {})
+    monkeypatch.setattr(ms, "mb_artist_detail_cache", {})
 
     runtime = types.SimpleNamespace(mb_worker=types.SimpleNamespace(mb_service=service))
     pp = {

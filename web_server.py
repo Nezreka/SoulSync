@@ -1046,14 +1046,23 @@ def extract_filename(full_path):
     else:
         return full_path
 
-def _make_context_key(username, filename):
+def _make_context_key(username, filename, task_id=None):
     """Build a unique context key from username and full Soulseek path.
 
     Uses the full remote path (not just filename) to prevent collisions
     when different tracks from the same user share a filename
     (e.g., two albums both containing '01 - Intro.flac').
+
+    Pass ``task_id`` when the key identifies a post-processing context for
+    one specific download task: two tasks can legitimately download the same
+    peer/path (album redownloads, cross-batch duplicates), and without the
+    task id the second task's context silently overwrites the first's.
+    Live-transfer lookups and all legacy callers keep the two-part key —
+    only post-processing context writes pass a task id.
     """
     normalized = filename.replace('\\', '/').lstrip('/') if filename else ''
+    if task_id:
+        return f"{username}::{task_id}::{normalized}"
     return f"{username}::{normalized}"
 
 
@@ -1372,6 +1381,11 @@ wishlist_timer_lock = threading.Lock()
 
 watchlist_auto_scanning = False
 watchlist_auto_scanning_timestamp = 0
+# H7: refreshed by the scan thread while it is alive (see
+# core/watchlist/auto_scan.py::_start_scan_heartbeat). The stuck detector
+# only resets the flag above when THIS is stale — a healthy multi-hour scan
+# must never look stuck just because its start timestamp is old.
+watchlist_auto_scanning_heartbeat = 0
 watchlist_timer_lock = threading.Lock()
 
 # Beatport scrape cache + its accessors live in api/beatport.py now (lifted
@@ -1876,18 +1890,9 @@ from core.search.cache import (
     get_cache_key as _get_enhanced_search_cache_key_impl,
     get_cached_response as _get_cached_enhanced_search_response,
     set_cached_response as _set_cached_enhanced_search_response,
+    should_cache_enhanced_search_response,
 )
 from core.search.orchestrator import VALID_SOURCES as ENHANCED_SEARCH_VALID_SOURCES
-
-
-def _get_enhanced_search_cache_key(query, requested_source=None):
-    """Thin wrapper that wires live config providers into the cache-key builder."""
-    return _get_enhanced_search_cache_key_impl(
-        query, requested_source,
-        active_server_provider=config_manager.get_active_media_server,
-        fallback_source_provider=_get_metadata_fallback_source,
-        hydrabase_active_provider=_is_hydrabase_active,
-    )
 
 # --- Background Download Monitoring (GUI Parity) ---
 from core.downloads.monitor import (
@@ -2216,8 +2221,9 @@ def start_batch_healing_timer():
         # Schedule next healing cycle
         _schedule_batch_healing_timer(30.0)
 
-# Start the healing timer when the server starts
-start_batch_healing_timer()
+# NOTE: start_batch_healing_timer() is NOT called at module level — it is
+# started once per process from start_runtime_services(), so importers
+# (tests, CLI tools, workers) don't inherit a live 30s healing loop.
 
 # Cleanup handler for Flask shutdown/reload
 import atexit
@@ -5842,7 +5848,15 @@ def enhanced_search():
     if not query:
         return jsonify(_search_orchestrator.empty_response())
 
-    cache_key = _get_enhanced_search_cache_key(query, requested_source)
+    # The cached payload's db_artists are profile-scoped: the profile id is
+    # part of the key (H12) so profiles never read each other's results.
+    cache_key = _get_enhanced_search_cache_key_impl(
+        query, requested_source,
+        active_server_provider=config_manager.get_active_media_server,
+        fallback_source_provider=_get_metadata_fallback_source,
+        hydrabase_active_provider=_is_hydrabase_active,
+        profile_id_provider=get_current_profile_id,
+    )
     cached = _get_cached_enhanced_search_response(cache_key)
     if cached is not None:
         logger.info(f"Enhanced search cache hit for: '{query}'")
@@ -5853,7 +5867,10 @@ def enhanced_search():
     try:
         deps = _build_search_deps()
         response_data = _search_orchestrator.run_enhanced_search(query, requested_source, deps)
-        _set_cached_enhanced_search_response(cache_key, response_data)
+        # M16: a provider-outage response (source unavailable, empty
+        # payload) must not be cached as a successful empty search.
+        if should_cache_enhanced_search_response(response_data):
+            _set_cached_enhanced_search_response(cache_key, response_data)
         return jsonify(response_data)
     except Exception as e:
         logger.error(f"Enhanced search error: {e}")
@@ -7887,9 +7904,12 @@ def request_incremental_database_update():
             db_update_state.update({
                 "status": "running", "phase": "Initializing...",
                 "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": "",
+                # H16: new run epoch — a stale worker from a watchdog-superseded
+                # run must not overwrite this run's terminal state.
+                "run_epoch": db_update_state.get("run_epoch", 0) + 1,
                 "last_progress_at": time.time(),  # seed heartbeat for the stall watchdog
             })
-        db_update_executor.submit(_run_db_update_task, False, active_server)
+        db_update_executor.submit(_run_db_update_task, False, active_server, db_update_state["run_epoch"])
 
         add_activity_item("", "Database Update", f"Incremental update started: {reason}", "Now")
         return jsonify({
@@ -15027,10 +15047,11 @@ def start_simple_background_monitor():
 def check_and_recover_stuck_flags():
     """
     Check if wishlist_auto_processing or watchlist_auto_scanning flags are stuck.
-    If a flag has been True for more than 2 hours (7200 seconds), reset it.
-    This prevents indefinite blocking when processes crash without cleanup.
+    If a flag has been True for more than 15 minutes (900 seconds) with no
+    sign of life, reset it. This prevents indefinite blocking when processes
+    crash without cleanup.
     """
-    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
+    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat
 
     import time
     current_time = time.time()
@@ -15054,13 +15075,19 @@ def check_and_recover_stuck_flags():
 
     # Check watchlist flag
     if watchlist_auto_scanning:
-        time_stuck = current_time - watchlist_auto_scanning_timestamp
+        # H7: the scan thread heartbeats while alive — only treat the flag as
+        # stuck when the heartbeat itself is stale. A healthy multi-hour scan
+        # (mandatory per-artist sleeps exceed the 900s timeout) must never be
+        # reset mid-run; that is what started overlapping scans.
+        last_sign_of_life = max(watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat)
+        time_stuck = current_time - last_sign_of_life
         if time_stuck > stuck_timeout:
             stuck_minutes = time_stuck / 60
             logger.info(f"[Stuck Detection] Watchlist auto-scanning flag has been stuck for {stuck_minutes:.1f} minutes - RESETTING")
             with watchlist_timer_lock:
                 watchlist_auto_scanning = False
                 watchlist_auto_scanning_timestamp = 0
+                watchlist_auto_scanning_heartbeat = 0
             return True
 
     return False
@@ -15085,16 +15112,21 @@ def is_wishlist_actually_processing():
 def is_watchlist_actually_scanning():
     """
     Check if watchlist is truly scanning (not just flag stuck).
-    Returns True only if flag is set AND timestamp is recent (< 15 minutes).
+    Returns True only if flag is set AND there has been a sign of life
+    (scan start or heartbeat) within the last 15 minutes.
     """
-    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
+    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat
 
     if not watchlist_auto_scanning:
         return False
 
     import time
     current_time = time.time()
-    time_since_start = current_time - watchlist_auto_scanning_timestamp
+    # H7: heartbeat-aware — a live scan refreshes the heartbeat, so only a
+    # stale heartbeat means stuck (the start timestamp alone goes stale on
+    # every healthy multi-hour scan).
+    last_sign_of_life = max(watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat)
+    time_since_start = current_time - last_sign_of_life
 
     # If more than 15 minutes, flag is stuck - auto-recover and return False
     if time_since_start > 900:  # 15 minutes
@@ -19867,6 +19899,13 @@ def _build_watchlist_auto_scan_deps():
         global watchlist_auto_scanning_timestamp
         watchlist_auto_scanning_timestamp = value
 
+    def _get_hb():
+        return watchlist_auto_scanning_heartbeat
+
+    def _set_hb(value):
+        global watchlist_auto_scanning_heartbeat
+        watchlist_auto_scanning_heartbeat = value
+
     def _get_state():
         return watchlist_scan_state
 
@@ -19888,6 +19927,8 @@ def _build_watchlist_auto_scan_deps():
         _set_auto_scanning=_set_flag,
         _get_auto_scanning_timestamp=_get_ts,
         _set_auto_scanning_timestamp=_set_ts,
+        _get_auto_scanning_heartbeat=_get_hb,
+        _set_auto_scanning_heartbeat=_set_hb,
         _get_watchlist_scan_state=_get_state,
         _set_watchlist_scan_state=_set_state,
         get_deezer_client=_get_deezer_client,
@@ -23460,6 +23501,12 @@ def start_runtime_services():
         # Start OAuth callback servers
         logger.info("Starting OAuth callback servers...")
         start_oauth_callback_servers()
+
+        # Batch state healing timer — started once per process here, so it
+        # runs under both direct execution and the WSGI entrypoint. (It used
+        # to fire at module import, which started the 30s loop in every
+        # importer — tests, workers, CLI tools.)
+        start_batch_healing_timer()
 
         # One-time repair: purge artist album-list cache entries poisoned by
         # partial watchlist probes (limit=5/max_pages=1 results stored in the

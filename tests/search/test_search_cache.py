@@ -7,6 +7,7 @@ import time
 import pytest
 
 from core.search import cache as search_cache
+from core.search.cache import should_cache_enhanced_search_response
 
 
 @pytest.fixture
@@ -131,3 +132,67 @@ def test_key_preserves_falsy_provider_returns():
     assert key[1] is None
     assert key[2] == ''
     assert key[3] == 0
+
+
+def _key_for(query, profile_id=None, pid_raises=False):
+    def pid():
+        if pid_raises:
+            raise RuntimeError("no profile context")
+        return profile_id
+
+    return search_cache.get_cache_key(
+        query, '',
+        active_server_provider=lambda: 'plex',
+        fallback_source_provider=lambda: 'spotify',
+        hydrabase_active_provider=lambda: False,
+        profile_id_provider=pid,
+    )
+
+
+def test_cache_key_differs_across_profiles():
+    """H12: profile A and profile B must not share an enhanced-search cache key."""
+    key_a = _key_for('metallica', profile_id=1)
+    key_b = _key_for('metallica', profile_id=2)
+    assert key_a != key_b
+    # same profile + same query still hits
+    assert _key_for('metallica', profile_id=1) == key_a
+
+
+def test_cached_response_does_not_leak_across_profiles():
+    """H12: profile B must not be served profile A's cached local artists."""
+    search_cache.clear_cache()
+    try:
+        key_a = _key_for('metallica', profile_id=1)
+        search_cache.set_cached_response(key_a, {'db_artists': [{'name': "Metallica (A's library)"}]})
+        key_b = _key_for('metallica', profile_id=2)
+        assert search_cache.get_cached_response(key_b) is None
+        assert search_cache.get_cached_response(key_a) == {'db_artists': [{'name': "Metallica (A's library)"}]}
+    finally:
+        search_cache.clear_cache()
+
+
+def test_key_profile_provider_failure_falls_back():
+    key = _key_for('q', pid_raises=True)
+    assert key[-1] == 'unknown'
+
+
+# ---------------------------------------------------------------------------
+# M16: cacheability of enhanced-search responses
+# ---------------------------------------------------------------------------
+
+
+def test_outage_response_is_not_cacheable():
+    """M16: a response whose source was unavailable (provider outage) must
+    not be cached — caching it would poison the next hour's identical query."""
+    assert should_cache_enhanced_search_response(
+        {'spotify_artists': [], 'source_available': False}) is False
+
+
+def test_healthy_response_is_cacheable():
+    assert should_cache_enhanced_search_response(
+        {'spotify_artists': [], 'source_available': True}) is True
+
+
+def test_response_without_availability_flag_is_cacheable():
+    # short-query / DB-only responses carry no flag — still cacheable
+    assert should_cache_enhanced_search_response({'db_artists': []}) is True

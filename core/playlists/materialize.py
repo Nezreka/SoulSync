@@ -109,6 +109,23 @@ def _symlink_is_current(dest: str, rel_target: str) -> bool:
         return False
 
 
+def _copy_is_current(real_path: str, dest_path: str) -> bool:
+    """True when an existing copied entry still matches the source.
+
+    The default ``copy_fn`` (``shutil.copy2``) preserves mtime, so size +
+    mtime is a cheap reliable freshness check: a retagged or replaced
+    library file at the same path changes at least one of them. A custom
+    copy_fn that does NOT preserve mtime degrades to "always re-copy"
+    (safe, just less idempotent) — never to a stale "unchanged".
+    """
+    try:
+        src = os.stat(real_path)
+        dst = os.stat(dest_path)
+    except OSError:
+        return False
+    return (src.st_size == dst.st_size) and (src.st_mtime_ns == dst.st_mtime_ns)
+
+
 def _remove_entry(path: str) -> None:
     """Remove an existing file/symlink at ``path`` (incl. a broken symlink)."""
     if os.path.islink(path) or os.path.exists(path):
@@ -130,7 +147,10 @@ def materialize_one(
 
     Idempotent: a correct existing entry is left alone. In ``symlink`` mode a
     relative link is used; if it can't be created (unsupported FS, no privilege)
-    it falls back to a copy so the entry is never left broken. Returns one of:
+    it falls back to a copy so the entry is never left broken. In ``copy``
+    mode an existing copy is verified against the source (size + mtime) before
+    being reported ``'unchanged'`` — a retagged/replaced library file at the
+    same path is re-copied, never left stale. Returns one of:
     ``'linked'``, ``'copied'``, ``'unchanged'``, ``'fellback'`` (symlink
     requested but copied), ``'missing'`` (source gone)."""
     if not real_path or not os.path.exists(real_path):
@@ -142,8 +162,11 @@ def materialize_one(
 
     if mode == "copy":
         if os.path.isfile(dest_path) and not os.path.islink(dest_path):
-            return "unchanged"
-        _remove_entry(dest_path)
+            if _copy_is_current(real_path, dest_path):
+                return "unchanged"
+            # stale copy — fall through and re-copy below
+        else:
+            _remove_entry(dest_path)
         copy_fn(real_path, dest_path)
         return "copied"
 

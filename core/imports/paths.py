@@ -302,6 +302,22 @@ def build_simple_download_destination(context, file_path: str):
     return destination_dir / filename, album_name, filename
 
 
+def _truncate_utf8_bytes(value: str, max_bytes: int) -> str:
+    """Truncate to at most ``max_bytes`` UTF-8 bytes without splitting a
+    code point. M8: filesystems limit names by BYTES (255), so a 200-char
+    CJK name (600 bytes) must be cut by byte length, not char count."""
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    truncated = encoded[:max_bytes]
+    while truncated:
+        try:
+            return truncated.decode("utf-8")
+        except UnicodeDecodeError:
+            truncated = truncated[:-1]
+    return value[:1] if value else value
+
+
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename for file system compatibility."""
     sanitized = re.sub(r'[<>:"/\\|?*]', "_", filename)
@@ -313,7 +329,9 @@ def sanitize_filename(filename: str) -> str:
     sanitized = sanitized.strip(". ") or "_"
     if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)", sanitized, re.IGNORECASE):
         sanitized = "_" + sanitized
-    return sanitized[:200]
+    # M8: truncate by UTF-8 BYTES (filesystem limits are byte-based), never
+    # splitting a code point. Plain [:200] kept 200 CJK chars = 600 bytes.
+    return _truncate_utf8_bytes(sanitized, 200)
 
 
 def sanitize_context_values(context: dict) -> dict:
@@ -921,7 +939,16 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
     if is_explicit_comp:
         raw_album_type = "compilation"
 
-    total_tracks = (album_context.get("total_tracks", 0) or 0) if album_context else 0
+    # L2: resolve the track count from the same chain import album building
+    # uses (core/imports/context.py): album_context -> track_info ->
+    # album_info -> 0. Reading only album_context left $albumtype blind
+    # when the count arrived on track_info or album_info.
+    total_tracks = (
+        (album_context.get("total_tracks") if album_context else None)
+        or track_info.get("total_tracks")
+        or (album_info.get("total_tracks") if isinstance(album_info, dict) else None)
+        or 0
+    )
     album_type_display = get_album_type_display(raw_album_type, total_tracks)
 
     # $atypes: every qualifier the release actually carries, bracketed, and

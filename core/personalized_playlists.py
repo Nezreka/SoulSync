@@ -1085,6 +1085,14 @@ class PersonalizedPlaylistsService:
             else:
                 from core.metadata_service import get_primary_client
                 itunes = get_primary_client()
+                # S8: these track ids come from the active (non-Spotify)
+                # source — label them with the provider-correct key instead
+                # of mislabeling them as spotify_track_id. The generic 'id'
+                # is preserved for consumers that don't care about the source.
+                track_id_key = {
+                    'itunes': 'itunes_track_id',
+                    'deezer': 'deezer_track_id',
+                }.get(active_source, 'spotify_track_id')
                 for album in selected_albums:
                     try:
                         album_data = itunes.get_album(album.id, include_tracks=True)
@@ -1100,7 +1108,7 @@ class PersonalizedPlaylistsService:
                                     track_artists = track.get('artists', [])
                                     artist_names = [a['name'] for a in track_artists] if isinstance(track_artists, list) and track_artists and isinstance(track_artists[0], dict) else (track_artists if isinstance(track_artists, list) else [])
                                     all_tracks.append({
-                                        'spotify_track_id': track_id,
+                                        track_id_key: track_id,
                                         'track_name': track.get('name', ''),
                                         'artist_name': ', '.join(artist_names) if artist_names else 'Unknown',
                                         'album_name': album_name,

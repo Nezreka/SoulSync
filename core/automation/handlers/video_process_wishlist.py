@@ -808,6 +808,29 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
 
 # ── guard: keep an in-progress drain from overlapping the next tick ───────────
 _running: Dict[str, bool] = {"movie": False, "episode": False}
+_running_lock = threading.Lock()
+
+
+def _try_claim(media_type: str) -> bool:
+    """Atomically check-and-set the per-kind running flag (H14).
+
+    The engine's overlap guard reads is_running() and the handler sets the
+    flag afterwards — a check-then-act race: two triggers landing in the
+    window both entered, and the first finisher cleared the flag while the
+    second still ran. The claim closes it: only the thread that flips
+    False→True under the lock owns the run (same pattern as rss_sync).
+    """
+    with _running_lock:
+        if _running.get(media_type):
+            return False
+        _running[media_type] = True
+        return True
+
+
+def _release(media_type: str) -> None:
+    """Clear the per-kind running flag (lock-protected, for visibility)."""
+    with _running_lock:
+        _running[media_type] = False
 
 
 def _wishlist_db_key(item: Dict[str, Any], media_type: str) -> tuple:
@@ -892,7 +915,11 @@ def auto_video_process_wishlist(
     concurrency = max(1, int(config.get('max_concurrent', 3) or 3))
     label = 'movie' if media_type == 'movie' else 'episode'
 
-    _running[media_type] = True
+    if not _try_claim(media_type):
+        # Lost the race with another trigger that already owns this drain —
+        # the engine guard is check-then-act, the claim is the atomic backstop.
+        return {'status': 'skipped', 'reason': 'already_running',
+                '_manages_own_progress': True}
     try:
         root = target_dir(media_type)
         if not root:
@@ -1080,4 +1107,5 @@ def auto_video_process_wishlist(
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
         return {'status': 'error', 'error': str(e), '_manages_own_progress': True}
     finally:
-        _running[media_type] = False
+        _release(media_type)  # H14: under the lock, so a concurrent trigger
+        # cannot read a stale False while the second body still runs.

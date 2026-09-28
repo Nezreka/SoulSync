@@ -324,6 +324,11 @@ class WishlistService:
 
             for wishlist_track in wishlist_tracks:
                 formatted_track = self.format_track_for_download(wishlist_track)
+                # H10: the formatted track must know which profile's wishlist
+                # row it came from. Without the owner, a cross-profile batch
+                # is stamped with the runtime's profile and the master worker
+                # downloads the track into the wrong library (#1199).
+                formatted_track.setdefault("profile_id", profile_id)
                 formatted_tracks.append(formatted_track)
 
             return formatted_tracks

@@ -25,7 +25,27 @@ logger = logging.getLogger(__name__)
 
 def search_kind(client, query: str, kind: str, source_name: Optional[str] = None,
                 prefer_free: bool = False) -> list:
-    """Search one result type from a metadata source and normalize it."""
+    """Search one result type from a metadata source and normalize it.
+
+    Provider errors return ``[]`` — preserved behavior for direct callers.
+    (Logging happens inside the raw worker before it re-raises.)
+    """
+    try:
+        return _search_kind_raw(client, query, kind, source_name=source_name, prefer_free=prefer_free)
+    except ValueError:
+        raise
+    except Exception:
+        return []
+
+
+def _search_kind_raw(client, query: str, kind: str, source_name: Optional[str] = None,
+                   prefer_free: bool = False) -> list:
+    """Search one result type from a metadata source and normalize it.
+
+    Identical to :func:`search_kind` except provider exceptions propagate
+    instead of returning ``[]`` — used by :func:`search_source` so it can
+    count failed kinds and report whether the source is actually available.
+    """
     source_label = source_name or type(client).__name__
 
     # prefer_free is only ever set for an explicit Spotify pick (see the
@@ -50,6 +70,7 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                 })
         except Exception as e:
             logger.debug(f"Artist search failed for {source_label}: {e}")
+            raise
         return artists
 
     if kind == "albums":
@@ -79,6 +100,7 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                 })
         except Exception as e:
             logger.warning(f"Album search failed for {source_label}: {e}", exc_info=True)
+            raise
         return albums
 
     if kind == "tracks":
@@ -115,6 +137,7 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                 })
         except Exception as e:
             logger.warning(f"Track search failed for {source_label}: {e}", exc_info=True)
+            raise
         return tracks
 
     if kind == "playlists":
@@ -165,6 +188,7 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                     })
         except Exception as e:
             logger.debug(f"Playlist search failed for {source_label}: {e}")
+            raise
         return playlists
 
     raise ValueError(f"Unknown metadata search kind: {kind}")
@@ -172,20 +196,27 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
 
 def search_source(query: str, client, source_name: Optional[str] = None,
                   prefer_free: bool = False) -> dict:
-    """Run search-kinds against a single client in parallel."""
+    """Run search-kinds against a single client in parallel.
+
+    ``available`` is True when at least one kind succeeded; False only when
+    every kind failed — so a provider outage is distinguishable from a
+    healthy empty result (M16).
+    """
     results: dict[str, Any] = {"artists": [], "albums": [], "tracks": [], "playlists": []}
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
-            executor.submit(search_kind, client, query, "artists", source_name, prefer_free): "artists",
-            executor.submit(search_kind, client, query, "albums", source_name, prefer_free): "albums",
-            executor.submit(search_kind, client, query, "tracks", source_name, prefer_free): "tracks",
-            executor.submit(search_kind, client, query, "playlists", source_name, prefer_free): "playlists",
+            executor.submit(_search_kind_raw, client, query, "artists", source_name, prefer_free): "artists",
+            executor.submit(_search_kind_raw, client, query, "albums", source_name, prefer_free): "albums",
+            executor.submit(_search_kind_raw, client, query, "tracks", source_name, prefer_free): "tracks",
+            executor.submit(_search_kind_raw, client, query, "playlists", source_name, prefer_free): "playlists",
         }
+        failed_kinds = 0
         for future in as_completed(futures):
             kind = futures[future]
             try:
                 results[kind] = future.result()
             except Exception as e:
+                failed_kinds += 1
                 logger.warning(
                     f"{kind.title()} search failed for {source_name or type(client).__name__}: {e}",
                     exc_info=True,
@@ -197,5 +228,5 @@ def search_source(query: str, client, source_name: Optional[str] = None,
         "albums": results["albums"],
         "tracks": results["tracks"],
         "playlists": results["playlists"],
-        "available": True,
+        "available": failed_kinds < len(futures),
     }

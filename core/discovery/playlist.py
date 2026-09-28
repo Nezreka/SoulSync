@@ -110,6 +110,11 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
         total_discovered = 0
         total_failed = 0
         total_skipped = 0
+        # S6: Wing It stubs are rows written, not metadata matches — counted
+        # separately so counters stay honest. total_discovered keeps meaning
+        # "rows written" (matched + wing-it) for progress/event compatibility;
+        # total_matched is derived as total_discovered - total_wing_it.
+        total_wing_it = 0
         total_tracks = 0
         last_playlist_name = ''
 
@@ -176,7 +181,7 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     logger.warning(f"Playlist discovery cancelled (automation {automation_id})")
                     deps.update_automation_progress(automation_id, status='finished', progress=100,
                                                  phase='Discovery cancelled',
-                                                 log_line=f'Cancelled: {total_discovered} discovered, {total_failed} failed',
+                                                 log_line=f'Cancelled: {total_discovered - total_wing_it} matched, {total_wing_it} wing-it, {total_failed} failed',
                                                  log_type='info')
                     return
 
@@ -419,6 +424,13 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         'confidence': best_confidence,
                         'matched_data': matched_data,
                     }
+                    if matched_data.get('track_number') is None:
+                        # M12: the provider genuinely doesn't know the track
+                        # number — record the enrichment attempt so the
+                        # pipeline pre-scan gate (should_rediscover) treats
+                        # this match as complete instead of re-discovering
+                        # (and rewriting identically) on every run.
+                        extra_data['track_number_unknown_enrichment_attempted'] = True
                     db.update_mirrored_track_extra_data(track_id, extra_data)
                     # A match on an "Unknown Artist" row should FIX the row —
                     # matched_data alone leaves the mirror displaying (and
@@ -459,6 +471,7 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     }
                     db.update_mirrored_track_extra_data(track_id, extra_data)
                     total_discovered += 1
+                    total_wing_it += 1
                     logger.info(f"[{i+1}/{len(undiscovered_tracks)}] Wing It: {track_name} by {artist_name}")
                     deps.update_automation_progress(automation_id,
                         progress=((total_skipped + total_discovered + total_failed) / max(1, grand_total)) * 100,
@@ -469,7 +482,9 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                 time.sleep(0.15)
 
         # Emit completion event only if new tracks were actually discovered
-        # (no point triggering downstream sync if nothing changed)
+        # (no point triggering downstream sync if nothing changed). Wing It
+        # rows count: they were written, so downstream still triggers.
+        total_matched = total_discovered - total_wing_it
         try:
             if deps.automation_engine and total_discovered > 0:
                 _disc_pl_id = str(playlists[0]['id']) if len(playlists) == 1 else ''
@@ -477,17 +492,22 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     'playlist_name': last_playlist_name if len(playlists) == 1 else f'{len(playlists)} playlists',
                     'playlist_id': _disc_pl_id,
                     'total_tracks': str(total_tracks),
+                    # S6: honest breakdown. discovered_count keeps its
+                    # historical meaning (total rows written: matched +
+                    # wing-it) so existing consumers keep working.
                     'discovered_count': str(total_discovered),
+                    'matched_count': str(total_matched),
+                    'wing_it_count': str(total_wing_it),
                     'failed_count': str(total_failed),
                     'skipped_count': str(total_skipped),
                 })
         except Exception as e:
             logger.debug("discovery_completed emit failed: %s", e)
 
-        logger.error(f"Playlist discovery complete: {total_discovered} discovered, {total_failed} failed, {total_skipped} skipped")
+        logger.error(f"Playlist discovery complete: {total_matched} matched, {total_wing_it} wing-it, {total_failed} failed, {total_skipped} skipped")
         deps.update_automation_progress(automation_id, status='finished', progress=100,
                                      phase='Discovery complete',
-                                     log_line=f'Done: {total_discovered} discovered, {total_failed} failed, {total_skipped} skipped',
+                                     log_line=f'Done: {total_matched} matched, {total_wing_it} wing-it, {total_failed} failed, {total_skipped} skipped',
                                      log_type='success')
 
     except Exception as e:

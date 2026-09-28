@@ -7,7 +7,7 @@ import socket
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -45,11 +45,19 @@ __all__ = [
 
 _MB_RELEASE_CACHE_MAX_ENTRIES = 4096
 _MB_RELEASE_DETAIL_CACHE_MAX_ENTRIES = 4096
+_MB_ARTIST_CACHE_MAX_ENTRIES = 1024
+_MB_ARTIST_DETAIL_CACHE_MAX_ENTRIES = 1024
 
 mb_release_cache: "OrderedDict[tuple, str]" = OrderedDict()
 mb_release_cache_lock = threading.RLock()
 mb_release_detail_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 mb_release_detail_cache_lock = threading.RLock()
+# L4: per-track MusicBrainz artist lookups for one album's tracks all ask
+# about the same artist. Bounded + locked, keyed by normalized identity.
+mb_artist_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+mb_artist_cache_lock = threading.RLock()
+mb_artist_detail_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+mb_artist_detail_cache_lock = threading.RLock()
 logger = _create_logger("metadata.source")
 
 _SOURCE_NETWORK_EXCEPTIONS = (requests.RequestException, socket.timeout, TimeoutError)
@@ -66,8 +74,6 @@ _EDITION_BARE_RE = re.compile(
     r'(?:\s+(?:edition|version))?\s*$',
     re.IGNORECASE,
 )
-
-
 def normalize_album_cache_key(album_name: str) -> str:
     result = _EDITION_PAREN_RE.sub("", album_name or "")
     result = _EDITION_BARE_RE.sub("", result)
@@ -264,6 +270,49 @@ def _collect_source_ids(metadata: dict, cfg) -> dict:
     return source_ids
 
 
+def _cached_mb_artist(mb_service, artist_name: str) -> Optional[Dict[str, Any]]:
+    """L4: ``match_artist`` result cached by normalized artist name. One
+    album's tracks all resolve the same artist — the network is hit once,
+    not once per track. Only successful results are cached."""
+    key = str(artist_name or "").strip().lower()
+    if not key:
+        return None
+    with mb_artist_cache_lock:
+        cached = _bounded_cache_get(mb_artist_cache, key)
+        if cached is not None:
+            return cached
+    result = _call_source_lookup("MusicBrainz artist", mb_service.match_artist, artist_name)
+    if result:
+        with mb_artist_cache_lock:
+            _bounded_cache_set(mb_artist_cache, key, result, _MB_ARTIST_CACHE_MAX_ENTRIES)
+    return result
+
+
+def _cached_mb_artist_details(mb_service, artist_mbid: str) -> Optional[Dict[str, Any]]:
+    """L4: ``get_artist`` (genre fallback) result cached by artist MBID —
+    the normalized identity for this lookup. Same once-per-album
+    semantics as :func:`_cached_mb_artist`."""
+    key = str(artist_mbid or "").strip()
+    if not key:
+        return None
+    with mb_artist_detail_cache_lock:
+        cached = _bounded_cache_get(mb_artist_detail_cache, key)
+        if cached is not None:
+            return cached
+    detail = _call_source_lookup(
+        "MusicBrainz artist details",
+        mb_service.mb_client.get_artist,
+        key,
+        includes=["genres"],
+    )
+    if detail:
+        with mb_artist_detail_cache_lock:
+            _bounded_cache_set(
+                mb_artist_detail_cache, key, detail, _MB_ARTIST_DETAIL_CACHE_MAX_ENTRIES
+            )
+    return detail
+
+
 def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
     if cfg.get("musicbrainz.embed_tags", True) is False:
         return
@@ -298,7 +347,7 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
     track_artist_name = metadata.get("artist", "") or artist_name
     if ", " in track_artist_name:
         track_artist_name = track_artist_name.split(", ")[0]
-    artist_result = None if pinned_release else _call_source_lookup("MusicBrainz artist", mb_service.match_artist, track_artist_name)
+    artist_result = None if pinned_release else _cached_mb_artist(mb_service, track_artist_name)
     if artist_result and artist_result.get("mbid"):
         pp["artist_mbid"] = artist_result["mbid"]
         pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = pp["artist_mbid"]
@@ -426,12 +475,7 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             )
         ]
     if not pp["mb_genres"] and pp.get("artist_mbid"):
-        artist_detail = _call_source_lookup(
-            "MusicBrainz artist details",
-            mb_service.mb_client.get_artist,
-            pp["artist_mbid"],
-            includes=["genres"],
-        )
+        artist_detail = _cached_mb_artist_details(mb_service, pp["artist_mbid"])
         if artist_detail:
             pp["mb_genres"] = [
                 g["name"] for g in sorted(

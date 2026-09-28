@@ -282,7 +282,10 @@ def bulk_toggle(
             auto = database.get_automation(aid)
             if auto:
                 if auto.get('enabled'):
-                    automation_engine.schedule_automation(auto)
+                    # H17: schedule_automation takes the integer id, not the
+                    # row dict — passing `auto` crashed inside and the timer
+                    # stayed silent, so the automation never fired.
+                    automation_engine.schedule_automation(aid)
                 else:
                     automation_engine.cancel_automation(aid)
     return {'success': True, 'updated': updated}, 200

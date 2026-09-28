@@ -264,17 +264,19 @@ def test_real_metadata_still_beats_embedded_tag():
     assert result == 5
 
 
-def test_filename_beats_embedded_tag_no_regression():
-    """SAFETY: embedded tag is consulted LAST, so a correctly-named ripped
-    file ('05 - Song') with a stale/wrong embedded tag is NOT regressed —
-    the filename still wins, exactly as before the fix."""
+def test_embedded_beats_filename_guess():
+    """M6 (backend-review): the source-written embedded tag is consulted
+    between provider metadata and the filename guess — matching staging
+    (which lets embedded override the filename) and the pipeline's own
+    comment at the call site ("a source between metadata and the filename
+    guess"). A stale filename no longer overrides the tag."""
     result = resolve_track_number(
         album_info={},
         track_info={},
         file_path='/dl/09 - Mislabelled.flac',
-        embedded_track_number=2,   # wrong/stale tag must NOT win
+        embedded_track_number=2,
     )
-    assert result == 9
+    assert result == 2
 
 
 def test_embedded_only_fills_the_floor_gap():

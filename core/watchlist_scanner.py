@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 import re
+import sqlite3
 import time
 from difflib import SequenceMatcher
 import requests
@@ -1498,6 +1499,7 @@ class WatchlistScanner:
                 artist_added_tracks = 0
 
                 artist_was_cancelled = False
+                albums_processed = 0
                 for album_index, album in enumerate(albums):
                     # The album loop had no cancel point at all, so a cancel
                     # could only land between ARTISTS. An artist with thirty
@@ -1510,6 +1512,10 @@ class WatchlistScanner:
                             artist.artist_name, album_index, len(albums),
                         )
                         break
+                    # H8: count only albums actually attempted — the cancel
+                    # check above means a mid-artist cancel leaves the rest
+                    # untouched, and the result must report the real count.
+                    albums_processed += 1
                     try:
                         album_data = album_fetcher(album.id, getattr(album, 'name', ''))
                         tracks = self._extract_track_items(album_data)
@@ -1633,15 +1639,20 @@ class WatchlistScanner:
                         logger.warning("Error checking album %s: %s", album.name, e)
                         continue
 
-                self.update_artist_scan_timestamp(artist)
+                # H8: a cancelled artist is NOT fully scanned — stamping the
+                # timestamp would skip it next run, and reporting success (or
+                # the full album count) would lie about what was checked.
+                if not artist_was_cancelled:
+                    self.update_artist_scan_timestamp(artist)
 
                 scan_results.append(ScanResult(
                     artist_name=artist.artist_name,
                     spotify_artist_id=source_artist_id or artist.spotify_artist_id or '',
-                    albums_checked=len(albums),
+                    albums_checked=albums_processed,
                     new_tracks_found=artist_new_tracks,
                     tracks_added_to_wishlist=artist_added_tracks,
-                    success=True,
+                    success=not artist_was_cancelled,
+                    error_message="cancelled" if artist_was_cancelled else None,
                 ))
 
                 _emit(
@@ -1650,7 +1661,7 @@ class WatchlistScanner:
                     artist_index=absolute_index,
                     total_artists=total_artists_override if total_artists_override is not None else len(watchlist_artists),
                     profile_id=profile_id,
-                    albums_checked=len(albums),
+                    albums_checked=albums_processed,
                     new_tracks_found=artist_new_tracks,
                     tracks_added_to_wishlist=artist_added_tracks,
                 )
@@ -2546,6 +2557,14 @@ class WatchlistScanner:
             logger.info(f"Track missing from library: '{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' - adding to wishlist")
             return True  # Track is missing
             
+        except sqlite3.Error as e:
+            # H11: infrastructure failure (locked DB, I/O error) — we cannot
+            # prove the track is missing. Fail CLOSED: treat it as present
+            # for this scan (it is rechecked on the next scan) rather than
+            # wishlisting — and re-downloading — an owned track.
+            track_name = track.get('name', 'Unknown') if isinstance(track, dict) else getattr(track, 'name', 'Unknown')
+            logger.warning(f"Library check failed for '{track_name}' ({e}) — treating as present this scan")
+            return False
         except Exception as e:
             # Handle both dict and object track formats for error logging
             track_name = track.get('name', 'Unknown') if isinstance(track, dict) else getattr(track, 'name', 'Unknown')

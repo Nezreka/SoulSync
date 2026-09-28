@@ -351,13 +351,21 @@ def test_single_source_spotify_unavailable_when_package_missing():
 
 def test_single_source_search_failure_returns_empty():
     spot = _Client(authed=True, fail_search=True)
+    # the _Client fake has no search_playlists: give it a failing one so the
+    # model is a total provider outage, not a client that simply lacks
+    # playlist search (which legitimately returns []).
+    def _boom(q, limit=10):
+        raise RuntimeError("client search boom")
+    spot.search_playlists = _boom
     deps = _build_deps(spotify_client=spot)
-    result = orchestrator.run_enhanced_search('q', 'spotify', deps)
-    # search_source still returns a wrapper because per-kind exceptions are
-    # swallowed inside it, so we get [] for each kind, source_available=True
+    result = orchestrator.run_enhanced_search('pink floyd', 'spotify', deps)
+    # M16: per-kind failures are counted, so a total provider outage is
+    # distinguishable from a healthy empty result — source_available=False
+    # keeps the outage response out of the enhanced-search cache.
     assert result['spotify_artists'] == []
     assert result['spotify_albums'] == []
     assert result['spotify_tracks'] == []
+    assert result['source_available'] is False
 
 
 # ---------------------------------------------------------------------------
@@ -686,3 +694,35 @@ def test_single_source_spotify_authed_never_prefers_free():
 
     assert result['spotify_artists'][0]['name'] == 'Official Artist'
     assert spot.prefer_free_seen is False
+
+
+def test_fanout_all_kinds_failing_marks_source_unavailable():
+    """M16: when the primary fallback source's provider is down for every
+    kind, the fan-out response must carry source_available=False so the
+    route doesn't cache the outage as a successful empty search."""
+    fb_client = _Client(fail_search=True)
+    # the _Client fake has no search_playlists: give it a failing one so the
+    # model is a total provider outage, not a client that simply lacks
+    # playlist search (which legitimately returns []).
+    def _boom(q, limit=10):
+        raise RuntimeError("client search boom")
+    fb_client.search_playlists = _boom
+    deps = _build_deps(
+        get_metadata_fallback_source=lambda: 'deezer',
+        get_metadata_fallback_client=lambda: fb_client,
+    )
+    result = orchestrator.run_enhanced_search('pink floyd', '', deps)
+
+    assert result['spotify_artists'] == []
+    assert result['source_available'] is False
+
+
+def test_fanout_healthy_primary_marks_source_available():
+    fb_client = _Client(artists=[_Artist('f1', 'Fallback Artist')])
+    deps = _build_deps(
+        get_metadata_fallback_source=lambda: 'deezer',
+        get_metadata_fallback_client=lambda: fb_client,
+    )
+    result = orchestrator.run_enhanced_search('pink floyd', '', deps)
+
+    assert result['source_available'] is True

@@ -385,7 +385,9 @@ class CandidatesDeps:
     run_async: Callable[..., Any]
     get_database: Callable[[], Any]
     update_task_status: Callable
-    make_context_key: Callable[[str, str], str]
+    # Builds context keys; accepts an optional task_id that scopes the key to
+    # one task (see _make_context_key in web_server.py).
+    make_context_key: Callable[..., str]
     on_download_completed: Callable
 
 
@@ -668,6 +670,21 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
                 context_key = deps.make_context_key(username, filename)
                 with matched_context_lock:
+                    if context_key in matched_downloads_context:
+                        # Another task is already using this peer/path. Stamp
+                        # the key with this task's id so the two contexts can't
+                        # overwrite each other; readers try the task-scoped key
+                        # first and fall back to the legacy key.
+                        existing = matched_downloads_context[context_key]
+                        if not (isinstance(existing, dict)
+                                and existing.get('task_id') == task_id):
+                            context_key = deps.make_context_key(username, filename, task_id)
+                            logger.info(
+                                "[Context] Peer/path already claimed by task %s — "
+                                "storing task %s context under scoped key",
+                                existing.get('task_id') if isinstance(existing, dict) else '?',
+                                task_id,
+                            )
                     # Create WebUI equivalent of GUI's SpotifyBasedSearchResult data structure
                     enhanced_payload = download_payload.copy()
                     
@@ -805,22 +822,17 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 
                 # Update task with successful download info
                 _cancelled_after_start = False
+                _cancel_after_start = None  # (download_id, username) to cancel outside the lock
                 with tasks_lock:
                     if task_id in download_tasks:
                         # PHASE 3: Final cancellation check after download started (GUI PARITY)
                         if download_tasks[task_id]['status'] == 'cancelled':
                             _cancelled_after_start = True
-                            logger.warning(f"[Modal Worker] Task {task_id} cancelled after download {download_id} started - attempting to cancel download")
-                            # Try to cancel the download immediately
-                            try:
-                                logger.info(
-                                    f"[CancelTrigger:candidates.worker_cancelled_during_download] "
-                                    f"download_id={download_id} username={username} task_id={task_id}"
-                                )
-                                deps.run_async(deps.download_orchestrator.cancel_download(download_id, username, remove=True))
-                                logger.warning(f"Successfully cancelled active download {download_id}")
-                            except Exception as cancel_error:
-                                logger.error(f"Failed to cancel active download {download_id}: {cancel_error}")
+                            # Capture the cancel intent under the lock; the actual
+                            # cancel call does slskd network I/O and must run
+                            # OUTSIDE tasks_lock (see below).
+                            _cancel_after_start = (download_id, username)
+                            logger.warning(f"[Modal Worker] Task {task_id} cancelled after download {download_id} started - will cancel download outside the lock")
                         else:
                             # Store download information - use real download ID from download_orchestrator
                             # CRITICAL FIX: Trust the download ID returned by download_orchestrator.download()
@@ -844,10 +856,22 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                                 logger.debug("picked_candidate detail failed: %s", _picked_exc)
 
                 if _cancelled_after_start:
-                    # Free the worker slot OUTSIDE tasks_lock: on_download_completed
-                    # re-acquires it and tasks_lock is non-reentrant, so calling it
-                    # in-lock deadlocked the worker WHILE HOLDING the global lock,
-                    # freezing all downloads. Idempotent, so it's safe here.
+                    # Cancel the download OUTSIDE tasks_lock: cancel_download
+                    # performs slskd network I/O, and holding the global lock
+                    # across it serialized the 1s monitor ticks behind every
+                    # cancellation. on_download_completed re-acquires the lock
+                    # and tasks_lock is non-reentrant, so it stays out too.
+                    if _cancel_after_start is not None:
+                        cancel_download_id, cancel_username = _cancel_after_start
+                        try:
+                            logger.info(
+                                f"[CancelTrigger:candidates.worker_cancelled_during_download] "
+                                f"download_id={cancel_download_id} username={cancel_username} task_id={task_id}"
+                            )
+                            deps.run_async(deps.download_orchestrator.cancel_download(cancel_download_id, cancel_username, remove=True))
+                            logger.warning(f"Successfully cancelled active download {cancel_download_id}")
+                        except Exception as cancel_error:
+                            logger.error(f"Failed to cancel active download {cancel_download_id}: {cancel_error}")
                     if batch_id:
                         deps.on_download_completed(batch_id, task_id, success=False)
                     return False
