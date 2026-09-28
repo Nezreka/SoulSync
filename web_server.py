@@ -8545,6 +8545,24 @@ def library_check_tracks():
         # Single query: get ALL tracks by this artist from the DB
         db_tracks = db.search_tracks(artist=artist_name, limit=500, server_source=active_server)
 
+        # Ownership is per-artist. When the requested artist isn't in the
+        # library by name, search_tracks() degrades to a whole-table word-OR
+        # ("Black Rainbows" matches "Black Sabbath" on "black") and the title
+        # matcher below would credit a different artist's song as owned
+        # (Ktzenjammer follow-up to #1292: "Snowball" flagged owned via Black
+        # Sabbath's "Snowblind" — and mergeOwnership would then PLAY that
+        # wrong file). A track by another artist is never the same recording,
+        # so keep only rows credited to the requested artist, via the album
+        # artist or the per-track artist (compilations).
+        from core.text.normalize import normalize_key
+        _wanted_artist_key = normalize_key(artist_name)
+        if _wanted_artist_key:
+            db_tracks = [
+                t for t in db_tracks
+                if normalize_key(getattr(t, 'artist_name', '') or '') == _wanted_artist_key
+                or normalize_key(getattr(t, 'track_artist', '') or '') == _wanted_artist_key
+            ]
+
         if not db_tracks:
             # No tracks by this artist in DB — none owned
             owned_map = {t.get('name', ''): {"owned": False} for t in tracks if t.get('name')}
@@ -8583,7 +8601,7 @@ def library_check_tracks():
         target_album = data.get('album_name', '')
         target_album_norm = _normalize(target_album) if target_album else ''
 
-        def _match_title(search_norm, search_clean, candidates):
+        def _match_title(search_norm, search_clean, candidates, threshold=0.7):
             """Find best matching track from a list of (norm, clean, db_track) candidates."""
             from core.text.title_match import choose_best_title_candidate
             return choose_best_title_candidate(
@@ -8591,11 +8609,24 @@ def library_check_tracks():
                 search_clean,
                 candidates,
                 lambda left, right: SequenceMatcher(None, left, right).ratio(),
+                threshold=threshold,
             )
+
+        # A 0.7 title ratio is only safe inside one album's track list. The
+        # #808 fallback (and the album-less path) searches the artist's whole
+        # catalog, where different songs routinely share a stem: "Beyond I" /
+        # "Beyond Fate" = 0.74, "Solve" / "Solace" = 0.73, "Bestrafe mich" /
+        # "Heirate mich" = 0.72 (Ktzenjammer follow-up to #1292). Out there
+        # only near-identical titles may match — 0.85 is the same level
+        # titles_plausibly_same() accepts regardless of shared words, so
+        # typos ("Beleive"/"Believe" = 0.86) still match while stem-sharing
+        # different songs no longer do.
+        _WIDE_POOL_THRESHOLD = 0.85
 
         # Split DB tracks by album if album-aware matching is active
         album_entries = []
         other_entries = []
+        title_threshold = 0.7
         if target_album_norm:
             for entry in db_title_entries:
                 db_album = _normalize(getattr(entry[2], 'album_title', '') or '')
@@ -8609,11 +8640,17 @@ def library_check_tracks():
             # 'Champagne Supernova (OurVinyl Sessions)' scores ~0.5). Marking
             # every track unowned off a failed ALBUM-name comparison is wrong —
             # fall back to artist-wide title matching, which is exactly the
-            # pre-album-aware behavior and still holds the 0.7 title bar.
+            # pre-album-aware behavior, but under the near-identical bar.
             if not album_entries:
                 album_entries = other_entries
+                # ...but the wide pool only gets the near-identical bar: a 0.7
+                # ratio across the whole catalog is where the stem-sharing
+                # false positives live (see _WIDE_POOL_THRESHOLD above).
+                title_threshold = _WIDE_POOL_THRESHOLD
         else:
             other_entries = db_title_entries
+            # No album context at all: same wide pool, same near-identical bar.
+            title_threshold = _WIDE_POOL_THRESHOLD
 
         owned_map = {}
         for track in tracks:
@@ -8628,9 +8665,11 @@ def library_check_tracks():
             # prevents false positives where "Thriller" on Album A shows as owned
             # because it exists on Album B. Without album context, search all tracks.
             if target_album_norm:
-                matched_db_track = _match_title(search_norm, search_clean, album_entries)
+                matched_db_track = _match_title(search_norm, search_clean, album_entries,
+                                                threshold=title_threshold)
             else:
-                matched_db_track = _match_title(search_norm, search_clean, other_entries)
+                matched_db_track = _match_title(search_norm, search_clean, other_entries,
+                                                threshold=title_threshold)
 
             if matched_db_track:
                 import os
