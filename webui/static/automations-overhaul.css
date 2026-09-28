@@ -1,0 +1,848 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUTOMATIONS — navigation overhaul (music React page)
+
+   The page is now an app surface, not a scroll: a sidebar for navigation and
+   a main pane that shows one thing at a time (overview dashboard, one library
+   collection, or the guides). This file styles ONLY the new automx-* markup.
+   The card itself keeps its chassis from automations-redesign.css.
+
+   Loaded AFTER automations-redesign.css and wins by cascade where they meet
+   (the .automations-grid override). Every selector is scoped under .automx so
+   nothing leaks — the video page and every other surface are untouched.
+
+   Design language: quiet dark glass, one accent, generous whitespace, motion
+   that settles rather than announces. Same tokens as the wishlist premier
+   pass (--accent-rgb and friends).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.automx {
+  --automx-accent: var(--accent-rgb, 29, 185, 84);
+  --automx-accent-light: var(--accent-light-rgb, 134, 239, 172);
+  --automx-danger: 244, 63, 94;
+  --automx-warn: 245, 158, 11;
+  --automx-ok: 34, 197, 94;
+  --automx-surface: rgba(255, 255, 255, 0.04);
+  --automx-surface-2: rgba(255, 255, 255, 0.07);
+  --automx-border: rgba(255, 255, 255, 0.08);
+  --automx-text: #ffffff;
+  --automx-text-2: rgba(255, 255, 255, 0.66);
+  --automx-text-3: rgba(255, 255, 255, 0.4);
+  --automx-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── App frame ──────────────────────────────────────────────────────────── */
+.page-shell.automx {
+  display: flex;
+  align-items: stretch;
+  padding: 0;
+  overflow: hidden;
+  /* The app chrome is just the left nav; the shell's own 20px margin is the
+     only thing above and below, so this fills the viewport cleanly. */
+  height: calc(100vh - 40px);
+  min-height: 620px;
+}
+
+.automx-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 30px 36px 60px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+/* A soft crossfade each time the view or collection changes. The page keys
+   the view container so React remounts it and the animation replays. */
+@keyframes automx-view-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.automx-view {
+  animation: automx-view-in 0.28s var(--automx-ease);
+  max-width: 1160px;
+  margin: 0 auto;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────────────────── */
+.automx-sidebar {
+  width: 278px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
+  border-right: 1px solid var(--automx-border);
+  padding: 18px 14px 16px;
+  gap: 14px;
+}
+
+.automx-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.automx-search-icon {
+  position: absolute;
+  left: 12px;
+  font-size: 15px;
+  color: var(--automx-text-3);
+  pointer-events: none;
+}
+.automx-search-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--automx-border);
+  border-radius: 12px;
+  color: var(--automx-text);
+  font-size: 13.5px;
+  font-family: inherit;
+  padding: 10px 32px 10px 34px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.automx-search-input::placeholder { color: var(--automx-text-3); }
+.automx-search-input:focus {
+  outline: none;
+  border-color: rgba(var(--automx-accent), 0.55);
+  box-shadow: 0 0 0 3px rgba(var(--automx-accent), 0.14);
+}
+.automx-search-clear {
+  position: absolute;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--automx-text-2);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.automx-search-clear:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+
+.automx-nav {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+.automx-nav-heading {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--automx-text-3);
+  padding: 16px 12px 6px;
+}
+.automx-nav-heading:first-child { padding-top: 2px; }
+
+.automx-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: none;
+  color: var(--automx-text-2);
+  font-size: 13.5px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+.automx-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--automx-text);
+}
+.automx-nav-item.active {
+  background: rgba(var(--automx-accent), 0.13);
+  border-color: rgba(var(--automx-accent), 0.28);
+  color: #fff;
+  box-shadow: 0 2px 14px rgba(var(--automx-accent), 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.automx-nav-icon {
+  width: 20px;
+  text-align: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.automx-nav-item.active .automx-nav-icon { opacity: 1; }
+.automx-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.automx-nav-count {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--automx-text-3);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.automx-nav-item.active .automx-nav-count {
+  background: rgba(var(--automx-accent), 0.2);
+  color: rgb(var(--automx-accent-light));
+  border-color: rgba(var(--automx-accent), 0.3);
+}
+.automx-nav-count.alert {
+  background: rgba(var(--automx-danger), 0.16);
+  color: rgb(253, 164, 175);
+  border-color: rgba(var(--automx-danger), 0.4);
+  box-shadow: 0 0 10px rgba(var(--automx-danger), 0.25);
+}
+.automx-nav-attention .automx-nav-label { color: rgb(253, 164, 175); }
+.automx-nav-attention.active .automx-nav-label { color: #fff; }
+
+.automx-health-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.automx-health-dot.ok { background: rgb(var(--automx-ok)); box-shadow: 0 0 6px rgba(var(--automx-ok), 0.8); }
+.automx-health-dot.warn { background: rgb(var(--automx-warn)); box-shadow: 0 0 6px rgba(var(--automx-warn), 0.8); }
+.automx-health-dot.bad {
+  background: rgb(var(--automx-danger));
+  box-shadow: 0 0 8px rgba(var(--automx-danger), 0.9);
+  animation: automx-blink 1.6s ease-in-out infinite;
+}
+.automx-health-dot.none { display: none; }
+@keyframes automx-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* A group row mid-drag: the accent outline says "drop here". */
+.automx-nav-item.automx-drop-target {
+  background: rgba(var(--automx-accent), 0.16);
+  border-color: rgba(var(--automx-accent), 0.65);
+  box-shadow: 0 0 0 3px rgba(var(--automx-accent), 0.18), 0 2px 18px rgba(var(--automx-accent), 0.25);
+  color: #fff;
+}
+
+/* ── Sidebar foot ───────────────────────────────────────────────────────── */
+.automx-sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--automx-border);
+}
+.automx-master {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--automx-border);
+  background: var(--automx-surface);
+  color: var(--automx-text-3);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.22s ease;
+}
+.automx-master:hover { border-color: rgba(255, 255, 255, 0.18); }
+.automx-master .automx-master-sw {
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  position: relative;
+  background: rgba(255, 255, 255, 0.14);
+  transition: background 0.22s ease;
+  flex-shrink: 0;
+}
+.automx-master .automx-master-sw::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.22s var(--automx-ease);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.automx-master.on { color: rgb(134, 239, 172); border-color: rgba(var(--automx-ok), 0.35); }
+.automx-master.on .automx-master-sw { background: rgba(var(--automx-ok), 0.55); }
+.automx-master.on .automx-master-sw::after { transform: translateX(14px); }
+.automx-master:disabled { opacity: 0.55; cursor: default; }
+
+.automx-new-btn {
+  border: none;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  color: #06110a;
+  background: linear-gradient(135deg, rgb(var(--automx-accent-light)), rgb(var(--automx-accent)) 140%);
+  box-shadow: 0 4px 18px rgba(var(--automx-accent), 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 0.18s var(--automx-ease), box-shadow 0.18s ease;
+}
+.automx-new-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(var(--automx-accent), 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.automx-new-btn:active { transform: translateY(0); }
+.automx-new-btn-lg { font-size: 15px; padding: 13px 26px; }
+
+/* ── Overview ───────────────────────────────────────────────────────────── */
+.automx-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* The hero answers the page's real question — is automation working — in one
+   glance. The glow carries the verdict's colour; the mark carries its glyph. */
+.automx-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 30px 34px;
+  border-radius: 22px;
+  border: 1px solid var(--automx-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018));
+  backdrop-filter: blur(14px);
+}
+.automx-hero-glow {
+  position: absolute;
+  inset: auto -80px -120px auto;
+  width: 380px;
+  height: 380px;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  transition: background 0.5s ease;
+}
+.automx-hero.ok .automx-hero-glow {
+  background: radial-gradient(circle, rgba(var(--automx-ok), 0.22), transparent 65%);
+  animation: automx-breathe 5s ease-in-out infinite;
+}
+.automx-hero.warn .automx-hero-glow {
+  background: radial-gradient(circle, rgba(var(--automx-warn), 0.26), transparent 65%);
+  animation: automx-breathe 3.2s ease-in-out infinite;
+}
+.automx-hero.paused .automx-hero-glow {
+  background: radial-gradient(circle, rgba(148, 163, 184, 0.18), transparent 65%);
+}
+@keyframes automx-breathe {
+  0%, 100% { opacity: 0.75; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+.automx-hero-mark {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.automx-hero.ok .automx-hero-mark {
+  color: rgb(134, 239, 172);
+  border-color: rgba(var(--automx-ok), 0.45);
+  box-shadow: 0 0 26px rgba(var(--automx-ok), 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.automx-hero.warn .automx-hero-mark {
+  color: rgb(253, 224, 171);
+  border-color: rgba(var(--automx-warn), 0.5);
+  box-shadow: 0 0 26px rgba(var(--automx-warn), 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.automx-hero-text { position: relative; flex: 1; min-width: 0; }
+.automx-hero-title {
+  font-size: 27px;
+  font-weight: 750;
+  letter-spacing: -0.015em;
+  color: var(--automx-text);
+}
+.automx-hero-sub {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--automx-text-2);
+}
+.automx-hero-actions { position: relative; flex-shrink: 0; }
+.automx-hero-btn {
+  border: 1px solid rgba(var(--automx-accent), 0.4);
+  background: rgba(var(--automx-accent), 0.14);
+  color: rgb(var(--automx-accent-light));
+  border-radius: 12px;
+  padding: 11px 20px;
+  font-size: 13.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.automx-hero-btn:hover {
+  background: rgba(var(--automx-accent), 0.24);
+  box-shadow: 0 4px 18px rgba(var(--automx-accent), 0.3);
+  transform: translateY(-1px);
+}
+
+.automx-overview-grid {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 22px;
+  align-items: start;
+}
+
+.automx-panel {
+  border-radius: 20px;
+  border: 1px solid var(--automx-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.014));
+  padding: 20px 22px;
+  min-width: 0;
+}
+.automx-panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.automx-panel-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--automx-text);
+}
+.automx-panel-sub {
+  font-size: 12px;
+  color: var(--automx-text-3);
+}
+.automx-panel-link {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: rgb(var(--automx-accent-light));
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.automx-panel-link:hover { text-decoration: underline; }
+.automx-panel-empty {
+  padding: 26px 10px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--automx-text-3);
+}
+.automx-panel-empty-good { color: rgba(134, 239, 172, 0.75); }
+
+/* The timeline: a rail with a dot per run, so "what happens when" reads as a
+   sequence rather than a stack of rows. */
+.automx-timeline {
+  position: relative;
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+.automx-timeline::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(var(--automx-accent), 0.5), rgba(var(--automx-accent), 0.06));
+}
+.automx-timeline-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0 9px 22px;
+}
+.automx-timeline-dot {
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: rgb(var(--automx-accent));
+  box-shadow: 0 0 10px rgba(var(--automx-accent), 0.7);
+  border: 2px solid rgba(0, 0, 0, 0.55);
+}
+.automx-time-chip {
+  flex-shrink: 0;
+  min-width: 74px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 5px 10px;
+  border-radius: 999px;
+  color: rgb(var(--automx-accent-light));
+  background: rgba(var(--automx-accent), 0.12);
+  border: 1px solid rgba(var(--automx-accent), 0.3);
+}
+
+/* Rows are buttons: the name is the affordance, and clicking it finds the
+   automation in the library. Everything stays one click from its details. */
+.automx-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border-radius: 8px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.automx-row-main:hover { background: rgba(255, 255, 255, 0.05); }
+.automx-row-icon { font-size: 14px; flex-shrink: 0; transform: translateY(1px); }
+.automx-row-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--automx-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.automx-row-sub {
+  font-size: 12px;
+  color: var(--automx-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: auto;
+  flex-shrink: 1;
+}
+
+.automx-attention-list,
+.automx-recent-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.automx-attention-row,
+.automx-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  margin: 0 -8px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.automx-attention-row:hover,
+.automx-recent-row:hover {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+.automx-attention-row.failed {
+  background: rgba(var(--automx-danger), 0.07);
+  border-color: rgba(var(--automx-danger), 0.22);
+}
+.automx-attention-row.failed:hover { background: rgba(var(--automx-danger), 0.11); }
+.automx-attention-row.failed .automx-row-sub {
+  color: rgb(253, 164, 175);
+  white-space: normal;
+}
+.automx-row-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.automx-attention-row:hover .automx-row-actions,
+.automx-attention-row:focus-within .automx-row-actions {
+  opacity: 1;
+}
+.automx-mini-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--automx-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--automx-text-2);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+.automx-mini-btn:hover {
+  background: rgba(var(--automx-accent), 0.16);
+  border-color: rgba(var(--automx-accent), 0.4);
+  color: #fff;
+}
+.automx-recent-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.automx-recent-result {
+  font-size: 12px;
+  color: var(--automx-text-2);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.automx-recent-result.skipped { color: var(--automx-text-3); font-style: italic; }
+.automx-recent-when {
+  font-size: 12px;
+  color: var(--automx-text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Library ──────────────────────────────────────────────────────────── */
+.automx-library-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.automx-library-icon {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 21px;
+  background: rgba(var(--automx-accent), 0.12);
+  border: 1px solid rgba(var(--automx-accent), 0.3);
+  box-shadow: 0 4px 16px rgba(var(--automx-accent), 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.automx-library-titles { flex: 1; min-width: 0; }
+.automx-library-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.015em;
+  color: var(--automx-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.automx-library-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--automx-text-3);
+}
+.automx-library-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.automx-chip-btn {
+  border: 1px solid var(--automx-border);
+  background: var(--automx-surface);
+  color: var(--automx-text-2);
+  border-radius: 10px;
+  padding: 8px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  white-space: nowrap;
+}
+.automx-chip-btn:hover {
+  background: var(--automx-surface-2);
+  color: var(--automx-text);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.automx-chip-danger:hover {
+  background: rgba(var(--automx-danger), 0.12);
+  border-color: rgba(var(--automx-danger), 0.4);
+  color: rgb(253, 164, 175);
+}
+.automx-rename-input {
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.015em;
+  font-family: inherit;
+  color: var(--automx-text);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(var(--automx-accent), 0.5);
+  border-radius: 10px;
+  padding: 4px 10px;
+  width: 100%;
+  max-width: 420px;
+}
+.automx-rename-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--automx-accent), 0.16);
+}
+
+.automx-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.automx-filter-search,
+.automx-filter-select {
+  background: rgba(0, 0, 0, 0.26);
+  border: 1px solid var(--automx-border);
+  border-radius: 11px;
+  color: var(--automx-text);
+  padding: 9px 13px;
+  font-size: 13px;
+  font-family: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.automx-filter-search { flex: 1; min-width: 200px; }
+.automx-filter-search::placeholder { color: var(--automx-text-3); }
+.automx-filter-search:focus,
+.automx-filter-select:focus {
+  outline: none;
+  border-color: rgba(var(--automx-accent), 0.55);
+  box-shadow: 0 0 0 3px rgba(var(--automx-accent), 0.14);
+}
+.automx-filter-count {
+  font-size: 12px;
+  color: var(--automx-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The card grid, given room to breathe now that one collection shows at a
+   time: fluid columns instead of the old fixed pair. */
+.automx .automations-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 14px;
+}
+
+.automx-guides {
+  max-width: 900px;
+}
+
+/* ── Empty states ─────────────────────────────────────────────────────── */
+.automx-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 70px 30px;
+  border-radius: 22px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.015);
+}
+.automx-empty-small { padding: 46px 24px; }
+.automx-empty-icon { font-size: 40px; opacity: 0.9; }
+.automx-empty-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--automx-text);
+}
+.automx-empty-text {
+  font-size: 13.5px;
+  color: var(--automx-text-2);
+  max-width: 420px;
+  line-height: 1.55;
+}
+.automx-text-btn {
+  background: none;
+  border: none;
+  color: rgb(var(--automx-accent-light));
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 6px 10px;
+}
+.automx-text-btn:hover { text-decoration: underline; }
+
+/* ── Responsive ───────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .automx-overview-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 880px) {
+  .page-shell.automx {
+    flex-direction: column;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+  }
+  .automx-sidebar {
+    width: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--automx-border);
+    padding: 14px;
+  }
+  .automx-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 6px;
+    padding-bottom: 4px;
+  }
+  .automx-nav-heading { display: none; }
+  .automx-nav-item { width: auto; flex-shrink: 0; }
+  .automx-nav-overview { order: -1; }
+  .automx-sidebar-foot {
+    flex-direction: row;
+    border-top: none;
+    padding-top: 0;
+  }
+  .automx-sidebar-foot .automx-new-btn { flex: 1; }
+  .automx-main { overflow: visible; padding: 22px 18px 48px; }
+  .automx-hero { flex-direction: column; text-align: center; padding: 26px 22px; }
+  .automx-library-head { flex-wrap: wrap; }
+}
+
+/* ── Motion preferences ───────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .automx-view { animation: none; }
+  .automx-hero-glow { animation: none; }
+  .automx-health-dot.bad { animation: none; }
+  .automx-nav-item,
+  .automx-new-btn,
+  .automx-hero-btn,
+  .automx-mini-btn,
+  .automx-chip-btn,
+  .automx-master { transition: none; }
+}

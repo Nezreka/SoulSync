@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  buildAutomationsView,
+  attentionQueue,
   automationHealth,
-  sectionGlow,
-  sectionSummary,
+  buildCollections,
+  collectionAutomations,
+  collectionCount,
+  collectionGroupName,
+  collectionHealth,
   filterByHealth,
   filterAutomations,
   filterOptions,
   forMusicSide,
   readAutomationsList,
+  recentRuns,
+  upcomingRuns,
 } from './-automations.helpers';
-import { AUTO_FILTER_BAR_MIN, type Automation } from './-automations.types';
+import { type Automation } from './-automations.types';
 
 function auto(over: Partial<Automation> & { id: number }): Automation {
   return { name: `auto-${over.id}`, ...over };
@@ -45,59 +50,155 @@ describe('forMusicSide', () => {
   });
 });
 
-describe('buildAutomationsView', () => {
-  it('splits system from user automations', () => {
-    const view = buildAutomationsView([auto({ id: 1, is_system: true }), auto({ id: 2 })]);
-    expect(view.system.map((a) => a.id)).toEqual([1]);
-    expect(view.ungrouped.map((a) => a.id)).toEqual([2]);
-  });
-
-  it('treats SQLite 1/0 as booleans', () => {
-    // enabled and is_system are INTEGER columns; a plain truthiness check on
-    // `=== true` would classify every real row as user-owned and disabled.
-    const view = buildAutomationsView([
-      auto({ id: 1, is_system: 1, enabled: 1 }),
-      auto({ id: 2, is_system: 0, enabled: 0 }),
-    ]);
-    expect(view.system.map((a) => a.id)).toEqual([1]);
-    expect(view.stats.active).toBe(1);
-  });
-
-  it('groups user automations by name, groups sorted', () => {
-    const view = buildAutomationsView([
+describe('buildCollections', () => {
+  it('orders smart lenses, then System, then groups by name, then ungrouped', () => {
+    const rows = [
       auto({ id: 1, group_name: 'Zed' }),
       auto({ id: 2, group_name: 'Alpha' }),
-      auto({ id: 3, group_name: 'Zed' }),
-      auto({ id: 4 }),
+      auto({ id: 3, is_system: 1 }),
+    ];
+    const keys = buildCollections(rows).map((c) => c.key);
+    expect(keys).toEqual([
+      'all',
+      'attention',
+      'scheduled',
+      'events',
+      'off',
+      'guides',
+      'system',
+      'group:Alpha',
+      'group:Zed',
+      'ungrouped',
     ]);
-    expect(view.groups.map((g) => g.name)).toEqual(['Alpha', 'Zed']);
-    // Order WITHIN a group is API order, because the vanilla page sorted the
-    // distinct names and then filtered — it never re-sorted the rows.
-    expect(view.groups[1].automations.map((a) => a.id)).toEqual([1, 3]);
-    expect(view.ungrouped.map((a) => a.id)).toEqual([4]);
   });
 
-  it('never files a system automation under a group', () => {
-    // is_system wins: a seeded row carrying a group_name still belongs in the
-    // protected System section, which is what stops it being editable.
-    const view = buildAutomationsView([auto({ id: 1, is_system: 1, group_name: 'Alpha' })]);
-    expect(view.system.map((a) => a.id)).toEqual([1]);
-    expect(view.groups).toEqual([]);
+  it('carries the group name on group collections', () => {
+    const defs = buildCollections([auto({ id: 1, group_name: 'Nightly' })]);
+    const g = defs.find((d) => d.key === 'group:Nightly');
+    expect(g?.kind).toBe('group');
+    expect(g?.groupName).toBe('Nightly');
+    expect(g?.label).toBe('Nightly');
+  });
+});
+
+describe('collectionAutomations', () => {
+  const rows = () => [
+    auto({ id: 1, is_system: 1, enabled: 1, trigger_type: 'schedule' }),
+    auto({ id: 2, group_name: 'Nightly', enabled: 1, trigger_type: 'track_downloaded' }),
+    auto({ id: 3, group_name: 'Nightly', enabled: 0, trigger_type: 'schedule' }),
+    auto({ id: 4, enabled: 1, trigger_type: 'schedule', last_error: 'boom' }),
+    auto({ id: 5, enabled: 1, trigger_type: 'daily_time' }),
+  ];
+
+  it('all returns everything', () => {
+    expect(collectionAutomations(rows(), 'all').map((a) => a.id)).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it('counts stats over the whole list', () => {
-    const view = buildAutomationsView([
-      auto({ id: 1, is_system: 1, enabled: 1 }),
-      auto({ id: 2, enabled: 1 }),
+  it('unknown keys fall back to all', () => {
+    expect(collectionAutomations(rows(), 'nope')).toHaveLength(5);
+  });
+
+  it('splits timer triggers from event triggers', () => {
+    expect(collectionAutomations(rows(), 'scheduled').map((a) => a.id)).toEqual([1, 3, 4, 5]);
+    expect(collectionAutomations(rows(), 'events').map((a) => a.id)).toEqual([2]);
+  });
+
+  it('attention holds failing and never-run rows, worst first', () => {
+    // id 4 failed; ids 1, 2, 5 are enabled and never ran; id 3 is off so it
+    // is not a problem that it never ran. Failures lead, like the overview's
+    // attention queue.
+    expect(collectionAutomations(rows(), 'attention').map((a) => a.id)).toEqual([4, 1, 2, 5]);
+  });
+
+  it('off holds only disabled rows', () => {
+    expect(collectionAutomations(rows(), 'off').map((a) => a.id)).toEqual([3]);
+  });
+
+  it('system wins over group_name, like the old protected section did', () => {
+    const withSystemGroup = [...rows(), auto({ id: 6, is_system: 1, group_name: 'Nightly' })];
+    expect(collectionAutomations(withSystemGroup, 'system').map((a) => a.id)).toEqual([1, 6]);
+    expect(collectionAutomations(withSystemGroup, 'group:Nightly').map((a) => a.id)).toEqual([
+      2, 3,
+    ]);
+  });
+
+  it('ungrouped holds user rows with no group', () => {
+    expect(collectionAutomations(rows(), 'ungrouped').map((a) => a.id)).toEqual([4, 5]);
+  });
+
+  it('guides holds no automations — it renders reference content', () => {
+    expect(collectionAutomations(rows(), 'guides')).toEqual([]);
+  });
+});
+
+describe('collectionGroupName', () => {
+  it('unwraps group: keys and returns null for smart keys', () => {
+    expect(collectionGroupName('group:Nightly')).toBe('Nightly');
+    expect(collectionGroupName('group:My Group 2')).toBe('My Group 2');
+    expect(collectionGroupName('all')).toBeNull();
+    expect(collectionGroupName('system')).toBeNull();
+  });
+});
+
+describe('collectionHealth', () => {
+  it('reports bad when anything is failing, warn when off or never ran', () => {
+    expect(collectionHealth([auto({ id: 1, last_error: 'x' })], 'all')).toBe('bad');
+    expect(collectionHealth([auto({ id: 1, enabled: 0 })], 'all')).toBe('warn');
+    expect(
+      collectionHealth([auto({ id: 1, enabled: 1, last_run: '2026-01-01 00:00:00' })], 'all'),
+    ).toBe('ok');
+    expect(collectionHealth([], 'all')).toBe('none');
+  });
+});
+
+describe('collectionCount', () => {
+  it('counts the collection, and null for guides', () => {
+    const rows = [auto({ id: 1, enabled: 1 }), auto({ id: 2, enabled: 0 })];
+    expect(collectionCount(rows, 'all')).toBe(2);
+    expect(collectionCount(rows, 'off')).toBe(1);
+    expect(collectionCount(rows, 'guides')).toBeNull();
+  });
+});
+
+describe('upcomingRuns', () => {
+  // next_run is a server timestamp string; parseServerTime handles the shape.
+  const stamp = (h: number) => `2026-09-28 0${h}:00:00`;
+  it('returns enabled timer rows with a next_run, soonest first', () => {
+    const rows = [
+      auto({ id: 1, enabled: 1, trigger_type: 'schedule', next_run: stamp(3) }),
+      auto({ id: 2, enabled: 1, trigger_type: 'track_downloaded', next_run: stamp(1) }),
+      auto({ id: 3, enabled: 1, trigger_type: 'daily_time', next_run: stamp(1) }),
+      auto({ id: 4, enabled: 0, trigger_type: 'schedule', next_run: stamp(1) }),
+      auto({ id: 5, enabled: 1, trigger_type: 'schedule' }),
+    ];
+    expect(upcomingRuns(rows, false).map((a) => a.id)).toEqual([3, 1]);
+  });
+
+  it('returns nothing while the side is paused', () => {
+    const rows = [auto({ id: 1, enabled: 1, trigger_type: 'schedule', next_run: stamp(1) })];
+    expect(upcomingRuns(rows, true)).toEqual([]);
+  });
+});
+
+describe('recentRuns', () => {
+  it('orders by last_run, newest first, skipping never-run rows', () => {
+    const rows = [
+      auto({ id: 1, last_run: '2026-09-28 01:00:00' }),
+      auto({ id: 2 }),
+      auto({ id: 3, last_run: '2026-09-28 03:00:00' }),
+    ];
+    expect(recentRuns(rows).map((a) => a.id)).toEqual([3, 1]);
+  });
+});
+
+describe('attentionQueue', () => {
+  it('orders failing before never-run', () => {
+    const rows = [
+      auto({ id: 1, enabled: 1 }),
+      auto({ id: 2, enabled: 1, last_error: 'boom' }),
       auto({ id: 3, enabled: 0 }),
-    ]);
-    expect(view.stats).toEqual({ active: 2, system: 1, custom: 2, total: 3 });
-  });
-
-  it('shows the filter bar only at the vanilla threshold', () => {
-    const many = (n: number) => Array.from({ length: n }, (_, i) => auto({ id: i }));
-    expect(buildAutomationsView(many(AUTO_FILTER_BAR_MIN - 1)).showFilterBar).toBe(false);
-    expect(buildAutomationsView(many(AUTO_FILTER_BAR_MIN)).showFilterBar).toBe(true);
+    ];
+    expect(attentionQueue(rows).map((a) => a.id)).toEqual([2, 1]);
   });
 });
 
@@ -226,64 +327,5 @@ describe('filterByHealth', () => {
 
   it('an unknown lens filters nothing rather than everything', () => {
     expect(filterByHealth(rows, 'nonsense')).toHaveLength(4);
-  });
-});
-
-describe('filterAutomations with a health lens', () => {
-  const a = (over: Record<string, unknown>) => ({ id: 1, name: 'a', ...over }) as never;
-  const labels = () => ({ trigger: '', action: '' });
-
-  it('combines the lens with the text box', () => {
-    const rows = [
-      a({ id: 1, name: 'nightly', enabled: 1, last_error: 'boom' }),
-      a({ id: 2, name: 'weekly', enabled: 1, last_error: 'boom' }),
-      a({ id: 3, name: 'nightly', enabled: 1, last_run: 'x' }),
-    ];
-    const out = filterAutomations(rows, { q: 'night', health: 'failing' }, labels);
-    expect(out.map((r) => (r as { id: number }).id)).toEqual([1]);
-  });
-});
-
-describe('sectionSummary — a collapsed family still says something', () => {
-  const a = (over: Record<string, unknown>) => ({ id: 1, name: 'a', ...over }) as never;
-
-  it('leads with what is broken', () => {
-    expect(
-      sectionSummary([
-        a({ enabled: 1, last_error: 'boom', last_run: 'x' }),
-        a({ enabled: 1, last_run: 'x' }),
-        a({ enabled: 0 }),
-      ]),
-    ).toBe('1 failing · 1 off');
-  });
-
-  it('says all healthy rather than printing three zeros', () => {
-    expect(sectionSummary([a({ enabled: 1, last_run: 'x' })])).toBe('all healthy');
-  });
-
-  it('counts never-run only among enabled rows', () => {
-    expect(sectionSummary([a({ enabled: 1 }), a({ enabled: 0 })])).toBe('1 never run · 1 off');
-  });
-
-  it('has a word for an empty family', () => {
-    expect(sectionSummary([])).toBe('empty');
-  });
-});
-
-describe('sectionGlow', () => {
-  it('pins the two families that exist on every install', () => {
-    expect(sectionGlow('system')).toBe('148,163,184');
-    // The user's own automations carry the accent they chose.
-    expect(sectionGlow('ungrouped')).toBe('var(--accent-rgb)');
-  });
-
-  it('gives a group the same colour every time, without storing anything', () => {
-    expect(sectionGlow('group', 'Nightly')).toBe(sectionGlow('group', 'Nightly'));
-    expect(sectionGlow('group', 'Nightly')).toMatch(/^\d+,\d+,\d+$/);
-  });
-
-  it('does not collapse every group onto one colour', () => {
-    const names = ['Nightly', 'Weekend', 'Imports', 'Cleanup', 'Radio'];
-    expect(new Set(names.map((n) => sectionGlow('group', n))).size).toBeGreaterThan(1);
   });
 });

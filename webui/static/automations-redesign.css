@@ -67,28 +67,6 @@
 }
 .automations-stats .auto-master-toggle.on .auto-master-sw::after { transform: translateX(16px); }
 
-/* ── Filter bar ─────────────────────────────────────────────────────────── */
-.auto-filter-bar {
-    display: flex; align-items: center; gap: 10px;
-    padding: 4px 2px 14px; flex-wrap: wrap;
-}
-.auto-filter-bar .auto-filter-search,
-.auto-filter-bar .auto-filter-select {
-    background: rgba(255,255,255,0.045);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 10px; color: #fff;
-    padding: 9px 13px; font-size: 13px; font-family: inherit;
-    transition: border-color .2s ease, box-shadow .2s ease;
-}
-.auto-filter-bar .auto-filter-search { flex: 1; min-width: 200px; }
-.auto-filter-bar .auto-filter-search:focus,
-.auto-filter-bar .auto-filter-select:focus {
-    outline: none;
-    border-color: rgba(var(--accent-rgb), 0.5);
-    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
-}
-.auto-filter-bar .auto-filter-count { font-size: 12px; color: rgba(255,255,255,0.35); }
-
 /* ── Sections ───────────────────────────────────────────────────────────── */
 .automations-section { margin-bottom: 26px; }
 .automations-section-header {
@@ -211,7 +189,11 @@
 .automation-card .auto-meta-fail {
     color: #ff8a80;
     font-weight: 600;
-    max-width: 34ch;
+    /* min() so a long error actually truncates inside a narrow meta line:
+       with white-space:nowrap the shrink-to-fit minimum is the full text,
+       and a bare 34ch cap lets the span overflow its container and sit on
+       top of the card's action buttons. */
+    max-width: min(34ch, 100%);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -491,7 +473,7 @@
 .automation-card.automation-tile .automation-meta { flex: 1; min-width: 0; line-height: 1.55; }
 /* The foot is a designated control strip, not a hover surface — the toggle in
    it is a state readout as much as a control, so it must not be half-faded. */
-.automation-card.automation-tile .automation-actions { opacity: 1; }
+.automation-card.automation-tile .automation-actions { opacity: 1; flex-shrink: 0; }
 .automation-card.automation-tile .auto-tile-sep {
     width: 1px; height: 16px; margin: 0 2px;
     background: rgba(255,255,255,0.10); flex-shrink: 0;
@@ -1042,47 +1024,6 @@
     color: #fff; transform: translateY(-1px);
 }
 
-/* ── The verdict strip ──
-   Active/System/Custom counted rows in a table. These answer "is automation
-   working", and each is a lens: clicking one filters the page to exactly the
-   rows it counted. */
-.automations-stats .auto-stat-lens {
-    cursor: pointer;
-    font-family: inherit;
-    transition: border-color .18s ease, background .18s ease, transform .18s ease;
-}
-.automations-stats .auto-stat-lens:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.16); }
-.automations-stats .auto-stat-lens.active {
-    border-color: rgba(var(--accent-rgb), 0.45);
-    background: rgba(var(--accent-rgb), 0.12);
-    color: #fff;
-}
-.automations-stats .auto-stat-lens.failing {
-    border-color: rgba(244, 67, 54, 0.3);
-    background: rgba(244, 67, 54, 0.07);
-    color: #ff8a80;
-}
-.automations-stats .auto-stat-lens.failing strong {
-    background: none; -webkit-text-fill-color: #ff8a80; color: #ff8a80;
-}
-.automations-stats .auto-stat-lens.failing.active {
-    border-color: rgba(244, 67, 54, 0.55);
-    background: rgba(244, 67, 54, 0.14);
-}
-.automations-stats .auto-stat-lens.waiting {
-    border-color: rgba(245, 158, 11, 0.28);
-    color: #f59e0b;
-}
-.automations-stats .auto-stat-lens.waiting strong {
-    background: none; -webkit-text-fill-color: #f59e0b; color: #f59e0b;
-}
-.automations-stats .auto-stat-allgood {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 12px; font-weight: 600; letter-spacing: .03em;
-    color: rgb(134, 239, 172);
-}
-.automations-stats .auto-stat-allgood::before { content: '✓'; }
-
 /* ── Families ──
    Sections were bare headers over a grid: no order, no organisation, and a
    collapsed one told you nothing. Same container chassis as the tools page's
@@ -1111,11 +1052,6 @@
     background: rgba(var(--tile-glow), 0.16);
     color: #fff;
     border-color: rgba(var(--tile-glow), 0.28);
-}
-.automations-section-header .section-summary {
-    font-size: 11px;
-    color: rgba(255,255,255,0.3);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 /* ── Builder palette: search + drawers ──
