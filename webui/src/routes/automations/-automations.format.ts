@@ -276,10 +276,7 @@ export function formatTrigger(
   const cfg = (config ?? {}) as Record<string, unknown>;
 
   if (type === 'schedule' && config) {
-    return formatInterval(
-      cfg.interval as number | undefined,
-      cfg.unit as string | undefined,
-    );
+    return formatInterval(cfg.interval as number | undefined, cfg.unit as string | undefined);
   }
   if (type === 'daily_time' && config) {
     return `Daily at ${cfg.time ?? '00:00'}`;
