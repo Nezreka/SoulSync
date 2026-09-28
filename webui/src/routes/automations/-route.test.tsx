@@ -63,7 +63,7 @@ describe('automations route', () => {
     renderRoute();
 
     await screen.findByText('Nightly');
-    expect(document.querySelector('.automations-container')).not.toBeNull();
+    expect(document.querySelector('.automx')).not.toBeNull();
     // The legacy controller must NOT have been asked to activate the old page.
     expect(window.SoulSyncWebShellBridge!.activateLegacyPath).not.toHaveBeenCalled();
   });
@@ -90,9 +90,19 @@ describe('automations route', () => {
 
   it('carries the filter controls in the URL', async () => {
     renderRoute(['/automations?q=night&trigger=schedule&action=scan_library']);
-    await waitFor(() => expect(document.querySelector('.automations-container')).not.toBeNull());
+    await waitFor(() => expect(document.querySelector('.automx')).not.toBeNull());
     // validateSearch must accept all three without throwing the route down.
-    expect(document.querySelector('.automations-container')).not.toBeNull();
+    expect(document.querySelector('.automx')).not.toBeNull();
+  });
+
+  it('rewrites a legacy ?health= link onto the matching smart collection', async () => {
+    // The pre-overhaul verdict strip linked ?health=failing|never|off. The
+    // fixture row never ran, so it belongs to the attention collection.
+    renderRoute(['/automations?health=failing']);
+    const title = await screen.findByText('Needs attention', {
+      selector: '.automx-library-title',
+    });
+    expect(title).not.toBeNull();
   });
 });
 

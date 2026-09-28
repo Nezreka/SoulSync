@@ -14,34 +14,100 @@ function searchString(value: unknown): string | undefined {
   return undefined;
 }
 
+// Which top-level view the page shows. The library is the browsable
+// collection grid; the overview is the glanceable status dashboard.
+export const automationsViews = ['overview', 'library'] as const;
+export type AutomationsViewName = (typeof automationsViews)[number];
+
+/**
+ * Navigation collections for the library sidebar.
+ *
+ * Smart collections are fixed keys; user groups ride as `group:<name>`.
+ * `guides` is the reference hub, not a set of automations.
+ */
+export const AUTOMATION_NAV_KEYS = [
+  'all',
+  'attention',
+  'scheduled',
+  'events',
+  'off',
+  'system',
+  'ungrouped',
+  'guides',
+] as const;
+
+/**
+ * A legacy pre-overhaul `?health=` value and the smart collection that
+ * replaced it. 'failing' and 'never' both lived under the old verdict strip's
+ * "needs attention" idea; 'off' is the Switched off collection.
+ */
+const legacyHealthToNav: Record<string, string> = {
+  failing: 'attention',
+  never: 'attention',
+  off: 'off',
+};
+
+function searchView(value: unknown): AutomationsViewName {
+  const s = searchString(value);
+  return (automationsViews as readonly string[]).includes(s ?? '')
+    ? (s as AutomationsViewName)
+    : 'overview';
+}
+
 // All three filter-bar controls, not just the text box. They were transient DOM
 // state in the vanilla page — a reload dropped them — so putting them in the URL
 // only adds state that used to be thrown away.
-export const automationsSearchSchema = z.object({
-  q: z
-    .preprocess((v) => searchString(v) ?? '', z.string())
-    .default('')
-    .catch(''),
-  /** Raw trigger_type from the dropdown; '' means All Triggers. */
-  trigger: z
-    .preprocess((v) => searchString(v) ?? '', z.string())
-    .default('')
-    .catch(''),
-  /** Raw action_type from the dropdown; '' means All Actions. */
-  action: z
-    .preprocess((v) => searchString(v) ?? '', z.string())
-    .default('')
-    .catch(''),
-  /**
-   * A health lens from the verdict strip: 'failing' | 'never' | 'off'.
-   * In the URL so a chip is linkable and survives a reload — the whole point
-   * of the strip is that a number leads somewhere.
-   */
-  health: z
-    .preprocess((v) => searchString(v) ?? '', z.string())
-    .default('')
-    .catch(''),
-});
+export const automationsSearchSchema = z
+  .object({
+    /** 'overview' = status dashboard, 'library' = the browsable collection grid. */
+    view: z
+      .preprocess((v) => searchView(v), z.enum(automationsViews))
+      .default('overview')
+      .catch('overview'),
+    /**
+     * The sidebar collection being browsed: a smart key ('all', 'attention',
+     * 'scheduled', 'events', 'off', 'system', 'ungrouped', 'guides') or
+     * `group:<name>` for a user group. Only meaningful when view=library.
+     */
+    nav: z
+      .preprocess((v) => searchString(v) ?? 'all', z.string())
+      .default('all')
+      .catch('all'),
+    q: z
+      .preprocess((v) => searchString(v) ?? '', z.string())
+      .default('')
+      .catch(''),
+    /** Raw trigger_type from the dropdown; '' means All Triggers. */
+    trigger: z
+      .preprocess((v) => searchString(v) ?? '', z.string())
+      .default('')
+      .catch(''),
+    /** Raw action_type from the dropdown; '' means All Actions. */
+    action: z
+      .preprocess((v) => searchString(v) ?? '', z.string())
+      .default('')
+      .catch(''),
+    /**
+     * Legacy param from the pre-overhaul page, where the verdict strip linked
+     * `?health=failing|never|off`. The overhaul replaced that strip with the
+     * Needs attention / Switched off smart collections, so a bookmarked
+     * health link rewrites to the equivalent collection below instead of
+     * being silently dropped. Never read back out or written to the URL.
+     */
+    health: z
+      .preprocess((v) => searchString(v) ?? '', z.string())
+      .default('')
+      .catch(''),
+  })
+  .transform(({ health, ...rest }) => {
+    const legacy = health ? legacyHealthToNav[health] : undefined;
+    // Only the untouched defaults rewrite: an explicit new-style view/nav
+    // always wins over a stale health param sharing the URL.
+    if (legacy && rest.view === 'overview' && rest.nav === 'all') {
+      return { ...rest, view: 'library' as const, nav: legacy };
+    }
+    return rest;
+  });
 
 export type AutomationsSearch = z.infer<typeof automationsSearchSchema>;
 
@@ -110,17 +176,6 @@ export interface AutomationsMasterState {
 export interface AutomationsProgressResponse {
   [key: string]: unknown;
   error?: string;
-}
-
-/** The list view, already split the way the page renders it. */
-export interface AutomationsView {
-  system: Automation[];
-  /** User automations that carry a group_name, sorted by group name. */
-  groups: { name: string; automations: Automation[] }[];
-  /** User automations with no group — the "My Automations" section. */
-  ungrouped: Automation[];
-  stats: { active: number; system: number; custom: number; total: number };
-  showFilterBar: boolean;
 }
 
 /** One entry in the builder palette. */

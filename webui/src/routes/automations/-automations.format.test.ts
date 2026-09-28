@@ -5,6 +5,7 @@ import {
   automationOutcome,
   automationSchedule,
   formatAction,
+  formatInterval,
   formatTrigger,
   humanizeType,
   lastResultFacts,
@@ -95,8 +96,16 @@ describe('formatTrigger', () => {
   });
 
   it('falls back within schedule/weekly when config keys are missing', () => {
-    expect(formatTrigger('schedule', {})).toBe('Every 1 hours');
+    expect(formatTrigger('schedule', {})).toBe('Every hour');
     expect(formatTrigger('weekly_time', {})).toBe('Every day at 00:00');
+  });
+
+  it('uses the singular unit when the interval is 1', () => {
+    expect(formatInterval(1, 'hours')).toBe('Every hour');
+    expect(formatInterval(1, 'minutes')).toBe('Every minute');
+    expect(formatInterval(2, 'hours')).toBe('Every 2 hours');
+    expect(formatInterval(undefined, undefined)).toBe('Every hour');
+    expect(formatTrigger('schedule', { interval: 1, unit: 'days' })).toBe('Every day');
   });
 
   it('uses the label map for event triggers', () => {
