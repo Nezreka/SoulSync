@@ -1047,10 +1047,19 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                                                    log_line='Ran library sweep — owned tracks removed before batch',
                                                    log_type='info')
 
-                # Get wishlist tracks for processing - combine all profiles
+                # Get wishlist tracks for processing - combine all profiles.
+                # Stamp each track with its owning profile: the batching
+                # below (H10) groups tracks by track-level profile_id, the
+                # sanitize dedupe keeps one entry per (track, owner), and the
+                # manual backoff clear scopes per owner (S13). Without the
+                # stamp every auto batch fell back to the runtime profile, so
+                # other profiles' tracks downloaded into the wrong library
+                # (#1351).
                 raw_wishlist_tracks = []
                 for profile in all_profiles:
-                    raw_wishlist_tracks.extend(_tracks(profile))
+                    for _t in _tracks(profile):
+                        _t['profile_id'] = profile['id']
+                        raw_wishlist_tracks.append(_t)
                 if not raw_wishlist_tracks:
                     logger.warning("No tracks returned from wishlist service.")
                     return

@@ -1800,6 +1800,18 @@ def post_process_matched_download_with_verification(context_key, context, file_p
 
     logger = pp_logger
     try:
+        # #1351: a batched download only knows its profile through the batch.
+        # The pops below strip batch_id before the inner pipeline builds the
+        # final import path, so import_profile_id() resolved to None and the
+        # file fell back to the shared transfer folder — even for own-library
+        # profiles. The staging route (try_staging_match) never puts batch_id
+        # in its context at all, so resolve through the wrapper's batch_id
+        # argument as well. The pop semantics below stay untouched: this only
+        # preserves the profile the inner pipeline was always meant to see.
+        if not context.get('profile_id'):
+            _resolved_pid = import_profile_id(context) or import_profile_id({'batch_id': batch_id})
+            if _resolved_pid:
+                context['profile_id'] = _resolved_pid
         original_task_id = context.pop('task_id', None)
         original_batch_id = context.pop('batch_id', None)
         # #999: the atomic-publish stage redirect runs inside the inner pipeline
