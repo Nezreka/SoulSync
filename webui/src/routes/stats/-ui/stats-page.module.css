@@ -683,6 +683,13 @@
   margin-bottom: 16px;
   padding-bottom: 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.statsTopArtistsVisual::-webkit-scrollbar {
+  display: none;
 }
 
 .statsArtistBubbles {
@@ -690,6 +697,7 @@
   justify-content: space-around;
   align-items: flex-end;
   gap: 10px;
+  min-width: min-content;
 }
 
 .statsArtistBubble {
@@ -1672,24 +1680,221 @@
     flex-direction: column;
     align-items: center;
   }
+
+  .statsGenreLegend,
+  .statsDbLegend {
+    width: 100%;
+  }
 }
 
 @media (max-width: 580px) {
+  .statsContainer {
+    margin: 6px;
+    padding: 14px 10px;
+    border-radius: 16px;
+  }
+
+  .statsSectionCard {
+    padding: 16px 12px;
+    border-radius: 16px;
+  }
+
+  .headerPrimaryActions {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .statsYearButton {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .statsTabs,
+  .statsTimeRange {
+    width: 100%;
+    display: flex;
+  }
+
+  .statsTab,
+  .statsRangeButton {
+    flex: 1;
+    text-align: center;
+    padding: 6px 4px;
+    font-size: 0.75rem;
+  }
+
+  .statsSyncBar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .statsServerSync {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .statsServerSyncGroup {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .statsSyncControls {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .historyImportControl {
+    width: 100%;
+  }
+
   .statsOverview {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .statsCard {
+    padding: 14px 16px;
+  }
+
+  .statsCardValue {
+    font-size: 1.8rem;
+  }
+
+  .statsHealthGrid {
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 
   .statsClockRow {
-    grid-template-columns: 26px repeat(24, 1fr);
-    gap: 2px;
+    grid-template-columns: 24px repeat(24, 1fr);
+    gap: 1.5px;
+  }
+
+  .statsClockAxis {
+    grid-template-columns: 24px repeat(4, 1fr);
+    gap: 1.5px;
+  }
+
+  .statsClockAxisLabel {
+    font-size: 0.6rem;
+  }
+
+  .statsClockDay {
+    font-size: 0.6rem;
+    padding-right: 2px;
+  }
+
+  .statsSectionTitle {
+    font-size: 0.74rem;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+  }
+
+  .statsRankedItem,
+  .statsRecentItem {
+    padding: 8px 8px;
+    gap: 8px;
+  }
+
+  .statsRankedName,
+  .statsRecentTitle {
+    font-size: 0.84rem;
+  }
+
+  .statsRankedImage,
+  .statsRankedImageFallback {
+    width: 36px;
+    height: 36px;
+  }
+
+  .statsArtistBubbles {
+    gap: 6px;
+  }
+
+  .statsBubbleImage {
+    transform: scale(0.92);
+  }
+
+  .statsOwnPlayRow {
+    grid-template-columns: 75px 1fr 40px;
+    gap: 8px;
+  }
+
+  .statsDiskFormatRow {
+    grid-template-columns: 55px 1fr auto;
+    gap: 8px;
   }
 
   .statsDetailBackdrop {
     align-items: flex-end;
-    padding: 10px;
+    padding: 8px;
   }
 
   .statsDetailModal {
-    max-height: 84vh;
+    max-height: 88vh;
+    border-radius: 18px 18px 12px 12px;
+  }
+
+  .statsDetailHeader {
+    padding: 16px 16px 12px;
+  }
+
+  .statsDetailHeader h3 {
+    font-size: 1.25rem;
+  }
+
+  .statsDetailRow {
+    grid-template-columns: 38px minmax(0, 1fr) auto 32px;
+    gap: 8px;
+    padding: 8px 8px;
+    min-height: 52px;
+  }
+
+  .statsDetailArt,
+  .statsDetailArtFallback {
+    width: 38px;
+    height: 38px;
+  }
+
+  .statsDetailTrackTitle {
+    font-size: 0.86rem;
   }
 }
+
+@media (max-width: 380px) {
+  .statsContainer {
+    margin: 4px;
+    padding: 12px 8px;
+  }
+
+  .statsSectionCard {
+    padding: 14px 8px;
+  }
+
+  .statsCardValue {
+    font-size: 1.6rem;
+  }
+
+  .statsClockRow {
+    grid-template-columns: 20px repeat(24, 1fr);
+    gap: 1px;
+  }
+
+  .statsClockAxis {
+    grid-template-columns: 20px repeat(4, 1fr);
+    gap: 1px;
+  }
+
+  .statsClockDay {
+    font-size: 0.54rem;
+    padding-right: 1px;
+  }
+
+  .statsOwnPlayRow {
+    grid-template-columns: 62px 1fr 34px;
+    gap: 6px;
+  }
+}
+

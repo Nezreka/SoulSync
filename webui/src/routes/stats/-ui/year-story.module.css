@@ -157,11 +157,14 @@
   z-index: 1;
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 24px;
+  justify-content: flex-start;
+  padding: 24px 20px;
   overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 .stage::-webkit-scrollbar {
@@ -172,8 +175,8 @@
   width: min(840px, 100%);
   text-align: center;
   animation: yearSlideIn 0.42s cubic-bezier(0.16, 1, 0.3, 1);
-  margin: auto;
-  padding: 10px 0;
+  margin: auto 0;
+  padding: 10px 0 20px;
 }
 
 @keyframes yearSlideIn {
@@ -337,6 +340,7 @@
   align-items: center;
   gap: 10px;
   max-width: 54px;
+  min-width: 0;
   height: 100%;
 }
 
@@ -1090,13 +1094,30 @@
 }
 
 @media (max-width: 760px) {
-  .cardStage,
-  .cardControls {
-    width: min(340px, 100%);
+  .stage {
+    padding: 14px 12px;
+    justify-content: flex-start;
+  }
+
+  .slide {
+    margin: 0 auto;
+    padding-bottom: 32px;
+  }
+
+  .cardLayout {
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
   }
 
   .cardStage {
-    height: 350px;
+    width: min(300px, 100%);
+    height: 360px;
+  }
+
+  .cardControls {
+    width: min(340px, 100%);
+    padding: 18px 16px;
   }
 
   .albumGrid,
@@ -1165,22 +1186,133 @@
 }
 
 @media (max-width: 640px) {
+  .pips {
+    padding: 14px 60px 0 16px;
+  }
+
+  .close {
+    top: 14px;
+    right: 16px;
+    width: 34px;
+    height: 34px;
+    font-size: 0.85rem;
+  }
+
+  .collage {
+    gap: 8px;
+    margin-top: 24px;
+  }
+
+  .collageArt {
+    width: 54px;
+    height: 54px;
+  }
+
+  .heroPortrait {
+    width: 150px;
+    height: 150px;
+  }
+
+  .heroSquare {
+    width: 160px;
+    height: 160px;
+  }
+
   .monthStrip {
     height: 180px;
-    gap: 5px;
-    padding: 10px;
+    gap: 4px;
+    padding: 10px 8px;
   }
 
   .monthLabel {
-    font-size: 0.65rem;
+    font-size: 0.62rem;
   }
 
   .factRow {
-    gap: 12px;
+    gap: 10px;
+    margin-top: 24px;
   }
 
   .fact {
-    padding: 14px 18px;
-    min-width: 130px;
+    padding: 12px 14px;
+    min-width: 90px;
+    flex: 1 1 90px;
+  }
+
+  .factValue {
+    font-size: 1.4rem;
+  }
+
+  .controls {
+    padding: 10px 16px 18px;
+    gap: 10px;
+  }
+
+  .navButton {
+    padding: 8px 18px;
+    font-size: 0.84rem;
+  }
+
+  .counter {
+    font-size: 0.8rem;
+    padding: 5px 10px;
+  }
+}
+
+@media (max-width: 420px) {
+  .stage {
+    padding: 10px 8px;
+  }
+
+  .collage {
+    gap: 5px;
+  }
+
+  .collageArt {
+    width: 46px;
+    height: 46px;
+  }
+
+  .heroPortrait {
+    width: 130px;
+    height: 130px;
+  }
+
+  .heroSquare {
+    width: 140px;
+    height: 140px;
+  }
+
+  .monthStrip {
+    gap: 2px;
+    padding: 8px 4px;
+  }
+
+  .monthLabel {
+    font-size: 0.55rem;
+  }
+
+  .discoveryArt {
+    width: 68px;
+    height: 68px;
+  }
+
+  .fact {
+    min-width: 75px;
+    padding: 10px 8px;
+  }
+
+  .cardStage {
+    height: 320px;
+  }
+
+  .controls {
+    gap: 6px;
+    padding: 8px 10px 14px;
+  }
+
+  .navButton {
+    padding: 7px 14px;
+    font-size: 0.8rem;
   }
 }
