@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.empty_folder_cleaner import (
     EmptyFolderCleanerJob, dir_is_removable, is_junk, remove_empty_folder,
@@ -76,6 +78,44 @@ def test_apply_deletes_junk_then_folder(tmp_path):
     (d / '.DS_Store').write_text('x')
     res = remove_empty_folder(str(d), junk_files=['.DS_Store'], remove_junk=True, root=str(root), **_fx())
     assert res['removed'] is True and not d.exists()
+
+
+@pytest.mark.parametrize('subdir', ['.deleted', '._xxx'])
+def test_apply_refuses_folder_holding_a_hidden_subdir(tmp_path, subdir):
+    """`listdir` hands back files and subdirs in one list, so the purgeable test
+    has to reject directories itself. `.deleted` is the quarantine that must never
+    be swept; `._xxx` is the name that otherwise matches `is_appledouble` — a
+    directory is never a leftover, whatever it's called."""
+    root = tmp_path / 'lib'; root.mkdir()
+    d = root / 'Artist'; d.mkdir()
+    holder = d / subdir; holder.mkdir()
+    (holder / 'rescued.flac').write_text('audio')
+
+    res = remove_empty_folder(str(d), junk_files=[], remove_junk=True, root=str(root),
+                              remove_disposable=True, **_fx())
+
+    assert res['removed'] is False and 'no longer empty' in res['error'].lower()
+    assert (holder / 'rescued.flac').exists()    # contents untouched
+
+
+def test_apply_sweeps_appledouble_sidecars(tmp_path):
+    """An AppleDouble sidecar is a leftover: the audio it shadowed is gone."""
+    root = tmp_path / 'lib'; root.mkdir()
+    d = root / 'Empty'; d.mkdir()
+    (d / '._01 - Track.flac').write_text('resource fork')
+    res = remove_empty_folder(str(d), junk_files=[], remove_junk=True, root=str(root),
+                              remove_disposable=True, **_fx())
+    assert res['removed'] is True and not d.exists()
+
+
+def test_apply_keeps_other_dot_files(tmp_path):
+    """A '.nomedia' / '.stfolder' marker is somebody's data, not our leftover."""
+    root = tmp_path / 'lib'; root.mkdir()
+    d = root / 'Artist'; d.mkdir()
+    (d / '.nomedia').write_text('')
+    res = remove_empty_folder(str(d), junk_files=[], remove_junk=True, root=str(root),
+                              remove_disposable=True, **_fx())
+    assert res['removed'] is False and (d / '.nomedia').exists()
 
 
 def test_apply_refuses_folder_that_gained_a_file(tmp_path):

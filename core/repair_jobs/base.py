@@ -1,11 +1,12 @@
 """Base classes for the multi-job Library Maintenance Worker."""
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 import os
 import threading
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from core.library.residual_files import is_appledouble
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.base")
@@ -94,6 +95,29 @@ def skip_deleted_quarantine(root: str, dirs: list, transfer_folder: str) -> None
     """
     dirs[:] = [d for d in dirs
                if not is_internal_transfer_dir(os.path.join(root, d), transfer_folder)]
+
+
+def walk_library(root: str):
+    """Walk a library tree the way every maintenance job should: SoulSync's own
+    folders and macOS AppleDouble sidecars are already gone by the time you see them.
+
+    Yields ``(dirpath, dirnames, filenames)`` like ``os.walk``, minus the
+    quarantine / atomic-staging trees and minus ``._``-prefixed files. An
+    AppleDouble sidecar (``._01 - Track.flac``) is resource-fork bytes under the
+    real file's name and extension, so every extension check in the codebase reads
+    one as audio — the orphan detector files a finding for a file no media server
+    even shows, and the quality scanner tries to probe it. Nothing else is
+    filtered: a hidden *directory* is walked like any other, as it always was.
+
+    Exists because the exclusions used to be a thing each job had to REMEMBER:
+    `skip_deleted_quarantine` was called at seven of the eight walk sites, and the
+    one that forgot (the quality-upgrade scanner's `estimate_scope`) silently
+    counted staged files its own scan would skip. Reach for this instead of
+    ``os.walk`` and the whole class of mismatch goes away.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        skip_deleted_quarantine(dirpath, dirnames, root)
+        yield dirpath, dirnames, [f for f in filenames if not is_appledouble(f)]
 
 
 # hand-tagged releases ("tag it yourself"): the user typed every tag for a
