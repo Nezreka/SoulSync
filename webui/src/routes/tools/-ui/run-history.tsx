@@ -37,7 +37,10 @@ export interface RunHistoryProps {
   runs: RepairJobRun[] | null;
   error: boolean;
   /** Jump to the findings this job has open. */
-  onShowFindings: (jobId: string, label: string) => void;
+  onShowFindings: (
+    jobId: string,
+    labelOrOptions?: string | { severity?: string; findingType?: string },
+  ) => void;
   /** Re-read the history — a run that just finished is not in this list yet. */
   onRefresh: () => void;
 }
@@ -158,7 +161,10 @@ function RunRow({
   rowKey: string;
   open: boolean;
   onToggle: (key: string) => void;
-  onShowFindings: (jobId: string, label: string) => void;
+  onShowFindings: (
+    jobId: string,
+    labelOrOptions?: string | { severity?: string; findingType?: string },
+  ) => void;
 }) {
   const outcome = runOutcome(run);
   const label = run.display_name || (run.job_id || '').replace(/_/g, ' ');

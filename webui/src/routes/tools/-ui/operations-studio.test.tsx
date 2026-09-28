@@ -1,27 +1,29 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { FindingGroup, RepairJob } from '../-tools.types';
+import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
+import type { RepairJob } from '../-tools.types';
 
 import { Operations } from './operations';
-import {
-  OperationsStudio,
-  PLAYBOOK_PRESETS,
-  STRATEGIC_PILLARS,
-} from './operations-studio';
+import { OperationsStudio, PLAYBOOK_PRESETS, STRATEGIC_PILLARS } from './operations-studio';
 
 const fetchMock = vi.fn();
 const toastSpy = vi.fn();
 
-function routes(map: Record<string, unknown>, fallback: unknown = {}) {
+function routes(map: Record<string, unknown> = {}, fallback: unknown = {}) {
+  const merged: Record<string, unknown> = {
+    '/api/repair/findings/groups': { groups: mockFindingGroups },
+    '/api/repair/finding-types': { types: mockFindingTypes },
+    ...map,
+  };
   fetchMock.mockImplementation((url: string) => {
-    const hit = Object.keys(map)
+    const hit = Object.keys(merged)
       .filter((key) => url.includes(key))
       .sort((a, b) => b.length - a.length)[0];
     return Promise.resolve({
       ok: true,
       status: 200,
-      json: async () => (hit ? map[hit] : fallback),
+      json: async () => (hit ? merged[hit] : fallback),
     } as never);
   });
 }
@@ -74,27 +76,54 @@ const testJobs: RepairJob[] = [
 const mockFindingGroups: FindingGroup[] = [
   {
     finding_type: 'missing_lyrics',
+    pending: 42,
+    resolved: 0,
+    dismissed: 0,
+    total: 42,
+    severity_max: 'info',
+    job_ids: ['lyrics_fetcher'],
+  },
+  {
+    finding_type: 'corrupt_audio',
+    pending: 3,
+    resolved: 0,
+    dismissed: 0,
+    total: 3,
+    severity_max: 'error',
+    job_ids: ['audio_corruption_detector'],
+  },
+  {
+    finding_type: 'canonical_version',
+    pending: 8,
+    resolved: 0,
+    dismissed: 0,
+    total: 8,
+    severity_max: 'info',
+    job_ids: ['album_tag_consistency'],
+  },
+];
+
+const mockFindingTypes: FindingTypeInfo[] = [
+  {
+    type: 'missing_lyrics',
     label: 'Missing Lyrics',
     verb: 'Apply Lyrics',
-    count: 42,
     fixable: true,
     destructive: false,
     job_ids: ['lyrics_fetcher'],
   },
   {
-    finding_type: 'corrupt_audio',
+    type: 'corrupt_audio',
     label: 'Corrupt Audio',
     verb: 'Re-download',
-    count: 3,
     fixable: true,
     destructive: true,
     job_ids: ['audio_corruption_detector'],
   },
   {
-    finding_type: 'canonical_version',
+    type: 'canonical_version',
     label: 'Canonical Version',
     verb: null,
-    count: 8,
     fixable: false,
     destructive: false,
     job_ids: ['album_tag_consistency'],
@@ -106,6 +135,7 @@ beforeEach(() => {
   toastSpy.mockReset();
   routes({
     '/api/repair/findings/groups': { groups: mockFindingGroups },
+    '/api/repair/finding-types': { types: mockFindingTypes },
   });
   vi.stubGlobal('fetch', fetchMock);
   Object.assign(window, { showToast: toastSpy });
@@ -357,8 +387,8 @@ describe('Operations component mode switcher', () => {
     );
 
     // Click Advanced Mode button
-    const advancedBtn = [...container.querySelectorAll('.operations-mode-toggle-btn')].find(
-      (btn) => btn.textContent?.includes('Advanced Mode'),
+    const advancedBtn = [...container.querySelectorAll('.operations-mode-toggle-btn')].find((btn) =>
+      btn.textContent?.includes('Advanced Mode'),
     );
     expect(advancedBtn).not.toBeUndefined();
 

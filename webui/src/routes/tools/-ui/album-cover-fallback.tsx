@@ -65,21 +65,11 @@ export function getAlbumVinylTheme(name: string): VinylTheme {
   return themes[Math.abs(hash) % themes.length];
 }
 
-export function VinylCoverFallback({
-  name,
-  initialChar,
-}: {
-  name: string;
-  initialChar: string;
-}) {
+export function VinylCoverFallback({ name, initialChar }: { name: string; initialChar: string }) {
   const theme = getAlbumVinylTheme(name);
 
   return (
-    <div
-      className="repair-vinyl-disc"
-      style={{ background: theme.bg }}
-      aria-hidden="true"
-    >
+    <div className="repair-vinyl-disc" style={{ background: theme.bg }} aria-hidden="true">
       <div className="repair-vinyl-grooves" />
       <div className="repair-vinyl-sheen" />
       <div
@@ -89,10 +79,7 @@ export function VinylCoverFallback({
           borderColor: theme.ringColor,
         }}
       >
-        <span
-          className="repair-album-art-fallback"
-          style={{ color: theme.text }}
-        >
+        <span className="repair-album-art-fallback" style={{ color: theme.text }}>
           {initialChar}
         </span>
       </div>

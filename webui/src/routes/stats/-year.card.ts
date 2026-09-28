@@ -335,7 +335,10 @@ function drawStack(
     const count = Math.min(model.artUrls.length, 4);
     const gap = Math.round(14 * s);
     const availableW = W - M * 2;
-    const tileW = Math.min(Math.floor((availableW - (count - 1) * gap) / count), Math.floor(220 * s));
+    const tileW = Math.min(
+      Math.floor((availableW - (count - 1) * gap) / count),
+      Math.floor(220 * s),
+    );
     const totalW = count * tileW + (count - 1) * gap;
     const startX = M + Math.floor((availableW - totalW) / 2);
     model.artUrls.slice(0, count).forEach((_, index) => {
@@ -382,9 +385,7 @@ function drawPoster(
 
   // Type is bottom-anchored here, not top — a poster reads up from its base.
   const rows = model.stats.length;
-  const highlightHeight = model.highlight
-    ? (model.runnersUp.length ? 180 * s : 144 * s)
-    : 0;
+  const highlightHeight = model.highlight ? (model.runnersUp.length ? 180 * s : 144 * s) : 0;
   let y = H - 90 * s - rows * 66 * s - highlightHeight;
 
   ctx.fillStyle = palette.text;

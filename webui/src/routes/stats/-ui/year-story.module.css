@@ -76,18 +76,30 @@
 }
 
 @keyframes auroraFloat1 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(80px, 60px) scale(1.15); }
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  100% {
+    transform: translate(80px, 60px) scale(1.15);
+  }
 }
 
 @keyframes auroraFloat2 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(-70px, -50px) scale(1.2); }
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  100% {
+    transform: translate(-70px, -50px) scale(1.2);
+  }
 }
 
 @keyframes auroraFloat3 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(-50px, 70px) scale(0.9); }
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  100% {
+    transform: translate(-50px, 70px) scale(0.9);
+  }
 }
 
 /* Progress pips */
@@ -207,7 +219,9 @@
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Typography */
@@ -517,8 +531,20 @@
 }
 
 @keyframes heroPulse {
-  0% { transform: scale(1); box-shadow: 0 0 0 3px rgba(30, 215, 96, 0.35), 0 0 40px rgba(30, 215, 96, 0.25), 0 24px 60px rgba(0, 0, 0, 0.7); }
-  100% { transform: scale(1.03); box-shadow: 0 0 0 4px rgba(30, 215, 96, 0.6), 0 0 65px rgba(30, 215, 96, 0.45), 0 28px 70px rgba(0, 0, 0, 0.8); }
+  0% {
+    transform: scale(1);
+    box-shadow:
+      0 0 0 3px rgba(30, 215, 96, 0.35),
+      0 0 40px rgba(30, 215, 96, 0.25),
+      0 24px 60px rgba(0, 0, 0, 0.7);
+  }
+  100% {
+    transform: scale(1.03);
+    box-shadow:
+      0 0 0 4px rgba(30, 215, 96, 0.6),
+      0 0 65px rgba(30, 215, 96, 0.45),
+      0 28px 70px rgba(0, 0, 0, 0.8);
+  }
 }
 
 .heroSquare {
@@ -567,16 +593,30 @@
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.collageArt:nth-child(1) { transform: rotate(-8deg) translateY(6px); }
-.collageArt:nth-child(2) { transform: rotate(-3deg) translateY(-4px); }
-.collageArt:nth-child(3) { transform: rotate(0deg) scale(1.1); z-index: 2; box-shadow: 0 18px 45px rgba(0, 0, 0, 0.7); }
-.collageArt:nth-child(4) { transform: rotate(3deg) translateY(-4px); }
-.collageArt:nth-child(5) { transform: rotate(8deg) translateY(6px); }
+.collageArt:nth-child(1) {
+  transform: rotate(-8deg) translateY(6px);
+}
+.collageArt:nth-child(2) {
+  transform: rotate(-3deg) translateY(-4px);
+}
+.collageArt:nth-child(3) {
+  transform: rotate(0deg) scale(1.1);
+  z-index: 2;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.7);
+}
+.collageArt:nth-child(4) {
+  transform: rotate(3deg) translateY(-4px);
+}
+.collageArt:nth-child(5) {
+  transform: rotate(8deg) translateY(6px);
+}
 
 .collageArt:hover {
   transform: translateY(-8px) scale(1.15) !important;
   z-index: 5;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 25px rgba(30, 215, 96, 0.35);
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.8),
+    0 0 25px rgba(30, 215, 96, 0.35);
 }
 
 /* --- Album wall --- */
@@ -637,7 +677,9 @@
   opacity: 0;
   transform: translateY(10px) scale(0.9);
   transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5), 0 0 15px rgba(30, 215, 96, 0.5);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.5),
+    0 0 15px rgba(30, 215, 96, 0.5);
 }
 
 .albumCardPlayable:hover .albumPlayBadge,
@@ -1008,7 +1050,9 @@
 
 .swatchActive {
   border-color: #fff !important;
-  box-shadow: 0 0 0 2px #1ed760, 0 4px 14px rgba(30, 215, 96, 0.4) !important;
+  box-shadow:
+    0 0 0 2px #1ed760,
+    0 4px 14px rgba(30, 215, 96, 0.4) !important;
   transform: scale(1.05);
 }
 
@@ -1023,7 +1067,7 @@
   cursor: pointer;
 }
 
-.cardToggle input[type="checkbox"] {
+.cardToggle input[type='checkbox'] {
   accent-color: #1ed760;
   width: 16px;
   height: 16px;

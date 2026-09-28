@@ -31,6 +31,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { FindingAlbumGroup } from '../-tools.api';
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type {
   BulkFixStatus,
@@ -76,13 +77,12 @@ import {
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
 import { safeFixablePending, visibleGroups } from '../-tools.groups';
+import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
+import { AlbumInspectionTray } from './album-inspection-tray';
 import { FindingDetail } from './finding-detail';
 import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
-import { AlbumInspectionTray } from './album-inspection-tray';
-import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
-import type { FindingAlbumGroup } from '../-tools.api';
 import { FindingsInbox } from './findings-inbox';
 import { HealthHero } from './health-hero';
 
@@ -146,7 +146,13 @@ export interface FindingsSurfaceProps {
   trackCount: number | null;
   /** A jump from the run history: scope the surface to one job's open
    *  findings. The token re-fires the same job. */
-  focusJob?: { jobId: string; token: number; query?: string } | null;
+  focusJob?: {
+    jobId: string;
+    token: number;
+    query?: string;
+    severity?: string;
+    findingType?: string;
+  } | null;
   /** `updateRepairStatus()` — refresh the pending badge after any mutation. */
   onStatusChanged: () => void;
   /** Default view mode: 'albums' (default for UI) or 'inbox' (default for unit tests). */

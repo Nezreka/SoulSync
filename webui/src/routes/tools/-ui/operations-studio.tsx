@@ -15,11 +15,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { FindingTypeInfo } from '../-tools.groups';
+import type { FindingAlbumGroup } from '../-tools.api';
+import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type {
   BulkFixStatus,
-  FindingAlbumGroup,
-  FindingGroup,
   RepairFinding,
   RepairJob,
   RepairJobProgress,
@@ -40,9 +39,9 @@ import {
   stopRepairJob,
 } from '../-tools.api';
 import { repairJobBadge } from '../-tools.core';
+import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray } from './album-inspection-tray';
 import { FindingsAlbumGrid } from './findings-album-grid';
-import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
@@ -124,7 +123,12 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     tagline: 'Relocate tracks, clean duplicates, and quarantine unlinked files',
     description:
       'Detects duplicate recordings, cleans up unlinked orphan tracks, and moves files into organized directory structures.',
-    jobIds: ['duplicate_finder', 'orphan_file_detector', 'dead_file_cleaner', 'empty_folder_remover'],
+    jobIds: [
+      'duplicate_finder',
+      'orphan_file_detector',
+      'dead_file_cleaner',
+      'empty_folder_remover',
+    ],
     findingTypes: ['duplicate_tracks', 'orphan_file', 'dead_file', 'empty_folder'],
   },
 ] as const;
@@ -183,7 +187,7 @@ export interface OperationsStudioProps {
   jobs: RepairJob[] | null;
   progress: Record<string, RepairJobProgress>;
   runs: RepairJobRun[];
-  trackCount?: number;
+  trackCount?: number | null;
   onChanged: () => void;
   onShowFindings: (jobId: string, options?: { severity?: string; findingType?: string }) => void;
   onSwitchToAdvanced: (category?: string) => void;
@@ -297,10 +301,7 @@ export function OperationsStudio({
   // Executive Health Score
   const healthScore = useMemo(() => {
     const total = trackCount || 1000;
-    const totalPending = groups.reduce(
-      (acc, g) => acc + (g.pending ?? (g as any).count ?? 0),
-      0,
-    );
+    const totalPending = groups.reduce((acc, g) => acc + (g.pending ?? (g as any).count ?? 0), 0);
     if (totalPending === 0) return 100;
     return Math.max(0, Math.min(100, Math.round(((total - totalPending) / total) * 100)));
   }, [groups, trackCount]);
@@ -421,10 +422,7 @@ export function OperationsStudio({
         for (const target of targets) {
           await setRepairJobEnabled(target.job_id, enable);
         }
-        toast(
-          `${pillar.title} autopilot ${enable ? 'activated' : 'paused'}`,
-          'success',
-        );
+        toast(`${pillar.title} autopilot ${enable ? 'activated' : 'paused'}`, 'success');
         onChanged();
       } catch {
         toast('Error toggling autopilot for pillar', 'error');
@@ -478,7 +476,8 @@ export function OperationsStudio({
             <h5 className="operations-triage-title">Smart Action Triage</h5>
           </div>
           <p className="operations-triage-sub">
-            Prioritized by authority and data safety. Apply zero-risk enrichments instantly or review quarantined file changes.
+            Prioritized by authority and data safety. Apply zero-risk enrichments instantly or
+            review quarantined file changes.
           </p>
         </div>
 
@@ -493,7 +492,8 @@ export function OperationsStudio({
             </div>
             <h6 className="operations-triage-heading">Zero-Risk Auto-Fixes</h6>
             <p className="operations-triage-desc">
-              Missing synced lyrics, high-res vinyl covers, ReplayGain loudness normalization, and tag alignment.
+              Missing synced lyrics, high-res vinyl covers, ReplayGain loudness normalization, and
+              tag alignment.
             </p>
             <div className="operations-triage-action-row">
               <button
@@ -543,7 +543,8 @@ export function OperationsStudio({
             </div>
             <h6 className="operations-triage-heading">Quarantine &amp; Review</h6>
             <p className="operations-triage-desc">
-              Corrupt audio files, duplicate recordings, orphan audio files, and short preview clips.
+              Corrupt audio files, duplicate recordings, orphan audio files, and short preview
+              clips.
             </p>
             <div className="operations-triage-action-row">
               <button
@@ -589,13 +590,9 @@ export function OperationsStudio({
             </div>
             <div className="operations-live-hud-title-wrap">
               <span className="operations-live-hud-badge">Active Operation Telemetry</span>
-              <h6 className="operations-live-hud-name">
-                {activeRunningJob.job.display_name}
-              </h6>
+              <h6 className="operations-live-hud-name">{activeRunningJob.job.display_name}</h6>
               {activeRunningJob.prog?.phase ? (
-                <span className="operations-live-hud-phase">
-                  {activeRunningJob.prog.phase}
-                </span>
+                <span className="operations-live-hud-phase">{activeRunningJob.prog.phase}</span>
               ) : null}
             </div>
             <div className="operations-live-hud-actions">
@@ -629,7 +626,8 @@ export function OperationsStudio({
             <h5 className="operations-playbooks-title">Curated Library Playbooks</h5>
           </div>
           <p className="operations-playbooks-sub">
-            Run automated composite health audits across your music library without tweaking individual scripts.
+            Run automated composite health audits across your music library without tweaking
+            individual scripts.
           </p>
         </div>
 
@@ -670,7 +668,8 @@ export function OperationsStudio({
             <h5 className="operations-pillars-title">4 Strategic Domains</h5>
           </div>
           <p className="operations-pillars-sub">
-            Autonomous background curation grouped by collection priorities. Toggle continuous Autopilot or run manual domain sweeps.
+            Autonomous background curation grouped by collection priorities. Toggle continuous
+            Autopilot or run manual domain sweeps.
           </p>
         </div>
 
@@ -682,16 +681,13 @@ export function OperationsStudio({
 
             const isRunning =
               runningPillar === pillar.id ||
-              pillarJobs.some(
-                (j) => j.is_running || progress[j.job_id]?.status === 'running',
-              );
+              pillarJobs.some((j) => j.is_running || progress[j.job_id]?.status === 'running');
 
             const openFindings = groups
               .filter((g) => pillar.findingTypes.includes(g.finding_type))
               .reduce((sum, g) => sum + (g.pending ?? (g as any).count ?? 0), 0);
 
-            const allEnabled =
-              pillarJobs.length > 0 && pillarJobs.every((j) => j.enabled);
+            const allEnabled = pillarJobs.length > 0 && pillarJobs.every((j) => j.enabled);
 
             return (
               <div
@@ -736,9 +732,7 @@ export function OperationsStudio({
 
                 <div className="operations-pillar-stats-row">
                   <div className="operations-pillar-stat">
-                    <span className="operations-pillar-stat-val">
-                      {pillarJobs.length}
-                    </span>
+                    <span className="operations-pillar-stat-val">{pillarJobs.length}</span>
                     <span className="operations-pillar-stat-lbl">Active Jobs</span>
                   </div>
                   <div className="operations-pillar-stat">
@@ -758,14 +752,16 @@ export function OperationsStudio({
                 <div className="operations-pillar-actions">
                   <label
                     className="operations-pillar-autopilot"
-                    title={allEnabled ? 'Pause automated background scans for this pillar' : 'Enable automated background scans for this pillar'}
+                    title={
+                      allEnabled
+                        ? 'Pause automated background scans for this pillar'
+                        : 'Enable automated background scans for this pillar'
+                    }
                   >
                     <input
                       type="checkbox"
                       checked={allEnabled}
-                      onChange={(e) =>
-                        void handlePillarAutopilotToggle(pillar, e.target.checked)
-                      }
+                      onChange={(e) => void handlePillarAutopilotToggle(pillar, e.target.checked)}
                     />
                     <span className="repair-toggle-slider small" />
                     <span className="operations-pillar-autopilot-label">
@@ -786,7 +782,11 @@ export function OperationsStudio({
 
                 <div className="operations-pillar-footer">
                   <span className="operations-pillar-subjob-hint">
-                    Includes {pillarJobs.map((j) => j.display_name).slice(0, 3).join(', ')}
+                    Includes{' '}
+                    {pillarJobs
+                      .map((j) => j.display_name)
+                      .slice(0, 3)
+                      .join(', ')}
                     {pillarJobs.length > 3 ? ` +${pillarJobs.length - 3} more` : ''}
                   </span>
                   <button
@@ -812,7 +812,8 @@ export function OperationsStudio({
             <h5 className="operations-spotlight-title">Releases Needing Attention</h5>
           </div>
           <p className="operations-spotlight-sub">
-            Curated visual overview of albums flagged for audio quality defects, missing artwork, or tag alignment.
+            Curated visual overview of albums flagged for audio quality defects, missing artwork, or
+            tag alignment.
           </p>
         </div>
 

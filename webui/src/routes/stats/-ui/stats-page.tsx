@@ -266,7 +266,9 @@ export function StatsPage() {
                 onClick={openStory}
                 data-testid="stats-year-button"
               >
-                <span className={styles.yearSparkle} aria-hidden="true">✨</span>
+                <span className={styles.yearSparkle} aria-hidden="true">
+                  ✨
+                </span>
                 Your Year
               </button>
             ) : null}
@@ -640,7 +642,16 @@ function OverviewCards({
       label: 'Total Plays',
       value: formatCompactNumber(overview.total_plays),
       icon: (
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <polygon points="5 3 19 12 5 21 5 3" />
         </svg>
       ),
@@ -650,7 +661,16 @@ function OverviewCards({
       label: 'Listening Time',
       value: formatListeningTime(overview.total_time_ms),
       icon: (
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
         </svg>
@@ -661,7 +681,16 @@ function OverviewCards({
       label: 'Artists',
       value: formatCompactNumber(overview.unique_artists),
       icon: (
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
           <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
           <line x1="12" x2="12" y1="19" y2="22" />
@@ -673,7 +702,16 @@ function OverviewCards({
       label: 'Albums',
       value: formatCompactNumber(overview.unique_albums),
       icon: (
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <circle cx="12" cy="12" r="10" />
           <circle cx="12" cy="12" r="3" />
         </svg>
@@ -684,7 +722,16 @@ function OverviewCards({
       label: 'Tracks',
       value: formatCompactNumber(overview.unique_tracks),
       icon: (
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M9 18V5l12-2v13" />
           <circle cx="6" cy="18" r="3" />
           <circle cx="18" cy="16" r="3" />

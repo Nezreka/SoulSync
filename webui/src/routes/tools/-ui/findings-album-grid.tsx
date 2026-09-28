@@ -133,10 +133,7 @@ export function FindingsAlbumGrid({
               {art ? (
                 <img src={art} alt="" loading="lazy" />
               ) : (
-                <VinylCoverFallback
-                  name={name || 'Unknown'}
-                  initialChar={initial(group)}
-                />
+                <VinylCoverFallback name={name || 'Unknown'} initialChar={initial(group)} />
               )}
               <span className="repair-album-count">{group.count}</span>
               {group.error_count && group.error_count > 0 ? (
@@ -170,9 +167,7 @@ export function FindingsAlbumGrid({
                     </span>
                   ))}
                   {group.finding_types.length > 2 ? (
-                    <span className="repair-album-tag more">
-                      +{group.finding_types.length - 2}
-                    </span>
+                    <span className="repair-album-tag more">+{group.finding_types.length - 2}</span>
                   ) : null}
                 </div>
               ) : null}

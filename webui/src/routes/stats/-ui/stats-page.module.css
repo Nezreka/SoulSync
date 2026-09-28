@@ -74,8 +74,12 @@
 }
 
 @keyframes sparkleRotate {
-  0% { transform: scale(1) rotate(0deg); }
-  100% { transform: scale(1.2) rotate(20deg); }
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  100% {
+    transform: scale(1.2) rotate(20deg);
+  }
 }
 
 /* Segmented Tabs (Listening | Library) */
@@ -250,7 +254,9 @@
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .statsSyncControls {
@@ -591,7 +597,9 @@
   background: rgb(var(--accent-rgb));
   border: none;
   padding: 0;
-  transition: transform 0.15s ease, filter 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    filter 0.15s ease;
 }
 
 .statsClockCell:disabled {
@@ -1897,4 +1905,3 @@
     gap: 6px;
   }
 }
-

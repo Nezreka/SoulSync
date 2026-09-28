@@ -340,7 +340,8 @@ export function MaintenanceHero() {
     findingType?: string;
   } | null>(null);
   const showJobFindings = useCallback(
-    (jobId: string, options?: { severity?: string; findingType?: string }) => {
+    (jobId: string, optionsOrLabel?: string | { severity?: string; findingType?: string }) => {
+      const options = typeof optionsOrLabel === 'object' ? optionsOrLabel : undefined;
       setJobFocus((previous) => ({
         jobId,
         severity: options?.severity,

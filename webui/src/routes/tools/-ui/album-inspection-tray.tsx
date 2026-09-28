@@ -1,19 +1,10 @@
 import { useEffect, useState } from 'react';
 
-import type { RepairFinding } from '../-tools.types';
 import type { FindingAlbumGroup } from '../-tools.api';
+import type { RepairFinding } from '../-tools.types';
 
-import {
-  fetchRepairFindings,
-  fixFinding,
-  dismissFinding,
-  reopenFinding,
-} from '../-tools.api';
-import {
-  findingFixLabel,
-  findingSeverityIcon,
-  findingTypeLabel,
-} from '../-tools.core';
+import { fetchRepairFindings, fixFinding, dismissFinding, reopenFinding } from '../-tools.api';
+import { findingFixLabel, findingSeverityIcon, findingTypeLabel } from '../-tools.core';
 import { VinylCoverFallback } from './album-cover-fallback';
 
 export interface AlbumInspectionTrayProps {
@@ -68,8 +59,7 @@ export function AlbumInspectionTray({
           d.expected_artist === group.artist;
         if (group.group_by === 'artist') return matchArtist;
         return (
-          matchAlbum ||
-          (matchArtist && String(item.file_path || '').includes(group.album || ''))
+          matchAlbum || (matchArtist && String(item.file_path || '').includes(group.album || ''))
         );
       });
 
@@ -365,11 +355,10 @@ export function AlbumInspectionTray({
                 typeof rawNum === 'number' && rawNum > 0
                   ? String(rawNum).padStart(2, '0')
                   : typeof rawNum === 'string' && /^\d+$/.test(rawNum.trim())
-                  ? String(parseInt(rawNum.trim(), 10)).padStart(2, '0')
-                  : String(idx + 1).padStart(2, '0');
+                    ? String(parseInt(rawNum.trim(), 10)).padStart(2, '0')
+                    : String(idx + 1).padStart(2, '0');
 
-              const formatStr =
-                details.current_quality || details.current_format || details.format;
+              const formatStr = details.current_quality || details.current_format || details.format;
 
               return (
                 <div
@@ -512,9 +501,7 @@ export function AlbumInspectionTray({
                         </div>
                       ) : (
                         <div className="album-track-status-group">
-                          <span className={`album-track-status-pill ${f.status}`}>
-                            {f.status}
-                          </span>
+                          <span className={`album-track-status-pill ${f.status}`}>{f.status}</span>
                           <button
                             type="button"
                             className="album-action-reopen-btn"

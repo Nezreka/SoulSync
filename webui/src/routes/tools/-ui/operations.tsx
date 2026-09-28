@@ -704,7 +704,10 @@ export function Operations({
                     {family.pending.toLocaleString()} open
                   </span>
                 ) : null}
-                <span className={`repair-family-chevron${isOpen ? ' open' : ''}`} aria-hidden="true">
+                <span
+                  className={`repair-family-chevron${isOpen ? ' open' : ''}`}
+                  aria-hidden="true"
+                >
                   &#9660;
                 </span>
               </button>
