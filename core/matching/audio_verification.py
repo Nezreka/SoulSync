@@ -84,6 +84,7 @@ def _normalized_readings(text: str) -> tuple:
     if not text:
         return "", None
     s = text.lower().strip()
+    original = s
     # Annotations that are metadata, not core identity.
     s = re.sub(r'\s*\([^)]*\)', '', s)
     s = re.sub(r'\s*\[[^\]]*\]', '', s)
@@ -92,11 +93,27 @@ def _normalized_readings(text: str) -> tuple:
     s = re.sub(r'\s+(?:feat\.?|ft\.?|featuring)\s+.*$', '', s, flags=re.IGNORECASE)
     dash_qualifier = _DASH_QUALIFIER_RE.search(s)
     if dash_qualifier and is_trailing_version_qualifier(dash_qualifier.group("qualifier")):
+        canonical = _finish_normalization(s[:dash_qualifier.start()].rstrip())
+        verbatim = _finish_normalization(s)
+        if not canonical:
+            # The base title may have been entirely inside brackets. Recover
+            # it before scoring either the stripped or the verbatim reading.
+            original_dash = _DASH_QUALIFIER_RE.search(original)
+            base = original[:original_dash.start()].rstrip() if original_dash else original
+            canonical = _finish_normalization(base) or base
+            verbatim = _finish_normalization(original) or original
         return (
-            _finish_normalization(s[:dash_qualifier.start()].rstrip()),
-            _finish_normalization(s),
+            canonical,
+            verbatim,
         )
-    return _finish_normalization(s), None
+    canonical = _finish_normalization(s)
+    if canonical:
+        return canonical, None
+    # Some titles consist entirely of bracketed text ("(Nice Dream)",
+    # "[Rhubarb]"). Stripping annotations must not erase the song's identity.
+    # Keep a literal punctuation-only title such as "-" distinguishable from
+    # other titles too.
+    return _finish_normalization(original) or original, None
 
 
 def normalize(text: str, *, strip_version_tail: bool = True) -> str:
