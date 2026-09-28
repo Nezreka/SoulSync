@@ -60893,6 +60893,152 @@ tr.tag-diff-same {
     font-size: 13px;
 }
 
+/* Header Actions: Mode switcher + Master toggle in maintenance header */
+.tools-maintenance-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+/* Executive Library Health Hero in Simple Studio */
+.operations-executive-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 18px 24px;
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    flex-wrap: wrap;
+}
+
+.operations-exec-metric {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.operations-exec-score {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 68px;
+    height: 68px;
+    border-radius: 14px;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, rgba(15, 23, 42, 0.6) 100%);
+    border: 1px solid rgba(129, 140, 248, 0.4);
+    box-shadow: 0 0 18px rgba(99, 102, 241, 0.2);
+}
+
+.operations-exec-num {
+    font-size: 20px;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.operations-exec-status {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #a5b4fc;
+    margin-top: 3px;
+}
+
+.operations-exec-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.operations-exec-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.01em;
+}
+
+.operations-exec-sub {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.operations-exec-cta {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.operations-exec-cta:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+}
+
+/* Spotlight Section in Simple Studio */
+.operations-spotlight-section {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: linear-gradient(180deg, rgba(17, 24, 39, 0.75) 0%, rgba(15, 23, 42, 0.65) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 22px;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.operations-spotlight-header {
+    margin-bottom: 6px;
+}
+
+.operations-spotlight-title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 5px;
+}
+
+.operations-spotlight-badge {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%);
+    border: 1px solid rgba(168, 85, 247, 0.4);
+    color: #c084fc;
+}
+
+.operations-spotlight-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.operations-spotlight-sub {
+    margin: 0;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
 /* ── Operations Studio View ─────────────────────────────────────────────── */
 
 .operations-studio {

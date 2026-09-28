@@ -44,6 +44,7 @@ import { useRepairProgressEvent, useRepairStatusEvent } from '../-tools.events';
 import { takeFindingsFocus } from '../-tools.findings-focus';
 import { FindingsSurface } from './findings-surface';
 import { Operations } from './operations';
+import { OperationsStudio } from './operations-studio';
 import { RunHistory } from './run-history';
 
 /** The vanilla hides a finished job's progress panel 30s after it lands. */
@@ -359,6 +360,21 @@ export function MaintenanceHero() {
     setTimeout(() => jumpToSection('repair-section-findings'), 300);
   }, []);
 
+  const [mode, setMode] = useState<'simple' | 'advanced'>(() => {
+    try {
+      const saved = localStorage.getItem('soulsync_operations_mode');
+      if (saved === 'advanced' || saved === 'simple') return saved;
+    } catch {}
+    return 'simple';
+  });
+
+  const handleModeChange = useCallback((next: 'simple' | 'advanced') => {
+    setMode(next);
+    try {
+      localStorage.setItem('soulsync_operations_mode', next);
+    } catch {}
+  }, []);
+
   return (
     <div className="tools-maintenance-hero">
       <div className="tools-maintenance-header">
@@ -371,21 +387,72 @@ export function MaintenanceHero() {
             </p>
           </div>
         </div>
-        <label className="repair-master-toggle">
-          <input
-            type="checkbox"
-            id="repair-master-toggle"
-            checked={enabled}
-            onChange={() => void onMasterToggle()}
-          />
-          <span className="repair-toggle-slider" />
-          <span className="repair-toggle-label" id="repair-master-label">
-            {enabled ? 'Enabled' : 'Disabled'}
-          </span>
-        </label>
+
+        <div className="tools-maintenance-header-actions">
+          {/* Workstation Mode Switcher */}
+          <div
+            className="operations-mode-toggle-group"
+            role="tablist"
+            aria-label="Workstation View Mode"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'simple'}
+              className={`operations-mode-toggle-btn ${mode === 'simple' ? 'active' : ''}`}
+              onClick={() => handleModeChange('simple')}
+              title="Switch to Simple Studio Mode (Recommended)"
+            >
+              <span className="operations-mode-toggle-icon">✦</span>
+              <span>Simple Mode</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'advanced'}
+              className={`operations-mode-toggle-btn ${mode === 'advanced' ? 'active' : ''}`}
+              onClick={() => handleModeChange('advanced')}
+              title="Switch to Advanced Mode (30 Micro-Jobs & Granular Queries)"
+            >
+              <span className="operations-mode-toggle-icon">⚙</span>
+              <span>Advanced Mode</span>
+            </button>
+          </div>
+
+          <label className="repair-master-toggle">
+            <input
+              type="checkbox"
+              id="repair-master-toggle"
+              checked={enabled}
+              onChange={() => void onMasterToggle()}
+            />
+            <span className="repair-toggle-slider" />
+            <span className="repair-toggle-label" id="repair-master-label">
+              {enabled ? 'Enabled' : 'Disabled'}
+            </span>
+          </label>
+        </div>
       </div>
 
-      <nav className="repair-section-nav" aria-label="Maintenance sections">
+      {/* ── SIMPLE MODE: Primary Curated Studio & Spotlight ──────────────── */}
+      {mode === 'simple' ? (
+        <OperationsStudio
+          jobs={jobs}
+          progress={progress}
+          runs={history || []}
+          trackCount={trackCount}
+          onChanged={loadJobs}
+          onShowFindings={showJobFindings}
+          onSwitchToAdvanced={(_cat) => handleModeChange('advanced')}
+        />
+      ) : null}
+
+      {/* ── ADVANCED MODE: Granular Chassis (Mounted for contracts, visible in Advanced) ── */}
+      <nav
+        className="repair-section-nav"
+        aria-label="Maintenance sections"
+        hidden={mode !== 'advanced'}
+      >
         {SECTIONS.map((section) => (
           <button
             className="repair-section-link"
@@ -408,41 +475,45 @@ export function MaintenanceHero() {
         ))}
       </nav>
 
-      <FindingsSurface
-        jobs={jobs || []}
-        runs={history || []}
-        trackCount={trackCount}
-        focusJob={jobFocus}
-        onStatusChanged={refreshStatus}
-        defaultView="albums"
-      />
+      <div className="repair-advanced-chassis" hidden={mode !== 'advanced'}>
+        <FindingsSurface
+          jobs={jobs || []}
+          runs={history || []}
+          trackCount={trackCount}
+          focusJob={jobFocus}
+          onStatusChanged={refreshStatus}
+          defaultView="albums"
+        />
 
-      <section className="repair-section" id="repair-section-operations">
-        <h4 className="repair-section-title">Maintenance jobs</h4>
-        <div id="repair-jobs-list">
-          <Operations
-            jobs={jobs}
-            error={jobsError}
-            progress={progress}
-            runs={history || []}
-            onChanged={loadJobs}
-            onHelp={setHelpJob}
-            onShowFindings={showJobFindings}
-          />
-        </div>
-      </section>
+        <section className="repair-section" id="repair-section-operations">
+          <h4 className="repair-section-title">Maintenance jobs</h4>
+          <div id="repair-jobs-list">
+            <Operations
+              jobs={jobs}
+              error={jobsError}
+              progress={progress}
+              runs={history || []}
+              onChanged={loadJobs}
+              onHelp={setHelpJob}
+              onShowFindings={showJobFindings}
+              mode={mode}
+              onModeChange={handleModeChange}
+            />
+          </div>
+        </section>
 
-      <section className="repair-section" id="repair-section-history">
-        <h4 className="repair-section-title">Recent runs</h4>
-        <div className="repair-runs-card" id="repair-history-list">
-          <RunHistory
-            runs={history}
-            error={historyError}
-            onShowFindings={showJobFindings}
-            onRefresh={() => void loadHistory()}
-          />
-        </div>
-      </section>
+        <section className="repair-section" id="repair-section-history">
+          <h4 className="repair-section-title">Recent runs</h4>
+          <div className="repair-runs-card" id="repair-history-list">
+            <RunHistory
+              runs={history}
+              error={historyError}
+              onShowFindings={showJobFindings}
+              onRefresh={() => void loadHistory()}
+            />
+          </div>
+        </section>
+      </div>
 
       {helpJob ? <JobHelpOverlay job={helpJob} onClose={() => setHelpJob(null)} /> : null}
     </div>

@@ -184,11 +184,11 @@ describe('OperationsStudio (Simple Mode)', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('⚡ Apply All 42 Safe Fixes')).not.toBeNull();
+      expect(screen.getAllByText('⚡ Apply All 42 Safe Fixes').length).toBeGreaterThan(0);
     });
 
-    const safeBtn = screen.getByText('⚡ Apply All 42 Safe Fixes');
-    fireEvent.click(safeBtn);
+    const safeBtns = screen.getAllByText('⚡ Apply All 42 Safe Fixes');
+    fireEvent.click(safeBtns[0]);
 
     await waitFor(() => {
       const calls = fetchMock.mock.calls.map((c) => String(c[0]));
