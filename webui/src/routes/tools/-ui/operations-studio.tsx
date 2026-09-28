@@ -4,17 +4,33 @@
  * Designed for everyday collectors and audiophiles who want immaculate libraries
  * without micromanaging 30 individual backend cron daemons.
  *
- * Organizes maintenance into:
- * 1. One-Click Playbooks (Full Tune-Up, Audio Integrity Sweep, Metadata Polish, Media Enrichment)
- * 2. The 4 Strategic Pillars (Audio Fidelity, Metadata Perfection, Media Enrichment, Storage Hygiene)
- * 3. Seamless cross-links to Findings and the Album Inspection Tray.
+ * Features:
+ * 1. Smart Action Triage Center (Safe 1-Click Auto-Fixes vs. Quarantine Staging)
+ * 2. Live Scanning Mission Control HUD with real-time telemetry
+ * 3. 1-Click Playbooks (Full Tune-Up, Audio Integrity Sweep, Metadata Polish, Media Enrichment)
+ * 4. The 4 Strategic Pillars with direct resolution actions
+ * 5. Seamless cross-links to Findings and the Album Inspection Tray.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { RepairJob, RepairJobProgress, RepairJobRun } from '../-tools.types';
+import type {
+  BulkFixStatus,
+  FindingGroup,
+  RepairJob,
+  RepairJobProgress,
+  RepairJobRun,
+} from '../-tools.types';
 
-import { runRepairJob, setRepairJobEnabled } from '../-tools.api';
+import {
+  fetchBulkFixStatus,
+  fetchFindingGroups,
+  runRepairJob,
+  setRepairJobEnabled,
+  startBulkFix,
+  stopBulkFix,
+  stopRepairJob,
+} from '../-tools.api';
 import { repairJobBadge } from '../-tools.core';
 
 function toast(message: string, type = 'info') {
@@ -30,6 +46,7 @@ export interface StrategicPillar {
   tagline: string;
   description: string;
   jobIds: readonly string[];
+  findingTypes: readonly string[];
 }
 
 export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
@@ -49,6 +66,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'short_preview_track',
       'lossy_converter_scan',
     ],
+    findingTypes: ['corrupt_audio', 'fake_lossless', 'quality_upgrade', 'short_preview_track'],
   },
   {
     id: 'metadata',
@@ -67,6 +85,14 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'suspect_album_tag',
       'acoustid_audio_fingerprint',
     ],
+    findingTypes: [
+      'album_tag_inconsistency',
+      'comma_artist_split',
+      'genre_cleanup',
+      'nonlatin_matching',
+      'track_number_mismatch',
+      'mbid_mismatch',
+    ],
   },
   {
     id: 'enrichment',
@@ -78,6 +104,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     description:
       'Locates synchronized time-coded lyrics, downloads high-resolution album art sleeves, and applies ReplayGain normalization.',
     jobIds: ['lyrics_fetcher', 'artwork_fetcher', 'replaygain_filler'],
+    findingTypes: ['missing_lyrics', 'missing_cover_art', 'missing_replaygain', 'replaygain_retag'],
   },
   {
     id: 'storage',
@@ -89,6 +116,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     description:
       'Detects duplicate recordings, cleans up unlinked orphan tracks, and moves files into organized directory structures.',
     jobIds: ['orphan_file_detector', 'relocate', 'duplicate_cleaner', 'cache_evictor'],
+    findingTypes: ['orphan_file', 'duplicate_tracks', 'dead_file', 'empty_folder'],
   },
 ] as const;
 
@@ -166,6 +194,54 @@ export function OperationsStudio({
 }: OperationsStudioProps) {
   const [runningPlaybook, setRunningPlaybook] = useState<string | null>(null);
   const [runningPillar, setRunningPillar] = useState<string | null>(null);
+  const [groups, setGroups] = useState<FindingGroup[]>([]);
+  const [bulkStatus, setBulkStatus] = useState<BulkFixStatus | null>(null);
+  const bulkTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const loadGroups = useCallback(async () => {
+    try {
+      const data = await fetchFindingGroups();
+      setGroups(data);
+    } catch {
+      // Ignore group load error
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadGroups();
+  }, [loadGroups, jobs]);
+
+  // Poll bulk fix progress if active
+  useEffect(() => {
+    const poll = async () => {
+      const status = await fetchBulkFixStatus();
+      if (!status) return;
+      setBulkStatus(status);
+      if (!status.running) {
+        if (bulkTimerRef.current) {
+          clearInterval(bulkTimerRef.current);
+          bulkTimerRef.current = null;
+        }
+        if (status.fixed && status.fixed > 0) {
+          toast(`Successfully applied ${status.fixed} fixes!`, 'success');
+        }
+        onChanged();
+        void loadGroups();
+      }
+    };
+
+    if (bulkStatus?.running && !bulkTimerRef.current) {
+      bulkTimerRef.current = setInterval(() => void poll(), 1000);
+      void poll();
+    }
+
+    return () => {
+      if (bulkTimerRef.current) {
+        clearInterval(bulkTimerRef.current);
+        bulkTimerRef.current = null;
+      }
+    };
+  }, [bulkStatus?.running, onChanged, loadGroups]);
 
   const jobMap = useMemo(() => {
     const map = new Map<string, RepairJob>();
@@ -174,6 +250,78 @@ export function OperationsStudio({
     }
     return map;
   }, [jobs]);
+
+  // Compute Authority Buckets
+  const { safeCount, suggestionCount, quarantineCount } = useMemo(() => {
+    let safe = 0;
+    let suggestions = 0;
+    let quarantine = 0;
+
+    for (const g of groups) {
+      if (g.destructive && g.count > 0) {
+        quarantine += g.count;
+      } else if (!g.destructive && g.fixable && g.count > 0) {
+        safe += g.count;
+      } else if (g.count > 0) {
+        suggestions += g.count;
+      }
+    }
+
+    return { safeCount: safe, suggestionCount: suggestions, quarantineCount: quarantine };
+  }, [groups]);
+
+  // Active running job for Live Mission Control HUD
+  const activeRunningJob = useMemo(() => {
+    for (const job of jobs || []) {
+      if (job.is_running || progress[job.job_id]?.status === 'running') {
+        return {
+          job,
+          prog: progress[job.job_id],
+        };
+      }
+    }
+    return null;
+  }, [jobs, progress]);
+
+  const handleApplyAllSafeFixes = useCallback(async () => {
+    try {
+      const result = await startBulkFix({ safeOnly: true });
+      if (result.started) {
+        toast(`Applying ${result.total || safeCount} safe fixes in background…`, 'info');
+        setBulkStatus({ running: true, done: 0, total: result.total || safeCount });
+      } else if (result.already_running) {
+        toast('A maintenance fix task is already in progress', 'info');
+        setBulkStatus({ running: true });
+      } else {
+        toast(result.error || 'Could not start safe fixes', 'error');
+      }
+    } catch {
+      toast('Error launching safe fixes', 'error');
+    }
+  }, [safeCount]);
+
+  const handleStopBulkFix = useCallback(() => {
+    stopBulkFix();
+    setBulkStatus(null);
+    toast('Stopped automated fix task', 'info');
+    setTimeout(() => {
+      onChanged();
+      void loadGroups();
+    }, 600);
+  }, [onChanged, loadGroups]);
+
+  const handleStopActiveJob = useCallback(
+    async (jobId: string) => {
+      try {
+        const result = await stopRepairJob(jobId);
+        toast(result.stopped ? 'Stopping operation…' : 'Job is not running', 'info');
+        setTimeout(onChanged, 800);
+      } catch {
+        toast('Error stopping operation', 'error');
+      }
+    },
+    [onChanged],
+  );
 
   const runJobSequence = useCallback(
     async (jobIds: readonly string[], label: string) => {
@@ -250,6 +398,169 @@ export function OperationsStudio({
 
   return (
     <div className="operations-studio">
+      {/* ── Autonomous Authority & Triage Center ────────────────────────── */}
+      <div className="operations-triage-section">
+        <div className="operations-triage-header">
+          <div className="operations-triage-title-group">
+            <span className="operations-triage-badge">Autonomous Curation</span>
+            <h5 className="operations-triage-title">Smart Action Triage</h5>
+          </div>
+          <p className="operations-triage-sub">
+            Prioritized by authority and data safety. Apply zero-risk enrichments instantly or review quarantined file changes.
+          </p>
+        </div>
+
+        <div className="operations-triage-grid">
+          {/* Card 1: Safe 1-Click Auto-Fixes */}
+          <div className="operations-triage-card safe">
+            <div className="operations-triage-top">
+              <span className="operations-triage-icon">⚡</span>
+              <span className="operations-triage-count-pill safe">
+                {safeCount > 0 ? `${safeCount} Ready` : 'All Clean'}
+              </span>
+            </div>
+            <h6 className="operations-triage-heading">Zero-Risk Auto-Fixes</h6>
+            <p className="operations-triage-desc">
+              Missing synced lyrics, high-res vinyl covers, ReplayGain loudness normalization, and tag alignment.
+            </p>
+            <div className="operations-triage-action-row">
+              <button
+                type="button"
+                className="operations-triage-btn safe"
+                disabled={safeCount === 0 || Boolean(bulkStatus?.running)}
+                onClick={() => void handleApplyAllSafeFixes()}
+              >
+                {bulkStatus?.running
+                  ? `Applying Fixes (${bulkStatus.done || 0}/${bulkStatus.total || safeCount})…`
+                  : `⚡ Apply All ${safeCount} Safe Fixes`}
+              </button>
+            </div>
+          </div>
+
+          {/* Card 2: Curator Suggestions */}
+          <div className="operations-triage-card suggestions">
+            <div className="operations-triage-top">
+              <span className="operations-triage-icon">💡</span>
+              <span className="operations-triage-count-pill suggestions">
+                {suggestionCount > 0 ? `${suggestionCount} Suggestions` : 'Optimal'}
+              </span>
+            </div>
+            <h6 className="operations-triage-heading">Curator Recommendations</h6>
+            <p className="operations-triage-desc">
+              Collaboration artist splits, canonical release alignment, and discography gaps.
+            </p>
+            <div className="operations-triage-action-row">
+              <button
+                type="button"
+                className="operations-triage-btn suggestions"
+                disabled={suggestionCount === 0}
+                onClick={() => {
+                  const target = document.getElementById('repair-section-findings');
+                  target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+              >
+                Review Suggestions ➔
+              </button>
+            </div>
+          </div>
+
+          {/* Card 3: Quarantine & High-Risk Decisions */}
+          <div className="operations-triage-card quarantine">
+            <div className="operations-triage-top">
+              <span className="operations-triage-icon">🛡️</span>
+              <span className="operations-triage-count-pill quarantine">
+                {quarantineCount > 0 ? `⚠️ ${quarantineCount} In Quarantine` : '0 Critical'}
+              </span>
+            </div>
+            <h6 className="operations-triage-heading">Quarantine &amp; Review</h6>
+            <p className="operations-triage-desc">
+              Corrupt audio files, duplicate recordings, orphan audio files, and short preview clips.
+            </p>
+            <div className="operations-triage-action-row">
+              <button
+                type="button"
+                className="operations-triage-btn quarantine"
+                disabled={quarantineCount === 0}
+                onClick={() => {
+                  const target = document.getElementById('repair-section-findings');
+                  target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+              >
+                🛡️ Inspect Quarantine ➔
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Live Bulk Fix Progress Bar if running */}
+        {bulkStatus?.running ? (
+          <div className="operations-bulk-progress-panel">
+            <div className="operations-bulk-progress-info">
+              <span className="operations-bulk-pulse-dot" />
+              <span className="operations-bulk-progress-text">
+                Applying automated safe fixes: {bulkStatus.done || 0} of {bulkStatus.total || safeCount} items processed
+              </span>
+              <button
+                type="button"
+                className="operations-bulk-stop-btn"
+                onClick={handleStopBulkFix}
+              >
+                Stop Fix
+              </button>
+            </div>
+            <div className="operations-bulk-progress-track">
+              <div
+                className="operations-bulk-progress-fill"
+                style={{
+                  width: `${Math.max(
+                    3,
+                    Math.min(
+                      100,
+                      ((bulkStatus.done || 0) / Math.max(1, bulkStatus.total || safeCount)) * 100,
+                    ),
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* ── Live Mission Control HUD (Telemetry Cockpit) ────────────────── */}
+      {activeRunningJob ? (
+        <div className="operations-mission-control-hud">
+          <div className="operations-hud-orb-box">
+            <span className="operations-hud-orb" />
+          </div>
+          <div className="operations-hud-meta">
+            <div className="operations-hud-header">
+              <span className="operations-hud-badge">Active Operation Telemetry</span>
+              <span className="operations-hud-job-name">
+                {activeRunningJob.job.display_name}
+              </span>
+            </div>
+            <div className="operations-hud-phase">
+              {activeRunningJob.prog?.phase || 'Auditing music library files and spectral attributes…'}
+            </div>
+            {activeRunningJob.prog?.progress !== undefined ? (
+              <div className="operations-hud-progress-track">
+                <div
+                  className="operations-hud-progress-fill"
+                  style={{ width: `${Math.max(2, Math.min(100, activeRunningJob.prog.progress))}%` }}
+                />
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="operations-hud-stop-btn"
+            onClick={() => void handleStopActiveJob(activeRunningJob.job.job_id)}
+          >
+            ⏹ Stop Operation
+          </button>
+        </div>
+      ) : null}
+
       {/* ── 1-Click Playbooks Bar ────────────────────────────────────────── */}
       <div className="operations-playbooks-section">
         <div className="operations-playbooks-header">

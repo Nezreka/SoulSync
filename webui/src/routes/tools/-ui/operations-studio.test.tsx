@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { RepairJob, RepairJobRun } from '../-tools.types';
+import type { FindingGroup, RepairJob } from '../-tools.types';
 
 import { Operations } from './operations';
 import {
@@ -71,10 +71,42 @@ const testJobs: RepairJob[] = [
   }),
 ];
 
+const mockFindingGroups: FindingGroup[] = [
+  {
+    finding_type: 'missing_lyrics',
+    label: 'Missing Lyrics',
+    verb: 'Apply Lyrics',
+    count: 42,
+    fixable: true,
+    destructive: false,
+    job_ids: ['lyrics_fetcher'],
+  },
+  {
+    finding_type: 'corrupt_audio',
+    label: 'Corrupt Audio',
+    verb: 'Re-download',
+    count: 3,
+    fixable: true,
+    destructive: true,
+    job_ids: ['audio_corruption_detector'],
+  },
+  {
+    finding_type: 'canonical_version',
+    label: 'Canonical Version',
+    verb: null,
+    count: 8,
+    fixable: false,
+    destructive: false,
+    job_ids: ['album_tag_consistency'],
+  },
+];
+
 beforeEach(() => {
   fetchMock.mockReset();
   toastSpy.mockReset();
-  routes({});
+  routes({
+    '/api/repair/findings/groups': { groups: mockFindingGroups },
+  });
   vi.stubGlobal('fetch', fetchMock);
   Object.assign(window, { showToast: toastSpy });
   try {
@@ -107,6 +139,93 @@ describe('OperationsStudio (Simple Mode)', () => {
     for (const pillar of STRATEGIC_PILLARS) {
       expect(screen.getByText(pillar.title)).not.toBeNull();
     }
+  });
+
+  it('renders the Smart Action Triage Center with its 3 authority buckets', async () => {
+    render(
+      <OperationsStudio
+        jobs={testJobs}
+        progress={{}}
+        runs={[]}
+        onChanged={vi.fn()}
+        onShowFindings={vi.fn()}
+        onSwitchToAdvanced={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Smart Action Triage')).not.toBeNull();
+    expect(screen.getByText('Zero-Risk Auto-Fixes')).not.toBeNull();
+    expect(screen.getByText('Curator Recommendations')).not.toBeNull();
+    expect(screen.getByText('Quarantine & Review')).not.toBeNull();
+
+    // Verify counts populated from mockFindingGroups
+    await waitFor(() => {
+      expect(screen.getByText('42 Ready')).not.toBeNull();
+      expect(screen.getByText('8 Suggestions')).not.toBeNull();
+      expect(screen.getByText('⚠️ 3 In Quarantine')).not.toBeNull();
+    });
+  });
+
+  it('triggers safe bulk fix when "Apply All Safe Fixes" is clicked', async () => {
+    routes({
+      '/api/repair/findings/groups': { groups: mockFindingGroups },
+      '/api/repair/findings/bulk-fix-start': { started: true, total: 42 },
+    });
+
+    render(
+      <OperationsStudio
+        jobs={testJobs}
+        progress={{}}
+        runs={[]}
+        onChanged={vi.fn()}
+        onShowFindings={vi.fn()}
+        onSwitchToAdvanced={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('⚡ Apply All 42 Safe Fixes')).not.toBeNull();
+    });
+
+    const safeBtn = screen.getByText('⚡ Apply All 42 Safe Fixes');
+    fireEvent.click(safeBtn);
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map((c) => String(c[0]));
+      expect(calls.some((url) => url.includes('bulk-fix-start'))).toBe(true);
+    });
+  });
+
+  it('renders Live Mission Control HUD when a job is actively running', async () => {
+    const runningJobs = [
+      mockJob({
+        job_id: 'audio_corruption_detector',
+        display_name: 'Audio Corruption Detector',
+        is_running: true,
+      }),
+    ];
+
+    render(
+      <OperationsStudio
+        jobs={runningJobs}
+        progress={{
+          audio_corruption_detector: {
+            status: 'running',
+            progress: 45,
+            phase: 'Verifying FLAC frame signatures…',
+          },
+        }}
+        runs={[]}
+        onChanged={vi.fn()}
+        onShowFindings={vi.fn()}
+        onSwitchToAdvanced={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Active Operation Telemetry')).not.toBeNull();
+    expect(screen.getByText('Audio Corruption Detector')).not.toBeNull();
+    expect(screen.getByText('Verifying FLAC frame signatures…')).not.toBeNull();
+    expect(screen.getByText('⏹ Stop Operation')).not.toBeNull();
   });
 
   it('renders all 1-Click Playbooks', () => {

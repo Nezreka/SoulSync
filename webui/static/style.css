@@ -60869,6 +60869,411 @@ tr.tag-diff-same {
     gap: 24px;
 }
 
+/* ── Autonomous Authority & Triage Center ────────────────────────────── */
+.operations-triage-section {
+    background: linear-gradient(180deg, rgba(17, 24, 39, 0.75) 0%, rgba(15, 23, 42, 0.65) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 22px;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.operations-triage-header {
+    margin-bottom: 18px;
+}
+
+.operations-triage-title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 5px;
+}
+
+.operations-triage-badge {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(56, 189, 248, 0.2) 100%);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    color: #34d399;
+}
+
+.operations-triage-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.operations-triage-sub {
+    margin: 0;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.operations-triage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.operations-triage-card {
+    display: flex;
+    flex-direction: column;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 18px;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.operations-triage-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    opacity: 0.8;
+}
+
+.operations-triage-card.safe {
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+    border-color: rgba(16, 185, 129, 0.25);
+}
+.operations-triage-card.safe::before {
+    background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.operations-triage-card.suggestions {
+    background: linear-gradient(180deg, rgba(139, 92, 246, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+    border-color: rgba(139, 92, 246, 0.25);
+}
+.operations-triage-card.suggestions::before {
+    background: linear-gradient(90deg, #8b5cf6, #c084fc);
+}
+
+.operations-triage-card.quarantine {
+    background: linear-gradient(180deg, rgba(239, 68, 68, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+    border-color: rgba(239, 68, 68, 0.25);
+}
+.operations-triage-card.quarantine::before {
+    background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
+.operations-triage-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.operations-triage-card.safe:hover {
+    border-color: rgba(16, 185, 129, 0.5);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35), 0 0 20px rgba(16, 185, 129, 0.15);
+}
+.operations-triage-card.quarantine:hover {
+    border-color: rgba(239, 68, 68, 0.5);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35), 0 0 20px rgba(239, 68, 68, 0.15);
+}
+
+.operations-triage-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.operations-triage-icon {
+    font-size: 22px;
+}
+
+.operations-triage-count-pill {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+}
+.operations-triage-count-pill.safe {
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    color: #34d399;
+}
+.operations-triage-count-pill.suggestions {
+    background: rgba(139, 92, 246, 0.15);
+    border: 1px solid rgba(139, 92, 246, 0.35);
+    color: #c084fc;
+}
+.operations-triage-count-pill.quarantine {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+}
+
+.operations-triage-heading {
+    margin: 0 0 6px 0;
+    font-size: 14.5px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.operations-triage-desc {
+    margin: 0 0 16px 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    line-height: 1.45;
+    flex: 1;
+}
+
+.operations-triage-action-row {
+    margin-top: auto;
+}
+
+.operations-triage-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 9px 16px;
+    border-radius: 9px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.operations-triage-btn.safe {
+    background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+    border: none;
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+}
+.operations-triage-btn.safe:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+    filter: brightness(1.08);
+}
+
+.operations-triage-btn.suggestions {
+    background: rgba(139, 92, 246, 0.15);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    color: #d8b4fe;
+}
+.operations-triage-btn.suggestions:hover:not(:disabled) {
+    background: rgba(139, 92, 246, 0.28);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.operations-triage-btn.quarantine {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+}
+.operations-triage-btn.quarantine:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.22);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.operations-triage-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Bulk Fix Progress Panel */
+.operations-bulk-progress-panel {
+    margin-top: 18px;
+    padding: 14px 18px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.operations-bulk-progress-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.operations-bulk-pulse-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #34d399;
+    box-shadow: 0 0 10px #34d399;
+    animation: radar-pulse 1.2s infinite ease-in-out;
+}
+
+.operations-bulk-progress-text {
+    flex: 1;
+    font-size: 12.5px;
+    color: #e2e8f0;
+    font-weight: 500;
+}
+
+.operations-bulk-stop-btn {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.operations-bulk-stop-btn:hover {
+    background: rgba(239, 68, 68, 0.35);
+    color: #fff;
+}
+
+.operations-bulk-progress-track {
+    height: 7px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.operations-bulk-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+    border-radius: 999px;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+/* ── Live Mission Control Telemetry HUD ───────────────────────────────── */
+.operations-mission-control-hud {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, rgba(30, 27, 75, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+    border: 1px solid rgba(99, 102, 241, 0.4);
+    border-radius: 14px;
+    box-shadow: 0 8px 32px rgba(99, 102, 241, 0.25);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    animation: hud-slide-down 0.25s ease-out;
+}
+
+@keyframes hud-slide-down {
+    from { transform: translateY(-8px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.operations-hud-orb-box {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    background: rgba(99, 102, 241, 0.2);
+    border: 1px solid rgba(99, 102, 241, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.operations-hud-orb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #818cf8;
+    box-shadow: 0 0 16px #818cf8;
+    animation: radar-pulse 1.4s infinite ease-in-out;
+}
+
+@keyframes radar-pulse {
+    0% { transform: scale(0.9); opacity: 0.7; }
+    50% { transform: scale(1.15); opacity: 1; }
+    100% { transform: scale(0.9); opacity: 0.7; }
+}
+
+.operations-hud-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.operations-hud-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 2px;
+}
+
+.operations-hud-badge {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(99, 102, 241, 0.3);
+    border: 1px solid rgba(99, 102, 241, 0.5);
+    color: #c7d2fe;
+}
+
+.operations-hud-job-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.operations-hud-phase {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.65);
+    margin-bottom: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.operations-hud-progress-track {
+    height: 5px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.operations-hud-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%);
+    border-radius: 999px;
+    transition: width 0.25s ease;
+    box-shadow: 0 0 10px rgba(168, 85, 247, 0.6);
+}
+
+.operations-hud-stop-btn {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    color: #fca5a5;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+.operations-hud-stop-btn:hover {
+    background: rgba(239, 68, 68, 0.35);
+    color: #fff;
+    border-color: rgba(239, 68, 68, 0.7);
+}
+
 /* Playbooks Section */
 .operations-playbooks-section {
     background: rgba(15, 19, 30, 0.6);
