@@ -61266,83 +61266,99 @@ tr.tag-diff-same {
     transform: none;
 }
 
-/* Bulk Fix Progress Panel */
+/* ── Bulk Fix Progress Banner ─────────────────────────────────────────── */
+.operations-triage-bulk-banner,
 .operations-bulk-progress-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
     margin-top: 18px;
-    padding: 14px 18px;
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(16, 185, 129, 0.3);
-    border-radius: 10px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    padding: 14px 20px;
+    background: linear-gradient(135deg, rgba(6, 78, 59, 0.4) 0%, rgba(15, 23, 42, 0.75) 100%);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 16px rgba(16, 185, 129, 0.15);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }
 
+.operations-triage-bulk-info,
 .operations-bulk-progress-info {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-}
-
-.operations-bulk-pulse-dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: #34d399;
-    box-shadow: 0 0 10px #34d399;
-    animation: radar-pulse 1.2s infinite ease-in-out;
-}
-
-.operations-bulk-progress-text {
+    gap: 12px;
     flex: 1;
-    font-size: 12.5px;
+    min-width: 0;
+}
+
+.operations-triage-bulk-pulse,
+.operations-bulk-pulse-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 12px #34d399, 0 0 4px #fff;
+    animation: radar-pulse-dot 1.4s infinite ease-in-out;
+    flex-shrink: 0;
+}
+
+.operations-triage-bulk-text,
+.operations-bulk-progress-text {
+    font-size: 13px;
     color: #e2e8f0;
     font-weight: 500;
 }
 
+.operations-triage-bulk-stop,
 .operations-bulk-stop-btn {
-    background: rgba(239, 68, 68, 0.2);
+    background: rgba(239, 68, 68, 0.18);
     border: 1px solid rgba(239, 68, 68, 0.4);
     color: #fca5a5;
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 600;
-    padding: 3px 10px;
-    border-radius: 6px;
+    padding: 6px 14px;
+    border-radius: 8px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
 }
+
+.operations-triage-bulk-stop:hover,
 .operations-bulk-stop-btn:hover {
-    background: rgba(239, 68, 68, 0.35);
+    background: rgba(239, 68, 68, 0.3);
+    border-color: rgba(239, 68, 68, 0.6);
     color: #fff;
-}
-
-.operations-bulk-progress-track {
-    height: 7px;
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 999px;
-    overflow: hidden;
-}
-
-.operations-bulk-progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
-    border-radius: 999px;
-    transition: width 0.3s ease;
-    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
 }
 
 /* ── Live Mission Control Telemetry HUD ───────────────────────────────── */
+.operations-live-hud,
 .operations-mission-control-hud {
     display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 16px 20px;
-    background: linear-gradient(135deg, rgba(30, 27, 75, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
-    border: 1px solid rgba(99, 102, 241, 0.4);
-    border-radius: 14px;
-    box-shadow: 0 8px 32px rgba(99, 102, 241, 0.25);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    animation: hud-slide-down 0.25s ease-out;
+    flex-direction: column;
+    gap: 14px;
+    padding: 20px 24px;
+    background: linear-gradient(135deg, rgba(30, 27, 75, 0.75) 0%, rgba(15, 23, 42, 0.9) 100%);
+    border: 1px solid rgba(129, 140, 248, 0.35);
+    border-radius: 16px;
+    box-shadow: 0 10px 36px rgba(0, 0, 0, 0.45), 0 0 28px rgba(99, 102, 241, 0.18);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    animation: hud-slide-down 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.operations-live-hud::before,
+.operations-mission-control-hud::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(168, 85, 247, 0.6) 30%, rgba(56, 189, 248, 0.6) 70%, transparent 100%);
 }
 
 @keyframes hud-slide-down {
@@ -61350,106 +61366,153 @@ tr.tag-diff-same {
     to { transform: translateY(0); opacity: 1; }
 }
 
+.operations-live-hud-head {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.operations-live-hud-radar,
 .operations-hud-orb-box {
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
-    background: rgba(99, 102, 241, 0.2);
-    border: 1px solid rgba(99, 102, 241, 0.45);
+    position: relative;
+    width: 44px;
+    height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
+    border-radius: 12px;
+    background: rgba(99, 102, 241, 0.18);
+    border: 1px solid rgba(129, 140, 248, 0.4);
     flex-shrink: 0;
+    box-shadow: 0 0 16px rgba(99, 102, 241, 0.25);
 }
 
+.operations-live-hud-ping {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 12px;
+    border: 2px solid #818cf8;
+    animation: radar-pulse 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+    pointer-events: none;
+}
+
+.operations-live-hud-dot,
 .operations-hud-orb {
     width: 14px;
     height: 14px;
     border-radius: 50%;
-    background: #818cf8;
-    box-shadow: 0 0 16px #818cf8;
-    animation: radar-pulse 1.4s infinite ease-in-out;
+    background: #6366f1;
+    box-shadow: 0 0 14px #818cf8, 0 0 4px #fff;
+    animation: radar-pulse-dot 1.5s infinite ease-in-out;
 }
 
 @keyframes radar-pulse {
-    0% { transform: scale(0.9); opacity: 0.7; }
+    0% { transform: scale(0.9); opacity: 0.8; }
     50% { transform: scale(1.15); opacity: 1; }
-    100% { transform: scale(0.9); opacity: 0.7; }
+    100% { transform: scale(0.9); opacity: 0.8; }
 }
 
+@keyframes radar-pulse-dot {
+    0%, 100% { transform: scale(0.9); opacity: 0.8; }
+    50% { transform: scale(1.15); opacity: 1; filter: brightness(1.2); }
+}
+
+.operations-live-hud-title-wrap,
 .operations-hud-meta {
     flex: 1;
     min-width: 0;
-}
-
-.operations-hud-header {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 2px;
+    flex-direction: column;
+    gap: 3px;
 }
 
+.operations-live-hud-badge,
 .operations-hud-badge {
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 1px 6px;
+    letter-spacing: 0.07em;
+    padding: 2px 7px;
     border-radius: 4px;
-    background: rgba(99, 102, 241, 0.3);
-    border: 1px solid rgba(99, 102, 241, 0.5);
+    background: rgba(99, 102, 241, 0.25);
+    border: 1px solid rgba(129, 140, 248, 0.5);
     color: #c7d2fe;
+    width: fit-content;
 }
 
+.operations-live-hud-name,
 .operations-hud-job-name {
-    font-size: 14px;
-    font-weight: 600;
+    margin: 0;
+    font-size: 16.5px;
+    font-weight: 700;
     color: #fff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    letter-spacing: -0.01em;
 }
 
+.operations-live-hud-phase,
 .operations-hud-phase {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.65);
-    margin-bottom: 6px;
+    margin: 0;
+    font-size: 12.5px;
+    color: #cbd5e1;
+    font-family: ui-monospace, SFMono-Regular, monospace;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    opacity: 0.85;
 }
 
+.operations-live-hud-actions {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.operations-live-hud-stop-btn,
+.operations-hud-stop-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    flex-shrink: 0;
+}
+
+.operations-live-hud-stop-btn:hover,
+.operations-hud-stop-btn:hover {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
+}
+
+.operations-live-hud-bar-track,
 .operations-hud-progress-track {
-    height: 5px;
-    background: rgba(255, 255, 255, 0.1);
+    height: 7px;
+    background: rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 999px;
     overflow: hidden;
+    position: relative;
+    margin-top: 4px;
 }
 
+.operations-live-hud-bar-fill,
 .operations-hud-progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%);
+    background: linear-gradient(90deg, #6366f1 0%, #a855f7 50%, #38bdf8 100%);
     border-radius: 999px;
-    transition: width 0.25s ease;
-    box-shadow: 0 0 10px rgba(168, 85, 247, 0.6);
-}
-
-.operations-hud-stop-btn {
-    background: rgba(239, 68, 68, 0.2);
-    border: 1px solid rgba(239, 68, 68, 0.45);
-    color: #fca5a5;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 8px 14px;
-    border-radius: 8px;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: all 0.2s ease;
-}
-.operations-hud-stop-btn:hover {
-    background: rgba(239, 68, 68, 0.35);
-    color: #fff;
-    border-color: rgba(239, 68, 68, 0.7);
+    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 0 12px rgba(129, 140, 248, 0.7);
 }
 
 /* Playbooks Section */
