@@ -319,6 +319,20 @@ def _delete_file_if_present(file_path, transfer_folder, config_manager=None, dow
     return False, 'file was already gone'
 
 
+def _file_removal_failed(removed: bool, note) -> bool:
+    """True when a best-effort file removal/quarantine actually failed on a file
+    that was there — the approved action didn't happen, so the finding must stay
+    actionable. 'already gone', unlocatable, and no-path are benign: nothing was
+    left behind on disk."""
+    if removed or not note:
+        return False
+    if note == 'file was already gone':
+        return False
+    if 'could not be located' in note:
+        return False
+    return True
+
+
 def _quarantine_file_if_present(file_path, transfer_folder, source,
                                 config_manager=None, download_folder=None):
     """Move a library file into the deleted-files quarantine instead of deleting it.
@@ -2790,6 +2804,14 @@ class RepairWorker:
                     config_manager=self._config_manager,
                     download_folder=download_folder)
 
+            # If the preview file is still on disk and the delete failed, the
+            # approved action didn't happen — report failure and keep the DB
+            # row so the finding stays actionable.
+            if _file_removal_failed(deleted_file, delete_note):
+                return {'success': False,
+                        'error': f'Could not delete the preview file ({delete_note}) — '
+                                 f'library entry kept so you can retry'}
+
             # Drop the DB row so the track shows as missing.
             if entity_id:
                 try:
@@ -2875,6 +2897,14 @@ class RepairWorker:
                     target_path, self.transfer_folder, 'corrupt_audio',
                     config_manager=self._config_manager,
                     download_folder=download_folder)
+
+            # If the corrupt file is still on disk and the quarantine move
+            # failed, the approved action didn't happen — report failure and
+            # keep the DB row so the finding stays actionable.
+            if _file_removal_failed(moved, move_note):
+                return {'success': False,
+                        'error': f'Could not move the corrupt file to the deleted folder '
+                                 f'({move_note}) — library entry kept so you can retry'}
 
             # Drop the DB row so the track shows as missing.
             if entity_id:
@@ -3072,13 +3102,6 @@ class RepairWorker:
         if correct_num is None:
             return {'success': False, 'error': 'No correct track number in finding details'}
 
-        # If we have an entity_id (track DB ID), update DB directly
-        if entity_id:
-            try:
-                self.db.update_track_fields(int(entity_id), {'track_number': int(correct_num)})
-            except Exception as e:
-                logger.debug("DB track number update failed for entity %s: %s", entity_id, e)
-
         # Fix the file tag (the primary fix — works even without entity_id)
         if not file_path:
             return {'success': False, 'error': 'No file path associated with this finding'}
@@ -3091,6 +3114,15 @@ class RepairWorker:
 
         if not os.path.isfile(resolved):
             return {'success': False, 'error': f'File not found: {os.path.basename(file_path)}'}
+
+        # The file exists, so the fix can actually run — update the DB track
+        # number now. (Writing it before the file check left the DB claiming a
+        # number the tags don't have whenever the file was missing.)
+        if entity_id:
+            try:
+                self.db.update_track_fields(int(entity_id), {'track_number': int(correct_num)})
+            except Exception as e:
+                logger.debug("DB track number update failed for entity %s: %s", entity_id, e)
 
         try:
             from core.repair_jobs.track_number_repair import (
@@ -3841,19 +3873,14 @@ class RepairWorker:
                 cursor.execute("SELECT id FROM tracks WHERE id = ?", (album_id,))
                 if not cursor.fetchone():
                     return {'success': False, 'error': 'Album version no longer exists in library — keeping single'}
-
-            # Remove single from DB
-            cursor.execute("DELETE FROM tracks WHERE id = ?", (single_id,))
-            conn.commit()
-            removed = cursor.rowcount
         finally:
             if conn:
                 conn.close()
 
-        if removed == 0:
-            return {'success': True, 'action': 'already_removed', 'message': 'Single track was already removed'}
-
-        # Delete single file from disk
+        # Delete the single file from disk BEFORE touching the DB: if the file
+        # delete fails, the library row (and the finding) stays intact so the
+        # user can retry. (The old order committed the DB delete first and
+        # swallowed file-delete errors as success, orphaning the file.)
         file_deleted = False
         if single_path:
             download_folder = None
@@ -3868,15 +3895,34 @@ class RepairWorker:
                     transfer_norm = os.path.normpath(self.transfer_folder)
                     parent = os.path.dirname(resolved)
                     for _ in range(3):
-                        if (parent and os.path.isdir(parent)
-                                and os.path.normpath(parent) != transfer_norm
-                                and not os.listdir(parent)):
-                            os.rmdir(parent)
-                            parent = os.path.dirname(parent)
-                        else:
+                        try:
+                            if (parent and os.path.isdir(parent)
+                                    and os.path.normpath(parent) != transfer_norm
+                                    and not os.listdir(parent)):
+                                os.rmdir(parent)
+                                parent = os.path.dirname(parent)
+                            else:
+                                break
+                        except OSError:
                             break
-            except OSError:
-                pass  # Best effort — DB entry already removed
+            except OSError as e:
+                return {'success': False,
+                        'error': f'Could not delete {os.path.basename(single_path)}: {e} — library entry kept'}
+
+        # Remove single from DB
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM tracks WHERE id = ?", (single_id,))
+            conn.commit()
+            removed = cursor.rowcount
+        finally:
+            if conn:
+                conn.close()
+
+        if removed == 0:
+            return {'success': True, 'action': 'already_removed', 'message': 'Single track was already removed'}
 
         album_name = album_info.get('album', 'unknown album')
         msg = f'Removed single, album version on "{album_name}" kept'
@@ -3893,6 +3939,38 @@ class RepairWorker:
 
         if not track_id:
             return {'success': False, 'error': 'No track ID to remove'}
+
+        # Delete the file from disk BEFORE touching the DB: if the file delete
+        # fails, the library rows (and the finding) stay intact so the user can
+        # retry. (The old order committed the DB deletes first and swallowed
+        # file-delete errors as success, orphaning the file.)
+        file_deleted = False
+        if track_path:
+            download_folder = None
+            if self._config_manager:
+                download_folder = self._config_manager.get('soulseek.download_path', '')
+            try:
+                resolved = _resolve_file_path(track_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
+                if resolved and os.path.exists(resolved):
+                    os.remove(resolved)
+                    file_deleted = True
+                    # Clean up empty parent directories
+                    transfer_norm = os.path.normpath(self.transfer_folder)
+                    parent = os.path.dirname(resolved)
+                    for _ in range(3):
+                        try:
+                            if (parent and os.path.isdir(parent)
+                                    and os.path.normpath(parent) != transfer_norm
+                                    and not os.listdir(parent)):
+                                os.rmdir(parent)
+                                parent = os.path.dirname(parent)
+                            else:
+                                break
+                        except OSError:
+                            break
+            except OSError as e:
+                return {'success': False,
+                        'error': f'Could not delete {os.path.basename(track_path)}: {e} — library entry kept'}
 
         # Remove from DB
         conn = None
@@ -3920,31 +3998,6 @@ class RepairWorker:
 
         if removed == 0:
             return {'success': True, 'action': 'already_removed', 'message': 'Track was already removed'}
-
-        # Delete file from disk
-        file_deleted = False
-        if track_path:
-            download_folder = None
-            if self._config_manager:
-                download_folder = self._config_manager.get('soulseek.download_path', '')
-            try:
-                resolved = _resolve_file_path(track_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    os.remove(resolved)
-                    file_deleted = True
-                    # Clean up empty parent directories
-                    transfer_norm = os.path.normpath(self.transfer_folder)
-                    parent = os.path.dirname(resolved)
-                    for _ in range(3):
-                        if (parent and os.path.isdir(parent)
-                                and os.path.normpath(parent) != transfer_norm
-                                and not os.listdir(parent)):
-                            os.rmdir(parent)
-                            parent = os.path.dirname(parent)
-                        else:
-                            break
-            except OSError:
-                pass  # Best effort — DB entry already removed
 
         msg = f'{type_label} track removed from library'
         if file_deleted:
@@ -5532,22 +5585,25 @@ class RepairWorker:
                     from mutagen import File as MutagenFile
                     test = MutagenFile(out_path)
                     if test is not None:
-                        os.remove(resolved)
-                        # Update DB path using original DB format
+                        # Update the DB FIRST: if the DB update fails, the
+                        # source file is untouched and the row still points at
+                        # it. Deleting the file first and swallowing the DB
+                        # error as success left the DB pointing at a gone file.
                         new_db_path = os.path.splitext(file_path)[0] + out_ext
+                        from core.quality.retention import quality_json, transforms_json
+                        output_quality = probe_audio_quality(out_path)
+                        retention_json = transforms_json([{
+                            'type': 'lossy_copy',
+                            'source_replaced': True,
+                            'codec': codec,
+                            'bitrate': bitrate,
+                            'output_quality': (
+                                output_quality.to_dict() if output_quality else None),
+                        }])
+                        conn = None
                         try:
                             conn = self.db._get_connection()
                             cursor = conn.cursor()
-                            from core.quality.retention import quality_json, transforms_json
-                            output_quality = probe_audio_quality(out_path)
-                            retention_json = transforms_json([{
-                                'type': 'lossy_copy',
-                                'source_replaced': True,
-                                'codec': codec,
-                                'bitrate': bitrate,
-                                'output_quality': (
-                                    output_quality.to_dict() if output_quality else None),
-                            }])
                             cursor.execute(
                                 """UPDATE tracks
                                       SET file_path=?, acquired_quality_json=?,
@@ -5557,9 +5613,20 @@ class RepairWorker:
                                  retention_json, entity_id)
                             )
                             conn.commit()
-                            conn.close()
                         except Exception as e:
-                            logger.debug("Failed to update DB path after lossy conversion: %s", e)
+                            return {'success': False,
+                                    'error': f'Converted to {quality_label} but the DB path '
+                                             f'update failed — original kept: {e}'}
+                        finally:
+                            if conn:
+                                conn.close()
+                        try:
+                            os.remove(resolved)
+                        except OSError as e:
+                            return {'success': False,
+                                    'error': f'Converted to {quality_label} (the library now '
+                                             f'points at it) but the original could not be '
+                                             f'deleted: {e}'}
                         return {'success': True, 'action': 'converted_and_deleted',
                                 'message': f'Converted to {quality_label} and deleted original'}
                 except Exception as e:

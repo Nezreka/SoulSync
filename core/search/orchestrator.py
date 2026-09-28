@@ -219,7 +219,10 @@ def _single_source_response(
         'metadata_source': requested_source,
         'primary_source': requested_source,
         'alternate_sources': [],
-        'source_available': True,
+        # M16: a total provider outage must not be cached as a successful
+        # empty search — the source is only available when at least one
+        # search kind succeeded.
+        'source_available': source_results.get('available', True),
     }
 
 
@@ -317,6 +320,10 @@ def _fan_out_response(query: str, db_artists: list[dict], deps: SearchDeps) -> d
         'metadata_source': primary_source,
         'primary_source': primary_source,
         'alternate_sources': alternate_sources,
+        # M16: only mark the source available when at least one search kind
+        # succeeded on it — a provider outage must not be cached as a
+        # successful empty search.
+        'source_available': primary_results.get('available', False),
     }
 
 

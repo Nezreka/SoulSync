@@ -74,6 +74,15 @@ _STREAMING_SOURCE_NAMES = frozenset((
     'torrent', 'usenet',
 ))
 
+# Sentinel returned by _get_live_transfers() when the poll itself failed
+# (slskd/engine exception). Deliberately NOT {}: an empty dict means "no
+# transfers exist", which the >90s stuck-task logic reads as "every
+# downloading task is stuck". A failed poll means "unknown" — the tick must
+# skip its retry/completion decisions instead of acting on empty data,
+# otherwise one slskd hiccup cancels healthy downloads and blacklists
+# their peers via used_sources.
+_LIVE_TRANSFERS_FETCH_FAILED = object()
+
 
 def _resolve_download_source(username):
     """Map a download's username to its logical source for per-source budgeting.
@@ -482,36 +491,60 @@ class WebUIDownloadMonitor:
         self.monitor_thread = None
         self.monitored_batches = set()
         self._lock = threading.Lock()
-        
+        # Generation counter: bumped on every stop/shutdown and every fresh
+        # start. The loop captures its generation at start and exits when it
+        # no longer matches, so a thread stuck mid-tick across a restart can
+        # never run another tick alongside the new thread.
+        self._generation = 0
+
     def start_monitoring(self, batch_id):
         """Start monitoring a download batch"""
         with self._lock:
             self.monitored_batches.add(batch_id)
             if not self.monitoring:
                 self.monitoring = True
-                self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+                self._generation += 1
+                generation = self._generation
+                self.monitor_thread = threading.Thread(
+                    target=self._monitor_loop, args=(generation,), daemon=True)
                 self.monitor_thread.start()
                 logger.info(f"Started download monitor for batch {batch_id}")
-    
+
+    def _join_old_thread(self, old_thread):
+        # Never join the current thread (stop called from the loop itself
+        # would deadlock); bounded wait so a wedged tick can't block the
+        # caller forever. The generation bump already guarantees the old
+        # thread runs no further ticks after this point.
+        if old_thread is not None and old_thread is not threading.current_thread():
+            old_thread.join(timeout=5)
+
     def stop_monitoring(self, batch_id):
         """Stop monitoring a specific batch"""
+        old_thread = None
         with self._lock:
             self.monitored_batches.discard(batch_id)
             if not self.monitored_batches:
                 self.monitoring = False
+                self._generation += 1
+                old_thread, self.monitor_thread = self.monitor_thread, None
                 logger.debug("Stopped download monitor (no active batches)")
+        self._join_old_thread(old_thread)
 
     def shutdown(self):
         """Stop the monitor loop and clear active batch tracking."""
+        old_thread = None
         with self._lock:
             self.monitoring = False
             self.monitored_batches.clear()
-            self.monitor_thread = None
+            self._generation += 1
+            old_thread, self.monitor_thread = self.monitor_thread, None
+        self._join_old_thread(old_thread)
         logger.info("Download monitor shutdown requested")
-    
-    def _monitor_loop(self):
+
+    def _monitor_loop(self, generation):
         """Main monitoring loop - checks downloads every 1 second for responsive web UX"""
-        while self.monitoring and self.monitored_batches:
+        while (self.monitoring and self.monitored_batches
+               and generation == self._generation):
             try:
                 if globals().get('IS_SHUTTING_DOWN', False):
                     self.monitoring = False
@@ -534,6 +567,12 @@ class WebUIDownloadMonitor:
 
         # Get live transfer data from slskd
         live_transfers_lookup = self._get_live_transfers()
+        if live_transfers_lookup is _LIVE_TRANSFERS_FETCH_FAILED:
+            # The poll itself failed — the transfer list is UNKNOWN, not
+            # empty. Running the stuck-task pass against it would cancel
+            # healthy downloads and blacklist their peers. Skip this tick.
+            logger.debug("Monitor: live-transfer poll failed, skipping this tick's retry/completion pass")
+            return
 
         # Track tasks with exhausted retries to handle after releasing lock
         exhausted_tasks = []  # List of (batch_id, task_id) tuples
@@ -694,7 +733,7 @@ class WebUIDownloadMonitor:
         try:
             # Check if we should stop due to shutdown
             if not self.monitoring:
-                return {}
+                return _LIVE_TRANSFERS_FETCH_FAILED
 
             live_transfers = {}
 
@@ -762,10 +801,10 @@ class WebUIDownloadMonitor:
                 "Event loop is closed" in str(e)):
                 logger.info("Monitor detected shutdown, stopping immediately")
                 self.monitoring = False
-                return {}
+                return _LIVE_TRANSFERS_FETCH_FAILED
             else:
                 logger.error(f"Monitor: Could not fetch live transfers: {e}")
-            return {}
+            return _LIVE_TRANSFERS_FETCH_FAILED
     
     def _should_retry_task(self, task_id, task, live_transfers_lookup, current_time, deferred_ops):
         """

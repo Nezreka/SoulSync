@@ -1,9 +1,11 @@
 """TTL'd in-memory cache for enhanced-search responses.
 
 The cache key blends the normalized query with the active media server,
-configured fallback metadata source, hydrabase-active flag, and the
-explicit single-source request (if any). This prevents responses from
-colliding when a user changes settings or switches single-source mode.
+configured fallback metadata source, hydrabase-active flag, the
+explicit single-source request (if any), and the active profile/library
+scope. This prevents responses from colliding when a user changes settings,
+switches single-source mode, or when a second profile issues the same query
+(the cached payload's ``db_artists`` are profile-scoped).
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ import threading
 import time
 from typing import Any, Callable, Optional, Tuple
 
-CacheKey = Tuple[str, str, str, bool, str]
+CacheKey = Tuple[str, str, str, bool, str, Any]
 
 CACHE_TTL_SECONDS = 600
 CACHE_MAX_ENTRIES = 100
@@ -67,13 +69,15 @@ def get_cache_key(
     active_server_provider: Callable[[], str],
     fallback_source_provider: Callable[[], str],
     hydrabase_active_provider: Callable[[], bool],
+    profile_id_provider: Optional[Callable[[], Any]] = None,
 ) -> CacheKey:
     """Build a cache key for an enhanced-search query.
 
     Each provider arg is a zero-arg callable so the cache key reflects the
     LIVE config state at lookup time, not the state at app startup. Each
     provider is wrapped in try/except: failures resolve to a sentinel value
-    so a misconfigured client never breaks search.
+    so a misconfigured client never breaks search. The profile id keeps
+    profile-scoped payloads (``db_artists``) from leaking across profiles.
     """
     normalized_query = (query or '').strip().lower()
 
@@ -92,8 +96,13 @@ def get_cache_key(
     except Exception:
         hydrabase_active = False
 
+    try:
+        profile_id = profile_id_provider() if profile_id_provider else 'unknown'
+    except Exception:
+        profile_id = 'unknown'
+
     source_tag = (requested_source or '').strip().lower() or 'auto'
-    return (normalized_query, active_server, fallback_source, hydrabase_active, source_tag)
+    return (normalized_query, active_server, fallback_source, hydrabase_active, source_tag, profile_id)
 
 
 def get_cached_response(key: CacheKey) -> Optional[dict]:
@@ -102,6 +111,20 @@ def get_cached_response(key: CacheKey) -> Optional[dict]:
 
 def set_cached_response(key: CacheKey, data: Any) -> None:
     _cache.set(key, data)
+
+
+def should_cache_enhanced_search_response(response_data: Any) -> bool:
+    """Whether an enhanced-search response is worth caching.
+
+    M16: a response whose metadata source was unavailable (a provider
+    outage that produced an empty payload) must NOT be cached — caching it
+    would poison the next hour's identical query with a false empty result.
+    Responses without the flag (short-query / DB-only responses) stay
+    cacheable as before.
+    """
+    if isinstance(response_data, dict) and response_data.get('source_available') is False:
+        return False
+    return True
 
 
 def clear_cache() -> None:

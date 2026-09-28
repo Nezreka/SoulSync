@@ -120,17 +120,19 @@ def resolve_track_number(
     """Walk the resolution chain and return the first valid positive
     int found, or None when every source is missing / unusable.
 
-    Order: album_info -> track_info -> nested spotify_data -> filename ->
+    Order: album_info -> track_info -> nested spotify_data ->
     ``embedded_track_number`` (the source-written file tag, when the caller
-    supplies it). Caller is responsible for the final default-1 floor —
-    leaving that out of this function so tests can pin "everything missing
-    returns None" separate from the floor behaviour.
+    supplies it) -> filename. Caller is responsible for the final default-1
+    floor — leaving that out of this function so tests can pin "everything
+    missing returns None" separate from the floor behaviour.
 
     ``embedded_track_number`` is passed in (not read here) so this stays a
     pure function — the file I/O lives in :func:`read_embedded_track_number`.
-    It is consulted **last**, only when every other source came up empty, so
-    it can never override a value the pre-fix resolver already produced — it
-    only fills the gap that would otherwise hit the default-1 floor.
+    It is consulted after provider metadata but BEFORE the filename guess:
+    the tag was written by the source at rip/download time, while the
+    filename guess only pattern-matches "NN - Title" and can misfire on
+    badly named files. This matches staging, which also lets the embedded
+    tag override the filename.
     """
     album_info = album_info if isinstance(album_info, dict) else {}
     track_info = track_info if isinstance(track_info, dict) else {}
@@ -143,6 +145,15 @@ def resolve_track_number(
     )
     if resolved is not None:
         return resolved
+
+    # M6: the source-written embedded tag comes before the filename guess.
+    # The tag was written by the source at rip/download time; the filename
+    # guess only pattern-matches "NN - Title" and can misfire on badly
+    # named files (e.g. "Track 01.mp3" whose tag says 5). Staging lets the
+    # embedded tag override the filename too, so this keeps both in sync.
+    embedded = _coerce_positive(embedded_track_number)
+    if embedded is not None:
+        return embedded
 
     # Filename fallback — use the EXPLICIT extractor variant which
     # returns 0 when no numeric prefix is recognised (vs. the default
@@ -160,13 +171,7 @@ def resolve_track_number(
         if ff is not None:
             return ff
 
-    # Embedded source-written file tag is consulted LAST — only when every
-    # other source (metadata + the ripped-album "NN - Title" filename) came
-    # up empty. This is deliberate: it can ONLY fill the gap that would
-    # otherwise hit the caller's default-1 floor, so it never overrides a
-    # value the pre-fix resolver would have used. A correctly-named file
-    # with a stale/wrong embedded tag is therefore never regressed.
-    return _coerce_positive(embedded_track_number)
+    return None
 
 
 def track_number_from_directory_order(file_path: str) -> Optional[int]:

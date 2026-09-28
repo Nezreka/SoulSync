@@ -671,6 +671,37 @@ def cancel_popularity_backfill():
     return jsonify({"success": True, "state": pb.get_state()})
 
 
+def _popularity_backfill_tick():
+    """Run one autostart popularity-backfill tick across EVERY profile.
+
+    S7: the old tick hardcoded profile 1 — every other profile's
+    similar-artist popularity gaps stayed empty forever. Extracted from
+    _autostart_popularity_backfill so tests can drive a single tick
+    without the sleeps.
+    """
+    from core.discovery import popularity_backfill as pb
+    database = get_database()
+    for profile in database.get_all_profiles() or []:
+        profile_id = profile.get('id') if isinstance(profile, dict) else getattr(profile, 'id', None)
+        if profile_id is None:
+            continue
+        if pb.is_running():
+            return
+        missing = database.count_similar_artists_missing_popularity(profile_id)
+        if missing <= 0:
+            continue
+        spotify_free, lastfm, deezer = _resolve_popularity_sources()
+        if not any([spotify_free, lastfm, deezer]):
+            logger.debug("Popularity backfill: %d missing for profile %s but no source configured",
+                         missing, profile_id)
+            continue
+        logger.info("Popularity backfill: filling %d artist(s) for profile %s in the background",
+                    missing, profile_id)
+        # run synchronously — the caller thread IS the background worker
+        pb.run_backfill(database, spotify_free=spotify_free, lastfm=lastfm,
+                        deezer=deezer, profile_id=profile_id)
+
+
 def _autostart_popularity_backfill():
     """Self-maintaining popularity fill — no button, no restart, no cost to scans.
 
@@ -682,19 +713,7 @@ def _autostart_popularity_backfill():
     _t.sleep(90)  # let the server finish its own startup work first
     while True:
         try:
-            from core.discovery import popularity_backfill as pb
-            if not pb.is_running():
-                database = get_database()
-                missing = database.count_similar_artists_missing_popularity(1)
-                if missing > 0:
-                    spotify_free, lastfm, deezer = _resolve_popularity_sources()
-                    if any([spotify_free, lastfm, deezer]):
-                        logger.info("Popularity backfill: filling %d artist(s) in the background", missing)
-                        # run synchronously — this thread IS the background worker
-                        pb.run_backfill(database, spotify_free=spotify_free, lastfm=lastfm,
-                                        deezer=deezer, profile_id=1)
-                    else:
-                        logger.debug("Popularity backfill: %d missing but no source configured", missing)
+            _popularity_backfill_tick()
         except Exception as e:
             logger.debug(f"popularity backfill tick skipped: {e}")
         _t.sleep(3600)  # re-check hourly; new artists fill within the hour
@@ -1801,8 +1820,11 @@ def get_seasonal_playlist(season_key):
         if not track_ids:
             return jsonify({"success": True, "tracks": []})
 
-        # Use source-appropriate ID column for lookups
-        track_id_col = 'spotify_track_id' if active_source == 'spotify' else 'itunes_track_id'
+        # Use source-appropriate ID column for lookups (deezer pool rows
+        # carry deezer_track_id — the old spotify/itunes binary choice
+        # missed them entirely)
+        from core.seasonal_vibes import seasonal_track_id_column
+        track_id_col = seasonal_track_id_column(active_source)
 
         # Fetch track details from seasonal tracks or discovery pool (filtered by source)
         tracks = []

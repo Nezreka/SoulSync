@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 import time
 from types import SimpleNamespace
@@ -84,6 +85,7 @@ from core.imports.paths import (
     build_simple_download_destination,
     docker_resolve_path,
     import_profile_id,
+    transfer_root_for_context,
 )
 from core.imports.album_naming import resolve_album_group
 from core.metadata.lyrics import generate_lrc_file
@@ -635,6 +637,86 @@ def _apply_profile_output_transforms(final_path: str, context: dict,
     return lossy_path
 
 
+def _update_moved_track_file_path(old_path: str, new_path: str) -> None:
+    """Point the SoulSync library row at a track file's new location after
+    an M5 album-folder merge. Best-effort: a stale file_path is worse than
+    a missed update, but a failed update must never fail the import."""
+    try:
+        if config_manager.get_active_media_server() != "soulsync":
+            return
+        db = get_database()
+        with db._get_connection() as conn:
+            conn.execute(
+                "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE file_path = ?",
+                (new_path, old_path),
+            )
+            conn.commit()
+    except Exception as e:
+        logger.debug("[M5] Could not update moved track path %s -> %s: %s", old_path, new_path, e)
+
+
+def _merge_upgraded_album_folder(context, artist_context, album_info, old_album_name,
+                                 file_ext, new_final_path) -> None:
+    """M5: the album group just upgraded standard -> deluxe. Tracks filed
+    earlier under the standard folder are moved into the deluxe folder so
+    the album is not split across two folders by processing order.
+
+    The old folder is located with a dry-run of the real path builder, so
+    custom templates stay consistent. Never raises — a failed merge leaves
+    the split in place (the pre-existing behavior), it must not fail the
+    deluxe track's own import.
+    """
+    try:
+        old_album_info = dict(album_info) if isinstance(album_info, dict) else {}
+        old_album_info["album_name"] = old_album_name
+        old_final_path, old_is_replace = build_final_path_for_track(
+            context, artist_context, old_album_info, file_ext, create_dirs=False
+        )
+        if old_is_replace:
+            return
+        old_folder = os.path.dirname(old_final_path or "")
+        new_folder = os.path.dirname(new_final_path or "")
+        if not old_folder or not new_folder or old_folder == new_folder:
+            return
+        # Safety: only touch folders under the transfer/library root.
+        transfer_dir = os.path.normpath(transfer_root_for_context(context))
+        if os.path.commonpath([os.path.normpath(old_folder), transfer_dir]) != transfer_dir:
+            logger.warning("[M5] Upgrade merge refused: %s is outside the library root", old_folder)
+            return
+        if not os.path.isdir(old_folder):
+            return
+        os.makedirs(new_folder, exist_ok=True)
+        try:
+            entries = os.listdir(old_folder)
+        except OSError:
+            return
+        for entry in entries:
+            src = os.path.join(old_folder, entry)
+            if not os.path.isfile(src):
+                continue
+            dst = os.path.join(new_folder, entry)
+            if os.path.exists(dst):
+                logger.warning(
+                    "[M5] Upgrade merge: %s already exists in %s — leaving %s in place",
+                    entry, new_folder, src,
+                )
+                continue
+            try:
+                shutil.move(src, dst)
+            except OSError as e:
+                logger.error("[M5] Upgrade merge: could not move %s -> %s: %s", src, dst, e)
+                continue
+            _update_moved_track_file_path(src, dst)
+        try:
+            os.rmdir(old_folder)
+        except OSError:
+            pass  # not empty (name conflicts) — leave the remainder in place
+        logger.info("[M5] Merged upgraded album folder %s -> %s", old_folder, new_folder)
+    except Exception as e:
+        logger.error("[M5] Album folder merge failed (non-fatal): %s", e)
+
+
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
     on_download_completed = getattr(runtime, "on_download_completed", None)
     automation_engine = getattr(runtime, "automation_engine", None)
@@ -1115,6 +1197,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         if not artist_context:
             logger.error("Post-processing failed: Missing artist context.")
+            # H4: leave an outcome flag — without it the verification
+            # wrapper falls through to "cannot verify, assuming success"
+            # and marks the task Completed for a file that went nowhere.
+            context['_context_failure_msg'] = 'Missing artist context'
             return
 
         _junk_artist_names = {'', 'unknown', 'unknown artist', 'various artists', 'none', 'null'}
@@ -1296,7 +1382,30 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # overwrite of the batch (ordinary wishlist items stay protected).
         is_quality_upgrade = _enhance_source_info.get('job') == 'quality_upgrade'
 
-        final_path, _ = build_final_path_for_track(context, artist_context, album_info, file_ext)
+        # M5: re-resolve the album group just before filing — a concurrent
+        # track may have upgraded standard -> deluxe after this track
+        # resolved it above. The group only ever upgrades, never
+        # downgrades, so this can only move the track into the newer folder.
+        _group_upgraded_from = None
+        if album_info and album_info.get('is_album') and not is_album_download:
+            _regrouped = resolve_album_group(artist_context, album_info, original_album)
+            if _regrouped and _regrouped != album_info.get('album_name'):
+                logger.info(
+                    "Album grouping re-resolved before filing: %r -> %r",
+                    album_info.get('album_name'), _regrouped,
+                )
+                album_info['album_name'] = _regrouped
+            _group_upgraded_from = album_info.pop('_album_group_upgraded_from', None)
+
+        final_path, _final_is_replace = build_final_path_for_track(context, artist_context, album_info, file_ext)
+        if _group_upgraded_from and not _final_is_replace:
+            # M5: this track upgraded the group — relocate tracks already
+            # filed under the standard folder so the album isn't split
+            # across two folders by processing order.
+            _merge_upgraded_album_folder(
+                context, artist_context, album_info,
+                _group_upgraded_from, file_ext, final_path,
+            )
         # #999 atomic album publish (opt-in): redirect to a private staging mirror
         # for fresh whole-album batches; returns final_path unchanged otherwise.
         # Upgrades publish at the live destination before retiring an old copy;
@@ -1900,8 +2009,50 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             return
 
         expected_final_path = context.get('_final_processed_path')
+        # H4: an explicit inner-pipeline failure ALWAYS wins — even when
+        # _final_processed_path points at an existing file. The path is
+        # assigned before the quality-upgrade rejection, so a rejected
+        # import can carry both; honoring the destination would mark a
+        # failed import Completed.
+        failure_msg = context.get('_context_failure_msg')
+        if failure_msg:
+            logger.error(f"Task {task_id} failed in post-processing: {failure_msg}")
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = failure_msg
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+            _notify_download_completed(batch_id, task_id, success=False)
+            return
         if not expected_final_path:
-            logger.info(f"No _final_processed_path in context for task {task_id} — cannot verify, assuming success")
+            # H4: with no destination and no failure, the inner pipeline
+            # ended in one of two ways — an explicit no-destination success
+            # (e.g. redundant source removal where the destination already
+            # exists) or an unrecognized outcome. Only the former may
+            # complete; the latter must fail rather than "assume success"
+            # (that marked missing/quarantined files Completed).
+            if not context.get('_pipeline_import_succeeded'):
+                failure_msg = (
+                    'Post-processing finished with no destination file and '
+                    'no recorded outcome'
+                )
+                logger.error(f"Task {task_id} failed in post-processing: {failure_msg}")
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = failure_msg
+                with matched_context_lock:
+                    if context_key in matched_downloads_context:
+                        del matched_downloads_context[context_key]
+                _notify_download_completed(batch_id, task_id, success=False)
+                return
+            logger.info(
+                f"No _final_processed_path for task {task_id} — pipeline "
+                f"reported success without a destination (e.g. redundant "
+                f"source already at destination); marking completed"
+            )
             with tasks_lock:
                 if task_id in download_tasks:
                     _mark_task_completed(task_id, context.get('track_info'))

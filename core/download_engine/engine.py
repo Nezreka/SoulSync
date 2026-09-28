@@ -291,13 +291,24 @@ class DownloadEngine:
         endpoint earlier in the same loop).
         """
         all_downloads = []
-        for source_name, plugin in self._plugins.items():
-            if plugin is None or source_name in exclude:
-                continue
+
+        async def _fetch(source_name, plugin):
             try:
-                all_downloads.extend(await plugin.get_all_downloads())
+                return source_name, await plugin.get_all_downloads()
             except Exception as exc:
                 logger.debug("%s get_all_downloads failed: %s", source_name, exc)
+                return source_name, []
+
+        # Fan out across plugins concurrently: this runs on the monitor's 1s
+        # tick, so serial per-plugin awaits delayed every decision by the sum
+        # of plugin latencies. gather() preserves registration order, so the
+        # flattened result is deterministic; each plugin is still isolated by
+        # its own try/except (a failing plugin contributes no rows).
+        sources = [(name, plugin) for name, plugin in self._plugins.items()
+                   if plugin is not None and name not in exclude]
+        for _, rows in await asyncio.gather(
+                *(_fetch(name, plugin) for name, plugin in sources)):
+            all_downloads.extend(rows)
         return all_downloads
 
     async def get_download_status(self, download_id: str):
