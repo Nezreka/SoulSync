@@ -133,6 +133,10 @@
     /* the base sheet gives cards margin: 4px 0 — grid/flex gaps own ALL
        spacing in the redesign, so zero it (audit leftover) */
     margin: 0;
+    /* grid blowout guard: without this a wide child (flow chips row) sets the
+       card's min-content size and the card overflows its track on narrow
+       screens, clipping the run-count badge at the card edge */
+    min-width: 0;
     display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;
     padding: 12px 14px 11px 17px;
     background: rgba(255,255,255,0.03);
@@ -387,6 +391,9 @@
 /* head — dot, name, and the run count as a link to the history */
 .automation-card.automation-tile .auto-tile-head {
     display: flex; align-items: center; gap: 9px; min-width: 0;
+    /* own row in the wrapping card: keeps the run-count badge inside the
+       card on narrow screens instead of clipping at the card edge */
+    flex: 1 1 100%;
 }
 .automation-card.automation-tile .automation-status { margin-top: 0; }
 .automation-card.automation-tile .automation-name {
