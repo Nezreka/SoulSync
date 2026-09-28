@@ -531,6 +531,9 @@ def album_name_carries(album_name: str, disambiguation: str) -> bool:
 def with_disambiguation(template: str, disambiguation: str, album_name: str = "") -> str:
     """Give the album folder the release's disambiguation when the template doesn't.
 
+    Callers gate this behind ``file_organization.auto_disambiguation`` (#1352):
+    it only runs when the user left the automatic suffix on.
+
     two releases can share a title, artist and release group and differ only by
     musicbrainz's disambiguation ("baby punk version"). without it in the folder
     they land in one directory and their same-named tracks collide (#1299). so
@@ -553,6 +556,21 @@ def with_disambiguation(template: str, disambiguation: str, album_name: str = ""
         return template
     end = matches[-1].end()
     return folder[:end] + " ($disambiguation)" + folder[end:] + sep + filename
+
+
+def _auto_disambiguation_enabled() -> bool:
+    """Should the album folder get the release's disambiguation unasked?
+
+    #1352: ``with_disambiguation`` rewrites the user's template to keep
+    same-named releases in their own folders (#1299). That rewrite is only
+    wanted when the user opts in — otherwise the template is respected
+    exactly and $disambiguation renders only where explicitly placed.
+    Default True: existing installs keep the #1299 behavior.
+    """
+    try:
+        return bool(_get_config_manager().get("file_organization.auto_disambiguation", True))
+    except Exception:
+        return True
 
 
 def apply_path_template(template: str, context: dict) -> str:
@@ -617,7 +635,9 @@ def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
 
 def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, str]:
     """Build file path using a user-provided template string directly."""
-    template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
+    # #1352: the auto-suffix rewrites the template; only do it when enabled.
+    if _auto_disambiguation_enabled():
+        template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
     _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
@@ -695,7 +715,9 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
         }
         template = default_templates.get(template_type, "$artist/$album/$track - $title")
 
-    template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
+    # #1352: the auto-suffix rewrites the template; only do it when enabled.
+    if _auto_disambiguation_enabled():
+        template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
     _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 

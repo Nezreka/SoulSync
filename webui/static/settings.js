@@ -3281,6 +3281,9 @@ async function loadSettingsData() {
         // that has never saved this key must show it ON or the checkbox lies
         // about what the importer is doing.
         document.getElementById('detect-multi-artist-compilations').checked = settings.file_organization?.detect_multi_artist_compilations !== false;
+        // !== false, not === true: same default-ON convention — the importer
+        // auto-adds the disambiguation unless the key was explicitly saved off.
+        document.getElementById('auto-disambiguation').checked = settings.file_organization?.auto_disambiguation !== false;
         document.getElementById('artist-separator').value = settings.metadata_enhancement?.tags?.artist_separator || ', ';
         document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
         document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
@@ -6246,6 +6249,7 @@ async function saveSettings(quiet = false) {
         },
         file_organization: {
             enabled: document.getElementById('file-organization-enabled').checked,
+            auto_disambiguation: document.getElementById('auto-disambiguation').checked,
             disc_label: document.getElementById('disc-label').value,
             collab_artist_mode: document.getElementById('collab-artist-mode').value,
             artistletter_symbol_fallback: document.getElementById('artistletter-symbol-fallback').checked,
