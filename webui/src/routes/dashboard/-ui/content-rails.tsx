@@ -163,11 +163,31 @@ export function ContentBand() {
     tab === 'recent' && !hasRecent ? 'fresh' : tab === 'fresh' && !hasFresh ? 'recent' : tab;
   const fromDiscover = hasFresh && releases[0].fromDiscover;
   const now = Date.now();
+  // The section header names the active feed with its count; the switcher
+  // is a segmented control. Same tabs, same roles, composed instead of
+  // floating beside a small subtitle.
+  const feedTitle = active === 'recent' ? 'Recently Added' : 'Fresh Releases';
+  const feedCount = active === 'recent' ? albums.length : releases.length;
+  const feedCountLabel =
+    active === 'recent' ? `${feedCount} new` : `${feedCount} release${feedCount === 1 ? '' : 's'}`;
 
   return (
     <article className="dash-card dash-card--rail">
       <div className="dash-rail-head">
-        <div className="dash-band-tabs" role="tablist">
+        <div className="dash-rail-titleblock">
+          <h2 className="dash-rail-title">
+            {feedTitle}
+            <span className="dash-rail-count">{feedCountLabel}</span>
+          </h2>
+          <span className="dash-rail-subtitle">
+            {active === 'recent'
+              ? 'the latest albums to land in your library'
+              : fromDiscover
+                ? 'new music picked for you — follow artists to tune this'
+                : 'new music from artists you watch'}
+          </span>
+        </div>
+        <div className="dash-band-tabs" role="tablist" aria-label="Choose feed">
           <button
             type="button"
             role="tab"
@@ -189,13 +209,6 @@ export function ContentBand() {
             Fresh Releases
           </button>
         </div>
-        <span className="dash-rail-subtitle">
-          {active === 'recent'
-            ? 'the latest albums to land in your library'
-            : fromDiscover
-              ? 'new music picked for you — follow artists to tune this'
-              : 'new music from artists you watch'}
-        </span>
       </div>
 
       {active === 'recent' ? (

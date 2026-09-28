@@ -1,0 +1,571 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Dashboard premier redesign (Sept 2026) — a pure visual reskin of the
+   music dashboard. Loaded after style.css so it wins by cascade.
+
+   What it changes:
+   - Hero left: an editorial header — date eyebrow, restrained two-tone
+     greeting (the shimmer gradient read as gimmicky), stats as a divided
+     stat band, and the library status recomposed as one contained bar
+     instead of loose elements.
+   - Rails: a composed section header — real title + count, lede subtitle,
+     and the feed switcher as a segmented control instead of bare tabs.
+   - Right column: wider (340 → 376px) with genuinely breathing cards —
+     deeper padding, taller rows, calmer sync health block.
+   - Listen band + footer: light polish, structure untouched.
+
+   What it does NOT change: every JS-referenced hook stays put —
+   worker-orbs.js anchors (.orb-stage, orb containers/buttons/tooltips),
+   the tour's live ids, the artefact-pinned orb strip and library-card
+   markup (restyled, never restructured), and all data-testid hooks.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. HERO ─────────────────────────────────────────────────────────── */
+
+#dashboard-page .dash-hero-main {
+    gap: 20px;
+}
+
+/* Date eyebrow — the quiet editorial kicker premier headers open with. */
+#dashboard-page .dash-hero-eyebrow {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(244, 245, 247, 0.42);
+}
+
+/* The greeting, restrained: solid type, tight tracking, two tones —
+   the moment in muted lead, the name in full white. The old shimmer
+   gradient is gone; it read as decoration, not confidence. */
+#dashboard-page .dash-hero .hello-greeting {
+    font-size: clamp(28px, 3vw, 36px);
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    line-height: 1.12;
+}
+#dashboard-page .dash-hero .hello-greeting > span {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: #f4f5f7;
+    animation: none;
+    padding-bottom: 0.1em;
+    margin-bottom: -0.1em;
+}
+#dashboard-page .hello-greet-lead {
+    font-weight: 500;
+    color: rgba(244, 245, 247, 0.58);
+}
+#dashboard-page .hello-greet-name {
+    color: #ffffff;
+}
+
+/* Stats as a divided band — hairline rules between figures, tabular
+   numerals, labels with real letterspacing. The premier analytics look. */
+#dashboard-page .dash-hero-numbers {
+    gap: 0;
+    margin-top: 2px;
+}
+#dashboard-page .dash-hero-number {
+    position: relative;
+    padding: 2px 30px;
+    gap: 4px;
+}
+#dashboard-page .dash-hero-number:first-child {
+    padding-left: 0;
+}
+#dashboard-page .dash-hero-number:last-child {
+    padding-right: 0;
+}
+#dashboard-page .dash-hero-number + .dash-hero-number::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 4px;
+    bottom: 4px;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.10);
+}
+#dashboard-page .dash-hero-number-value {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+}
+#dashboard-page .dash-hero-number-label {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+}
+
+/* The library status, recomposed as ONE contained bar: status on the left,
+   actions on the right — instead of a pill, a menu dot and a run-on
+   sentence sharing a line. The pinned library-card markup is only
+   reordered (flex order) and restyled, never restructured. */
+#dashboard-page .dash-hero-library .library-status-header {
+    align-items: center;
+    gap: 12px;
+    padding: 10px 10px 10px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    max-width: 640px;
+}
+#dashboard-page .dash-hero-library .library-status-info {
+    order: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    align-items: center;
+    gap: 10px;
+}
+#dashboard-page .dash-hero-library .library-status-title {
+    font-size: 13.5px;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+#dashboard-page .dash-hero-library .library-status-subtitle {
+    font-size: 12.5px;
+    color: rgba(244, 245, 247, 0.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#dashboard-page .dash-hero-library .library-status-actions {
+    order: 2;
+    flex: none;
+}
+#dashboard-page .dash-hero-library .library-status-btn {
+    min-height: 38px;
+    padding: 0 20px;
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    border-color: rgba(var(--accent-rgb), 0.38);
+    background: rgba(var(--accent-rgb), 0.14);
+    transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+#dashboard-page .dash-hero-library .library-status-btn:hover {
+    background: rgba(var(--accent-rgb), 0.24);
+    border-color: rgba(var(--accent-rgb), 0.6);
+}
+#dashboard-page .dash-hero-library .library-status-btn:active {
+    transform: scale(0.98);
+}
+#dashboard-page .dash-hero-library .library-status-btn.scanning {
+    border-color: rgba(240, 179, 90, 0.5);
+    background: rgba(240, 179, 90, 0.10);
+}
+#dashboard-page .library-status-more {
+    width: 38px;
+    min-height: 38px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(244, 245, 247, 0.7);
+    transition: background 0.18s ease, border-color 0.18s ease;
+}
+#dashboard-page .library-status-more:hover {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+/* ── 2. RAILS ────────────────────────────────────────────────────────── */
+
+/* A composed section header: title + count on the left with the lede
+   beneath it, the feed switcher as a segmented control on the right.
+   No more bare tabs floating beside a small subtitle. */
+#dashboard-page .dash-rail-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+    padding: 0 4px;
+}
+#dashboard-page .dash-rail-titleblock {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+#dashboard-page .dash-rail-title {
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: #f4f5f7;
+}
+#dashboard-page .dash-rail-count {
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: rgb(var(--accent-light-rgb));
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+/* The Recently Played title is the doorway to the full ledger — a quiet
+   button wearing the title's type, the underline on hover the only tell. */
+#dashboard-page .dash-rail-titlelink {
+    appearance: none;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+#dashboard-page .dash-rail-titlelink:hover {
+    color: #fff;
+    text-decoration: underline;
+    text-decoration-color: rgba(var(--accent-rgb), 0.6);
+    text-underline-offset: 4px;
+}
+#dashboard-page .dash-rail-titlelink:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.7);
+    outline-offset: 4px;
+    border-radius: 4px;
+}
+#dashboard-page .dash-rail-subtitle {
+    font-size: 13px;
+    color: rgba(244, 245, 247, 0.5);
+    line-height: 1.45;
+}
+
+/* Segmented control — the premier idiom for a two-feed switcher. */
+#dashboard-page .dash-band-tabs {
+    flex: none;
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+#dashboard-page .dash-band-tab {
+    appearance: none;
+    border: none;
+    background: none;
+    margin: 0;
+    padding: 8px 18px;
+    border-radius: 999px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: rgba(244, 245, 247, 0.55);
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+    text-decoration: none;
+    border-bottom: none;
+}
+#dashboard-page .dash-band-tab:hover {
+    color: rgba(244, 245, 247, 0.9);
+}
+#dashboard-page .dash-band-tab.active {
+    background: rgba(255, 255, 255, 0.11);
+    color: #fff;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    border-bottom: none;
+}
+#dashboard-page .dash-band-tab:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.7);
+    outline-offset: 2px;
+}
+
+/* The shelf itself: a touch more air between covers, slightly larger
+   cards, and a hover treatment with intent (lift + accent edge). */
+#dashboard-page .dash-rail {
+    gap: 16px;
+    padding: 4px 4px 12px;
+}
+#dashboard-page .dash-rail .dash-rail-card {
+    width: 162px;
+    flex: none;
+    border-radius: 14px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+#dashboard-page .dash-rail .dash-rail-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+#dashboard-page .dash-rail-caption {
+    top: 10px;
+    right: 10px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 4px 9px;
+    background: rgba(8, 8, 12, 0.68);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+#dashboard-page .dash-rail-badge {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: rgba(244, 245, 247, 0.5);
+    margin-top: 3px;
+}
+
+/* ── 3. RIGHT COLUMN — room to breathe ───────────────────────────────── */
+
+#dashboard-page .dash-layout {
+    grid-template-columns: minmax(0, 1fr) 376px;
+    gap: 32px;
+}
+#dashboard-page .dash-main {
+    gap: 30px;
+}
+#dashboard-page .dash-side {
+    gap: 20px;
+}
+#dashboard-page .dash-side-card {
+    padding: 26px;
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
+}
+#dashboard-page .dash-side-head {
+    margin-bottom: 18px;
+}
+#dashboard-page .dash-side-title {
+    font-size: 16px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+}
+#dashboard-page .dash-side-link {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* Sync health: calmer percentage, a bar with presence, rows that
+   breathe — 50px tall with larger art and real hover intent. */
+#dashboard-page .dash-sync-health {
+    gap: 12px;
+    margin-bottom: 18px;
+}
+#dashboard-page .dash-sync-pct {
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+#dashboard-page .dash-sync-of {
+    font-size: 13px;
+    max-width: 180px;
+}
+#dashboard-page .dash-sync-bar {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+#dashboard-page .dash-sync-sortbar {
+    margin: 0 0 8px;
+}
+#dashboard-page .dash-sync-rows {
+    gap: 2px;
+}
+#dashboard-page .dash-sync-row {
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    min-height: 52px;
+    padding: 4px 8px 4px 4px;
+    border-radius: 12px;
+    transition: background 0.15s ease;
+}
+#dashboard-page .dash-sync-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+#dashboard-page .dash-sync-row .syncband-art {
+    width: 38px;
+    height: 38px;
+    border-radius: 9px;
+}
+#dashboard-page .dash-sync-name {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.005em;
+}
+#dashboard-page .dash-sync-missing {
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+#dashboard-page .dash-sync-done {
+    font-size: 12.5px;
+}
+#dashboard-page .dash-side-more {
+    margin-top: 14px;
+    font-size: 13px;
+}
+
+/* Up next: the same flat-row language, taller and quieter. */
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row {
+    padding: 11px 8px 11px 6px;
+    border-radius: 12px;
+}
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-name {
+    font-size: 14px;
+    font-weight: 550;
+    letter-spacing: 0.005em;
+}
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-last {
+    font-size: 12.5px;
+}
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-when {
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: rgba(244, 245, 247, 0.65);
+}
+
+/* Watchlist / wishlist tiles: true cards now, numerals with presence. */
+#dashboard-page .dash-tiles.header-quick-nav {
+    gap: 16px;
+}
+#dashboard-page .dash-tiles .dash-tile.header-button {
+    min-height: 104px;
+    padding: 20px;
+    border-radius: 18px;
+    gap: 6px;
+}
+#dashboard-page .dash-tiles .dash-tile .hero-btn-badge {
+    font-size: 30px;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+}
+#dashboard-page .dash-tiles .dash-tile .hero-btn-label {
+    font-size: 13px;
+    font-weight: 500;
+}
+#dashboard-page .dash-tiles .dash-tile-sub {
+    font-size: 12px;
+}
+
+/* ── 4. LISTEN BAND — light polish ───────────────────────────────────── */
+
+#dashboard-page .listen-band {
+    gap: 16px;
+}
+#dashboard-page .listen-hero {
+    padding: 20px 24px;
+    border-radius: 18px;
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    background:
+        radial-gradient(120% 180% at 0% 0%, rgba(var(--accent-rgb), 0.16) 0%, rgba(var(--accent-rgb), 0.04) 55%, transparent 100%),
+        linear-gradient(165deg, rgba(15, 15, 20, 0.96), rgba(8, 8, 12, 0.99));
+}
+#dashboard-page .listen-hero-text strong {
+    font-size: 16px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+}
+#dashboard-page .listen-hero-text span {
+    font-size: 12.5px;
+}
+#dashboard-page .listen-tile {
+    padding: 18px 22px;
+    border-radius: 18px;
+}
+#dashboard-page .listen-tile-title {
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+}
+
+/* ── 5. FOOTER — quieter ─────────────────────────────────────────────── */
+
+#dashboard-page .dash-footer {
+    margin-top: 12px;
+    padding-top: 22px;
+}
+
+/* ── 6. RESPONSIVE ───────────────────────────────────────────────────── */
+
+/* The wider side column stacks a little earlier so rows never squeeze. */
+@media (max-width: 1320px) {
+    #dashboard-page .dash-layout {
+        grid-template-columns: 1fr;
+        gap: 26px;
+    }
+    #dashboard-page .dash-side {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+        align-items: start;
+    }
+    #dashboard-page .dash-side > .header-quick-nav {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 960px) {
+    #dashboard-page .dash-hero .hello-greeting {
+        font-size: clamp(24px, 6vw, 30px);
+    }
+    #dashboard-page .dash-hero-number {
+        padding: 2px 18px;
+    }
+    #dashboard-page .dash-hero-number-value {
+        font-size: 21px;
+    }
+    /* The contained library bar stacks: status above, actions below. */
+    #dashboard-page .dash-hero-library .library-status-header {
+        align-items: stretch;
+        flex-direction: column;
+        padding: 14px 14px 12px 16px;
+    }
+    #dashboard-page .dash-hero-library .library-status-info {
+        flex-wrap: wrap;
+    }
+    #dashboard-page .dash-hero-library .library-status-subtitle {
+        white-space: normal;
+    }
+    #dashboard-page .dash-hero-library .library-status-actions {
+        justify-content: flex-start;
+    }
+    /* Rail header stacks: title block above the segmented control. */
+    #dashboard-page .dash-rail-head {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+    #dashboard-page .dash-rail-title {
+        font-size: 19px;
+    }
+    #dashboard-page .dash-side {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    #dashboard-page .dash-hero-eyebrow {
+        font-size: 10px;
+    }
+    #dashboard-page .dash-hero-numbers {
+        gap: 14px 0;
+    }
+    #dashboard-page .dash-hero-number {
+        padding: 2px 14px;
+    }
+    #dashboard-page .dash-hero-number-value {
+        font-size: 19px;
+    }
+    #dashboard-page .dash-rail .dash-rail-card {
+        width: 138px;
+    }
+    #dashboard-page .dash-side-card {
+        padding: 20px;
+    }
+}
+
+/* The old 1260px hero/side stacking rules in style.css still apply where
+   they don't conflict; the 1320px rule above takes over the side-column
+   stacking slightly earlier for the wider rail. */
