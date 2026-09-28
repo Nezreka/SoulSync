@@ -233,7 +233,10 @@
 .automation-card .automation-name {
     font-size: 13.5px; font-weight: 620; color: #fff;
     letter-spacing: .01em; margin-bottom: 5px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    /* Two lines before truncating — names stay readable instead of
+       collapsing to "Nightly wishlist sy…". */
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    white-space: normal; overflow: hidden;
 }
 
 /* pipeline — the flow line as tinted chips with dimmed connectors */

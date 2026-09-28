@@ -131,7 +131,7 @@ export function AutomationsOverview({
                   <button
                     type="button"
                     className="automx-row-main"
-                    title="Find in library"
+                    title={`${a.name} — find in library`}
                     onClick={() => onFind(a.name)}
                   >
                     <span className="automx-row-icon" aria-hidden="true">
@@ -171,7 +171,7 @@ export function AutomationsOverview({
                     <button
                       type="button"
                       className="automx-row-main"
-                      title="Find in library"
+                      title={`${a.name} — find in library`}
                       onClick={() => onFind(a.name)}
                     >
                       <span className="automx-row-icon" aria-hidden="true">
@@ -225,7 +225,7 @@ export function AutomationsOverview({
                   <button
                     type="button"
                     className="automx-row-main"
-                    title="Find in library"
+                    title={`${a.name} — find in library`}
                     onClick={() => onFind(a.name)}
                   >
                     <span className="automx-row-icon" aria-hidden="true">
