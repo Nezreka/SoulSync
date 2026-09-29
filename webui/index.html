@@ -7180,11 +7180,13 @@
                                                         title="What's this?" onclick="toggleSettingHelp(this)"
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                     <small class="settings-hint setting-help-body" hidden>A soundtrack
-                                                        or compilation is filed under <code>Various Artists</code>
+                                                        or compilation is filed as a compilation
                                                         instead of whichever contributor happened to be downloading
                                                         &mdash; without this, one guitarist featured on 45 soundtracks
-                                                        collects all 45 albums. Each track still credits the artist who
-                                                        actually recorded it. A release counts as a compilation when it
+                                                        collects all 45 albums. Compilations are filed with the
+                                                        Compilation Path Template below, not the album one. Each track
+                                                        still credits the artist who actually recorded it. A release
+                                                        counts as a compilation when it
                                                         is credited to Various Artists, when the metadata source types
                                                         it one, or &mdash; when reorganizing, where the whole tracklist
                                                         is known &mdash; when three or more tracks have different
@@ -7193,6 +7195,23 @@
                                                         composer. Also governs whether reorganize gives compilations
                                                         their own folder layout.</small>
                                                 </div>
+                                                <div class="form-group">
+                                                    <label>Compilation Path Template:</label>
+                                                    <input type="text" id="template-compilation-path"
+                                                        placeholder="Compilations/$album/$track - $artist - $title">
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Used instead
+                                                        of the album template for soundtracks and compilations (see
+                                                        &ldquo;Detect multi-artist compilations&rdquo; above).
+                                                        Same variables as the album template; <code>$albumartist</code>
+                                                        is the release's credit (often Various Artists) and
+                                                        <code>$artist</code> is whoever recorded the track. To file
+                                                        compilations exactly like albums, give it the same template
+                                                        as the album one.</small>
+                                                </div>
+
                                                 <div class="form-group">
                                                     <label>Single Path Template:</label>
                                                     <input type="text" id="template-single-path"

@@ -3236,6 +3236,9 @@ async function loadSettingsData() {
         // Populate File Organization settings
         document.getElementById('file-organization-enabled').checked = settings.file_organization?.enabled !== false;
         document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
+        // compilations have their own template; it was never shown, so an album
+        // template change silently skipped every soundtrack (#1385)
+        document.getElementById('template-compilation-path').value = settings.file_organization?.templates?.compilation_path || 'Compilations/$album/$track - $artist - $title';
         // $albumartist honors the Collaborative Album Artist mode; the old
         // $artist default filed multi-artist singles under "A, B & C". A
         // stored old-default upgrades server-side too (core/imports/paths.py).
@@ -6356,6 +6359,7 @@ async function saveSettings(quiet = false) {
             detect_multi_artist_compilations: document.getElementById('detect-multi-artist-compilations').checked,
             templates: {
                 album_path: document.getElementById('template-album-path').value,
+                compilation_path: document.getElementById('template-compilation-path').value,
                 single_path: document.getElementById('template-single-path').value,
                 playlist_path: document.getElementById('template-playlist-path').value,
                 playlist_item: document.getElementById('template-playlist-item').value,
