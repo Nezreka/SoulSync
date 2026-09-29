@@ -45,6 +45,9 @@ describe('usePromoVideo', () => {
     act(() => fire(0.9));
     await waitFor(() => expect(result.current.videoId).toBe('v1'));
     expect(result.current.playing).toBe(true);
+    // pointing at it is fine while it already holds the stage
+    act(() => result.current.setHover(true));
+    expect(result.current.playing).toBe(true);
     act(() => result.current.onUnplayable('v1'));
     expect(result.current.videoId).toBeNull();
     expect(result.current.playing).toBe(false);

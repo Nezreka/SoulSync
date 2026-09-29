@@ -14,6 +14,8 @@ export interface PromoVideo {
   videoId: string | null;
   onUnplayable: (videoId: string) => void;
   glowRgb: string | null;
+  /** the pointer is on the banner: its video jumps the queue */
+  setHover: (hover: boolean) => void;
 }
 
 export function usePromoVideo(
@@ -35,5 +37,12 @@ export function usePromoVideo(
     [],
   );
   const glowRgb = useDominantColor(art ?? null);
-  return { ref: slot.ref, playing: slot.playing, videoId, onUnplayable, glowRgb };
+  return {
+    ref: slot.ref,
+    playing: slot.playing,
+    videoId,
+    onUnplayable,
+    glowRgb,
+    setHover: slot.setHover,
+  };
 }

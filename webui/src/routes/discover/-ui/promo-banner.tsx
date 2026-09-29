@@ -30,6 +30,13 @@ export interface PromoBannerProps {
   playing: boolean;
   onUnplayable?: (videoId: string) => void;
   videoToggle?: { on: boolean; onToggle: () => void };
+  /**
+   * wide: a full-width row. feature: the big bento tile. tile: a smaller bento
+   * tile. portrait: a tall 9:16 card, art filling it, words at the bottom.
+   */
+  size?: 'wide' | 'feature' | 'tile' | 'portrait';
+  /** the pointer entered or left: the stage plays a hovered card's video first */
+  onHoverChange?: (hover: boolean) => void;
 }
 
 export function PromoBanner({
@@ -46,11 +53,23 @@ export function PromoBanner({
   playing,
   onUnplayable,
   videoToggle,
+  size = 'wide',
+  onHoverChange,
 }: PromoBannerProps) {
   return (
     <section
       ref={rootRef}
-      className={`dsc-promo dsc-promo--${kind}`}
+      className={`dsc-promo dsc-promo--${kind} dsc-promo--${size}${playing && videoId ? ' is-live' : ''}`}
+      onMouseEnter={onHoverChange ? () => onHoverChange(true) : undefined}
+      onMouseLeave={onHoverChange ? () => onHoverChange(false) : undefined}
+      onFocus={onHoverChange ? () => onHoverChange(true) : undefined}
+      onBlur={
+        onHoverChange
+          ? (e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onHoverChange(false);
+            }
+          : undefined
+      }
       aria-label={`${eyebrow}: ${title}`}
       style={glowRgb ? ({ '--promo-rgb': glowRgb } as React.CSSProperties) : undefined}
     >
@@ -96,11 +115,13 @@ export function PromoBanner({
         </button>
       ) : null}
       <div className="dsc-promo-body">
-        <div
-          className={`dsc-promo-cover${round ? ' round' : ''}`}
-          aria-hidden="true"
-          style={art ? { backgroundImage: `url('${art}')` } : undefined}
-        />
+        {size === 'portrait' ? null : (
+          <div
+            className={`dsc-promo-cover${round ? ' round' : ''}`}
+            aria-hidden="true"
+            style={art ? { backgroundImage: `url('${art}')` } : undefined}
+          />
+        )}
         <div className="dsc-promo-copy">
           <span className="dsc-promo-eyebrow">{eyebrow}</span>
           <h3 className="dsc-promo-title">{title}</h3>

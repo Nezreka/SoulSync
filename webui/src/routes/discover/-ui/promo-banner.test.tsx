@@ -18,6 +18,33 @@ function props(over: Partial<Parameters<typeof PromoBanner>[0]> = {}) {
 }
 
 describe('PromoBanner', () => {
+  it('lays out by size: a portrait card is all art, no separate cover', () => {
+    const { container, rerender } = render(<PromoBanner {...props({ size: 'feature' })} />);
+    expect(container.querySelector('.dsc-promo')).toHaveClass('dsc-promo--feature');
+    expect(container.querySelector('.dsc-promo-cover')).not.toBeNull();
+    rerender(<PromoBanner {...props({ size: 'portrait' })} />);
+    expect(container.querySelector('.dsc-promo')).toHaveClass('dsc-promo--portrait');
+    expect(container.querySelector('.dsc-promo-cover')).toBeNull();
+  });
+
+  it('tells the stage when the pointer is on it', () => {
+    const onHoverChange = vi.fn();
+    const { container } = render(<PromoBanner {...props({ onHoverChange })} />);
+    const banner = container.querySelector('.dsc-promo')!;
+    fireEvent.mouseEnter(banner);
+    fireEvent.mouseLeave(banner);
+    expect(onHoverChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('marks itself live only while its video holds the stage', () => {
+    const { container, rerender } = render(
+      <PromoBanner {...props({ videoId: 'v1', playing: false })} />,
+    );
+    expect(container.querySelector('.dsc-promo')).not.toHaveClass('is-live');
+    rerender(<PromoBanner {...props({ videoId: 'v1', playing: true })} />);
+    expect(container.querySelector('.dsc-promo')).toHaveClass('is-live');
+  });
+
   it('says what it advertises, with its cover and its action', () => {
     const { container } = render(<PromoBanner {...props({ round: true })} />);
     expect(

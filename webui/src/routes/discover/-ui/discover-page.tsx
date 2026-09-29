@@ -120,6 +120,7 @@ import { RecommendedShelf } from './recommended-shelf';
 import { YourAlbumsSourcesModal, YourArtistsSourcesModal } from './sources-modals';
 import { StationModal } from './station-modal';
 import { StationsRow } from './stations-row';
+import { VideoRail, type RailArtist } from './video-rail';
 import { YourAlbumsBatchModal } from './your-albums-batch-modal';
 import { YourAlbumsShelf } from './your-albums-shelf';
 import { YourArtistsModal } from './your-artists-modal';
@@ -1294,6 +1295,36 @@ export function DiscoverPage() {
     videosOn,
   );
   const videoToggle = { on: videosOn, onToggle: () => setVideosOn(!videosOn) };
+  // the watch rail: hero picks and recommendations with a photo, one each,
+  // never the artist already in the bento
+  const railArtists: RailArtist[] = [];
+  {
+    const seenNames = new Set<string>(
+      artistPick?.artist_name ? [artistPick.artist_name.toLowerCase()] : [],
+    );
+    for (const a of [...hero.artists, ...recArtists] as {
+      artist_id?: string | number | null;
+      artist_name?: string;
+      image_url?: string | null;
+      source?: string | null;
+      explanation?: unknown;
+    }[]) {
+      const name = a.artist_name ?? '';
+      if (!name || !a.image_url || seenNames.has(name.toLowerCase())) continue;
+      seenNames.add(name.toLowerCase());
+      railArtists.push({
+        key: `${a.artist_id ?? name}`,
+        name,
+        image: a.image_url,
+        reason: explanationLine(a.explanation as never),
+        href:
+          a.artist_id != null
+            ? detailPath(a.artist_id, a.source ?? recSource(recPayload) ?? null, name)
+            : '#',
+      });
+      if (railArtists.length >= 10) break;
+    }
+  }
   const playTopTracks = () => {
     if (!week || playingTop) return;
     const intent = beginPlayIntent();
@@ -1469,35 +1500,135 @@ export function DiscoverPage() {
             {renderForYouSections()}
           </DiscoveryZone>
 
-          {spotlight ? (
-            <PromoBanner
-              kind="release"
-              eyebrow={`${releaseKind(spotlight.album.album_type)}${shortDate(spotlight.album.release_date) ? ` · ${shortDate(spotlight.album.release_date)}` : ''}`}
-              title={spotlight.album.album_name ?? ''}
-              subtitle={
-                <>
-                  <strong>{spotlight.album.artist_name}</strong> · {spotlight.reason}
-                </>
-              }
-              art={spotlight.album.album_cover_url ?? null}
-              actions={
-                <button
-                  type="button"
-                  className="dsc-pulse-btn primary"
-                  onClick={() =>
-                    void albumOpen.openRecentAlbum(recentForSpotlight[spotlight.index])
+          {spotlight || artistPick || (throwback && throwbackRow) ? (
+            <section className="dsc-bento" aria-label="Spotlight">
+              {spotlight ? (
+                <PromoBanner
+                  kind="release"
+                  size="feature"
+                  onHoverChange={releasePromo.setHover}
+                  eyebrow={`${releaseKind(spotlight.album.album_type)}${shortDate(spotlight.album.release_date) ? ` · ${shortDate(spotlight.album.release_date)}` : ''}`}
+                  title={spotlight.album.album_name ?? ''}
+                  subtitle={
+                    <>
+                      <strong>{spotlight.album.artist_name}</strong> · {spotlight.reason}
+                    </>
                   }
-                >
-                  Open {releaseKind(spotlight.album.album_type).replace('New ', '')}
-                </button>
-              }
-              glowRgb={releasePromo.glowRgb}
-              rootRef={releasePromo.ref}
-              videoId={releasePromo.videoId}
-              playing={releasePromo.playing}
-              onUnplayable={releasePromo.onUnplayable}
-              videoToggle={videoToggle}
-            />
+                  art={spotlight.album.album_cover_url ?? null}
+                  actions={
+                    <button
+                      type="button"
+                      className="dsc-pulse-btn primary"
+                      onClick={() =>
+                        void albumOpen.openRecentAlbum(recentForSpotlight[spotlight.index])
+                      }
+                    >
+                      Open {releaseKind(spotlight.album.album_type).replace('New ', '')}
+                    </button>
+                  }
+                  glowRgb={releasePromo.glowRgb}
+                  rootRef={releasePromo.ref}
+                  videoId={releasePromo.videoId}
+                  playing={releasePromo.playing}
+                  onUnplayable={releasePromo.onUnplayable}
+                  videoToggle={videoToggle}
+                />
+              ) : null}
+              {artistPick ? (
+                <PromoBanner
+                  kind="artist"
+                  size="tile"
+                  onHoverChange={artistPromo.setHover}
+                  eyebrow="An artist you should know"
+                  title={artistPick.artist_name ?? ''}
+                  subtitle={
+                    explanationLine(artistPick.explanation as never) || 'Picked from your library'
+                  }
+                  art={artistPick.image_url ?? null}
+                  round
+                  actions={
+                    <>
+                      <a
+                        className="dsc-pulse-btn primary"
+                        href={detailPath(
+                          artistPick.artist_id ?? '',
+                          recSource(recPayload) || null,
+                          artistPick.artist_name,
+                        )}
+                      >
+                        View artist
+                      </a>
+                      {artistPick.artist_id ? (
+                        <button
+                          type="button"
+                          className="dsc-pulse-btn"
+                          disabled={rec.watchingIds.has(String(artistPick.artist_id))}
+                          onClick={() =>
+                            void rec.toggleWatchlist(
+                              String(artistPick.artist_id),
+                              artistPick.artist_name ?? '',
+                            )
+                          }
+                        >
+                          {rec.watchingIds.has(String(artistPick.artist_id))
+                            ? 'On your watchlist'
+                            : 'Add to watchlist'}
+                        </button>
+                      ) : null}
+                    </>
+                  }
+                  glowRgb={artistPromo.glowRgb}
+                  rootRef={artistPromo.ref}
+                  videoId={artistPromo.videoId}
+                  playing={artistPromo.playing}
+                  onUnplayable={artistPromo.onUnplayable}
+                  videoToggle={videoToggle}
+                />
+              ) : null}
+              {throwback && throwbackRow ? (
+                <PromoBanner
+                  kind="throwback"
+                  size="tile"
+                  onHoverChange={throwbackPromo.setHover}
+                  eyebrow="Throwback"
+                  title={throwback.name}
+                  subtitle={
+                    <>
+                      <strong>{throwback.artist}</strong> · you had this on repeat, then it went
+                      quiet
+                    </>
+                  }
+                  art={throwback.cover || null}
+                  actions={
+                    <>
+                      <button
+                        type="button"
+                        className="dsc-pulse-btn primary"
+                        onClick={() => {
+                          const intent = beginPlayIntent();
+                          void playTrackNow(throwbackRow, throwback.name, intent);
+                        }}
+                      >
+                        Play it
+                      </button>
+                      <button
+                        type="button"
+                        className="dsc-pulse-btn"
+                        onClick={() => modal.open('repeat_rewind')}
+                      >
+                        Repeat Rewind
+                      </button>
+                    </>
+                  }
+                  glowRgb={throwbackPromo.glowRgb}
+                  rootRef={throwbackPromo.ref}
+                  videoId={throwbackPromo.videoId}
+                  playing={throwbackPromo.playing}
+                  onUnplayable={throwbackPromo.onUnplayable}
+                  videoToggle={videoToggle}
+                />
+              ) : null}
+            </section>
           ) : null}
 
           <DiscoveryZone
@@ -1521,55 +1652,12 @@ export function DiscoverPage() {
             {renderZoneSections(newMissingIds)}
           </DiscoveryZone>
 
-          {artistPick ? (
-            <PromoBanner
-              kind="artist"
-              eyebrow="An artist you should know"
-              title={artistPick.artist_name ?? ''}
-              subtitle={
-                explanationLine(artistPick.explanation as never) || 'Picked from your library'
-              }
-              art={artistPick.image_url ?? null}
-              round
-              actions={
-                <>
-                  <a
-                    className="dsc-pulse-btn primary"
-                    href={detailPath(
-                      artistPick.artist_id ?? '',
-                      recSource(recPayload) || null,
-                      artistPick.artist_name,
-                    )}
-                  >
-                    View artist
-                  </a>
-                  {artistPick.artist_id ? (
-                    <button
-                      type="button"
-                      className="dsc-pulse-btn"
-                      disabled={rec.watchingIds.has(String(artistPick.artist_id))}
-                      onClick={() =>
-                        void rec.toggleWatchlist(
-                          String(artistPick.artist_id),
-                          artistPick.artist_name ?? '',
-                        )
-                      }
-                    >
-                      {rec.watchingIds.has(String(artistPick.artist_id))
-                        ? 'On your watchlist'
-                        : 'Add to watchlist'}
-                    </button>
-                  ) : null}
-                </>
-              }
-              glowRgb={artistPromo.glowRgb}
-              rootRef={artistPromo.ref}
-              videoId={artistPromo.videoId}
-              playing={artistPromo.playing}
-              onUnplayable={artistPromo.onUnplayable}
-              videoToggle={videoToggle}
-            />
-          ) : null}
+          <VideoRail
+            title="Watch"
+            subtitle="Artists picked for you. Point at one to watch its video."
+            artists={railArtists}
+            videosOn={videosOn}
+          />
 
           {libraryIds.length > 0 && (
             <DiscoveryZone
@@ -1581,47 +1669,6 @@ export function DiscoverPage() {
               {renderZoneSections(libraryIds)}
             </DiscoveryZone>
           )}
-
-          {throwback && throwbackRow ? (
-            <PromoBanner
-              kind="throwback"
-              eyebrow="Throwback"
-              title={throwback.name}
-              subtitle={
-                <>
-                  <strong>{throwback.artist}</strong> · you had this on repeat, then it went quiet
-                </>
-              }
-              art={throwback.cover || null}
-              actions={
-                <>
-                  <button
-                    type="button"
-                    className="dsc-pulse-btn primary"
-                    onClick={() => {
-                      const intent = beginPlayIntent();
-                      void playTrackNow(throwbackRow, throwback.name, intent);
-                    }}
-                  >
-                    Play it
-                  </button>
-                  <button
-                    type="button"
-                    className="dsc-pulse-btn"
-                    onClick={() => modal.open('repeat_rewind')}
-                  >
-                    Repeat Rewind
-                  </button>
-                </>
-              }
-              glowRgb={throwbackPromo.glowRgb}
-              rootRef={throwbackPromo.ref}
-              videoId={throwbackPromo.videoId}
-              playing={throwbackPromo.playing}
-              onUnplayable={throwbackPromo.onUnplayable}
-              videoToggle={videoToggle}
-            />
-          ) : null}
 
           <DiscoveryZone
             id="discover-zone-tools"

@@ -16,14 +16,23 @@ export interface SlotState {
   ratio: number;
   /** it has a video to play */
   hasVideo: boolean;
+  /** the pointer is on it: a hovered card with a video jumps the queue */
+  hover?: boolean;
 }
 
 /** at least this much of a banner must be showing for its video to play */
 export const MIN_VISIBLE = 0.5;
 
-/** the slot that gets the stage, or null. ties go to the one registered first. */
+/**
+ * the slot that gets the stage, or null. a hovered slot with a video wins
+ * outright (you pointed at it); otherwise the most visible one with a video,
+ * if at least half of it shows. ties go to the one registered first.
+ */
 export function chooseActive(slots: Map<string, SlotState>, enabled: boolean): string | null {
   if (!enabled) return null;
+  for (const [id, s] of slots) {
+    if (s.hover && s.hasVideo && s.ratio > 0) return id;
+  }
   let best: string | null = null;
   let bestRatio = MIN_VISIBLE - 1e-9;
   for (const [id, s] of slots) {
@@ -140,6 +149,8 @@ export interface VideoSlot {
   seen: boolean;
   /** it holds the stage: mount the player */
   playing: boolean;
+  /** tell the stage the pointer is on this banner, or has left it */
+  setHover: (hover: boolean) => void;
 }
 
 /** register a banner with the stage. */
@@ -173,5 +184,7 @@ export function useVideoSlot(id: string, hasVideo: boolean, stage = videoStage):
 
   useEffect(() => () => stage.remove(id), [id, stage]);
 
-  return { ref, seen, playing: active === id };
+  const setHover = useCallback((hover: boolean) => stage.set(id, { hover }), [id, stage]);
+
+  return { ref, seen, playing: active === id, setHover };
 }

@@ -35,6 +35,28 @@ describe('chooseActive', () => {
     expect(chooseActive(slots([['hero', { ratio: 0.5, hasVideo: true }]]), true)).toBe('hero');
   });
 
+  it('a hovered card with a video jumps the queue, even over a more visible one', () => {
+    expect(
+      chooseActive(
+        slots([
+          ['feature', { ratio: 1, hasVideo: true }],
+          ['card-3', { ratio: 0.4, hasVideo: true, hover: true }],
+        ]),
+        true,
+      ),
+    ).toBe('card-3');
+    // pointing at a card with no video changes nothing
+    expect(
+      chooseActive(
+        slots([
+          ['feature', { ratio: 1, hasVideo: true }],
+          ['card-3', { ratio: 1, hasVideo: false, hover: true }],
+        ]),
+        true,
+      ),
+    ).toBe('feature');
+  });
+
   it('plays nothing when disabled', () => {
     expect(chooseActive(slots([['hero', { ratio: 1, hasVideo: true }]]), false)).toBeNull();
   });
