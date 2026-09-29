@@ -42,6 +42,14 @@ SoulSync auto-generates playlists from your **discovery pool** (similar artists 
 
 Each playlist can be played in the media player, downloaded, or synced to your media server.
 
+## Jump back in
+
+The top of Discover greets you and puts what you go back to in one grid: **Flow**, On Repeat, your first Daily Mixes, the mood that suits the hour, and Repeat Rewind.
+
+- **Flow** is one tap for endless-feeling listening: your favourites woven with the tracks of theirs you never play and their neighbours in your library. Every press is a fresh draw, and every track is one you own.
+- **On Repeat** is what you've played most in the last 30 days. **Repeat Rewind** is what you had on repeat 2 to 12 months ago and then stopped playing.
+- **Blend** mixes two people's listening into one playlist, leading with what you both play. It appears once another profile has its own ListenBrainz or Last.fm listening history.
+
 ## Moods
 
 Chill, Focus, Energy, Feel Good and Late Night mixes, built from **your own albums**: an album whose Last.fm tags (or AudioDB mood) say chill puts its tracks in the chill pool. Every track is one you own, so a mood plays straight away. Picks lean on what you play, spread across artists, and change once a day. Moods fill out as more of your albums get Last.fm tags.

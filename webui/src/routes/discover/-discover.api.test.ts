@@ -6,6 +6,8 @@ import { server } from '@/test/msw';
 import {
   blacklistArtist,
   dismissAllInbox,
+  fetchFlow,
+  fetchForYouMixes,
   fetchInbox,
   fetchMoodMixes,
   fetchWeekStats,
@@ -305,6 +307,22 @@ describe('the inbox', () => {
     await setInboxState(7, 'saved');
     expect((await dismissAllInbox()).dismissed).toBe(4);
     expect(seen).toEqual(['GET saved', 'STATE 7 {"state":"saved"}', 'DISMISS']);
+  });
+});
+
+describe('on repeat, blends and flow', () => {
+  it('reads the for-you mixes as an outcome and flow as a plain answer', async () => {
+    server.use(
+      http.get('*/api/discover/for-you', () =>
+        HttpResponse.json({ success: true, mixes: [{ key: 'on_repeat' }] }),
+      ),
+      http.get('*/api/discover/flow', () =>
+        HttpResponse.json({ success: true, tracks: [{ name: 'x' }] }),
+      ),
+    );
+    const out = await fetchForYouMixes();
+    expect(out.kind === 'ok' && (out.data.mixes as unknown[])).toHaveLength(1);
+    expect((await fetchFlow()).tracks).toHaveLength(1);
   });
 });
 

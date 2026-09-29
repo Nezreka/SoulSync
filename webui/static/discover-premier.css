@@ -2953,12 +2953,242 @@
     mix-blend-mode: normal;
 }
 
+/* the quick grid's mood tile wears the same colour */
+.dsc-quick-tile[data-mix-key^="mood_"] .dsc-quick-art {
+    position: relative;
+}
+
+.dsc-quick-tile[data-mix-key^="mood_"] .dsc-quick-art::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(160deg, rgba(var(--mood-rgb), 0.85), rgba(var(--mood-rgb), 0.35));
+}
+
 .discover-mix-card[data-mix-key^="mood_"] .mix-card-play {
     z-index: 5 !important;
 }
 
-.discover-mix-card[data-mix-key="mood_chill"] { --mood-rgb: 45, 170, 220; }
-.discover-mix-card[data-mix-key="mood_focus"] { --mood-rgb: 99, 102, 241; }
-.discover-mix-card[data-mix-key="mood_energy"] { --mood-rgb: 244, 96, 32; }
-.discover-mix-card[data-mix-key="mood_feel_good"] { --mood-rgb: 234, 179, 8; }
-.discover-mix-card[data-mix-key="mood_late_night"] { --mood-rgb: 124, 58, 237; }
+[data-mix-key="mood_chill"] { --mood-rgb: 45, 170, 220; }
+[data-mix-key="mood_focus"] { --mood-rgb: 99, 102, 241; }
+[data-mix-key="mood_energy"] { --mood-rgb: 244, 96, 32; }
+[data-mix-key="mood_feel_good"] { --mood-rgb: 234, 179, 8; }
+[data-mix-key="mood_late_night"] { --mood-rgb: 124, 58, 237; }
+
+/* ── 15. Greeting and the quick grid (spotify's home, with deezer's flow) ── */
+.dsc-greeting {
+    margin: 4px 0 24px;
+}
+
+.dsc-greeting-title {
+    margin: 0 0 16px;
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    color: #fff;
+}
+
+.dsc-quick-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.dsc-quick-tile {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 64px;
+    min-width: 0;
+    overflow: hidden;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.07);
+    transition: background 160ms ease;
+}
+
+.dsc-quick-tile:hover,
+.dsc-quick-tile:focus-within {
+    background: rgba(255, 255, 255, 0.13);
+}
+
+.dsc-quick-open {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    padding: 0 52px 0 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.dsc-quick-art {
+    flex: 0 0 64px;
+    width: 64px;
+    height: 64px;
+    background-size: cover;
+    background-position: center;
+    background-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.35);
+}
+
+.dsc-quick-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.dsc-quick-play {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent-color, #1db954);
+    color: #05130a;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+    opacity: 0;
+    transform: translateY(-50%) scale(0.9);
+    transition: opacity 160ms ease, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dsc-quick-tile:hover .dsc-quick-play,
+.dsc-quick-tile:focus-within .dsc-quick-play,
+.dsc-quick-play[aria-busy='true'] {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+}
+
+.dsc-quick-open:focus-visible,
+.dsc-quick-play:focus-visible,
+.dsc-quick-tile--flow:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline-offset: 2px;
+}
+
+/* flow: the one-tap button, two cells wide, alive */
+.dsc-quick-tile--flow {
+    grid-column: span 2;
+    gap: 14px;
+    padding: 0 60px 0 14px;
+    border: none;
+    color: #fff;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    background: linear-gradient(120deg, #0d5c32 0%, #1e3a8a 50%, #5b21b6 100%);
+    background-size: 200% 200%;
+    animation: dsc-flow-shift 14s ease-in-out infinite;
+}
+
+.dsc-quick-tile--flow:hover {
+    background: linear-gradient(120deg, #0f7a42 0%, #1d4ed8 50%, #6d28d9 100%);
+    background-size: 200% 200%;
+}
+
+.dsc-quick-tile--flow .dsc-quick-play {
+    opacity: 1;
+    transform: translateY(-50%);
+    background: #fff;
+    color: #0a0b0d;
+}
+
+.dsc-quick-tile--flow:disabled {
+    cursor: progress;
+}
+
+.dsc-flow-orb {
+    flex: 0 0 38px;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff 0%, rgba(255, 255, 255, 0.55) 35%, rgba(255, 255, 255, 0) 72%);
+    box-shadow: 0 0 22px rgba(255, 255, 255, 0.45);
+    animation: dsc-flow-breathe 3.2s ease-in-out infinite;
+}
+
+.dsc-quick-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.dsc-quick-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+@keyframes dsc-flow-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
+
+@keyframes dsc-flow-breathe {
+    0%, 100% { transform: scale(0.92); opacity: 0.85; }
+    50% { transform: scale(1.05); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dsc-quick-tile--flow,
+    .dsc-flow-orb {
+        animation: none;
+    }
+}
+
+@media (hover: none) {
+    .dsc-quick-play {
+        opacity: 1;
+        transform: translateY(-50%);
+    }
+}
+
+@media (max-width: 1100px) {
+    .dsc-quick-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 520px) {
+    .dsc-greeting-title {
+        font-size: 1.5rem;
+    }
+    .dsc-quick-tile {
+        height: 56px;
+    }
+    .dsc-quick-art {
+        flex-basis: 56px;
+        width: 56px;
+        height: 56px;
+    }
+    .dsc-quick-name {
+        font-size: 0.82rem;
+    }
+    /* a phone tile is a tap target: tap opens it. the play button just
+       squeezed every name down to three letters */
+    .dsc-quick-tile:not(.dsc-quick-tile--flow) .dsc-quick-play {
+        display: none;
+    }
+    .dsc-quick-open {
+        padding-right: 8px;
+        gap: 10px;
+    }
+}

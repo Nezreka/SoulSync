@@ -2037,6 +2037,35 @@ def get_daily_mixes():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+@bp.route('/api/discover/for-you', methods=['GET'])
+@_hide_blocked({'mixes[].tracks': WORKS})
+@_discover_shelf_cache()
+def get_for_you_mixes():
+    """on repeat, repeat rewind and any blends, read straight off listening
+    history. owned tracks only, so they play straight away."""
+    try:
+        from core.personalized.for_you import build_for_you
+        payload = build_for_you(get_database(), get_current_profile_id())
+        return jsonify({"success": True, "mixes": payload.get("mixes", [])})
+    except Exception as e:
+        logger.error(f"Error building for-you mixes: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/flow', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
+def get_flow():
+    """a fresh flow queue every call: favourites, their unplayed tracks, and
+    their neighbours in your library. never cached, on purpose."""
+    try:
+        from core.personalized.for_you import build_flow
+        payload = build_flow(get_database(), get_current_profile_id())
+        return jsonify({"success": True, "tracks": payload.get("tracks", [])})
+    except Exception as e:
+        logger.error(f"Error building flow: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/discover/moods', methods=['GET'])
 @_hide_blocked({'mixes[].tracks': WORKS})
 def get_mood_mixes():

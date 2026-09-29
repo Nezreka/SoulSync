@@ -211,6 +211,14 @@ export const fetchPopularPicks = () =>
 export const fetchDailyMixes = () =>
   section<Record<string, unknown>>('discover/personalized/daily-mixes');
 
+/** on repeat, repeat rewind and any blends, read off your listening history. */
+export const fetchForYouMixes = () => section<Record<string, unknown>>('discover/for-you');
+
+/** a fresh flow queue: favourites and what they lead to in your library. */
+export function fetchFlow(): Promise<{ success?: boolean; tracks?: unknown[]; error?: string }> {
+  return readJson(apiClient.get('discover/flow'));
+}
+
 /** chill / focus / energy / feel good / late night, from your own tagged albums. */
 export const fetchMoodMixes = () => section<Record<string, unknown>>('discover/moods');
 export const fetchHiddenGems = () =>

@@ -11,6 +11,7 @@ import {
   fetchHiddenGems,
   fetchListeningMix,
   fetchDailyMixes,
+  fetchForYouMixes,
   fetchMoodMixes,
   fetchPopularPicks,
   fetchReleaseRadar,
@@ -91,10 +92,11 @@ export interface DiscoverMixesController {
  * exists to preserve. The slow-external feeders stay ungated on purpose.
  */
 /**
- * the moods payload as cards. every track is owned, so there's nothing to
- * download or sync-match: no syncKey, which leaves Play as the one action.
+ * a {mixes: [...]} payload as cards: moods, on repeat, repeat rewind, blends.
+ * every track is owned, so there's nothing to download or sync-match: no
+ * syncKey, which leaves Play as the one action.
  */
-export function moodMixesFrom(payload: Record<string, unknown> | undefined): DiscoverMix[] {
+export function mixCardsFrom(payload: Record<string, unknown> | undefined): DiscoverMix[] {
   if (!payload || !Array.isArray(payload.mixes)) return [];
   const out: DiscoverMix[] = [];
   for (const raw of payload.mixes as Record<string, unknown>[]) {
@@ -142,6 +144,8 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
   // Slow external — enabled from mount, awaited by nothing.
   const releaseRadar = useQuery(mixQuery('release-radar', fetchReleaseRadar));
   const daily = useQuery(mixQuery('daily-mixes', fetchDailyMixes));
+  // on repeat, repeat rewind, blends: small and fast, so not held back
+  const forYou = useQuery(mixQuery('for-you', fetchForYouMixes));
   // below the fold, and built once a day server side
   const moodsQuery = useQuery(mixQuery('moods', fetchMoodMixes, belowFoldReady));
   // your recipes: server-built, renewed on their own schedule
@@ -180,6 +184,12 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
         tracks,
       });
     }
+  }
+
+  // then on repeat, repeat rewind and any blends: straight off what you play
+  const forYouOutcome = forYou.data as SectionOutcome<Record<string, unknown>> | undefined;
+  for (const m of mixCardsFrom(forYouOutcome?.kind === 'ok' ? forYouOutcome.data : undefined)) {
+    mixes.push(m);
   }
 
   // then the LIVE_MIX_FEEDERS order: release_radar, discovery_weekly,
@@ -267,7 +277,7 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
   const decadeMixes = availableDecades.map((d) => decadeMix(d));
 
   const moodOutcome = moodsQuery.data as SectionOutcome<Record<string, unknown>> | undefined;
-  const moodMixes = moodMixesFrom(moodOutcome?.kind === 'ok' ? moodOutcome.data : undefined);
+  const moodMixes = mixCardsFrom(moodOutcome?.kind === 'ok' ? moodOutcome.data : undefined);
 
   const registry: Record<string, DiscoverMix> = {};
   for (const m of [...mixes, ...decadeMixes, ...moodMixes]) registry[m.key] = m;

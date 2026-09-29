@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { getShellProfileContext } from '@/platform/shell/bridge';
+
 import type { WebLens } from '../-discover.artist-web';
 import type { CacheItem } from '../-discover.cache-sections';
 import type { DiscoverSectionId, DiscoverZoneId } from '../-discover.layout';
@@ -15,6 +17,7 @@ import type { GenreDiveData } from './genre-dive-modal';
 import {
   fetchBecauseYouListenTo,
   fetchGenreDeepDive,
+  fetchFlow,
   fetchLbPlaylist,
   fetchWeekStats,
 } from '../-discover.api';
@@ -35,6 +38,7 @@ import {
 } from '../-discover.bylt';
 import { CACHE_SECTIONS } from '../-discover.cache-sections';
 import { decadeClassicsName, decadeTrackToSpotify } from '../-discover.decade-shelf';
+import { quickTiles } from '../-discover.greeting';
 import { normalizeTrack } from '../-discover.helpers';
 import { inboxArtistRef } from '../-discover.inbox';
 import { discoverLimiter } from '../-discover.limiter';
@@ -99,6 +103,7 @@ import { DiscoverNav, type DiscoverNavItem } from './discover-nav';
 import { DiscoveryInbox } from './discovery-inbox';
 import { DownloadBar } from './download-bar';
 import { GenreDiveModal } from './genre-dive-modal';
+import { GreetingGrid } from './greeting-grid';
 import { MixModal } from './mix-modal';
 import { MixShelf } from './mix-shelf';
 import { SpotlightBanner, TasteGapBanner, WeekBanner } from './pulse-banners';
@@ -316,6 +321,7 @@ export function DiscoverPage() {
   const week = weekSummary(weekQuery.data);
   const gap = tasteGap(weekQuery.data);
   const [playingTop, setPlayingTop] = useState(false);
+  const [flowBusy, setFlowBusy] = useState(false);
   const stationPreview = useStationPreview();
   // A profile switch discards an open preview: it belongs to the old profile,
   // and a response already in flight for it must never fill this one in.
@@ -1253,6 +1259,27 @@ export function DiscoverPage() {
     void playMixNow(rows, 'Your top tracks this week', intent).finally(() => setPlayingTop(false));
   };
 
+  /** flow: a fresh queue from the server every press, played straight away. */
+  const playFlow = () => {
+    if (flowBusy) return;
+    const intent = beginPlayIntent();
+    setFlowBusy(true);
+    void fetchFlow()
+      .then((res) => {
+        const tracks = res.tracks ?? [];
+        if (!intent.isCurrent()) return;
+        if (!tracks.length) {
+          toast('Flow needs some listening history first', 'info');
+          return;
+        }
+        return playMixNow(tracks, 'Flow', intent);
+      })
+      .catch(() => toast("Couldn't start Flow. Try again.", 'error'))
+      .finally(() => setFlowBusy(false));
+  };
+  const tiles = quickTiles(mixes.mixes, mixes.moodMixes, new Date().getHours());
+  const shellProfile = getShellProfileContext();
+
   const newMissingIds = zoneSections('new-missing');
   const libraryIds = zoneSections('library');
   const navItems: DiscoverNavItem[] = [
@@ -1322,6 +1349,16 @@ export function DiscoverPage() {
               </button>
             </div>
           )}
+          <GreetingGrid
+            name={shellProfile?.name}
+            hour={new Date().getHours()}
+            tiles={tiles}
+            onOpenMix={modal.open}
+            onPlayMix={playMixFromCard}
+            onPlayFlow={playFlow}
+            flowBusy={flowBusy}
+            playingKey={playingMixKey}
+          />
           <div className="discover-command-hero">
             <DiscoverHero
               artist={hero.artist}

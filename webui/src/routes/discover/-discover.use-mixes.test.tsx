@@ -7,7 +7,7 @@ import { server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
 import { fetchDiscoveryWeekly, fetchReleaseRadar, fetchSeasonalPlaylist } from './-discover.api';
-import { moodMixesFrom, useDiscoverMixes } from './-discover.use-mixes';
+import { mixCardsFrom, useDiscoverMixes } from './-discover.use-mixes';
 
 /**
  * The Your Mixes registry hook.
@@ -71,6 +71,7 @@ function stub({
     ].map((path) => http.get(path, () => json({ tracks: personalized }))),
     http.get('/api/discover/personalized/daily-mixes', () => json({ mixes: daily })),
     http.get('/api/discover/moods', () => json({ mixes: [] })),
+    http.get('/api/discover/for-you', () => json({ mixes: [] })),
     http.get('/api/discover/decades/available', () => {
       hits.push('decades');
       return json({ decades });
@@ -91,9 +92,9 @@ afterEach(() => {
   server.resetHandlers();
 });
 
-describe('moodMixesFrom', () => {
+describe('mixCardsFrom (moods, on repeat, blends)', () => {
   it('turns the moods payload into play-only cards that say what they are', () => {
-    const mixes = moodMixesFrom({
+    const mixes = mixCardsFrom({
       mixes: [
         {
           key: 'mood_chill',
@@ -109,8 +110,8 @@ describe('moodMixesFrom', () => {
     expect(mixes[0]).toMatchObject({ title: 'Chill', blurb: 'Downtempo, lo-fi and chillout' });
     // owned tracks: no syncKey, so the modal offers Play and nothing else
     expect(mixes[0].syncKey).toBeUndefined();
-    expect(moodMixesFrom(undefined)).toEqual([]);
-    expect(moodMixesFrom({ mixes: 'nope' })).toEqual([]);
+    expect(mixCardsFrom(undefined)).toEqual([]);
+    expect(mixCardsFrom({ mixes: 'nope' })).toEqual([]);
   });
 });
 
