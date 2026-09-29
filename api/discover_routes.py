@@ -3219,18 +3219,46 @@ def image_proxy():
     Kept for backwards compatibility; new normalized artwork URLs use
     /api/image-cache/<key>, but older browser sessions may still hold this
     query-string form.
+
+    The requested URL is normalized first (core.metadata.artwork): raw
+    media-server artwork URLs — Plex/Jellyfin/Navidrome localhost or relative
+    paths as stored in thumb_url — need server-side auth tokens the browser
+    must never see before they can be fetched. Normalizing here fixes those
+    URLs for every caller (web UI dashboard rails, the Companion extension)
+    instead of only the endpoints that normalize at serialization time.
+    Ordinary remote URLs pass through unchanged in meaning.
     """
     url = request.args.get('url', '')
     if not url or not url.startswith('http'):
         return '', 400
 
     try:
+        from urllib.parse import parse_qs, urlparse
+
         from core.image_cache import get_image_cache
+        from core.metadata.artwork import is_image_proxy_url
 
         cache = get_image_cache()
-        cached = cache.get_url(url)
-        if request.args.get('v') == 'rail':
-            cached = cache.get_variant_of(cached.key, 'rail')
+        # Mint media-server auth tokens / canonicalize before fetching.
+        target = fix_artist_image_url(url) or url
+        if target.startswith('/api/image-cache/'):
+            # Normalized to a registered cache entry: serve it directly.
+            key = target.split('?', 1)[0].rsplit('/', 1)[-1]
+            if request.args.get('v') == 'rail':
+                cached = cache.get_variant_of(key, 'rail')
+            else:
+                cached = cache.get(key)
+        else:
+            if is_image_proxy_url(target):
+                # The normalizer had no token config and bounced an internal
+                # host back into the proxy form: unwrap one layer and fetch
+                # the inner URL instead of requesting ourselves.
+                inner = parse_qs(urlparse(target).query).get('url', [''])[0]
+                if inner.startswith('http'):
+                    target = inner
+            cached = cache.get_url(target)
+            if request.args.get('v') == 'rail':
+                cached = cache.get_variant_of(cached.key, 'rail')
         response = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
         max_age = int(config_manager.get("image_cache.ttl_seconds", 2592000))
         response.headers['Cache-Control'] = f'private, max-age={max_age}'
