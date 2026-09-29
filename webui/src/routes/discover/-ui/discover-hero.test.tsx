@@ -173,6 +173,18 @@ describe('the hero', () => {
     expect(faces[1]).toHaveClass('active');
   });
 
+  it('falls back to the initial when a face image fails, never a broken icon', () => {
+    const rotation = [artist({ artist_name: 'Storken', image_url: '/api/image-cache/gone' })];
+    const { container } = render(
+      <DiscoverHero {...heroProps({ count: 2, index: 1, artists: [...rotation, artist()] })} />,
+    );
+    const face = container.querySelector('.hero-indicator img')!;
+    fireEvent.error(face);
+    const first = container.querySelectorAll('.hero-indicator')[0];
+    expect(first.querySelector('img')).toBeNull();
+    expect(first.textContent).toBe('S');
+  });
+
   it('sets the named artists apart in the reason, and reads exactly the same', () => {
     const { container } = render(
       <DiscoverHero

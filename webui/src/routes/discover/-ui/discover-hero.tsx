@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import type { HeroWatchlistButton, WatchAllPhase } from '../-discover.hero';
 import type { DiscoverHeroArtist } from '../-discover.types';
 
@@ -88,6 +90,32 @@ function HeroReason({ artist }: { artist: DiscoverHeroArtist }) {
       ))}
       {parts.more > 0 ? ` +${parts.more} more` : ''}
     </>
+  );
+}
+
+/**
+ * one face in the rotation strip. an image that fails to load shows the
+ * artist's initial, never the browser's broken-image icon: a cached image can
+ * lose its source (an index rebuild does exactly that) and the strip has to
+ * survive it.
+ */
+function HeroFace({ artist }: { artist: DiscoverHeroArtist }) {
+  const [broken, setBroken] = useState(false);
+  if (artist.image_url && !broken) {
+    return (
+      <img
+        className="hero-indicator-face"
+        src={artist.image_url}
+        alt=""
+        loading="lazy"
+        onError={() => setBroken(true)}
+      />
+    );
+  }
+  return (
+    <span className="hero-indicator-face hero-indicator-face--blank" aria-hidden="true">
+      {artist.artist_name.slice(0, 1)}
+    </span>
   );
 }
 
@@ -357,20 +385,8 @@ export function DiscoverHero({
                 aria-current={ind.active ? 'true' : undefined}
                 onClick={() => onJump(ind.index)}
               >
-                {artists?.[ind.index]?.image_url ? (
-                  <img
-                    className="hero-indicator-face"
-                    src={artists[ind.index].image_url}
-                    alt=""
-                    loading="lazy"
-                  />
-                ) : artists?.[ind.index] ? (
-                  <span
-                    className="hero-indicator-face hero-indicator-face--blank"
-                    aria-hidden="true"
-                  >
-                    {artists[ind.index].artist_name.slice(0, 1)}
-                  </span>
+                {artists?.[ind.index] ? (
+                  <HeroFace artist={artists[ind.index]} />
                 ) : (
                   <span className="hero-indicator-dot" aria-hidden="true" />
                 )}
